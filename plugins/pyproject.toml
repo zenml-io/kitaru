@@ -1,5 +1,6 @@
 [tool.uv]
 exclude-newer = "3 days"
+# Temporary bootstrap exception for 0.2.149. Remove after 2026-09-03.
 exclude-newer-package = { claude-agent-sdk = "2026-09-01" }
 
 [tool.uv.workspace]

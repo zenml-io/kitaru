@@ -62,7 +62,7 @@ When a worker runs the same program with a selected replay, the adapter can appl
 - replace the model directly or through a mapping keyed by the current model; and
 - apply supported tool policies to adapter-wrapped, in-process SDK MCP tools.
 
-The adapter rejects `model_params`, `resume`, `continue_conversation`, and `fork_session` during replay because the public one-shot boundary cannot enforce those changes without combining the new run with hidden provider state.
+The adapter rejects `model_params`, `resume`, `continue_conversation`, `fork_session`, `resume_session_at`, and `resume_drops_turn` during replay because the public one-shot boundary cannot enforce those changes without combining the new run with hidden provider state. A mapped model override must contain the model set in `ClaudeAgentOptions`; otherwise the adapter stops before calling Claude.
 
 ## Make an SDK MCP server replayable
 
@@ -162,7 +162,8 @@ Passthrough is a live call, not a simulation or transaction. A database write, m
 | External MCP servers | Recorded when exposed by public messages and hooks | Passthrough only; substitution is not supported |
 | LLM tool policy | Not applicable | Not supported |
 | Async prompt iterable | Not supported | Not supported |
-| `ClaudeSDKClient`, resume, continue, or fork | Not supported | Not supported |
+| `ClaudeSDKClient` | Not supported | Not supported |
+| Resume, continue, or fork options | Recorded as an observed stream; prior provider state is not recorded | Not supported |
 | Original message trajectory or arbitrary mid-run state | Observed where the public stream exposes it | Not restored or played back |
 
 ## Recording failures and retries
@@ -191,4 +192,4 @@ Check these points against the application's code and deployment before promisin
 
 ## Optional live smoke
 
-The repository tests exercise the public Claude Agent SDK types and local fakes without a provider credential. For an opt-in live check, configure your normal Anthropic credentials plus `KITARU_API_URL`, `KITARU_API_KEY`, and `KITARU_AGENT_ID`, then run the recording example with a harmless prompt and no side-effecting tools. This sends a real provider request and may incur cost; it is not part of the default test suite.
+The repository tests exercise the public Claude Agent SDK types and local fakes without a provider credential. For an opt-in live check, configure your normal Anthropic credentials plus `KITARU_API_URL`, `KITARU_API_KEY`, and `KITARU_AGENT_ID`, then adapt the recording snippet above with a harmless prompt and no side-effecting tools. This sends a real provider request and may incur cost; it is not part of the default test suite.

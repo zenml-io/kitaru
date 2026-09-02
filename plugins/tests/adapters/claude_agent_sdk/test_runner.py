@@ -210,7 +210,7 @@ async def test_replay_uses_recorded_input_and_supported_overrides(
         override=ReplayOverride(
             prompt="recorded prompt",
             system_prompt="candidate system",
-            model="candidate-model",
+            model={"old-model": "candidate-model"},
         )
     )
     client = FakeClient()
@@ -263,7 +263,11 @@ async def test_non_replay_session_continuation_options_pass_through(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     options = ClaudeAgentOptions(
-        resume="session-1", continue_conversation=True, fork_session=True
+        resume="session-1",
+        continue_conversation=True,
+        fork_session=True,
+        resume_session_at="message-1",
+        resume_drops_turn="assistant",
     )
     fake = FakeQuery([_terminal()])
     monkeypatch.setattr(runner_module, "sdk_query", fake)
@@ -278,6 +282,8 @@ async def test_non_replay_session_continuation_options_pass_through(
     assert copied.resume == "session-1"
     assert copied.continue_conversation is True
     assert copied.fork_session is True
+    assert copied.resume_session_at == "message-1"
+    assert copied.resume_drops_turn == "assistant"
 
 
 @pytest.mark.parametrize(
@@ -287,6 +293,26 @@ async def test_non_replay_session_continuation_options_pass_through(
         (None, ClaudeAgentOptions(resume="session"), "resume"),
         (None, ClaudeAgentOptions(continue_conversation=True), "continue"),
         (None, ClaudeAgentOptions(fork_session=True), "fork"),
+        (
+            None,
+            ClaudeAgentOptions(resume_session_at="message-1"),
+            "resume_session_at",
+        ),
+        (
+            None,
+            ClaudeAgentOptions(resume_drops_turn="assistant"),
+            "resume_drops_turn",
+        ),
+        (
+            ReplayOverride(model={"old-model": "candidate-model"}),
+            None,
+            "requires ClaudeAgentOptions.model",
+        ),
+        (
+            ReplayOverride(model={"other-model": "candidate-model"}),
+            ClaudeAgentOptions(model="old-model"),
+            "no entry for 'old-model'",
+        ),
     ],
 )
 async def test_replay_preflight_rejects_unsupported_options_before_invocation(

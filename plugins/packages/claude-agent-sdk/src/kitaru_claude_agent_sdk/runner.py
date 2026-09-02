@@ -1,6 +1,16 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
 """One-shot public Claude Agent SDK query facade."""
 
 import asyncio
@@ -253,7 +263,7 @@ def _prepare_replay(
     options: ClaudeAgentOptions,
     replay: ReplayResponse | None,
 ) -> tuple[str, ClaudeAgentOptions]:
-    """Preflight and apply root-input replay without mutating caller options."""
+    """Apply root-input replay to the private options copy."""
     if replay is None:
         return prompt, options
 
@@ -263,6 +273,8 @@ def _prepare_replay(
             ("resume", options.resume is not None),
             ("continue_conversation", options.continue_conversation),
             ("fork_session", options.fork_session),
+            ("resume_session_at", options.resume_session_at is not None),
+            ("resume_drops_turn", options.resume_drops_turn is not None),
         )
         if enabled
     ]
@@ -293,11 +305,19 @@ def _resolve_model_override(
     override: ReplayOverride, current_model: str | None
 ) -> str | None:
     """Resolve a direct or current-model-keyed replacement."""
-    if isinstance(override.model, str):
-        return override.model
-    if isinstance(override.model, dict) and current_model is not None:
-        return override.model.get(current_model)
-    return None
+    model = override.model
+    if model is None or isinstance(model, str):
+        return model
+    if current_model is None:
+        raise UnsupportedReplayError(
+            "A mapped model override requires ClaudeAgentOptions.model."
+        )
+    replacement = model.get(current_model)
+    if replacement is None:
+        raise UnsupportedReplayError(
+            f"The mapped model override has no entry for '{current_model}'."
+        )
+    return replacement
 
 
 def _get_qualified_tool_name(server_name: str, tool_name: str) -> str:
@@ -310,7 +330,7 @@ def _preflight_replayable_servers(
     options: ClaudeAgentOptions,
     replay: ReplayResponse | None,
 ) -> dict[str, SdkMcpTool[Any]]:
-    """Validate all definitions and policies before creating an invocation."""
+    """Validate definitions and harden substituting replay options."""
     if servers and not isinstance(options.mcp_servers, Mapping):
         raise UnsupportedReplayError(
             "Replayable SDK MCP servers require mapping-based mcp_servers options."
