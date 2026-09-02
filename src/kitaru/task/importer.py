@@ -173,7 +173,7 @@ def call_parser(
 
 def session_request(
     parsed: ImportedSession,
-    agent_id: uuid.UUID,
+    agent_id: uuid.UUID | None,
     provider: str | None,
     origin: SessionOrigin = SessionOrigin.IMPORTED,
 ) -> SessionCreateRequest:
@@ -181,7 +181,8 @@ def session_request(
 
     Args:
         parsed: Imported session.
-        agent_id: Agent the session is created under.
+        agent_id: Agent the session is created under, None resolves it from
+            the task.
         provider: Source system named on the import.
         origin: Session origin.
 
@@ -287,7 +288,7 @@ def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
 async def ingest_session(
     client: KitaruAPIClient,
     parsed: ImportedSession,
-    agent_id: uuid.UUID,
+    agent_id: uuid.UUID | None,
     provider: str | None,
     origin: SessionOrigin = SessionOrigin.IMPORTED,
 ) -> SessionResponse | None:
@@ -296,7 +297,8 @@ async def ingest_session(
     Args:
         client: API client.
         parsed: Imported session.
-        agent_id: Agent the session is created under.
+        agent_id: Agent the session is created under, None resolves it from
+            the task.
         provider: Source system named on the import.
         origin: Session origin.
 

@@ -68,13 +68,11 @@ class _FakeClient:
 
 def _adapter(
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[LogfireAdapter, _FakeClient, uuid.UUID]:
+) -> tuple[LogfireAdapter, _FakeClient]:
     client = _FakeClient()
-    agent_id = uuid.uuid4()
-    monkeypatch.setenv("KITARU_AGENT_ID", str(agent_id))
     monkeypatch.setattr(importer_adapter, "KitaruAPIClient", lambda: client)
     adapter = LogfireAdapter()
-    return adapter, client, agent_id
+    return adapter, client
 
 
 def _start_trace(adapter: LogfireAdapter) -> str:
@@ -88,7 +86,7 @@ def test_run_imports_the_logfire_trace_around_the_function(
     fake_logfire: FakeLogfire, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Run the function inside a Logfire trace, then import the trace."""
-    adapter, client, agent_id = _adapter(monkeypatch)
+    adapter, client = _adapter(monkeypatch)
     fake_logfire.poll_builders = [build_complete_rows, build_complete_rows]
     fake_logfire.fetch_builders = [build_complete_rows]
 
@@ -117,7 +115,7 @@ def test_run_imports_the_logfire_trace_around_the_function(
     ]
     assert len(client.sessions.created) == 1
     request = client.sessions.created[0]
-    assert request.agent_id == agent_id
+    assert request.agent_id is None
     assert request.origin == SessionOrigin.RECORDED
     assert request.status == SessionStatus.COMPLETED
     assert request.external_id == f"{PROJECT_ID}:{trace_id}"

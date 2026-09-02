@@ -17,7 +17,7 @@ See the [Langfuse import guide](https://docs.zenml.io/kitaru/guides/import-langf
 
 ## Adapter
 
-The package also ships an adapter that imports Langfuse traces of wrapped agent runs. The adapter uses the Langfuse client already configured in your process and the Kitaru connection from your environment. Set `KITARU_AGENT_ID` to the agent imported sessions are created under, then wrap your agent entrypoint in a `LangfuseAdapter` and run it through the adapter.
+The package also ships an adapter that imports Langfuse traces of wrapped agent runs. The adapter uses the Langfuse client already configured in your process and the Kitaru connection from your environment. Wrap your agent entrypoint in a `LangfuseAdapter` and run it through the adapter.
 
 ```python
 from kitaru_langfuse_importer import LangfuseAdapter

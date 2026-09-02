@@ -143,8 +143,10 @@ class _FakeAdapter(ImporterBackedAdapter):
     @contextmanager
     def open_trace(self) -> Iterator[str]:
         self.events.append("trace-enter")
-        yield "trace-1"
-        self.events.append("trace-exit")
+        try:
+            yield "trace-1"
+        finally:
+            self.events.append("trace-exit")
 
     async def wait_until_complete(self, external_id: str) -> None:
         self.events.append(f"wait:{external_id}")
@@ -163,13 +165,11 @@ def _adapter(
     monkeypatch: pytest.MonkeyPatch,
     parser: Parser,
     completeness_timeout: float = 120.0,
-) -> tuple[_FakeAdapter, _FakeClient, uuid.UUID]:
+) -> tuple[_FakeAdapter, _FakeClient]:
     client = _FakeClient()
-    agent_id = uuid.uuid4()
-    monkeypatch.setenv("KITARU_AGENT_ID", str(agent_id))
     monkeypatch.setattr(importer_adapter, "KitaruAPIClient", lambda: client)
     adapter = _FakeAdapter(parser, completeness_timeout=completeness_timeout)
-    return adapter, client, agent_id
+    return adapter, client
 
 
 def _arm_replay(
@@ -191,7 +191,7 @@ def test_run_imports_the_trace_around_the_function(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run the function inside the trace, then import the finished trace."""
-    adapter, client, agent_id = _adapter(monkeypatch, _single_session_parser)
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
 
     def func(value: int) -> int:
         adapter.events.append("func")
@@ -209,7 +209,7 @@ def test_run_imports_the_trace_around_the_function(
     ]
     assert len(client.sessions.created) == 1
     request = client.sessions.created[0]
-    assert request.agent_id == agent_id
+    assert request.agent_id is None
     assert request.origin == SessionOrigin.RECORDED
     assert request.external_id == "trace-1"
     assert request.imported_from == "acme"
@@ -221,7 +221,7 @@ async def test_run_async_imports_the_trace_around_the_function(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run the async function inside the trace, then import the finished trace."""
-    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
 
     async def func(value: int) -> int:
         adapter.events.append("func")
@@ -241,9 +241,56 @@ async def test_run_async_imports_the_trace_around_the_function(
     assert len(client.sessions.batches) == 1
 
 
+def test_run_imports_the_trace_of_a_raising_function(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Import the finished trace when the function raises, then re-raise."""
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
+
+    def func() -> None:
+        adapter.events.append("func")
+        raise ValueError("boom")
+
+    with pytest.raises(ValueError, match="boom"):
+        adapter.run(func)
+
+    assert adapter.events == [
+        "trace-enter",
+        "func",
+        "trace-exit",
+        "wait:trace-1",
+        "fetch:trace-1",
+    ]
+    assert len(client.sessions.created) == 1
+    assert len(client.sessions.batches) == 1
+
+
+async def test_run_async_imports_the_trace_of_a_raising_function(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Import the finished trace when the coroutine raises, then re-raise."""
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
+
+    async def func() -> None:
+        adapter.events.append("func")
+        raise ValueError("boom")
+
+    with pytest.raises(ValueError, match="boom"):
+        await adapter.run_async(func)
+
+    assert adapter.events == [
+        "trace-enter",
+        "func",
+        "trace-exit",
+        "wait:trace-1",
+        "fetch:trace-1",
+    ]
+    assert len(client.sessions.created) == 1
+
+
 def test_run_rejects_a_parse_without_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
     """Raise SessionImportError when the parse yields no session."""
-    adapter, client, _ = _adapter(monkeypatch, _empty_parser)
+    adapter, client = _adapter(monkeypatch, _empty_parser)
 
     with pytest.raises(SessionImportError, match="0 sessions"):
         adapter.run(lambda: None)
@@ -255,7 +302,7 @@ def test_run_rejects_a_parse_with_several_sessions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Raise SessionImportError when the parse yields more than one session."""
-    adapter, client, _ = _adapter(monkeypatch, _two_session_parser)
+    adapter, client = _adapter(monkeypatch, _two_session_parser)
 
     with pytest.raises(SessionImportError, match="2 sessions"):
         adapter.run(lambda: None)
@@ -265,7 +312,7 @@ def test_run_rejects_a_parse_with_several_sessions(
 
 def test_run_rejects_a_parse_with_a_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """Raise SessionImportError when the parse yields a failure."""
-    adapter, client, _ = _adapter(monkeypatch, _failure_parser)
+    adapter, client = _adapter(monkeypatch, _failure_parser)
 
     with pytest.raises(SessionImportError, match="unparsable item"):
         adapter.run(lambda: None)
@@ -277,7 +324,7 @@ def test_run_creates_a_failed_session_on_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Create a failed session and return the result on a completeness timeout."""
-    adapter, client, agent_id = _adapter(
+    adapter, client = _adapter(
         monkeypatch, _single_session_parser, completeness_timeout=0.01
     )
     adapter.wait_seconds = 10.0
@@ -287,10 +334,11 @@ def test_run_creates_a_failed_session_on_timeout(
     assert result == "done"
     assert len(client.sessions.created) == 1
     request = client.sessions.created[0]
-    assert request.agent_id == agent_id
+    assert request.agent_id is None
     assert request.origin == SessionOrigin.RECORDED
     assert request.status == SessionStatus.FAILED
-    assert request.external_id == "trace-1"
+    assert request.external_id is None
+    assert request.metadata == {"external_id": "trace-1"}
     assert request.imported_from == "acme"
     assert request.error is not None
     assert "did not complete" in request.error
@@ -301,7 +349,7 @@ def test_run_creates_a_failed_session_on_hook_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Treat a TimeoutError raised by the wait hook like an elapsed timeout."""
-    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
     adapter.wait_error = TimeoutError("provider gave up")
 
     result = adapter.run(lambda: "done")
@@ -315,7 +363,7 @@ def test_run_raises_a_fetch_error_after_the_function(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Raise the fetch error after the function has completed."""
-    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
     adapter.fetch_error = RuntimeError("fetch failed")
 
     with pytest.raises(RuntimeError, match="fetch failed"):
@@ -329,7 +377,7 @@ def test_run_raises_an_ingest_error_after_the_function(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Raise the ingest error after the function has completed."""
-    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
     client.sessions.ingest_error = APIError(
         httpx.codes.UNPROCESSABLE_ENTITY, "invalid nodes"
     )
@@ -346,7 +394,7 @@ def test_run_rejects_an_already_imported_trace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Raise SessionImportError when the session external id already exists."""
-    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
     client.sessions.create_error = APIError(httpx.codes.CONFLICT, "conflict")
 
     with pytest.raises(SessionImportError, match="already exists"):
@@ -360,7 +408,7 @@ def test_run_rejects_a_replay_with_an_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Raise RuntimeError before the function when the replay has an override."""
-    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
     replay_id = _arm_replay(monkeypatch, client, override=ReplayOverride(model="gpt-5"))
 
     with pytest.raises(RuntimeError, match="replay overrides"):
@@ -375,7 +423,7 @@ def test_run_rejects_a_replay_with_a_default_tool_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Raise RuntimeError when the replay's default tool config is not passthrough."""
-    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
     _arm_replay(
         monkeypatch,
         client,
@@ -397,7 +445,7 @@ def test_run_rejects_a_replay_with_a_named_tool_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Raise RuntimeError when a per-tool config is not passthrough."""
-    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
     _arm_replay(
         monkeypatch,
         client,
@@ -422,7 +470,7 @@ def test_run_proceeds_with_a_passthrough_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run and import normally when the replay is passthrough-only."""
-    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
     _arm_replay(monkeypatch, client)
 
     result = adapter.run(lambda: "done")
@@ -439,7 +487,7 @@ def test_run_creates_a_replay_origin_session_on_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Carry the replay origin on the failed session of a timed out replay."""
-    adapter, client, _ = _adapter(
+    adapter, client = _adapter(
         monkeypatch, _single_session_parser, completeness_timeout=0.01
     )
     _arm_replay(monkeypatch, client)
@@ -458,7 +506,7 @@ async def test_run_async_rejects_a_replay_with_an_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Raise RuntimeError before the async function when the replay has an override."""
-    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
     _arm_replay(monkeypatch, client, override=ReplayOverride(prompt="new prompt"))
 
     async def func() -> None:

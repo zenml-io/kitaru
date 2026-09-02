@@ -70,13 +70,11 @@ class _FakeClient:
 
 def _adapter(
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[PhoenixAdapter, _FakeClient, uuid.UUID]:
+) -> tuple[PhoenixAdapter, _FakeClient]:
     client = _FakeClient()
-    agent_id = uuid.uuid4()
-    monkeypatch.setenv("KITARU_AGENT_ID", str(agent_id))
     monkeypatch.setattr(importer_adapter, "KitaruAPIClient", lambda: client)
     adapter = PhoenixAdapter()
-    return adapter, client, agent_id
+    return adapter, client
 
 
 def _start_trace(adapter: PhoenixAdapter) -> str:
@@ -90,7 +88,7 @@ def test_run_imports_the_phoenix_trace_around_the_function(
     fake_phoenix: FakePhoenix, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Run the function inside an OTel trace, then import the trace."""
-    adapter, client, agent_id = _adapter(monkeypatch)
+    adapter, client = _adapter(monkeypatch)
     fake_phoenix.span_builders = [build_complete_spans, build_complete_spans]
 
     def func(value: int) -> int:
@@ -110,7 +108,7 @@ def test_run_imports_the_phoenix_trace_around_the_function(
     assert fake_phoenix.limits == [1000] * 2
     assert len(client.sessions.created) == 1
     request = client.sessions.created[0]
-    assert request.agent_id == agent_id
+    assert request.agent_id is None
     assert request.origin == SessionOrigin.RECORDED
     assert request.status == SessionStatus.COMPLETED
     assert request.external_id == trace_id

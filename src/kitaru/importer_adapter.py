@@ -28,7 +28,6 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
 )
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.env import get_required_env
 from kitaru.task.importer import (
     ImportedSession,
     Parser,
@@ -100,11 +99,16 @@ class ImporterBackedAdapter:
             The function's result.
         """
         asyncio.run(self._check_replay())
-        agent_id = uuid.UUID(get_required_env("KITARU_AGENT_ID"))
         origin = self._get_origin()
-        with self.open_trace() as external_id:
-            result = func(*args, **kwargs)
-        asyncio.run(self._import_trace(external_id, agent_id, origin))
+        external_id: str | None = None
+        try:
+            with self.open_trace() as external_id:
+                result = func(*args, **kwargs)
+        finally:
+            # Import the trace of a raising function too, the provider
+            # records the error on it.
+            if external_id is not None:
+                asyncio.run(self._import_trace(external_id, origin))
         return result
 
     async def run_async(
@@ -121,11 +125,14 @@ class ImporterBackedAdapter:
             The function's result.
         """
         await self._check_replay()
-        agent_id = uuid.UUID(get_required_env("KITARU_AGENT_ID"))
         origin = self._get_origin()
-        with self.open_trace() as external_id:
-            result = await func(*args, **kwargs)
-        await self._import_trace(external_id, agent_id, origin)
+        external_id: str | None = None
+        try:
+            with self.open_trace() as external_id:
+                result = await func(*args, **kwargs)
+        finally:
+            if external_id is not None:
+                await self._import_trace(external_id, origin)
         return result
 
     def _get_origin(self) -> SessionOrigin:
@@ -156,14 +163,11 @@ class ImporterBackedAdapter:
                 "Importer-backed adapters do not support replay tool policies"
             )
 
-    async def _import_trace(
-        self, external_id: str, agent_id: uuid.UUID, origin: SessionOrigin
-    ) -> None:
+    async def _import_trace(self, external_id: str, origin: SessionOrigin) -> None:
         """Wait for the provider trace, then fetch, parse, and ingest it.
 
         Args:
             external_id: Provider trace id.
-            agent_id: Agent the imported session is created under.
             origin: Session origin.
 
         Raises:
@@ -176,9 +180,7 @@ class ImporterBackedAdapter:
                 await self.wait_until_complete(external_id)
         except TimeoutError:
             async with KitaruAPIClient() as client:
-                await self._create_timed_out_session(
-                    client, external_id, agent_id, origin
-                )
+                await self._create_timed_out_session(client, external_id, origin)
             return
         payload = await self.fetch(external_id)
         sessions: list[ImportedSession] = []
@@ -195,7 +197,7 @@ class ImporterBackedAdapter:
             )
         async with KitaruAPIClient() as client:
             session = await ingest_session(
-                client, sessions[0], agent_id, self.provider, origin
+                client, sessions[0], None, self.provider, origin
             )
         if session is None:
             raise SessionImportError(
@@ -203,29 +205,26 @@ class ImporterBackedAdapter:
             )
 
     async def _create_timed_out_session(
-        self,
-        client: KitaruAPIClient,
-        external_id: str,
-        agent_id: uuid.UUID,
-        origin: SessionOrigin,
+        self, client: KitaruAPIClient, external_id: str, origin: SessionOrigin
     ) -> None:
         """Create a failed session for a trace that did not complete in time.
 
         Args:
             client: API client.
             external_id: Provider trace id.
-            agent_id: Agent the failed session is created under.
             origin: Session origin.
         """
+        # Keep the trace id out of external_id so a later import of the
+        # completed trace is not deduplicated against this placeholder.
         request = SessionCreateRequest(
-            agent_id=agent_id,
+            agent_id=None,
             origin=origin,
             status=SessionStatus.FAILED,
             inputs=None,
             outputs=None,
-            error=f"Provider trace did not complete within "
+            error="Provider trace did not complete within "
             f"{self._completeness_timeout} seconds",
-            external_id=external_id,
+            metadata={"external_id": external_id},
             imported_from=self.provider,
         )
         await client.sessions.create(request)

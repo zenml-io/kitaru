@@ -73,20 +73,18 @@ class _FakeClient:
 
 def _adapter(
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[LangfuseAdapter, _FakeClient, uuid.UUID]:
+) -> tuple[LangfuseAdapter, _FakeClient]:
     client = _FakeClient()
-    agent_id = uuid.uuid4()
-    monkeypatch.setenv("KITARU_AGENT_ID", str(agent_id))
     monkeypatch.setattr(importer_adapter, "KitaruAPIClient", lambda: client)
     adapter = LangfuseAdapter()
-    return adapter, client, agent_id
+    return adapter, client
 
 
 def test_run_imports_the_langfuse_trace_around_the_function(
     fake_langfuse: FakeLangfuseClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Run the function inside a Langfuse trace, then import the trace."""
-    adapter, client, agent_id = _adapter(monkeypatch)
+    adapter, client = _adapter(monkeypatch)
     fake_langfuse.trace_builders = [build_complete_trace, build_complete_trace]
 
     def func(value: int) -> int:
@@ -108,7 +106,7 @@ def test_run_imports_the_langfuse_trace_around_the_function(
     assert fake_langfuse.requested == [trace_id, trace_id]
     assert len(client.sessions.created) == 1
     request = client.sessions.created[0]
-    assert request.agent_id == agent_id
+    assert request.agent_id is None
     assert request.origin == SessionOrigin.RECORDED
     assert request.status == SessionStatus.COMPLETED
     assert request.external_id == f"project-1:{trace_id}"

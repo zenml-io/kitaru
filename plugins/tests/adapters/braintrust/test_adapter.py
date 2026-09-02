@@ -67,20 +67,18 @@ class _FakeClient:
 
 def _adapter(
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[BraintrustAdapter, _FakeClient, uuid.UUID]:
+) -> tuple[BraintrustAdapter, _FakeClient]:
     client = _FakeClient()
-    agent_id = uuid.uuid4()
-    monkeypatch.setenv("KITARU_AGENT_ID", str(agent_id))
     monkeypatch.setattr(importer_adapter, "KitaruAPIClient", lambda: client)
     adapter = BraintrustAdapter()
-    return adapter, client, agent_id
+    return adapter, client
 
 
 def test_run_imports_the_braintrust_trace_around_the_function(
     fake_braintrust: FakeBraintrust, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Run the function inside a Braintrust span, then import the trace."""
-    adapter, client, agent_id = _adapter(monkeypatch)
+    adapter, client = _adapter(monkeypatch)
     fake_braintrust.rows_builders = [build_complete_rows, build_complete_rows]
 
     def func(value: int) -> int:
@@ -102,7 +100,7 @@ def test_run_imports_the_braintrust_trace_around_the_function(
     assert fake_braintrust.requested == [root_span_id, root_span_id]
     assert len(client.sessions.created) == 1
     request = client.sessions.created[0]
-    assert request.agent_id == agent_id
+    assert request.agent_id is None
     assert request.origin == SessionOrigin.RECORDED
     assert request.status == SessionStatus.COMPLETED
     assert request.external_id == f"project-1:{root_span_id}"
@@ -119,7 +117,7 @@ def test_trace_requires_an_active_braintrust_logger(
     fake_braintrust: FakeBraintrust, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Reject a run when the module-level span is the no-op span."""
-    adapter, client, _ = _adapter(monkeypatch)
+    adapter, client = _adapter(monkeypatch)
     fake_braintrust.no_active_logger = True
 
     with pytest.raises(RuntimeError, match="No active Braintrust logger"):

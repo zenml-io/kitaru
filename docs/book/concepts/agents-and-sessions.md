@@ -43,8 +43,6 @@ Recording adapters intercept calls and keep the defaults. Declare both `false` w
 ```yaml
 run_spec:
   command: python agent.py
-  env:
-    KITARU_AGENT_ID: <agent-id>
   runtime_capabilities:
     overrides: false
     tool_policies: false
