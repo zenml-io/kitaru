@@ -223,6 +223,18 @@ async def test_terminal_usage_is_session_aggregate_not_duplicate_llm_node(
     }
 
 
+async def test_session_preserves_full_replay_input_while_root_is_bounded(
+    fake_client: FakeClient,
+) -> None:
+    prompt = "x" * (16 * 1024 + 1)
+
+    await _recorder(fake_client, prompt)
+
+    assert fake_client.sessions.created[0].inputs == prompt
+    root = {node.index: node for node in nodes(fake_client)}[0]
+    assert root.inputs == {"value": prompt[:-1], "truncated": True}
+
+
 async def test_hook_and_stream_views_do_not_duplicate_tool_node(
     fake_client: FakeClient,
 ) -> None:

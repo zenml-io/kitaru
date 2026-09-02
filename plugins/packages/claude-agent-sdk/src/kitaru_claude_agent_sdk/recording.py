@@ -256,7 +256,7 @@ class InvocationRecorder:
                 origin=SessionOrigin.REPLAY if replay else SessionOrigin.RECORDED,
                 status=SessionStatus.IN_PROGRESS,
                 name=session_name,
-                inputs=captured_inputs,
+                inputs=inputs,
                 outputs=None,
                 started_at=started_at,
                 metadata={"options": selected_options},
