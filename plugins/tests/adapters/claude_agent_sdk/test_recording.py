@@ -289,6 +289,35 @@ async def test_stream_tool_use_reparents_hook_created_node(
     assert tool.parent_index == model.index
 
 
+async def test_replayable_tool_preserves_full_arguments_for_history_key(
+    fake_client: FakeClient,
+) -> None:
+    tool_name = "mcp__support__lookup"
+    arguments = {"query": "x" * (16 * 1024 + 1)}
+    recorder = await InvocationRecorder.start(
+        client=cast(KitaruAPIClient, fake_client),
+        inputs="hello",
+        agent_id=uuid.uuid4(),
+        agent_version_id=None,
+        session_name=None,
+        replay=False,
+        replayable_tool_names=frozenset({tool_name}),
+    )
+
+    await recorder.record_message(
+        AssistantMessage(
+            content=[ToolUseBlock("tool-1", tool_name, arguments)],
+            model="claude-test",
+            message_id="message-1",
+        )
+    )
+
+    tool = next(
+        node for node in nodes(fake_client) if node.node_type is NodeType.TOOL_CALL
+    )
+    assert tool.inputs == arguments
+
+
 async def test_unknown_message_is_bounded_and_opaque_fields_are_not_persisted(
     fake_client: FakeClient,
 ) -> None:

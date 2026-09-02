@@ -598,6 +598,55 @@ async def test_preflight_rejects_unsupported_targets_before_session_or_sdk(
         assert client.sessions.created == []
 
 
+async def test_preflight_rejects_invalid_static_result_before_session_or_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def original(_: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("live handler must not run")
+
+    replay = _replay(
+        _policy(
+            "mcp__support__lookup",
+            StaticConfig(
+                cases=[
+                    StaticCase(
+                        match=None,
+                        match_mode=StaticMatchMode.EXACT,
+                        result={"content": [{"type": "image", "data": "..."}]},
+                    )
+                ],
+                on_miss=ToolPolicyOnMiss.FAIL,
+            ),
+        )
+    )
+    client = FakeClient()
+    client.replay = replay
+    monkeypatch.setattr(
+        runner_module.recording_module, "KitaruAPIClient", lambda: client
+    )
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(replay.id))
+    sdk_calls = 0
+
+    async def query(**_: Any) -> AsyncIterator[ResultMessage]:
+        nonlocal sdk_calls
+        sdk_calls += 1
+        yield _terminal()
+
+    monkeypatch.setattr(runner_module, "sdk_query", query)
+
+    with pytest.raises(UnsupportedReplayError, match="text content blocks only"):
+        await anext(
+            KitaruClaudeRunner(agent_id=uuid.uuid4()).query(
+                prompt="hello",
+                options=ClaudeAgentOptions(tools=[]),
+                replayable_servers=[_server("support", original)],
+            )
+        )
+
+    assert sdk_calls == 0
+    assert client.sessions.created == []
+
+
 @pytest.mark.parametrize(
     ("options", "message"),
     [

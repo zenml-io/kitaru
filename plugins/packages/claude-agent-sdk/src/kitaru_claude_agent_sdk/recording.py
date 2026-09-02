@@ -594,6 +594,11 @@ class InvocationRecorder:
         cache_key = compute_tool_cache_key(block.name, block.input)
         if cache_key is not None:
             self._tool_cache_keys[block.id] = cache_key
+        inputs = (
+            block.input
+            if block.name in self.replayable_tool_names
+            else _capture(block.input)
+        )
         policy_events = (
             self._tool_policy_events.get(cache_key, []) if cache_key is not None else []
         )
@@ -611,7 +616,7 @@ class InvocationRecorder:
                 parent_index=parent_index,
                 external_id=block.id,
                 status=NodeStatus.IN_PROGRESS,
-                inputs=_capture(block.input),
+                inputs=inputs,
                 outputs=None,
                 tool_name=block.name,
                 attributes=(
@@ -628,7 +633,7 @@ class InvocationRecorder:
                 update={
                     "name": block.name,
                     "parent_index": parent_index,
-                    "inputs": _capture(block.input),
+                    "inputs": inputs,
                     "tool_name": block.name,
                     "attributes": {
                         **cast(dict[str, Any], node.attributes),

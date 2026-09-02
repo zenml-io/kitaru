@@ -373,6 +373,14 @@ def _preflight_replayable_servers(
             raise UnsupportedReplayError(
                 f"Tool policy target '{target}' is not a wrapped SDK MCP tool."
             )
+        if isinstance(config, StaticConfig):
+            for case in config.cases:
+                try:
+                    normalize_tool_result(case.result)
+                except ToolPolicyError as error:
+                    raise UnsupportedReplayError(
+                        f"Static result for tool '{target}' cannot be replayed: {error}"
+                    ) from error
         if (
             isinstance(config, PassthroughConfig)
             and any(target.startswith(f"mcp__{name}__") for name in server_names)
