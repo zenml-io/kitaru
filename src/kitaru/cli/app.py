@@ -3970,12 +3970,12 @@ async def worker_start(
     payload_cache_root: Path | None = None,
     metadata: list[str] | None = None,
     log_level: Annotated[
-        str | None,
+        str,
         Parameter(
             name="--log-level",
             help="Log level for worker runtime logs: debug, info, warning, or error.",
         ),
-    ] = None,
+    ] = "info",
 ) -> CommandResult:
     """Launch the existing generic worker as one foreground process."""
     invocation = _invocation()

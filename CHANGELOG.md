@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The Vercel AI SDK adapter is now developed and tested against `ai` 7.0.85. The supported peer range is unchanged (`>=7.0.60 <8.0.0`).
 - `kitaru-pydantic-ai` now supports the PydanticAI 2.23 through 2.36 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.35.3 with `genai-prices` 0.1.4.
 - `kitaru-openai-agents` now supports the OpenAI Agents SDK 0.20, 0.21, and 0.22 minor lines in addition to 0.19.3+. The 0.21 line moved the OpenAI provider to `openai>=3.0.0,<4`, so the plugin workspace lockfile now resolves `openai-agents` 0.22.0 with `openai` 3.5.0.
+- Finished sessions that name an import source now accept node ingestion regardless of origin, so importer-backed adapter runs can ingest their nodes into recorded and replay sessions.
 - Creating a replay or starting an experiment run is now rejected with HTTP 422 when the config carries an override or a non-passthrough tool policy that the agent version's runtime capabilities do not declare.
 - Importer-backed adapters now reject a replay config carrying an override or a non-passthrough tool policy with a RuntimeError before the wrapped function runs.
 - Updating a finished session now returns HTTP 409 for every field. Previously only a status change was rejected and the other fields stayed writable.
