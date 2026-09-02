@@ -43,8 +43,10 @@ jobs:
           kitaru doctor > doctor.json || true
           python3 -c "import json; d=json.load(open('doctor.json'))['item']['checks']; [print(c['name'], c['status'], c.get('detail','')[:80]) for c in d]" \
             || cat doctor.json
-          cat "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" 2>/dev/null | grep -q ".local/bin" \
-            || { echo "PATH not persisted"; exit 1; }
+          # `set -o pipefail` above would fail the pipe on a missing rc file, so
+          # swallow cat's status and let grep decide.
+          { cat "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" 2>/dev/null || true; } \
+            | grep -q ".local/bin" || { echo "PATH not persisted"; exit 1; }
       - name: Re-run is an upgrade, not an error
         shell: bash
         run: cat install.sh | bash -s -- --no-login --no-skills --no-mcp --quiet
