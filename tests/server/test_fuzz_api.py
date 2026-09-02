@@ -17,7 +17,11 @@ Requests are generated from ``openapi/openapi.json`` in both schema-conformant
 and schema-violating modes and sent to the real app on a disposable PostgreSQL
 database. Run with ``just fuzz-api``, or:
 
-    KITARU_FUZZ=1 uv run pytest tests/server/test_fuzz_api.py -p no:randomly
+    KITARU_FUZZ=1 uv run --extra server --group fuzz \
+        pytest tests/server/test_fuzz_api.py -p no:randomly
+
+Without the ``fuzz`` group installed the module skips itself at collection
+rather than failing, so a plain ``uv run pytest`` reports nothing.
 
 The assertion is only that the server never answers 5xx. One database is
 shared by the whole session, so rows an earlier operation writes are visible
