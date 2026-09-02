@@ -167,6 +167,17 @@ else
   ok "uv $(uv --version | awk '{print $2}') installed"
 fi
 
+persist_path() {
+  # `uv tool update-shell` handles bash/zsh/fish when it recognises the login
+  # shell. Cover the rest (Alpine sh, containers, CI images) by appending to
+  # ~/.profile when no rc file mentions the directory yet.
+  local dir="$1" f
+  for f in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.config/fish/config.fish"; do
+    [ -f "$f" ] && grep -qs "$dir\|\.local/bin" "$f" && return 0
+  done
+  printf '\n# Added by the Kitaru installer\nexport PATH="%s:$PATH"\n' "$dir" >> "$HOME/.profile"
+}
+
 # ---------------------------------------------------------------------------
 # 2. kitaru CLI + MCP server, in an isolated tool environment
 # ---------------------------------------------------------------------------
@@ -186,6 +197,7 @@ quiet uv "${UV_ARGS[@]}" "$SPEC" || die "uv tool install failed. Re-run with --v
 TOOL_BIN="$(uv tool dir --bin 2>/dev/null || echo "$HOME/.local/bin")"
 ensure_path "$TOOL_BIN"
 quiet uv tool update-shell || true
+persist_path "$TOOL_BIN"
 
 have kitaru || die "kitaru installed to $TOOL_BIN but is not on PATH. Add it and re-run."
 ok "kitaru $(kitaru --version 2>/dev/null) installed"
