@@ -15,9 +15,9 @@
 
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from kitaru.api_models.v1.task import TaskKind
@@ -50,3 +50,17 @@ class WorkerConfig(BaseSettings):
     blob_cache_root: Path | None = None
     payload_cache_root: Path | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_scope_with_id(self) -> Self:
+        """Reject a scope alongside a pre-registered worker id.
+
+        Raises:
+            ValueError: Both a scope and a worker id are set.
+
+        Returns:
+            The validated configuration.
+        """
+        if self.id is not None and "scope" in self.model_fields_set:
+            raise ValueError("KITARU_WORKER_SCOPE cannot be set with KITARU_WORKER_ID")
+        return self

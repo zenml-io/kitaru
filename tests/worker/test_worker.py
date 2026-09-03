@@ -717,7 +717,6 @@ def _pre_registered_config(worker_id: uuid.UUID, tmp_path: Path) -> WorkerConfig
     """Build a worker config adopting a pre-registered worker."""
     return WorkerConfig(
         id=worker_id,
-        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
         poll_interval=0.01,
         blob_cache_root=tmp_path / "blobs",
         payload_cache_root=tmp_path / "payloads",

@@ -122,16 +122,17 @@ def build_worker_config(
             "invalid_arguments",
             "--claim, --selector, and --job-id cannot be set with KITARU_WORKER_ID.",
         )
-    scope = WorkerScope(
-        claims=_parse_claims(claims) if claims is not None else base.scope.claims,
-        selectors=(
-            _parse_selectors(selectors)
-            if selectors is not None
-            else base.scope.selectors
-        ),
-        job_id=job_id if job_id is not None else base.scope.job_id,
-    )
-    updates: dict[str, Any] = {"scope": scope}
+    updates: dict[str, Any] = {}
+    if base.id is None:
+        updates["scope"] = WorkerScope(
+            claims=_parse_claims(claims) if claims is not None else base.scope.claims,
+            selectors=(
+                _parse_selectors(selectors)
+                if selectors is not None
+                else base.scope.selectors
+            ),
+            job_id=job_id if job_id is not None else base.scope.job_id,
+        )
     explicit = {
         "name": name,
         "concurrency": concurrency,
@@ -146,7 +147,7 @@ def build_worker_config(
     updates.update({key: value for key, value in explicit.items() if value is not None})
     if metadata is not None:
         updates["metadata"] = {**base.metadata, **_parse_metadata(metadata)}
-    return config_type.model_validate({**base.model_dump(), **updates})
+    return config_type.model_validate({**base.model_dump(exclude={"scope"}), **updates})
 
 
 def _parse_selectors(values: list[str]) -> list[LabelSelector]:

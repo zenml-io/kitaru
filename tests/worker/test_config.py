@@ -16,6 +16,7 @@
 import uuid
 
 import pytest
+from pydantic import ValidationError
 
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import LabelSelector, WorkerClaim, WorkerScope
@@ -44,6 +45,14 @@ def test_id_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KITARU_WORKER_ID", str(worker_id))
     config = WorkerConfig()
     assert config.id == worker_id
+
+
+def test_id_rejects_a_scope_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KITARU_WORKER_SCOPE__* alongside KITARU_WORKER_ID fails validation."""
+    monkeypatch.setenv("KITARU_WORKER_ID", str(uuid.uuid4()))
+    monkeypatch.setenv("KITARU_WORKER_SCOPE__CLAIMS", '[{"kind": "agent"}]')
+    with pytest.raises(ValidationError, match="KITARU_WORKER_SCOPE"):
+        WorkerConfig()
 
 
 def test_concurrency_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
