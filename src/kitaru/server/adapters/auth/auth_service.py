@@ -298,21 +298,28 @@ class AuthService:
         self,
         worker_id: uuid.UUID,
         account_id: uuid.UUID,
-        lifetime_seconds: int | None = None,
+        timeout_seconds: int | None = None,
     ) -> IssuedToken:
         """Issue a token scoped to a registered worker.
+
+        Given a timeout, the token outlives it by the configured expiry
+        leeway. Otherwise the token lives for the configured worker token
+        lifetime.
 
         Args:
             worker_id: Id of the registered worker.
             account_id: Id of the registering account.
-            lifetime_seconds: Seconds until the token expires, the configured
-                worker token lifetime when omitted.
+            timeout_seconds: Lifetime of the worker the token is issued for.
 
         Returns:
             Issued token.
         """
-        if lifetime_seconds is None:
+        if timeout_seconds is None:
             lifetime_seconds = self._settings.WORKER_TOKEN_LIFETIME_SECONDS
+        else:
+            lifetime_seconds = (
+                timeout_seconds + self._settings.TASK_TOKEN_EXPIRY_LEEWAY_SECONDS
+            )
         expires_at = datetime.now(UTC) + timedelta(seconds=lifetime_seconds)
         token = JWTToken(
             subject=WorkerSubject(worker_id=worker_id, account_id=account_id),

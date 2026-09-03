@@ -13,24 +13,30 @@
 #  permissions and limitations under the License.
 """Worker launcher backed by Modal sandboxes."""
 
+import shlex
+
 import modal
 
 from kitaru.server.application.models.worker import WorkerLaunch
-from kitaru.server.worker_launcher_settings import ModalWorkerLauncherSettings
-
-WORKER_COMMAND = ("python", "-m", "kitaru.worker")
+from kitaru.server.worker_launcher_settings import WorkerLauncherSettings
 
 
 class ModalWorkerLauncher:
     """Worker launcher starting one Modal sandbox per worker."""
 
-    def __init__(self, settings: ModalWorkerLauncherSettings) -> None:
+    def __init__(self, settings: WorkerLauncherSettings) -> None:
         """Initialize the launcher.
 
         Args:
-            settings: Modal worker launcher settings.
+            settings: Worker launcher settings.
         """
-        self._settings = settings
+        # Settings validation requires the modal sub-model under the modal
+        # backend, the only backend that constructs this launcher.
+        assert settings.modal is not None
+        self._modal_settings = settings.modal
+        self._image = settings.get_image()
+        self._command = shlex.split(settings.command)
+        self._timeout_seconds = settings.timeout_seconds
 
     async def launch(self, command: WorkerLaunch) -> None:
         """Start a worker for a job.
@@ -39,24 +45,25 @@ class ModalWorkerLauncher:
             command: Worker launch.
         """
         client = await modal.Client.from_credentials.aio(
-            self._settings.token_id, self._settings.token_secret.get_secret_value()
+            self._modal_settings.token_id,
+            self._modal_settings.token_secret.get_secret_value(),
         )
         async with client:
             app = await modal.App.lookup.aio(
-                self._settings.app_name, client=client, create_if_missing=True
+                self._modal_settings.app_name, client=client, create_if_missing=True
             )
             await modal.Sandbox.create.aio(
-                *WORKER_COMMAND,
+                *self._command,
                 app=app,
-                image=modal.Image.from_registry(self._settings.image),
+                image=modal.Image.from_registry(self._image),
                 env={
                     "KITARU_API_URL": command.server_url,
                     "KITARU_API_TOKEN": command.worker_token.get_secret_value(),
                     "KITARU_WORKER_ID": str(command.worker_id),
-                    "KITARU_WORKER_TIMEOUT": str(self._settings.timeout_seconds),
+                    "KITARU_WORKER_TIMEOUT": str(self._timeout_seconds),
                 },
-                timeout=self._settings.timeout_seconds,
-                cpu=self._settings.cpu,
-                memory=self._settings.memory_mb,
+                timeout=self._timeout_seconds,
+                cpu=self._modal_settings.cpu,
+                memory=self._modal_settings.memory_mb,
                 client=client,
             )

@@ -53,12 +53,13 @@ The server is configured through `KITARU_SERVER_*` variables ([Docker](docker.md
 When no live worker can claim an import job's tasks, the server starts one scoped to that job in a Modal sandbox. This stays off unless a worker launcher backend is configured, and `KITARU_SERVER_SERVER_URL` must be set, since the sandbox dials back to the server and startup fails otherwise. Install the `modal` extra (`pip install 'kitaru[server,modal]'`) to pull in the Modal SDK the server needs.
 
 ```bash
-KITARU_SERVER_WORKER_LAUNCHER__BACKEND=modal           # default none
+KITARU_SERVER_WORKER_LAUNCHER__BACKEND=modal                    # default none
+KITARU_SERVER_WORKER_LAUNCHER__IMAGE=zenmldocker/kitaru-worker:<version>   # default: the published image at the server's version
+KITARU_SERVER_WORKER_LAUNCHER__COMMAND="python -m kitaru.worker"   # default
+KITARU_SERVER_WORKER_LAUNCHER__TIMEOUT_SECONDS=3600             # default 3600
 KITARU_SERVER_WORKER_LAUNCHER__MODAL__TOKEN_ID=ak-...
 KITARU_SERVER_WORKER_LAUNCHER__MODAL__TOKEN_SECRET=as-...
-KITARU_SERVER_WORKER_LAUNCHER__MODAL__IMAGE=zenmldocker/kitaru-worker:<version>
 KITARU_SERVER_WORKER_LAUNCHER__MODAL__APP_NAME=kitaru-workers   # default kitaru-workers
-KITARU_SERVER_WORKER_LAUNCHER__MODAL__TIMEOUT_SECONDS=3600      # default 3600
 KITARU_SERVER_WORKER_LAUNCHER__MODAL__CPU=1.0                   # optional
 KITARU_SERVER_WORKER_LAUNCHER__MODAL__MEMORY_MB=2048            # optional
 ```
@@ -66,8 +67,9 @@ KITARU_SERVER_WORKER_LAUNCHER__MODAL__MEMORY_MB=2048            # optional
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `KITARU_SERVER_WORKER_LAUNCHER__BACKEND` | none | Worker launcher backend, currently `modal` |
+| `KITARU_SERVER_WORKER_LAUNCHER__IMAGE` | published image | Worker image to run. Defaults to the `zenmldocker/kitaru-worker` tag matching the server version, which does not exist for development builds, so those must set it |
+| `KITARU_SERVER_WORKER_LAUNCHER__COMMAND` | `python -m kitaru.worker` | Command the worker container runs |
+| `KITARU_SERVER_WORKER_LAUNCHER__TIMEOUT_SECONDS` | 3600 | Worker lifetime, passed as `KITARU_WORKER_TIMEOUT` and enforced by the backend. The worker's token outlives it by `KITARU_SERVER_TASK_TOKEN_EXPIRY_LEEWAY_SECONDS` |
 | `KITARU_SERVER_WORKER_LAUNCHER__MODAL__TOKEN_ID` / `MODAL__TOKEN_SECRET` | none | Modal API token |
-| `KITARU_SERVER_WORKER_LAUNCHER__MODAL__IMAGE` | none | Worker image the sandbox runs, the published `zenmldocker/kitaru-worker` tag matching the server version |
 | `KITARU_SERVER_WORKER_LAUNCHER__MODAL__APP_NAME` | `kitaru-workers` | Modal app the sandbox runs under |
-| `KITARU_SERVER_WORKER_LAUNCHER__MODAL__TIMEOUT_SECONDS` | 3600 | Sandbox lifetime and the worker's `KITARU_WORKER_TIMEOUT` |
 | `KITARU_SERVER_WORKER_LAUNCHER__MODAL__CPU` / `MODAL__MEMORY_MB` | none | Sandbox resources |

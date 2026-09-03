@@ -306,12 +306,7 @@ def create_app(settings: APISettings) -> FastAPI:
                 ModalWorkerLauncher,
             )
 
-            # Settings validation requires WORKER_LAUNCHER.modal under the
-            # modal backend, the only backend that constructs this launcher.
-            assert settings.WORKER_LAUNCHER.modal is not None
-            app.state.worker_launcher = ModalWorkerLauncher(
-                settings.WORKER_LAUNCHER.modal
-            )
+            app.state.worker_launcher = ModalWorkerLauncher(settings.WORKER_LAUNCHER)
         async for session in database.get_async_session():
             server_id = await ensure_server_id(
                 SQLServerSettingsRepository(session), settings.SERVER_ID

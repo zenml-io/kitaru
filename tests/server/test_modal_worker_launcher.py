@@ -23,12 +23,14 @@ pytest.importorskip("modal")
 
 import modal
 
-from kitaru.server.adapters.worker_launcher.modal import (
-    WORKER_COMMAND,
-    ModalWorkerLauncher,
-)
+from kitaru.server import worker_launcher_settings
+from kitaru.server.adapters.worker_launcher.modal import ModalWorkerLauncher
 from kitaru.server.application.models.worker import WorkerLaunch
-from kitaru.server.worker_launcher_settings import ModalWorkerLauncherSettings
+from kitaru.server.worker_launcher_settings import (
+    ModalWorkerLauncherSettings,
+    WorkerLauncherBackend,
+    WorkerLauncherSettings,
+)
 
 
 class _CallRecorder:
@@ -108,15 +110,19 @@ def fake_modal(monkeypatch: pytest.MonkeyPatch) -> _FakeModal:
 
 
 def _settings(
-    cpu: float | None = None, memory_mb: int | None = None
-) -> ModalWorkerLauncherSettings:
-    return ModalWorkerLauncherSettings(
-        token_id="ak-test",
-        token_secret="as-test",
-        image="zenmldocker/kitaru-worker:1.0.0",
+    image: str | None = "zenmldocker/kitaru-worker:1.0.0",
+    command: str = "python -m kitaru.worker",
+    cpu: float | None = None,
+    memory_mb: int | None = None,
+) -> WorkerLauncherSettings:
+    return WorkerLauncherSettings(
+        backend=WorkerLauncherBackend.MODAL,
+        image=image,
+        command=command,
         timeout_seconds=120,
-        cpu=cpu,
-        memory_mb=memory_mb,
+        modal=ModalWorkerLauncherSettings(
+            token_id="ak-test", token_secret="as-test", cpu=cpu, memory_mb=memory_mb
+        ),
     )
 
 
@@ -150,7 +156,7 @@ async def test_launch_creates_sandbox_with_resource_limits(
     ]
     assert len(fake_modal.sandbox_create.calls) == 1
     args, kwargs = fake_modal.sandbox_create.calls[0]
-    assert args == WORKER_COMMAND
+    assert args == ("python", "-m", "kitaru.worker")
     assert kwargs["app"] is fake_modal.app
     assert kwargs["image"] is fake_modal.image
     assert kwargs["env"] == {
@@ -177,3 +183,35 @@ async def test_launch_without_resource_limits_passes_none_through(
     _, kwargs = fake_modal.sandbox_create.calls[0]
     assert kwargs["cpu"] is None
     assert kwargs["memory"] is None
+
+
+async def test_launch_splits_a_configured_command(fake_modal: _FakeModal) -> None:
+    """Run a configured command as its shell-split argument list."""
+    launcher = ModalWorkerLauncher(
+        _settings(command="/app/.venv/bin/python -m kitaru.worker --log-level debug")
+    )
+
+    await launcher.launch(_command())
+
+    args, _ = fake_modal.sandbox_create.calls[0]
+    assert args == (
+        "/app/.venv/bin/python",
+        "-m",
+        "kitaru.worker",
+        "--log-level",
+        "debug",
+    )
+
+
+async def test_launch_defaults_to_the_published_worker_image(
+    fake_modal: _FakeModal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run the published worker image at the installed version when unset."""
+    monkeypatch.setattr(worker_launcher_settings, "version", lambda name: "0.25.0")
+    launcher = ModalWorkerLauncher(_settings(image=None))
+
+    await launcher.launch(_command())
+
+    assert fake_modal.from_registry.calls == [
+        (("zenmldocker/kitaru-worker:0.25.0",), {})
+    ]

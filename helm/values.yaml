@@ -351,6 +351,18 @@ server:
     # sandbox dials back to the server.
     backend: none
 
+    # The worker image to run. If not set, the published
+    # zenmldocker/kitaru-worker tag matching the server version is used, which
+    # does not exist for development builds.
+    image:
+
+    # The command the worker container runs.
+    command: python -m kitaru.worker
+
+    # The worker lifetime in seconds, passed to the worker as
+    # KITARU_WORKER_TIMEOUT and enforced by the backend.
+    timeoutSeconds: 3600
+
     # Settings for the modal backend. Only used when backend is set to modal.
     modal:
       # The Modal API token id.
@@ -362,15 +374,8 @@ server:
       # directly.
       tokenSecret:
 
-      # The worker image the sandbox runs. Use the published
-      # zenmldocker/kitaru-worker tag matching the server version.
-      image:
-
       # The Modal app name the sandbox runs under.
       appName: kitaru-workers
-
-      # The sandbox lifetime in seconds, and the worker's KITARU_WORKER_TIMEOUT.
-      timeoutSeconds: 3600
 
       # The number of CPU cores to allocate to the sandbox. If not set, uses
       # the Modal default.

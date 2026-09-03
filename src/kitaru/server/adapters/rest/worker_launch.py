@@ -62,7 +62,7 @@ async def schedule_worker_launch(
     issued = auth_service.issue_worker_token(
         worker_id=worker.id,
         account_id=actor.account.id,
-        lifetime_seconds=_get_worker_token_lifetime_seconds(settings),
+        timeout_seconds=settings.WORKER_LAUNCHER.timeout_seconds,
     )
     launch = WorkerLaunch(
         worker_id=worker.id,
@@ -74,22 +74,6 @@ async def schedule_worker_launch(
     # Starlette runs background tasks after it, so the worker row is
     # committed before the sandbox starts.
     background_tasks.add_task(_launch_worker, launcher, launch)
-
-
-def _get_worker_token_lifetime_seconds(settings: APISettings) -> int:
-    """Compute the lifetime of an ephemeral worker token.
-
-    Args:
-        settings: API settings for this process.
-
-    Returns:
-        Sandbox timeout plus the task token expiry leeway, in seconds.
-    """
-    # Modal is the only launcher backend, and settings validation requires
-    # its sub-model to be set under that backend.
-    modal = settings.WORKER_LAUNCHER.modal
-    assert modal is not None
-    return modal.timeout_seconds + settings.TASK_TOKEN_EXPIRY_LEEWAY_SECONDS
 
 
 async def _launch_worker(launcher: WorkerLauncher, launch: WorkerLaunch) -> None:

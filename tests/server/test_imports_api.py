@@ -98,11 +98,10 @@ async def app(
             SERVER_URL="https://kitaru.example.com",
             WORKER_LAUNCHER=WorkerLauncherSettings(
                 backend=WorkerLauncherBackend.MODAL,
+                image="zenmldocker/kitaru-worker:1.0.0",
+                timeout_seconds=120,
                 modal=ModalWorkerLauncherSettings(
-                    token_id="ak-test",
-                    token_secret="as-test",
-                    image="zenmldocker/kitaru-worker:1.0.0",
-                    timeout_seconds=120,
+                    token_id="ak-test", token_secret="as-test"
                 ),
             ),
         )

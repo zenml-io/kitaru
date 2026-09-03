@@ -78,18 +78,21 @@ blob_storage__s3__access_key_id: {{ .accessKeyID | quote }}
 
 {{- if eq .Kitaru.workerLauncher.backend "modal" }}
 worker_launcher__backend: {{ .Kitaru.workerLauncher.backend | quote }}
+{{- if .Kitaru.workerLauncher.image }}
+worker_launcher__image: {{ .Kitaru.workerLauncher.image | quote }}
+{{- end }}
+{{- if .Kitaru.workerLauncher.command }}
+worker_launcher__command: {{ .Kitaru.workerLauncher.command | quote }}
+{{- end }}
+{{- if .Kitaru.workerLauncher.timeoutSeconds }}
+worker_launcher__timeout_seconds: {{ .Kitaru.workerLauncher.timeoutSeconds | quote }}
+{{- end }}
 {{- with .Kitaru.workerLauncher.modal }}
 {{- if .tokenID }}
 worker_launcher__modal__token_id: {{ .tokenID | quote }}
 {{- end }}
-{{- if .image }}
-worker_launcher__modal__image: {{ .image | quote }}
-{{- end }}
 {{- if .appName }}
 worker_launcher__modal__app_name: {{ .appName | quote }}
-{{- end }}
-{{- if .timeoutSeconds }}
-worker_launcher__modal__timeout_seconds: {{ .timeoutSeconds | quote }}
 {{- end }}
 {{- if .cpu }}
 worker_launcher__modal__cpu: {{ .cpu | quote }}
