@@ -285,9 +285,7 @@ async def _login_managed_cloud(
     finally:
         await session.close()
 
-    server_url = validate_server_url(
-        cast(str, workspace.server_url), configuration=True
-    )
+    server_url = _validate_managed_server_url(cast(str, workspace.server_url))
     client = KitaruAPIClient(
         base_url=server_url,
         timeout=timeout,
@@ -352,6 +350,17 @@ def _get_selected_workspace_id(device_metadata: dict[str, str]) -> uuid.UUID:
             "invalid_configuration",
             "Managed-cloud login returned an invalid workspace ID.",
         ) from error
+
+
+def _validate_managed_server_url(server_url: str) -> str:
+    """Validate a managed server URL before forwarding a bearer token."""
+    server_url = validate_server_url(server_url, configuration=True)
+    if not server_url.startswith("https://"):
+        raise CLIError(
+            "invalid_configuration",
+            "Managed workspace server URLs must use HTTPS.",
+        )
+    return server_url
 
 
 async def _wait_for_managed_workspace(

@@ -346,6 +346,15 @@ async def test_bare_login_waits_for_a_pending_workspace(
     assert delays == [auth._WORKSPACE_POLL_INTERVAL_SECONDS] * 2
 
 
+def test_managed_workspace_server_url_requires_https() -> None:
+    """Do not forward a control-plane bearer token over plaintext HTTP."""
+    with pytest.raises(CLIError) as raised:
+        auth._validate_managed_server_url("http://managed.example.com")
+
+    assert raised.value.kind == "invalid_configuration"
+    assert "must use HTTPS" in raised.value.message
+
+
 async def test_login_explains_when_kitaru_is_not_available(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
