@@ -25,7 +25,9 @@ Prefer to do it by hand? The installer is three commands, which you can run your
 ```bash
 uv tool install "kitaru[cli,mcp,worker]"     # CLI + MCP server, isolated from your projects
 npx skills add zenml-io/kitaru-skills          # the coding-agent skills
-kitaru login --local                           # local server in Docker, or: kitaru login <team-url>
+kitaru login                                   # managed cloud; 14-day trial, no credit card required
+kitaru login --local                           # local server in Docker
+# or: kitaru login <team-url>                  # an existing managed or self-hosted workspace
 ```
 
 then point your assistant at `kitaru-mcp` as described in [Set up your coding agent](../agent-native/setup.md).
@@ -64,11 +66,13 @@ kitaru logout --volumes      # stop and delete the database (a clean reset)
 
 After upgrading the `kitaru` package, upgrade the local server to match with `kitaru login --local --upgrade`; a plain login deliberately never replaces the server image. Prefer to manage Docker yourself, or need a shared deployment with your own Postgres, real auth, and TLS? See [Docker](../deploy/docker.md) and [Deploy Kitaru](../deploy/README.md).
 
-## Connect to a team server
+## Connect to managed cloud or a team server
 
 `kitaru login --local` already connected you; `kitaru status` confirms it.
 
-Against a shared server, log in with `kitaru login <url>`. For non-interactive use (CI, production services), create an API key and set two environment variables that the SDK, the CLI, and workers all read:
+For managed cloud, run `kitaru login`. The browser flow lets you select or create a Kitaru workspace, then the CLI waits for it to become available and selects it. Managed cloud includes a 14-day trial with no credit card required.
+
+Against an existing managed or self-hosted workspace, log in with `kitaru login <url>`. For non-interactive use (CI, production services), create an API key and set two environment variables that the SDK, the CLI, and workers all read:
 
 ```bash
 export KITARU_API_URL="https://kitaru.your-team.example"

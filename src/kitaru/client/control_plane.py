@@ -14,6 +14,7 @@
 """Control plane login for clients of a control plane backed server."""
 
 import logging
+import uuid
 import webbrowser
 from collections.abc import Callable
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -32,6 +33,9 @@ logger = logging.getLogger(__name__)
 
 DEVICE_AUTHORIZATION_PATH = "/auth/device_authorization"
 LOGIN_PATH = "/auth/login"
+WORKSPACE_PATH = "/workspaces/{workspace_id}"
+
+MANAGED_CLOUD_API_URL = "https://cloudapi.zenml.io"
 
 # Grant the control plane accepts an API key under.
 API_KEY_GRANT_TYPE = "zenml_api_key"
@@ -65,6 +69,42 @@ class ControlPlaneToken(BaseModel):
 
     access_token: str
     expires_in: int
+    device_metadata: dict[str, str] | None = None
+
+
+class ControlPlaneKitaruServiceStatus(BaseModel):
+    """Deployment details needed to connect to a Kitaru workspace."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    server_url: str | None = None
+
+
+class ControlPlaneKitaruService(BaseModel):
+    """Kitaru service attached to a managed workspace."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    status: ControlPlaneKitaruServiceStatus | None = None
+
+
+class ControlPlaneWorkspace(BaseModel):
+    """Managed workspace fields required by the Kitaru login flow."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: uuid.UUID
+    name: str
+    workspace_type: str
+    status: str
+    kitaru_service: ControlPlaneKitaruService | None = None
+
+    @property
+    def server_url(self) -> str | None:
+        """Return the deployed Kitaru server URL, if available."""
+        if self.kitaru_service is None or self.kitaru_service.status is None:
+            return None
+        return self.kitaru_service.status.server_url
 
 
 class ControlPlaneSession:
@@ -142,6 +182,20 @@ class ControlPlaneSession:
         prompt: Callable[[ControlPlaneDeviceAuthorization], None] | None = None,
         workspace_id: str | None = None,
     ) -> ApiToken:
+        """Authorize this machine and return its cached control plane token."""
+        result = await self.device_login_with_metadata(
+            open_browser=open_browser,
+            prompt=prompt,
+            workspace_id=workspace_id,
+        )
+        return ApiToken.issued(result.access_token, result.expires_in)
+
+    async def device_login_with_metadata(
+        self,
+        open_browser: bool = True,
+        prompt: Callable[[ControlPlaneDeviceAuthorization], None] | None = None,
+        workspace_id: str | None = None,
+    ) -> ControlPlaneToken:
         """Authorize this machine against the control plane.
 
         The call blocks until a signed-in account confirms the user code in a
@@ -157,7 +211,7 @@ class ControlPlaneSession:
             DeviceLoginError: The authorization expired or was refused.
 
         Returns:
-            Token issued for the authorized device.
+            Control plane token and workspace selection issued for the device.
         """
         client_id = get_client_id()
         device = describe_this_device()
@@ -201,7 +255,28 @@ class ControlPlaneSession:
         confirmed = await poll_for_token(
             exchange, authorization.expires_in, authorization.interval
         )
-        return self._store_token(confirmed)
+        issued = ControlPlaneToken.model_validate(confirmed.json())
+        self._store_issued_token(issued)
+        return issued
+
+    async def get_workspace(
+        self, workspace_id: uuid.UUID, access_token: str
+    ) -> ControlPlaneWorkspace:
+        """Get the managed workspace selected during device authorization.
+
+        Args:
+            workspace_id: Selected workspace ID.
+            access_token: Control plane bearer token.
+
+        Returns:
+            Managed workspace connection details.
+        """
+        response = await self._http.get(
+            WORKSPACE_PATH.format(workspace_id=workspace_id),
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        raise_for_response(response)
+        return ControlPlaneWorkspace.model_validate(response.json())
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -217,6 +292,10 @@ class ControlPlaneSession:
             Cached token.
         """
         issued = ControlPlaneToken.model_validate(response.json())
+        return self._store_issued_token(issued)
+
+    def _store_issued_token(self, issued: ControlPlaneToken) -> ApiToken:
+        """Cache a validated control plane token response."""
         token = ApiToken.issued(issued.access_token, issued.expires_in)
         self._store.set_token(self._url, token, type=ApiType.CONTROL_PLANE)
         return token

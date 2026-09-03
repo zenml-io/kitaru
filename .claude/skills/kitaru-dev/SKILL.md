@@ -73,7 +73,7 @@ Agent-facing commands use the version-1 structured contract. Success documents i
 
 For agent-facing use, prefer `--output json --machine --non-interactive --no-browser`. A deliberate dashboard or device-login handoff is the exception.
 
-Document login consistently: `kitaru login SERVER` targets the full managed or self-hosted instance URL, while `kitaru login --local` provisions or reuses the CLI-owned Docker Compose deployment. It defaults to `http://localhost:8000`; `--port` takes precedence over `KITARU_LOCAL_PORT`, and the selected port persists with the deployment. `kitaru logout` stops that deployment when it is selected, and `kitaru logout --volumes` also deletes its PostgreSQL data.
+Document login consistently: `kitaru login` starts the interactive managed-cloud device flow and connects to the Kitaru workspace selected or created in the browser. `kitaru login SERVER` targets the full managed or self-hosted instance URL, while `kitaru login --local` provisions or reuses the CLI-owned Docker Compose deployment. The local deployment defaults to `http://localhost:8000`; `--port` takes precedence over `KITARU_LOCAL_PORT`, and the selected port persists with the deployment. `kitaru logout` stops that deployment when it is selected, and `kitaru logout --volumes` also deletes its PostgreSQL data.
 
 `kitaru status` shows the selected server, provenance, credential state, compatibility, and live-worker count. `kitaru info` adds local package, Python, platform, and server details. `kitaru doctor` runs independent local, server, authentication, and tooling checks without stopping after the first failure. These commands never print secret values.
 
