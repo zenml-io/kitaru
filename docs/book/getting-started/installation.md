@@ -19,10 +19,11 @@ That one command:
 4. Prints the two ways to get a server, and stops:
 
 ```
-kitaru login --local       local, in Docker. Free, open source.
-https://cloud.kitaru.ai    managed cloud. 14-day trial, no credit card required.
-                           then: kitaru login <your workspace URL>
+uv run kitaru login --local    local, in Docker. Free, open source.
+uv run kitaru login            managed cloud. 14-day trial, no credit card required.
 ```
+
+(Inside a project Kitaru is not on your PATH, hence `uv run`. The isolated install uses plain `kitaru`.)
 
 Works on macOS, Linux, WSL, and Git Bash on Windows. Running it again upgrades.
 
@@ -62,7 +63,7 @@ Set up Kitaru in this repository by following https://kitaru.ai/install.md. Use 
 kitaru doctor
 ```
 
-It checks the CLI, the server connection, authentication, and whether the skills are installed. Server connection and authentication fail until you have run `kitaru login --local` (needs [Docker](https://docs.docker.com/get-started/get-docker/)) or logged in to a managed or team server; the sections below cover both.
+It checks the CLI, the server connection, authentication, and whether the skills are installed. Server connection and authentication fail until you have run `kitaru login --local` (needs [Docker](https://docs.docker.com/get-started/get-docker/)) or `kitaru login` for the managed cloud; the sections below cover both.
 
 Then read the [Quickstart](quickstart.md). It is written as prompts for your coding agent, and everything it needs is now in place.
 

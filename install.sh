@@ -20,8 +20,8 @@
 #   4. Registers the Kitaru MCP server with Claude Code and Codex if their
 #      CLIs are installed; prints the JSON for everything else.
 #   5. Stops there and prints the two ways to get a server: local in Docker
-#      (`kitaru login --local`) or the managed cloud. Login is a decision, so
-#      the script does not make it for you.
+#      (`kitaru login --local`) or the managed cloud (`kitaru login`). Login
+#      is a decision, so the script does not make it for you.
 #
 # Nothing here needs sudo. Everything lands under $HOME. Re-running upgrades.
 #
@@ -423,8 +423,10 @@ fi
 say ""
 say "${C_GREEN}◆${C_RESET} ${C_BOLD}Kitaru is installed.${C_RESET}"
 say ""
+# In project mode kitaru is not on PATH; every command goes through uv run.
+if [ "$KITARU_SCOPE" = "project" ]; then K="uv run kitaru"; else K="kitaru"; fi
 if [ "$KITARU_SCOPE" = "project" ]; then
-  say "  Installed into this project's environment. Run it as ${C_BOLD}uv run kitaru ...${C_RESET}"
+  say "  Installed into this project's environment, so run it as ${C_BOLD}uv run kitaru ...${C_RESET}"
   say "  (or activate $VENV_DIR)."
   say ""
 elif [ "$(PATH="$ORIG_PATH" command -v kitaru 2>/dev/null || true)" != "$KITARU_BIN" ]; then
@@ -434,13 +436,12 @@ fi
 if [ -n "$KITARU_SERVER" ]; then
   say "  Next, log in to your server:"
   say ""
-  say "    ${C_BOLD}kitaru login $KITARU_SERVER${C_RESET}"
+  say "    ${C_BOLD}$K login $KITARU_SERVER${C_RESET}"
 else
   say "  Next, pick where your Kitaru server lives:"
   say ""
-  say "    ${C_BOLD}kitaru login --local${C_RESET}       local, in Docker. Free, open source."
-  say "    ${C_BOLD}https://cloud.kitaru.ai${C_RESET}    managed cloud. 14-day trial, no credit card required."
-  say "                               then: kitaru login <your workspace URL>"
+  say "    ${C_BOLD}$K login --local${C_RESET}    local, in Docker. Free, open source."
+  say "    ${C_BOLD}$K login${C_RESET}            managed cloud. 14-day trial, no credit card required."
 fi
 say ""
 say "  Then, in your agent's repo, tell your coding agent:"
@@ -452,7 +453,7 @@ if [ "$KITARU_SCOPE" = "global" ]; then
 fi
 say ""
 say "  No agent yet?  ${C_BOLD}Use kitaru-guided-tour to show me Kitaru on the example agent.${C_RESET}"
-say "  Check setup:   kitaru doctor"
+say "  Check setup:   $K doctor"
 say "  Docs:          https://docs.zenml.io/kitaru"
 say ""
 }
