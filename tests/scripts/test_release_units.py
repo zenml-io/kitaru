@@ -140,13 +140,13 @@ def test_inventory_describes_core_and_eleven_plugin_distributions() -> None:
 
 def test_default_requirements_are_derived_from_release_units() -> None:
     assert set(default_requirements(load_inventory()).values()) == {
-        "kitaru-braintrust-importer==0.2.0",
+        "kitaru-braintrust-importer[adapter]==0.2.0",
         "kitaru-evaluator==0.1.3",
         "kitaru-jsonl-importer==0.1.1",
-        "kitaru-langfuse-importer==0.2.0",
-        "kitaru-langsmith-importer==0.2.0",
-        "kitaru-logfire-importer==0.2.0",
-        "kitaru-phoenix-importer==0.2.0",
+        "kitaru-langfuse-importer[adapter]==0.2.0",
+        "kitaru-langsmith-importer[adapter]==0.2.0",
+        "kitaru-logfire-importer[adapter]==0.2.0",
+        "kitaru-phoenix-importer[adapter]==0.2.0",
     }
 
 
@@ -616,6 +616,10 @@ def test_inventory_rejects_an_adapter_in_the_default_catalog(
             'requirement="kitaru-langfuse-importer[adapter]==0.1.1"',
         ),
         ('display_version="0.2.0"', 'display_version="0.1.1"'),
+        (
+            'requirement="kitaru-langfuse-importer[adapter]==0.2.0"',
+            'requirement="kitaru-langfuse-importer==0.2.0"',
+        ),
     ],
 )
 def test_inventory_rejects_stale_server_default_versions(
@@ -626,7 +630,26 @@ def test_inventory_rejects_stale_server_default_versions(
 
     with pytest.raises(
         ReleaseInventoryError,
-        match=r"server default requirement and display version must match 0\.2\.0",
+        match=r"server default requirement and display version must match "
+        r"kitaru-langfuse-importer\[adapter\]==0\.2\.0",
+    ):
+        load_inventory(release_repo)
+
+
+def test_inventory_rejects_default_extras_outside_the_default_catalog(
+    release_repo: Path,
+) -> None:
+    inventory_path = release_repo / "release" / "release-units.toml"
+    document = inventory_path.read_text()
+    langgraph = document.index('slug = "langgraph"')
+    catalog_line = document.index("default-catalog = false", langgraph)
+    inventory_path.write_text(
+        f'{document[:catalog_line]}default-extras = ["adapter"]\n'
+        f"{document[catalog_line:]}"
+    )
+
+    with pytest.raises(
+        ReleaseInventoryError, match="default-extras requires default-catalog"
     ):
         load_inventory(release_repo)
 
