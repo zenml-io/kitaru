@@ -17,6 +17,7 @@ import asyncio
 import uuid
 
 from kitaru.api_models.v1.task import (
+    BlobSourceSpec,
     ImportTaskDetails,
     ScriptPluginSpec,
     TaskSpecResponse,
@@ -56,25 +57,38 @@ class ImportHandler:
         details = spec.details
         env = build_process_env(task_id, {}, spec.env, spec.secret_env, token)
         if isinstance(details.plugin, ScriptPluginSpec):
-            plugin_path, payload_path = await asyncio.gather(
-                materialize_blob(
+            if isinstance(details.source, BlobSourceSpec):
+                plugin_path, payload_path = await asyncio.gather(
+                    materialize_blob(
+                        ctx,
+                        ctx.blob_cache,
+                        details.plugin.blob_id,
+                        details.plugin.sha256,
+                    ),
+                    materialize_blob(
+                        ctx,
+                        ctx.payload_cache,
+                        details.source.blob_id,
+                        details.source.sha256,
+                    ),
+                )
+                env["KITARU_TASK_PAYLOAD_PATH"] = str(payload_path)
+            else:
+                plugin_path = await materialize_blob(
                     ctx, ctx.blob_cache, details.plugin.blob_id, details.plugin.sha256
-                ),
-                materialize_blob(
-                    ctx,
-                    ctx.payload_cache,
-                    details.payload.blob_id,
-                    details.payload.sha256,
-                ),
-            )
+                )
             env["KITARU_TASK_PLUGIN_PATH"] = str(plugin_path)
             dependencies = parse_inline_dependencies(plugin_path)
         else:
-            payload_path = await materialize_blob(
-                ctx, ctx.payload_cache, details.payload.blob_id, details.payload.sha256
-            )
+            if isinstance(details.source, BlobSourceSpec):
+                payload_path = await materialize_blob(
+                    ctx,
+                    ctx.payload_cache,
+                    details.source.blob_id,
+                    details.source.sha256,
+                )
+                env["KITARU_TASK_PAYLOAD_PATH"] = str(payload_path)
             dependencies = [details.plugin.requirement]
-        env["KITARU_TASK_PAYLOAD_PATH"] = str(payload_path)
         argv = get_python_run_argv("kitaru.task", ["import"], dependencies)
         return TaskProcess(
             command=argv,
