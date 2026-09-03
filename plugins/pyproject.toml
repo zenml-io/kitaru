@@ -1,6 +1,11 @@
 [tool.uv]
 exclude-newer = "3 days"
-# Temporary bootstrap exception for 0.2.149. Remove after 2026-09-03.
+# kitaru-claude-agent-sdk requires claude-agent-sdk>=0.2.149, published
+# 2026-08-31T20:01Z, which the three-day quarantine above still excludes, so the
+# workspace does not resolve without this line. Delete it and re-lock once the
+# quarantine has moved past that publish time. Left in place it is narrower than
+# the default and caps this one package at 2026-09-01 forever, so a later fix is
+# never picked up and `uv lock --check` keeps passing while that happens.
 exclude-newer-package = { claude-agent-sdk = "2026-09-01" }
 
 [tool.uv.workspace]
@@ -63,6 +68,11 @@ known-first-party = [
     "kitaru_phoenix_importer",
     "kitaru_pydantic_ai",
 ]
+# The repository root holds a tests/mcp directory, so ruff's source detection
+# classifies the `mcp` distribution as first-party when it runs from there and
+# third-party when it runs from this directory. Naming it keeps one import
+# order valid from both.
+known-third-party = ["mcp"]
 
 [tool.ty.src]
 include = ["packages/*/src/**/*.py", "tests/**/*.py"]

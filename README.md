@@ -100,6 +100,7 @@ Python and TypeScript SDKs talk to the same server. Adapters ship for:
 | PydanticAI | Python | `kitaru-pydantic-ai` |
 | LangGraph (also LangChain agents, Deep Agents) | Python | `kitaru-langgraph` |
 | OpenAI Agents SDK | Python | `kitaru-openai-agents` |
+| Claude Agent SDK | Python | `kitaru-claude-agent-sdk` |
 | Mastra | TypeScript | `@zenml-io/kitaru-mastra` |
 | Vercel AI SDK | TypeScript | `@zenml-io/kitaru-vercel-ai` |
 

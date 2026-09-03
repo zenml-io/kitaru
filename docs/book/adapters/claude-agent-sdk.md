@@ -64,6 +64,8 @@ When a worker runs the same program with a selected replay, the adapter can appl
 
 The adapter rejects `model_params`, `resume`, `continue_conversation`, `fork_session`, `resume_session_at`, and `resume_drops_turn` during replay because the public one-shot boundary cannot enforce those changes without combining the new run with hidden provider state. A mapped model override must contain the model set in `ClaudeAgentOptions`; otherwise the adapter stops before calling Claude.
 
+An agent version that runs this adapter keeps the default [runtime capabilities](../concepts/agents-and-sessions.md#runtime-capabilities), `overrides` and `tool_policies` both `true`, because the adapter intercepts model and tool calls inside the agent process. Those two booleans cannot say which override fields an adapter supports, so a `model_params` override is accepted when you create the replay and rejected by this adapter's own preflight when the run starts, before Claude is called. Do not declare `overrides: false` to express that: it also rejects the prompt, system-prompt, and model overrides this adapter does support.
+
 ## Make an SDK MCP server replayable
 
 Claude's public `SdkMcpTool` handler is the tool boundary the adapter can replace. Declare those tools with `replayable_sdk_mcp_server()` instead of constructing their server yourself:
@@ -114,14 +116,29 @@ The policy identity is `mcp__<server name>__<tool name>`, or `mcp__support__look
 
 ## Tool replay policies
 
-The adapter supports the shared Kitaru tool-policy behavior only for tools declared through `replayable_sdk_mcp_server()`:
+The adapter supports the shared Kitaru [tool policies](../guides/tool-policies.md) only for tools declared through `replayable_sdk_mcp_server()`:
 
 | Policy | Behavior |
 | --- | --- |
-| `static` | Return the first exact or shallow-subset argument match without calling the handler. |
-| `history` | Look up a recorded result by the exact tool identity and canonical JSON arguments. Baseline scope consumes repeated matches by occurrence; broader scopes use the server-selected match. |
-| `error_result` | On a static or history miss, return a valid Claude MCP result with text content and `is_error: true`. |
-| `passthrough` | Call the original handler. This includes `on_miss: passthrough` and can perform real, irreversible side effects. |
+| `passthrough` | Calls the original handler. Any network request, database write, message send, or other side effect happens for real. |
+| `static` | Returns the first exact or shallow-subset argument match without calling the handler. On a miss, `fail`, `error_result`, and `passthrough` behavior is supported. |
+| `history` | Looks up a recorded result by the exact tool identity and canonical JSON arguments. Baseline scope consumes repeated matches by occurrence; broader scopes use the server-selected match. On a miss, `fail`, `error_result`, and `passthrough` behavior is supported. |
+| `llm` | Rejected before the adapter creates a session or calls Claude; this policy is not supported by this adapter. |
+
+`error_result` is a value of `on_miss`, not a policy `type`. A config sent as `{"type": "error_result"}` is rejected by the server with HTTP 422. On a static or history miss, `on_miss: error_result` returns a valid Claude MCP result with text content and `is_error: true`, so Claude reads the failure and can continue the run. `on_miss: fail` stops the replay without calling the handler, and `on_miss: passthrough` calls the original handler with the side effects that implies.
+
+A replay that substitutes any tool must set `tool_policy.default` to an empty `static` policy with `on_miss: fail`. The adapter rejects every other default, `passthrough` included, with `Claude SDK MCP replay requires an empty static fail default policy` before it creates a Kitaru session or calls Claude. A `passthrough` default is valid only when no tool carries a substituting policy, which means an all-passthrough replay.
+
+```json
+{
+  "default": {"type": "static", "cases": [], "on_miss": "fail"},
+  "tools": {
+    "mcp__support__lookup": {"type": "static", "cases": [], "on_miss": "error_result"}
+  }
+}
+```
+
+Pass that document to `kitaru replay create --tool-policy` or `kitaru experiment create --tool-policy`. The empty default matches nothing, so any tool the policy does not name fails the replay instead of quietly reaching a live handler.
 
 Static and history results must fit the adapter's versioned result format: a mapping with text MCP `content` blocks and an optional boolean `is_error`. A result may contain up to 100 text blocks and 64 KiB. This release cannot substitute images, embedded resources, audio, extra fields, or larger results.
 
@@ -157,7 +174,7 @@ Passthrough is a live call, not a simulation or transaction. A database write, m
 | Native asynchronous message stream | Yielded unchanged and recorded | Yielded unchanged from the new run |
 | Prompt, system prompt, and model | Recorded when exposed by the public SDK | Replacement supported |
 | `model_params` | Not a replay boundary | Not supported |
-| Adapter-wrapped in-process SDK MCP tools | Recorded | Static, history, error-result, and passthrough policies |
+| Adapter-wrapped in-process SDK MCP tools | Recorded | Static, history, and passthrough policies, with `fail`, `error_result`, or `passthrough` on a miss |
 | Claude built-in tools | Recorded when exposed by public messages and hooks | Passthrough only; substitution is not supported |
 | External MCP servers | Recorded when exposed by public messages and hooks | Passthrough only; substitution is not supported |
 | LLM tool policy | Not applicable | Not supported |
@@ -172,9 +189,17 @@ Kitaru creates the session before it calls Claude, then writes the public messag
 
 The exception carries the Kitaru `session_id` when available, the failing `phase`, and the terminal Claude message when recording failed after one was produced. Preserve that evidence instead of blindly rerunning the query.
 
+When Claude's terminal message reports a failure, Kitaru records the most readable cause that message carries: the errors Claude reported, then the result text, then the terminal reason, then the subtype. A provider API error such as a 529 overload arrives with the subtype `success`, `is_error` set, and the cause in the result text, so the subtype alone would say nothing. Kitaru skips a terminal reason or subtype that reads as a success, `success` and `completed`, and falls back to `Claude reported a failed result` when the message carries no cause at all. The HTTP status of the failing call is kept in the session's terminal metadata as `api_error_status`.
+
+If the consumer stops the stream early and Kitaru then fails to close the session or to close the Claude iterator, the adapter logs a warning naming the session ID on the `kitaru_claude_agent_sdk.runner` logger. Closing an asynchronous generator discards the exception it raises inside, notes included, so the log is the only report that survives. Configure Python logging in the agent process if you want to see it.
+
 ## Data and evaluation
 
 Kitaru stores prompts, tool arguments and results, model output, reasoning text, and failure summaries as trace data. The adapter limits the size of recorded values and excludes provider-only fields such as thinking signatures. It does not add its own redaction policy. Decide what your application may send to Claude and its tools, and give the resulting Kitaru data the same access and retention controls as the source data.
+
+The session's root node records the prompt string that was actually sent to Claude as the `effective_prompt` attribute, next to the recorded `options`. A replay that overrides the prompt keeps the baseline prompt in `session.inputs`, which is the shared Kitaru convention that lets a cohort compare arms on one task input, so the root attribute is where you read the text the model received. A prompt longer than the adapter's recorded-value limit is stored as `{"value": "...", "truncated": true}` rather than as a silently shortened string, the same shape Kitaru uses for every other oversized recorded value.
+
+Claude reports per-call token usage as a snapshot taken before the model finishes generating, so the count on an individual `llm_call` node is a partial. The authoritative totals arrive on the terminal `ResultMessage`. Kitaru records the difference between those totals and the counts already on the model nodes as usage on the root node, exactly the way it records the run's total cost there, so the session totals add up to Claude's own numbers. Claude's thinking tokens appear in Kitaru's reasoning-token field. Kitaru never records a negative difference, so on the rare field whose per-call counts already add up to more than Claude's total, the root node carries nothing and the session total stays above Claude's number. A run that never reaches a terminal message, such as one the consumer aborts, therefore records no cost and keeps only the partial per-call counts, because the SDK publishes no authoritative figures before then.
 
 Replay tells you what the changed program did on the same recorded input under the selected tool policy. It does not tell you whether the new answer is correct or better. Add an [evaluator](../guides/write-an-evaluator.md) for the behavior that matters, freeze the relevant sessions into a cohort, and compare the resulting evaluations.
 
