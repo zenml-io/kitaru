@@ -21,7 +21,7 @@ from typing import cast
 
 import pytest
 
-from kitaru.api_models.v1.auth import TokenResponse
+from kitaru.api_models.v1.auth import DeviceAuthorizationResponse, TokenResponse
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.cli import auth
 from kitaru.cli.output import CLIError
@@ -99,6 +99,32 @@ class FakeClient:
 
 
 WORKSPACE_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+
+
+def test_device_prompt_uses_the_complete_verification_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct people to the verification page without a redundant code prompt."""
+    messages: list[str] = []
+    monkeypatch.setattr(auth, "write_interaction", messages.append)
+
+    auth._show_device_prompt(
+        DeviceAuthorizationResponse(
+            device_id=WORKSPACE_ID,
+            device_code="device-code",
+            user_code="ABCD-EFGH",
+            verification_uri="https://cloud.example.com/devices/verify",
+            verification_uri_complete=(
+                "https://cloud.example.com/devices/verify?user_code=ABCD-EFGH"
+            ),
+            expires_in=300,
+            interval=5,
+        )
+    )
+
+    assert messages == [
+        "Open https://cloud.example.com/devices/verify?user_code=ABCD-EFGH to continue."
+    ]
 
 
 def managed_workspace(

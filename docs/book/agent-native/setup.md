@@ -13,7 +13,7 @@ Kitaru observes your production agents; your coding assistant is how you talk to
 Skills and MCP work together: the skills say how to work, and the server bounds what can be touched.
 
 {% hint style="success" %}
-Used the [one-line installer](../getting-started/installation.md)? It already installed the MCP server, registered it with Claude Code and Codex (user scope, pointed at `http://localhost:8000` in `standard` mode), and installed the skills. Skip to [Capability modes and tools](#capability-modes-and-tools) unless you use another assistant or a different server URL.
+Used the [one-line installer](../getting-started/installation.md)? It already installed the MCP server, registered it with Claude Code (in your repo's `.mcp.json` when run inside a repository, user scope otherwise) and Codex, pointed at `http://localhost:8000` in `standard` mode, and installed the skills. Skip to [Capability modes and tools](#capability-modes-and-tools) unless you use another assistant or a different server URL.
 {% endhint %}
 
 ## Install the MCP server
