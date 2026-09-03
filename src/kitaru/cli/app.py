@@ -1171,6 +1171,13 @@ _PLUGIN_SOURCE_PARAMETERS = (
         "--display-version", "string", "option", False, "Human-readable version."
     ),
 )
+_FETCH_ENTRYPOINT_PARAMETER = ParameterSpec(
+    "--fetch-entrypoint",
+    "string",
+    "option",
+    False,
+    "Script attribute or module reference for API-based fetches.",
+)
 
 
 def _open_asset_client():
@@ -3130,7 +3137,10 @@ def _plugin_register_parameters(kind: str) -> tuple[ParameterSpec, ...]:
         parent.append(
             ParameterSpec("--agent-id", "UUID", "option", False, "Scoping agent.")
         )
-    return (*parent, *_PLUGIN_SOURCE_PARAMETERS)
+    source_parameters = _PLUGIN_SOURCE_PARAMETERS
+    if kind == "importer":
+        source_parameters = (*source_parameters, _FETCH_ENTRYPOINT_PARAMETER)
+    return (*parent, *source_parameters)
 
 
 async def _register_plugin_command(
@@ -3140,6 +3150,7 @@ async def _register_plugin_command(
     script: Path | None,
     package: str | None,
     entrypoint: str | None,
+    fetch_entrypoint: str | None,
     description: str | None,
     provider: str | None,
     metadata: str | None,
@@ -3148,7 +3159,10 @@ async def _register_plugin_command(
 ) -> CommandResult:
     """Run one kind-specific parent-plus-version registration."""
     source = registration.prepare_plugin_source(
-        script=script, package=package, entrypoint=entrypoint
+        script=script,
+        package=package,
+        entrypoint=entrypoint,
+        fetch_entrypoint=fetch_entrypoint,
     )
     parent = registration.plugin_parent_request(
         kind,
@@ -3175,12 +3189,16 @@ async def _register_plugin_version_command(
     script: Path | None,
     package: str | None,
     entrypoint: str | None,
+    fetch_entrypoint: str | None,
     display_version: str | None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Run one kind-specific version registration."""
     source = registration.prepare_plugin_source(
-        script=script, package=package, entrypoint=entrypoint
+        script=script,
+        package=package,
+        entrypoint=entrypoint,
+        fetch_entrypoint=fetch_entrypoint,
     )
     async with _open_asset_client() as client:
         return await registration.register_plugin_version(
@@ -3333,6 +3351,7 @@ async def importer_register(
     script: Path | None = None,
     package: str | None = None,
     entrypoint: str | None = None,
+    fetch_entrypoint: str | None = None,
     description: str | None = None,
     provider: str | None = None,
     metadata: str | None = None,
@@ -3345,6 +3364,7 @@ async def importer_register(
         script=script,
         package=package,
         entrypoint=entrypoint,
+        fetch_entrypoint=fetch_entrypoint,
         description=description,
         provider=provider,
         metadata=metadata,
@@ -3403,6 +3423,7 @@ async def importer_get(importer: str, /) -> CommandResult:
                 "IMPORTER", "reference", "argument", True, "Importer UUID or name."
             ),
             *_PLUGIN_SOURCE_PARAMETERS,
+            _FETCH_ENTRYPOINT_PARAMETER,
             _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
@@ -3418,6 +3439,7 @@ async def importer_version_register(
     script: Path | None = None,
     package: str | None = None,
     entrypoint: str | None = None,
+    fetch_entrypoint: str | None = None,
     display_version: str | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
@@ -3428,6 +3450,7 @@ async def importer_version_register(
         script=script,
         package=package,
         entrypoint=entrypoint,
+        fetch_entrypoint=fetch_entrypoint,
         display_version=display_version,
         idempotency_key=idempotency_key,
     )
@@ -3566,6 +3589,7 @@ async def evaluator_register(
         script=script,
         package=package,
         entrypoint=entrypoint,
+        fetch_entrypoint=None,
         description=description,
         provider=None,
         metadata=metadata,
@@ -3649,6 +3673,7 @@ async def evaluator_version_register(
         script=script,
         package=package,
         entrypoint=entrypoint,
+        fetch_entrypoint=None,
         display_version=display_version,
         idempotency_key=idempotency_key,
     )

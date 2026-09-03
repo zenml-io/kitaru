@@ -489,3 +489,24 @@ def test_idempotency_key_option_covers_only_single_create_commands() -> None:
         [command] = describe_schema(path)
         names = {parameter["name"] for parameter in command["parameters"]}
         assert "--idempotency-key" not in names, path
+
+
+def test_fetch_entrypoint_option_is_importer_only() -> None:
+    """--fetch-entrypoint is offered on importer registration and nowhere else."""
+    covered_paths = (
+        ("importer", "register"),
+        ("importer", "version", "register"),
+    )
+    for path in covered_paths:
+        [command] = describe_schema(path)
+        names = {parameter["name"] for parameter in command["parameters"]}
+        assert "--fetch-entrypoint" in names, path
+
+    uncovered_paths = (
+        ("evaluator", "register"),
+        ("evaluator", "version", "register"),
+    )
+    for path in uncovered_paths:
+        [command] = describe_schema(path)
+        names = {parameter["name"] for parameter in command["parameters"]}
+        assert "--fetch-entrypoint" not in names, path

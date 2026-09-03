@@ -69,22 +69,19 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
 
 `fetch` receives the import's `--query` (or `source.query` on the request) and yields parser payloads. Each yielded payload runs through your `parse` entrypoint with the import's `params`, exactly like a file upload would, so every trace that `parse` groups into one session must be in the same payload. The built-in importers yield one payload holding every fetched trace, oldest first. Raise from the fetcher to end the import task with the failure recorded in the import stats.
 
-A script source names the fetch entrypoint as a bare attribute, like the parse entrypoint. A package source names it as `module:attribute`. There is no `--fetch-entrypoint` flag on `kitaru importer register` yet, so set it through the API directly, for example with the Python client:
+A script source names the fetch entrypoint as a bare attribute, like the parse entrypoint. A package source names it as `module:attribute`. Pass it alongside `--entrypoint` with `--fetch-entrypoint`:
 
-```python
-from kitaru.api_models.v1.importer import ImporterVersionCreateRequest
-from kitaru.api_models.v1.plugin import PackagePluginSource
+```bash
+kitaru importer register my-format \
+  --script my_format_importer.py --entrypoint parse \
+  --fetch-entrypoint fetch --provider my-format
+```
 
-await client.importers.create_version(
-    importer_id,
-    ImporterVersionCreateRequest(
-        source=PackagePluginSource(
-            requirement="my-importer==1.0.0",
-            entrypoint="my_importer:parse",
-            fetch_entrypoint="my_importer:fetch",
-        )
-    ),
-)
+The same flag registers a fetch entrypoint on a later version:
+
+```bash
+kitaru importer version register my-format \
+  --script my_format_importer.py --entrypoint parse --fetch-entrypoint fetch
 ```
 
 An import against a version without a fetch entrypoint rejects a `--since`, `--until`, `--trace-id`, or `--query` selection.
