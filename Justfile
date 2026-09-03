@@ -91,7 +91,7 @@ test *ARGS:
     uv run pytest {{ ARGS }}
 
 # Run all property tests with the heavy nightly profile
-fuzz: fuzz-importers fuzz-mcp fuzz-api
+fuzz: fuzz-importers fuzz-mcp fuzz-filters fuzz-api
 
 # Heavy property-test run for the plugins tree (importer parse() contract, LangGraph capture)
 fuzz-importers:
@@ -100,6 +100,10 @@ fuzz-importers:
 # Heavy property-test run for the core tree (MCP tool boundary, credential redaction)
 fuzz-mcp:
     HYPOTHESIS_PROFILE=nightly uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py tests/cli/test_redaction_properties.py --hypothesis-show-statistics
+
+# Heavy grammar-aware property tests for recursive JSON list filters
+fuzz-filters:
+    HYPOTHESIS_PROFILE=nightly uv run --extra server pytest tests/server/test_fuzz_filters.py --hypothesis-show-statistics
 
 # Heavy API fuzzing run against a live server (requires docker compose up -d db)
 fuzz-api:

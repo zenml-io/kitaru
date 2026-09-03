@@ -25,6 +25,9 @@ jobs:
           - name: mcp
             sync-command: uv sync --frozen --extra server --extra mcp
             recipe: fuzz-mcp
+          - name: filters
+            sync-command: uv sync --frozen --extra server
+            recipe: fuzz-filters
           - name: api
             sync-command: uv sync --frozen --extra server --group fuzz
             recipe: fuzz-api
