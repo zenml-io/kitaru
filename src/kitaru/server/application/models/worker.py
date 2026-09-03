@@ -11,12 +11,15 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Worker filter model."""
+"""Worker filter and command models."""
 
 import uuid
 from collections.abc import Mapping
 from typing import ClassVar
 
+from pydantic import SecretStr
+
+from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
 from kitaru.server.filtering import EQUALITY_OPS, STRING_OPS, FilterField
 
@@ -30,3 +33,12 @@ class WorkerFilter(ListFilter):
     }
 
     include_stale: bool = False
+
+
+class WorkerLaunch(FrozenModel):
+    """Worker launch."""
+
+    worker_id: uuid.UUID
+    worker_token: SecretStr
+    server_url: str
+    job_id: uuid.UUID

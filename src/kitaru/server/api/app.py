@@ -108,6 +108,7 @@ from kitaru.server.domain.base import (
     UpgradeRequiredError,
     ValidationError,
 )
+from kitaru.server.worker_launcher_settings import WorkerLauncherBackend
 
 _COMMON_ERROR_RESPONSES = error_responses(401, 403, 503) | {
     422: {"model": ValidationErrorBody, "description": "Validation Error"}
@@ -300,6 +301,17 @@ def create_app(settings: APISettings) -> FastAPI:
             from kitaru.server.adapters.blobstore.s3 import S3BlobDataStore
 
             app.state.s3_blob_data_store = S3BlobDataStore(settings.BLOB_STORAGE.s3)
+        if settings.WORKER_LAUNCHER.backend is WorkerLauncherBackend.MODAL:
+            from kitaru.server.adapters.worker_launcher.modal import (
+                ModalWorkerLauncher,
+            )
+
+            # Settings validation requires WORKER_LAUNCHER.modal under the
+            # modal backend, the only backend that constructs this launcher.
+            assert settings.WORKER_LAUNCHER.modal is not None
+            app.state.worker_launcher = ModalWorkerLauncher(
+                settings.WORKER_LAUNCHER.modal
+            )
         async for session in database.get_async_session():
             server_id = await ensure_server_id(
                 SQLServerSettingsRepository(session), settings.SERVER_ID
@@ -364,6 +376,9 @@ def create_app(settings: APISettings) -> FastAPI:
     app.state.server_id = None
     # Replaced with a live store at startup when S3 blob storage is configured.
     app.state.s3_blob_data_store = None
+    # Replaced with a live launcher at startup when a worker launcher backend
+    # is configured.
+    app.state.worker_launcher = None
     _register_domain_exception_handlers(app)
     _register_database_exception_handler(app)
     _register_pool_timeout_exception_handler(app)

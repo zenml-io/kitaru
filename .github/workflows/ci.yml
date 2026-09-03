@@ -114,6 +114,7 @@ jobs:
           --extra cli
           --extra worker
           --extra s3
+          --extra modal
           --group fuzz
       - run: uv run ty check
   audit:
@@ -369,19 +370,19 @@ jobs:
         include:
           - name: py311-base
             python-version: '3.11'
-            sync-command: uv sync --frozen --extra server --extra otel
+            sync-command: uv sync --frozen --extra server --extra otel --extra modal
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py312-base
             python-version: '3.12'
-            sync-command: uv sync --frozen --extra server --extra otel
+            sync-command: uv sync --frozen --extra server --extra otel --extra modal
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py313-base
             python-version: '3.13'
-            sync-command: uv sync --frozen --extra server --extra otel
+            sync-command: uv sync --frozen --extra server --extra otel --extra modal
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py314-base
             python-version: '3.14'
-            sync-command: uv sync --frozen --extra server --extra otel
+            sync-command: uv sync --frozen --extra server --extra otel --extra modal
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py311-cli
             python-version: '3.11'

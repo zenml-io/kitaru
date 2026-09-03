@@ -112,6 +112,7 @@ from kitaru.server.application.interfaces.blob_data_store import (
 from kitaru.server.application.interfaces.idempotency_key_repository import (
     IdempotencyKeyRepository,
 )
+from kitaru.server.application.interfaces.worker_launcher import WorkerLauncher
 from kitaru.server.application.models.auth import (
     AuthContext,
     TaskAuthContext,
@@ -440,6 +441,19 @@ def get_blob_data_stores(
     if s3_store is not None:
         stores[BlobStorageBackend.S3] = s3_store
     return BlobDataStores(stores, settings.BLOB_STORAGE.backend)
+
+
+def get_worker_launcher(request: Request) -> WorkerLauncher | None:
+    """Return the worker launcher attached to the application state.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        Worker launcher for this process, or None when no backend is configured.
+    """
+    worker_launcher: WorkerLauncher | None = request.app.state.worker_launcher
+    return worker_launcher
 
 
 def get_blob_service(
