@@ -72,6 +72,8 @@ def test_route_manifest_is_registered() -> None:
         "/api/v1/importers/{importer_id}/versions/{version}",
         "/api/v1/imports",
         "/api/v1/info",
+        "/api/v1/insights",
+        "/api/v1/insights/{insight_id}",
         "/api/v1/investigations",
         "/api/v1/investigations/{investigation_id}",
         "/api/v1/investigations/{investigation_id}/sessions",

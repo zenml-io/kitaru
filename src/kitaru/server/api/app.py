@@ -67,6 +67,7 @@ from kitaru.server.adapters.rest.routers import (
     importers,
     imports,
     info,
+    insights,
     investigations,
     jobs,
     replays,
@@ -463,6 +464,12 @@ def create_app(settings: APISettings) -> FastAPI:
         imports.router,
         prefix="/api/v1/imports",
         tags=["imports"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        insights.router,
+        prefix="/api/v1/insights",
+        tags=["insights"],
         responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(
