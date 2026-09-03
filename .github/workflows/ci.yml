@@ -163,6 +163,9 @@ jobs:
       - name: Sync quickstart example
         working-directory: examples/python/pydantic_ai_ticket_resolver
         run: uv sync --frozen
+      - name: Run frozen quickstart example end to end
+        working-directory: examples/python/pydantic_ai_ticket_resolver
+        run: uv run --frozen python scripts/run_ci_e2e.py
       - name: Install current Kitaru artifacts into quickstart example
         run: |
           uv pip install \

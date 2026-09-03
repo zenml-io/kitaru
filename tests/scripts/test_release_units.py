@@ -140,7 +140,7 @@ def test_inventory_describes_core_and_ten_plugin_distributions() -> None:
 def test_default_requirements_are_derived_from_release_units() -> None:
     assert set(default_requirements(load_inventory()).values()) == {
         "kitaru-braintrust-importer==0.2.0",
-        "kitaru-evaluator==0.1.2",
+        "kitaru-evaluator==0.1.3",
         "kitaru-jsonl-importer==0.1.1",
         "kitaru-langfuse-importer==0.2.0",
         "kitaru-langsmith-importer==0.2.0",

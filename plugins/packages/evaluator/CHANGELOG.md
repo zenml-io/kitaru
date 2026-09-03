@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Emit numeric score scales from built-in evaluators and remove retry hash results.
+
 ## 0.1.2
 
 - Include directly priced non-root spans and fall back to aggregate costs when direct coverage is incomplete.

@@ -169,7 +169,10 @@ def test_entrypoint_loads_through_package_plugin_contract() -> None:
     assert [result.model_dump(mode="json") for result in first] == [
         result.model_dump(mode="json") for result in repeated
     ]
-    assert {result.name for result in first} >= {"input_sha256", "terminality"}
+    assert {result.name for result in first} >= {"terminality"}
+    assert {result.name for result in first}.isdisjoint(
+        {"input_sha256", "config_sha256"}
+    )
 
 
 def test_ordered_result_name_contracts() -> None:
@@ -214,8 +217,6 @@ def test_ordered_result_name_contracts() -> None:
     }
     expected = {
         "session_diagnostics": [
-            "input_sha256",
-            "config_sha256",
             "terminality",
             "node_order",
             "parent_linkage",
@@ -228,16 +229,12 @@ def test_ordered_result_name_contracts() -> None:
             "resource_integrity",
         ],
         "output_contract": [
-            "input_sha256",
-            "config_sha256",
             "output_availability",
             "exact_output",
             "required_paths",
             "type_requirements",
         ],
         "trajectory_signals": [
-            "input_sha256",
-            "config_sha256",
             "tool_identity_coverage",
             "adjacent_identical_calls",
             "failed_identical_retries",
@@ -245,8 +242,6 @@ def test_ordered_result_name_contracts() -> None:
             "cycle_detector_bounds",
         ],
         "tool_health": [
-            "input_sha256",
-            "config_sha256",
             "failed_calls",
             "null_results",
             "empty_results",
@@ -254,8 +249,6 @@ def test_ordered_result_name_contracts() -> None:
             "adjacent_repeated_failures",
         ],
         "timing_profile": [
-            "input_sha256",
-            "config_sha256",
             "wall_clock_duration_seconds",
             "node_duration_coverage",
             "slowest_nodes",
@@ -263,8 +256,6 @@ def test_ordered_result_name_contracts() -> None:
             "invalid_intervals",
         ],
         "resource_budget": [
-            "input_sha256",
-            "config_sha256",
             "duration_budget",
             "cost_budget",
             "total_tokens_budget",
@@ -273,16 +264,12 @@ def test_ordered_result_name_contracts() -> None:
             "tool_call_count_budget",
         ],
         "tool_policy": [
-            "input_sha256",
-            "config_sha256",
             "tool_name_coverage",
             "required_tools",
             "forbidden_tools",
             "per_tool_maximums",
         ],
         "llm_call_signals": [
-            "input_sha256",
-            "config_sha256",
             "failed_calls",
             "empty_results",
             "adjacent_identical_inputs",
@@ -290,15 +277,11 @@ def test_ordered_result_name_contracts() -> None:
             "metadata_coverage",
         ],
         "model_policy": [
-            "input_sha256",
-            "config_sha256",
             "allowed_models",
             "allowed_providers",
             "requested_model_match",
         ],
         "workflow_conformance": [
-            "input_sha256",
-            "config_sha256",
             "tool_name_coverage",
             "workflow_match",
         ],
@@ -306,40 +289,20 @@ def test_ordered_result_name_contracts() -> None:
     assert {
         name: [result.name for result in results] for name, results in calls.items()
     } == expected
-
-
-def test_shared_hashes_are_stable_and_preserve_node_array_order() -> None:
-    """Canonicalize object keys while retaining supplied node order."""
-    first = _node(0, tool_name="search", inputs={"b": 2, "a": 1}, outputs={})
-    second = _node(1, tool_name="read", inputs={}, outputs={})
-    same = _node(0, tool_name="search", inputs={"a": 1, "b": 2}, outputs={})
-    hash_a = _by_name(evaluators.session_diagnostics(_view([first, second])))[
-        "input_sha256"
-    ].value
-    hash_b = _by_name(evaluators.session_diagnostics(_view([same, second])))[
-        "input_sha256"
-    ].value
-    hash_reordered = _by_name(evaluators.session_diagnostics(_view([second, first])))[
-        "input_sha256"
-    ].value
-    assert hash_a == hash_b
-    assert hash_a != hash_reordered
-    config_a = _by_name(
-        evaluators.output_contract(
-            _view(), type_requirements={"/answer": "integer", "": "object"}
-        )
-    )["config_sha256"].value
-    config_b = _by_name(
-        evaluators.output_contract(
-            _view(), type_requirements={"": "object", "/answer": "integer"}
-        )
-    )["config_sha256"].value
-    assert config_a == config_b
-    assert [
-        result.model_dump_json() for result in evaluators.session_diagnostics(_view())
-    ] == [
-        result.model_dump_json() for result in evaluators.session_diagnostics(_view())
-    ]
+    structured_or_resource_names = {
+        "cycle_detector_bounds",
+        "duration_seconds",
+        "recorded_counts",
+        "slowest_nodes",
+        "wall_clock_duration_seconds",
+    }
+    for results in calls.values():
+        for result in results:
+            if result.name in structured_or_resource_names:
+                continue
+            assert result.value is None
+            assert isinstance(result.score, float)
+            assert result.min_score == 0
 
 
 def test_decimal_encoding_ignores_ambient_precision() -> None:
@@ -373,8 +336,12 @@ def test_session_diagnostics_distinguishes_missing_and_zero_resources() -> None:
     )
     assert missing["duration_seconds"].value == "unavailable"
     assert zero["duration_seconds"].value == "0"
-    assert _payload(missing["cost_coverage"])["session"] == "unavailable"
-    assert _payload(zero["cost_coverage"])["session"] == "0"
+    assert missing["cost_coverage"].score == 0
+    assert missing["cost_coverage"].max_score == 1
+    assert zero["cost_coverage"].score == 1
+    assert zero["cost_coverage"].max_score == 1
+    assert missing["token_coverage"].score == 0
+    assert zero["token_coverage"].score == 1
     assert all(result.passed is None for result in missing.values())
 
 
@@ -391,10 +358,12 @@ def test_session_diagnostics_localizes_integrity_findings() -> None:
         _node(1, tool_name="earlier", inputs={}, outputs={}),
     ]
     results = _by_name(evaluators.session_diagnostics(_view(nodes)))
-    assert _payload(results["node_order"])["ordered"] is False
-    assert _payload(results["parent_linkage"])["total"] == 1
-    assert _payload(results["chronology_findings"])["total"] == 1
-    assert _payload(results["payload_coverage"])["complete"] == 1
+    assert results["node_order"].score == 0
+    assert results["parent_linkage"].score == 1
+    assert results["parent_linkage"].max_score == 2
+    assert results["chronology_findings"].score == 1
+    assert results["payload_coverage"].score == 1
+    assert results["payload_coverage"].max_score == 2
 
 
 def test_session_diagnostics_checks_parent_ids_and_invalid_resources() -> None:
@@ -406,12 +375,9 @@ def test_session_diagnostics_checks_parent_ids_and_invalid_resources() -> None:
     results = _by_name(
         evaluators.session_diagnostics(_view([parent, child], cost=Decimal("-1")))
     )
-    linkage = _payload(results["parent_linkage"])
-    assert linkage["total"] == 1
-    assert linkage["evidence"][0]["id_mismatches"] == [
-        {"kind": "primary_index_id_mismatch"}
-    ]
-    assert _payload(results["resource_integrity"])["total"] == 2
+    assert results["parent_linkage"].score == 1
+    assert results["resource_integrity"].score == 2
+    assert results["resource_integrity"].max_score is None
 
 
 def test_output_contract_handles_exact_pointer_and_type_rules() -> None:
@@ -426,23 +392,30 @@ def test_output_contract_handles_exact_pointer_and_type_rules() -> None:
         )
     )
     assert results["exact_output"].passed is True
+    assert results["exact_output"].score == 1
     assert results["required_paths"].passed is True
+    assert results["required_paths"].score == 0
+    assert results["required_paths"].max_score == 1
     assert results["type_requirements"].passed is True
+    assert results["type_requirements"].score == 0
+    assert results["type_requirements"].max_score == 2
     unknown = _by_name(evaluators.output_contract(_view(outputs=None), expected=None))
     assert unknown["exact_output"].passed is None
-    assert unknown["output_availability"].value == "unavailable"
+    assert unknown["output_availability"].score == 0
+    assert unknown["output_availability"].max_score == 1
     root = _by_name(evaluators.output_contract(view, required_paths=[""]))
     assert root["required_paths"].passed is True
 
 
-def test_output_contract_bounds_large_exact_result() -> None:
-    """Hash compared payloads instead of echoing them into the task result."""
+def test_output_contract_scores_large_exact_result_without_echoing_it() -> None:
+    """Score a large exact match without echoing it into the task result."""
     output = {"content": "x" * 600_000}
     results = evaluators.output_contract(_view(outputs=output), expected=output)
     exact = _by_name(results)["exact_output"]
-    payload = _payload(exact)
     assert exact.passed is True
-    assert payload["observed_sha256"] == payload["expected_sha256"]
+    assert exact.score == 1
+    assert exact.max_score == 1
+    assert exact.value is None
     assert len(exact.model_dump_json()) < 1_000
 
 
@@ -559,11 +532,11 @@ def test_trajectory_signals_separate_repeats_retries_and_cycles() -> None:
         _node(6, tool_name="b", inputs={}, outputs={}),
     ]
     results = _by_name(evaluators.trajectory_signals(_view(nodes)))
-    assert _payload(results["adjacent_identical_calls"])["total"] == 1
-    assert _payload(results["failed_identical_retries"])["total"] == 1
-    cycles = _payload(results["short_cycles"])
-    assert cycles["total"] == 1
-    assert cycles["evidence"][0]["period"] == 2
+    assert results["adjacent_identical_calls"].score == 1
+    assert results["adjacent_identical_calls"].max_score == 6
+    assert results["failed_identical_retries"].score == 1
+    assert results["short_cycles"].score == 1
+    assert results["short_cycles"].max_score is None
     assert _payload(results["cycle_detector_bounds"]) == {
         "max_period": 5,
         "min_period": 2,
@@ -585,11 +558,9 @@ def test_trajectory_signals_do_not_cycle_distinct_calls_to_the_same_tool() -> No
         )
     ]
 
-    cycles = _payload(
-        _by_name(evaluators.trajectory_signals(_view(nodes)))["short_cycles"]
-    )
+    cycles = _by_name(evaluators.trajectory_signals(_view(nodes)))["short_cycles"]
 
-    assert cycles["total"] == 0
+    assert cycles.score == 0
 
 
 def test_trajectory_signals_emit_one_maximal_odd_cycle() -> None:
@@ -598,12 +569,8 @@ def test_trajectory_signals_emit_one_maximal_odd_cycle() -> None:
         _node(index, tool_name=name, inputs={}, outputs={})
         for index, name in enumerate(["a", "b", "a", "b", "a", "b", "a"])
     ]
-    cycles = _payload(
-        _by_name(evaluators.trajectory_signals(_view(nodes)))["short_cycles"]
-    )
-    assert cycles["total"] == 1
-    assert cycles["evidence"][0]["start_index"] == 0
-    assert cycles["evidence"][0]["end_index"] == 6
+    cycles = _by_name(evaluators.trajectory_signals(_view(nodes)))["short_cycles"]
+    assert cycles.score == 1
 
 
 def test_tool_health_preserves_null_empty_and_falsey_values() -> None:
@@ -616,10 +583,11 @@ def test_tool_health_preserves_null_empty_and_falsey_values() -> None:
         _node(4, tool_name="d", outputs=False),
     ]
     results = _by_name(evaluators.tool_health(_view(nodes)))
-    assert _payload(results["failed_calls"])["total"] == 1
-    assert _payload(results["null_results"])["total"] == 1
-    assert _payload(results["empty_results"])["total"] == 2
-    assert _payload(results["error_status_inconsistencies"])["total"] == 2
+    assert results["failed_calls"].score == 1
+    assert results["failed_calls"].max_score == 5
+    assert results["null_results"].score == 1
+    assert results["empty_results"].score == 2
+    assert results["error_status_inconsistencies"].score == 2
 
 
 def test_timing_profile_reports_slow_overlapping_and_invalid_spans() -> None:
@@ -640,10 +608,13 @@ def test_timing_profile_reports_slow_overlapping_and_invalid_spans() -> None:
     ]
     results = _by_name(evaluators.timing_profile(_view(nodes), evidence_limit=1))
     assert results["wall_clock_duration_seconds"].value == "10"
-    assert _payload(results["node_duration_coverage"])["complete"] == 3
+    assert results["node_duration_coverage"].score == 2
+    assert results["node_duration_coverage"].max_score == 4
     assert _payload(results["slowest_nodes"])["evidence"][0]["index"] == 0
-    assert _payload(results["overlapping_intervals"])["total"] == 1
-    assert _payload(results["invalid_intervals"])["total"] == 1
+    assert results["overlapping_intervals"].score == 1
+    assert results["overlapping_intervals"].max_score == 1
+    assert results["invalid_intervals"].score == 1
+    assert results["invalid_intervals"].max_score == 4
 
 
 def test_resource_budget_reconciles_rollups_and_uses_inclusive_ceilings() -> None:
@@ -688,6 +659,13 @@ def test_resource_budget_reconciles_rollups_and_uses_inclusive_ceilings() -> Non
             "tool_call_count_budget",
         )
     )
+    assert results["duration_budget"].score == 10
+    assert results["duration_budget"].min_score == 0
+    assert results["duration_budget"].max_score == 10
+    assert results["cost_budget"].score == 1.25
+    assert results["cost_budget"].max_score == 1.25
+    assert results["total_tokens_budget"].score == 5
+    assert results["total_tokens_budget"].max_score == 5
     assert (
         _by_name(evaluators.resource_budget(view, max_total_tokens=4))[
             "total_tokens_budget"
@@ -795,7 +773,11 @@ def test_tool_policy_uses_conservative_name_coverage() -> None:
         )
     )
     assert results["forbidden_tools"].passed is False
+    assert results["forbidden_tools"].score == 1
+    assert results["forbidden_tools"].max_score == 1
     assert results["required_tools"].passed is None
+    assert results["required_tools"].score == 1
+    assert results["required_tools"].max_score == 1
     assert results["per_tool_maximums"].passed is None
 
 
@@ -825,11 +807,13 @@ def test_llm_signals_and_model_policy_use_recorded_metadata() -> None:
         ),
     ]
     signals = _by_name(evaluators.llm_call_signals(_view(nodes)))
-    assert _payload(signals["failed_calls"])["total"] == 1
-    assert _payload(signals["empty_results"])["total"] == 2
-    assert _payload(signals["adjacent_identical_inputs"])["total"] == 1
-    assert _payload(signals["requested_model_mismatches"])["total"] == 1
-    assert _payload(signals["metadata_coverage"])["complete_tokens"] == 1
+    assert signals["failed_calls"].score == 1
+    assert signals["failed_calls"].max_score == 2
+    assert signals["empty_results"].score == 2
+    assert signals["adjacent_identical_inputs"].score == 1
+    assert signals["requested_model_mismatches"].score == 1
+    assert signals["metadata_coverage"].score == 6
+    assert signals["metadata_coverage"].max_score == 8
 
     policy = _by_name(
         evaluators.model_policy(
@@ -840,8 +824,12 @@ def test_llm_signals_and_model_policy_use_recorded_metadata() -> None:
         )
     )
     assert policy["allowed_models"].passed is True
+    assert policy["allowed_models"].score == 0
+    assert policy["allowed_models"].max_score == 2
     assert policy["allowed_providers"].passed is False
+    assert policy["allowed_providers"].score == 1
     assert policy["requested_model_match"].passed is False
+    assert policy["requested_model_match"].score == 1
 
 
 def test_model_policy_holds_without_llm_calls() -> None:
@@ -871,7 +859,8 @@ def test_llm_signals_use_json_encoding_equality(first: Any, second: Any) -> None
         _node(1, node_type=NodeType.LLM_CALL, inputs=second, outputs="second"),
     ]
     signals = _by_name(evaluators.llm_call_signals(_view(nodes)))
-    assert _payload(signals["adjacent_identical_inputs"])["total"] == 0
+    assert signals["adjacent_identical_inputs"].score == 0
+    assert signals["adjacent_identical_inputs"].max_score == 1
 
 
 @pytest.mark.parametrize(
@@ -926,8 +915,8 @@ def test_nonterminal_workflow_conformance_reports_decisive_failures(
     assert result.passed is passed
 
 
-def test_result_values_are_bounded_for_long_workflows() -> None:
-    """Return a receipt instead of exceeding the worker result-size limit."""
+def test_long_workflows_return_a_bounded_numeric_result() -> None:
+    """Return a small numeric result for a long workflow."""
     names = [f"tool-{index}-{'x' * 100}" for index in range(1_000)]
     nodes = [
         _node(index, tool_name=name, outputs={}) for index, name in enumerate(names)
@@ -935,9 +924,10 @@ def test_result_values_are_bounded_for_long_workflows() -> None:
     result = _by_name(
         evaluators.workflow_conformance(_view(nodes), expected_tools=names)
     )["workflow_match"]
-    payload = _payload(result)
     assert result.passed is True
-    assert payload["$kitaru"] == "result_truncated"
+    assert result.score == 1
+    assert result.max_score == 1
+    assert result.value is None
     assert len(result.model_dump_json()) < 1_000
 
 

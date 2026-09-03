@@ -11,7 +11,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-08-31T09:09:28.238793Z"
 exclude-newer-span = "P3D"
 
 [manifest]
@@ -1228,6 +1228,7 @@ dev = [
     { name = "ty", specifier = ">=0.0.72" },
     { name = "yamlfix" },
 ]
+fuzz = [{ name = "schemathesis", specifier = ">=4.25,<5" }]
 
 [[package]]
 name = "kitaru-braintrust-importer"
@@ -1253,7 +1254,7 @@ provides-extras = ["adapter"]
 
 [[package]]
 name = "kitaru-evaluator"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "packages/evaluator" }
 dependencies = [
     { name = "kitaru" },
