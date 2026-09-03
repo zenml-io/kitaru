@@ -38,11 +38,10 @@ from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.interfaces.worker_launcher import WorkerLauncher
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.application.models.worker import WorkerLaunch
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.worker_service import WorkerService
-from kitaru.server.domain.job import Job
+from kitaru.server.domain.task import Task
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +83,10 @@ async def create_import(
         Created job.
     """
     command = import_create_to_command(body)
-    job = await service.create_import(command, actor=actor)
+    job, task = await service.create_import(command, actor=actor)
     if launcher is not None:
         await _schedule_worker_launch(
-            job,
-            service,
+            task,
             worker_service,
             auth_service,
             launcher,
@@ -100,8 +98,7 @@ async def create_import(
 
 
 async def _schedule_worker_launch(
-    job: Job,
-    job_service: JobService,
+    task: Task,
     worker_service: WorkerService,
     auth_service: AuthService,
     launcher: WorkerLauncher,
@@ -109,13 +106,12 @@ async def _schedule_worker_launch(
     background_tasks: BackgroundTasks,
     actor: AuthContext,
 ) -> None:
-    """Register a worker for the job's task and launch it after the response.
+    """Register a worker for the task and launch it after the response.
 
     A live worker whose scope covers the task suppresses the launch.
 
     Args:
-        job: Created job.
-        job_service: Job service.
+        task: Task the worker is started for.
         worker_service: Worker service.
         auth_service: Authentication service for the current request.
         launcher: Worker launcher.
@@ -123,9 +119,6 @@ async def _schedule_worker_launch(
         background_tasks: Tasks run after the response is sent.
         actor: Caller context.
     """
-    # An import job holds exactly one task.
-    tasks, _ = await job_service.list_job_tasks(job.id, TaskFilter(), actor=actor)
-    task = tasks[0]
     if await worker_service.is_covered(task):
         return
     worker = await worker_service.register_ephemeral_worker(
@@ -142,7 +135,7 @@ async def _schedule_worker_launch(
         worker_id=worker.id,
         worker_token=SecretStr(issued.token),
         server_url=settings.SERVER_URL,
-        job_id=job.id,
+        job_id=task.job_id,
     )
     # The route class commits the session before the response goes out and
     # Starlette runs background tasks after it, so the worker row is

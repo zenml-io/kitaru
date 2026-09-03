@@ -49,6 +49,14 @@ class WorkerService:
         self._liveness_timeout_seconds = liveness_timeout_seconds
         self._analytics = analytics
 
+    def _get_live_cutoff(self) -> datetime:
+        """Compute the earliest last heartbeat of a live worker.
+
+        Returns:
+            Start of the liveness window.
+        """
+        return datetime.now(UTC) - timedelta(seconds=self._liveness_timeout_seconds)
+
     async def register_worker(
         self,
         name: str,
@@ -95,10 +103,9 @@ class WorkerService:
         Returns:
             Whether a worker within the liveness window covers the task.
         """
-        cutoff = datetime.now(UTC) - timedelta(seconds=self._liveness_timeout_seconds)
         # Claiming is not filtered by account, so every live worker on the
         # server counts.
-        workers = await self._repository.list_live(cutoff)
+        workers = await self._repository.list_live(self._get_live_cutoff())
         return any(worker.covers(task) for worker in workers)
 
     async def register_ephemeral_worker(
@@ -177,9 +184,7 @@ class WorkerService:
         _ = actor
         live_cutoff = None
         if not worker_filter.include_stale:
-            live_cutoff = datetime.now(UTC) - timedelta(
-                seconds=self._liveness_timeout_seconds
-            )
+            live_cutoff = self._get_live_cutoff()
         return await self._repository.query(worker_filter, live_cutoff)
 
     async def delete_worker(self, worker_id: uuid.UUID, actor: AuthContext) -> None:

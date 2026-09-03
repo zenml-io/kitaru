@@ -294,7 +294,9 @@ class JobService:
         )
         return job
 
-    async def create_import(self, command: ImportCreate, actor: AuthContext) -> Job:
+    async def create_import(
+        self, command: ImportCreate, actor: AuthContext
+    ) -> tuple[Job, Task]:
         """Create a job running one importer task on a payload blob.
 
         An omitted importer version resolves to the importer's latest. An
@@ -316,7 +318,7 @@ class JobService:
                 agent.
 
         Returns:
-            Created job.
+            Created job and its importer task.
         """
         plugin = await resolve_plugin(
             command.importer, PluginKind.IMPORTER, self._plugins
@@ -331,7 +333,7 @@ class JobService:
                 command.agent_version_id, agent.id, self._agent_versions
             )
         job = await self.create_job(JobKind.IMPORT, actor)
-        await self.add_task(
+        task = await self.add_task(
             ImportTask(
                 job_id=job.id,
                 plugin_version_id=plugin_version.id,
@@ -341,7 +343,7 @@ class JobService:
                 params=command.params,
             )
         )
-        return job
+        return job, task
 
     async def create_evaluations(
         self, command: EvaluationBatchCreate, actor: AuthContext

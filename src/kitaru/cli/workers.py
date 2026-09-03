@@ -360,25 +360,20 @@ async def start_worker(
 
 def _worker_summary(config: Any) -> dict[str, Any]:
     """Return a non-secret lifecycle projection of worker configuration."""
+    summary: dict[str, Any] = {"name": config.name}
     if config.id is not None:
-        return {
-            "name": config.name,
-            "id": str(config.id),
-            "concurrency": config.concurrency,
-            "claim_batch_size": config.claim_batch_size,
-        }
-    return {
-        "name": config.name,
-        "claims": [_claim_syntax(claim) for claim in config.scope.claims],
-        "selectors": (
+        summary["id"] = str(config.id)
+    else:
+        summary["claims"] = [_claim_syntax(claim) for claim in config.scope.claims]
+        summary["selectors"] = (
             [selector.model_dump(mode="json") for selector in config.scope.selectors]
             if config.scope.selectors is not None
             else None
-        ),
-        "job_id": str(config.scope.job_id) if config.scope.job_id else None,
-        "concurrency": config.concurrency,
-        "claim_batch_size": config.claim_batch_size,
-    }
+        )
+        summary["job_id"] = str(config.scope.job_id) if config.scope.job_id else None
+    summary["concurrency"] = config.concurrency
+    summary["claim_batch_size"] = config.claim_batch_size
+    return summary
 
 
 def _claim_syntax(claim: WorkerClaim) -> str:

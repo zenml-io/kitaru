@@ -170,11 +170,9 @@ class Worker:
             os.environ["KITARU_API_URL"] = api_client.base_url
             worker_id = self._config.id
             if worker_id is None:
-                name, worker, client = await self._register(api_client)
+                worker, client = await self._register(api_client)
             else:
-                name, worker, client = await self._load_pre_registered(
-                    api_client, worker_id
-                )
+                worker, client = await self._load_pre_registered(api_client, worker_id)
             ctx = ExecutionContext(
                 client=client,
                 blob_cache=BlobCache(blob_cache_root),
@@ -195,19 +193,19 @@ class Worker:
                 heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await heartbeat_task
-                logger.info("Worker %s stopped.", name)
+                logger.info("Worker %s stopped.", worker.name)
 
     async def _register(
         self, api_client: KitaruAPIClient
-    ) -> tuple[str, WorkerResponse, KitaruAPIClient]:
+    ) -> tuple[WorkerResponse, KitaruAPIClient]:
         """Register a new worker and authenticate as it with a renewing token.
 
         Args:
             api_client: Client pointed at the target server.
 
         Returns:
-            Worker name, registered worker, and a client authenticated with a
-            token the worker renews for itself.
+            Registered worker and a client authenticated with a token the
+            worker renews for itself.
         """
         name = self._config.name or default_worker_name()
         registration = WorkerCreateRequest(
@@ -223,11 +221,11 @@ class Worker:
             api_client, worker.id, response.token.get_secret_value()
         )
         client = api_client.with_auth(RenewingTokenAuth(source))
-        return name, worker, client
+        return worker, client
 
     async def _load_pre_registered(
         self, api_client: KitaruAPIClient, worker_id: uuid.UUID
-    ) -> tuple[str, WorkerResponse, KitaruAPIClient]:
+    ) -> tuple[WorkerResponse, KitaruAPIClient]:
         """Load a worker the server pre-registered.
 
         Args:
@@ -235,7 +233,7 @@ class Worker:
             worker_id: Id of the pre-registered worker.
 
         Returns:
-            Worker name, loaded worker, and the client unchanged.
+            Loaded worker and the client unchanged.
         """
         worker = await api_client.workers.get(worker_id)
         self._config = self._config.model_copy(update={"scope": worker.scope})
@@ -243,7 +241,7 @@ class Worker:
         # The server minted this worker's token for the sandbox lifetime, so
         # the worker keeps the environment client's static bearer token and
         # never renews it.
-        return worker.name, worker, api_client
+        return worker, api_client
 
     async def _supervise_heartbeat(self, heartbeat: WorkerHeartbeat) -> None:
         """Run the heartbeat, restarting it after an unexpected exception.
