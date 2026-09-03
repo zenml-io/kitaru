@@ -14,10 +14,12 @@
 """Import API models."""
 
 import uuid
+from typing import Annotated, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import (
+    DiscriminatedRequestModel,
     JsonValue,
     OwnedResponseModel,
     PlainStr,
@@ -28,6 +30,27 @@ from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 
 MAX_IMPORT_FAILURES = 20
+
+
+class BlobImportSource(DiscriminatedRequestModel):
+    """Blob import source."""
+
+    type: Literal["blob"] = Field(default="blob")
+    blob_id: uuid.UUID = Field(description="Blob holding the payload to parse.")
+
+
+class ApiImportSource(DiscriminatedRequestModel):
+    """API import source."""
+
+    type: Literal["api"] = Field(default="api")
+    query: dict[str, JsonValue] = Field(
+        default_factory=dict, description="Importer-defined selection of what to fetch."
+    )
+
+
+ImportSource = Annotated[
+    BlobImportSource | ApiImportSource, Field(discriminator="type")
+]
 
 
 class ImportCreateRequest(RequestModel):
@@ -45,7 +68,14 @@ class ImportCreateRequest(RequestModel):
         default=None,
         description="Importer version, an omitted value resolves to latest.",
     )
-    payload_blob_id: uuid.UUID = Field(description="Blob holding the payload to parse.")
+    source: ImportSource | None = Field(
+        default=None, description="Where the payload comes from."
+    )
+    payload_blob_id: uuid.UUID | None = Field(
+        default=None,
+        deprecated="Use source instead.",
+        description="Blob holding the payload to parse.",
+    )
     params: dict[str, JsonValue] = Field(
         default_factory=dict, description="Parameters passed to the importer."
     )
@@ -57,6 +87,33 @@ class ImportCreateRequest(RequestModel):
 
 class ImportListParams(FilterableListParams):
     """Import list params."""
+
+    @model_validator(mode="after")
+    def _source_xor_payload_blob_id(self) -> Self:
+        """Require exactly one of source and payload_blob_id.
+
+        Raises:
+            ValueError: Both or neither field was set.
+
+        Returns:
+            The validated request.
+        """
+        if self.source is not None and self.payload_blob_id is not None:
+            raise ValueError("source and payload_blob_id are mutually exclusive")
+        if self.source is None and self.payload_blob_id is None:
+            raise ValueError("source is required")
+        return self
+
+    def get_source(self) -> "BlobImportSource | ApiImportSource":
+        """Return the import source, mapping the deprecated blob id to it.
+
+        Returns:
+            Import source.
+        """
+        if self.source is not None:
+            return self.source
+        assert self.payload_blob_id is not None
+        return BlobImportSource(blob_id=self.payload_blob_id)
 
 
 class ImportFailure(ResponseModel):

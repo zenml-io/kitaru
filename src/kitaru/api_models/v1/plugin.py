@@ -27,6 +27,9 @@ class ScriptPluginSource(DiscriminatedRequestModel):
     type: Literal["script"] = Field(default="script")
     blob_id: uuid.UUID = Field(description="Blob holding the script.")
     entrypoint: str = Field(description="Attribute in the file.")
+    fetch_entrypoint: str | None = Field(
+        default=None, description="Attribute in the file fetching payloads from an API."
+    )
 
 
 class PackagePluginSource(DiscriminatedRequestModel):
@@ -35,6 +38,11 @@ class PackagePluginSource(DiscriminatedRequestModel):
     type: Literal["package"] = Field(default="package")
     requirement: str = Field(description="Pinned PEP 508 requirement.")
     entrypoint: str = Field(description="Module and attribute, as module:attribute.")
+    fetch_entrypoint: str | None = Field(
+        default=None,
+        description="Module and attribute fetching payloads from an API, "
+        "as module:attribute.",
+    )
 
 
 PluginSource = Annotated[
