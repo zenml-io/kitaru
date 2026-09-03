@@ -32,6 +32,9 @@ exclude = [
     # Slack invite redirects return 403 to bots/link-checkers
     "^https://(www\\.)?zenml\\.io/slack",
     "^https://(www\\.)?kitaru\\.ai/slack",
+    # kitaru.ai/install is served by the redirect worker, which only deploys
+    # from main; the README link is correct once this lands there.
+    "^https://(www\\.)?kitaru\\.ai/install",
     # katacontainers.io refuses automated link-checker connections
     "^https://katacontainers\\.io",
     # TEMPORARY (v2 docs restructure): docs.zenml.io/kitaru is live, but the
