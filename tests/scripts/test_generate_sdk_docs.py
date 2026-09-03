@@ -229,6 +229,10 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
     "kitaru.api_models.v1.replay_config": frozenset({"ToolConfig"}),
     # Annotated union aliases; the concrete filter models are published.
     "kitaru.api_models.v1.filter": frozenset({"Filter", "FilterParam"}),
+    # Annotated discriminated-union alias plus the batch size cap.
+    "kitaru.api_models.v1.insight": frozenset(
+        {"InsightData", "MAX_INSIGHT_BATCH_SIZE"}
+    ),
 }
 
 # Resource classes that exist in kitaru.client.resources but are deliberately

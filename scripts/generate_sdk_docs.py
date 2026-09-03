@@ -116,6 +116,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "ExperimentsResource",
                 "ExperimentRunsResource",
                 "InvestigationsResource",
+                "InsightsResource",
                 "iterate_pages",
             }
         ),
@@ -315,6 +316,22 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "InvestigationSessionsListParams",
                 "InvestigationSessionUpdateRequest",
                 "InvestigationSessionResponse",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.insight": ModuleSpec(
+        symbols=frozenset(
+            {
+                "TextInsightData",
+                "CategoryValue",
+                "CategoricalInsightData",
+                "HistogramBin",
+                "HistogramInsightData",
+                "InsightInput",
+                "InsightBatchCreateRequest",
+                "InsightUpdateRequest",
+                "InsightListParams",
+                "InsightResponse",
             }
         ),
     ),
