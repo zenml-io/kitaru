@@ -24,16 +24,24 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from pydantic_core import PydanticSerializationError
+
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_PARENT_DEPTH = 64
 
 
 class InvalidImport(ValueError):
     """Raised when a Phoenix payload cannot be parsed."""
+
+
+def _escape_failure_text(value: str) -> str:
+    """Escape unencodable characters in failure diagnostics only."""
+    return value.encode("utf-8", errors="backslashreplace").decode("utf-8")
 
 
 def _decode_json(value: Any) -> Any:
@@ -47,6 +55,8 @@ def _decode_json(value: Any) -> Any:
         return json.loads(stripped)
     except json.JSONDecodeError:
         return value
+    except (RecursionError, ValueError) as exc:
+        raise InvalidImport("Embedded JSON exceeds decoding limits") from exc
 
 
 def _datetime(value: Any) -> datetime | None:
@@ -60,14 +70,17 @@ def _datetime(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _integer(value: Any) -> int | None:
-    """Parse an integer attribute."""
+def _parse_token_count(value: Any) -> int | None:
+    """Parse a nonnegative token count."""
     if value in (None, ""):
         return None
     try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise InvalidImport("Token count must be a nonnegative integer") from exc
+    if parsed < 0 or (isinstance(value, float) and value < 0):
+        raise InvalidImport("Token count must be a nonnegative integer")
+    return parsed
 
 
 def _decimal(value: Any) -> Decimal | None:
@@ -75,9 +88,12 @@ def _decimal(value: Any) -> Decimal | None:
     if value in (None, ""):
         return None
     try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return None
+        parsed = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise InvalidImport("Cost must be finite and nonnegative") from exc
+    if not parsed.is_finite() or parsed < 0:
+        raise InvalidImport("Cost must be finite and nonnegative")
+    return parsed
 
 
 def _attributes(span: dict[str, Any]) -> dict[str, Any]:
@@ -105,8 +121,12 @@ def _indexed_messages(
         if not attribute_key.startswith(prefix):
             continue
         index, separator, field = attribute_key.removeprefix(prefix).partition(".")
-        if separator and index.isdigit():
-            messages[int(index)][field] = _decode_json(value)
+        if separator and index.isascii() and index.isdigit():
+            try:
+                message_index = int(index)
+            except ValueError:
+                continue
+            messages[message_index][field] = _decode_json(value)
     return [messages[index] for index in sorted(messages)] or None
 
 
@@ -133,7 +153,7 @@ def _parse_values(
 
     try:
         decoded = json.loads(text)
-    except json.JSONDecodeError:
+    except (ValueError, RecursionError):
         values: list[tuple[int, dict[str, Any]]] = []
         failures: list[ImportFailure] = []
         for line_number, line in enumerate(text.splitlines(), start=1):
@@ -141,7 +161,7 @@ def _parse_values(
                 continue
             try:
                 value = json.loads(line)
-            except json.JSONDecodeError:
+            except (ValueError, RecursionError):
                 failures.append(
                     ImportFailure(
                         line=line_number,
@@ -225,7 +245,9 @@ def _expand_values(
                     ImportFailure(
                         line=line_number,
                         external_id=(
-                            str(envelope_trace_id) if envelope_trace_id else None
+                            _escape_failure_text(str(envelope_trace_id))
+                            if envelope_trace_id
+                            else None
                         ),
                         error="Phoenix trace envelope has a non-object spans value",
                     )
@@ -266,7 +288,9 @@ def _expand_values(
             failures.append(
                 ImportFailure(
                     line=line_number,
-                    external_id=trace_id,
+                    external_id=_escape_failure_text(trace_id)
+                    if trace_id is not None
+                    else None,
                     error="Phoenix span lacks trace_id or span_id",
                 )
             )
@@ -323,7 +347,7 @@ def _error(span: dict[str, Any], attributes: dict[str, Any]) -> str | None:
 def _tokens(attributes: dict[str, Any]) -> TokenUsage | None:
     """Map OpenTelemetry GenAI token attributes."""
     values = (
-        _integer(
+        _parse_token_count(
             _attribute(
                 attributes,
                 "gen_ai.usage.input_tokens",
@@ -332,7 +356,7 @@ def _tokens(attributes: dict[str, Any]) -> TokenUsage | None:
                 "llm.usage.prompt_tokens",
             )
         ),
-        _integer(
+        _parse_token_count(
             _attribute(
                 attributes,
                 "gen_ai.usage.output_tokens",
@@ -341,14 +365,14 @@ def _tokens(attributes: dict[str, Any]) -> TokenUsage | None:
                 "llm.usage.completion_tokens",
             )
         ),
-        _integer(
+        _parse_token_count(
             _attribute(
                 attributes,
                 "gen_ai.usage.details.cache_read_tokens",
                 "llm.token_count.prompt_details.cache_read",
             )
         ),
-        _integer(
+        _parse_token_count(
             _attribute(
                 attributes,
                 "gen_ai.usage.details.reasoning_tokens",
@@ -390,20 +414,25 @@ def _build_tree(
         for node, parent in nodes_with_parents
         if node.external_id is not None and parent in by_id
     }
-    complete: set[str] = set()
+    depths: dict[str, int] = {}
     for node_id in parents:
-        if node_id in complete:
-            continue
         path: list[str] = []
         seen: set[str] = set()
         current: str | None = node_id
-        while current in parents and current not in complete:
+        while current in parents and current not in depths:
             if current in seen:
                 raise InvalidImport("The imported span graph contains a parent cycle")
             seen.add(current)
             path.append(current)
+            if len(path) >= MAX_PARENT_DEPTH:
+                raise InvalidImport("The imported span graph exceeds 64 parent levels")
             current = parents[current]
-        complete.update(path)
+        depth = depths.get(current, 1) if current is not None else 1
+        for ancestor in reversed(path):
+            depth += 1
+            if depth > MAX_PARENT_DEPTH:
+                raise InvalidImport("The imported span graph exceeds 64 parent levels")
+            depths[ancestor] = depth
 
     roots: list[ImportedNode] = []
     for node, parent in nodes_with_parents:
@@ -556,14 +585,16 @@ class PhoenixTraceImporter:
         failures.extend(expansion_failures)
         for trace_id, spans in sorted(traces.items()):
             try:
-                yield self._parse_trace(
+                session = self._parse_trace(
                     trace_id, spans, trace_metadata.get(trace_id, {})
                 )
-            except InvalidImport as exc:
+                session.model_dump_json()
+                yield session
+            except (InvalidImport, PydanticSerializationError) as exc:
                 yield ImportFailure(
                     line=trace_lines[trace_id],
-                    external_id=trace_id,
-                    error=str(exc),
+                    external_id=_escape_failure_text(trace_id),
+                    error=_escape_failure_text(str(exc)),
                 )
         yield from failures
 

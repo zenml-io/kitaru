@@ -406,3 +406,150 @@ def test_rejects_oversized_payload(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(InvalidImport, match="50 MiB upload limit"):
         LangSmithRunImporter().parse(b"1234", {})
+
+
+def assert_bad_run_isolated(row: dict[str, Any]) -> None:
+    """Assert malformed input leaves both neighboring sessions available."""
+    result = list(
+        parse(
+            json.dumps(
+                [
+                    run("good1", "good1", thread_id="good1"),
+                    row,
+                    run("good2", "good2", thread_id="good2"),
+                ]
+            ).encode(),
+            {},
+        )
+    )
+    assert {
+        item.external_id for item in result if isinstance(item, ImportedSession)
+    } == {"project-1:good1", "project-1:good2"}
+    assert len([item for item in result if isinstance(item, ImportFailure)]) == 1
+    for item in result:
+        item.model_dump_json()
+
+
+@pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity", "-0.1"])
+def test_invalid_cost_is_isolated(value: str) -> None:
+    assert_bad_run_isolated(run("bad", "bad", total_cost=value))
+
+
+@pytest.mark.parametrize("field", ["prompt_tokens", "completion_tokens"])
+@pytest.mark.parametrize("value", [-1, -0.25, float("inf")])
+def test_invalid_tokens_are_isolated(field: str, value: Any) -> None:
+    assert_bad_run_isolated(run("bad", "bad", **{field: value}))
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{"outputs": "\ud800"}, {"id": "\ud800", "trace_id": "\ud800"}, {"name": "\udfff"}],
+)
+def test_surrogates_are_isolated(fields: dict[str, Any]) -> None:
+    row = run("bad", "bad")
+    row.update(fields)
+    assert_bad_run_isolated(row)
+
+
+@pytest.mark.parametrize("depth", [63, 64, 65, 1200])
+def test_tree_depth_boundary(depth: int) -> None:
+    rows = [
+        run(f"node{i}", "bad", parent_run_id=f"node{i - 1}" if i else None)
+        for i in range(depth)
+    ]
+    result = list(
+        parse(json.dumps([*rows, run("good", "good", thread_id="good")]).encode(), {})
+    )
+    imported = [item for item in result if isinstance(item, ImportedSession)]
+    assert len(imported) == (2 if depth <= 64 else 1)
+    assert len(result) == 2
+    for item in result:
+        item.model_dump_json()
+
+
+@pytest.mark.parametrize("copies", [2, 3])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_duplicate_run_rejects_entire_trace(copies: int, reverse: bool) -> None:
+    rows = [run("bad", "bad") for _ in range(copies)]
+    rows.append(run("good", "good"))
+    if reverse:
+        rows.reverse()
+    result = list(parse(json.dumps(rows).encode(), {}))
+    imported = [item for item in result if isinstance(item, ImportedSession)]
+    assert len(imported) == 1
+    assert imported[0].metadata["langsmith.trace_ids"] == ["good"]
+    assert len([item for item in result if isinstance(item, ImportFailure)]) == 1
+
+
+def test_same_run_id_in_separate_traces_is_valid() -> None:
+    assert (
+        len(
+            sessions(
+                jsonl(
+                    run("same", "first", thread_id="first"),
+                    run("same", "second", thread_id="second"),
+                )
+            )
+        )
+        == 2
+    )
+
+
+def test_self_parent_is_a_root() -> None:
+    result = sessions(jsonl(run("root", "trace", parent_run_id="root")))
+    assert len(result) == 1
+    assert len(result[0].nodes) == 1
+    assert result[0].nodes[0].children == []
+
+
+@pytest.mark.parametrize("encoded", [False, True])
+def test_deep_tool_payload_is_isolated(encoded: bool) -> None:
+    output: Any = "answer"
+    for _ in range(66):
+        output = [output]
+    if encoded:
+        output = json.dumps(output)
+    assert_bad_run_isolated(run("bad", "bad", run_type="llm", outputs=output))
+
+
+@pytest.mark.parametrize("value", [None, 0, 2])
+def test_valid_numeric_values_are_preserved(value: int | None) -> None:
+    result = sessions(
+        jsonl(run("valid", "valid", total_cost=value, prompt_tokens=value))
+    )
+    assert len(result) == 1
+    node = result[0].nodes[0]
+    assert node.cost == (Decimal(value) if value is not None else None)
+    assert (node.tokens.input_tokens if node.tokens else None) == value
+
+
+def test_cached_negative_tokens_are_isolated() -> None:
+    assert_bad_run_isolated(
+        run("bad", "bad", outputs={"usage_metadata": {"cached_input_tokens": -1}})
+    )
+
+
+def test_embedded_json_decoder_recursion_is_isolated() -> None:
+    nested = "[" * 10000 + "0" + "]" * 10000
+    assert_bad_run_isolated(run("bad", "bad", inputs=nested))
+
+
+def test_deep_outer_json_raises_import_error() -> None:
+    with pytest.raises(InvalidImport):
+        list(parse(("[" * 10000 + "0" + "]" * 10000).encode(), {}))
+
+
+def test_valid_unicode_survives() -> None:
+    result = sessions(
+        jsonl(
+            run(
+                "valid",
+                "valid",
+                outputs="你好 🌍",
+                metadata={"ls_model_name": "模型 🌍"},
+            )
+        )
+    )
+    assert result[0].nodes[0].outputs == "你好 🌍"
+    assert result[0].nodes[0].model == "模型 🌍"
+    result[0].model_dump_json()

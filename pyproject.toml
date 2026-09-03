@@ -129,6 +129,9 @@ dev = [
     "hypothesis>=6.165",
     "hypothesis-jsonschema>=0.23",
 ]
+fuzz = [
+    "schemathesis>=4.25,<5",
+]
 
 [tool.ruff]
 target-version = "py311"

@@ -504,3 +504,180 @@ def test_rejects_invalid_files(payload: bytes, message: str) -> None:
     """Reject invalid payloads with actionable errors."""
     with pytest.raises(InvalidImport, match=message):
         parse(payload)
+
+
+@pytest.mark.parametrize("value", ["NaN", "-NaN", "sNaN", "Infinity", "-Infinity", -1])
+def test_invalid_cost_isolates_session(value: Any) -> None:
+    """Reject invalid costs without losing neighboring sessions."""
+    records = []
+    for trace_id in ("good-before", "bad", "good-after"):
+        attributes = {"operation.cost": value if trace_id == "bad" else "0.25"}
+        records.append(span("root", trace_id=trace_id, attributes=attributes))
+    results = parse(jsonl(*records))
+    sessions = [item for item in results if isinstance(item, ImportedSession)]
+    failures = [item for item in results if isinstance(item, ImportFailure)]
+    assert len(sessions) == 2
+    assert len(failures) == 1
+    assert "cost" in failures[0].error.lower()
+    assert all(session.nodes[0].cost == Decimal("0.25") for session in sessions)
+    for item in results:
+        item.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "gen_ai.usage.input_tokens",
+        "gen_ai.usage.output_tokens",
+        "gen_ai.usage.details.cache_read_tokens",
+        "gen_ai.usage.details.reasoning_tokens",
+    ],
+)
+@pytest.mark.parametrize("value", [-1, -0.25, float("inf"), float("nan")])
+def test_invalid_tokens_isolate_session(field: str, value: Any) -> None:
+    """Reject negative or non-finite token counts at the session boundary."""
+    records = []
+    for trace_id in ("good-before", "bad", "good-after"):
+        attributes = {field: value if trace_id == "bad" else 3}
+        records.append(span("root", trace_id=trace_id, attributes=attributes))
+    results = parse(jsonl(*records))
+    assert sum(isinstance(item, ImportedSession) for item in results) == 2
+    assert sum(isinstance(item, ImportFailure) for item in results) == 1
+
+
+@pytest.mark.parametrize("depth", [63, 64, 65, 1200])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_parent_depth_boundary_preserves_other_sessions(
+    depth: int, reverse: bool
+) -> None:
+    """Accept 64 levels with intact parent links and contain deeper traces."""
+    records = [
+        span(str(index), parent_id=(str(index - 1) if index else None))
+        for index in range(depth)
+    ]
+    if reverse:
+        records.reverse()
+    attributes = {"gen_ai.conversation.id": "healthy"}
+    records.append(span("healthy", trace_id="healthy", attributes=attributes))
+    results = parse(jsonl(*records))
+    assert len(results) == 2
+    if depth <= 64:
+        sessions = [item for item in results if isinstance(item, ImportedSession)]
+        assert len(sessions) == 2
+        chain = next(item for item in sessions if len(flatten(item.nodes)) == depth)
+        current = chain.nodes[0]
+        for index in range(depth):
+            assert current.external_id == f"trace-1:{index}"
+            if index + 1 < depth:
+                [current] = current.children
+        chain.model_dump_json()
+    else:
+        [failure] = [item for item in results if isinstance(item, ImportFailure)]
+        assert "64" in failure.error
+        assert sum(isinstance(item, ImportedSession) for item in results) == 1
+
+
+@pytest.mark.parametrize("location", ["trace_id", "name", "input", "attribute"])
+@pytest.mark.parametrize("text", ["\ud800", "\udfff"])
+def test_surrogate_failure_is_serializable(location: str, text: str) -> None:
+    """Contain malformed Unicode while preserving valid Unicode neighbors."""
+    attributes = {"gen_ai.conversation.id": "bad"}
+    bad = span("bad", trace_id="bad", attributes=attributes)
+    if location == "trace_id":
+        bad["context"]["trace_id"] = text
+    elif location == "name":
+        bad["name"] = text
+    elif location == "input":
+        bad["attributes"]["input.value"] = {"nested": text}
+    else:
+        bad["attributes"][text] = text
+    healthy = span(
+        "healthy",
+        trace_id="healthy",
+        attributes={"gen_ai.conversation.id": "healthy", "input.value": "café 😀"},
+    )
+    results = parse(jsonl(bad, healthy))
+    assert sum(isinstance(item, ImportedSession) for item in results) == 1
+    assert sum(isinstance(item, ImportFailure) for item in results) == 1
+    for item in results:
+        item.model_dump_json()
+
+
+def test_nested_attribute_json_decode_is_contained() -> None:
+    """Contain decoder recursion inside a trace and retain a valid neighbor."""
+    nested = "[" * 2000 + "0" + "]" * 2000
+    bad = span(
+        "bad",
+        trace_id="bad",
+        attributes={"gen_ai.conversation.id": "bad", "input.value": nested},
+    )
+    healthy = span(
+        "healthy", trace_id="healthy", attributes={"gen_ai.conversation.id": "healthy"}
+    )
+    results = parse(jsonl(bad, healthy))
+    assert sum(isinstance(item, ImportedSession) for item in results) == 1
+    assert sum(isinstance(item, ImportFailure) for item in results) == 1
+
+
+@pytest.mark.parametrize(
+    "index", ["²", "\u0661", "9" * 5000], ids=["superscript", "arabic", "long"]
+)
+def test_malformed_message_index_preserves_valid_messages(index: str) -> None:
+    """Ignore non-ASCII and invalid indexes without losing real messages."""
+    [session] = parse(
+        jsonl(
+            span(
+                "llm",
+                span_kind="LLM",
+                attributes={
+                    f"llm.input_messages.{index}.message.content": "bad",
+                    "llm.input_messages.0.message.content": "hello",
+                },
+            )
+        )
+    )
+    assert isinstance(session, ImportedSession)
+    assert session.nodes[0].inputs == [{"message.content": "hello"}]
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"name": "no identifiers"},
+        {"trace_id": "\ud800"},
+        {"traceId": "\udfff", "spans": None},
+    ],
+)
+def test_malformed_identity_failures_are_serializable(record: dict[str, Any]) -> None:
+    """Safely report absent or malformed identifiers before trace grouping."""
+    results = parse(jsonl(record, span("healthy")))
+    assert sum(isinstance(item, ImportedSession) for item in results) == 1
+    assert sum(isinstance(item, ImportFailure) for item in results) == 1
+    for item in results:
+        item.model_dump_json()
+
+
+@pytest.mark.parametrize("value", [None, "", 0, "0", 2, "2"])
+def test_valid_numeric_attributes_are_preserved(value: Any) -> None:
+    """Keep missing values, zero, and ordinary numeric strings valid."""
+    [session] = parse(
+        jsonl(
+            span(
+                "root",
+                attributes={
+                    "operation.cost": value,
+                    "gen_ai.usage.input_tokens": value,
+                },
+            )
+        )
+    )
+    assert isinstance(session, ImportedSession)
+    node = session.nodes[0]
+    if value in (None, ""):
+        assert node.cost is None
+        assert node.tokens is None
+    else:
+        assert node.cost == Decimal(str(value))
+        assert node.tokens is not None
+        assert node.tokens.input_tokens == int(value)
+    session.model_dump_json()

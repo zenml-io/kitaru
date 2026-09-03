@@ -18,6 +18,7 @@
 """Langfuse JSON and JSONL trace importer plugin."""
 
 import json
+import math
 import re
 from collections import defaultdict
 from collections.abc import Iterator
@@ -26,6 +27,8 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+
+from pydantic_core import PydanticSerializationError
 
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
@@ -36,6 +39,8 @@ from kitaru.task.importer import (
 )
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_TREE_DEPTH = 64
+MAX_TOOL_SCAN_DEPTH = 64
 _TRACE_SHAPE = "trace"
 _OBSERVATION_SHAPE = "observation"
 _EVENT_SHAPE = "ingestion_event"
@@ -505,8 +510,12 @@ def _decode_json(value: Any) -> Any:
         return value
     try:
         return json.loads(stripped)
+    except RecursionError as exc:
+        raise InvalidImport("Nested JSON exceeds the decoding depth limit") from exc
     except json.JSONDecodeError:
         return value
+    except ValueError as exc:
+        raise InvalidImport("Embedded JSON contains an invalid value") from exc
 
 
 def _datetime(value: Any) -> datetime | None:
@@ -530,19 +539,31 @@ def _decimal(value: Any) -> Decimal | None:
     if value is None or value == "":
         return None
     try:
-        return Decimal(str(value))
+        result = Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+    if not result.is_finite() or result < 0:
+        raise InvalidImport("Langfuse cost must be finite and nonnegative")
+    return result
 
 
 def _integer(value: Any) -> int | None:
     """Parse one provider integer."""
     if value is None or value == "":
         return None
+    if isinstance(value, (int, float)) and value < 0:
+        raise InvalidImport("Langfuse token count must be nonnegative")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise InvalidImport("Langfuse token count must be finite and nonnegative")
     try:
-        return int(value)
+        result = int(value)
+    except OverflowError as exc:
+        raise InvalidImport("Langfuse token count exceeds the supported range") from exc
     except (TypeError, ValueError):
         return None
+    if result < 0:
+        raise InvalidImport("Langfuse token count must be nonnegative")
+    return result
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -738,14 +759,16 @@ def _parse_records(content: bytes) -> list[dict[str, Any]]:
         raise InvalidImport("Import file contains no JSON records")
     try:
         decoded = json.loads(text)
-    except json.JSONDecodeError:
+    except RecursionError as exc:
+        raise InvalidImport("JSON document exceeds the decoding depth limit") from exc
+    except ValueError:
         records = []
         for line_number, line in enumerate(text.splitlines(), start=1):
             if not line.strip():
                 continue
             try:
                 value = json.loads(line)
-            except json.JSONDecodeError as exc:
+            except (ValueError, RecursionError) as exc:
                 raise InvalidImport(f"Line {line_number} is not valid JSON") from exc
             if not isinstance(value, dict):
                 raise InvalidImport(
@@ -934,11 +957,17 @@ def _tool_call_ids(value: Any) -> set[str]:
     """Return tool-call ids emitted by one model output."""
     result: set[str] = set()
 
-    def walk(item: Any, *, tool_call: bool = False) -> None:
-        item = _decode_json(item)
+    def walk(item: Any, depth: int = 0, *, tool_call: bool = False) -> None:
+        if depth > MAX_TOOL_SCAN_DEPTH:
+            raise InvalidImport("Tool-call output exceeds the scanning depth limit")
+        decoded = _decode_json(item)
+        if isinstance(item, str) and decoded != item:
+            walk(decoded, depth + 1, tool_call=tool_call)
+            return
+        item = decoded
         if isinstance(item, list):
             for child in item:
-                walk(child, tool_call=tool_call)
+                walk(child, depth + 1, tool_call=tool_call)
             return
         if not isinstance(item, dict):
             return
@@ -955,7 +984,7 @@ def _tool_call_ids(value: Any) -> set[str]:
                 result.add(str(call_id))
 
         for key, child in item.items():
-            walk(child, tool_call=key in {"toolCalls", "tool_calls"})
+            walk(child, depth + 1, tool_call=key in {"toolCalls", "tool_calls"})
 
     walk(value)
     return result
@@ -1019,13 +1048,11 @@ def _flatten_node_tree(roots: list[ImportedNode]) -> list[ImportedNode]:
     """Flatten an imported node tree in ingestion order."""
     flattened: list[ImportedNode] = []
 
-    def walk(node: ImportedNode) -> None:
+    pending = list(reversed(roots))
+    while pending:
+        node = pending.pop()
         flattened.append(node)
-        for child in node.children:
-            walk(child)
-
-    for root in roots:
-        walk(root)
+        pending.extend(reversed(node.children))
     return flattened
 
 
@@ -1052,35 +1079,92 @@ def _apply_secondary_parent_indexes(
         )
 
 
+def _validate_node_graph(nodes_with_parents: list[tuple[str, str | None]]) -> None:
+    """Reject cycles and excessive depth with one completed walk per node."""
+    parents = dict(nodes_with_parents)
+    if len(parents) != len(nodes_with_parents):
+        raise InvalidImport("The imported node graph contains duplicate external ids")
+    depths: dict[str, int] = {}
+    for external_id in parents:
+        path: list[str] = []
+        active: set[str] = set()
+        current: str | None = external_id
+        while current is not None and current in parents and current not in depths:
+            if current in active:
+                raise InvalidImport("The imported node graph contains a parent cycle")
+            active.add(current)
+            path.append(current)
+            current = parents[current]
+        depth = depths.get(current, 0) if current is not None else 0
+        for node_id in reversed(path):
+            depth += 1
+            if depth > MAX_TREE_DEPTH:
+                raise InvalidImport(
+                    f"The imported node graph exceeds depth {MAX_TREE_DEPTH}"
+                )
+            depths[node_id] = depth
+
+
+def _safe_failure_text(value: str) -> str:
+    """Escape unencodable text in failure diagnostics only."""
+    return value.encode("utf-8", errors="backslashreplace").decode("utf-8")
+
+
+def _validate_model_fields(record: dict[str, Any]) -> None:
+    """Require optional model and provider fields to contain strings."""
+    for key in (
+        "providedModelName",
+        "provided_model_name",
+        "model",
+        "modelId",
+        "model_id",
+        "modelProvider",
+        "model_provider",
+    ):
+        value = record.get(key)
+        if value is not None and not isinstance(value, str):
+            raise InvalidImport(f"Langfuse {key} must be a string or null")
+    metadata = _dict(record.get("metadata"))
+    sources = (
+        metadata,
+        _dict(metadata.get("attributes")),
+        _dict(metadata.get("resourceAttributes")),
+    )
+    for key in (
+        "gen_ai.request.model",
+        "gen_ai.response.model",
+        "gen_ai.provider.name",
+        "gen_ai.system",
+    ):
+        for source in sources:
+            value = source.get(key)
+            if value is not None and not isinstance(value, str):
+                raise InvalidImport(f"Langfuse {key} must be a string or null")
+        for prefix in ("attributes", "resourceAttributes"):
+            value = metadata.get(f"{prefix}.{key}")
+            if value is not None and not isinstance(value, str):
+                raise InvalidImport(f"Langfuse {key} must be a string or null")
+
+
 def _build_node_tree(
     nodes_with_parents: list[tuple[ImportedNode, str | None]],
     secondary_parents: dict[str, list[str]] | None = None,
 ) -> list[ImportedNode]:
     """Build and validate the parsed-node tree."""
-    external_ids = [node.external_id for node, _ in nodes_with_parents]
-    if any(external_id is None for external_id in external_ids):
+    if any(node.external_id is None for node, _ in nodes_with_parents):
         raise InvalidImport("The imported node graph contains a missing external id")
-    if len(external_ids) != len(set(external_ids)):
-        raise InvalidImport("The imported node graph contains duplicate external ids")
-
+    _validate_node_graph(
+        [
+            (node.external_id, parent)
+            for node, parent in nodes_with_parents
+            if node.external_id is not None
+        ]
+    )
     converted = {
         node.external_id: node
         for node, _ in nodes_with_parents
         if node.external_id is not None
     }
-    parents = {
-        node.external_id: parent_external_id
-        for node, parent_external_id in nodes_with_parents
-        if node.external_id is not None and parent_external_id in converted
-    }
-    for external_id in external_ids:
-        seen: set[str] = set()
-        current = external_id
-        while current in parents:
-            if current in seen:
-                raise InvalidImport("The imported node graph contains a parent cycle")
-            seen.add(current)
-            current = parents[current]
 
     roots: list[ImportedNode] = []
     for node, parent_external_id in nodes_with_parents:
@@ -1146,8 +1230,8 @@ class LangfuseJSONLImporter:
                 failures.append(
                     ImportFailure(
                         line=len(failures) + 1,
-                        external_id=trace_id,
-                        error=str(exc),
+                        external_id=_safe_failure_text(trace_id),
+                        error=_safe_failure_text(str(exc)),
                     )
                 )
                 continue
@@ -1174,8 +1258,8 @@ class LangfuseJSONLImporter:
                 failures.append(
                     ImportFailure(
                         line=len(failures) + 1,
-                        external_id=source_id,
-                        error=str(exc),
+                        external_id=_safe_failure_text(source_id),
+                        error=_safe_failure_text(str(exc)),
                     )
                 )
         return [*sessions, *failures]
@@ -1310,6 +1394,7 @@ class LangfuseJSONLImporter:
                 item[0],
             )
         )
+        _validate_node_graph([(node_id, parent) for node_id, parent, _ in raw_nodes])
         inferred_parents = (
             _infer_tool_call_parents(raw_nodes) if infer_tool_call_links else {}
         )
@@ -1322,8 +1407,14 @@ class LangfuseJSONLImporter:
         }
         nodes_with_parents: list[tuple[ImportedNode, str | None]] = []
         for source_node_id, parent_source_id, record in raw_nodes:
+            _validate_model_fields(record)
             node_type, tool_name = _node_type(record)
             status = _node_status(record)
+            total_cost = _first_nonempty(record, "totalCost", "total_cost")
+            if total_cost is None:
+                total_cost = _dict(_first(record, "costDetails", "cost_details")).get(
+                    "total"
+                )
             nodes_with_parents.append(
                 (
                     ImportedNode(
@@ -1365,12 +1456,7 @@ class LangfuseJSONLImporter:
                             )
                         ),
                         tokens=_tokens(record),
-                        cost=_decimal(
-                            _first(record, "totalCost", "total_cost")
-                            or _dict(_first(record, "costDetails", "cost_details")).get(
-                                "total"
-                            )
-                        ),
+                        cost=_decimal(total_cost),
                         model_params=_dict(
                             _first(record, "modelParameters", "model_parameters")
                         )
@@ -1473,7 +1559,7 @@ class LangfuseJSONLImporter:
             )
             or file_framework
         )
-        return ImportedSession(
+        session = ImportedSession(
             external_id=f"{source_instance}:{source_id}",
             name=trace_names[-1] if trace_names else None,
             status=session_status,
@@ -1497,6 +1583,12 @@ class LangfuseJSONLImporter:
             framework=framework,
             nodes=node_tree,
         )
+
+        try:
+            session.model_dump_json()
+        except PydanticSerializationError as exc:
+            raise InvalidImport(f"Session cannot be serialized: {exc}") from exc
+        return session
 
 
 def parse(

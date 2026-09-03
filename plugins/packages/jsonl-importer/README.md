@@ -15,6 +15,8 @@ Write one complete Kitaru session object per line. Unknown fields and invalid re
 
 See the [Kitaru JSONL guide](https://docs.zenml.io/kitaru/guides/importing-sessions) for the full session and node schema.
 
+Nodes must use the flat indexed representation; no nested parent-depth limit applies to those indexes. Costs must be finite and nonnegative, and token counts must be nonnegative. A line whose data cannot decode or serialize is reported as a failure without preventing valid neighboring lines from importing.
+
 ## Links
 
 - [Kitaru documentation](https://docs.zenml.io/kitaru)
