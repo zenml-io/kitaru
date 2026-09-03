@@ -106,6 +106,8 @@ Node indexes do not need to be contiguous. Every `parent_index` and `secondary_p
 
 ## Import a file
 
+The `kitaru-jsonl` importer has no fetch entrypoint, so it only accepts uploaded files. FILE is always required, and `--since`, `--until`, `--trace-id`, and `--query` do not apply.
+
 The session import command uploads the file, resolves an exact importer and agent version, and creates an import job:
 
 ```bash

@@ -83,6 +83,30 @@ kitaru session list --agent support-agent --origin imported --imported-from brai
 
 Pass them with `--params '{"source_instance": "my-braintrust-project"}'`, or use the dedicated `--join-on` flag, which accepts a JSON Pointer only (it must start with `/`) and cannot be combined with `join_on` inside `--params`.
 
+## 3. Or fetch from the Braintrust API
+
+Skip the export and upload, and let the import task fetch spans from Braintrust directly:
+
+```bash
+kitaru session import \
+  --importer kitaru/braintrust@latest \
+  --agent support-agent@latest \
+  --since 7d \
+  --query '{"project_id": "my-braintrust-project"}' \
+  --tag imported-baseline --wait
+```
+
+Omitting FILE and setting `--since` selects an API import: the worker calls the Braintrust API instead of parsing an uploaded payload. `--since` and `--until` accept an ISO 8601 timestamp or a relative duration (`7d`, `12h`, `30m`). `--trace-id` (repeatable) fetches exactly those root span ids instead of a time window. The same selection is a query object on the SDK and REST request:
+
+| Query key | Meaning |
+| --- | --- |
+| `project_id` | Braintrust project to fetch from. Required. |
+| `trace_ids` | Braintrust root span ids to fetch. When present, exactly those traces are fetched and the time window is ignored. |
+| `since` | Timezone-aware ISO 8601 datetime, lower bound of root span start time. Required when `trace_ids` is absent. |
+| `until` | Timezone-aware ISO 8601 datetime, upper bound of root span start time. Defaults to now. |
+
+The worker needs `kitaru-braintrust-importer[adapter]` installed (the default plugin catalog already installs it that way) and `BRAINTRUST_API_KEY` in its environment, plus `BRAINTRUST_API_URL` for a self-hosted instance. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way.
+
 ## What a trace becomes
 
 Every Braintrust event in a trace becomes one node, and the `span_parents` links are rebuilt as the node tree, so a tool span nested under a model span stays nested. Node type is mapped conservatively:
