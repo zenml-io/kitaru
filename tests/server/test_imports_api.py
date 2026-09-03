@@ -26,7 +26,7 @@ from fastapi import FastAPI
 from conftest import (
     UNSCOPED_WORKER_SCOPE,
     FakeAccountRepository,
-    FakeEphemeralWorkersBackend,
+    FakeEphemeralWorkers,
     JobAndTaskServices,
     build_job_and_task_services,
     create_agent,
@@ -74,15 +74,15 @@ def services() -> JobAndTaskServices:
 
 
 @pytest.fixture
-def ephemeral_workers() -> FakeEphemeralWorkersBackend:
+def ephemeral_workers() -> FakeEphemeralWorkers:
     """Provide a fake ephemeral worker backend recording starts."""
-    return FakeEphemeralWorkersBackend()
+    return FakeEphemeralWorkers()
 
 
 @pytest.fixture
 async def app(
     services: JobAndTaskServices,
-    ephemeral_workers: FakeEphemeralWorkersBackend,
+    ephemeral_workers: FakeEphemeralWorkers,
     auth_service: AuthService,
     account_repository: FakeAccountRepository,
 ) -> FastAPI:
@@ -245,7 +245,7 @@ async def test_create_import_not_found_for_unknown_payload(
 async def test_create_import_starts_an_ephemeral_worker(
     client: httpx.AsyncClient,
     services: JobAndTaskServices,
-    ephemeral_workers: FakeEphemeralWorkersBackend,
+    ephemeral_workers: FakeEphemeralWorkers,
     auth_service: AuthService,
 ) -> None:
     """Register and start an ephemeral worker pinned to the job."""
@@ -282,7 +282,7 @@ async def test_create_import_starts_an_ephemeral_worker(
 async def test_create_import_skips_the_start_when_a_live_worker_covers_the_task(
     client: httpx.AsyncClient,
     services: JobAndTaskServices,
-    ephemeral_workers: FakeEphemeralWorkersBackend,
+    ephemeral_workers: FakeEphemeralWorkers,
 ) -> None:
     """Skip registering and starting a worker when a live worker covers the task."""
     live_worker = await create_worker(
@@ -305,7 +305,7 @@ async def test_create_import_without_an_ephemeral_worker_backend_registers_nothi
     app: FastAPI,
     client: httpx.AsyncClient,
     services: JobAndTaskServices,
-    ephemeral_workers: FakeEphemeralWorkersBackend,
+    ephemeral_workers: FakeEphemeralWorkers,
 ) -> None:
     """Skip registering and starting a worker when no backend is configured."""
     app.state.ephemeral_workers = None
@@ -323,7 +323,7 @@ async def test_create_import_without_an_ephemeral_worker_backend_registers_nothi
 async def test_create_import_returns_201_when_the_start_fails(
     client: httpx.AsyncClient,
     services: JobAndTaskServices,
-    ephemeral_workers: FakeEphemeralWorkersBackend,
+    ephemeral_workers: FakeEphemeralWorkers,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Observe HTTP 201 when the background start fails, with the failure logged."""

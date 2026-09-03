@@ -21,9 +21,7 @@ from pydantic import SecretStr
 from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.interfaces.ephemeral_workers import (
-    EphemeralWorkersBackend,
-)
+from kitaru.server.application.interfaces.ephemeral_workers import EphemeralWorkers
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.application.models.worker import EphemeralWorkerSpec
@@ -39,7 +37,7 @@ async def start_ephemeral_worker(
     job_service: JobService,
     worker_service: WorkerService,
     auth_service: AuthService,
-    ephemeral_workers: EphemeralWorkersBackend,
+    ephemeral_workers: EphemeralWorkers,
     settings: APISettings,
     background_tasks: BackgroundTasks,
     actor: AuthContext,
@@ -83,7 +81,7 @@ async def start_ephemeral_worker(
 
 
 async def _start_worker(
-    ephemeral_workers: EphemeralWorkersBackend, spec: EphemeralWorkerSpec
+    ephemeral_workers: EphemeralWorkers, spec: EphemeralWorkerSpec
 ) -> None:
     """Start a worker, logging a failure instead of raising.
 

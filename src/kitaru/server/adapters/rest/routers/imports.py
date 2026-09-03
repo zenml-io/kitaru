@@ -34,9 +34,7 @@ from kitaru.server.adapters.rest.mapping.jobs import job_to_response
 from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.interfaces.ephemeral_workers import (
-    EphemeralWorkersBackend,
-)
+from kitaru.server.application.interfaces.ephemeral_workers import EphemeralWorkers
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.worker_service import WorkerService
@@ -56,7 +54,7 @@ async def create_import(
     actor: Annotated[AuthContext, Depends(authorize)],
     settings: Annotated[APISettings, Depends(get_app_settings)],
     ephemeral_workers: Annotated[
-        EphemeralWorkersBackend | None, Depends(get_ephemeral_workers)
+        EphemeralWorkers | None, Depends(get_ephemeral_workers)
     ],
     background_tasks: BackgroundTasks,
 ) -> JobResponse:

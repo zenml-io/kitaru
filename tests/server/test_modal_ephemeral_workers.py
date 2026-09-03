@@ -24,7 +24,7 @@ pytest.importorskip("modal")
 import modal
 
 from kitaru import images
-from kitaru.server.adapters.ephemeral_workers.modal import ModalEphemeralWorkersBackend
+from kitaru.server.adapters.ephemeral_workers.modal import ModalEphemeralWorkers
 from kitaru.server.application.models.worker import EphemeralWorkerSpec
 from kitaru.server.ephemeral_worker_settings import (
     EphemeralWorkerBackend,
@@ -136,7 +136,7 @@ async def test_start_creates_sandbox_with_resource_limits(
     fake_modal: _FakeModal,
 ) -> None:
     """Start a sandbox with the credentials, image, env, and resource limits."""
-    ephemeral_workers = ModalEphemeralWorkersBackend(_settings(cpu=2.0, memory_mb=4096))
+    ephemeral_workers = ModalEphemeralWorkers(_settings(cpu=2.0, memory_mb=4096))
     spec = _spec()
 
     await ephemeral_workers.start(spec)
@@ -172,7 +172,7 @@ async def test_start_without_resource_limits_passes_none_through(
     fake_modal: _FakeModal,
 ) -> None:
     """Pass cpu and memory through as None when not configured."""
-    ephemeral_workers = ModalEphemeralWorkersBackend(_settings())
+    ephemeral_workers = ModalEphemeralWorkers(_settings())
 
     await ephemeral_workers.start(_spec())
 
@@ -183,7 +183,7 @@ async def test_start_without_resource_limits_passes_none_through(
 
 async def test_start_splits_a_configured_command(fake_modal: _FakeModal) -> None:
     """Run a configured command as its shell-split argument list."""
-    ephemeral_workers = ModalEphemeralWorkersBackend(
+    ephemeral_workers = ModalEphemeralWorkers(
         _settings(command="/app/.venv/bin/python -m kitaru.worker --log-level debug")
     )
 
@@ -204,7 +204,7 @@ async def test_start_defaults_to_the_published_worker_image(
 ) -> None:
     """Run the published worker image at the installed version when unset."""
     monkeypatch.setattr(images, "version", lambda name: "0.25.0")
-    ephemeral_workers = ModalEphemeralWorkersBackend(_settings(image=None))
+    ephemeral_workers = ModalEphemeralWorkers(_settings(image=None))
 
     await ephemeral_workers.start(_spec())
 
@@ -217,7 +217,7 @@ async def test_start_reuses_the_client_across_starts(
     fake_modal: _FakeModal,
 ) -> None:
     """Open the Modal client once and reuse it for every start."""
-    ephemeral_workers = ModalEphemeralWorkersBackend(_settings())
+    ephemeral_workers = ModalEphemeralWorkers(_settings())
 
     await ephemeral_workers.start(_spec())
     await ephemeral_workers.start(_spec())
