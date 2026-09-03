@@ -61,7 +61,7 @@ from kitaru.task.importer import (
     FetchQuery,
     ImportedSession,
     SessionImportError,
-    _resolve_fetcher,
+    _resolve_entrypoint,
     call_fetcher,
     call_parser,
     flatten_nodes,
@@ -176,7 +176,7 @@ async def test_call_fetcher_rejects_non_bytes_item() -> None:
         await anext(call_fetcher(fetcher, {}))
 
 
-def test_resolve_fetcher_script_plugin(
+def test_resolve_entrypoint_script_plugin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Load a script plugin's fetch entrypoint from KITARU_TASK_PLUGIN_PATH."""
@@ -191,12 +191,12 @@ def test_resolve_fetcher_script_plugin(
         params={},
     )
 
-    fetcher = _resolve_fetcher(details, source.entrypoint)
+    fetcher = _resolve_entrypoint(details, source.entrypoint)
 
     assert fetcher({"a": 1}) == {"a": 1}
 
 
-def test_resolve_fetcher_package_plugin() -> None:
+def test_resolve_entrypoint_package_plugin() -> None:
     """Load a package plugin's fetch entrypoint by module:attribute."""
     source = ApiSourceSpec(entrypoint="json:dumps", query={})
     details = ImportTaskDetails(
@@ -206,7 +206,7 @@ def test_resolve_fetcher_package_plugin() -> None:
         params={},
     )
 
-    fetcher = _resolve_fetcher(details, source.entrypoint)
+    fetcher = _resolve_entrypoint(details, source.entrypoint)
 
     assert fetcher({"a": 1}) == '{"a": 1}'
 

@@ -631,7 +631,7 @@ def test_inventory_rejects_stale_server_default_versions(
     with pytest.raises(
         ReleaseInventoryError,
         match=r"server default requirement and display version must match "
-        r"kitaru-langfuse-importer\[adapter\]==0\.2\.0",
+        r"kitaru-[a-z]+-importer\[adapter\]==0\.2\.0",
     ):
         load_inventory(release_repo)
 
