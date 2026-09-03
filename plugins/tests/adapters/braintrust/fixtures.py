@@ -32,6 +32,16 @@ _QUERY_PATTERN = re.compile(
     r" \| filter: root_span_id = '(?P<root_span_id>[^']+)'"
 )
 
+_LIST_QUERY_PATTERN = re.compile(
+    r"select: root_span_id \| from: project_logs\('(?P<project_id>[^']+)'\) spans"
+    r" \| filter: NOT EXISTS\(span_parents\) AND"
+    r" \(\(created >= '(?P<since>[^']+)' AND created <= '(?P<until>[^']+)'\)"
+    r" OR \(metrics\.start >= (?P<since_ts>[-0-9.]+)"
+    r" AND metrics\.start <= (?P<until_ts>[-0-9.]+)\)\)"
+    r" \| sort: created asc"
+    r" \| limit: (?P<limit>\d+)"
+)
+
 
 def build_row(
     span_id: str,
@@ -99,14 +109,18 @@ class FakeSpan(SpanImpl):
 class _FakeResponse:
     """BTQL response fake."""
 
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
+    def __init__(self, rows: list[dict[str, Any]], cursor: str | None = None) -> None:
         self._rows = rows
+        self._cursor = cursor
 
     def raise_for_status(self) -> None:
         return None
 
     def json(self) -> dict[str, Any]:
-        return {"data": self._rows}
+        payload: dict[str, Any] = {"data": self._rows}
+        if self._cursor is not None:
+            payload["cursor"] = self._cursor
+        return payload
 
 
 class _FakeAsyncClient:
@@ -137,6 +151,10 @@ class FakeBraintrust:
         self.spans: list[FakeSpan] = []
         self.no_active_logger = False
         self.project_id = "project-1"
+        # Each list page is (root_span_ids, cursor_for_next_page).
+        self.list_pages: list[tuple[list[str], str | None]] = []
+        self.list_queries: list[dict[str, str]] = []
+        self.list_cursors_received: list[str | None] = []
 
     def start_span(self, *, name: str) -> Any:
         if self.no_active_logger:
@@ -158,6 +176,18 @@ class FakeBraintrust:
     ) -> _FakeResponse:
         assert url == "https://api.braintrust.dev/btql"
         assert headers == {"Authorization": "Bearer test-key"}
+        list_match = _LIST_QUERY_PATTERN.fullmatch(json["query"])
+        if list_match is not None:
+            assert list_match["project_id"] == self.project_id
+            self.list_queries.append(list_match.groupdict())
+            self.list_cursors_received.append(json.get("cursor"))
+            self.events.append("list")
+            assert self.list_pages, "unexpected BTQL list query"
+            root_span_ids, cursor = self.list_pages.pop(0)
+            return _FakeResponse(
+                [{"root_span_id": root_span_id} for root_span_id in root_span_ids],
+                cursor=cursor,
+            )
         match = _QUERY_PATTERN.fullmatch(json["query"])
         assert match is not None, f"unexpected BTQL query: {json['query']}"
         assert match["project_id"] == self.project_id

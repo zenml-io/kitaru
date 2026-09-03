@@ -15,11 +15,17 @@
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
+from datetime import datetime
+from typing import Any
 
 from langsmith import Client
 from langsmith.schemas import Run
+from langsmith.utils import get_tracer_project
 
-__all__ = ["fetch_runs", "serialize_runs", "wait_for_runs"]
+from kitaru.task.importer import FetchQuery
+
+__all__ = ["fetch", "fetch_runs", "serialize_runs", "wait_for_runs"]
 
 _POLL_INTERVAL = 2.0
 
@@ -92,3 +98,74 @@ def serialize_runs(runs: list[Run]) -> bytes:
     return "\n".join(json.dumps(run.model_dump(mode="json")) for run in runs).encode(
         "utf-8"
     )
+
+
+class LangSmithFetchQuery(FetchQuery):
+    """LangSmith fetch query."""
+
+    project_name: str | None = None
+
+
+def _list_root_trace_ids(
+    client: Client,
+    project_name: str | None,
+    since: datetime,
+    until: datetime,
+) -> list[str]:
+    """List distinct trace ids of root runs started in a time window.
+
+    Args:
+        client: LangSmith client.
+        project_name: LangSmith project name, the SDK's tracer project when None.
+        since: Lower bound of trace start time.
+        until: Upper bound of trace end time.
+
+    Returns:
+        Distinct trace ids in listing order.
+    """
+    runs = client.list_runs(
+        project_name=project_name or get_tracer_project(),
+        is_root=True,
+        start_time=since,
+        filter=f'lt(end_time, "{until.isoformat()}")',
+    )
+    trace_ids: list[str] = []
+    seen: set[str] = set()
+    for run in runs:
+        trace_id = str(run.trace_id)
+        if trace_id not in seen:
+            seen.add(trace_id)
+            trace_ids.append(trace_id)
+    return trace_ids
+
+
+async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
+    """Fetch LangSmith traces as parser payloads.
+
+    Args:
+        query: Fetch query with trace_ids, since, until, and project_name.
+
+    Raises:
+        ValueError: The query is invalid.
+
+    Yields:
+        One parser payload per fetched trace.
+    """
+    parsed = LangSmithFetchQuery.model_validate(query)
+    client = Client()
+
+    if parsed.trace_ids is not None:
+        trace_ids = parsed.trace_ids
+    else:
+        since, until = parsed.get_window()
+        trace_ids = await asyncio.to_thread(
+            _list_root_trace_ids,
+            client,
+            parsed.project_name,
+            since,
+            until,
+        )
+
+    for trace_id in trace_ids:
+        runs = await fetch_runs(client, trace_id)
+        yield serialize_runs(runs)

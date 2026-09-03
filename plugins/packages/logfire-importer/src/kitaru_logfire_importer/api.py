@@ -14,7 +14,9 @@
 """Logfire API read layer."""
 
 import asyncio
-from datetime import datetime
+import json
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -22,8 +24,9 @@ from logfire._internal.config import get_base_url_from_token
 from logfire.query_client import AsyncLogfireQueryClient
 
 from kitaru.env import get_required_env
+from kitaru.task.importer import FetchQuery
 
-__all__ = ["fetch_trace", "wait_for_trace"]
+__all__ = ["fetch", "fetch_trace", "wait_for_trace"]
 
 _POLL_INTERVAL = 2.0
 
@@ -102,3 +105,96 @@ async def fetch_trace(trace_id: str, min_timestamp: datetime) -> bytes:
         )
         response.raise_for_status()
         return response.content
+
+
+def _rows_from_ndjson(content: bytes) -> list[dict[str, Any]]:
+    """Decode Query API NDJSON messages into result rows.
+
+    Args:
+        content: Query API NDJSON response body.
+
+    Returns:
+        Rows from the data messages, in encounter order.
+    """
+    rows: list[dict[str, Any]] = []
+    for line in content.splitlines():
+        if not line.strip():
+            continue
+        message = json.loads(line)
+        if message.get("type") == "data":
+            rows.extend(message.get("rows", []))
+    return rows
+
+
+async def _list_root_trace_ids(since: datetime, until: datetime) -> list[str]:
+    """List distinct root trace ids started within a time window.
+
+    Args:
+        since: Lower bound of trace start time.
+        until: Upper bound of trace start time.
+
+    Returns:
+        Trace ids ordered by start timestamp.
+    """
+    read_token = get_required_env("LOGFIRE_READ_TOKEN")
+    async with httpx.AsyncClient(
+        base_url=get_base_url_from_token(read_token)
+    ) as client:
+        response = await client.post(
+            "/v2/query",
+            headers={
+                "accept": "application/x-ndjson",
+                "authorization": f"Bearer {read_token}",
+            },
+            json={
+                "sql": (
+                    "SELECT DISTINCT trace_id, start_timestamp FROM records "
+                    "WHERE parent_span_id IS NULL "
+                    f"AND start_timestamp >= '{since.isoformat()}' "
+                    f"AND start_timestamp <= '{until.isoformat()}' "
+                    "ORDER BY start_timestamp"
+                ),
+                "min_timestamp": since.isoformat(),
+                "max_timestamp": until.isoformat(),
+            },
+        )
+        response.raise_for_status()
+        rows = _rows_from_ndjson(response.content)
+
+    trace_ids: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        trace_id = str(row["trace_id"])
+        if trace_id not in seen:
+            seen.add(trace_id)
+            trace_ids.append(trace_id)
+    return trace_ids
+
+
+async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
+    """Fetch parser payloads from the Logfire Query API.
+
+    Args:
+        query: Fetch query. `trace_ids` fetches exactly those traces in
+            order and ignores the time window. Otherwise `since` is
+            required and `until` defaults to now.
+
+    Raises:
+        ValueError: The query is invalid.
+
+    Yields:
+        One NDJSON trace payload per fetched trace.
+    """
+    parsed = FetchQuery.model_validate(query)
+    if parsed.trace_ids is not None:
+        # The adapter approximates min_timestamp with the trace's own start
+        # time. Arbitrary trace ids carry no such reference point, so fall
+        # back to the earliest possible timestamp instead.
+        min_timestamp = parsed.since or datetime.min.replace(tzinfo=UTC)
+        for trace_id in parsed.trace_ids:
+            yield await fetch_trace(trace_id, min_timestamp)
+        return
+
+    since, until = parsed.get_window()
+    for trace_id in await _list_root_trace_ids(since, until):
+        yield await fetch_trace(trace_id, since)

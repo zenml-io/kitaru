@@ -14,11 +14,16 @@
 """Langfuse API read layer."""
 
 import asyncio
+from collections.abc import AsyncIterator
+from datetime import datetime
+from typing import Any
 
 from langfuse import get_client
 from langfuse.api import NotFoundError, ObservationsView, TraceWithFullDetails
 
-__all__ = ["fetch_trace", "serialize_trace", "wait_for_trace"]
+from kitaru.task.importer import FetchQuery
+
+__all__ = ["fetch", "fetch_trace", "serialize_trace", "wait_for_trace"]
 
 _POLL_INTERVAL = 2.0
 
@@ -89,3 +94,50 @@ def serialize_trace(trace: TraceWithFullDetails) -> bytes:
     # Serialize with the camelCase wire field names the importer parser
     # expects.
     return trace.model_dump_json(by_alias=True).encode("utf-8")
+
+
+async def _list_trace_ids(since: datetime, until: datetime) -> AsyncIterator[str]:
+    """List trace ids in a time window, paging through every result page.
+
+    Args:
+        since: Lower bound of trace start time.
+        until: Upper bound of trace start time.
+
+    Yields:
+        Trace ids in listing order.
+    """
+    api = get_client().async_api
+    page = 1
+    while True:
+        traces = await api.trace.list(
+            from_timestamp=since, to_timestamp=until, page=page
+        )
+        for trace in traces.data:
+            yield trace.id
+        if page >= traces.meta.total_pages:
+            return
+        page += 1
+
+
+async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
+    """Fetch parser payloads for traces matching a query.
+
+    Args:
+        query: Fetch query with `trace_ids`, `since`, and `until` keys.
+
+    Raises:
+        ValueError: The query is invalid.
+
+    Yields:
+        Trace payload bytes, one per fetched trace.
+    """
+    parsed = FetchQuery.model_validate(query)
+
+    if parsed.trace_ids is not None:
+        for trace_id in parsed.trace_ids:
+            yield serialize_trace(await fetch_trace(trace_id))
+        return
+
+    since, until = parsed.get_window()
+    async for trace_id in _list_trace_ids(since, until):
+        yield serialize_trace(await fetch_trace(trace_id))

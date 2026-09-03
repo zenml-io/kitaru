@@ -90,11 +90,30 @@ class FakeLangSmithClient:
     def flush(self) -> None:
         self._fake.events.append("flush")
 
-    def list_runs(self, *, trace_id: str) -> Iterator[Run]:
-        self._fake.requested.append(trace_id)
-        self._fake.events.append("poll")
-        assert self._fake.runs_builders, "unexpected run listing poll"
-        return iter(self._fake.runs_builders.pop(0)(trace_id))
+    def list_runs(
+        self,
+        *,
+        trace_id: str | None = None,
+        project_name: str | None = None,
+        is_root: bool | None = None,
+        start_time: datetime | None = None,
+        filter: str | None = None,
+    ) -> Iterator[Run]:
+        if trace_id is not None:
+            self._fake.requested.append(trace_id)
+            self._fake.events.append("poll")
+            assert self._fake.runs_builders, "unexpected run listing poll"
+            return iter(self._fake.runs_builders.pop(0)(trace_id))
+        self._fake.root_listing_calls.append(
+            {
+                "project_name": project_name,
+                "is_root": is_root,
+                "start_time": start_time,
+                "filter": filter,
+            }
+        )
+        assert self._fake.root_run_listings, "unexpected root run listing"
+        return iter(self._fake.root_run_listings.pop(0))
 
 
 class FakeLangSmith:
@@ -105,6 +124,9 @@ class FakeLangSmith:
         self.requested: list[str] = []
         self.events: list[str] = []
         self.pinned_run_ids: list[uuid.UUID] = []
+        self.root_run_listings: list[list[Run]] = []
+        self.root_listing_calls: list[dict[str, Any]] = []
+        self.default_project_name = "fake-default-project"
         self.client = FakeLangSmithClient(self)
 
     @contextmanager
@@ -141,4 +163,15 @@ def fake_langsmith(monkeypatch: pytest.MonkeyPatch) -> FakeLangSmith:
     monkeypatch.setattr(adapter_module, "tracing_context", fake.tracing_context)
     monkeypatch.setattr(adapter_module, "trace", fake.trace)
     monkeypatch.setattr(adapter_module, "get_cached_client", fake.get_cached_client)
+    return fake
+
+
+@pytest.fixture
+def fake_langsmith_api(monkeypatch: pytest.MonkeyPatch) -> FakeLangSmith:
+    """Create a fake LangSmith SDK and route the fetch entrypoint to it."""
+    fake = FakeLangSmith()
+    monkeypatch.setattr(api_module, "Client", lambda: fake.client)
+    monkeypatch.setattr(
+        api_module, "get_tracer_project", lambda: fake.default_project_name
+    )
     return fake

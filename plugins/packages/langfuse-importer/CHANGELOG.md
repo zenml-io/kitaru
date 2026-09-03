@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fetch traces directly from the Langfuse API by trace id or time window, through the `adapter` extra.
+
 ## 0.2.0
 
 - Add the Langfuse importer-backed adapter, installed through the `adapter` extra.

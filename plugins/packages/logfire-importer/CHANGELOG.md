@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Support Logfire 5.x for the `adapter` extra in addition to the existing 4.35+ line.
+- Fetch traces from the Logfire Query API by trace id or time window through the `adapter` extra.
 
 ## 0.2.0
 
