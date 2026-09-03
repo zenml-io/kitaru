@@ -81,21 +81,23 @@ async def _make_agent(api_client: KitaruAPIClient) -> uuid.UUID:
     return agent.id
 
 
-def _insight_input(**overrides: str) -> InsightInput:
+def _insight_input(
+    title: str = "insight", description: str | None = None
+) -> InsightInput:
     """Build a minimal text insight input.
 
     Args:
-        **overrides: Additional insight input fields.
+        title: Insight title.
+        description: Insight description.
 
     Returns:
         Insight input ready to pass to insights.create.
     """
-    values: dict[str, object] = {
-        "title": "insight",
-        "data": TextInsightData(content="root cause"),
-    }
-    values.update(overrides)
-    return InsightInput(**values)
+    return InsightInput(
+        title=title,
+        description=description,
+        data=TextInsightData(content="root cause"),
+    )
 
 
 async def test_create(api_client: KitaruAPIClient) -> None:
