@@ -5696,6 +5696,9 @@
             "title": "Hooks",
             "type": "array"
           },
+          "runtime_capabilities": {
+            "$ref": "#/components/schemas/RuntimeCapabilities"
+          },
           "secret_ids": {
             "description": "Secrets merged into the process environment.",
             "items": {
@@ -5729,6 +5732,26 @@
           "command"
         ],
         "title": "RunSpec",
+        "type": "object"
+      },
+      "RuntimeCapabilities": {
+        "additionalProperties": false,
+        "description": "Runtime capabilities.",
+        "properties": {
+          "overrides": {
+            "default": true,
+            "description": "Whether the runtime can apply replay overrides.",
+            "title": "Overrides",
+            "type": "boolean"
+          },
+          "tool_policies": {
+            "default": true,
+            "description": "Whether the runtime can apply non-passthrough tool policies.",
+            "title": "Tool Policies",
+            "type": "boolean"
+          }
+        },
+        "title": "RuntimeCapabilities",
         "type": "object"
       },
       "SampleDataCreateRequest": {
@@ -16226,7 +16249,7 @@
     },
     "/api/v1/experiments/{experiment_id}/runs": {
       "post": {
-        "description": "Start an experiment run, fanning out one replay per cohort version session.\n\nClients observe HTTP 201 on success, 404 when the experiment, the\ncohort version, or the resolved agent version does not exist, 409 when\nthe baseline evaluation mode is not none and a cohort version session\nis not finished, and 422 when the cohort version has no sessions, the\ncohort version or agent version belongs to another agent, or the\nresolved agent version has no run spec.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created run.",
+        "description": "Start an experiment run, fanning out one replay per cohort version session.\n\nClients observe HTTP 201 on success, 404 when the experiment, the\ncohort version, or the resolved agent version does not exist, 409 when\nthe baseline evaluation mode is not none and a cohort version session\nis not finished, and 422 when the cohort version has no sessions, the\ncohort version or agent version belongs to another agent, the resolved\nagent version has no run spec, or the config carries an override or\ntool policy the agent version's runtime capabilities do not declare.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created run.",
         "operationId": "start_run_api_v1_experiments__experiment_id__runs_post",
         "parameters": [
           {
@@ -18948,7 +18971,7 @@
         ]
       },
       "post": {
-        "description": "Create a standalone replay of a recorded or imported session.\n\nClients observe HTTP 201 on success, 404 when the baseline session or\nthe resolved agent version or an evaluator config does not exist, 409\nwhen the baseline evaluation mode is not none and the baseline session\nis not finished, and 422 when the baseline session carries no agent\nversion and none was given, the resolved agent version has no run spec,\nthe tool policy uses cohort-version-scoped history, or an evaluator\nversion repeats.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
+        "description": "Create a standalone replay of a recorded or imported session.\n\nClients observe HTTP 201 on success, 404 when the baseline session or\nthe resolved agent version or an evaluator config does not exist, 409\nwhen the baseline evaluation mode is not none and the baseline session\nis not finished, and 422 when the baseline session carries no agent\nversion and none was given, the resolved agent version has no run spec,\nthe tool policy uses cohort-version-scoped history, the config carries\nan override or tool policy the agent version's runtime capabilities do\nnot declare, or an evaluator version repeats.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
         "operationId": "create_replay_api_v1_replays_post",
         "parameters": [
           {

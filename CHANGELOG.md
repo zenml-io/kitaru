@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `evaluator_params` to the evaluation response, the params the producing evaluator ran with, `None` on a manual row.
 - Added a `replay_id` filter to evaluation listing, matching evaluations linked to a replay.
 - Added `min_score`, `max_score`, and `target_score` to evaluation results and evaluation responses, for displaying a score against its scale and against the score it should beat. All three are only accepted on a float evaluation.
+- Added the `ImporterBackedAdapter` base class in `kitaru.importer_adapter`. Install a provider's importer package with its `adapter` extra, then wrap an agent entrypoint with `run` or `run_async` to record it through that provider: the adapter activates a provider trace around the function, waits for the provider to finish the trace, fetches it, parses it with an importer parser, and ingests it as one session with origin `recorded`, or `replay` when running under a replay. The session is created under the agent of the running task and the Kitaru connection comes from the environment. When the function raises, the trace is still imported and the exception is re-raised. When the trace does not complete within the completeness timeout, the adapter creates a failed session carrying the trace id in its metadata instead of raising. The reusable `ingest_session` helper in `kitaru.task.importer` creates a session and ingests its nodes outside an import task.
+- `kitaru worker start` now emits the worker's runtime logs, with the level selected by `--log-level`.
+- Added runtime capabilities to the agent version run spec: `overrides` and `tool_policies` declare whether the runtime can apply replay overrides and non-passthrough tool policies. Both default to true, and clients read them from the agent version response.
 
 ### Changed
 
@@ -21,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `if_missing` baseline scoring now matches a prior evaluation by evaluator version and params rather than by evaluator version alone, so a baseline scored again with different params always gets a fresh task instead of being skipped.
 - Evaluation aggregates for an experiment run now read the replay links written at creation time, so a run's aggregate is pinned to the evaluations that scored its replays and a later evaluation of the same session no longer changes it. Aggregates now group by evaluator version in addition to name and data type, and `EvaluationAggregateResponse` exposes `evaluator_version_id`, `evaluator_name`, and `evaluator_version` per group. Manual evaluations no longer appear in run aggregates, they stay visible in listings and session views.
 - The evaluation `experiment_run_id` filter now matches through the replay link table instead of the producing task's job, so a standalone evaluation job's rows no longer match a run's filter and an evaluation adopted into a run through `if_missing` does.
+- Finished sessions that name an import source now accept node ingestion regardless of origin, so importer-backed adapter runs can ingest their nodes into recorded and replay sessions.
+- Creating a replay or starting an experiment run is now rejected with HTTP 422 when the config carries an override or a non-passthrough tool policy that the agent version's runtime capabilities do not declare.
+- Importer-backed adapters now reject a replay config carrying an override or a non-passthrough tool policy with a RuntimeError before the wrapped function runs.
+- `session_request` in `kitaru.task.importer` now takes the parsed session, the agent id, the provider, and the origin instead of the import task details.
 
 ### Fixed
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add the Langfuse importer-backed adapter, installed through the `adapter` extra.
+
 ## 0.1.1
 
 - Resolve legacy ingestion updates independently of JSONL row order and preserve explicit zero token counts.

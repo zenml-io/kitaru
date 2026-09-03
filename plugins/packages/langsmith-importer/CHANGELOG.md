@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add the LangSmith importer-backed adapter, installed through the `adapter` extra.
+
 ## 0.1.0
 
 - First stable release of the LangSmith trace importer.

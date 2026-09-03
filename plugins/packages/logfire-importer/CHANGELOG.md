@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add the Logfire importer-backed adapter, installed through the `adapter` extra.
+
 ## 0.1.1
 
 - Keep same-named sessions from different Logfire projects separate.
