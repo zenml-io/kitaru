@@ -368,15 +368,9 @@ async def _wait_for_managed_workspace(
                 "invalid_configuration",
                 "The workspace selected during login is not a Kitaru workspace.",
             )
-        if workspace.status == "available":
-            if workspace.server_url:
-                return workspace
-            raise CLIError(
-                "invalid_configuration",
-                f"Managed workspace {workspace.name!r} is available but has no "
-                "Kitaru server URL.",
-            )
-        if workspace.status not in {"not_initialized", "pending"}:
+        if workspace.status == "available" and workspace.server_url:
+            return workspace
+        if workspace.status not in {"not_initialized", "pending", "available"}:
             raise CLIError(
                 "invalid_configuration",
                 f"Managed workspace {workspace.name!r} is {workspace.status}.",

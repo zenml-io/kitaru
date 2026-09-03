@@ -316,7 +316,11 @@ async def test_bare_login_waits_for_a_pending_workspace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Poll a newly created workspace until its Kitaru service is available."""
-    responses = [managed_workspace(status="pending"), managed_workspace()]
+    responses = [
+        managed_workspace(status="pending"),
+        managed_workspace(server_url=None),
+        managed_workspace(),
+    ]
     delays: list[float] = []
 
     class FakeManagedCloudSession:
@@ -339,7 +343,7 @@ async def test_bare_login_waits_for_a_pending_workspace(
     )
 
     assert workspace.status == "available"
-    assert delays == [auth._WORKSPACE_POLL_INTERVAL_SECONDS]
+    assert delays == [auth._WORKSPACE_POLL_INTERVAL_SECONDS] * 2
 
 
 async def test_login_explains_when_kitaru_is_not_available(
