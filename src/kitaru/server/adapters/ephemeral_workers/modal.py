@@ -21,7 +21,7 @@ from kitaru.server.application.models.worker import EphemeralWorkerSpec
 from kitaru.server.ephemeral_worker_settings import EphemeralWorkerSettings
 
 
-class ModalEphemeralWorkers:
+class ModalEphemeralWorkersBackend:
     """Ephemeral workers starting one Modal sandbox per worker."""
 
     def __init__(self, settings: EphemeralWorkerSettings) -> None:

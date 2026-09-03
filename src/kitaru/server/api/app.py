@@ -303,10 +303,10 @@ def create_app(settings: APISettings) -> FastAPI:
             app.state.s3_blob_data_store = S3BlobDataStore(settings.BLOB_STORAGE.s3)
         if settings.EPHEMERAL_WORKER.backend is EphemeralWorkerBackend.MODAL:
             from kitaru.server.adapters.ephemeral_workers.modal import (
-                ModalEphemeralWorkers,
+                ModalEphemeralWorkersBackend,
             )
 
-            app.state.ephemeral_workers = ModalEphemeralWorkers(
+            app.state.ephemeral_workers = ModalEphemeralWorkersBackend(
                 settings.EPHEMERAL_WORKER
             )
         async for session in database.get_async_session():

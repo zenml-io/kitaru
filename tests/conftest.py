@@ -4018,7 +4018,7 @@ class FakeBlobDataStore:
         self._content.pop(sha256, None)
 
 
-class FakeEphemeralWorkers:
+class FakeEphemeralWorkersBackend:
     """In-memory ephemeral worker backend recording starts."""
 
     def __init__(self) -> None:

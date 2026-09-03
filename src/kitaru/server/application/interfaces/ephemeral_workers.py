@@ -18,7 +18,7 @@ from typing import Protocol
 from kitaru.server.application.models.worker import EphemeralWorkerSpec
 
 
-class EphemeralWorkers(Protocol):
+class EphemeralWorkersBackend(Protocol):
     """Ephemeral worker operations."""
 
     async def start(self, spec: EphemeralWorkerSpec) -> None:

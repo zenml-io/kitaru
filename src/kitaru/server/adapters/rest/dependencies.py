@@ -109,7 +109,9 @@ from kitaru.server.application.interfaces.blob_data_store import (
     BlobDataStore,
     BlobDataStores,
 )
-from kitaru.server.application.interfaces.ephemeral_workers import EphemeralWorkers
+from kitaru.server.application.interfaces.ephemeral_workers import (
+    EphemeralWorkersBackend,
+)
 from kitaru.server.application.interfaces.idempotency_key_repository import (
     IdempotencyKeyRepository,
 )
@@ -443,7 +445,7 @@ def get_blob_data_stores(
     return BlobDataStores(stores, settings.BLOB_STORAGE.backend)
 
 
-def get_ephemeral_workers(request: Request) -> EphemeralWorkers | None:
+def get_ephemeral_workers(request: Request) -> EphemeralWorkersBackend | None:
     """Return the ephemeral worker backend attached to the application state.
 
     Args:
@@ -452,7 +454,9 @@ def get_ephemeral_workers(request: Request) -> EphemeralWorkers | None:
     Returns:
         Ephemeral worker backend for this process, or None when none is configured.
     """
-    ephemeral_workers: EphemeralWorkers | None = request.app.state.ephemeral_workers
+    ephemeral_workers: EphemeralWorkersBackend | None = (
+        request.app.state.ephemeral_workers
+    )
     return ephemeral_workers
 
 
