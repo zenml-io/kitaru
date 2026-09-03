@@ -60,17 +60,18 @@ async def _query_spans(
 
 
 async def _list_root_span_ids(
-    project_id: str, since: datetime, until: datetime
-) -> list[str]:
+    client: httpx.AsyncClient, project_id: str, since: datetime, until: datetime
+) -> AsyncIterator[str]:
     """List root span ids of a project in ascending start-time order.
 
     Args:
+        client: HTTP client.
         project_id: Braintrust project id.
         since: Lower bound of root span start time.
         until: Upper bound of root span start time.
 
-    Returns:
-        Root span ids.
+    Yields:
+        Root span ids, one BTQL page at a time.
     """
     api_url = os.environ.get("BRAINTRUST_API_URL") or _DEFAULT_API_URL
     since_ts, until_ts = since.timestamp(), until.timestamp()
@@ -82,29 +83,27 @@ async def _list_root_span_ids(
         f" | sort: created asc"
         f" | limit: {_LIST_PAGE_SIZE}"
     )
-    root_span_ids: list[str] = []
     cursor: str | None = None
-    async with httpx.AsyncClient() as client:
-        while True:
-            body: dict[str, Any] = {"query": query}
-            if cursor is not None:
-                body["cursor"] = cursor
-            response = await client.post(
-                f"{api_url}/btql",
-                headers={
-                    "Authorization": f"Bearer {get_required_env('BRAINTRUST_API_KEY')}"
-                },
-                json=body,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            rows = payload["data"]
-            root_span_ids.extend(
-                str(row["root_span_id"]) for row in rows if row.get("root_span_id")
-            )
-            cursor = payload.get("cursor")
-            if not cursor:
-                return root_span_ids
+    while True:
+        body: dict[str, Any] = {"query": query}
+        if cursor is not None:
+            body["cursor"] = cursor
+        response = await client.post(
+            f"{api_url}/btql",
+            headers={
+                "Authorization": f"Bearer {get_required_env('BRAINTRUST_API_KEY')}"
+            },
+            json=body,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        rows = payload["data"]
+        for row in rows:
+            if row.get("root_span_id"):
+                yield str(row["root_span_id"])
+        cursor = payload.get("cursor")
+        if not cursor:
+            return
 
 
 def _roots_have_ended(rows: list[dict[str, Any]]) -> bool:
@@ -140,18 +139,25 @@ async def wait_for_spans(project_id: str, root_span_id: str) -> list[dict[str, A
             await asyncio.sleep(_POLL_INTERVAL)
 
 
-async def fetch_spans(project_id: str, root_span_id: str) -> list[dict[str, Any]]:
+async def fetch_spans(
+    project_id: str,
+    root_span_id: str,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict[str, Any]]:
     """Fetch the span rows of a trace once from the Braintrust API.
 
     Args:
         project_id: Braintrust project id.
         root_span_id: Braintrust root span id.
+        client: HTTP client, a new one when None.
 
     Returns:
         Fetched span rows.
     """
-    async with httpx.AsyncClient() as client:
+    if client is not None:
         return await _query_spans(client, project_id, root_span_id)
+    async with httpx.AsyncClient() as new_client:
+        return await _query_spans(new_client, project_id, root_span_id)
 
 
 def serialize_spans(rows: list[dict[str, Any]]) -> bytes:
@@ -186,11 +192,16 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         Trace payload bytes.
     """
     parsed = BraintrustFetchQuery.model_validate(query)
-    if parsed.trace_ids is not None:
-        trace_ids = parsed.trace_ids
-    else:
+    async with httpx.AsyncClient() as client:
+        if parsed.trace_ids is not None:
+            for trace_id in parsed.trace_ids:
+                rows = await fetch_spans(parsed.project_id, trace_id, client)
+                yield serialize_spans(rows)
+            return
+
         since, until = parsed.get_window()
-        trace_ids = await _list_root_span_ids(parsed.project_id, since, until)
-    for trace_id in trace_ids:
-        rows = await fetch_spans(parsed.project_id, trace_id)
-        yield serialize_spans(rows)
+        async for trace_id in _list_root_span_ids(
+            client, parsed.project_id, since, until
+        ):
+            rows = await fetch_spans(parsed.project_id, trace_id, client)
+            yield serialize_spans(rows)

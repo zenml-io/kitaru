@@ -73,17 +73,22 @@ async def wait_for_spans(trace_id: str) -> list[Any]:
         await asyncio.sleep(_POLL_INTERVAL)
 
 
-async def fetch_spans(trace_id: str, project: str | None = None) -> list[Any]:
+async def fetch_spans(
+    trace_id: str,
+    project: str | None = None,
+    client: AsyncClient | None = None,
+) -> list[Any]:
     """Fetch the spans of a trace once from the Phoenix span API.
 
     Args:
         trace_id: Phoenix trace id.
         project: Phoenix project identifier, the environment project when None.
+        client: Phoenix client, a new one when None.
 
     Returns:
         Fetched spans.
     """
-    return await AsyncClient().spans.get_spans(
+    return await (client or AsyncClient()).spans.get_spans(
         project_identifier=project or get_env_project_name(),
         trace_ids=[trace_id],
         limit=_SPAN_LIMIT,
@@ -121,11 +126,12 @@ def _span_start_time(span: Any) -> datetime | None:
 
 
 async def _list_root_trace_ids(
-    project: str, since: datetime, until: datetime
+    client: AsyncClient, project: str, since: datetime, until: datetime
 ) -> AsyncIterator[str]:
     """List root-span trace ids in a time window, paging through every page.
 
     Args:
+        client: Phoenix client.
         project: Phoenix project identifier.
         since: Lower bound of span start time.
         until: Upper bound of span start time.
@@ -133,7 +139,6 @@ async def _list_root_trace_ids(
     Yields:
         Trace ids in listing order.
     """
-    client = AsyncClient()
     seen: set[str] = set()
     window_start = since
     while True:
@@ -177,13 +182,14 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         Trace payload bytes, one per fetched trace.
     """
     parsed = PhoenixFetchQuery.model_validate(query)
+    client = AsyncClient()
 
     if parsed.trace_ids is not None:
         for trace_id in parsed.trace_ids:
-            yield serialize_spans(await fetch_spans(trace_id, parsed.project))
+            yield serialize_spans(await fetch_spans(trace_id, parsed.project, client))
         return
 
     since, until = parsed.get_window()
     project = parsed.project or get_env_project_name()
-    async for trace_id in _list_root_trace_ids(project, since, until):
-        yield serialize_spans(await fetch_spans(trace_id, parsed.project))
+    async for trace_id in _list_root_trace_ids(client, project, since, until):
+        yield serialize_spans(await fetch_spans(trace_id, parsed.project, client))

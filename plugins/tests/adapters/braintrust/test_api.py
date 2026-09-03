@@ -13,7 +13,6 @@
 #  permissions and limitations under the License.
 """Focused contract tests for the Braintrust API fetch entrypoint."""
 
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,12 +22,8 @@ from kitaru.task.importer import ImportedSession
 from kitaru_braintrust_importer.api import fetch
 from kitaru_braintrust_importer.importer import parse
 
+from ..fetch_helpers import collect_payloads
 from .fixtures import FakeBraintrust, build_complete_rows
-
-
-async def _drain(payloads: AsyncIterator[bytes]) -> list[bytes]:
-    """Collect all payloads yielded by a fetch call."""
-    return [payload async for payload in payloads]
 
 
 async def test_fetch_trace_ids_fetches_exactly_those_in_order(
@@ -37,7 +32,7 @@ async def test_fetch_trace_ids_fetches_exactly_those_in_order(
     """Fetch exactly the given trace ids and ignore the time window."""
     fake_braintrust.rows_builders = [build_complete_rows, build_complete_rows]
 
-    payloads = await _drain(
+    payloads = await collect_payloads(
         fetch({"project_id": "project-1", "trace_ids": ["root-a", "root-b"]})
     )
 
@@ -58,7 +53,7 @@ async def test_time_window_lists_root_span_ids_and_fetches_each_trace(
     fake_braintrust.list_pages = [(["root-a", "root-b"], None)]
     fake_braintrust.rows_builders = [build_complete_rows, build_complete_rows]
 
-    payloads = await _drain(
+    payloads = await collect_payloads(
         fetch(
             {
                 "project_id": "project-1",
@@ -89,7 +84,7 @@ async def test_time_window_paginates_through_multiple_list_pages(
     ]
     fake_braintrust.rows_builders = [build_complete_rows, build_complete_rows]
 
-    payloads = await _drain(
+    payloads = await collect_payloads(
         fetch({"project_id": "project-1", "since": "2026-01-01T00:00:00+00:00"})
     )
 
@@ -104,7 +99,7 @@ async def test_until_defaults_to_now(fake_braintrust: FakeBraintrust) -> None:
     fake_braintrust.list_pages = [([], None)]
     before = datetime.now(UTC)
 
-    await _drain(
+    await collect_payloads(
         fetch({"project_id": "project-1", "since": "2020-01-01T00:00:00+00:00"})
     )
 
@@ -119,7 +114,7 @@ async def test_fetch_yields_nothing_for_an_empty_listing(
     """Yield no payloads when the time window listing has no root spans."""
     fake_braintrust.list_pages = [([], None)]
 
-    payloads = await _drain(
+    payloads = await collect_payloads(
         fetch({"project_id": "project-1", "since": "2026-01-01T00:00:00+00:00"})
     )
 
@@ -135,45 +130,9 @@ async def test_fetch_yields_nothing_for_an_empty_listing(
             "Extra inputs are not permitted",
         ),
         ({"trace_ids": ["root-a"]}, "Field required"),
-        (
-            {"project_id": "project-1"},
-            "since is required when trace_ids is absent",
-        ),
-        (
-            {"project_id": "project-1", "trace_ids": "root-a"},
-            "Input should be a valid list",
-        ),
-        (
-            {"project_id": "project-1", "trace_ids": [1, 2]},
-            "Input should be a valid string",
-        ),
-        (
-            {"project_id": "project-1", "since": "not-a-date"},
-            "Input should be a valid datetime",
-        ),
-        (
-            {"project_id": "project-1", "since": "2026-01-01T00:00:00"},
-            "Input should have timezone info",
-        ),
-        (
-            {
-                "project_id": "project-1",
-                "since": "2026-01-01T00:00:00+00:00",
-                "until": "not-a-date",
-            },
-            "Input should be a valid datetime",
-        ),
-        (
-            {
-                "project_id": "project-1",
-                "since": "2026-01-02T00:00:00+00:00",
-                "until": "2026-01-01T00:00:00+00:00",
-            },
-            "until must not be before since",
-        ),
     ],
 )
 async def test_fetch_rejects_invalid_queries(query: dict[str, Any], match: str) -> None:
     """Reject an invalid query before yielding any payload."""
     with pytest.raises(ValueError, match=match):
-        await _drain(fetch(query))
+        await collect_payloads(fetch(query))

@@ -76,35 +76,59 @@ async def wait_for_trace(trace_id: str, min_timestamp: datetime) -> None:
             await asyncio.sleep(_POLL_INTERVAL)
 
 
-async def fetch_trace(trace_id: str, min_timestamp: datetime) -> bytes:
+async def _post_query(
+    client: httpx.AsyncClient, read_token: str, body: dict[str, Any]
+) -> bytes:
+    """Post one Query API request and return the raw NDJSON response body.
+
+    Args:
+        client: HTTP client.
+        read_token: Logfire read token.
+        body: Query API request body.
+
+    Returns:
+        NDJSON response body.
+    """
+    response = await client.post(
+        "/v2/query",
+        headers={
+            "accept": "application/x-ndjson",
+            "authorization": f"Bearer {read_token}",
+        },
+        json=body,
+    )
+    response.raise_for_status()
+    return response.content
+
+
+async def fetch_trace(
+    trace_id: str,
+    min_timestamp: datetime,
+    client: httpx.AsyncClient | None = None,
+) -> bytes:
     """Fetch a trace once from the Logfire Query API as NDJSON.
 
     Args:
         trace_id: Logfire trace id.
         min_timestamp: Minimum timestamp for the records query.
+        client: HTTP client, a new one when None.
 
     Returns:
         Trace payload bytes.
     """
     read_token = get_required_env("LOGFIRE_READ_TOKEN")
+    body = {
+        "sql": f"SELECT * FROM records WHERE trace_id = '{trace_id}'",
+        "min_timestamp": min_timestamp.isoformat(),
+    }
+    if client is not None:
+        return await _post_query(client, read_token, body)
     # Request the NDJSON stream the importer parser expects directly
     # because the query client only returns decoded results.
     async with httpx.AsyncClient(
         base_url=get_base_url_from_token(read_token)
-    ) as client:
-        response = await client.post(
-            "/v2/query",
-            headers={
-                "accept": "application/x-ndjson",
-                "authorization": f"Bearer {read_token}",
-            },
-            json={
-                "sql": f"SELECT * FROM records WHERE trace_id = '{trace_id}'",
-                "min_timestamp": min_timestamp.isoformat(),
-            },
-        )
-        response.raise_for_status()
-        return response.content
+    ) as new_client:
+        return await _post_query(new_client, read_token, body)
 
 
 def _rows_from_ndjson(content: bytes) -> list[dict[str, Any]]:
@@ -126,10 +150,13 @@ def _rows_from_ndjson(content: bytes) -> list[dict[str, Any]]:
     return rows
 
 
-async def _list_root_trace_ids(since: datetime, until: datetime) -> list[str]:
+async def _list_root_trace_ids(
+    client: httpx.AsyncClient, since: datetime, until: datetime
+) -> list[str]:
     """List distinct root trace ids started within a time window.
 
     Args:
+        client: HTTP client.
         since: Lower bound of trace start time.
         until: Upper bound of trace start time.
 
@@ -137,29 +164,22 @@ async def _list_root_trace_ids(since: datetime, until: datetime) -> list[str]:
         Trace ids ordered by start timestamp.
     """
     read_token = get_required_env("LOGFIRE_READ_TOKEN")
-    async with httpx.AsyncClient(
-        base_url=get_base_url_from_token(read_token)
-    ) as client:
-        response = await client.post(
-            "/v2/query",
-            headers={
-                "accept": "application/x-ndjson",
-                "authorization": f"Bearer {read_token}",
-            },
-            json={
-                "sql": (
-                    "SELECT DISTINCT trace_id, start_timestamp FROM records "
-                    "WHERE parent_span_id IS NULL "
-                    f"AND start_timestamp >= '{since.isoformat()}' "
-                    f"AND start_timestamp <= '{until.isoformat()}' "
-                    "ORDER BY start_timestamp"
-                ),
-                "min_timestamp": since.isoformat(),
-                "max_timestamp": until.isoformat(),
-            },
-        )
-        response.raise_for_status()
-        rows = _rows_from_ndjson(response.content)
+    content = await _post_query(
+        client,
+        read_token,
+        {
+            "sql": (
+                "SELECT DISTINCT trace_id, start_timestamp FROM records "
+                "WHERE parent_span_id IS NULL "
+                f"AND start_timestamp >= '{since.isoformat()}' "
+                f"AND start_timestamp <= '{until.isoformat()}' "
+                "ORDER BY start_timestamp"
+            ),
+            "min_timestamp": since.isoformat(),
+            "max_timestamp": until.isoformat(),
+        },
+    )
+    rows = _rows_from_ndjson(content)
 
     trace_ids: list[str] = []
     seen: set[str] = set()
@@ -186,15 +206,20 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         One NDJSON trace payload per fetched trace.
     """
     parsed = FetchQuery.model_validate(query)
-    if parsed.trace_ids is not None:
-        # The adapter approximates min_timestamp with the trace's own start
-        # time. Arbitrary trace ids carry no such reference point, so fall
-        # back to the earliest possible timestamp instead.
-        min_timestamp = parsed.since or datetime.min.replace(tzinfo=UTC)
-        for trace_id in parsed.trace_ids:
-            yield await fetch_trace(trace_id, min_timestamp)
-        return
+    read_token = get_required_env("LOGFIRE_READ_TOKEN")
+    async with httpx.AsyncClient(
+        base_url=get_base_url_from_token(read_token)
+    ) as client:
+        if parsed.trace_ids is not None:
+            # The adapter approximates min_timestamp with the trace's own
+            # start time. Arbitrary trace ids carry no such reference
+            # point, so fall back to the earliest possible timestamp
+            # instead.
+            min_timestamp = parsed.since or datetime.min.replace(tzinfo=UTC)
+            for trace_id in parsed.trace_ids:
+                yield await fetch_trace(trace_id, min_timestamp, client)
+            return
 
-    since, until = parsed.get_window()
-    for trace_id in await _list_root_trace_ids(since, until):
-        yield await fetch_trace(trace_id, since)
+        since, until = parsed.get_window()
+        for trace_id in await _list_root_trace_ids(client, since, until):
+            yield await fetch_trace(trace_id, since, client)

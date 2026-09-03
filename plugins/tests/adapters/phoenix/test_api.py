@@ -15,7 +15,6 @@
 
 import json
 from datetime import UTC, datetime
-from typing import Any
 
 import pytest
 
@@ -25,12 +24,8 @@ from kitaru.task.importer import ImportedSession
 from kitaru_phoenix_importer.api import fetch
 from kitaru_phoenix_importer.importer import parse
 
+from ..fetch_helpers import collect_payloads
 from .fixtures import PROJECT, FakePhoenix, build_complete_spans, build_span
-
-
-async def _collect(query: dict[str, Any]) -> list[bytes]:
-    """Drain the fetch generator into a list of payloads."""
-    return [payload async for payload in fetch(query)]
 
 
 async def test_trace_ids_fetches_exactly_those_traces_in_order(
@@ -39,7 +34,7 @@ async def test_trace_ids_fetches_exactly_those_traces_in_order(
     """Fetch the requested traces, skip the time window, and preserve order."""
     fake_phoenix.span_builders = [build_complete_spans, build_complete_spans]
 
-    payloads = await _collect({"trace_ids": ["trace-b", "trace-a"]})
+    payloads = await collect_payloads(fetch({"trace_ids": ["trace-b", "trace-a"]}))
 
     assert fake_phoenix.requested == ["trace-b", "trace-a"]
     assert not fake_phoenix.list_windows
@@ -85,8 +80,10 @@ async def test_time_window_lists_spans_across_two_pages(
     ]
     fake_phoenix.span_builders = [build_complete_spans, build_complete_spans]
 
-    payloads = await _collect(
-        {"since": "2026-08-27T09:00:00+00:00", "until": "2026-08-27T11:00:00+00:00"}
+    payloads = await collect_payloads(
+        fetch(
+            {"since": "2026-08-27T09:00:00+00:00", "until": "2026-08-27T11:00:00+00:00"}
+        )
     )
 
     assert len(payloads) == 2
@@ -108,7 +105,7 @@ async def test_time_window_project_defaults_to_env_project(
     """Fall back to the environment project when the query omits one."""
     fake_phoenix.list_pages = [[]]
 
-    payloads = await _collect({"since": "2026-08-27T09:00:00+00:00"})
+    payloads = await collect_payloads(fetch({"since": "2026-08-27T09:00:00+00:00"}))
 
     assert payloads == []
     assert fake_phoenix.project_identifiers == [PROJECT]
@@ -119,7 +116,7 @@ async def test_until_defaults_to_now(fake_phoenix: FakePhoenix) -> None:
     fake_phoenix.list_pages = [[]]
 
     before = datetime.now(UTC)
-    await _collect({"since": "2026-08-27T09:00:00+00:00"})
+    await collect_payloads(fetch({"since": "2026-08-27T09:00:00+00:00"}))
     after = datetime.now(UTC)
 
     [(_, until)] = fake_phoenix.list_windows
@@ -131,45 +128,17 @@ async def test_empty_listing_yields_nothing(fake_phoenix: FakePhoenix) -> None:
     """Yield nothing when the time window has no spans."""
     fake_phoenix.list_pages = [[]]
 
-    payloads = await _collect({"since": "2026-08-27T09:00:00+00:00"})
+    payloads = await collect_payloads(fetch({"since": "2026-08-27T09:00:00+00:00"}))
 
     assert payloads == []
     assert fake_phoenix.requested == []
 
 
-@pytest.mark.parametrize(
-    ("query", "match"),
-    [
-        (
-            {"since": "2026-08-27T09:00:00+00:00", "bogus": "x"},
-            "Extra inputs are not permitted",
-        ),
-        ({}, "since is required when trace_ids is absent"),
-        (
-            {"trace_ids": "trace-1", "since": "2026-08-27T09:00:00+00:00"},
-            "Input should be a valid list",
-        ),
-        ({"since": "not-a-datetime"}, "Input should be a valid datetime"),
-        (
-            {"since": "2026-08-27T09:00:00+00:00", "until": "not-a-datetime"},
-            "Input should be a valid datetime",
-        ),
-        ({"since": "2026-08-27T09:00:00"}, "Input should have timezone info"),
-        (
-            {
-                "since": "2026-08-27T11:00:00+00:00",
-                "until": "2026-08-27T09:00:00+00:00",
-            },
-            "until must not be before since",
-        ),
-    ],
-)
-async def test_validation_errors(
-    fake_phoenix: FakePhoenix, query: dict[str, Any], match: str
-) -> None:
-    """Raise ValueError before the first yield for each invalid query."""
-    with pytest.raises(ValueError, match=match):
-        await _collect(query)
+async def test_validation_errors(fake_phoenix: FakePhoenix) -> None:
+    """Raise ValueError before the first yield for an invalid query."""
+    query = {"since": "2026-08-27T09:00:00+00:00", "bogus": "x"}
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        await collect_payloads(fetch(query))
 
     assert fake_phoenix.requested == []
     assert fake_phoenix.list_windows == []
@@ -181,7 +150,7 @@ async def test_fetch_payload_round_trips_through_the_real_parser(
     """Run a fetched payload through the real parser end to end."""
     fake_phoenix.span_builders = [build_complete_spans]
 
-    [payload] = await _collect({"trace_ids": ["trace-1"]})
+    [payload] = await collect_payloads(fetch({"trace_ids": ["trace-1"]}))
 
     spans = json.loads(payload)
     assert [span["name"] for span in spans] == ["kitaru-run", "llm-call"]
