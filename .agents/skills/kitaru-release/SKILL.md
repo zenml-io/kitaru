@@ -39,13 +39,13 @@ uv run --no-project --with packaging==26.2 \
   python scripts/release_units.py list --format json
 ```
 
-For every selected unit, resolve its latest published tag. Compare that tag with `origin/develop` and inspect merged PRs in the range with `git log`, `git diff`, and `gh pr view`. Derive directly changed core and plugin units from `impact-paths` in `release/release-units.toml`. Read `requires:*` labels as indirect follow-ups, together with `Release context`, linked work, and existing changelog entries. A directly changed unit does not need a matching label.
+For every selected unit, resolve its latest published tag. Compare that tag with `origin/develop` and inspect merged PRs in the range with `git log`, `git diff`, and `gh pr view`. Derive directly changed core and plugin units from `impact-paths` in `release/release-units.toml`. Read `requires:*` labels as release follow-up metadata, together with `Release context`, linked work, and existing changelog entries. A directly changed unit does not need a matching label when it will be published in the next applicable release. If its publication is intentionally deferred past that release, attach its exact `release-label` and record the intended timing in `Release context`.
 
 For one plugin, start at that plugin's previous tag. For all plugins, calculate a separate range for every plugin release unit. `requires:plugins` means every unit is expected; report a unit with no implementation change as a red flag and require an explanation in the release PR.
 
 For core, collect requirements for frontend, plugins, skills, ZenML docs, website, examples, and additional context from source PRs. Read linked repositories with `gh` or existing local checkouts. Do not write to them.
 
-Compare declared follow-ups with the actual diff and PR context. Report unknown, conflicting, or stale signals. The diff identifies direct units; labels record work that the Kitaru diff cannot show. Repository state decides what can be released.
+Compare declared follow-ups with the actual diff and PR context. Report unknown, conflicting, or stale signals. The diff identifies direct units; labels record deferred publication or other work that the Kitaru diff cannot show. Repository state decides what can be released.
 
 For core, collect every merged PR label in the range and use the latest published stable core version as the input to the deterministic version rule:
 

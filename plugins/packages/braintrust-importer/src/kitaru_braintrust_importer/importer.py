@@ -19,6 +19,7 @@
 
 import hashlib
 import json
+import math
 import re
 from collections import defaultdict
 from collections.abc import Iterator
@@ -27,6 +28,8 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+
+from pydantic_core import PydanticSerializationError
 
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
@@ -37,6 +40,7 @@ from kitaru.task.importer import (
 )
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+_MAX_NESTED_DEPTH = 64
 _SESSION_FIELDS = (
     "session_id",
     "sessionId",
@@ -371,6 +375,11 @@ class InvalidImport(ValueError):
     """Raised when a Braintrust payload cannot be parsed."""
 
 
+def _safe_failure_text(value: str) -> str:
+    """Escape lone surrogates so failure diagnostics remain JSON serializable."""
+    return value.encode("utf-8", errors="backslashreplace").decode("utf-8")
+
+
 @dataclass(frozen=True, slots=True)
 class _Turn:
     """One source trace within a multi-turn session."""
@@ -384,9 +393,12 @@ class _Turn:
 
 def _digest(value: Any) -> str:
     """Return a stable digest for normalized JSON-compatible data."""
-    encoded = json.dumps(
-        value, sort_keys=True, separators=(",", ":"), default=str
-    ).encode()
+    try:
+        encoded = json.dumps(
+            value, sort_keys=True, separators=(",", ":"), default=str
+        ).encode()
+    except RecursionError as exc:
+        raise InvalidImport("Record exceeds the supported JSON nesting depth") from exc
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -404,8 +416,14 @@ def _decode_json(value: Any) -> Any:
         return value
     try:
         return json.loads(candidate)
+    except RecursionError as exc:
+        raise InvalidImport(
+            "Embedded JSON exceeds the supported nesting depth"
+        ) from exc
     except json.JSONDecodeError:
         return value
+    except ValueError as exc:
+        raise InvalidImport("Embedded JSON contains an invalid value") from exc
 
 
 def _path_value(value: Any, path: str) -> Any:
@@ -440,23 +458,28 @@ def _path_value(value: Any, path: str) -> Any:
 
 
 def _decimal(value: Any) -> Decimal | None:
-    """Parse one provider decimal."""
+    """Parse a finite, nonnegative cost."""
     if value is None or value == "":
         return None
     try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return None
+        parsed = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise InvalidImport("Cost must be a finite, nonnegative number") from exc
+    if not parsed.is_finite() or parsed < 0:
+        raise InvalidImport("Cost must be a finite, nonnegative number")
+    return parsed
 
 
-def _contains_tool_activity(value: Any) -> bool:
-    """Detect model output that references tool calls without explicit spans."""
+def _contains_tool_activity(value: Any, depth: int = 0) -> bool:
+    """Detect tool activity within a bounded container and decoding depth."""
+    if depth > _MAX_NESTED_DEPTH:
+        raise InvalidImport("Tool payload exceeds the supported nesting depth of 64")
     if isinstance(value, dict):
         if any(key in value for key in ("tool_calls", "toolCalls")):
             return True
-        return any(_contains_tool_activity(item) for item in value.values())
+        return any(_contains_tool_activity(item, depth + 1) for item in value.values())
     if isinstance(value, list):
-        return any(_contains_tool_activity(item) for item in value)
+        return any(_contains_tool_activity(item, depth + 1) for item in value)
     return False
 
 
@@ -492,14 +515,16 @@ def _parse_records(content: bytes) -> tuple[list[dict[str, Any]], bool]:
     value: Any
     try:
         value = json.loads(text)
-    except json.JSONDecodeError:
+    except RecursionError as exc:
+        raise InvalidImport("JSON exceeds the supported nesting depth") from exc
+    except ValueError:
         records: list[dict[str, Any]] = []
         for line_number, line in enumerate(text.splitlines(), start=1):
             if not line.strip():
                 continue
             try:
                 row = json.loads(line)
-            except json.JSONDecodeError as exc:
+            except (ValueError, RecursionError) as exc:
                 raise InvalidImport(f"Line {line_number} is not valid JSON") from exc
             if not isinstance(row, dict):
                 raise InvalidImport(
@@ -634,11 +659,14 @@ def _token_usage(record: dict[str, Any]) -> TokenUsage | None:
             values.append(None)
             continue
         try:
-            values.append(int(value))
-        except (TypeError, ValueError) as exc:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError) as exc:
             raise InvalidImport(
                 f"Braintrust metric '{field}' must be an integer"
             ) from exc
+        if parsed < 0 or (isinstance(value, float) and value < 0):
+            raise InvalidImport(f"Braintrust metric '{field}' must be nonnegative")
+        values.append(parsed)
     if all(value is None for value in values):
         return None
     try:
@@ -676,19 +704,26 @@ def _trace_id(record: dict[str, Any]) -> str:
 
 def _root_record(records: list[dict[str, Any]], trace_id: str) -> dict[str, Any]:
     """Choose the root record for one trace."""
-    for record in records:
-        if str(record.get("span_id") or "") == trace_id:
-            return record
+    matches = [
+        record for record in records if str(record.get("span_id") or "") == trace_id
+    ]
+    if matches:
+        return min(matches, key=_digest)
 
     def duration(record: dict[str, Any]) -> float:
         metrics = _metrics(record)
         start = metrics.get("start")
         end = metrics.get("end")
         if isinstance(start, (int, float)) and isinstance(end, (int, float)):
-            return end - start
+            duration = end - start
+            try:
+                if math.isfinite(duration):
+                    return duration
+            except OverflowError:
+                pass
         return -1
 
-    return max(records, key=duration)
+    return max(records, key=lambda record: (duration(record), _digest(record)))
 
 
 def _build_node_tree(
@@ -710,14 +745,29 @@ def _build_node_tree(
         for node, parent_external_id in nodes_with_parents
         if node.external_id is not None and parent_external_id in converted
     }
-    for external_id in external_ids:
+    depths: dict[str, int] = {}
+    for external_id in converted:
+        chain: list[str] = []
         seen: set[str] = set()
-        current = external_id
-        while current in parents:
+        current: str | None = external_id
+        while current is not None and current not in depths:
             if current in seen:
                 raise InvalidImport("The imported node graph contains a parent cycle")
             seen.add(current)
-            current = parents[current]
+            chain.append(current)
+            if len(chain) > _MAX_NESTED_DEPTH:
+                raise InvalidImport(
+                    "The imported node graph exceeds the maximum depth of 64"
+                )
+            current = parents.get(current)
+        depth = depths[current] if current is not None else 0
+        for node_id in reversed(chain):
+            depth += 1
+            if depth > _MAX_NESTED_DEPTH:
+                raise InvalidImport(
+                    "The imported node graph exceeds the maximum depth of 64"
+                )
+            depths[node_id] = depth
     roots: list[ImportedNode] = []
     for node, parent_external_id in nodes_with_parents:
         if parent_external_id in converted:
@@ -748,23 +798,39 @@ class BraintrustProjectLogImporter:
             ]
         )
         trace_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for record in records:
-            trace_records[_trace_id(record)].append(record)
+        failures: list[ImportFailure] = []
+        for line, record in enumerate(records, start=1):
+            try:
+                trace_records[_trace_id(record)].append(record)
+            except InvalidImport as exc:
+                failures.append(
+                    ImportFailure(line=line, error=_safe_failure_text(str(exc)))
+                )
 
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         sessions: list[ImportedSession] = []
-        failures: list[ImportFailure] = []
         for trace_id, rows in trace_records.items():
-            root = _root_record(rows, trace_id)
             try:
-                source_instance = _source_instance(root, params)
+                root = _root_record(rows, trace_id)
+                projects = {
+                    str(row["project_id"])
+                    for row in rows
+                    if row.get("project_id") not in (None, "")
+                }
+                if len(projects) > 1:
+                    raise InvalidImport(
+                        f"Trace '{trace_id}' contains conflicting project identities"
+                    )
+                source_instance = (
+                    next(iter(projects)) if projects else _source_instance(root, params)
+                )
                 session_id = _join_value(root, params, trace_id)
             except InvalidImport as exc:
                 failures.append(
                     ImportFailure(
                         line=len(failures) + 1,
-                        external_id=trace_id,
-                        error=str(exc),
+                        external_id=_safe_failure_text(trace_id),
+                        error=_safe_failure_text(str(exc)),
                     )
                 )
                 continue
@@ -772,26 +838,29 @@ class BraintrustProjectLogImporter:
 
         for (source_instance, source_id), session_records in sorted(grouped.items()):
             try:
-                sessions.append(
-                    self._parse_session(
-                        source_instance,
-                        source_id,
-                        session_records,
-                        full_export=full_export,
-                        file_framework=file_framework,
-                        join_on=(
-                            params.get("join_on")
-                            if isinstance(params.get("join_on"), str)
-                            else None
-                        ),
-                    )
+                session = self._parse_session(
+                    source_instance,
+                    source_id,
+                    session_records,
+                    full_export=full_export,
+                    file_framework=file_framework,
+                    join_on=(
+                        params.get("join_on")
+                        if isinstance(params.get("join_on"), str)
+                        else None
+                    ),
                 )
+                try:
+                    session.model_dump_json()
+                except PydanticSerializationError as exc:
+                    raise InvalidImport(f"Session cannot be serialized: {exc}") from exc
+                sessions.append(session)
             except InvalidImport as exc:
                 failures.append(
                     ImportFailure(
                         line=len(failures) + 1,
-                        external_id=source_id,
-                        error=str(exc),
+                        external_id=_safe_failure_text(source_id),
+                        error=_safe_failure_text(str(exc)),
                     )
                 )
         return [*sessions, *failures]
@@ -863,7 +932,12 @@ class BraintrustProjectLogImporter:
             }
             for row in ordered:
                 span_id = str(row.get("span_id") or row.get("id") or _digest(row)[:16])
-                parents = [str(value) for value in (row.get("span_parents") or [])]
+                raw_parents = row.get("span_parents")
+                if raw_parents is not None and not isinstance(raw_parents, list):
+                    raise InvalidImport(
+                        "Braintrust span_parents must be a list or null"
+                    )
+                parents = [str(value) for value in (raw_parents or [])]
                 parent_span_id = parents[-1] if parents else None
                 if parent_span_id and parent_span_id not in span_ids:
                     missing_parent = True
@@ -876,6 +950,19 @@ class BraintrustProjectLogImporter:
                 status = _node_status(row)
                 attributes = _dict(row.get("span_attributes"))
                 metadata = _dict(row.get("metadata"))
+                for field in (
+                    "model",
+                    "provider",
+                    "gen_ai.request.model",
+                    "gen_ai.response.model",
+                    "gen_ai.provider.name",
+                ):
+                    if metadata.get(field) is not None and not isinstance(
+                        metadata[field], str
+                    ):
+                        raise InvalidImport(
+                            f"Braintrust metadata '{field}' must be a string or null"
+                        )
                 nodes_with_parents.append(
                     (
                         ImportedNode(

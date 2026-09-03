@@ -524,3 +524,179 @@ def test_warns_about_incomplete_llm_span() -> None:
     warnings = session.metadata["normalization_warnings"]
     assert isinstance(warnings, list)
     assert "lack recorded input or output" in warnings[0]
+
+
+def boundary_event(trace: str = "bad", **fields: Any) -> dict[str, Any]:
+    """Build an independent trace for failure-boundary regressions."""
+    return {
+        "span_id": trace,
+        "root_span_id": trace,
+        "project_id": "project",
+        "span_attributes": {"type": "llm"},
+        "input": "hello",
+        "output": "world",
+        **fields,
+    }
+
+
+def assert_bad_trace_isolated(row: dict[str, Any]) -> None:
+    """Assert malformed input leaves both neighboring sessions available."""
+    result = list(
+        parse(
+            json.dumps(
+                [boundary_event("good1"), row, boundary_event("good2")]
+            ).encode(),
+            {},
+        )
+    )
+    assert {
+        item.external_id for item in result if isinstance(item, ImportedSession)
+    } == {"project:good1", "project:good2"}
+    assert len([item for item in result if isinstance(item, ImportFailure)]) == 1
+    for item in result:
+        item.model_dump_json()
+
+
+@pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity", "-0.1"])
+def test_invalid_cost_is_isolated(value: str) -> None:
+    assert_bad_trace_isolated(boundary_event(metrics={"estimated_cost": value}))
+
+
+@pytest.mark.parametrize(
+    "field", ["prompt_tokens", "completion_tokens", "prompt_cached_tokens"]
+)
+@pytest.mark.parametrize("value", [-1, -0.25, float("inf")])
+def test_invalid_tokens_are_isolated(field: str, value: Any) -> None:
+    assert_bad_trace_isolated(boundary_event(metrics={field: value}))
+
+
+@pytest.mark.parametrize("value", [False, 0, 1, "", "parent", {}])
+def test_non_list_parents_are_isolated(value: Any) -> None:
+    assert_bad_trace_isolated(boundary_event(span_parents=value))
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "model",
+        "provider",
+        "gen_ai.request.model",
+        "gen_ai.response.model",
+        "gen_ai.provider.name",
+    ],
+)
+@pytest.mark.parametrize("value", [False, 0, [], {}])
+def test_wrong_type_model_metadata_is_isolated(field: str, value: Any) -> None:
+    assert_bad_trace_isolated(boundary_event(metadata={field: value}))
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"output": "\ud800"},
+        {"span_id": "\ud800", "root_span_id": "\ud800"},
+        {"metadata": {"model": "\udfff"}},
+    ],
+)
+def test_surrogates_are_isolated(fields: dict[str, Any]) -> None:
+    assert_bad_trace_isolated(boundary_event(**fields))
+
+
+@pytest.mark.parametrize("depth", [63, 64, 65, 1200])
+def test_tree_depth_boundary(depth: int) -> None:
+    rows = [
+        boundary_event(span_id=f"node{i}", span_parents=[f"node{i - 1}"] if i else [])
+        for i in range(depth)
+    ]
+    result = list(parse(json.dumps([*rows, boundary_event("good")]).encode(), {}))
+    imported = [item for item in result if isinstance(item, ImportedSession)]
+    assert len(imported) == (2 if depth <= 64 else 1)
+    assert len(result) == 2
+    for item in result:
+        item.model_dump_json()
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_conflicting_project_rejects_trace(reverse: bool) -> None:
+    rows = [
+        boundary_event(span_id="a", project_id="first"),
+        boundary_event(span_id="b", project_id="second"),
+    ]
+    if reverse:
+        rows.reverse()
+    result = list(
+        parse(
+            json.dumps([*rows, boundary_event("good")]).encode(),
+            {"source_instance": "fallback"},
+        )
+    )
+    assert [
+        item.external_id for item in result if isinstance(item, ImportedSession)
+    ] == ["project:good"]
+    assert len([item for item in result if isinstance(item, ImportFailure)]) == 1
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_explicit_project_on_any_row_wins(reverse: bool) -> None:
+    rows = [boundary_event(span_id="a", project_id=None), boundary_event(span_id="b")]
+    if reverse:
+        rows.reverse()
+    result = list(parse(json.dumps(rows).encode(), {"source_instance": "fallback"}))
+    assert len(result) == 1
+    assert isinstance(result[0], ImportedSession)
+    assert result[0].external_id == "project:bad"
+
+
+def test_deep_tool_payload_is_isolated() -> None:
+    output: Any = "answer"
+    for _ in range(66):
+        output = [output]
+    assert_bad_trace_isolated(boundary_event(output=output))
+
+
+@pytest.mark.parametrize("value", [None, 0, 2])
+def test_valid_numeric_values_are_preserved(value: int | None) -> None:
+    result = sessions(
+        json.dumps(
+            [boundary_event(metrics={"estimated_cost": value, "prompt_tokens": value})]
+        ).encode()
+    )
+    assert len(result) == 1
+    node = result[0].nodes[0]
+    assert node.cost == (Decimal(value) if value is not None else None)
+    assert (node.tokens.input_tokens if node.tokens else None) == value
+
+
+def test_valid_unicode_survives() -> None:
+    result = sessions(
+        json.dumps(
+            [boundary_event(output="你好 🌍", metadata={"model": "模型 🌍"})]
+        ).encode()
+    )
+    assert result[0].nodes[0].outputs == "你好 🌍"
+    assert result[0].nodes[0].model == "模型 🌍"
+    result[0].model_dump_json()
+
+
+def test_embedded_json_decoder_recursion_is_isolated() -> None:
+    nested = "[" * 10000 + "0" + "]" * 10000
+    assert_bad_trace_isolated(
+        boundary_event(input=None, metadata={"input.value": nested})
+    )
+
+
+def test_deep_outer_json_raises_import_error() -> None:
+    with pytest.raises(InvalidImport):
+        list(parse(("[" * 10000 + "0" + "]" * 10000).encode(), {}))
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_rootless_trace_chooses_stable_join_identity(reverse: bool) -> None:
+    rows = [
+        boundary_event(span_id="a", metadata={"session_id": "first"}),
+        boundary_event(span_id="b", metadata={"session_id": "second"}),
+    ]
+    expected = sessions(json.dumps(rows).encode())[0].external_id
+    if reverse:
+        rows.reverse()
+    assert sessions(json.dumps(rows).encode())[0].external_id == expected

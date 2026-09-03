@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Add the Langfuse importer-backed adapter, installed through the `adapter` extra.
+- Isolate invalid numeric values, model fields, and unserializable payloads without discarding unrelated sessions; preserve explicit zero costs.
+- Bound observation depth and nested tool JSON scanning, validate before tool-link inference, and use iterative tree flattening.
 
 ## 0.1.1
 
