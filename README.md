@@ -44,7 +44,7 @@ Kitaru turns that history into something you can test:
 
 ## ⚡ Get started
 
-**1. Install and log in.** One line installs the CLI and MCP server (via `uv`), the coding-agent skills, and registers the MCP server with Claude Code and Codex. It ends by printing the two ways to get a server: `kitaru login --local` (Docker, free) or the managed cloud (14-day trial, no credit card required):
+**1. Install and log in.** Run this inside your agent's repository. It adds Kitaru to that project's environment with `uv` (so the worker can replay your agent next to its dependencies), installs the coding-agent skills, and registers the MCP server with Claude Code and Codex. Anywhere else it installs an isolated CLI instead. It ends by printing the two ways to get a server: `kitaru login --local` (Docker, free) or the managed cloud (14-day trial, no credit card required):
 
 ```bash
 curl -fsSL https://kitaru.ai/install | bash

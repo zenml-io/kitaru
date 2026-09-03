@@ -6,9 +6,14 @@
 #
 # What it does, in order:
 #   1. Makes sure `uv` is available (installs it from astral.sh if not).
-#   2. `uv tool install kitaru[cli,mcp,worker]` into an isolated environment,
-#      with a uv-managed Python if the machine has none. Puts `kitaru` and
-#      `kitaru-mcp` on PATH (~/.local/bin) for future terminals.
+#   2. Installs kitaru[cli,mcp,worker]. Where depends on where you run it:
+#        - inside a Python project (pyproject.toml or uv.lock in the current
+#          directory): `uv add` into that project's environment, so its worker
+#          can replay your agent alongside your agent's own dependencies;
+#        - anywhere else: `uv tool install` into an isolated environment, with
+#          `kitaru` and `kitaru-mcp` on PATH (~/.local/bin). Good for the CLI,
+#          MCP server, imports and evaluators; replays need the project form.
+#      --project / --global force either.
 #   3. Installs the Kitaru agent skills (zenml-io/kitaru-skills) from the
 #      repository tarball into ~/.agents/skills, plus ~/.claude/skills and
 #      ~/.codex/skills when those CLIs are installed. No Node needed.
@@ -42,7 +47,8 @@ KITARU_SKIP_MCP="${KITARU_SKIP_MCP:-0}"
 KITARU_QUIET="${KITARU_QUIET:-0}"
 KITARU_VERBOSE="${KITARU_VERBOSE:-0}"
 KITARU_WITH=()                                # extra packages, e.g. kitaru-pydantic-ai
-KITARU_PYTHON="${KITARU_PYTHON:-3.12}"        # uv-managed Python if none suitable
+KITARU_PYTHON="${KITARU_PYTHON:-3.12}"        # uv-managed Python if none suitable (global mode)
+KITARU_SCOPE="${KITARU_SCOPE:-auto}"          # auto | project | global
 KITARU_SKILLS_REPO="${KITARU_SKILLS_REPO:-zenml-io/kitaru-skills}"
 KITARU_LOCAL_URL="${KITARU_LOCAL_URL:-http://localhost:8000}"
 KITARU_MCP_MODE="${KITARU_MCP_MODE:-standard}"
@@ -57,6 +63,10 @@ Usage: install.sh [options]
   --pre               Allow pre-release versions
   --with=PKG          Also install PKG into the same environment (repeatable),
                       e.g. --with=kitaru-pydantic-ai --with=kitaru-langgraph
+  --project           Install into the Python project in the current directory
+                      (uv add). Default when a pyproject.toml or uv.lock is here.
+  --global            Install into an isolated uv tool environment on PATH.
+                      Default anywhere else.
   --server=URL        Point the MCP server at a team/self-hosted server
                       (default: the local server, http://localhost:8000)
   --no-skills         Skip installing the coding-agent skills
@@ -67,7 +77,7 @@ Usage: install.sh [options]
   -h, --help          This text
 
 Environment equivalents: KITARU_VERSION, KITARU_PRE=1, KITARU_SERVER,
-KITARU_SKIP_SKILLS=1, KITARU_SKIP_MCP=1,
+KITARU_SCOPE=project|global, KITARU_SKIP_SKILLS=1, KITARU_SKIP_MCP=1,
 KITARU_NO_MODIFY_PATH=1, KITARU_QUIET=1, KITARU_VERBOSE=1,
 KITARU_PYTHON (default 3.12), NO_COLOR.
 USAGE
@@ -82,6 +92,8 @@ while [ $# -gt 0 ]; do
     --with) shift; KITARU_WITH+=("${1:-}") ;;
     --server=*) KITARU_SERVER="${1#*=}" ;;
     --server) shift; KITARU_SERVER="${1:-}" ;;
+    --project) KITARU_SCOPE=project ;;
+    --global) KITARU_SCOPE=global ;;
     --no-skills) KITARU_SKIP_SKILLS=1 ;;
     --no-mcp) KITARU_SKIP_MCP=1 ;;
     --no-modify-path) KITARU_NO_MODIFY_PATH=1 ;;
@@ -215,42 +227,82 @@ persist_path() {
 }
 
 # ---------------------------------------------------------------------------
-# 2. kitaru CLI + MCP server, in an isolated tool environment
+# 2. kitaru CLI + MCP server: into this project, or an isolated tool env
 # ---------------------------------------------------------------------------
 SPEC="kitaru[cli,mcp,worker]"
 [ -n "$KITARU_VERSION" ] && SPEC="${SPEC}==${KITARU_VERSION}"
+EXTRA_PKGS=()
+for pkg in "${KITARU_WITH[@]:-}"; do [ -n "$pkg" ] && EXTRA_PKGS+=("$pkg"); done
 
-UV_ARGS=(tool install --upgrade --quiet --python "$KITARU_PYTHON")
-[ "$KITARU_PRE" = "1" ] && UV_ARGS+=(--prerelease allow)
-for pkg in "${KITARU_WITH[@]:-}"; do
-  [ -n "$pkg" ] && UV_ARGS+=(--with "$pkg")
-done
-
-step "Installing $SPEC"
-quiet "$UV" "${UV_ARGS[@]}" "$SPEC" || die "uv tool install failed. Re-run with --verbose for details."
-
-# uv puts tool executables in its tool bin dir; make sure future shells see it.
-TOOL_BIN="$("$UV" tool dir --bin 2>/dev/null || echo "$HOME/.local/bin")"
-case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) TOOL_BIN="$(cygpath -u "$TOOL_BIN" 2>/dev/null || echo "$TOOL_BIN")" ;; esac
-ensure_path "$TOOL_BIN"
-if [ "$KITARU_NO_MODIFY_PATH" = "1" ]; then
-  note "Not editing shell rc files (--no-modify-path). Make sure $TOOL_BIN is on your PATH."
-else
-  quiet "$UV" tool update-shell || true
-  persist_path "$TOOL_BIN"
+PROJECT_DIR="$PWD"
+if [ "$KITARU_SCOPE" = "auto" ]; then
+  if [ -f "$PROJECT_DIR/pyproject.toml" ] || [ -f "$PROJECT_DIR/uv.lock" ]; then
+    KITARU_SCOPE=project
+  else
+    KITARU_SCOPE=global
+  fi
 fi
 
-KITARU_BIN="$TOOL_BIN/kitaru"
-[ -x "$KITARU_BIN" ] || [ -x "$KITARU_BIN.exe" ] || die "uv reported success but $KITARU_BIN is missing. Re-run with --verbose."
-ok "kitaru $("$KITARU_BIN" --version 2>/dev/null) installed"
-note "$TOOL_BIN/kitaru, $TOOL_BIN/kitaru-mcp"
-# Warn if a different kitaru was already reachable on the PATH the user
-# started with (a pip or pipx install, say): depending on their rc order it
-# may keep winning in new terminals.
-hash -r
-RESOLVED_KITARU="$(PATH="$ORIG_PATH" command -v kitaru 2>/dev/null || true)"
-if [ -n "$RESOLVED_KITARU" ] && [ "$RESOLVED_KITARU" != "$KITARU_BIN" ] && [ "$RESOLVED_KITARU" != "$KITARU_BIN.exe" ]; then
-  warn "Another kitaru at $RESOLVED_KITARU ($("$RESOLVED_KITARU" --version 2>/dev/null || echo unknown)) shadows the one just installed. Remove it or put $TOOL_BIN first on PATH."
+if [ "$KITARU_SCOPE" = "project" ]; then
+  # ---- into the project in the current directory ---------------------------
+  # The worker runs your agent, so it has to live where your agent's
+  # dependencies live. `uv add` puts kitaru into this project's environment
+  # (creating .venv if needed) and records it in pyproject.toml.
+  [ -f "$PROJECT_DIR/pyproject.toml" ] || die "--project needs a pyproject.toml in $PROJECT_DIR (run \`uv init\` first, or use --global)."
+  step "Installing $SPEC into this project ($PROJECT_DIR)"
+  UV_ADD=(add --quiet)
+  [ "$KITARU_PRE" = "1" ] && UV_ADD+=(--prerelease allow)
+  quiet "$UV" "${UV_ADD[@]}" "$SPEC" "${EXTRA_PKGS[@]:+${EXTRA_PKGS[@]}}" \
+    || die "uv add failed (Kitaru needs Python >= 3.11; check requires-python). Re-run with --verbose for details."
+  VENV_DIR="${UV_PROJECT_ENVIRONMENT:-$PROJECT_DIR/.venv}"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) TOOL_BIN="$VENV_DIR/Scripts" ;;
+    *) TOOL_BIN="$VENV_DIR/bin" ;;
+  esac
+  KITARU_BIN="$TOOL_BIN/kitaru"
+  [ -x "$KITARU_BIN" ] || [ -x "$KITARU_BIN.exe" ] || die "uv reported success but $KITARU_BIN is missing. Re-run with --verbose."
+  ok "kitaru $("$KITARU_BIN" --version 2>/dev/null) installed into this project's environment"
+  note "environment: $VENV_DIR (recorded in pyproject.toml)"
+  note "run it as: uv run kitaru ...   (or activate the environment)"
+  # MCP: run through uv so the assistant gets this project's environment.
+  MCP_CMD=("$UV" run --directory "$PROJECT_DIR" kitaru-mcp)
+  CLAUDE_SCOPE=project
+else
+  # ---- isolated tool environment on PATH -----------------------------------
+  UV_ARGS=(tool install --upgrade --quiet --python "$KITARU_PYTHON")
+  [ "$KITARU_PRE" = "1" ] && UV_ARGS+=(--prerelease allow)
+  for pkg in "${EXTRA_PKGS[@]:+${EXTRA_PKGS[@]}}"; do UV_ARGS+=(--with "$pkg"); done
+
+  step "Installing $SPEC (isolated, on PATH)"
+  quiet "$UV" "${UV_ARGS[@]}" "$SPEC" || die "uv tool install failed. Re-run with --verbose for details."
+
+  # uv puts tool executables in its tool bin dir; make sure future shells see it.
+  TOOL_BIN="$("$UV" tool dir --bin 2>/dev/null || echo "$HOME/.local/bin")"
+  TOOL_ENV="$("$UV" tool dir 2>/dev/null || echo "$HOME/.local/share/uv/tools")/kitaru"
+  case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) TOOL_BIN="$(cygpath -u "$TOOL_BIN" 2>/dev/null || echo "$TOOL_BIN")" ;; esac
+  ensure_path "$TOOL_BIN"
+  if [ "$KITARU_NO_MODIFY_PATH" = "1" ]; then
+    note "Not editing shell rc files (--no-modify-path). Make sure $TOOL_BIN is on your PATH."
+  else
+    quiet "$UV" tool update-shell || true
+    persist_path "$TOOL_BIN"
+  fi
+
+  KITARU_BIN="$TOOL_BIN/kitaru"
+  [ -x "$KITARU_BIN" ] || [ -x "$KITARU_BIN.exe" ] || die "uv reported success but $KITARU_BIN is missing. Re-run with --verbose."
+  ok "kitaru $("$KITARU_BIN" --version 2>/dev/null) installed"
+  note "isolated environment: $TOOL_ENV   (uv tool; no other Python touched)"
+  note "commands: $TOOL_BIN/kitaru, $TOOL_BIN/kitaru-mcp"
+  # Warn if a different kitaru was already reachable on the PATH the user
+  # started with (a pip or pipx install, say): depending on their rc order it
+  # may keep winning in new terminals.
+  hash -r
+  RESOLVED_KITARU="$(PATH="$ORIG_PATH" command -v kitaru 2>/dev/null || true)"
+  if [ -n "$RESOLVED_KITARU" ] && [ "$RESOLVED_KITARU" != "$KITARU_BIN" ] && [ "$RESOLVED_KITARU" != "$KITARU_BIN.exe" ]; then
+    warn "Another kitaru at $RESOLVED_KITARU ($("$RESOLVED_KITARU" --version 2>/dev/null || echo unknown)) shadows the one just installed. Remove it or put $TOOL_BIN first on PATH."
+  fi
+  MCP_CMD=("$TOOL_BIN/kitaru-mcp")
+  CLAUDE_SCOPE=user
 fi
 
 # ---------------------------------------------------------------------------
@@ -321,7 +373,7 @@ fi
 # 4. MCP server registration
 # ---------------------------------------------------------------------------
 MCP_SERVER_URL="${KITARU_SERVER:-$KITARU_LOCAL_URL}"
-MCP_BIN="$TOOL_BIN/kitaru-mcp"
+MCP_ARGS=(--server "$MCP_SERVER_URL" --mode "$KITARU_MCP_MODE")
 
 if [ "$KITARU_SKIP_MCP" = "1" ]; then
   note "Skipping MCP registration (--no-mcp)"
@@ -329,18 +381,20 @@ else
   step "Registering the Kitaru MCP server"
   registered=0
   if have claude; then
-    # User-scope MCP servers live in ~/.claude.json. Snapshot it so a failed
-    # replace can put the previous entry back instead of leaving none.
-    CLAUDE_CFG="$HOME/.claude.json"; CLAUDE_CFG_BAK=""
+    # User-scope MCP servers live in ~/.claude.json, project-scope ones in
+    # ./.mcp.json. Snapshot the file so a failed replace can put the previous
+    # entry back instead of leaving none.
+    if [ "$CLAUDE_SCOPE" = "project" ]; then CLAUDE_CFG="$PROJECT_DIR/.mcp.json"; else CLAUDE_CFG="$HOME/.claude.json"; fi
+    CLAUDE_CFG_BAK=""
     if [ -f "$CLAUDE_CFG" ]; then
       CLAUDE_CFG_BAK="$(mktemp)"; cp "$CLAUDE_CFG" "$CLAUDE_CFG_BAK"
     fi
     if claude mcp get kitaru >/dev/null 2>&1; then
-      quiet claude mcp remove --scope user kitaru || true
+      quiet claude mcp remove --scope "$CLAUDE_SCOPE" kitaru || true
     fi
-    if quiet claude mcp add --scope user kitaru -- "$MCP_BIN" --server "$MCP_SERVER_URL" --mode "$KITARU_MCP_MODE" \
+    if quiet claude mcp add --scope "$CLAUDE_SCOPE" kitaru -- "${MCP_CMD[@]}" "${MCP_ARGS[@]}" \
        && claude mcp get kitaru >/dev/null 2>&1; then
-      ok "Claude Code: MCP server 'kitaru' (user scope)"; registered=1
+      ok "Claude Code: MCP server 'kitaru' ($CLAUDE_SCOPE scope)"; registered=1
     else
       if [ -n "$CLAUDE_CFG_BAK" ]; then cp "$CLAUDE_CFG_BAK" "$CLAUDE_CFG"; fi
       warn "Claude Code: could not register MCP server; previous config left as it was."
@@ -349,7 +403,7 @@ else
   fi
   if have codex; then
     # `codex mcp add` overwrites an existing name, so no remove first.
-    if quiet codex mcp add kitaru -- "$MCP_BIN" --server "$MCP_SERVER_URL" --mode "$KITARU_MCP_MODE"; then
+    if quiet codex mcp add kitaru -- "${MCP_CMD[@]}" "${MCP_ARGS[@]}"; then
       ok "Codex: MCP server 'kitaru'"; registered=1
     else
       warn "Codex: could not register MCP server"
@@ -357,7 +411,9 @@ else
   fi
   if [ "$registered" = "0" ]; then
     note "No Claude Code or Codex CLI found. For Cursor or any MCP client, add:"
-    note "  {\"mcpServers\":{\"kitaru\":{\"command\":\"$MCP_BIN\",\"args\":[\"--server\",\"$MCP_SERVER_URL\",\"--mode\",\"$KITARU_MCP_MODE\"]}}}"
+    MCP_JSON_ARGS=""
+    for a in "${MCP_CMD[@]:1}" "${MCP_ARGS[@]}"; do MCP_JSON_ARGS="$MCP_JSON_ARGS${MCP_JSON_ARGS:+,}\"$a\""; done
+    note "  {\"mcpServers\":{\"kitaru\":{\"command\":\"${MCP_CMD[0]}\",\"args\":[$MCP_JSON_ARGS]}}}"
   fi
 fi
 
@@ -367,7 +423,11 @@ fi
 say ""
 say "${C_GREEN}◆${C_RESET} ${C_BOLD}Kitaru is installed.${C_RESET}"
 say ""
-if [ "$(PATH="$ORIG_PATH" command -v kitaru 2>/dev/null || true)" != "$KITARU_BIN" ]; then
+if [ "$KITARU_SCOPE" = "project" ]; then
+  say "  Installed into this project's environment. Run it as ${C_BOLD}uv run kitaru ...${C_RESET}"
+  say "  (or activate $VENV_DIR)."
+  say ""
+elif [ "$(PATH="$ORIG_PATH" command -v kitaru 2>/dev/null || true)" != "$KITARU_BIN" ]; then
   say "  Open a new terminal so 'kitaru' is on your PATH."
   say ""
 fi
@@ -385,6 +445,11 @@ fi
 say ""
 say "  Then, in your agent's repo, tell your coding agent:"
 say "    ${C_BOLD}Use kitaru-investigation to investigate this agent.${C_RESET}"
+if [ "$KITARU_SCOPE" = "global" ]; then
+  say ""
+  say "  Replays run your agent, so they need Kitaru inside the agent's own project:"
+  say "  re-run this installer from that repo, or ${C_BOLD}uv add \"kitaru[cli,worker]\" kitaru-<adapter>${C_RESET} there."
+fi
 say ""
 say "  No agent yet?  ${C_BOLD}Use kitaru-guided-tour to show me Kitaru on the example agent.${C_RESET}"
 say "  Check setup:   kitaru doctor"

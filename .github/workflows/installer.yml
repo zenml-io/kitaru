@@ -99,6 +99,17 @@ jobs:
       - name: Re-run is an upgrade, not an error
         shell: bash
         run: cat install.sh | bash -s -- --no-skills --no-mcp --quiet
+      - name: Inside a project, install into that project's environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          mkdir demo-agent && cd demo-agent
+          uv init --quiet -p 3.12 --name demo-agent .
+          cat ../install.sh | bash -s -- --no-skills --no-mcp
+          grep -q 'kitaru\[cli,mcp,worker\]' pyproject.toml
+          uv run kitaru --version
+          uv run kitaru-mcp --help >/dev/null
       - name: A failed install must exit nonzero (quiet path)
         shell: bash
         # Regression for the status-swallowing bug in `quiet`: an impossible

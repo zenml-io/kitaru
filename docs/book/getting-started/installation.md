@@ -13,12 +13,12 @@ curl -fsSL https://kitaru.ai/install | bash
 
 What it does, in order:
 
-1. Installs the `kitaru` CLI and the `kitaru-mcp` server into an isolated [uv](https://docs.astral.sh/uv/) environment, installing uv first if you do not have it. No system Python is required.
+1. Installs the `kitaru` CLI and the `kitaru-mcp` server, installing [uv](https://docs.astral.sh/uv/) first if you do not have it. **Run it inside your agent's repository** (a directory with a `pyproject.toml` or `uv.lock`) and it does `uv add "kitaru[cli,mcp,worker]"` into that project's environment, which is where the worker has to live to replay your agent alongside its dependencies. Run it anywhere else and it installs an isolated `uv tool` environment with `kitaru` on your PATH, enough for the CLI, MCP server, imports and evaluators. `--project` and `--global` force either. No system Python is required.
 2. Installs the [agent skills](../agent-native/setup.md) into `~/.agents/skills`, and into `~/.claude/skills` and `~/.codex/skills` when Claude Code or Codex is installed.
 3. Registers the MCP server with Claude Code and Codex.
 4. Stops and prints the two ways to get a server: `kitaru login --local` for one on this machine in Docker (free, open source), or the managed cloud at https://cloud.kitaru.ai (14-day trial, no credit card required).
 
-Nothing needs `sudo`, everything lands under your home directory, and running it again upgrades. Options: `--server https://your-team.kitaru.ai` points the MCP server at a team server instead of the local one, `--with kitaru-pydantic-ai` adds an adapter to the same environment, `--no-skills` and `--no-mcp` skip steps, and `--no-modify-path` leaves your shell rc files alone. `bash -s -- --help` after the pipe lists everything.
+Nothing needs `sudo`, everything lands in the project or under your home directory, and running it again upgrades. Options: `--version 0.24.0` pins a release, `--server https://your-team.kitaru.ai` points the MCP server at a team server instead of the local one, `--with kitaru-pydantic-ai` adds an adapter to the same environment, `--no-skills` and `--no-mcp` skip steps, and `--no-modify-path` leaves your shell rc files alone. `bash -s -- --help` after the pipe lists everything.
 
 Prefer to do it by hand? The installer is three commands, which you can run yourself:
 
@@ -81,7 +81,7 @@ Node applications can also reuse a developer's selected CLI login without export
 
 ## Other ways to install
 
-The installer is the right choice for the CLI on a laptop. The paths below are for when Kitaru has to live inside a specific environment: your agent's own code, a Node project, CI, or a machine where you only want the skills.
+The installer run inside your agent's repository already installs into that project. The paths below are for adding the SDK by hand, Node projects, CI, or a machine where you only want the skills.
 
 Kitaru is three pieces: the **SDK + CLI**, a **server** your team shares (self-hosted, one per team), and **workers** that execute replays and evaluations in your environment. The CLI, server, and workers require **Python 3.11 or newer**; TypeScript agents use Node **22.22 or newer in the Node 22 release line** and connect to the same server. The server stores everything in **PostgreSQL**, provisioned for you locally by `kitaru login --local`; a [self-hosted deployment](../deploy/README.md) brings its own. Workers are plain processes (`kitaru worker start`) that run wherever your agent's environment lives; for containerized fleets, the published `zenmldocker/kitaru-worker` image works out of the box (see [Workers in production](../deploy/workers.md)).
 
