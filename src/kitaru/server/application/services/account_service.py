@@ -115,6 +115,7 @@ class AccountService:
         Raises:
             ForbiddenError: The caller may not create accounts.
             DuplicateAccountName: The account name is already registered.
+            ValidationError: The password is not supported by the hasher.
 
         Returns:
             Created account and its activation token when one was generated.
@@ -173,6 +174,9 @@ class AccountService:
         Args:
             name: Account name.
             password: Login password, hashed before storage.
+
+        Raises:
+            ValidationError: The password is not supported by the hasher.
 
         Returns:
             Stored account.
@@ -258,6 +262,7 @@ class AccountService:
             ForbiddenError: The caller may not set admin rights, writes its
                 own admin flag or another account's password or metadata,
                 or the current password is missing or does not match.
+            ValidationError: The password is not supported by the hasher.
 
         Returns:
             Updated account.
@@ -381,6 +386,7 @@ class AccountService:
         Raises:
             AccountNotFound: No user has this id.
             ForbiddenError: The account has no pending token or it does not match.
+            ValidationError: The password is not supported by the hasher.
 
         Returns:
             Activated account.
