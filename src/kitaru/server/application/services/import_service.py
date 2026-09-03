@@ -36,7 +36,7 @@ from kitaru.server.application.services.plugin_resolution import (
 )
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.job import Job
-from kitaru.server.domain.plugin import PluginKind
+from kitaru.server.domain.plugin import PluginKind, PluginVersionWithoutFetchEntrypoint
 from kitaru.server.domain.task import ImportTask
 
 
@@ -78,7 +78,8 @@ class ImportService:
 
         An omitted importer version resolves to the importer's latest. An
         agent version is stamped on every session the import creates, and
-        the sessions carry none when the command names none.
+        the sessions carry none when the command names none. An API import
+        requires an importer version with a fetch entrypoint.
 
         Args:
             command: Fields for the import.
@@ -90,6 +91,9 @@ class ImportService:
             PluginVersionNotFound: The importer has no version with this
                 number, or an evaluator config names an unknown version.
             BlobNotFound: No blob has the payload id.
+            PluginVersionWithoutFetchEntrypoint: The command sets
+                fetch_query and the resolved importer version carries no
+                fetch entrypoint.
             AgentNotFound: No agent has this id.
             AgentVersionNotFound: No agent version has this id.
             AgentVersionAgentMismatch: The agent version belongs to another
@@ -106,7 +110,14 @@ class ImportService:
         plugin_version = await resolve_plugin_version(
             plugin, command.version, self._plugins
         )
-        payload = await self._blobs.get(command.payload_blob_id)
+        if command.fetch_query is not None:
+            if plugin_version.source.fetch_entrypoint is None:
+                raise PluginVersionWithoutFetchEntrypoint(plugin_version.id)
+            payload_blob_id = None
+        else:
+            assert command.payload_blob_id is not None
+            payload = await self._blobs.get(command.payload_blob_id)
+            payload_blob_id = payload.id
         agent = await self._agents.get(command.agent_id)
         if command.agent_version_id is not None:
             await resolve_agent_id(
@@ -125,7 +136,8 @@ class ImportService:
                 agent_id=agent.id,
                 agent_version_id=command.agent_version_id,
                 importer_version_id=plugin_version.id,
-                payload_blob_id=payload.id,
+                payload_blob_id=payload_blob_id,
+                fetch_query=command.fetch_query,
                 params=command.params,
                 evaluators=evaluators,
             )

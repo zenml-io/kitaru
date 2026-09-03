@@ -20,10 +20,11 @@ from kitaru.server.application.models.auth import GrantKind
 from kitaru.server.application.services.resource_access import build_task_grants
 from kitaru.server.domain.task import (
     AgentTaskDetails,
+    ApiSourceSpec,
+    BlobSourceSpec,
     EvaluationTaskDetails,
     ImportTaskDetails,
     PackagePluginSpec,
-    PayloadSpec,
     ScriptPluginSpec,
     TaskRunSpec,
     TaskSpec,
@@ -92,10 +93,26 @@ def test_import_spec_grants_its_payload_and_script_blob() -> None:
         timeout_seconds=60,
         details=ImportTaskDetails(
             plugin=_script_plugin(plugin_blob_id),
-            payload=PayloadSpec(blob_id=payload_blob_id, sha256="abc"),
+            source=BlobSourceSpec(blob_id=payload_blob_id, sha256="abc"),
             agent_id=uuid.uuid4(),
         ),
     )
     assert build_task_grants(spec) == {
         GrantKind.BLOB: frozenset({payload_blob_id, plugin_blob_id})
     }
+
+
+def test_import_spec_with_api_source_grants_only_the_script_blob() -> None:
+    """Grant an API-sourced importer task only the blob holding its script."""
+    plugin_blob_id = uuid.uuid4()
+    spec = TaskSpec(
+        task_id=uuid.uuid4(),
+        kind=TaskKind.IMPORTER,
+        timeout_seconds=60,
+        details=ImportTaskDetails(
+            plugin=_script_plugin(plugin_blob_id),
+            source=ApiSourceSpec(entrypoint="pkg.api:fetch", query={}),
+            agent_id=uuid.uuid4(),
+        ),
+    )
+    assert build_task_grants(spec) == {GrantKind.BLOB: frozenset({plugin_blob_id})}

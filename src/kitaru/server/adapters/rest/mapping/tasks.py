@@ -17,12 +17,14 @@ import uuid
 
 from kitaru.api_models.v1.task import (
     AgentTaskDetails,
+    ApiSourceSpec,
+    BlobSourceSpec,
     EvaluationTaskDetails,
     ImportTaskDetails,
     PackagePluginSpec,
-    PayloadSpec,
     PluginSpec,
     ScriptPluginSpec,
+    SourceSpec,
     TaskClaimResponse,
     TaskDetails,
     TaskListParams,
@@ -46,13 +48,16 @@ from kitaru.server.domain.task import (
     AgentTaskDetails as DomainAgentTaskDetails,
 )
 from kitaru.server.domain.task import (
+    ApiSourceSpec as DomainApiSourceSpec,
+)
+from kitaru.server.domain.task import (
+    BlobSourceSpec as DomainBlobSourceSpec,
+)
+from kitaru.server.domain.task import (
     EvaluationTaskDetails as DomainEvaluationTaskDetails,
 )
 from kitaru.server.domain.task import (
     ImportTaskDetails as DomainImportTaskDetails,
-)
-from kitaru.server.domain.task import (
-    PayloadSpec as DomainPayloadSpec,
 )
 from kitaru.server.domain.task import (
     PluginSpec as DomainPluginSpec,
@@ -125,16 +130,20 @@ def _plugin_spec_to_response(plugin: DomainPluginSpec) -> PluginSpec:
     )
 
 
-def _payload_spec_to_response(payload: DomainPayloadSpec) -> PayloadSpec:
-    """Convert a payload spec value object to its response DTO.
+def _source_spec_to_response(
+    source: DomainBlobSourceSpec | DomainApiSourceSpec,
+) -> SourceSpec:
+    """Convert a source spec value object to its response DTO.
 
     Args:
-        payload: Payload the importer parses.
+        source: Where the payload comes from.
 
     Returns:
-        Payload spec DTO.
+        Source spec DTO.
     """
-    return PayloadSpec(blob_id=payload.blob_id, sha256=payload.sha256)
+    if isinstance(source, DomainBlobSourceSpec):
+        return BlobSourceSpec(blob_id=source.blob_id, sha256=source.sha256)
+    return ApiSourceSpec(entrypoint=source.entrypoint, query=source.query)
 
 
 def _run_spec_to_response(run_spec: DomainTaskRunSpec) -> TaskRunSpec:
@@ -176,7 +185,7 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
     if isinstance(details, DomainImportTaskDetails):
         return ImportTaskDetails(
             plugin=_plugin_spec_to_response(details.plugin),
-            payload=_payload_spec_to_response(details.payload),
+            source=_source_spec_to_response(details.source),
             provider=details.provider,
             agent_id=details.agent_id,
             params=details.params,

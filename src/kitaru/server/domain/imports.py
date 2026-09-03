@@ -17,10 +17,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.imports import ImportStats
-from kitaru.server.domain.base import DomainModel, NotFoundError
+from kitaru.server.domain.base import DomainModel, NotFoundError, ValidationError
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.replay_config import EvaluatorConfig
 
@@ -49,6 +49,20 @@ class ImportWithoutImporterVersion(NotFoundError):
         super().__init__(f"Import {import_id} no longer names an importer version")
 
 
+class InvalidImportSource(ValidationError):
+    """Raised when an import does not carry exactly one payload source."""
+
+    def __init__(self, import_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            import_id: Id of the import.
+        """
+        super().__init__(
+            f"Import {import_id} requires exactly one of payload_blob_id or fetch_query"
+        )
+
+
 class Import(DomainModel):
     """Import."""
 
@@ -58,13 +72,28 @@ class Import(DomainModel):
     agent_id: uuid.UUID
     agent_version_id: uuid.UUID | None = None
     importer_version_id: uuid.UUID | None = None
-    payload_blob_id: uuid.UUID
+    payload_blob_id: uuid.UUID | None = None
+    fetch_query: dict[str, Any] | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     evaluators: list[EvaluatorConfig] = Field(default_factory=list)
     stats: ImportStats | None = None
     error: str | None = None
     created: datetime | None = None
     updated: datetime | None = None
+
+    @model_validator(mode="after")
+    def _check_source(self) -> "Import":
+        """Require exactly one of payload_blob_id and fetch_query.
+
+        Raises:
+            InvalidImportSource: Both or neither field is set.
+
+        Returns:
+            The validated import.
+        """
+        if (self.payload_blob_id is None) == (self.fetch_query is None):
+            raise InvalidImportSource(self.id)
+        return self
 
     def record_stats(self, stats: ImportStats) -> None:
         """Set the stats of a completed import.

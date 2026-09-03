@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from kitaru.api_models.v1.imports import ImportResponse
+from kitaru.api_models.v1.imports import BlobImportSource, ImportResponse
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import (
     SessionListParams,
@@ -131,6 +131,7 @@ class StubImportClient:
             agent_id=self.agent.id,
             agent_version_id=self.agent_version.id,
             importer_version_id=self.importer_version.id,
+            source=BlobImportSource(blob_id=self.blob.id),
             payload_blob_id=self.blob.id,
             params={},
             evaluators=[],

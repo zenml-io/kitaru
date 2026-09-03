@@ -202,6 +202,23 @@ async def test_create_and_get(setup: Setup) -> None:
     assert loaded.evaluators[0].params == {"threshold": 0.5}
 
 
+async def test_api_import_round_trips_its_fetch_query(setup: Setup) -> None:
+    """An import fetching from an API stores its query and no payload blob."""
+    created = await setup.imports.create(
+        Import(
+            owner_id=setup.owner_id,
+            job_id=await setup.make_job_id(),
+            agent_id=setup.agent_id,
+            importer_version_id=setup.importer_version_id,
+            fetch_query={"since": "2026-08-01T00:00:00Z"},
+        )
+    )
+    assert created.payload_blob_id is None
+    loaded = await setup.imports.get(created.id)
+    assert loaded.fetch_query == {"since": "2026-08-01T00:00:00Z"}
+    assert loaded.payload_blob_id is None
+
+
 async def test_get_not_found(setup: Setup) -> None:
     """Raise for an unknown import id."""
     missing_id = uuid.uuid4()

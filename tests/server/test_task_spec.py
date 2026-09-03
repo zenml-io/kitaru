@@ -34,7 +34,12 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
-from kitaru.server.domain.task import ImportTaskDetails, ScriptPluginSpec
+from kitaru.server.domain.task import (
+    ApiSourceSpec,
+    BlobSourceSpec,
+    ImportTaskDetails,
+    ScriptPluginSpec,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -89,10 +94,47 @@ async def test_import_spec_is_built_from_the_import_row(
     assert spec.details.plugin.blob_id == code_blob.id
     assert spec.details.plugin.sha256 == code_blob.sha256
     assert spec.details.provider == "acme"
-    assert spec.details.payload.blob_id == payload.id
-    assert spec.details.payload.sha256 == payload.sha256
+    assert isinstance(spec.details.source, BlobSourceSpec)
+    assert spec.details.source.blob_id == payload.id
+    assert spec.details.source.sha256 == payload.sha256
     assert spec.details.agent_id == agent.id
     assert spec.details.params == {"delimiter": ","}
+
+
+async def test_import_spec_carries_the_api_source(
+    services: JobAndTaskServices,
+) -> None:
+    """An API import's spec names the fetch entrypoint and query, no payload."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.IMPORTER, name="api-importer"
+    )
+    code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(
+            blob_id=code_blob.id, entrypoint="run", fetch_entrypoint="fetch"
+        ),
+        display_version=None,
+    )
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    import_ = await services.imports.create(
+        Import(
+            owner_id=ACTOR.account.id,
+            job_id=job.id,
+            agent_id=agent.id,
+            importer_version_id=version.id,
+            fetch_query={"since": "2026-08-01T00:00:00Z"},
+        )
+    )
+    task = await create_import_task(services.tasks, job.id, import_id=import_.id)
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert isinstance(spec.details, ImportTaskDetails)
+    assert isinstance(spec.details.source, ApiSourceSpec)
+    assert spec.details.source.entrypoint == "fetch"
+    assert spec.details.source.query == {"since": "2026-08-01T00:00:00Z"}
 
 
 async def test_missing_import_row_cancels_the_task_at_claim(

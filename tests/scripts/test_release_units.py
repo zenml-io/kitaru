@@ -612,8 +612,8 @@ def test_inventory_rejects_an_adapter_in_the_default_catalog(
     ("old", "new"),
     [
         (
-            'requirement="kitaru-langfuse-importer==0.2.0"',
-            'requirement="kitaru-langfuse-importer==0.1.1"',
+            'requirement="kitaru-langfuse-importer[adapter]==0.2.0"',
+            'requirement="kitaru-langfuse-importer[adapter]==0.1.1"',
         ),
         ('display_version="0.2.0"', 'display_version="0.1.1"'),
     ],

@@ -41,6 +41,7 @@ from kitaru.server.domain.blob import BlobNotFound
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     InvalidPluginAgentScope,
+    InvalidPluginFetchEntrypoint,
     InvalidPluginProvider,
     PackagePluginSource,
     PluginKind,
@@ -410,6 +411,52 @@ async def test_create_version_script_source_with_known_blob(
     )
     assert isinstance(version.source, ScriptPluginSource)
     assert version.source.blob_id == blob.id
+
+
+async def test_create_version_evaluator_rejects_fetch_entrypoint(
+    evaluator_service: PluginService,
+) -> None:
+    """Reject a fetch entrypoint on an evaluator version."""
+    plugin = await evaluator_service.create_plugin(
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
+    )
+    with pytest.raises(InvalidPluginFetchEntrypoint):
+        await evaluator_service.create_version(
+            plugin.id,
+            PackagePluginSource(
+                requirement="kitaru-scorer==1.0.0",
+                entrypoint="pkg:score",
+                fetch_entrypoint="pkg:fetch",
+            ),
+            display_version=None,
+            actor=ACTOR,
+        )
+
+
+async def test_create_version_importer_round_trips_fetch_entrypoint(
+    importer_service: PluginService,
+) -> None:
+    """Store and reload an importer version's fetch entrypoint."""
+    plugin = await importer_service.create_plugin(
+        PluginCreate(
+            name="csv", description=None, provider="csv-provider", metadata={}
+        ),
+        actor=ACTOR,
+    )
+    created = await importer_service.create_version(
+        plugin.id,
+        PackagePluginSource(
+            requirement="kitaru-csv-importer==1.0.0",
+            entrypoint="pkg:parse",
+            fetch_entrypoint="pkg.api:fetch",
+        ),
+        display_version=None,
+        actor=ACTOR,
+    )
+    assert created.source.fetch_entrypoint == "pkg.api:fetch"
+    loaded = await importer_service.get_version(plugin.id, created.version, actor=ACTOR)
+    assert loaded.source.fetch_entrypoint == "pkg.api:fetch"
 
 
 async def test_get_version(evaluator_service: PluginService) -> None:
