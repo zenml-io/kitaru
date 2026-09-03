@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for the Modal worker launcher."""
+"""Tests for the Modal ephemeral worker backend."""
 
 import uuid
 from collections.abc import Callable
@@ -24,12 +24,12 @@ pytest.importorskip("modal")
 import modal
 
 from kitaru import images
-from kitaru.server.adapters.worker_launcher.modal import ModalWorkerLauncher
-from kitaru.server.application.models.worker import WorkerLaunch
-from kitaru.server.worker_launcher_settings import (
-    ModalWorkerLauncherSettings,
-    WorkerLauncherBackend,
-    WorkerLauncherSettings,
+from kitaru.server.adapters.ephemeral_workers.modal import ModalEphemeralWorkers
+from kitaru.server.application.models.worker import EphemeralWorkerSpec
+from kitaru.server.ephemeral_worker_settings import (
+    EphemeralWorkerBackend,
+    EphemeralWorkerSettings,
+    ModalEphemeralWorkerSettings,
 )
 
 
@@ -80,7 +80,7 @@ class _FakeModal(NamedTuple):
 
 @pytest.fixture
 def fake_modal(monkeypatch: pytest.MonkeyPatch) -> _FakeModal:
-    """Replace the Modal SDK entry points the launcher calls with fakes."""
+    """Replace the Modal SDK entry points the backend calls with fakes."""
     client = _FakeClient()
     app = object()
     image = object()
@@ -111,20 +111,20 @@ def _settings(
     command: str = "python -m kitaru.worker",
     cpu: float | None = None,
     memory_mb: int | None = None,
-) -> WorkerLauncherSettings:
-    return WorkerLauncherSettings(
-        backend=WorkerLauncherBackend.MODAL,
+) -> EphemeralWorkerSettings:
+    return EphemeralWorkerSettings(
+        backend=EphemeralWorkerBackend.MODAL,
         image=image,
         command=command,
         timeout_seconds=120,
-        modal=ModalWorkerLauncherSettings(
+        modal=ModalEphemeralWorkerSettings(
             token_id="ak-test", token_secret="as-test", cpu=cpu, memory_mb=memory_mb
         ),
     )
 
 
-def _command() -> WorkerLaunch:
-    return WorkerLaunch(
+def _spec() -> EphemeralWorkerSpec:
+    return EphemeralWorkerSpec(
         worker_id=uuid.uuid4(),
         worker_token="worker-token",
         server_url="https://kitaru.example.com",
@@ -132,14 +132,14 @@ def _command() -> WorkerLaunch:
     )
 
 
-async def test_launch_creates_sandbox_with_resource_limits(
+async def test_start_creates_sandbox_with_resource_limits(
     fake_modal: _FakeModal,
 ) -> None:
     """Start a sandbox with the credentials, image, env, and resource limits."""
-    launcher = ModalWorkerLauncher(_settings(cpu=2.0, memory_mb=4096))
-    command = _command()
+    ephemeral_workers = ModalEphemeralWorkers(_settings(cpu=2.0, memory_mb=4096))
+    spec = _spec()
 
-    await launcher.launch(command)
+    await ephemeral_workers.start(spec)
 
     assert fake_modal.from_credentials.calls == [(("ak-test", "as-test"), {})]
     assert fake_modal.from_registry.calls == [
@@ -157,9 +157,9 @@ async def test_launch_creates_sandbox_with_resource_limits(
     assert kwargs["app"] is fake_modal.app
     assert kwargs["image"] is fake_modal.image
     assert kwargs["env"] == {
-        "KITARU_API_URL": command.server_url,
+        "KITARU_API_URL": spec.server_url,
         "KITARU_API_TOKEN": "worker-token",
-        "KITARU_WORKER_ID": str(command.worker_id),
+        "KITARU_WORKER_ID": str(spec.worker_id),
         "KITARU_WORKER_TIMEOUT": "120",
     }
     assert kwargs["timeout"] == 120
@@ -168,26 +168,26 @@ async def test_launch_creates_sandbox_with_resource_limits(
     assert kwargs["client"] is fake_modal.client
 
 
-async def test_launch_without_resource_limits_passes_none_through(
+async def test_start_without_resource_limits_passes_none_through(
     fake_modal: _FakeModal,
 ) -> None:
     """Pass cpu and memory through as None when not configured."""
-    launcher = ModalWorkerLauncher(_settings())
+    ephemeral_workers = ModalEphemeralWorkers(_settings())
 
-    await launcher.launch(_command())
+    await ephemeral_workers.start(_spec())
 
     _, kwargs = fake_modal.sandbox_create.calls[0]
     assert kwargs["cpu"] is None
     assert kwargs["memory"] is None
 
 
-async def test_launch_splits_a_configured_command(fake_modal: _FakeModal) -> None:
+async def test_start_splits_a_configured_command(fake_modal: _FakeModal) -> None:
     """Run a configured command as its shell-split argument list."""
-    launcher = ModalWorkerLauncher(
+    ephemeral_workers = ModalEphemeralWorkers(
         _settings(command="/app/.venv/bin/python -m kitaru.worker --log-level debug")
     )
 
-    await launcher.launch(_command())
+    await ephemeral_workers.start(_spec())
 
     args, _ = fake_modal.sandbox_create.calls[0]
     assert args == (
@@ -199,28 +199,28 @@ async def test_launch_splits_a_configured_command(fake_modal: _FakeModal) -> Non
     )
 
 
-async def test_launch_defaults_to_the_published_worker_image(
+async def test_start_defaults_to_the_published_worker_image(
     fake_modal: _FakeModal, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Run the published worker image at the installed version when unset."""
     monkeypatch.setattr(images, "version", lambda name: "0.25.0")
-    launcher = ModalWorkerLauncher(_settings(image=None))
+    ephemeral_workers = ModalEphemeralWorkers(_settings(image=None))
 
-    await launcher.launch(_command())
+    await ephemeral_workers.start(_spec())
 
     assert fake_modal.from_registry.calls == [
         (("zenmldocker/kitaru-worker:0.25.0",), {})
     ]
 
 
-async def test_launch_reuses_the_client_across_launches(
+async def test_start_reuses_the_client_across_starts(
     fake_modal: _FakeModal,
 ) -> None:
-    """Open the Modal client once and reuse it for every launch."""
-    launcher = ModalWorkerLauncher(_settings())
+    """Open the Modal client once and reuse it for every start."""
+    ephemeral_workers = ModalEphemeralWorkers(_settings())
 
-    await launcher.launch(_command())
-    await launcher.launch(_command())
+    await ephemeral_workers.start(_spec())
+    await ephemeral_workers.start(_spec())
 
     assert len(fake_modal.from_credentials.calls) == 1
     assert len(fake_modal.sandbox_create.calls) == 2

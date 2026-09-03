@@ -114,7 +114,7 @@ from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.application.models.tag import TagFilter
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy
-from kitaru.server.application.models.worker import WorkerFilter, WorkerLaunch
+from kitaru.server.application.models.worker import EphemeralWorkerSpec, WorkerFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.blob_service import BlobService
@@ -4018,26 +4018,26 @@ class FakeBlobDataStore:
         self._content.pop(sha256, None)
 
 
-class FakeWorkerLauncher:
-    """In-memory worker launcher recording launches."""
+class FakeEphemeralWorkers:
+    """In-memory ephemeral worker backend recording starts."""
 
     def __init__(self) -> None:
-        """Initialize the launcher."""
-        self.launches: list[WorkerLaunch] = []
+        """Initialize the backend."""
+        self.starts: list[EphemeralWorkerSpec] = []
         self.error: Exception | None = None
 
-    async def launch(self, command: WorkerLaunch) -> None:
-        """Record a launch, or raise the configured error.
+    async def start(self, spec: EphemeralWorkerSpec) -> None:
+        """Record a start, or raise the configured error.
 
         Args:
-            command: Worker launch.
+            spec: Ephemeral worker spec.
 
         Raises:
             Exception: The fake was configured to raise.
         """
         if self.error is not None:
             raise self.error
-        self.launches.append(command)
+        self.starts.append(spec)
 
 
 async def create_blob(

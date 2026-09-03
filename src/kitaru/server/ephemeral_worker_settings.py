@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Worker launcher backend configuration."""
+"""Ephemeral worker backend configuration."""
 
 from enum import StrEnum
 from typing import Self
@@ -23,15 +23,15 @@ from kitaru.images import WORKER_IMAGE_REPOSITORY, get_image
 DEFAULT_WORKER_COMMAND = "python -m kitaru.worker"
 
 
-class WorkerLauncherBackend(StrEnum):
-    """Worker launcher backend."""
+class EphemeralWorkerBackend(StrEnum):
+    """Ephemeral worker backend."""
 
     NONE = "none"
     MODAL = "modal"
 
 
-class ModalWorkerLauncherSettings(BaseModel):
-    """Modal worker launcher settings."""
+class ModalEphemeralWorkerSettings(BaseModel):
+    """Modal ephemeral worker settings."""
 
     token_id: str
     token_secret: SecretStr
@@ -40,14 +40,14 @@ class ModalWorkerLauncherSettings(BaseModel):
     memory_mb: int | None = None
 
 
-class WorkerLauncherSettings(BaseModel):
-    """Worker launcher settings."""
+class EphemeralWorkerSettings(BaseModel):
+    """Ephemeral worker settings."""
 
-    backend: WorkerLauncherBackend = WorkerLauncherBackend.NONE
+    backend: EphemeralWorkerBackend = EphemeralWorkerBackend.NONE
     image: str | None = None
     command: str = DEFAULT_WORKER_COMMAND
     timeout_seconds: int = 3600
-    modal: ModalWorkerLauncherSettings | None = None
+    modal: ModalEphemeralWorkerSettings | None = None
 
     @model_validator(mode="after")
     def validate_backend_settings(self) -> Self:
@@ -59,10 +59,10 @@ class WorkerLauncherSettings(BaseModel):
         Returns:
             The validated settings object.
         """
-        if self.backend is WorkerLauncherBackend.MODAL and self.modal is None:
+        if self.backend is EphemeralWorkerBackend.MODAL and self.modal is None:
             raise ValueError(
-                "Set KITARU_SERVER_WORKER_LAUNCHER__MODAL__TOKEN_ID when "
-                "KITARU_SERVER_WORKER_LAUNCHER__BACKEND=modal"
+                "Set KITARU_SERVER_EPHEMERAL_WORKER__MODAL__TOKEN_ID when "
+                "KITARU_SERVER_EPHEMERAL_WORKER__BACKEND=modal"
             )
         return self
 
@@ -81,5 +81,5 @@ class WorkerLauncherSettings(BaseModel):
             return get_image(WORKER_IMAGE_REPOSITORY)
         except ValueError as error:
             raise ValueError(
-                f"Set KITARU_SERVER_WORKER_LAUNCHER__IMAGE, {error}"
+                f"Set KITARU_SERVER_EPHEMERAL_WORKER__IMAGE, {error}"
             ) from error

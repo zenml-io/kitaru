@@ -11,20 +11,20 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Worker launcher interface."""
+"""Ephemeral worker interface."""
 
 from typing import Protocol
 
-from kitaru.server.application.models.worker import WorkerLaunch
+from kitaru.server.application.models.worker import EphemeralWorkerSpec
 
 
-class WorkerLauncher(Protocol):
-    """Worker launch operations."""
+class EphemeralWorkers(Protocol):
+    """Ephemeral worker operations."""
 
-    async def launch(self, command: WorkerLaunch) -> None:
+    async def start(self, spec: EphemeralWorkerSpec) -> None:
         """Start a worker for a job.
 
         Args:
-            command: Worker launch.
+            spec: Ephemeral worker spec.
         """
         ...

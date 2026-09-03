@@ -118,7 +118,7 @@ class WorkerService:
 
         Args:
             job_id: Id of the job the worker drains.
-            runtime: Runtime the launcher reports.
+            runtime: Runtime the backend reports.
             actor: Caller context.
 
         Returns:

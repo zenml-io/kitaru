@@ -35,8 +35,8 @@ class WorkerFilter(ListFilter):
     include_stale: bool = False
 
 
-class WorkerLaunch(FrozenModel):
-    """Worker launch."""
+class EphemeralWorkerSpec(FrozenModel):
+    """Ephemeral worker spec."""
 
     worker_id: uuid.UUID
     worker_token: SecretStr

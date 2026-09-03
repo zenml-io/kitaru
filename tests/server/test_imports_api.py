@@ -26,7 +26,7 @@ from fastapi import FastAPI
 from conftest import (
     UNSCOPED_WORKER_SCOPE,
     FakeAccountRepository,
-    FakeWorkerLauncher,
+    FakeEphemeralWorkers,
     JobAndTaskServices,
     build_job_and_task_services,
     create_agent,
@@ -58,10 +58,10 @@ from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import ImportTask
-from kitaru.server.worker_launcher_settings import (
-    ModalWorkerLauncherSettings,
-    WorkerLauncherBackend,
-    WorkerLauncherSettings,
+from kitaru.server.ephemeral_worker_settings import (
+    EphemeralWorkerBackend,
+    EphemeralWorkerSettings,
+    ModalEphemeralWorkerSettings,
 )
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
@@ -74,19 +74,19 @@ def services() -> JobAndTaskServices:
 
 
 @pytest.fixture
-def launcher() -> FakeWorkerLauncher:
-    """Provide a fake worker launcher recording launches."""
-    return FakeWorkerLauncher()
+def ephemeral_workers() -> FakeEphemeralWorkers:
+    """Provide a fake ephemeral worker backend recording starts."""
+    return FakeEphemeralWorkers()
 
 
 @pytest.fixture
 async def app(
     services: JobAndTaskServices,
-    launcher: FakeWorkerLauncher,
+    ephemeral_workers: FakeEphemeralWorkers,
     auth_service: AuthService,
     account_repository: FakeAccountRepository,
 ) -> FastAPI:
-    """Provide the app wired to fake-backed services and a fake worker launcher."""
+    """Provide the app wired to fake services and a fake ephemeral worker backend."""
     # auth_service resolves tokens against this same repository, so the actor
     # a worker token is minted for must be loadable from it.
     await account_repository.create(ACCOUNT)
@@ -96,11 +96,11 @@ async def app(
             SECRET_ENCRYPTION_KEY="test-encryption-key",
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
             SERVER_URL="https://kitaru.example.com",
-            WORKER_LAUNCHER=WorkerLauncherSettings(
-                backend=WorkerLauncherBackend.MODAL,
+            EPHEMERAL_WORKER=EphemeralWorkerSettings(
+                backend=EphemeralWorkerBackend.MODAL,
                 image="zenmldocker/kitaru-worker:1.0.0",
                 timeout_seconds=120,
-                modal=ModalWorkerLauncherSettings(
+                modal=ModalEphemeralWorkerSettings(
                     token_id="ak-test", token_secret="as-test"
                 ),
             ),
@@ -115,7 +115,7 @@ async def app(
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
     app.dependency_overrides[get_auth_session] = stub_auth_session
-    app.state.worker_launcher = launcher
+    app.state.ephemeral_workers = ephemeral_workers
     return app
 
 
@@ -242,25 +242,25 @@ async def test_create_import_not_found_for_unknown_payload(
     assert response.status_code == 404
 
 
-async def test_create_import_launches_an_ephemeral_worker(
+async def test_create_import_starts_an_ephemeral_worker(
     client: httpx.AsyncClient,
     services: JobAndTaskServices,
-    launcher: FakeWorkerLauncher,
+    ephemeral_workers: FakeEphemeralWorkers,
     auth_service: AuthService,
 ) -> None:
-    """Register and launch an ephemeral worker pinned to the job."""
+    """Register and start an ephemeral worker pinned to the job."""
     response = await client.post(
         "/api/v1/imports", json=await _create_import_inputs(services)
     )
     assert response.status_code == 201
     job_id = uuid.UUID(response.json()["id"])
 
-    assert len(launcher.launches) == 1
-    launch = launcher.launches[0]
-    assert launch.job_id == job_id
-    assert launch.server_url == "https://kitaru.example.com"
+    assert len(ephemeral_workers.starts) == 1
+    spec = ephemeral_workers.starts[0]
+    assert spec.job_id == job_id
+    assert spec.server_url == "https://kitaru.example.com"
 
-    worker = await services.workers.get(launch.worker_id)
+    worker = await services.workers.get(spec.worker_id)
     assert worker.name == f"job-{job_id}"
     assert worker.scope == WorkerScope(
         claims=UNSCOPED_WORKER_SCOPE.claims, job_id=job_id
@@ -268,23 +268,23 @@ async def test_create_import_launches_an_ephemeral_worker(
     assert worker.runtime.platform == "modal"
     assert worker.metadata == {"ephemeral": "true"}
 
-    context = await auth_service.resolve(launch.worker_token.get_secret_value())
+    context = await auth_service.resolve(spec.worker_token.get_secret_value())
     assert isinstance(context.principal, WorkerPrincipal)
-    assert context.principal.worker_id == launch.worker_id
+    assert context.principal.worker_id == spec.worker_id
 
-    decoded = JWTToken.decode(launch.worker_token.get_secret_value(), local_settings())
+    decoded = JWTToken.decode(spec.worker_token.get_secret_value(), local_settings())
     expected_expiry = datetime.now(UTC) + timedelta(
         seconds=120 + local_settings().TASK_TOKEN_EXPIRY_LEEWAY_SECONDS
     )
     assert abs((decoded.expires_at - expected_expiry).total_seconds()) < 5
 
 
-async def test_create_import_skips_the_launch_when_a_live_worker_covers_the_task(
+async def test_create_import_skips_the_start_when_a_live_worker_covers_the_task(
     client: httpx.AsyncClient,
     services: JobAndTaskServices,
-    launcher: FakeWorkerLauncher,
+    ephemeral_workers: FakeEphemeralWorkers,
 ) -> None:
-    """Skip registering and launching a worker when a live worker covers the task."""
+    """Skip registering and starting a worker when a live worker covers the task."""
     live_worker = await create_worker(
         services.workers,
         ACCOUNT.id,
@@ -296,38 +296,38 @@ async def test_create_import_skips_the_launch_when_a_live_worker_covers_the_task
     )
     assert response.status_code == 201
 
-    assert launcher.launches == []
+    assert ephemeral_workers.starts == []
     workers, _ = await services.workers.query(WorkerFilter(), None)
     assert [worker.id for worker in workers] == [live_worker.id]
 
 
-async def test_create_import_without_a_launcher_registers_nothing(
+async def test_create_import_without_an_ephemeral_worker_backend_registers_nothing(
     app: FastAPI,
     client: httpx.AsyncClient,
     services: JobAndTaskServices,
-    launcher: FakeWorkerLauncher,
+    ephemeral_workers: FakeEphemeralWorkers,
 ) -> None:
-    """Skip registering and launching a worker when no launcher is configured."""
-    app.state.worker_launcher = None
+    """Skip registering and starting a worker when no backend is configured."""
+    app.state.ephemeral_workers = None
 
     response = await client.post(
         "/api/v1/imports", json=await _create_import_inputs(services)
     )
     assert response.status_code == 201
 
-    assert launcher.launches == []
+    assert ephemeral_workers.starts == []
     workers, _ = await services.workers.query(WorkerFilter(), None)
     assert workers == []
 
 
-async def test_create_import_returns_201_when_the_launch_fails(
+async def test_create_import_returns_201_when_the_start_fails(
     client: httpx.AsyncClient,
     services: JobAndTaskServices,
-    launcher: FakeWorkerLauncher,
+    ephemeral_workers: FakeEphemeralWorkers,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Observe HTTP 201 when the background launch fails, with the failure logged."""
-    launcher.error = RuntimeError("modal is down")
+    """Observe HTTP 201 when the background start fails, with the failure logged."""
+    ephemeral_workers.error = RuntimeError("modal is down")
 
     with caplog.at_level(logging.ERROR):
         response = await client.post(
@@ -342,7 +342,7 @@ async def test_create_import_returns_201_when_the_launch_fails(
 
     messages = [record.getMessage() for record in caplog.records]
     assert any(
-        "Failed to launch worker" in message
+        "Failed to start worker" in message
         and str(worker.id) in message
         and job_id in message
         for message in messages

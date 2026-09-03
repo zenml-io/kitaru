@@ -11,27 +11,27 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Worker launcher backed by Modal sandboxes."""
+"""Ephemeral workers backed by Modal sandboxes."""
 
 import shlex
 
 import modal
 
-from kitaru.server.application.models.worker import WorkerLaunch
-from kitaru.server.worker_launcher_settings import WorkerLauncherSettings
+from kitaru.server.application.models.worker import EphemeralWorkerSpec
+from kitaru.server.ephemeral_worker_settings import EphemeralWorkerSettings
 
 
-class ModalWorkerLauncher:
-    """Worker launcher starting one Modal sandbox per worker."""
+class ModalEphemeralWorkers:
+    """Ephemeral workers starting one Modal sandbox per worker."""
 
-    def __init__(self, settings: WorkerLauncherSettings) -> None:
-        """Initialize the launcher.
+    def __init__(self, settings: EphemeralWorkerSettings) -> None:
+        """Initialize the backend.
 
         Args:
-            settings: Worker launcher settings.
+            settings: Ephemeral worker settings.
         """
         # Settings validation requires the modal sub-model under the modal
-        # backend, the only backend that constructs this launcher.
+        # backend, the only backend that constructs this adapter.
         assert settings.modal is not None
         self._modal_settings = settings.modal
         self._image = settings.get_image()
@@ -46,7 +46,7 @@ class ModalWorkerLauncher:
             Authenticated client.
         """
         # from_credentials returns the client with its connection open and the
-        # SDK exposes no close, so one client serves every launch.
+        # SDK exposes no close, so one client serves every start.
         if self._client is None:
             self._client = await modal.Client.from_credentials.aio(
                 self._modal_settings.token_id,
@@ -54,11 +54,11 @@ class ModalWorkerLauncher:
             )
         return self._client
 
-    async def launch(self, command: WorkerLaunch) -> None:
+    async def start(self, spec: EphemeralWorkerSpec) -> None:
         """Start a worker for a job.
 
         Args:
-            command: Worker launch.
+            spec: Ephemeral worker spec.
         """
         client = await self._get_client()
         app = await modal.App.lookup.aio(
@@ -69,9 +69,9 @@ class ModalWorkerLauncher:
             app=app,
             image=modal.Image.from_registry(self._image),
             env={
-                "KITARU_API_URL": command.server_url,
-                "KITARU_API_TOKEN": command.worker_token.get_secret_value(),
-                "KITARU_WORKER_ID": str(command.worker_id),
+                "KITARU_API_URL": spec.server_url,
+                "KITARU_API_TOKEN": spec.worker_token.get_secret_value(),
+                "KITARU_WORKER_ID": str(spec.worker_id),
                 "KITARU_WORKER_TIMEOUT": str(self._timeout_seconds),
             },
             timeout=self._timeout_seconds,

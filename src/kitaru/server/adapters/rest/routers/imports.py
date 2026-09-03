@@ -24,17 +24,17 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_app_settings,
     get_auth_service,
+    get_ephemeral_workers,
     get_job_service,
-    get_worker_launcher,
     get_worker_service,
 )
+from kitaru.server.adapters.rest.ephemeral_workers import start_ephemeral_worker
 from kitaru.server.adapters.rest.mapping.imports import import_create_to_command
 from kitaru.server.adapters.rest.mapping.jobs import job_to_response
 from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
-from kitaru.server.adapters.rest.worker_launch import schedule_worker_launch
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.interfaces.worker_launcher import WorkerLauncher
+from kitaru.server.application.interfaces.ephemeral_workers import EphemeralWorkers
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.worker_service import WorkerService
@@ -53,15 +53,18 @@ async def create_import(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
     settings: Annotated[APISettings, Depends(get_app_settings)],
-    launcher: Annotated[WorkerLauncher | None, Depends(get_worker_launcher)],
+    ephemeral_workers: Annotated[
+        EphemeralWorkers | None, Depends(get_ephemeral_workers)
+    ],
     background_tasks: BackgroundTasks,
 ) -> JobResponse:
     """Import sessions from a payload blob, as a job holding one importer task.
 
     Clients observe HTTP 201 on success and 404 when the importer, the
-    version, the payload blob, or the agent does not exist. With a worker
-    launcher configured and no live worker covering the job's task, a worker
-    pinned to the job is registered and launched after the response is sent.
+    version, the payload blob, or the agent does not exist. With an ephemeral
+    worker backend configured and no live worker covering the job's task, a
+    worker pinned to the job is registered and started after the response is
+    sent.
 
     Args:
         body: Import create request.
@@ -70,7 +73,7 @@ async def create_import(
         auth_service: Authentication service for the current request.
         actor: Caller context.
         settings: API settings for this process.
-        launcher: Worker launcher, None when no backend is configured.
+        ephemeral_workers: Ephemeral worker backend, None when none is configured.
         background_tasks: Tasks run after the response is sent.
 
     Returns:
@@ -78,13 +81,13 @@ async def create_import(
     """
     command = import_create_to_command(body)
     job = await service.create_import(command, actor=actor)
-    if launcher is not None:
-        await schedule_worker_launch(
+    if ephemeral_workers is not None:
+        await start_ephemeral_worker(
             job,
             service,
             worker_service,
             auth_service,
-            launcher,
+            ephemeral_workers,
             settings,
             background_tasks,
             actor,

@@ -21,7 +21,7 @@ from pydantic_settings import SettingsConfigDict
 
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.config import Settings
-from kitaru.server.worker_launcher_settings import WorkerLauncherBackend
+from kitaru.server.ephemeral_worker_settings import EphemeralWorkerBackend
 
 
 def _get_otel_alias(name: str) -> AliasChoices:
@@ -185,8 +185,8 @@ class APISettings(Settings):
         return self
 
     @model_validator(mode="after")
-    def validate_worker_launcher_settings(self) -> Self:
-        """Validate worker launcher settings.
+    def validate_ephemeral_worker_settings(self) -> Self:
+        """Validate ephemeral worker settings.
 
         Raises:
             ValueError: A required setting is not set.
@@ -195,11 +195,11 @@ class APISettings(Settings):
             The validated settings object.
         """
         if (
-            self.WORKER_LAUNCHER.backend is not WorkerLauncherBackend.NONE
+            self.EPHEMERAL_WORKER.backend is not EphemeralWorkerBackend.NONE
             and not self.SERVER_URL
         ):
             raise ValueError(
                 "Set KITARU_SERVER_SERVER_URL when "
-                f"KITARU_SERVER_WORKER_LAUNCHER__BACKEND={self.WORKER_LAUNCHER.backend}"
+                f"KITARU_SERVER_EPHEMERAL_WORKER__BACKEND={self.EPHEMERAL_WORKER.backend}"
             )
         return self

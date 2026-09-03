@@ -109,10 +109,10 @@ from kitaru.server.application.interfaces.blob_data_store import (
     BlobDataStore,
     BlobDataStores,
 )
+from kitaru.server.application.interfaces.ephemeral_workers import EphemeralWorkers
 from kitaru.server.application.interfaces.idempotency_key_repository import (
     IdempotencyKeyRepository,
 )
-from kitaru.server.application.interfaces.worker_launcher import WorkerLauncher
 from kitaru.server.application.models.auth import (
     AuthContext,
     TaskAuthContext,
@@ -443,17 +443,17 @@ def get_blob_data_stores(
     return BlobDataStores(stores, settings.BLOB_STORAGE.backend)
 
 
-def get_worker_launcher(request: Request) -> WorkerLauncher | None:
-    """Return the worker launcher attached to the application state.
+def get_ephemeral_workers(request: Request) -> EphemeralWorkers | None:
+    """Return the ephemeral worker backend attached to the application state.
 
     Args:
         request: Incoming request.
 
     Returns:
-        Worker launcher for this process, or None when no backend is configured.
+        Ephemeral worker backend for this process, or None when none is configured.
     """
-    worker_launcher: WorkerLauncher | None = request.app.state.worker_launcher
-    return worker_launcher
+    ephemeral_workers: EphemeralWorkers | None = request.app.state.ephemeral_workers
+    return ephemeral_workers
 
 
 def get_blob_service(

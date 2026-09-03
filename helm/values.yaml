@@ -340,12 +340,12 @@ server:
       # this value directly.
       secretAccessKey:
 
-  # Worker launcher backend configuration.
-  workerLauncher:
-    # The worker launcher backend to use. Use one of:
+  # Ephemeral worker backend configuration.
+  ephemeralWorker:
+    # The ephemeral worker backend to use. Use one of:
     #
-    # none - Do not launch ephemeral workers.
-    # modal - Launch ephemeral workers as Modal sandboxes.
+    # none - Do not start ephemeral workers.
+    # modal - Start ephemeral workers as Modal sandboxes.
     #
     # server.serverURL must be set when a backend is configured, since the
     # sandbox dials back to the server.

@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Ephemeral worker launch scheduling."""
+"""Ephemeral worker start scheduling."""
 
 import logging
 
@@ -21,10 +21,10 @@ from pydantic import SecretStr
 from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.interfaces.worker_launcher import WorkerLauncher
+from kitaru.server.application.interfaces.ephemeral_workers import EphemeralWorkers
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.task import TaskFilter
-from kitaru.server.application.models.worker import WorkerLaunch
+from kitaru.server.application.models.worker import EphemeralWorkerSpec
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.job import Job
@@ -32,26 +32,26 @@ from kitaru.server.domain.job import Job
 logger = logging.getLogger(__name__)
 
 
-async def schedule_worker_launch(
+async def start_ephemeral_worker(
     job: Job,
     job_service: JobService,
     worker_service: WorkerService,
     auth_service: AuthService,
-    launcher: WorkerLauncher,
+    ephemeral_workers: EphemeralWorkers,
     settings: APISettings,
     background_tasks: BackgroundTasks,
     actor: AuthContext,
 ) -> None:
-    """Register a worker for the job and launch it after the response.
+    """Register a worker for the job and start it after the response.
 
-    A live worker whose scope covers the job's task suppresses the launch.
+    A live worker whose scope covers the job's task suppresses the start.
 
     Args:
         job: Created job.
         job_service: Job service.
         worker_service: Worker service.
         auth_service: Authentication service for the current request.
-        launcher: Worker launcher.
+        ephemeral_workers: Ephemeral worker backend.
         settings: API settings for this process.
         background_tasks: Tasks run after the response is sent.
         actor: Caller context.
@@ -61,15 +61,15 @@ async def schedule_worker_launch(
         return
     worker = await worker_service.register_ephemeral_worker(
         job.id,
-        WorkerRuntime(platform=settings.WORKER_LAUNCHER.backend.value),
+        WorkerRuntime(platform=settings.EPHEMERAL_WORKER.backend.value),
         actor=actor,
     )
     issued_token = auth_service.issue_worker_token(
         worker_id=worker.id,
         account_id=actor.account.id,
-        timeout_seconds=settings.WORKER_LAUNCHER.timeout_seconds,
+        timeout_seconds=settings.EPHEMERAL_WORKER.timeout_seconds,
     )
-    launch = WorkerLaunch(
+    spec = EphemeralWorkerSpec(
         worker_id=worker.id,
         worker_token=SecretStr(issued_token.token),
         server_url=settings.SERVER_URL,
@@ -77,19 +77,21 @@ async def schedule_worker_launch(
     )
     # Background tasks run after the route commits, so the worker is persisted
     # in the DB by then.
-    background_tasks.add_task(_launch_worker, launcher, launch)
+    background_tasks.add_task(_start_worker, ephemeral_workers, spec)
 
 
-async def _launch_worker(launcher: WorkerLauncher, launch: WorkerLaunch) -> None:
-    """Launch a worker, logging a failure instead of raising.
+async def _start_worker(
+    ephemeral_workers: EphemeralWorkers, spec: EphemeralWorkerSpec
+) -> None:
+    """Start a worker, logging a failure instead of raising.
 
     Args:
-        launcher: Worker launcher.
-        launch: Worker launch.
+        ephemeral_workers: Ephemeral worker backend.
+        spec: Ephemeral worker spec.
     """
     try:
-        await launcher.launch(launch)
+        await ephemeral_workers.start(spec)
     except Exception:
         logger.exception(
-            "Failed to launch worker %s for job %s.", launch.worker_id, launch.job_id
+            "Failed to start worker %s for job %s.", spec.worker_id, spec.job_id
         )
