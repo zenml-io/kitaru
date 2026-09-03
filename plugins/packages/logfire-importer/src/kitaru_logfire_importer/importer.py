@@ -26,12 +26,15 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from pydantic_core import PydanticSerializationError
+
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_PARENT_DEPTH = 64
 _DEFAULT_JOIN_PATHS = (
     "attributes.session.id",
     "attributes.session_id",
@@ -93,6 +96,11 @@ class _Turn:
     ended_at: datetime | None
 
 
+def _escape_failure_text(value: str) -> str:
+    """Escape unencodable characters in failure diagnostics only."""
+    return value.encode("utf-8", errors="backslashreplace").decode("utf-8")
+
+
 def _decode_json(value: Any) -> Any:
     """Decode JSON-encoded query columns while preserving ordinary strings."""
     if not isinstance(value, str):
@@ -104,6 +112,8 @@ def _decode_json(value: Any) -> Any:
         return json.loads(stripped)
     except json.JSONDecodeError:
         return value
+    except (RecursionError, ValueError) as exc:
+        raise InvalidImport("Embedded JSON exceeds decoding limits") from exc
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -125,14 +135,17 @@ def _datetime(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _integer(value: Any) -> int | None:
-    """Parse an integer attribute."""
+def _parse_token_count(value: Any) -> int | None:
+    """Parse a nonnegative token count."""
     if value in (None, ""):
         return None
     try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise InvalidImport("Token count must be a nonnegative integer") from exc
+    if parsed < 0 or (isinstance(value, float) and value < 0):
+        raise InvalidImport("Token count must be a nonnegative integer")
+    return parsed
 
 
 def _decimal(value: Any) -> Decimal | None:
@@ -140,9 +153,12 @@ def _decimal(value: Any) -> Decimal | None:
     if value in (None, ""):
         return None
     try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return None
+        parsed = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise InvalidImport("Cost must be finite and nonnegative") from exc
+    if not parsed.is_finite() or parsed < 0:
+        raise InvalidImport("Cost must be finite and nonnegative")
+    return parsed
 
 
 def _parse_records(content: bytes) -> list[dict[str, Any]]:
@@ -157,14 +173,14 @@ def _parse_records(content: bytes) -> list[dict[str, Any]]:
         raise InvalidImport("Import file contains no JSON records")
     try:
         decoded = json.loads(text)
-    except json.JSONDecodeError:
+    except (ValueError, RecursionError):
         values: list[Any] = []
         for line_number, line in enumerate(text.splitlines(), start=1):
             if not line.strip():
                 continue
             try:
                 values.append(json.loads(line))
-            except json.JSONDecodeError as exc:
+            except (ValueError, RecursionError) as exc:
                 raise InvalidImport(f"Line {line_number} is not valid JSON") from exc
     else:
         if isinstance(decoded, dict) and isinstance(decoded.get("data"), list):
@@ -318,7 +334,10 @@ def _node_status(record: dict[str, Any]) -> NodeStatus:
         record.get("otel_status_code") or record.get("status_code") or ""
     ).casefold()
     level = record.get("level")
-    level_number = _integer(level)
+    try:
+        level_number = int(level) if level is not None else None
+    except (TypeError, ValueError, OverflowError):
+        level_number = None
     if status == "error" or record.get("is_exception") is True:
         return NodeStatus.FAILED
     if isinstance(level, str) and level.casefold() in {"error", "fatal"}:
@@ -336,28 +355,28 @@ def _payload(record: dict[str, Any], *names: str) -> Any:
 def _tokens(record: dict[str, Any]) -> TokenUsage | None:
     """Map OpenTelemetry GenAI token attributes."""
     values = (
-        _integer(
+        _parse_token_count(
             _attribute(
                 record,
                 "gen_ai.usage.input_tokens",
                 "gen_ai.usage.prompt_tokens",
             )
         ),
-        _integer(
+        _parse_token_count(
             _attribute(
                 record,
                 "gen_ai.usage.output_tokens",
                 "gen_ai.usage.completion_tokens",
             )
         ),
-        _integer(
+        _parse_token_count(
             _attribute(
                 record,
                 "gen_ai.usage.details.cache_read_tokens",
                 "gen_ai.usage.cached_input_tokens",
             )
         ),
-        _integer(_attribute(record, "gen_ai.usage.details.reasoning_tokens")),
+        _parse_token_count(_attribute(record, "gen_ai.usage.details.reasoning_tokens")),
     )
     if all(value is None for value in values):
         return None
@@ -418,14 +437,26 @@ def _build_node_tree(
         for node, parent in nodes_with_parents
         if node.external_id is not None and parent in by_id
     }
+    depths: dict[str, int] = {}
     for node_id in parents:
+        path: list[str] = []
         seen: set[str] = set()
         current: str | None = node_id
-        while current in parents:
+        while current in parents and current not in depths:
             if current in seen:
                 raise InvalidImport("The imported span graph contains a parent cycle")
             seen.add(current)
+            path.append(current)
+            if len(path) >= MAX_PARENT_DEPTH:
+                raise InvalidImport("The imported span graph exceeds 64 parent levels")
             current = parents[current]
+        depth = depths.get(current, 1) if current is not None else 1
+        for ancestor in reversed(path):
+            depth += 1
+            if depth > MAX_PARENT_DEPTH:
+                raise InvalidImport("The imported span graph exceeds 64 parent levels")
+            depths[ancestor] = depth
+
     roots: list[ImportedNode] = []
     for node, parent in nodes_with_parents:
         if parent in by_id:
@@ -452,7 +483,9 @@ class LogfireRecordsImporter:
                 failures.append(
                     ImportFailure(
                         line=line_number,
-                        external_id=str(trace_id) if trace_id else None,
+                        external_id=_escape_failure_text(str(trace_id))
+                        if trace_id
+                        else None,
                         error="Logfire row lacks trace_id or span_id",
                     )
                 )
@@ -490,8 +523,8 @@ class LogfireRecordsImporter:
                 failures.append(
                     ImportFailure(
                         line=len(failures) + 1,
-                        external_id=trace_id,
-                        error=str(exc),
+                        external_id=_escape_failure_text(trace_id),
+                        error=_escape_failure_text(str(exc)),
                     )
                 )
                 continue
@@ -503,7 +536,7 @@ class LogfireRecordsImporter:
 
         for (source_instance, session_id), session_traces in sorted(grouped.items()):
             try:
-                yield self._parse_session(
+                session = self._parse_session(
                     source_instance,
                     session_id,
                     session_traces,
@@ -511,11 +544,13 @@ class LogfireRecordsImporter:
                     join_paths=join_paths[(source_instance, session_id)],
                     trace_fallback=(source_instance, session_id) in fallback_sessions,
                 )
-            except InvalidImport as exc:
+                session.model_dump_json()
+                yield session
+            except (InvalidImport, PydanticSerializationError) as exc:
                 yield ImportFailure(
                     line=len(failures) + 1,
-                    external_id=session_id,
-                    error=str(exc),
+                    external_id=_escape_failure_text(session_id),
+                    error=_escape_failure_text(str(exc)),
                 )
         yield from failures
 

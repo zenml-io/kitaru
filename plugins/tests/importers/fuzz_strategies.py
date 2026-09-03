@@ -42,9 +42,9 @@ IMPORTERS: dict[str, ModuleType] = {
 _ISO_TIMES = st.sampled_from(
     ["2026-01-01T00:00:00Z", "2026-01-01T00:00:00.123456+00:00", "1970-01-01T00:00:00Z"]
 )
-_FINITE_DECIMAL_STRINGS = st.decimals(
+_DECIMAL_STRINGS = st.decimals(
     allow_nan=False, allow_infinity=False, min_value=-1e6, max_value=1e6, places=6
-).map(str)
+).map(str) | st.sampled_from(["NaN", "sNaN", "Infinity", "-Infinity"])
 _WEIRD_TEXT = st.one_of(
     st.text(),
     st.text(alphabet="²³¹٣٤۵", min_size=1, max_size=4),
@@ -53,12 +53,9 @@ _WEIRD_TEXT = st.one_of(
     # Hypothesis's per-example entropy budget that the derandomized "ci"
     # profile fails the data_too_large health check before it finds anything.
     st.sampled_from(["x" * 1_000, "\u00e9" * 5_000, " " * 2_000]),
-    # #905: "\ud800" (a lone UTF-16 surrogate) survives into
-    # ImportedSession/ImportedNode string fields and then blows up
-    # model_dump_json() with a PydanticSerializationError, so it is excluded
-    # until the importers or those models sanitize lone surrogates.
-    # test_lone_surrogate_yields_serializable_session pins it.
-    st.sampled_from(["", " ", "\x00", "null", "NaN", "Infinity", "-0", "1e999"]),
+    st.sampled_from(
+        ["", " ", "\x00", "\ud800", "\udfff", "null", "NaN", "Infinity", "-0", "1e999"]
+    ),
 )
 
 
@@ -86,10 +83,8 @@ def _mostly(
 # Several importers re-parse string-valued fields as JSON (langfuse's
 # `input`/`output`, phoenix's `input.value`), so a document encoded inside a
 # string reaches a second parse that the outer `json.loads` never guarded.
-# #905: the encoded nesting is kept to a handful of levels, far below the depth
-# of about 50 at which the uncapped re-parse helpers (`_contains_tool_activity`,
-# `_tool_call_ids`) start to recurse; deep nesting is pinned separately by
-# test_deep_chain_yields_serializable_session_or_failure.
+# Large fixed samples exercise decoder/scan limits without consuming the
+# per-example entropy budget character by character.
 _JSON_IN_STRING = st.recursive(
     st.none() | st.booleans() | st.integers() | st.text(max_size=10),
     lambda children: (
@@ -97,7 +92,9 @@ _JSON_IN_STRING = st.recursive(
         | st.dictionaries(st.text(max_size=8), children, max_size=3)
     ),
     max_leaves=6,
-).map(json.dumps)
+).map(json.dumps) | st.sampled_from(
+    ["[" * depth + "0" + "]" * depth for depth in (63, 64, 65, 1_200)]
+)
 
 
 def adversarial_json_value(max_depth: int = 4) -> SearchStrategy[Any]:
@@ -113,8 +110,7 @@ def adversarial_json_value(max_depth: int = 4) -> SearchStrategy[Any]:
         st.floats(allow_nan=False, allow_infinity=False),
         _WEIRD_TEXT,
         _JSON_IN_STRING,
-        # #905: costs are read as strings; keep them finite until _decimal is fixed.
-        _FINITE_DECIMAL_STRINGS,
+        _DECIMAL_STRINGS,
     )
     return st.recursive(
         leaves,
@@ -129,13 +125,6 @@ def adversarial_json_value(max_depth: int = 4) -> SearchStrategy[Any]:
 def _langfuse_records() -> SearchStrategy[list[dict[str, Any]]]:
     # Token and cost numbers reach the importer under "usageDetails" and
     # "costDetails"; it reads no "usage" or "calculatedTotalCost" key at all.
-    #
-    # #905: "model" is deliberately kept out of the general key pool and drawn
-    # as a string or None below. The importer feeds it straight into
-    # `ImportedNode.requested_model` with no type check, so a non-string value
-    # such as `[]` escapes `parse()` as a pydantic `ValidationError` instead of
-    # a contained `ImportFailure`. test_non_string_model_field_is_contained
-    # pins it.
     keys = [
         "id",
         "traceId",
@@ -149,6 +138,9 @@ def _langfuse_records() -> SearchStrategy[list[dict[str, Any]]]:
         "metadata",
         "usageDetails",
         "costDetails",
+        "totalCost",
+        "model",
+        "providedModelName",
         "level",
         "statusMessage",
         "sessionId",
@@ -162,7 +154,16 @@ def _langfuse_records() -> SearchStrategy[list[dict[str, Any]]]:
         # the whole file before any observation is normalized.
         required={
             "traceId": _mostly(_TRACE_IDS, _WEIRD_TEXT),
-            "model": st.none() | _WEIRD_TEXT,
+            "usageDetails": st.dictionaries(
+                st.sampled_from(["input", "output", "total"]),
+                adversarial_json_value(1),
+                max_size=3,
+            ),
+            "costDetails": st.dictionaries(
+                st.sampled_from(["input", "output", "total"]),
+                _DECIMAL_STRINGS,
+                max_size=3,
+            ),
         },
     )
 
@@ -170,18 +171,11 @@ def _langfuse_records() -> SearchStrategy[list[dict[str, Any]]]:
 def _braintrust_records() -> SearchStrategy[list[dict[str, Any]]]:
     # "project_id" is compared across the rows of one trace, and conflicting
     # values raise InvalidImport, so it belongs in the pool.
-    #
-    # #905: "span_parents" is deliberately excluded from the general key pool
-    # below. importer.py does `row.get("span_parents") or []` and then iterates
-    # the result directly (no type check), so any truthy non-list value (bool,
-    # str, dict, number) crashes with `TypeError: 'bool' object is not
-    # iterable` instead of a contained ImportFailure;
-    # test_non_list_span_parents_is_contained pins it. `parent_key` below still
-    # exercises the key, but only ever with a list or an absent value.
     keys = [
         "id",
         "span_id",
         "root_span_id",
+        "span_parents",
         "input",
         "output",
         "metadata",
@@ -199,8 +193,20 @@ def _braintrust_records() -> SearchStrategy[list[dict[str, Any]]]:
         required={
             "root_span_id": _mostly(_TRACE_IDS, _WEIRD_TEXT),
             "project_id": _mostly(_PROJECT_IDS, _WEIRD_TEXT),
+            "metadata": st.dictionaries(
+                st.sampled_from(_BRAINTRUST_MODEL_METADATA),
+                adversarial_json_value(1),
+                max_size=2,
+            ),
+            "metrics": st.dictionaries(
+                st.sampled_from(
+                    ["estimated_cost", "prompt_tokens", "completion_tokens", "tokens"]
+                ),
+                adversarial_json_value(1),
+                max_size=2,
+            ),
         },
-    ).map(lambda rows: [_without_untyped_model_metadata(row) for row in rows])
+    )
 
 
 # The importer reads these metadata keys straight into `ImportedNode`'s
@@ -212,25 +218,6 @@ _BRAINTRUST_MODEL_METADATA = (
     "model",
     "provider",
 )
-
-
-def _without_untyped_model_metadata(record: dict[str, Any]) -> dict[str, Any]:
-    """Drop braintrust model metadata whose value is not a string.
-
-    A non-string value under one of these keys escapes `parse()` as a pydantic
-    `ValidationError` instead of a contained `ImportFailure` (#905, pinned by
-    test_non_string_model_metadata_is_contained). Remove this map when the
-    importer type-checks those fields.
-    """
-    metadata = record.get("metadata")
-    if not isinstance(metadata, dict):
-        return record
-    cleaned = {
-        key: value
-        for key, value in metadata.items()
-        if key not in _BRAINTRUST_MODEL_METADATA or isinstance(value, str)
-    }
-    return record if cleaned == metadata else {**record, "metadata": cleaned}
 
 
 def _langsmith_records() -> SearchStrategy[list[dict[str, Any]]]:
@@ -246,11 +233,10 @@ def _langsmith_records() -> SearchStrategy[list[dict[str, Any]]]:
         "end_time",
         "error",
         "extra",
-        # #905: "total_cost" is left out of the pool because the adversarial
-        # value strategy can hand it "NaN", which _decimal() accepts and
-        # ImportedNode then rejects with a pydantic ValidationError that
-        # escapes parse(). test_non_finite_cost_fails_only_its_record pins
-        # that bug; leaving the key in here only makes the property flaky.
+        "total_cost",
+        "prompt_cost",
+        "completion_cost",
+        "total_tokens",
         "prompt_tokens",
         "completion_tokens",
         "session_id",
@@ -288,7 +274,26 @@ def _logfire_records() -> SearchStrategy[list[dict[str, Any]]]:
         keys,
         id_key="span_id",
         parent_key="parent_span_id",
-        required={"trace_id": _mostly(_TRACE_IDS, _WEIRD_TEXT)},
+        required={
+            "trace_id": _mostly(_TRACE_IDS, _WEIRD_TEXT),
+            "attributes": _mostly(
+                st.dictionaries(
+                    st.sampled_from(
+                        [
+                            "gen_ai.usage.cost",
+                            "gen_ai.usage.input_tokens",
+                            "gen_ai.usage.output_tokens",
+                            "gen_ai.usage.cache_read.input_tokens",
+                            "gen_ai.input.messages",
+                            "gen_ai.output.messages",
+                        ]
+                    ),
+                    adversarial_json_value(1),
+                    max_size=3,
+                ),
+                adversarial_json_value(2),
+            ),
+        },
     )
 
 
@@ -297,6 +302,10 @@ def _phoenix_records() -> SearchStrategy[list[dict[str, Any]]]:
         st.sampled_from(
             [
                 "llm.input_messages.0.message.role",
+                "llm.input_messages.².message.role",
+                "llm.input_messages.٣.message.role",
+                "llm.input_messages." + "9" * 5_000 + ".message.role",
+                "gen_ai.usage.cost",
                 "llm.output_messages.0.message.content",
                 "llm.token_count.total",
                 "llm.model_name",
@@ -306,7 +315,6 @@ def _phoenix_records() -> SearchStrategy[list[dict[str, Any]]]:
                 "openinference.span.kind",
             ]
         ),
-        # #905: superscript digits crash _indexed_messages; ASCII-only until fixed.
         st.from_regex(
             r"llm\.input_messages\.[0-9]{1,2}\.message\.role", fullmatch=True
         ),
@@ -391,6 +399,19 @@ def _kitaru_jsonl_nodes() -> SearchStrategy[list[dict[str, Any]]]:
             "ended_at": _ISO_TIMES | _WEIRD_TEXT,
             "external_id": _IDS,
             "model": _WEIRD_TEXT,
+            "cost": _DECIMAL_STRINGS,
+            "tokens": st.fixed_dictionaries(
+                {},
+                optional={
+                    key: adversarial_json_value(1)
+                    for key in (
+                        "input_tokens",
+                        "output_tokens",
+                        "cached_input_tokens",
+                        "reasoning_tokens",
+                    )
+                },
+            ),
             "tool_name": _WEIRD_TEXT,
         },
     )
@@ -434,9 +455,8 @@ def _records_with_keys(
 
     # An empty list is an empty file, which every importer rejects up front;
     # `garbage_bytes()` already covers that, so spend these draws on records.
-    # The upper bound also keeps parent chains short: #905 makes the ancestor
-    # walk quadratic and deep enough chains hit a RecursionError, both of which
-    # the pinned regression tests cover on their own.
+    # Bound general fuzz draws for runtime and entropy. Focused regressions
+    # exercise large graphs and the exact nesting boundaries.
     return st.lists(record(), min_size=1, max_size=30)
 
 

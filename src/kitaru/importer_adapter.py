@@ -18,7 +18,7 @@ import os
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, suppress
 from typing import Any, TypeVar
 
 from kitaru.api_models.v1.imports import ImportFailure
@@ -110,9 +110,14 @@ class ImporterBackedAdapter(ABC):
         try:
             with self.open_trace() as external_id:
                 result = func(*args, **kwargs)
-        finally:
-            # Import the trace of a raising function too, the provider
-            # records the error on it.
+        except BaseException:
+            # Import the trace of a raising function too, but never replace
+            # the agent's failure with a secondary provider or import error.
+            if external_id is not None:
+                with suppress(BaseException):
+                    asyncio.run(self._import_trace(external_id, origin))
+            raise
+        else:
             if external_id is not None:
                 asyncio.run(self._import_trace(external_id, origin))
         return result
@@ -136,7 +141,12 @@ class ImporterBackedAdapter(ABC):
         try:
             with self.open_trace() as external_id:
                 result = await func(*args, **kwargs)
-        finally:
+        except BaseException:
+            if external_id is not None:
+                with suppress(BaseException):
+                    await self._import_trace(external_id, origin)
+            raise
+        else:
             if external_id is not None:
                 await self._import_trace(external_id, origin)
         return result
