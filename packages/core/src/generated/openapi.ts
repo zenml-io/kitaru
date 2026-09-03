@@ -8203,7 +8203,6 @@ export interface components {
             task: components["schemas"]["TaskResponse"];
             /**
              * Token
-             * Format: password
              * @description Bearer token scoped to this task and attempt.
              */
             token: string;
@@ -8613,7 +8612,6 @@ export interface components {
         WorkerRegistrationResponse: {
             /**
              * Token
-             * Format: password
              * @description Bearer token scoped to this worker.
              */
             token: string;
@@ -8757,7 +8755,6 @@ export interface components {
         WorkerTokenResponse: {
             /**
              * Token
-             * Format: password
              * @description Bearer token scoped to this worker.
              */
             token: string;

@@ -65,6 +65,8 @@ The `kitaru` console script is defined in `pyproject.toml` under `[project.scrip
 
 Register new leaf commands through the `_spec(...)` and `_register(...)` metadata in `src/kitaru/cli/app.py`. Tests should call `main([...])` with an explicit argument list and assert the returned integer exit code.
 
+When changing evaluation, replay, or experiment commands or contracts, read [Evaluation contracts](references/evaluation-contracts.md).
+
 ## Structured Output Contract
 
 Agent-facing commands use the version-1 structured contract. Success documents include `schema_version`, `command`, `ok`, `warnings`, `links`, and `next_actions`, plus `item` for one result or `items`, `count`, and `page` for a list. Streaming commands emit JSONL events. Structured errors are one JSON object on stderr with a stable error kind and exit code.
