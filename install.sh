@@ -414,11 +414,34 @@ login_local() {
   msg="$(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' "$out" | head -1)"
   hint="$(sed -n 's/.*"hint":"\([^"]*\)".*/\1/p' "$out" | head -1)"
   rm -f "$out"
+  # Port taken by something Kitaru does not own (a dev server, another app):
+  # try the next few ports, letting the CLI tell us which are free. It
+  # remembers the chosen port for later logins and logout.
+  if port_in_use "$msg"; then
+    local port
+    for port in 9000 9001 9002 9003 9004; do
+      note "$msg Trying port $port."
+      out="$(mktemp)"
+      if "$KITARU_BIN" login --local --port "$port" <"$in" 2>&1 | tee "$out"; then
+        rm -f "$out"; LOGGED_IN=1; return 0
+      fi
+      msg="$(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' "$out" | head -1)"
+      hint="$(sed -n 's/.*"hint":"\([^"]*\)".*/\1/p' "$out" | head -1)"
+      rm -f "$out"
+      port_in_use "$msg" || break
+    done
+    warn "Local server did not start.${msg:+ $msg}"
+    if [ -n "$hint" ]; then note "$hint"; fi
+    note "Then run: kitaru login --local --port <free port>"
+    return 1
+  fi
   warn "Local server did not start.${msg:+ $msg}"
   if [ -n "$hint" ]; then note "$hint"; fi
   note "Then run: kitaru login --local  (or: kitaru login --local --port 9000)"
   return 1
 }
+
+port_in_use() { printf '%s' "$1" | grep -qi "port .* in use"; }
 
 LOGGED_IN=0
 if [ "$KITARU_SKIP_LOGIN" = "1" ]; then
