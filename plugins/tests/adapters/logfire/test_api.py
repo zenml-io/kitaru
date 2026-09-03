@@ -15,8 +15,10 @@
 
 from datetime import UTC, datetime
 
+import httpx
 import pytest
 
+from kitaru.task import importer as importer_module
 from kitaru.task.importer import ImportedSession
 from kitaru_logfire_importer.api import fetch
 from kitaru_logfire_importer.importer import parse
@@ -27,6 +29,7 @@ from .fixtures import (
     build_complete_rows,
     build_conversation_rows,
     build_list_row,
+    ndjson,
 )
 
 TRACE_ID_1 = "a" * 32
@@ -197,6 +200,53 @@ async def test_fetch_by_time_window_yields_nothing_for_an_empty_listing(
 
     assert payloads == []
     assert fake_logfire.requested == []
+
+
+async def test_fetch_waits_out_a_rate_limit_and_succeeds(
+    fake_logfire: FakeLogfire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sleep for the reported delay once, then fetch the unthrottled payload."""
+    sleeps: list[float] = []
+
+    async def _sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(importer_module.asyncio, "sleep", _sleep)
+    fake_logfire.fetch_builders = [build_complete_rows]
+    fake_logfire.raise_once = httpx.HTTPStatusError(
+        "rate limited",
+        request=httpx.Request("POST", "https://logfire-api.test/v2/query"),
+        response=httpx.Response(
+            429,
+            headers={"Retry-After": "5"},
+            request=httpx.Request("POST", "https://logfire-api.test/v2/query"),
+        ),
+    )
+
+    payloads = await collect_payloads(
+        fetch({"trace_ids": [TRACE_ID_1], "since": "2026-07-24T09:00:00Z"})
+    )
+
+    assert sleeps == [5.0]
+    assert payloads == [ndjson(build_complete_rows(TRACE_ID_1))]
+
+
+async def test_fetch_propagates_a_non_rate_limit_error(
+    fake_logfire: FakeLogfire,
+) -> None:
+    """Propagate a non-429 error unchanged, without retrying."""
+    fake_logfire.raise_once = httpx.HTTPStatusError(
+        "server error",
+        request=httpx.Request("POST", "https://logfire-api.test/v2/query"),
+        response=httpx.Response(
+            500, request=httpx.Request("POST", "https://logfire-api.test/v2/query")
+        ),
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await collect_payloads(
+            fetch({"trace_ids": [TRACE_ID_1], "since": "2026-07-24T09:00:00Z"})
+        )
 
 
 async def test_fetch_rejects_invalid_queries() -> None:

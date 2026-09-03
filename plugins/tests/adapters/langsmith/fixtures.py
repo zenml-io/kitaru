@@ -114,6 +114,10 @@ class FakeLangSmithClient:
                 if delay:
                     time.sleep(delay)
                 with self._fake.lock:
+                    if self._fake.raise_once is not None:
+                        error = self._fake.raise_once
+                        self._fake.raise_once = None
+                        raise error
                     self._fake.requested.append(trace_id)
                     self._fake.events.append("poll")
                     assert self._fake.runs_builders, "unexpected run listing poll"
@@ -148,6 +152,7 @@ class FakeLangSmith:
         self.fetch_delays: list[float] = []
         self.in_flight = 0
         self.peak_in_flight = 0
+        self.raise_once: Exception | None = None
         self.lock = threading.Lock()
         self.client = FakeLangSmithClient(self)
 

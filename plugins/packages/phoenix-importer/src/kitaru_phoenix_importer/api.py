@@ -14,21 +14,63 @@
 """Arize Phoenix API read layer."""
 
 import asyncio
+import functools
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
 from phoenix.client import AsyncClient
 from phoenix.client.utils.config import get_env_project_name
 
-from kitaru.task.importer import FetchQuery, gather_bounded
+from kitaru.task.importer import FetchQuery, gather_bounded, retry_rate_limited
 
 __all__ = ["fetch", "fetch_spans", "serialize_spans", "wait_for_spans"]
 
 _POLL_INTERVAL = 2.0
 _SPAN_LIMIT = 1000
+
+
+def _parse_retry_after(value: str | None) -> float:
+    """Parse a Retry-After header value into a wait in seconds.
+
+    Args:
+        value: Retry-After header value, or None when absent.
+
+    Returns:
+        Seconds to wait, 60 when value is absent or not a delta-seconds
+        integer or an HTTP date.
+    """
+    if value is None:
+        return 60.0
+    try:
+        return float(int(value))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return 60.0
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return max((when - datetime.now(UTC)).total_seconds(), 0.0)
+
+
+def _get_retry_after(exc: Exception) -> float | None:
+    """Return the Phoenix rate limit wait in seconds, or None otherwise.
+
+    Args:
+        exc: Exception raised while calling the Phoenix span API.
+
+    Returns:
+        Seconds to wait before retrying, or None when exc is not a
+        Phoenix rate limit error.
+    """
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code != 429:
+        return None
+    return _parse_retry_after(exc.response.headers.get("Retry-After"))
 
 
 def _has_root(spans: list[Any]) -> bool:
@@ -88,10 +130,15 @@ async def fetch_spans(
     Returns:
         Fetched spans.
     """
-    return await (client or AsyncClient()).spans.get_spans(
-        project_identifier=project or get_env_project_name(),
-        trace_ids=[trace_id],
-        limit=_SPAN_LIMIT,
+    resolved_client = client or AsyncClient()
+    return await retry_rate_limited(
+        functools.partial(
+            resolved_client.spans.get_spans,
+            project_identifier=project or get_env_project_name(),
+            trace_ids=[trace_id],
+            limit=_SPAN_LIMIT,
+        ),
+        _get_retry_after,
     )
 
 
@@ -144,11 +191,15 @@ async def _list_root_trace_ids(
     starts: dict[str, datetime] = {}
     window_start = since
     while True:
-        spans = await client.spans.get_spans(
-            project_identifier=project,
-            start_time=window_start,
-            end_time=until,
-            limit=_SPAN_LIMIT,
+        spans = await retry_rate_limited(
+            functools.partial(
+                client.spans.get_spans,
+                project_identifier=project,
+                start_time=window_start,
+                end_time=until,
+                limit=_SPAN_LIMIT,
+            ),
+            _get_retry_after,
         )
         if not spans:
             break
@@ -177,7 +228,9 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     Every fetched trace's spans land in a single payload, oldest trace
     first, so the parser groups them into Kitaru sessions itself instead
     of seeing one trace at a time. Traces are fetched concurrently, up to
-    the query's concurrency, and merged back into that order.
+    the query's concurrency, and merged back into that order. A request
+    that hits the Phoenix rate limit waits out the reported delay and
+    retries instead of failing the fetch.
 
     Args:
         query: Fetch query with `project`, `trace_ids`, `since`, and `until`

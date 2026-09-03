@@ -20,6 +20,7 @@ from collections.abc import Callable
 from types import SimpleNamespace, TracebackType
 from typing import Any
 
+import httpx
 import pytest
 from braintrust import NOOP_SPAN, SpanImpl
 
@@ -121,12 +122,19 @@ class FakeSpan(SpanImpl):
 class _FakeResponse:
     """BTQL response fake."""
 
-    def __init__(self, rows: list[dict[str, Any]], cursor: str | None = None) -> None:
+    def __init__(
+        self,
+        rows: list[dict[str, Any]],
+        cursor: str | None = None,
+        error: Exception | None = None,
+    ) -> None:
         self._rows = rows
         self._cursor = cursor
+        self._error = error
 
     def raise_for_status(self) -> None:
-        return None
+        if self._error is not None:
+            raise self._error
 
     def json(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"data": self._rows}
@@ -177,6 +185,7 @@ class FakeBraintrust:
         self.fetch_delays: list[float] = []
         self.in_flight = 0
         self.peak_in_flight = 0
+        self.raise_once: Exception | None = None
 
     def start_span(self, *, name: str) -> Any:
         if self.no_active_logger:
@@ -213,6 +222,10 @@ class FakeBraintrust:
         match = _QUERY_PATTERN.fullmatch(json["query"])
         assert match is not None, f"unexpected BTQL query: {json['query']}"
         assert match["project_id"] == self.project_id
+        if self.raise_once is not None:
+            error = self.raise_once
+            self.raise_once = None
+            return _FakeResponse([], error=error)
         self.requested.append(match["root_span_id"])
         self.events.append("poll")
         assert self.rows_builders, "unexpected BTQL poll"
@@ -236,6 +249,9 @@ def fake_braintrust(monkeypatch: pytest.MonkeyPatch) -> FakeBraintrust:
     monkeypatch.setattr(
         api_module,
         "httpx",
-        SimpleNamespace(AsyncClient=lambda: _FakeAsyncClient(fake)),
+        SimpleNamespace(
+            AsyncClient=lambda: _FakeAsyncClient(fake),
+            HTTPStatusError=httpx.HTTPStatusError,
+        ),
     )
     return fake

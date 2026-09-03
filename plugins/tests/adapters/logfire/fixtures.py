@@ -23,6 +23,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 import kitaru_logfire_importer.adapter as adapter_module
@@ -180,11 +181,13 @@ class _FakeQueryClient:
 class _FakeResponse:
     """Query API response fake."""
 
-    def __init__(self, content: bytes) -> None:
+    def __init__(self, content: bytes = b"", error: Exception | None = None) -> None:
         self.content = content
+        self._error = error
 
     def raise_for_status(self) -> None:
-        return None
+        if self._error is not None:
+            raise self._error
 
 
 class _FakeAsyncClient:
@@ -218,6 +221,10 @@ class _FakeAsyncClient:
             try:
                 if self._fake.fetch_delays:
                     await asyncio.sleep(self._fake.fetch_delays.pop(0))
+                if self._fake.raise_once is not None:
+                    error = self._fake.raise_once
+                    self._fake.raise_once = None
+                    return _FakeResponse(error=error)
                 self._fake.requested.append(trace_id)
                 self._fake.fetch_min_timestamps.append(json["min_timestamp"])
                 self._fake.events.append("fetch")
@@ -252,6 +259,7 @@ class FakeLogfire:
         self.fetch_delays: list[float] = []
         self.in_flight = 0
         self.peak_in_flight = 0
+        self.raise_once: Exception | None = None
 
     @contextmanager
     def span(self, name: str) -> Iterator[SimpleNamespace]:
@@ -294,7 +302,8 @@ def fake_logfire(monkeypatch: pytest.MonkeyPatch) -> FakeLogfire:
         api_module,
         "httpx",
         SimpleNamespace(
-            AsyncClient=lambda *, base_url: _FakeAsyncClient(fake, base_url)
+            AsyncClient=lambda *, base_url: _FakeAsyncClient(fake, base_url),
+            HTTPStatusError=httpx.HTTPStatusError,
         ),
     )
     return fake

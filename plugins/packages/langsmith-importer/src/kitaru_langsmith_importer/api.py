@@ -21,13 +21,30 @@ from typing import Any
 
 from langsmith import Client
 from langsmith.schemas import Run
-from langsmith.utils import get_tracer_project
+from langsmith.utils import LangSmithRateLimitError, get_tracer_project
 
-from kitaru.task.importer import FetchQuery, gather_bounded
+from kitaru.task.importer import FetchQuery, gather_bounded, retry_rate_limited
 
 __all__ = ["fetch", "fetch_runs", "serialize_runs", "wait_for_runs"]
 
 _POLL_INTERVAL = 2.0
+_RATE_LIMIT_RETRY_AFTER = 60.0
+
+
+def _get_retry_after(exc: Exception) -> float | None:
+    """Return the LangSmith rate limit wait in seconds, or None otherwise.
+
+    Args:
+        exc: Exception raised while calling the LangSmith API.
+
+    Returns:
+        A fixed wait in seconds when exc is a LangSmith rate limit error,
+        since the SDK does not expose the response or its headers on that
+        exception. None otherwise.
+    """
+    if not isinstance(exc, LangSmithRateLimitError):
+        return None
+    return _RATE_LIMIT_RETRY_AFTER
 
 
 def _list_runs(client: Client, trace_id: str) -> list[Run]:
@@ -81,7 +98,9 @@ async def fetch_runs(client: Client, trace_id: str) -> list[Run]:
     Returns:
         Fetched trace runs.
     """
-    return await asyncio.to_thread(_list_runs, client, trace_id)
+    return await retry_rate_limited(
+        lambda: asyncio.to_thread(_list_runs, client, trace_id), _get_retry_after
+    )
 
 
 def serialize_runs(runs: list[Run]) -> bytes:
@@ -153,7 +172,8 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     session and leave every later trace of that thread parsing to the same
     external id, which the importer then drops as a duplicate. Traces are
     fetched concurrently, up to the query's concurrency, and merged back
-    into that order.
+    into that order. A request that hits the LangSmith rate limit waits
+    out a fixed delay and retries instead of failing the fetch.
 
     Args:
         query: Fetch query with trace_ids, since, until, and project_name.
@@ -172,12 +192,11 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         trace_ids = parsed.trace_ids
     else:
         since, until = parsed.get_window()
-        trace_ids = await asyncio.to_thread(
-            _list_root_trace_ids,
-            client,
-            parsed.project_name,
-            since,
-            until,
+        trace_ids = await retry_rate_limited(
+            lambda: asyncio.to_thread(
+                _list_root_trace_ids, client, parsed.project_name, since, until
+            ),
+            _get_retry_after,
         )
 
     run_batches = await gather_bounded(

@@ -17,6 +17,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -24,11 +25,51 @@ from logfire._internal.config import get_base_url_from_token
 from logfire.query_client import AsyncLogfireQueryClient
 
 from kitaru.env import get_required_env
-from kitaru.task.importer import FetchQuery, gather_bounded
+from kitaru.task.importer import FetchQuery, gather_bounded, retry_rate_limited
 
 __all__ = ["fetch", "fetch_trace", "wait_for_trace"]
 
 _POLL_INTERVAL = 2.0
+
+
+def _parse_retry_after(value: str | None) -> float:
+    """Parse a Retry-After header value into a wait in seconds.
+
+    Args:
+        value: Retry-After header value, or None when absent.
+
+    Returns:
+        Seconds to wait, 60 when value is absent or not a delta-seconds
+        integer or an HTTP date.
+    """
+    if value is None:
+        return 60.0
+    try:
+        return float(int(value))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return 60.0
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return max((when - datetime.now(UTC)).total_seconds(), 0.0)
+
+
+def _get_retry_after(exc: Exception) -> float | None:
+    """Return the Logfire rate limit wait in seconds, or None otherwise.
+
+    Args:
+        exc: Exception raised while calling the Logfire Query API.
+
+    Returns:
+        Seconds to wait before retrying, or None when exc is not a
+        Logfire rate limit error.
+    """
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code != 429:
+        return None
+    return _parse_retry_after(exc.response.headers.get("Retry-After"))
 
 
 def _get_query_client() -> AsyncLogfireQueryClient:
@@ -89,15 +130,20 @@ async def _post_query(
     Returns:
         NDJSON response body.
     """
-    response = await client.post(
-        "/v2/query",
-        headers={
-            "accept": "application/x-ndjson",
-            "authorization": f"Bearer {read_token}",
-        },
-        json=body,
-    )
-    response.raise_for_status()
+
+    async def _post() -> httpx.Response:
+        response = await client.post(
+            "/v2/query",
+            headers={
+                "accept": "application/x-ndjson",
+                "authorization": f"Bearer {read_token}",
+            },
+            json=body,
+        )
+        response.raise_for_status()
+        return response
+
+    response = await retry_rate_limited(_post, _get_retry_after)
     return response.content
 
 
@@ -195,7 +241,9 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     """Fetch every trace matched by the query into one parser payload.
 
     Traces are fetched concurrently, up to the query's concurrency, and
-    merged back in fetch order.
+    merged back in fetch order. A request that hits the Logfire rate
+    limit waits out the reported delay and retries instead of failing
+    the fetch.
 
     Args:
         query: Fetch query. `trace_ids` fetches exactly those traces in

@@ -16,12 +16,14 @@
 import json
 from datetime import UTC, datetime
 
+import httpx
 import pytest
 
 import kitaru_phoenix_importer.api as api_module
 from kitaru.api_models.v1.session import SessionStatus
+from kitaru.task import importer as importer_module
 from kitaru.task.importer import ImportedSession
-from kitaru_phoenix_importer.api import fetch
+from kitaru_phoenix_importer.api import fetch, serialize_spans
 from kitaru_phoenix_importer.importer import parse
 
 from ..fetch_helpers import collect_payloads
@@ -242,3 +244,50 @@ async def test_fetch_payload_round_trips_through_the_real_parser(
     [session] = sessions
     assert isinstance(session, ImportedSession)
     assert session.external_id == "trace-1"
+
+
+async def test_fetch_waits_out_a_rate_limit_and_succeeds(
+    fake_phoenix: FakePhoenix, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sleep for the reported delay once, then fetch the unthrottled payload."""
+    sleeps: list[float] = []
+
+    async def _sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(importer_module.asyncio, "sleep", _sleep)
+    fake_phoenix.span_builders = [
+        httpx.HTTPStatusError(
+            "rate limited",
+            request=httpx.Request("GET", "https://phoenix.test/v1/projects"),
+            response=httpx.Response(
+                429,
+                headers={"Retry-After": "5"},
+                request=httpx.Request("GET", "https://phoenix.test/v1/projects"),
+            ),
+        ),
+        build_complete_spans,
+    ]
+
+    payloads = await collect_payloads(fetch({"trace_ids": ["trace-1"]}))
+
+    assert sleeps == [5.0]
+    assert payloads == [serialize_spans(build_complete_spans("trace-1"))]
+
+
+async def test_fetch_propagates_a_non_rate_limit_error(
+    fake_phoenix: FakePhoenix,
+) -> None:
+    """Propagate a non-429 error unchanged, without retrying."""
+    fake_phoenix.span_builders = [
+        httpx.HTTPStatusError(
+            "server error",
+            request=httpx.Request("GET", "https://phoenix.test/v1/projects"),
+            response=httpx.Response(
+                500, request=httpx.Request("GET", "https://phoenix.test/v1/projects")
+            ),
+        ),
+    ]
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await collect_payloads(fetch({"trace_ids": ["trace-1"]}))

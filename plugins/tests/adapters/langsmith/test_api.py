@@ -20,11 +20,13 @@ from typing import Any
 
 import pytest
 from langsmith.schemas import Run
+from langsmith.utils import LangSmithRateLimitError
 
 from kitaru.api_models.v1.session import SessionStatus
+from kitaru.task import importer as importer_module
 from kitaru.task.importer import ImportedSession
 from kitaru_langsmith_importer.adapter import _PARSER_PARAMS
-from kitaru_langsmith_importer.api import fetch
+from kitaru_langsmith_importer.api import fetch, serialize_runs
 from kitaru_langsmith_importer.importer import parse
 
 from ..fetch_helpers import collect_payloads
@@ -288,3 +290,33 @@ async def test_fetch_rejects_unknown_query_keys(
     """Reject a query carrying a key outside the fetch contract."""
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         await anext(fetch({"bogus": True, "since": "2026-07-01T00:00:00Z"}))
+
+
+async def test_fetch_waits_out_a_rate_limit_and_succeeds(
+    fake_langsmith_api: FakeLangSmith, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sleep for the fixed delay once, then fetch the unthrottled payload."""
+    sleeps: list[float] = []
+
+    async def _sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(importer_module.asyncio, "sleep", _sleep)
+    trace_id = str(uuid.uuid4())
+    fake_langsmith_api.runs_builders = [build_complete_runs]
+    fake_langsmith_api.raise_once = LangSmithRateLimitError("rate limit exceeded")
+
+    payloads = await collect_payloads(fetch({"trace_ids": [trace_id]}))
+
+    assert sleeps == [60.0]
+    assert payloads == [serialize_runs(build_complete_runs(trace_id))]
+
+
+async def test_fetch_propagates_a_non_rate_limit_error(
+    fake_langsmith_api: FakeLangSmith,
+) -> None:
+    """Propagate a non-rate-limit error unchanged, without retrying."""
+    fake_langsmith_api.raise_once = RuntimeError("server error")
+
+    with pytest.raises(RuntimeError, match="server error"):
+        await collect_payloads(fetch({"trace_ids": [str(uuid.uuid4())]}))
