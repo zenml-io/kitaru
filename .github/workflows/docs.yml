@@ -83,6 +83,17 @@ jobs:
         working-directory: docs
       - name: Test redirect worker mapping
         run: node --test docs/worker/redirect.test.mjs
+      - name: Install Wrangler
+        # wrangler-action installs Wrangler with `npm i` in the working directory,
+        # and npm cannot do that at this pnpm workspace root ("Cannot read
+        # properties of null (reading 'edgesOut')"), which has failed every
+        # production deploy since 26 Aug. A global install satisfies the action's
+        # `npx --no-install wrangler --version` probe, so it skips its own install.
+        if: >-
+          steps.sdk_generator.outputs.available == 'true' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          github.event_name == 'workflow_dispatch')
+        run: npm install -g "wrangler@${WRANGLER_VERSION}" && wrangler --version
       - name: Deploy production docs
         # Push deploys only from main; a manual workflow_dispatch deploys whichever
         # branch it runs against, so docs can be shipped to production from develop.
