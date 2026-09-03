@@ -64,14 +64,14 @@ async def schedule_worker_launch(
         WorkerRuntime(platform=settings.WORKER_LAUNCHER.backend.value),
         actor=actor,
     )
-    issued = auth_service.issue_worker_token(
+    issued_token = auth_service.issue_worker_token(
         worker_id=worker.id,
         account_id=actor.account.id,
         timeout_seconds=settings.WORKER_LAUNCHER.timeout_seconds,
     )
     launch = WorkerLaunch(
         worker_id=worker.id,
-        worker_token=SecretStr(issued.token),
+        worker_token=SecretStr(issued_token.token),
         server_url=settings.SERVER_URL,
         job_id=job.id,
     )
@@ -90,7 +90,6 @@ async def _launch_worker(launcher: WorkerLauncher, launch: WorkerLaunch) -> None
     try:
         await launcher.launch(launch)
     except Exception:
-        # Nothing retries here, a lost launch is left to the liveness window.
         logger.exception(
             "Failed to launch worker %s for job %s.", launch.worker_id, launch.job_id
         )
