@@ -150,7 +150,7 @@ class FakeLangfuseClient:
             trace=SimpleNamespace(get=self._get, list=self._list)
         )
 
-    async def _get(self, trace_id: str) -> TraceWithFullDetails:
+    async def _get(self, trace_id: str, **kwargs: Any) -> TraceWithFullDetails:
         self.requested.append(trace_id)
         self.events.append("poll")
         assert self.trace_builders, "unexpected trace poll"

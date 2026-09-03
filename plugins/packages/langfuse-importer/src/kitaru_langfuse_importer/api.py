@@ -21,6 +21,7 @@ from typing import Any
 
 from langfuse import get_client
 from langfuse.api import NotFoundError, ObservationsView, TraceWithFullDetails
+from langfuse.api.core import RequestOptions
 
 from kitaru.task.importer import FetchQuery
 
@@ -33,6 +34,9 @@ __all__ = [
 ]
 
 _POLL_INTERVAL = 2.0
+# The SDK's default request timeout is 5 seconds, too short for listing a
+# time window or fetching a large trace with all observations.
+_REQUEST_OPTIONS: RequestOptions = {"timeout_in_seconds": 60}
 
 
 def _roots_have_ended(observations: list[ObservationsView]) -> bool:
@@ -86,7 +90,9 @@ async def fetch_trace(trace_id: str) -> TraceWithFullDetails:
     Returns:
         Fetched trace.
     """
-    return await get_client().async_api.trace.get(trace_id)
+    return await get_client().async_api.trace.get(
+        trace_id, request_options=_REQUEST_OPTIONS
+    )
 
 
 def serialize_trace(trace: TraceWithFullDetails) -> bytes:
@@ -135,6 +141,7 @@ async def _list_trace_ids(since: datetime, until: datetime) -> AsyncIterator[str
             to_timestamp=until,
             page=page,
             order_by="timestamp.asc",
+            request_options=_REQUEST_OPTIONS,
         )
         for trace in traces.data:
             yield trace.id
