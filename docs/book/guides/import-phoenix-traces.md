@@ -61,6 +61,29 @@ kitaru session list \
   --imported-from phoenix
 ```
 
+## 3. Or fetch from the Phoenix API
+
+Skip the export and upload, and let the import task fetch spans from Phoenix directly:
+
+```bash
+kitaru session import \
+  --importer kitaru/phoenix@latest \
+  --agent support-agent@latest \
+  --since 7d \
+  --tag imported-baseline --wait
+```
+
+Omitting FILE and setting `--since` selects an API import: the worker calls the Phoenix API instead of parsing an uploaded payload. `--since` and `--until` accept an ISO 8601 timestamp or a relative duration (`7d`, `12h`, `30m`). `--trace-id` (repeatable) fetches exactly those trace ids instead of a time window. The same selection is a query object on the SDK and REST request:
+
+| Query key | Meaning |
+| --- | --- |
+| `project` | Phoenix project to fetch from. Defaults to the project name from the environment. |
+| `trace_ids` | Phoenix trace ids to fetch. When present, exactly those traces are fetched and the time window is ignored. |
+| `since` | Timezone-aware ISO 8601 datetime, lower bound of span start time. Required when `trace_ids` is absent. |
+| `until` | Timezone-aware ISO 8601 datetime, upper bound of span start time. Defaults to now. |
+
+Pass `project` through `--query '{"project": "my-project"}'`. The worker needs `kitaru-phoenix-importer[adapter]` installed (the default plugin catalog already installs it that way) and, in its environment, `PHOENIX_ENDPOINT` or `PHOENIX_COLLECTOR_ENDPOINT`, `PHOENIX_API_KEY`, and `PHOENIX_PROJECT` for the default project. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping and limits below apply the same way.
+
 ## What becomes a session
 
 The safe default is one Phoenix trace per Kitaru session. The Phoenix `trace_id` becomes the session's `external_id`, so importing the same trace again skips it rather than creating a duplicate. Phoenix session or conversation attributes remain on the span, but this first importer version does not join several traces into one multi-turn session.
@@ -94,7 +117,7 @@ A span whose parent is absent from the file remains importable as a root node. T
 
 ## Limits
 
-- The importer reads files. It does not connect to the Phoenix API or manage Phoenix credentials.
+- The parser reads files. Live API access is the separate fetch path described above, not something the parser itself does.
 - It supports Phoenix's native JSON and JSONL trace shapes, not arbitrary OTLP JSON envelopes. Export JSONL from the Phoenix UI or JSON with the Phoenix CLI.
 - It does not accept JSONL produced by serializing `get_spans_dataframe()`. That table uses flattened top-level column names rather than the UI and CLI span objects.
 - It does not import Phoenix datasets, experiments, evaluators, or project configuration. Trace and span annotations included in the export are retained as metadata, but do not become Kitaru evaluations.

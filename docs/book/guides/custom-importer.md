@@ -53,6 +53,42 @@ Yield lazily; the import consumes one item at a time, so payload size is bounded
 
 Set a stable `external_id` from your source system: together with the importer's provider name it is the dedup key, so re-importing an overlapping export skips what is already stored instead of duplicating it.
 
+## Fetch traces from your own API instead of a file
+
+A custom importer can accept an API import too, the same way the built-in provider importers do, by declaring a fetch entrypoint on its version source alongside the parse entrypoint. The entrypoint is a second async callable:
+
+```python
+from collections.abc import AsyncIterator
+from typing import Any
+
+
+async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
+    for trace_id in select_traces(query):
+        yield fetch_trace_bytes(trace_id)
+```
+
+`fetch` receives the import's `--query` (or `source.query` on the request) and yields one parser payload per trace. Each yielded payload runs through your `parse` entrypoint with the import's `params`, exactly like a file upload would. Raise from the fetcher to end the import task with the failure recorded in the import stats, an `ImportFailure` inside the loop isolates one trace instead.
+
+A script source names the fetch entrypoint as a bare attribute, like the parse entrypoint. A package source names it as `module:attribute`. There is no `--fetch-entrypoint` flag on `kitaru importer register` yet, so set it through the API directly, for example with the Python client:
+
+```python
+from kitaru.api_models.v1.importer import ImporterVersionCreateRequest
+from kitaru.api_models.v1.plugin import PackagePluginSource
+
+await client.importers.create_version(
+    importer_id,
+    ImporterVersionCreateRequest(
+        source=PackagePluginSource(
+            requirement="my-importer==1.0.0",
+            entrypoint="my_importer:parse",
+            fetch_entrypoint="my_importer:fetch",
+        )
+    ),
+)
+```
+
+An import against a version without a fetch entrypoint rejects a `--since`, `--until`, `--trace-id`, or `--query` selection.
+
 ## Scaffold, test offline, register
 
 ```bash

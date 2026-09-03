@@ -59,6 +59,29 @@ kitaru session import langsmith-runs.jsonl \
   --media-type application/x-ndjson --wait
 ```
 
+## Fetch traces from the LangSmith API
+
+Skip the export and upload, and let the import task fetch runs from LangSmith directly:
+
+```bash
+kitaru session import \
+  --importer kitaru/langsmith@latest \
+  --agent support-agent@latest \
+  --since 7d \
+  --tag imported-baseline --wait
+```
+
+Omitting FILE and setting `--since` selects an API import: the worker calls the LangSmith API instead of parsing an uploaded payload. `--since` and `--until` accept an ISO 8601 timestamp or a relative duration (`7d`, `12h`, `30m`). `--trace-id` (repeatable) fetches exactly those trace ids instead of a time window. The same selection is a query object on the SDK and REST request:
+
+| Query key | Meaning |
+| --- | --- |
+| `trace_ids` | LangSmith trace ids to fetch. When present, exactly those traces are fetched and the time window is ignored. |
+| `since` | Timezone-aware ISO 8601 datetime, lower bound of trace start time. Required when `trace_ids` is absent. |
+| `until` | Timezone-aware ISO 8601 datetime, upper bound of trace end time. Defaults to now. |
+| `project_name` | LangSmith project to fetch from. Defaults to the SDK's tracer project, read from `LANGSMITH_PROJECT` (or `LANGCHAIN_PROJECT`) in the environment. |
+
+Pass `project_name` through `--query '{"project_name": "my-project"}'`. The worker needs `kitaru-langsmith-importer[adapter]` installed (the default plugin catalog already installs it that way) and `LANGSMITH_API_KEY` in its environment, plus `LANGSMITH_ENDPOINT` for a self-hosted instance. Each fetched trace is parsed the same way an uploaded export would be, so the mapping, dedup, and limitations below apply the same way.
+
 ## What a LangSmith trace becomes
 
 The mapping is one level deeper than a trace-per-session import, because a LangSmith thread is usually a multi-turn conversation spread over several traces:
