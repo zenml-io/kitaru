@@ -91,14 +91,22 @@ export async function serveInstallFile(request, { url, type }) {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response("Method not allowed", { status: 405 });
   }
-  const upstream = await fetch(url, {
-    cf: { cacheTtl: 300, cacheEverything: true },
-  });
-  if (!upstream.ok) {
-    return new Response(
+  const unavailable = () =>
+    new Response(
       "This file is temporarily unavailable. See https://docs.zenml.io/kitaru/getting-started/installation\n",
       { status: 502, headers: { "content-type": "text/plain; charset=utf-8" } },
     );
+  let upstream;
+  try {
+    upstream = await fetch(url, {
+      cf: { cacheTtl: 300, cacheEverything: true },
+    });
+  } catch {
+    // DNS, connection, and timeout failures reject rather than resolve.
+    return unavailable();
+  }
+  if (!upstream.ok) {
+    return unavailable();
   }
   return new Response(request.method === "HEAD" ? null : upstream.body, {
     status: 200,

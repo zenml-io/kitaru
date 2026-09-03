@@ -14,7 +14,7 @@ curl -fsSL https://kitaru.ai/install | bash
 What it does, in order:
 
 1. Installs the `kitaru` CLI and the `kitaru-mcp` server into an isolated [uv](https://docs.astral.sh/uv/) environment, installing uv first if you do not have it. No system Python is required.
-2. Installs the [agent skills](../agent-native/setup.md) for every coding agent on the machine.
+2. Installs the [agent skills](../agent-native/setup.md) into `~/.agents/skills`, and into `~/.claude/skills` and `~/.codex/skills` when Claude Code or Codex is installed.
 3. Registers the MCP server with Claude Code and Codex.
 4. Runs `kitaru login --local`, which starts the server and PostgreSQL in Docker and logs you in. If Docker is not running, it prints that command for later instead.
 

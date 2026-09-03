@@ -10,9 +10,9 @@
 #   2. `uv tool install kitaru[cli,mcp,worker]` into an isolated environment,
 #      with a uv-managed Python if the machine has none. Puts `kitaru` and
 #      `kitaru-mcp` on PATH (~/.local/bin) for future terminals.
-#   3. Installs the Kitaru agent skills (zenml-io/kitaru-skills) for every
-#      coding agent found on the machine, user scope. Uses `npx skills` when
-#      Node is present, otherwise copies them from git.
+#   3. Installs the Kitaru agent skills (zenml-io/kitaru-skills) from the
+#      repository tarball into ~/.agents/skills, plus ~/.claude/skills and
+#      ~/.codex/skills when those CLIs are installed. No Node needed.
 #   4. Registers the Kitaru MCP server with Claude Code and Codex if their
 #      CLIs are installed; prints the JSON for everything else.
 #   5. If Docker is running and there is a terminal, runs `kitaru login --local`
@@ -117,14 +117,16 @@ quiet() {
   # stdin is /dev/null so a child can never swallow the rest of this script
   # when it is being piped in from curl.
   if [ "$KITARU_VERBOSE" = "1" ]; then run "$@" </dev/null; return $?; fi
-  local out; out="$(mktemp)"
-  if "$@" >"$out" 2>&1 </dev/null; then rm -f "$out"; return 0; fi
-  local status=$?
-  cat "$out" >&2; rm -f "$out"; return $status
+  local out status=0; out="$(mktemp)"
+  "$@" >"$out" 2>&1 </dev/null || status=$?
+  [ "$status" -eq 0 ] || cat "$out" >&2
+  rm -f "$out"; return "$status"
 }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 main() {
+# PATH as the user had it, before this script adds anything to it.
+ORIG_PATH="$PATH"
 # ---------------------------------------------------------------------------
 # Guards
 # ---------------------------------------------------------------------------
@@ -145,7 +147,7 @@ if ! have curl && ! have wget; then die "Need curl or wget."; fi
 
 fetch_to_stdout() {
   if have curl; then curl -fsSL --proto '=https' --tlsv1.2 "$1"
-  else wget -qO- "$1"; fi
+  else wget -q --https-only -O- "$1"; fi
 }
 
 say ""
@@ -166,23 +168,34 @@ version_ge() {
   [ "$(printf '%s\n%s\n' "$2" "$1" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" = "$2" ]
 }
 
+uv_version_of() { "$1" --version 2>/dev/null | awk '{print $2}'; }
+
 install_uv() {
   step "Installing uv (Python package manager, from astral.sh)"
   # Download to a file first: `quiet` closes stdin, so piping into `sh -s`
   # would hand the installer an empty script.
   UV_INSTALLER="$(mktemp)"
+  trap 'rm -f "$UV_INSTALLER"' EXIT
   fetch_to_stdout https://astral.sh/uv/install.sh >"$UV_INSTALLER" \
     || die "Could not download the uv installer from https://astral.sh/uv/install.sh"
   quiet sh "$UV_INSTALLER" --quiet \
     || die "uv install failed. Install it from https://docs.astral.sh/uv/ and re-run."
-  rm -f "$UV_INSTALLER"
-  ensure_path "$HOME/.local/bin"
-  have uv || die "uv installed but not found on PATH. Open a new terminal and re-run."
-  ok "uv $(uv --version | awk '{print $2}') installed"
+  rm -f "$UV_INSTALLER"; trap - EXIT
+  # Use the binary we just installed by absolute path, and put its directory
+  # in front so an older uv earlier on PATH (or bash's hashed path) can't win.
+  UV="$HOME/.local/bin/uv"
+  export PATH="$HOME/.local/bin:$PATH"; hash -r
+  [ -x "$UV" ] || die "uv installed but $UV is missing. Install it from https://docs.astral.sh/uv/ and re-run."
+  version_ge "$(uv_version_of "$UV")" "$KITARU_MIN_UV" \
+    || die "uv at $UV is $(uv_version_of "$UV"), older than $KITARU_MIN_UV. Install a current uv and re-run."
+  ok "uv $(uv_version_of "$UV") installed"
 }
 
+# $UV is the uv binary used for everything below (absolute path).
+UV=""
 if have uv; then
-  UV_VER="$(uv --version 2>/dev/null | awk '{print $2}')"
+  UV="$(command -v uv)"
+  UV_VER="$(uv_version_of "$UV")"
   if version_ge "$UV_VER" "$KITARU_MIN_UV"; then
     ok "uv $UV_VER found"
   else
@@ -217,77 +230,91 @@ for pkg in "${KITARU_WITH[@]:-}"; do
 done
 
 step "Installing $SPEC"
-quiet uv "${UV_ARGS[@]}" "$SPEC" || die "uv tool install failed. Re-run with --verbose for details."
+quiet "$UV" "${UV_ARGS[@]}" "$SPEC" || die "uv tool install failed. Re-run with --verbose for details."
 
 # uv puts tool executables in its tool bin dir; make sure future shells see it.
-TOOL_BIN="$(uv tool dir --bin 2>/dev/null || echo "$HOME/.local/bin")"
+TOOL_BIN="$("$UV" tool dir --bin 2>/dev/null || echo "$HOME/.local/bin")"
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) TOOL_BIN="$(cygpath -u "$TOOL_BIN" 2>/dev/null || echo "$TOOL_BIN")" ;; esac
 ensure_path "$TOOL_BIN"
 if [ "$KITARU_NO_MODIFY_PATH" = "1" ]; then
   note "Not editing shell rc files (--no-modify-path). Make sure $TOOL_BIN is on your PATH."
 else
-  quiet uv tool update-shell || true
+  quiet "$UV" tool update-shell || true
   persist_path "$TOOL_BIN"
 fi
 
-have kitaru || die "kitaru installed to $TOOL_BIN but is not on PATH. Add it and re-run."
-ok "kitaru $(kitaru --version 2>/dev/null) installed"
+KITARU_BIN="$TOOL_BIN/kitaru"
+[ -x "$KITARU_BIN" ] || [ -x "$KITARU_BIN.exe" ] || die "uv reported success but $KITARU_BIN is missing. Re-run with --verbose."
+ok "kitaru $("$KITARU_BIN" --version 2>/dev/null) installed"
 note "$TOOL_BIN/kitaru, $TOOL_BIN/kitaru-mcp"
+# Warn if a different kitaru was already reachable on the PATH the user
+# started with (a pip or pipx install, say): depending on their rc order it
+# may keep winning in new terminals.
+hash -r
+RESOLVED_KITARU="$(PATH="$ORIG_PATH" command -v kitaru 2>/dev/null || true)"
+if [ -n "$RESOLVED_KITARU" ] && [ "$RESOLVED_KITARU" != "$KITARU_BIN" ] && [ "$RESOLVED_KITARU" != "$KITARU_BIN.exe" ]; then
+  warn "Another kitaru at $RESOLVED_KITARU ($("$RESOLVED_KITARU" --version 2>/dev/null || echo unknown)) shadows the one just installed. Remove it or put $TOOL_BIN first on PATH."
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Coding-agent skills
 # ---------------------------------------------------------------------------
-skills_present() {
-  local d
-  for d in "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.codex/skills"; do
-    [ -f "$d/kitaru-investigation/SKILL.md" ] && return 0
-  done
-  return 1
+# Destinations: ~/.agents/skills is the cross-agent location; ~/.claude and
+# ~/.codex get their own copy when that CLI is installed or the dir exists.
+skill_destinations() {
+  echo "$HOME/.agents/skills"
+  if have claude || [ -d "$HOME/.claude" ]; then echo "$HOME/.claude/skills"; fi
+  if have codex || [ -d "$HOME/.codex" ]; then echo "$HOME/.codex/skills"; fi
 }
 
-install_skills_from_tarball() {
-  # Fallback without Node: fetch the repo tarball (no git, no auth) and copy
-  # each skill into the user-scope skills folder of every agent host kitaru
-  # looks in (~/.agents always; ~/.claude and ~/.codex when present).
-  local tmp; tmp="$(mktemp -d)"
-  local url="https://github.com/${KITARU_SKILLS_REPO}/archive/refs/heads/main.tar.gz"
+install_skills() {
+  # Fetch the repository tarball (no git, no Node, no auth, nothing executed
+  # from the current directory) and copy every skill under skills/ into each
+  # destination. Every mutation is checked; a partial copy is a failure.
+  local tmp url src dest skill name
+  tmp="$(mktemp -d)" || return 1
+  url="https://github.com/${KITARU_SKILLS_REPO}/archive/refs/heads/main.tar.gz"
   if ! fetch_to_stdout "$url" | tar -xzf - -C "$tmp" 2>/dev/null; then
     rm -rf "$tmp"; return 1
   fi
-  local src; src="$(find "$tmp" -maxdepth 2 -type d -name skills | head -1)"
-  [ -n "$src" ] || { rm -rf "$tmp"; return 1; }
-  local host
-  for host in "$HOME/.agents" "$HOME/.claude" "$HOME/.codex"; do
-    if [ "$host" != "$HOME/.agents" ] && [ ! -d "$host" ]; then continue; fi
-    mkdir -p "$host/skills"
-    local skill
-    for skill in "$src"/*/; do
-      [ -f "$skill/SKILL.md" ] || continue
-      rm -rf "$host/skills/$(basename "$skill")"
-      cp -R "$skill" "$host/skills/$(basename "$skill")"
+  src="$(find "$tmp" -mindepth 2 -maxdepth 2 -type d -name skills | head -1)"
+  if [ -z "$src" ]; then rm -rf "$tmp"; return 1; fi
+  SKILL_NAMES=()
+  for skill in "$src"/*/; do
+    [ -f "$skill/SKILL.md" ] && SKILL_NAMES+=("$(basename "$skill")")
+  done
+  if [ "${#SKILL_NAMES[@]}" -eq 0 ]; then rm -rf "$tmp"; return 1; fi
+  SKILL_DESTS=()
+  while IFS= read -r dest; do SKILL_DESTS+=("$dest"); done < <(skill_destinations)
+  for dest in "${SKILL_DESTS[@]}"; do
+    mkdir -p "$dest" || { rm -rf "$tmp"; return 1; }
+    for name in "${SKILL_NAMES[@]}"; do
+      rm -rf "$dest/$name" || { rm -rf "$tmp"; return 1; }
+      cp -R "$src/$name" "$dest/$name" || { rm -rf "$tmp"; return 1; }
     done
   done
   rm -rf "$tmp"
+  skills_complete
+}
+
+# Postcondition: every skill from the tarball is present in every destination.
+skills_complete() {
+  local dest name
+  for dest in "${SKILL_DESTS[@]}"; do
+    for name in "${SKILL_NAMES[@]}"; do
+      [ -f "$dest/$name/SKILL.md" ] || return 1
+    done
+  done
   return 0
 }
 
+SKILL_NAMES=(); SKILL_DESTS=()
 if [ "$KITARU_SKIP_SKILLS" = "1" ]; then
   note "Skipping skills (--no-skills)"
 else
   step "Installing Kitaru agent skills ($KITARU_SKILLS_REPO)"
-  if have npx; then
-    # The skills CLI exits 0 even when it installed nothing, so check the
-    # filesystem rather than the exit code.
-    quiet npx -y skills add "$KITARU_SKILLS_REPO" -g -y -a '*' -s '*' || true
-    if skills_present; then
-      ok "Skills installed for every coding agent found (user scope)"
-    elif install_skills_from_tarball; then
-      ok "Skills copied into ~/.agents/skills (and ~/.claude, ~/.codex where present)"
-    else
-      warn "Could not install skills. Later: npx skills add $KITARU_SKILLS_REPO"
-    fi
-  elif install_skills_from_tarball; then
-    ok "Skills copied into ~/.agents/skills (and ~/.claude, ~/.codex where present)"
+  if install_skills; then
+    ok "${#SKILL_NAMES[@]} skills installed into ${SKILL_DESTS[*]}"
   else
     warn "Could not install skills. Later: npx skills add $KITARU_SKILLS_REPO"
   fi
@@ -305,17 +332,26 @@ else
   step "Registering the Kitaru MCP server"
   registered=0
   if have claude; then
+    # User-scope MCP servers live in ~/.claude.json. Snapshot it so a failed
+    # replace can put the previous entry back instead of leaving none.
+    CLAUDE_CFG="$HOME/.claude.json"; CLAUDE_CFG_BAK=""
+    if [ -f "$CLAUDE_CFG" ]; then
+      CLAUDE_CFG_BAK="$(mktemp)"; cp "$CLAUDE_CFG" "$CLAUDE_CFG_BAK"
+    fi
     if claude mcp get kitaru >/dev/null 2>&1; then
       quiet claude mcp remove --scope user kitaru || true
     fi
-    if quiet claude mcp add --scope user kitaru -- "$MCP_BIN" --server "$MCP_SERVER_URL" --mode "$KITARU_MCP_MODE"; then
+    if quiet claude mcp add --scope user kitaru -- "$MCP_BIN" --server "$MCP_SERVER_URL" --mode "$KITARU_MCP_MODE" \
+       && claude mcp get kitaru >/dev/null 2>&1; then
       ok "Claude Code: MCP server 'kitaru' (user scope)"; registered=1
     else
-      warn "Claude Code: could not register MCP server"
+      if [ -n "$CLAUDE_CFG_BAK" ]; then cp "$CLAUDE_CFG_BAK" "$CLAUDE_CFG"; fi
+      warn "Claude Code: could not register MCP server; previous config left as it was."
     fi
+    [ -n "$CLAUDE_CFG_BAK" ] && rm -f "$CLAUDE_CFG_BAK"
   fi
   if have codex; then
-    quiet codex mcp remove kitaru 2>/dev/null || true
+    # `codex mcp add` overwrites an existing name, so no remove first.
     if quiet codex mcp add kitaru -- "$MCP_BIN" --server "$MCP_SERVER_URL" --mode "$KITARU_MCP_MODE"; then
       ok "Codex: MCP server 'kitaru'"; registered=1
     else
@@ -331,8 +367,20 @@ fi
 # ---------------------------------------------------------------------------
 # 5. Login (local server via Docker, or a team server)
 # ---------------------------------------------------------------------------
-docker_running() { have docker && docker info >/dev/null 2>&1; }
-has_tty() { [ -t 0 ] || [ -r /dev/tty ]; }
+DOCKER_HINT=""
+docker_running() {
+  have docker || { DOCKER_HINT="Docker is not installed."; return 1; }
+  local err; err="$(docker info 2>&1 >/dev/null)" && return 0
+  case "$err" in
+    *"permission denied"*|*"Permission denied"*)
+      DOCKER_HINT="Docker is installed but this user cannot reach it. Add yourself to the docker group (sudo usermod -aG docker \$USER, then log out and in), or start Docker Desktop." ;;
+    *) DOCKER_HINT="Docker is not running." ;;
+  esac
+  return 1
+}
+# A real terminal we can read from: stdin is one, or /dev/tty actually opens
+# (checking the device node's permission bits is not enough in containers).
+has_tty() { [ -t 0 ] || { : </dev/tty; } 2>/dev/null; }
 
 login_cmd() {
   if [ -n "$KITARU_SERVER" ]; then printf 'kitaru login %s' "$KITARU_SERVER"
@@ -345,14 +393,16 @@ login_cmd() {
 # re-run upgrades. So on exactly that conflict, retry with --upgrade.
 LOCAL_UPGRADE_HINT="kitaru login --local --upgrade"
 login_local() {
-  local out; out="$(mktemp)"
-  if kitaru login --local </dev/tty 2>&1 | tee "$out"; then
+  # $1 = stdin source: /dev/tty when there is one, /dev/null otherwise
+  # (`kitaru login --local` needs no interaction).
+  local in="$1" out; out="$(mktemp)"
+  if "$KITARU_BIN" login --local <"$in" 2>&1 | tee "$out"; then
     rm -f "$out"; LOGGED_IN=1; return 0
   fi
-  if grep -q -- "--upgrade" "$out"; then
+  if grep -qi -- "conflict\|--upgrade" "$out"; then
     rm -f "$out"
-    note "An older local server is running. Upgrading it to match kitaru $(kitaru --version); your database is kept."
-    if kitaru login --local --upgrade </dev/tty; then LOGGED_IN=1; return 0; fi
+    note "An older local server is running. Upgrading it to match kitaru $("$KITARU_BIN" --version); your database is kept."
+    if "$KITARU_BIN" login --local --upgrade <"$in"; then LOGGED_IN=1; return 0; fi
     warn "Local server upgrade did not complete. Run: $LOCAL_UPGRADE_HINT"
     return 1
   fi
@@ -365,18 +415,20 @@ LOGGED_IN=0
 if [ "$KITARU_SKIP_LOGIN" = "1" ]; then
   note "Skipping login (--no-login)"
 elif [ -z "$KITARU_SERVER" ] && ! docker_running; then
-  warn "Docker is not running, so the local Kitaru server was not started."
-  note "Start Docker, then run: kitaru login --local"
-  note "Or use a team server:   kitaru login https://<your-team>.kitaru.ai"
-elif ! has_tty; then
-  note "No terminal attached, so login was not run. Next: $(login_cmd)"
-else
-  step "Logging in ($(login_cmd))"
-  if [ -n "$KITARU_SERVER" ]; then
-    kitaru login "$KITARU_SERVER" </dev/tty && LOGGED_IN=1 || warn "Login did not complete. Run: $(login_cmd)"
+  warn "$DOCKER_HINT The local Kitaru server was not started."
+  note "Fix that, then run: kitaru login --local"
+  note "Or use a team server: kitaru login https://<your-team>.kitaru.ai"
+elif [ -n "$KITARU_SERVER" ]; then
+  # Team login uses a device flow and needs a terminal.
+  if has_tty; then
+    step "Logging in ($(login_cmd))"
+    "$KITARU_BIN" login "$KITARU_SERVER" </dev/tty && LOGGED_IN=1 || warn "Login did not complete. Run: $(login_cmd)"
   else
-    login_local
+    note "No terminal attached, so login was not run. Next: $(login_cmd)"
   fi
+else
+  step "Logging in (kitaru login --local)"
+  if has_tty; then login_local /dev/tty; else login_local /dev/null; fi
 fi
 
 # ---------------------------------------------------------------------------

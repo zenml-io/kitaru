@@ -129,3 +129,19 @@ test("fetch(/install) returns 502 when GitHub is unavailable", async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+test("fetch(/install) returns 502 when the upstream fetch rejects", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new TypeError("fetch failed");
+  };
+  try {
+    const response = await worker.fetch(
+      new Request("https://kitaru.ai/install"),
+    );
+    assert.equal(response.status, 502);
+    assert.match(await response.text(), /temporarily unavailable/);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
