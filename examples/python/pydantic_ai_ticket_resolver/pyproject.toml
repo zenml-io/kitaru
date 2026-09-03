@@ -3,7 +3,7 @@ name = "kitaru-quickstart-example"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "kitaru[cli,mcp,server,worker]>=0.22.2",
+    "kitaru[cli,mcp,server,worker]>=0.24.0",
     "kitaru-langfuse-importer>=0.1.1",
     "kitaru-pydantic-ai[openai]>=0.1.0",
     "langfuse>=4.14,<5",

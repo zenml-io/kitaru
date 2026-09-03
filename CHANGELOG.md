@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The quickstart example now installs Kitaru 0.24.0 from its frozen lockfile, so its documented `session list --include-payloads` command works. CI also tests the published dependencies before replacing them with development wheels.
 - A NUL byte or another C0 control character in a user-supplied string now returns HTTP 422 instead of HTTP 500. Request string fields reject the characters at validation, and a database error caused by a value the database cannot store maps to HTTP 422 as a backstop.
 - Getting or updating an evaluator or importer version with a version number outside PostgreSQL's 32-bit integer range now returns HTTP 422 instead of HTTP 500.
 - Reusing an `Idempotency-Key` registered on another route against `POST /api/v1/api-keys` or `POST /api/v1/api-keys/{api_key_id}/rotate` now returns HTTP 422 instead of HTTP 500. The stored response is only decrypted after the request fingerprint matches, and a stored response that cannot be decrypted returns HTTP 409.

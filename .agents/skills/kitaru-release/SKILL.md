@@ -132,6 +132,18 @@ ui-tag = "<kitaru-ui-tag>"
 
 Read default membership from `release/release-units.toml`. Do not copy a fixed plugin count or a retired plugin name into the skill.
 
+Check the standalone quickstart dependency floor and lockfile under `examples/python/pydantic_ai_ticket_resolver/`. Its README uses `uv sync --frozen`, so changing only the dependency floor does not update the installed version. Refresh both files to a published compatible core version, retaining unrelated dependency pins:
+
+```bash
+uv add --project examples/python/pydantic_ai_ticket_resolver --no-sync \
+  --upgrade-package "kitaru==<published-version>" \
+  "kitaru[cli,mcp,server,worker]>=<published-version>"
+```
+
+With the local test PostgreSQL available, run `uv sync --frozen` and `uv run --frozen python scripts/run_ci_e2e.py` from the example directory before installing candidate wheels. The published-dependency run and the candidate-wheel run verify different installation paths. Preserve the existing lockfile cutoff when no unrelated dependency update is needed.
+
+Do not put an unpublished version or a local wheel path into the public quickstart lockfile. If the example requires the upcoming release, record its dependency refresh and frozen end-to-end check as a post-publication follow-up; candidate-wheel success alone does not complete it.
+
 The frontend declaration contains only the schema version, Kitaru version, and trusted frontend tag. The workflow downloads and verifies the published checksum.
 
 ## Prepare a plugin-only release PR
@@ -317,6 +329,8 @@ For a stable release, fast-forward `main` to the tagged release commit before me
 Approve required environments only after checking the candidate evidence. A managed-image failure is reported as a warning and does not block public deployables.
 
 Verify each published surface independently. Do not infer one surface from another.
+
+After the required core and plugin versions are available on PyPI, complete any pending quickstart dependency refresh through a reviewed follow-up PR and rerun its frozen end-to-end test. Report which branch contains that update: the public README links to `main`, and merging a follow-up into `develop` alone does not update the public example. The development-reset PR does not currently refresh the quickstart lockfile.
 
 The workflow does not update `main`. After the newest stable core release succeeds, tell the release owner to move `main` to the immutable core tag without creating a merge commit:
 
