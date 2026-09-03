@@ -198,13 +198,13 @@ class ControlPlaneSession:
     ) -> ControlPlaneToken:
         """Authorize this machine against the control plane.
 
-        The call blocks until a signed-in account confirms the user code in a
+        The call blocks until a signed-in account completes authorization in a
         browser, or until the authorization expires.
 
         Args:
             open_browser: Whether to open the verification page.
             prompt: Called with the authorization so the caller can show the
-                user code. Defaults to logging it.
+                verification URL. Defaults to logging it.
             workspace_id: Workspace ID preselected on the verification page.
 
         Raises:
@@ -235,9 +235,8 @@ class ControlPlaneSession:
             prompt(authorization)
         else:
             logger.info(
-                "Open %s and confirm the code %s.",
+                "Open %s to continue.",
                 verification_uri,
-                authorization.user_code,
             )
         if open_browser:
             webbrowser.open(verification_uri)

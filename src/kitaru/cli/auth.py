@@ -544,7 +544,7 @@ def _show_device_prompt(
         uri = authorization.verification_uri_complete or authorization.verification_uri
     else:
         uri = authorization.verification_uri_complete
-    message = f"Open {uri} and confirm code {authorization.user_code}."
+    message = f"Open {uri} to continue."
     write_interaction(message)
 
 
