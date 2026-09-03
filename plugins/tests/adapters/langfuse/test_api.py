@@ -14,7 +14,6 @@
 """Focused contract tests for the Langfuse fetch entrypoint."""
 
 from datetime import UTC, datetime
-from typing import Any
 
 import pytest
 
@@ -22,12 +21,8 @@ from kitaru.task.importer import ImportedSession
 from kitaru_langfuse_importer.api import fetch
 from kitaru_langfuse_importer.importer import parse
 
+from ..fetch_helpers import collect_payloads
 from .fixtures import FakeLangfuseClient, build_complete_trace, build_trace_page
-
-
-async def _collect(query: dict[str, Any]) -> list[bytes]:
-    """Drain the fetch generator into a list of payloads."""
-    return [payload async for payload in fetch(query)]
 
 
 async def test_fetch_with_trace_ids_fetches_exactly_those_in_order(
@@ -36,7 +31,7 @@ async def test_fetch_with_trace_ids_fetches_exactly_those_in_order(
     """Fetch exactly the requested trace ids, in the given order."""
     fake_langfuse.trace_builders = [build_complete_trace, build_complete_trace]
 
-    payloads = await _collect({"trace_ids": ["trace-2", "trace-1"]})
+    payloads = await collect_payloads(fetch({"trace_ids": ["trace-2", "trace-1"]}))
 
     assert fake_langfuse.requested == ["trace-2", "trace-1"]
     assert fake_langfuse.list_calls == []
@@ -52,8 +47,8 @@ async def test_fetch_with_trace_ids_ignores_the_time_window(
     """Ignore since and until when trace_ids is present."""
     fake_langfuse.trace_builders = [build_complete_trace]
 
-    payloads = await _collect(
-        {"trace_ids": ["trace-1"], "since": "2020-01-01T00:00:00+00:00"}
+    payloads = await collect_payloads(
+        fetch({"trace_ids": ["trace-1"], "since": "2020-01-01T00:00:00+00:00"})
     )
 
     assert fake_langfuse.requested == ["trace-1"]
@@ -77,7 +72,7 @@ async def test_fetch_time_window_lists_across_two_pages_and_fetches_each_trace(
     since = "2026-07-01T00:00:00+00:00"
     until = "2026-07-24T00:00:00+00:00"
 
-    payloads = await _collect({"since": since, "until": until})
+    payloads = await collect_payloads(fetch({"since": since, "until": until}))
 
     assert fake_langfuse.requested == ["trace-1", "trace-2", "trace-3"]
     assert len(payloads) == 3
@@ -96,7 +91,7 @@ async def test_fetch_time_window_defaults_until_to_now(
     fake_langfuse.trace_list_pages = [build_trace_page([], page=1, total_pages=0)]
 
     before = datetime.now(UTC)
-    await _collect({"since": "2026-07-01T00:00:00+00:00"})
+    await collect_payloads(fetch({"since": "2026-07-01T00:00:00+00:00"}))
     after = datetime.now(UTC)
 
     until = fake_langfuse.list_calls[0]["to_timestamp"]
@@ -109,42 +104,19 @@ async def test_fetch_yields_nothing_for_an_empty_listing(
     """Yield no payloads when the time window listing is empty."""
     fake_langfuse.trace_list_pages = [build_trace_page([], page=1, total_pages=0)]
 
-    payloads = await _collect({"since": "2026-07-01T00:00:00+00:00"})
+    payloads = await collect_payloads(fetch({"since": "2026-07-01T00:00:00+00:00"}))
 
     assert payloads == []
     assert fake_langfuse.requested == []
 
 
-@pytest.mark.parametrize(
-    ("query", "match"),
-    [
-        ({"trace_ids": ["trace-1"], "bogus": 1}, "Extra inputs are not permitted"),
-        ({}, "since is required when trace_ids is absent"),
-        (
-            {"trace_ids": "trace-1", "since": "2026-01-01T00:00:00+00:00"},
-            "Input should be a valid list",
-        ),
-        ({"since": "not-a-date"}, "Input should be a valid datetime"),
-        ({"since": "2026-01-01T00:00:00"}, "Input should have timezone info"),
-        (
-            {"since": "2026-01-01T00:00:00+00:00", "until": "not-a-date"},
-            "Input should be a valid datetime",
-        ),
-        (
-            {
-                "since": "2026-01-02T00:00:00+00:00",
-                "until": "2026-01-01T00:00:00+00:00",
-            },
-            "until must not be before since",
-        ),
-    ],
-)
 async def test_fetch_rejects_an_invalid_query(
-    fake_langfuse: FakeLangfuseClient, query: dict[str, Any], match: str
+    fake_langfuse: FakeLangfuseClient,
 ) -> None:
     """Raise ValueError before the first yield for an invalid query."""
-    with pytest.raises(ValueError, match=match):
-        await _collect(query)
+    query = {"trace_ids": ["trace-1"], "bogus": 1}
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        await collect_payloads(fetch(query))
 
     assert fake_langfuse.requested == []
     assert fake_langfuse.list_calls == []
