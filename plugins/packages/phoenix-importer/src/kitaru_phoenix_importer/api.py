@@ -127,8 +127,8 @@ def _span_start_time(span: Any) -> datetime | None:
 
 async def _list_root_trace_ids(
     client: AsyncClient, project: str, since: datetime, until: datetime
-) -> AsyncIterator[str]:
-    """List root-span trace ids in a time window, paging through every page.
+) -> list[str]:
+    """List root-span trace ids in a time window, oldest first.
 
     Args:
         client: Phoenix client.
@@ -136,10 +136,12 @@ async def _list_root_trace_ids(
         since: Lower bound of span start time.
         until: Upper bound of span start time.
 
-    Yields:
-        Trace ids in listing order.
+    Returns:
+        Trace ids ordered by ascending root span start time.
     """
-    seen: set[str] = set()
+    # get_spans has no ordering parameter, so sort the root spans here
+    # before collecting trace ids.
+    starts: dict[str, datetime] = {}
     window_start = since
     while True:
         spans = await client.spans.get_spans(
@@ -149,27 +151,32 @@ async def _list_root_trace_ids(
             limit=_SPAN_LIMIT,
         )
         if not spans:
-            return
+            break
         for span in spans:
             if span.get("parent_id") is not None:
                 continue
             trace_id = span["context"]["trace_id"]
-            if trace_id not in seen:
-                seen.add(trace_id)
-                yield trace_id
+            starts.setdefault(
+                trace_id, _span_start_time(span) or datetime.min.replace(tzinfo=UTC)
+            )
         if len(spans) < _SPAN_LIMIT:
-            return
+            break
         next_start = max(
             (start for span in spans if (start := _span_start_time(span))),
             default=None,
         )
         if next_start is None or next_start <= window_start:
-            return
+            break
         window_start = next_start
+    return sorted(starts, key=lambda trace_id: (starts[trace_id], trace_id))
 
 
 async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    """Fetch parser payloads for traces matching a query.
+    """Fetch one parser payload holding every span matching a query.
+
+    Every fetched trace's spans land in a single payload, oldest trace
+    first, so the parser groups them into Kitaru sessions itself instead
+    of seeing one trace at a time.
 
     Args:
         query: Fetch query with `project`, `trace_ids`, `since`, and `until`
@@ -179,17 +186,21 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         ValueError: The query is invalid.
 
     Yields:
-        Trace payload bytes, one per fetched trace.
+        One payload with every fetched trace's spans, oldest first, or
+        nothing when no trace matches.
     """
     parsed = PhoenixFetchQuery.model_validate(query)
     client = AsyncClient()
 
     if parsed.trace_ids is not None:
-        for trace_id in parsed.trace_ids:
-            yield serialize_spans(await fetch_spans(trace_id, parsed.project, client))
-        return
+        trace_ids = parsed.trace_ids
+    else:
+        since, until = parsed.get_window()
+        project = parsed.project or get_env_project_name()
+        trace_ids = await _list_root_trace_ids(client, project, since, until)
 
-    since, until = parsed.get_window()
-    project = parsed.project or get_env_project_name()
-    async for trace_id in _list_root_trace_ids(client, project, since, until):
-        yield serialize_spans(await fetch_spans(trace_id, parsed.project, client))
+    spans: list[Any] = []
+    for trace_id in trace_ids:
+        spans.extend(await fetch_spans(trace_id, parsed.project, client))
+    if spans:
+        yield serialize_spans(spans)

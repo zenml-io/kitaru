@@ -14,6 +14,7 @@
 """Langfuse API read layer."""
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any
@@ -23,7 +24,13 @@ from langfuse.api import NotFoundError, ObservationsView, TraceWithFullDetails
 
 from kitaru.task.importer import FetchQuery
 
-__all__ = ["fetch", "fetch_trace", "serialize_trace", "wait_for_trace"]
+__all__ = [
+    "fetch",
+    "fetch_trace",
+    "serialize_trace",
+    "serialize_traces",
+    "wait_for_trace",
+]
 
 _POLL_INTERVAL = 2.0
 
@@ -96,6 +103,20 @@ def serialize_trace(trace: TraceWithFullDetails) -> bytes:
     return trace.model_dump_json(by_alias=True).encode("utf-8")
 
 
+def serialize_traces(traces: list[TraceWithFullDetails]) -> bytes:
+    """Serialize fetched traces into the multi-trace payload the parser accepts.
+
+    Args:
+        traces: Fetched traces, in the order they should be ingested.
+
+    Returns:
+        Trace list payload bytes.
+    """
+    return json.dumps(
+        [trace.model_dump(mode="json", by_alias=True) for trace in traces]
+    ).encode("utf-8")
+
+
 async def _list_trace_ids(since: datetime, until: datetime) -> AsyncIterator[str]:
     """List trace ids in a time window, paging through every result page.
 
@@ -104,13 +125,16 @@ async def _list_trace_ids(since: datetime, until: datetime) -> AsyncIterator[str
         until: Upper bound of trace start time.
 
     Yields:
-        Trace ids in listing order.
+        Trace ids, oldest first.
     """
     api = get_client().async_api
     page = 1
     while True:
         traces = await api.trace.list(
-            from_timestamp=since, to_timestamp=until, page=page
+            from_timestamp=since,
+            to_timestamp=until,
+            page=page,
+            order_by="timestamp.asc",
         )
         for trace in traces.data:
             yield trace.id
@@ -120,7 +144,11 @@ async def _list_trace_ids(since: datetime, until: datetime) -> AsyncIterator[str
 
 
 async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    """Fetch parser payloads for traces matching a query.
+    """Fetch one parser payload containing every trace matching a query.
+
+    The parser groups traces into sessions by Langfuse session id, so every
+    matching trace must reach it in a single payload for that grouping to
+    work. A time-window query lists and fetches traces oldest first.
 
     Args:
         query: Fetch query with `trace_ids`, `since`, and `until` keys.
@@ -129,15 +157,17 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         ValueError: The query is invalid.
 
     Yields:
-        Trace payload bytes, one per fetched trace.
+        One trace list payload, or nothing when no trace matches.
     """
     parsed = FetchQuery.model_validate(query)
 
     if parsed.trace_ids is not None:
-        for trace_id in parsed.trace_ids:
-            yield serialize_trace(await fetch_trace(trace_id))
-        return
-
-    since, until = parsed.get_window()
-    async for trace_id in _list_trace_ids(since, until):
-        yield serialize_trace(await fetch_trace(trace_id))
+        traces = [await fetch_trace(trace_id) for trace_id in parsed.trace_ids]
+    else:
+        since, until = parsed.get_window()
+        traces = [
+            await fetch_trace(trace_id)
+            async for trace_id in _list_trace_ids(since, until)
+        ]
+    if traces:
+        yield serialize_traces(traces)

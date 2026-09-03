@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Fetch traces from the LangSmith API by trace id or time window through the `adapter` extra.
+- Import traces oldest first and group them by thread instead of dropping later traces of a thread as duplicates.
 
 ## 0.2.0
 

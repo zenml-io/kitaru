@@ -180,7 +180,11 @@ class BraintrustFetchQuery(FetchQuery):
 
 
 async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    """Fetch parser payloads for traces matching a query.
+    """Fetch one parser payload holding every span row matching a query.
+
+    Every fetched trace's rows land in a single payload, oldest trace
+    first, so the parser groups them into Kitaru sessions itself instead
+    of seeing one trace at a time.
 
     Args:
         query: Fetch query.
@@ -189,19 +193,19 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         ValueError: The query is invalid.
 
     Yields:
-        Trace payload bytes.
+        The trace payload bytes, or nothing when no trace matches.
     """
     parsed = BraintrustFetchQuery.model_validate(query)
+    rows: list[dict[str, Any]] = []
     async with httpx.AsyncClient() as client:
         if parsed.trace_ids is not None:
             for trace_id in parsed.trace_ids:
-                rows = await fetch_spans(parsed.project_id, trace_id, client)
-                yield serialize_spans(rows)
-            return
-
-        since, until = parsed.get_window()
-        async for trace_id in _list_root_span_ids(
-            client, parsed.project_id, since, until
-        ):
-            rows = await fetch_spans(parsed.project_id, trace_id, client)
-            yield serialize_spans(rows)
+                rows.extend(await fetch_spans(parsed.project_id, trace_id, client))
+        else:
+            since, until = parsed.get_window()
+            async for trace_id in _list_root_span_ids(
+                client, parsed.project_id, since, until
+            ):
+                rows.extend(await fetch_spans(parsed.project_id, trace_id, client))
+    if rows:
+        yield serialize_spans(rows)

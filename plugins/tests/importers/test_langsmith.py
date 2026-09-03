@@ -271,6 +271,27 @@ def test_falls_back_to_trace_id_with_warning() -> None:
     )
 
 
+def test_sessions_are_emitted_in_first_appearance_order() -> None:
+    """Emit sessions in payload order rather than sorted by grouping key."""
+    parsed = sessions(
+        jsonl(
+            run("root-a", "trace-a", thread_id="zzz-thread", inputs="a"),
+            run(
+                "root-b",
+                "trace-b",
+                thread_id="aaa-thread",
+                start_time="2026-08-05T10:01:00Z",
+                inputs="b",
+            ),
+        )
+    )
+
+    assert [session.external_id for session in parsed] == [
+        "project-1:zzz-thread",
+        "project-1:aaa-thread",
+    ]
+
+
 def test_isolates_trace_missing_selected_join_value() -> None:
     """Preserve valid traces when another lacks the selected grouping field."""
     valid = run(

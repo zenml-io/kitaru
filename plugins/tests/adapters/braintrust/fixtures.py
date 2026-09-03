@@ -85,6 +85,17 @@ def build_complete_rows(root_span_id: str) -> list[dict[str, Any]]:
     ]
 
 
+def build_session_rows(session_id: str) -> RowsBuilder:
+    """Build a rows builder whose root span joins the given session id."""
+
+    def _builder(root_span_id: str) -> list[dict[str, Any]]:
+        rows = build_complete_rows(root_span_id)
+        rows[0] = {**rows[0], "metadata": {"session_id": session_id}}
+        return rows
+
+    return _builder
+
+
 class FakeSpan(SpanImpl):
     """Braintrust span fake carrying only the ids the adapter reads."""
 

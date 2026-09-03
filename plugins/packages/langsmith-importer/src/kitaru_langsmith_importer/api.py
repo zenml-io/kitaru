@@ -112,7 +112,7 @@ def _list_root_trace_ids(
     since: datetime,
     until: datetime,
 ) -> list[str]:
-    """List distinct trace ids of root runs started in a time window.
+    """List distinct trace ids of root runs started in a time window, oldest first.
 
     Args:
         client: LangSmith client.
@@ -121,13 +121,18 @@ def _list_root_trace_ids(
         until: Upper bound of trace end time.
 
     Returns:
-        Distinct trace ids in listing order.
+        Distinct trace ids ordered by ascending root run start time.
     """
-    runs = client.list_runs(
-        project_name=project_name or get_tracer_project(),
-        is_root=True,
-        start_time=since,
-        filter=f'lt(end_time, "{until.isoformat()}")',
+    # Client.list_runs has no ordering parameter, so sort the root runs
+    # here before collecting trace ids.
+    runs = sorted(
+        client.list_runs(
+            project_name=project_name or get_tracer_project(),
+            is_root=True,
+            start_time=since,
+            filter=f'lt(end_time, "{until.isoformat()}")',
+        ),
+        key=lambda run: (run.start_time, str(run.trace_id)),
     )
     trace_ids: list[str] = []
     seen: set[str] = set()
@@ -140,7 +145,13 @@ def _list_root_trace_ids(
 
 
 async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    """Fetch LangSmith traces as parser payloads.
+    """Fetch LangSmith traces as one parser payload, oldest trace first.
+
+    The parser groups traces into Kitaru sessions by thread or session key,
+    so every fetched trace must reach it in a single payload. Yielding one
+    payload per trace would let the first trace of a thread create the
+    session and leave every later trace of that thread parsing to the same
+    external id, which the importer then drops as a duplicate.
 
     Args:
         query: Fetch query with trace_ids, since, until, and project_name.
@@ -149,7 +160,8 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         ValueError: The query is invalid.
 
     Yields:
-        One parser payload per fetched trace.
+        A single payload with every fetched trace's runs, in fetch order.
+        Nothing when no trace matches the query.
     """
     parsed = LangSmithFetchQuery.model_validate(query)
     client = Client()
@@ -166,6 +178,8 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
             until,
         )
 
+    all_runs: list[Run] = []
     for trace_id in trace_ids:
-        runs = await fetch_runs(client, trace_id)
-        yield serialize_runs(runs)
+        all_runs.extend(await fetch_runs(client, trace_id))
+    if all_runs:
+        yield serialize_runs(all_runs)

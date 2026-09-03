@@ -23,7 +23,7 @@ from kitaru_braintrust_importer.api import fetch
 from kitaru_braintrust_importer.importer import parse
 
 from ..fetch_helpers import collect_payloads
-from .fixtures import FakeBraintrust, build_complete_rows
+from .fixtures import FakeBraintrust, build_complete_rows, build_session_rows
 
 
 async def test_fetch_trace_ids_fetches_exactly_those_in_order(
@@ -38,12 +38,14 @@ async def test_fetch_trace_ids_fetches_exactly_those_in_order(
 
     assert fake_braintrust.requested == ["root-a", "root-b"]
     assert fake_braintrust.list_queries == []
-    assert len(payloads) == 2
+    assert len(payloads) == 1
     sessions = list(parse(payloads[0], {}))
-    assert len(sessions) == 1
-    session = sessions[0]
-    assert isinstance(session, ImportedSession)
-    assert session.external_id == "project-1:root-a"
+    assert len(sessions) == 2
+    assert all(isinstance(session, ImportedSession) for session in sessions)
+    assert [session.external_id for session in sessions] == [
+        "project-1:root-a",
+        "project-1:root-b",
+    ]
 
 
 async def test_time_window_lists_root_span_ids_and_fetches_each_trace(
@@ -67,11 +69,11 @@ async def test_time_window_lists_root_span_ids_and_fetches_each_trace(
     assert fake_braintrust.list_queries[0]["since"] == "2026-01-01T00:00:00+00:00"
     assert fake_braintrust.list_queries[0]["until"] == "2026-01-02T00:00:00+00:00"
     assert fake_braintrust.requested == ["root-a", "root-b"]
-    assert len(payloads) == 2
-    sessions = list(parse(payloads[1], {}))
-    assert len(sessions) == 1
-    assert isinstance(sessions[0], ImportedSession)
-    assert sessions[0].external_id == "project-1:root-b"
+    assert len(payloads) == 1
+    sessions = list(parse(payloads[0], {}))
+    assert len(sessions) == 2
+    assert isinstance(sessions[1], ImportedSession)
+    assert sessions[1].external_id == "project-1:root-b"
 
 
 async def test_time_window_paginates_through_multiple_list_pages(
@@ -91,7 +93,40 @@ async def test_time_window_paginates_through_multiple_list_pages(
     assert len(fake_braintrust.list_queries) == 2
     assert fake_braintrust.list_cursors_received == [None, "cursor-1"]
     assert fake_braintrust.requested == ["root-a", "root-b"]
-    assert len(payloads) == 2
+    assert len(payloads) == 1
+
+
+async def test_traces_sharing_a_session_are_fetched_in_one_payload(
+    fake_braintrust: FakeBraintrust,
+) -> None:
+    """Merge same-session traces into one Kitaru session, not a dropped duplicate."""
+    fake_braintrust.list_pages = [(["root-a", "root-b", "root-c"], None)]
+    fake_braintrust.rows_builders = [
+        build_session_rows("sess-1"),
+        build_complete_rows,
+        build_session_rows("sess-1"),
+    ]
+
+    payloads = await collect_payloads(
+        fetch({"project_id": "project-1", "since": "2026-01-01T00:00:00+00:00"})
+    )
+
+    assert len(payloads) == 1
+    sessions = [
+        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+    ]
+    assert len(sessions) == 2
+    # sess-1 groups root-a, the first trace read from the payload, so it is
+    # emitted before root-b even though "root-b" sorts before "sess-1".
+    assert [session.external_id for session in sessions] == [
+        "project-1:sess-1",
+        "project-1:root-b",
+    ]
+    by_id = {session.external_id: session for session in sessions}
+    shared_session = by_id["project-1:sess-1"]
+    assert shared_session.metadata["braintrust.trace_ids"] == ["root-a", "root-c"]
+    assert len(shared_session.nodes) == 2
+    assert {node.trace_id for node in shared_session.nodes} == {"root-a", "root-c"}
 
 
 async def test_until_defaults_to_now(fake_braintrust: FakeBraintrust) -> None:

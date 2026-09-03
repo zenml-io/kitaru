@@ -63,7 +63,10 @@ def build_observation(
 
 
 def build_trace(
-    trace_id: str, observations: list[dict[str, Any]]
+    trace_id: str,
+    observations: list[dict[str, Any]],
+    *,
+    session_id: str | None = None,
 ) -> TraceWithFullDetails:
     """Build one Langfuse API trace response with nested observations."""
     return TraceWithFullDetails.model_validate(
@@ -71,6 +74,7 @@ def build_trace(
             "id": trace_id,
             "timestamp": "2026-07-24T10:00:00Z",
             "project_id": "project-1",
+            "session_id": session_id,
             "name": "run",
             "input": {"prompt": "hello"},
             "output": {"answer": "world"},
@@ -112,7 +116,9 @@ def build_trace_page(trace_ids: list[str], page: int, total_pages: int) -> Trace
     )
 
 
-def build_complete_trace(trace_id: str) -> TraceWithFullDetails:
+def build_complete_trace(
+    trace_id: str, *, session_id: str | None = None
+) -> TraceWithFullDetails:
     """Build one finished trace with a root span and a nested generation."""
     return build_trace(
         trace_id,
@@ -126,6 +132,7 @@ def build_complete_trace(trace_id: str) -> TraceWithFullDetails:
                 model="gpt-5-nano",
             ),
         ],
+        session_id=session_id,
     )
 
 

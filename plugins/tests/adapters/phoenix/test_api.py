@@ -34,13 +34,12 @@ async def test_trace_ids_fetches_exactly_those_traces_in_order(
     """Fetch the requested traces, skip the time window, and preserve order."""
     fake_phoenix.span_builders = [build_complete_spans, build_complete_spans]
 
-    payloads = await collect_payloads(fetch({"trace_ids": ["trace-b", "trace-a"]}))
+    [payload] = await collect_payloads(fetch({"trace_ids": ["trace-b", "trace-a"]}))
 
     assert fake_phoenix.requested == ["trace-b", "trace-a"]
     assert not fake_phoenix.list_windows
     sessions = [
         session
-        for payload in payloads
         for session in parse(payload, {})
         if isinstance(session, ImportedSession)
     ]
@@ -86,7 +85,7 @@ async def test_time_window_lists_spans_across_two_pages(
         )
     )
 
-    assert len(payloads) == 2
+    assert len(payloads) == 1
     assert fake_phoenix.requested == ["trace-1", "trace-2"]
     assert fake_phoenix.project_identifiers[:2] == [PROJECT, PROJECT]
     since = datetime(2026, 8, 27, 9, 0, 0, tzinfo=UTC)
@@ -97,6 +96,62 @@ async def test_time_window_lists_spans_across_two_pages(
     assert fake_phoenix.list_windows[1][0] == datetime(
         2026, 8, 27, 10, 0, 0, tzinfo=UTC
     )
+
+
+async def test_time_window_fetch_yields_one_oldest_first_payload(
+    fake_phoenix: FakePhoenix,
+) -> None:
+    """Merge every fetched trace's spans into one oldest-first payload.
+
+    get_spans has no ordering parameter, and pages can surface root spans
+    out of start-time order, so the fetch must sort collected root spans
+    itself before fetching each trace.
+    """
+    fake_phoenix.list_pages = [
+        [
+            build_span(
+                "root-b",
+                "trace-b",
+                name="kitaru-run",
+                start_time="2026-08-27T10:00:02+00:00",
+            ),
+            build_span(
+                "root-c",
+                "trace-c",
+                name="kitaru-run",
+                start_time="2026-08-27T10:00:00+00:00",
+            ),
+            build_span(
+                "root-a",
+                "trace-a",
+                name="kitaru-run",
+                start_time="2026-08-27T10:00:01+00:00",
+            ),
+        ],
+    ]
+    fake_phoenix.span_builders = [
+        build_complete_spans,
+        build_complete_spans,
+        build_complete_spans,
+    ]
+
+    [payload] = await collect_payloads(
+        fetch(
+            {"since": "2026-08-27T09:00:00+00:00", "until": "2026-08-27T11:00:00+00:00"}
+        )
+    )
+
+    assert fake_phoenix.requested == ["trace-c", "trace-a", "trace-b"]
+    sessions = [
+        session
+        for session in parse(payload, {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [session.external_id for session in sessions] == [
+        "trace-c",
+        "trace-a",
+        "trace-b",
+    ]
 
 
 async def test_time_window_project_defaults_to_env_project(

@@ -827,7 +827,9 @@ class LangSmithRunImporter:
         )
         join_paths: dict[tuple[str, str], set[str]] = defaultdict(set)
         fallback_groups: set[tuple[str, str]] = set()
-        for trace_id, by_run_id in sorted(trace_records.items()):
+        # trace_records preserves the payload's run order, so iterating it
+        # directly groups traces in first-appearance order.
+        for trace_id, by_run_id in trace_records.items():
             rows = list(by_run_id.values())
             try:
                 if trace_id in duplicate_traces:
@@ -863,7 +865,9 @@ class LangSmithRunImporter:
                 )
 
         sessions: list[ImportedSession] = []
-        for key, traces in sorted(grouped.items()):
+        # grouped preserves the order each session key first appeared while
+        # grouping traces, so ingestion follows payload order.
+        for key, traces in grouped.items():
             try:
                 session = self._parse_session(
                     key[0],
