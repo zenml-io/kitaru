@@ -198,6 +198,47 @@ def test_plugin_source_validation_reads_script_once_and_requires_a_pin(
         prepare_plugin_source(script=script, package=None, entrypoint="missing")
 
 
+def test_fetch_entrypoint_validates_like_the_parse_entrypoint(tmp_path: Path) -> None:
+    """The fetch entrypoint is validated the same way as the parse entrypoint."""
+    script = tmp_path / "parser.py"
+    content = (
+        b"def parse(payload, params):\n"
+        b"    return iter(())\n"
+        b"\n\n"
+        b"async def fetch(query):\n"
+        b"    return iter(())\n"
+    )
+    script.write_bytes(content)
+
+    source = prepare_plugin_source(
+        script=script, package=None, entrypoint="parse", fetch_entrypoint="fetch"
+    )
+    assert source == ScriptSource(script, content, "parse", "fetch")
+    with pytest.raises(CLIError, match="one top-level attribute name"):
+        prepare_plugin_source(
+            script=script,
+            package=None,
+            entrypoint="parse",
+            fetch_entrypoint="module:fetch",
+        )
+    with pytest.raises(CLIError, match="no top-level attribute"):
+        prepare_plugin_source(
+            script=script,
+            package=None,
+            entrypoint="parse",
+            fetch_entrypoint="missing",
+        )
+
+    package = validate_package_source(
+        "example[fast]==1.2.3", "example:parse", "example:fetch"
+    )
+    assert package == PackageSource(
+        "example[fast]==1.2.3", "example:parse", "example:fetch"
+    )
+    with pytest.raises(CLIError, match="MODULE:ATTRIBUTE"):
+        validate_package_source("example==1.2.3", "example:parse", "fetch")
+
+
 async def test_exact_resolution_never_uses_fuzzy_or_ambiguous_names() -> None:
     """Bare UUIDs use get while names require one exact case-sensitive match."""
     exact = StubModel("Example")
@@ -277,6 +318,46 @@ async def test_script_plugin_registration_uploads_validated_bytes_before_version
     assert request.source.entrypoint == "parse"
     assert request.display_version == "v1"
     assert result.item["phases"]["blob"]["id"] == str(client.blobs.blob.id)
+
+
+async def test_script_fetch_entrypoint_reaches_the_version_request() -> None:
+    """A script source's fetch entrypoint reaches the created plugin source."""
+    client = StubClient()
+    source = ScriptSource(Path("parser.py"), b"script bytes", "parse", "fetch")
+
+    await register_plugin(
+        client,
+        kind="importer",
+        parent_request=ImporterCreateRequest(name="provider", provider="demo"),
+        source=source,
+        display_version="v1",
+    )
+
+    _, request = client.importers.version_requests[0]
+    assert request.source.entrypoint == "parse"
+    assert request.source.fetch_entrypoint == "fetch"
+
+
+async def test_package_fetch_entrypoint_reaches_the_version_request() -> None:
+    """A package source's fetch entrypoint reaches the created plugin source."""
+    parent = StubModel("existing")
+    client = StubClient()
+    client.importers.items = [parent]
+    source = PackageSource("example==1.0.0", "example:parse", "example:fetch")
+
+    await register_plugin_version(
+        client,
+        kind="importer",
+        reference="existing",
+        source=source,
+        display_version=None,
+    )
+
+    assert client.blobs.uploads == []
+    _, request = client.importers.version_requests[0]
+    assert request.source.requirement == "example==1.0.0"
+    assert request.source.entrypoint == "example:parse"
+    assert request.source.fetch_entrypoint == "example:fetch"
 
 
 async def test_uploaded_blob_is_reported_when_version_registration_fails() -> None:
@@ -369,6 +450,129 @@ def test_cli_agent_entrypoint_is_rejected_before_api_mutation(
     assert payload["error"]["kind"] == "invalid_arguments"
     assert client.agents.created_requests == []
     assert client.agents.version_requests == []
+
+
+def test_cli_importer_register_forwards_the_fetch_entrypoint(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Importer register threads --fetch-entrypoint into the version source."""
+    client = StubClient()
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield client
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+
+    script = tmp_path / "parser.py"
+    script.write_bytes(
+        b"def parse(payload, params):\n"
+        b"    return iter(())\n"
+        b"\n\n"
+        b"async def fetch(query):\n"
+        b"    return iter(())\n"
+    )
+
+    assert (
+        app_module.main(
+            [
+                "importer",
+                "register",
+                "demo",
+                "--script",
+                str(script),
+                "--entrypoint",
+                "parse",
+                "--fetch-entrypoint",
+                "fetch",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    _, request = client.importers.version_requests[0]
+    assert request.source.entrypoint == "parse"
+    assert request.source.fetch_entrypoint == "fetch"
+
+
+def test_cli_importer_version_register_forwards_the_fetch_entrypoint(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Importer version register threads --fetch-entrypoint into the source."""
+    parent = StubModel("existing")
+    client = StubClient()
+    client.importers.items = [parent]
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield client
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+
+    assert (
+        app_module.main(
+            [
+                "importer",
+                "version",
+                "register",
+                "existing",
+                "--package",
+                "example==1.0.0",
+                "--entrypoint",
+                "example:parse",
+                "--fetch-entrypoint",
+                "example:fetch",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert client.blobs.uploads == []
+    _, request = client.importers.version_requests[0]
+    assert request.source.entrypoint == "example:parse"
+    assert request.source.fetch_entrypoint == "example:fetch"
+
+
+def test_cli_importer_invalid_fetch_entrypoint_is_rejected_before_any_call(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """An invalid --fetch-entrypoint fails before any upload or remote call."""
+    client = StubClient()
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield client
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+
+    script = tmp_path / "parser.py"
+    script.write_bytes(b"def parse(payload, params):\n    return iter(())\n")
+
+    assert (
+        app_module.main(
+            [
+                "importer",
+                "register",
+                "demo",
+                "--script",
+                str(script),
+                "--entrypoint",
+                "parse",
+                "--fetch-entrypoint",
+                "module:fetch",
+            ]
+        )
+        == 2
+    )
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["error"]["kind"] == "invalid_arguments"
+    assert client.blobs.uploads == []
+    assert client.importers.created_requests == []
+    assert client.importers.version_requests == []
 
 
 def test_page_result_preserves_server_order_and_cursor() -> None:
