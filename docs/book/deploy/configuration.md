@@ -50,7 +50,7 @@ The server is configured through `KITARU_SERVER_*` variables ([Docker](docker.md
 
 ### Ephemeral workers
 
-When no live worker can claim an import job's tasks, the server starts one scoped to that job in a Modal sandbox. This stays off unless an ephemeral worker backend is configured, and `KITARU_SERVER_SERVER_URL` must be set, since the sandbox dials back to the server and startup fails otherwise. Install the `modal` extra (`pip install 'kitaru[server,modal]'`) to pull in the Modal SDK the server needs.
+When no live worker covers a job's tasks, the server starts one scoped to that job in a Modal sandbox. This stays off unless an ephemeral worker backend is configured, and `KITARU_SERVER_SERVER_URL` must be set, since the sandbox dials back to the server and startup fails otherwise. Install the `modal` extra (`pip install 'kitaru[server,modal]'`) to pull in the Modal SDK the server needs.
 
 ```bash
 KITARU_SERVER_EPHEMERAL_WORKER__BACKEND=modal                    # default none

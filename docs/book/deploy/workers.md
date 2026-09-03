@@ -61,7 +61,7 @@ kitaru worker start --job-id "$JOB_ID" --timeout 1800
 
 This is the pattern for [CI regression gates](../guides/regression-suite.md): the runner that starts the experiment also executes it, using the PR's own checkout as the agent environment.
 
-**Ephemeral workers started by the server.** With an [ephemeral worker backend](configuration.md) configured, an import whose task no live worker covers gets a worker registered for that job. The server starts it in a sandbox from the published `zenmldocker/kitaru-worker` image with `KITARU_WORKER_ID` set. From there the worker drains the job and exits like the CI pattern above.
+**Ephemeral workers started by the server.** With an [ephemeral worker backend](configuration.md) configured, a job whose tasks no live worker covers gets a worker registered for it. The server starts it in a sandbox from the published `zenmldocker/kitaru-worker` image with `KITARU_WORKER_ID` set. From there the worker drains the job and exits like the CI pattern above.
 
 ## Operational behavior
 
