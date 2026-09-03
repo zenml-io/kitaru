@@ -14,6 +14,8 @@
 """Import DTO conversions."""
 
 from kitaru.api_models.v1.imports import (
+    ApiImportSource,
+    BlobImportSource,
     ImportCreateRequest,
     ImportListParams,
     ImportResponse,
@@ -36,12 +38,18 @@ def import_create_to_command(body: ImportCreateRequest) -> ImportCreate:
     Returns:
         Import create command.
     """
+    source = body.get_source()
+    if isinstance(source, ApiImportSource):
+        payload_blob_id, fetch_query = None, source.query
+    else:
+        payload_blob_id, fetch_query = source.blob_id, None
     return ImportCreate(
         importer=body.importer,
         agent_id=body.agent_id,
         agent_version_id=body.agent_version_id,
         version=body.version,
-        payload_blob_id=body.payload_blob_id,
+        payload_blob_id=payload_blob_id,
+        fetch_query=fetch_query,
         params=body.params,
         evaluators=[evaluator_config_input(config) for config in body.evaluators],
     )
@@ -58,6 +66,12 @@ def import_to_response(import_: Import) -> ImportResponse:
     """
     assert import_.created is not None
     assert import_.updated is not None
+    source: BlobImportSource | ApiImportSource
+    if import_.payload_blob_id is not None:
+        source = BlobImportSource(blob_id=import_.payload_blob_id)
+    else:
+        assert import_.fetch_query is not None
+        source = ApiImportSource(query=import_.fetch_query)
     return ImportResponse(
         id=import_.id,
         owner_id=import_.owner_id,
@@ -65,6 +79,7 @@ def import_to_response(import_: Import) -> ImportResponse:
         agent_id=import_.agent_id,
         agent_version_id=import_.agent_version_id,
         importer_version_id=import_.importer_version_id,
+        source=source,
         payload_blob_id=import_.payload_blob_id,
         params=import_.params,
         evaluators=[

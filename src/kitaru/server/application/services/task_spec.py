@@ -26,19 +26,21 @@ from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
-from kitaru.server.domain.imports import ImportWithoutImporterVersion
+from kitaru.server.domain.imports import Import, ImportWithoutImporterVersion
 from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
     AgentTaskDetails,
+    ApiSourceSpec,
+    BlobSourceSpec,
     EvaluationTask,
     EvaluationTaskDetails,
     ImportTask,
     ImportTaskDetails,
     PackagePluginSpec,
-    PayloadSpec,
     PluginSpec,
     ScriptPluginSpec,
+    SourceSpec,
     Task,
     TaskRunSpec,
     TaskSpec,
@@ -193,7 +195,7 @@ class TaskSpecBuilder:
             import_.importer_version_id
         )
         plugin = await self._plugins.get(plugin_version.plugin_id)
-        payload = await self._blobs.get(import_.payload_blob_id)
+        source = await self._import_source_spec(import_, plugin_version)
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.IMPORTER,
@@ -201,11 +203,36 @@ class TaskSpecBuilder:
             env=task.env,
             details=ImportTaskDetails(
                 plugin=await self._plugin_spec(plugin_version),
-                payload=PayloadSpec(blob_id=payload.id, sha256=payload.sha256),
+                source=source,
                 provider=plugin.provider,
                 agent_id=import_.agent_id,
                 params=import_.params,
             ),
+        )
+
+    async def _import_source_spec(
+        self, import_: Import, plugin_version: PluginVersion
+    ) -> SourceSpec:
+        """Convert an import's source into its spec form.
+
+        Args:
+            import_: Import.
+            plugin_version: Importer version the import runs.
+
+        Raises:
+            BlobNotFound: The payload names an unknown blob.
+
+        Returns:
+            Blob or API source spec the task process reads its payload from.
+        """
+        if import_.payload_blob_id is not None:
+            payload = await self._blobs.get(import_.payload_blob_id)
+            return BlobSourceSpec(blob_id=payload.id, sha256=payload.sha256)
+        assert import_.fetch_query is not None
+        assert plugin_version.source.fetch_entrypoint is not None
+        return ApiSourceSpec(
+            entrypoint=plugin_version.source.fetch_entrypoint,
+            query=import_.fetch_query,
         )
 
     async def _plugin_spec(self, plugin_version: PluginVersion) -> PluginSpec:

@@ -156,6 +156,76 @@ async def test_create_import(
     assert task.labels == {}
 
 
+async def test_create_api_import(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Create an import that fetches from the provider API."""
+    plugin = await create_plugin(
+        services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(
+            blob_id=uuid.uuid4(), entrypoint="run", fetch_entrypoint="fetch"
+        ),
+        display_version=None,
+    )
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {"type": "api", "query": {"since": "2026-08-01T00:00:00Z"}},
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["source"] == body["source"]
+    assert created["payload_blob_id"] is None
+
+
+async def test_create_import_accepts_the_deprecated_payload_blob_id(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """The deprecated payload_blob_id maps to a blob source."""
+    await _importer_version(services)
+    body = await _import_request(services)
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    assert response.json()["source"] == {
+        "type": "blob",
+        "blob_id": body["payload_blob_id"],
+    }
+
+
+async def test_create_import_rejects_both_sources(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Setting source and payload_blob_id together is rejected."""
+    await _importer_version(services)
+    body = await _import_request(
+        services, source={"type": "api", "query": {"trace_ids": ["t1"]}}
+    )
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_api_import_rejects_importer_without_fetch_entrypoint(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """An API import on an importer version without a fetch entrypoint is rejected."""
+    await _importer_version(services)
+    body = await _import_request(services)
+    del body["payload_blob_id"]
+    body["source"] = {"type": "api", "query": {"trace_ids": ["t1"]}}
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+    assert "fetch entrypoint" in response.json()["detail"]
+
+
 async def test_create_import_with_evaluators(
     client: httpx.AsyncClient, services: JobAndTaskServices
 ) -> None:

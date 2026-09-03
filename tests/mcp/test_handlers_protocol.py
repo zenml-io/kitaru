@@ -18,7 +18,11 @@ from pydantic import ValidationError
 from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.cohort import CohortResponse
-from kitaru.api_models.v1.imports import ImportListParams, ImportResponse
+from kitaru.api_models.v1.imports import (
+    BlobImportSource,
+    ImportListParams,
+    ImportResponse,
+)
 from kitaru.api_models.v1.investigation import InvestigationSessionResponse
 from kitaru.api_models.v1.session import SessionDetailResponse, TokenUsage
 from kitaru.api_models.v1.session_node import SessionNodeResponse
@@ -278,7 +282,7 @@ def _get_import(import_id: uuid.UUID | None = None) -> ImportResponse:
         owner_id=uuid.uuid4(),
         job_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
-        payload_blob_id=uuid.uuid4(),
+        source=BlobImportSource(blob_id=uuid.uuid4()),
         params={},
         evaluators=[],
         created=now,

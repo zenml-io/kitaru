@@ -217,9 +217,11 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
     "kitaru.api_models.v1.evaluation": frozenset(
         {"EvaluationResult", "EvaluationName", "MAX_NAME_LENGTH"}
     ),
-    # Published under kitaru.task.importer (reexports).
+    # Published under kitaru.task.importer (reexports). ImportSource is an
+    # annotated discriminated-union alias; the two concrete sources are the
+    # developer-facing entry points.
     "kitaru.api_models.v1.imports": frozenset(
-        {"ImportFailure", "ImportStats", "MAX_IMPORT_FAILURES"}
+        {"ImportFailure", "ImportStats", "MAX_IMPORT_FAILURES", "ImportSource"}
     ),
     # Validation helper shared by the two requests carrying the deprecated
     # evaluate_baselines bool.

@@ -84,10 +84,6 @@ class ImportCreateRequest(RequestModel):
         description="Evaluators run against every imported session.",
     )
 
-
-class ImportListParams(FilterableListParams):
-    """Import list params."""
-
     @model_validator(mode="after")
     def _source_xor_payload_blob_id(self) -> Self:
         """Require exactly one of source and payload_blob_id.
@@ -119,6 +115,10 @@ class ImportListParams(FilterableListParams):
         blob_id = self.payload_blob_id
         assert blob_id is not None
         return BlobImportSource(blob_id=blob_id)
+
+
+class ImportListParams(FilterableListParams):
+    """Import list params."""
 
 
 class ImportFailure(ResponseModel):
@@ -161,7 +161,10 @@ class ImportResponse(OwnedResponseModel):
     importer_version_id: uuid.UUID | None = Field(
         default=None, description="Importer version run."
     )
-    payload_blob_id: uuid.UUID = Field(description="Blob holding the payload parsed.")
+    source: ImportSource = Field(description="Where the payload comes from.")
+    payload_blob_id: uuid.UUID | None = Field(
+        default=None, description="Blob holding the payload parsed."
+    )
     params: dict[str, JsonValue] = Field(
         description="Parameters passed to the importer."
     )

@@ -14,7 +14,11 @@ from typing import Any
 
 import pytest
 
-from kitaru.api_models.v1.imports import ImportListParams, ImportResponse
+from kitaru.api_models.v1.imports import (
+    BlobImportSource,
+    ImportListParams,
+    ImportResponse,
+)
 from kitaru.cli import app as app_module
 from kitaru.cli import imports
 
@@ -34,7 +38,7 @@ class StubImportClient:
             agent_id=self.agent_id,
             agent_version_id=None,
             importer_version_id=None,
-            payload_blob_id=uuid.uuid4(),
+            source=BlobImportSource(blob_id=uuid.uuid4()),
             params={},
             evaluators=[],
             stats=None,
