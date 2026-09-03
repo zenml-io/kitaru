@@ -129,3 +129,14 @@ jobs:
           packageManager: npm
           wranglerVersion: ${{ env.WRANGLER_VERSION }}
           command: deploy --config wrangler.redirect.toml
+  notify-failure:
+    # PR runs already surface as a red check; only the production deploy path
+    # (push to main, manual dispatch) needs a Discord ping.
+    needs: build-deploy
+    if: failure() && github.event_name != 'pull_request'
+    permissions: {}
+    uses: ./.github/workflows/notify-failure.yml
+    with:
+      title: SDK Reference Docs deploy
+    secrets:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_SRE }}
