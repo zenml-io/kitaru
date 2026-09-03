@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Running `kitaru login` without a server now opens the managed-cloud device flow, connects to the Kitaru workspace selected or created in the browser, waits for a new workspace to become available, and stores it as the active server. Explicit server URLs and `kitaru login --local` keep their existing behavior.
 - Added `baseline_evaluation_mode` to replay and experiment run creation, with values `none`, `if_missing`, and `force`. `if_missing` scores baselines while skipping evaluators that already scored them, `force` always scores them fresh. A request that sets neither `baseline_evaluation_mode` nor the deprecated `evaluate_baselines` defaults to `if_missing`. `evaluate_baselines` is deprecated in favor of this field and still accepted on the wire, mapping `False` to `none` and `True` to `if_missing`. Setting both fields on one request returns HTTP 422.
 - Added `evaluator_params` to the evaluation response, the params the producing evaluator ran with, `None` on a manual row.
 - Added a `replay_id` filter to evaluation listing, matching evaluations linked to a replay.
@@ -31,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The quickstart example now installs Kitaru 0.24.0 from its frozen lockfile, so its documented `session list --include-payloads` command works. CI also tests the published dependencies before replacing them with development wheels.
+- Setting a password longer than 72 bytes on `POST /api/v1/users`, `PATCH /api/v1/users/{account_id}`, or `POST /api/v1/users/{account_id}/activate` now returns HTTP 422 instead of HTTP 500. bcrypt reads at most 72 bytes, and a longer password is rejected rather than silently truncated.
+- The OpenAPI schema now declares the plaintext secret fields of `WorkerTokenResponse`, `WorkerRegistrationResponse`, `TaskWithSpec`, and `SecretWithValuesResponse` as plain strings. They were marked write-only, which forbade the value the server sends. Request schemas keep the write-only password format.
 - A NUL byte or another C0 control character in a user-supplied string now returns HTTP 422 instead of HTTP 500. Request string fields reject the characters at validation, and a database error caused by a value the database cannot store maps to HTTP 422 as a backstop.
 - Getting or updating an evaluator or importer version with a version number outside PostgreSQL's 32-bit integer range now returns HTTP 422 instead of HTTP 500.
 - Reusing an `Idempotency-Key` registered on another route against `POST /api/v1/api-keys` or `POST /api/v1/api-keys/{api_key_id}/rotate` now returns HTTP 422 instead of HTTP 500. The stored response is only decrypted after the request fingerprint matches, and a stored response that cannot be decrypted returns HTTP 409.

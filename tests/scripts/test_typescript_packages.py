@@ -183,7 +183,7 @@ def test_typescript_release_workflow_contract() -> None:
 def test_typescript_ci_owns_cross_language_tests() -> None:
     workflow_source = CI_WORKFLOW_PATH.read_text()
     typescript_job = workflow_source.split("\n  typescript:\n", maxsplit=1)[1].split(
-        "\n  client-import:\n", maxsplit=1
+        "\n  typos:\n", maxsplit=1
     )[0]
     base_matrix = workflow_source.split("\n          - name: py311-base\n", maxsplit=1)[
         1
@@ -194,13 +194,15 @@ def test_typescript_ci_owns_cross_language_tests() -> None:
     assert (
         "uv sync --frozen --extra server --extra cli --extra worker" in typescript_job
     )
+    assert "\n  typescript-ticket-resolver:\n" not in workflow_source
+    assert typescript_job.count("pnpm install --frozen-lockfile") == 1
 
 
 def test_typescript_ci_validates_the_standalone_ticket_resolver() -> None:
     workflow_source = CI_WORKFLOW_PATH.read_text()
-    job = workflow_source.split("\n  typescript-ticket-resolver:\n", maxsplit=1)[
-        1
-    ].split("\n  client-import:\n", maxsplit=1)[0]
+    job = workflow_source.split("\n  typescript:\n", maxsplit=1)[1].split(
+        "\n  typos:\n", maxsplit=1
+    )[0]
 
     assert "image: postgres:16-alpine" in job
     assert "run: pnpm install --frozen-lockfile" in job

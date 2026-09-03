@@ -56,11 +56,13 @@ Already in Claude Code, Codex, or Cursor? Open the repository there and paste th
 Set up Kitaru in this repository by following https://kitaru.ai/install.md. Use the one-line installer and tell me what it did.
 ```
 
-Prefer to do it by hand? The local server is FastAPI + Postgres, and `kitaru login --local` provisions it with Docker:
+Prefer to do it by hand? Add Kitaru to your project's environment, then choose managed cloud with `uv run kitaru login`, or provision the local FastAPI + Postgres server with Docker:
 
 ```bash
 uv add "kitaru[cli,worker,mcp]" kitaru-pydantic-ai    # or: pip install
-kitaru login --local                                  # or: kitaru login <your-team-url>
+uv run kitaru login                                   # managed cloud; 14-day trial, no credit card required
+uv run kitaru login --local                           # local server in Docker
+# or: uv run kitaru login <your-team-url>
 ```
 
 **2. Make your coding assistant Kitaru-capable.** This is the intended way to drive Kitaru: skills teach the method, and the MCP server gives your assistant bounded operations.

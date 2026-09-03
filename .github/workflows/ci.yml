@@ -76,40 +76,8 @@ jobs:
       - run: uv sync --frozen --extra server --extra cli --extra worker
       - name: Test compiled TypeScript adapters through Worker
         run: uv run pytest -q tests/typescript
-  typescript-ticket-resolver:
-    name: TypeScript ticket resolver
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: password
-        ports: [5433:5432]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
-        with:
-          run_install: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
-        with:
-          python-version: '3.12'
-      - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @zenml-io/kitaru build
       - run: pnpm --filter @zenml-io/kitaru-vercel-ai build
-      - run: uv sync --frozen --extra server --extra cli --extra worker
       - name: Install standalone example
         working-directory: examples/typescript/vercel_ai_ticket_resolver
         run: CI=true pnpm --ignore-workspace install --frozen-lockfile
@@ -122,17 +90,6 @@ jobs:
           pnpm typecheck
           pnpm lint
           pnpm test:e2e
-  client-import:
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
-      - run: uv venv .venv-clean
-      - run: uv pip install --python .venv-clean/bin/python .
-      - run: .venv-clean/bin/python -c "import kitaru.client"
   typos:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
@@ -206,6 +163,9 @@ jobs:
       - name: Sync quickstart example
         working-directory: examples/python/pydantic_ai_ticket_resolver
         run: uv sync --frozen
+      - name: Run frozen quickstart example end to end
+        working-directory: examples/python/pydantic_ai_ticket_resolver
+        run: uv run --frozen python scripts/run_ci_e2e.py
       - name: Install current Kitaru artifacts into quickstart example
         run: |
           uv pip install \
@@ -361,7 +321,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.release-units.outputs.plugin-matrix).matrix }}
-    name: plugin package (${{ matrix.package }})
+    name: plugin packages (${{ matrix.shard }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -369,12 +329,15 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           python-version: '3.12'
-      - name: Test installed package artifact
+      - name: Test installed package artifacts
         env:
-          PACKAGE_PATH: ${{ matrix.path }}
-        run: uv run --no-project python scripts/smoke_plugin_artifacts.py --package
-          "$PACKAGE_PATH"
-  mcp-wheel-contract:
+          PACKAGE_PATHS: ${{ matrix.package_paths }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r package_path; do
+            uv run --no-project python scripts/smoke_plugin_artifacts.py --package "$package_path" </dev/null
+          done <<< "$PACKAGE_PATHS"
+  artifact-contracts:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
@@ -384,24 +347,19 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           python-version: '3.12'
+      - name: Test clean client import
+        run: |
+          uv venv "$RUNNER_TEMP/client-import"
+          uv pip install --python "$RUNNER_TEMP/client-import/bin/python" .
+          "$RUNNER_TEMP/client-import/bin/python" -c "import kitaru.client"
+      - name: Test clean CLI wheel and source installations
+        run: uv run --no-sync python scripts/smoke_cli_artifacts.py
       - run: uv build --wheel
       - name: Test clean base and MCP wheel installations
         run: >-
           KITARU_TEST_WHEEL=dist uv run
           --extra server --extra otel --extra mcp
           pytest tests/mcp/test_installed_contract.py
-  cli-artifact-contract:
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
-        with:
-          python-version: '3.12'
-      - name: Test clean CLI wheel and source installations
-        run: uv run --no-sync python scripts/smoke_cli_artifacts.py
   test:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

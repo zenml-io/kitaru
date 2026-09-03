@@ -6031,9 +6031,7 @@
           },
           "values": {
             "additionalProperties": {
-              "format": "password",
-              "type": "string",
-              "writeOnly": true
+              "type": "string"
             },
             "description": "Secret values.",
             "title": "Values",
@@ -8475,10 +8473,8 @@
           },
           "token": {
             "description": "Bearer token scoped to this task and attempt.",
-            "format": "password",
             "title": "Token",
-            "type": "string",
-            "writeOnly": true
+            "type": "string"
           }
         },
         "required": [
@@ -9198,10 +9194,8 @@
         "properties": {
           "token": {
             "description": "Bearer token scoped to this worker.",
-            "format": "password",
             "title": "Token",
-            "type": "string",
-            "writeOnly": true
+            "type": "string"
           },
           "token_expires_at": {
             "description": "Time the token expires.",
@@ -9451,10 +9445,8 @@
         "properties": {
           "token": {
             "description": "Bearer token scoped to this worker.",
-            "format": "password",
             "title": "Token",
-            "type": "string",
-            "writeOnly": true
+            "type": "string"
           },
           "token_expires_at": {
             "description": "Time the token expires.",
