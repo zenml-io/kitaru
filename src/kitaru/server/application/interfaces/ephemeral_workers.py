@@ -22,7 +22,7 @@ class EphemeralWorkers(Protocol):
     """Ephemeral worker operations."""
 
     async def start(self, spec: EphemeralWorkerSpec) -> None:
-        """Start a worker for a job.
+        """Start an ephemeral worker.
 
         Args:
             spec: Ephemeral worker spec.

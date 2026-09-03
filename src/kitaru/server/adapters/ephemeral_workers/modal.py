@@ -30,8 +30,6 @@ class ModalEphemeralWorkers:
         Args:
             settings: Ephemeral worker settings.
         """
-        # Settings validation requires the modal sub-model under the modal
-        # backend, the only backend that constructs this adapter.
         assert settings.modal is not None
         self._modal_settings = settings.modal
         self._image = settings.get_image()
@@ -45,8 +43,6 @@ class ModalEphemeralWorkers:
         Returns:
             Authenticated client.
         """
-        # from_credentials returns the client with its connection open and the
-        # SDK exposes no close, so one client serves every start.
         if self._client is None:
             self._client = await modal.Client.from_credentials.aio(
                 self._modal_settings.token_id,
