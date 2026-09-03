@@ -184,7 +184,7 @@ async def test_create_import_resolves_latest_version_by_default(
     payload = await create_blob(services.blobs, ACTOR.account.id, content=b"csv-data")
     agent = await create_agent(services.agents, ACTOR.account.id)
 
-    job, _ = await services.job_service.create_import(
+    job = await services.job_service.create_import(
         ImportCreate(
             importer="csv", agent_id=agent.id, payload_blob_id=payload.id, params={}
         ),
@@ -214,7 +214,7 @@ async def test_create_import_stamps_the_job_kind_import(
     payload = await create_blob(services.blobs, ACTOR.account.id, content=b"csv-data")
     agent = await create_agent(services.agents, ACTOR.account.id)
 
-    job, _ = await services.job_service.create_import(
+    job = await services.job_service.create_import(
         ImportCreate(
             importer="csv", agent_id=agent.id, payload_blob_id=payload.id, params={}
         ),
@@ -241,7 +241,7 @@ async def test_create_import_stamps_the_agent_version_on_its_task(
         services.agent_versions, agent_id=agent.id, owner_id=ACTOR.account.id
     )
 
-    job, _ = await services.job_service.create_import(
+    job = await services.job_service.create_import(
         ImportCreate(
             importer="csv",
             agent_id=agent.id,

@@ -77,10 +77,11 @@ async def create_import(
         Created job.
     """
     command = import_create_to_command(body)
-    job, task = await service.create_import(command, actor=actor)
+    job = await service.create_import(command, actor=actor)
     if launcher is not None:
         await schedule_worker_launch(
-            task,
+            job,
+            service,
             worker_service,
             auth_service,
             launcher,
