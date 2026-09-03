@@ -65,6 +65,8 @@ The `kitaru` console script is defined in `pyproject.toml` under `[project.scrip
 
 Register new leaf commands through the `_spec(...)` and `_register(...)` metadata in `src/kitaru/cli/app.py`. Tests should call `main([...])` with an explicit argument list and assert the returned integer exit code.
 
+When changing evaluation, replay, or experiment commands or contracts, read [Evaluation contracts](references/evaluation-contracts.md).
+
 ## Structured Output Contract
 
 Agent-facing commands use the version-1 structured contract. Success documents include `schema_version`, `command`, `ok`, `warnings`, `links`, and `next_actions`, plus `item` for one result or `items`, `count`, and `page` for a list. Streaming commands emit JSONL events. Structured errors are one JSON object on stderr with a stable error kind and exit code.
@@ -74,16 +76,6 @@ For agent-facing use, prefer `--output json --machine --non-interactive --no-bro
 Document login consistently: `kitaru login SERVER` targets the full managed or self-hosted instance URL, while `kitaru login --local` provisions or reuses the CLI-owned Docker Compose deployment. It defaults to `http://localhost:8000`; `--port` takes precedence over `KITARU_LOCAL_PORT`, and the selected port persists with the deployment. `kitaru logout` stops that deployment when it is selected, and `kitaru logout --volumes` also deletes its PostgreSQL data.
 
 `kitaru status` shows the selected server, provenance, credential state, compatibility, and live-worker count. `kitaru info` adds local package, Python, platform, and server details. `kitaru doctor` runs independent local, server, authentication, and tooling checks without stopping after the first failure. These commands never print secret values.
-
-## Evaluation, Replay, and Experiment Contracts
-
-Evaluator selections carry per-version parameters. On CLI commands that select evaluators, repeat `--evaluator-params 'EVALUATOR@VERSION=JSON_OBJECT'` for each configured evaluator that needs parameters; the token must match one of the exact `--evaluator` tokens. Preserve the parameters in examples and reviewer reproduction steps because evaluator-produced rows record them and baseline reuse compares them.
-
-Replay creation and experiment-run start use `--baseline-evaluation-mode none|if_missing|force`, defaulting to `if_missing`. `none` does not score baselines, `if_missing` adopts the latest existing evaluation only when the session, evaluator version, and parameters all match and otherwise schedules a fresh baseline evaluation, and `force` always schedules a fresh baseline evaluation. The old `evaluate_baselines` boolean survives only on REST requests and responses for compatibility; do not expose it in new SDK or CLI guidance, and never send it together with `baseline_evaluation_mode`.
-
-`EvaluationResult` accepts optional `min_score`, `max_score`, and `target_score` only for float results. Evaluator-produced evaluation responses include the producing evaluator version and the parameters it ran with; manual rows have neither provenance value. Manual evaluations are append-only per session and name, and a duplicate returns HTTP 409.
-
-Experiment-run aggregates are pinned to the evaluations linked to each replay. Later evaluations of the same sessions do not change an existing run's statistics. Groups are keyed by evaluation name, data type, and evaluator version; manual evaluations are excluded. Keep these fields and the linked-evaluation semantics intact when changing aggregate DTOs or frontend mappings.
 
 ## Analytics
 
