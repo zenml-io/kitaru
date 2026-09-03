@@ -5,6 +5,7 @@
 
 import asyncio
 import contextlib
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -41,7 +42,7 @@ from kitaru_claude_agent_sdk import (
     UnsupportedReplayError,
 )
 
-from .conftest import FakeClient
+from .conftest import FakeClient, nodes
 
 
 def _terminal(result: str = "done") -> ResultMessage:
@@ -91,10 +92,12 @@ class FakeQuery:
         messages: list[Any],
         *,
         error: BaseException | None = None,
+        close_error: BaseException | None = None,
         wait_after_first: asyncio.Event | None = None,
     ) -> None:
         self.messages = messages
         self.error = error
+        self.close_error = close_error
         self.wait_after_first = wait_after_first
         self.calls: list[dict[str, Any]] = []
         self.closed = 0
@@ -113,6 +116,8 @@ class FakeQuery:
                 raise self.error
         finally:
             self.closed += 1
+            if self.close_error is not None:
+                raise self.close_error
 
 
 async def _collect(runner: KitaruClaudeRunner, **kwargs: Any) -> list[Any]:
@@ -267,6 +272,30 @@ async def test_replay_uses_recorded_input_and_supported_overrides(
     assert copied.model == "candidate-model"
     assert options.system_prompt == "old"
     assert options.model == "old-model"
+
+
+async def test_prompt_override_is_recorded_on_the_root_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replay = _replay(override=ReplayOverride(prompt="candidate prompt"))
+    client = FakeClient()
+    client.replay = replay
+    monkeypatch.setattr(
+        runner_module.recording_module, "KitaruAPIClient", lambda: client
+    )
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(replay.id))
+    fake = FakeQuery([_terminal()])
+    monkeypatch.setattr(runner_module, "sdk_query", fake)
+
+    await _collect(
+        KitaruClaudeRunner(agent_version_id=uuid.uuid4()), prompt="baseline prompt"
+    )
+
+    assert fake.calls[0]["prompt"] == "candidate prompt"
+    assert client.sessions.created[0].inputs == "baseline prompt"
+    root = {node.index: node for node in nodes(client)}[0]
+    assert root.inputs == "baseline prompt"
+    assert root.attributes["effective_prompt"] == "candidate prompt"
 
 
 async def test_task_bound_query_uses_resolved_task_input(
@@ -541,6 +570,70 @@ async def test_aclosing_after_consumer_error_cleans_up(
 
     assert fake.closed == 1
     assert len(client.sessions.updated) == 1
+
+
+async def test_consumer_abort_logs_a_finalization_failure_it_cannot_attach(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = FakeClient()
+    client.update_error = OSError("recording unavailable")
+    monkeypatch.setattr(
+        runner_module.recording_module, "KitaruAPIClient", lambda: client
+    )
+    fake = FakeQuery([SystemMessage(subtype="init", data={}), _terminal()])
+    monkeypatch.setattr(runner_module, "sdk_query", fake)
+
+    with caplog.at_level(logging.WARNING, logger=runner_module.__name__):
+        async with contextlib.aclosing(
+            KitaruClaudeRunner(agent_id=uuid.uuid4()).query(prompt="hello")
+        ) as stream:
+            async for _ in stream:
+                break
+
+    assert fake.closed == 1
+    assert client.sessions.updated[-1][1].status.value == "failed"
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+    ]
+    assert len(warnings) == 1
+    assert str(client.session_id) in warnings[0]
+    assert "could not finalize" in warnings[0]
+    assert "recording unavailable" in warnings[0]
+
+
+async def test_consumer_abort_logs_a_claude_close_failure_it_cannot_attach(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = FakeClient()
+    monkeypatch.setattr(
+        runner_module.recording_module, "KitaruAPIClient", lambda: client
+    )
+    fake = FakeQuery(
+        [SystemMessage(subtype="init", data={}), _terminal()],
+        close_error=OSError("claude subprocess would not close"),
+    )
+    monkeypatch.setattr(runner_module, "sdk_query", fake)
+
+    with caplog.at_level(logging.WARNING, logger=runner_module.__name__):
+        async with contextlib.aclosing(
+            KitaruClaudeRunner(agent_id=uuid.uuid4()).query(prompt="hello")
+        ) as stream:
+            async for _ in stream:
+                break
+
+    assert fake.closed == 1
+    assert client.sessions.updated[-1][1].status.value == "failed"
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+    ]
+    assert len(warnings) == 1
+    assert str(client.session_id) in warnings[0]
+    assert "could not close" in warnings[0]
+    assert "claude subprocess would not close" in warnings[0]
 
 
 async def test_cancellation_closes_inner_iterator_and_finalizes_once(

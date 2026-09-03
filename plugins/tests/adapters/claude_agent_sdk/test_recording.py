@@ -217,6 +217,9 @@ async def test_terminal_usage_is_session_aggregate_not_duplicate_llm_node(
     )
     root = latest[0]
     assert root.cost == Decimal("0.25")
+    # The terminal totals already equal the per-call counts here, so the root
+    # carries no remainder and the session cannot count this turn twice.
+    assert root.tokens is None
     assert all(node.cost is None for index, node in latest.items() if index != 0)
     assert fake_client.sessions.updated[-1][1].metadata == {
         "terminal": {
@@ -319,6 +322,158 @@ async def test_stream_tool_use_reparents_hook_created_node(
         node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
     )
     assert tool.parent_index == model.index
+
+
+def _split_delivery(*blocks: Any) -> AssistantMessage:
+    """Build one delivery of a turn the CLI splits across several messages."""
+    return AssistantMessage(
+        content=list(blocks),
+        model="claude-test",
+        message_id="message-1",
+        session_id="session-1",
+    )
+
+
+async def test_split_turn_tool_delivery_stays_under_its_llm_call(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    await recorder.record_tool_hook(
+        {"tool_use_id": "tool-1", "tool_name": "lookup", "tool_input": {"q": 1}},
+        event="before",
+    )
+    await recorder.record_message(_split_delivery(ThinkingBlock("planning", "sig")))
+    await recorder.record_message(
+        _split_delivery(ToolUseBlock("tool-1", "lookup", {"q": 1}))
+    )
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    model = next(
+        node for node in latest.values() if node.node_type is NodeType.LLM_CALL
+    )
+    tools = [node for node in latest.values() if node.node_type is NodeType.TOOL_CALL]
+    assert sorted(latest) == [0, 1, 2]
+    assert len(tools) == 1
+    assert tools[0].parent_index == model.index
+    assert tools[0].parent_index < tools[0].index
+    assert model.reasoning == "planning"
+
+
+async def test_split_turn_never_writes_one_message_id_at_two_indexes(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    await recorder.record_tool_hook(
+        {"tool_use_id": "tool-1", "tool_name": "lookup", "tool_input": {"q": 1}},
+        event="before",
+    )
+    hooked = nodes(fake_client)[-1]
+    await recorder.record_message(_split_delivery(ThinkingBlock("planning", "sig")))
+    await recorder.record_message(
+        _split_delivery(ToolUseBlock("tool-1", "lookup", {"q": 1}))
+    )
+
+    indexes_by_external_id: dict[str, set[int]] = {}
+    for node in nodes(fake_client):
+        if node.external_id is not None:
+            indexes_by_external_id.setdefault(node.external_id, set()).add(node.index)
+    assert all(len(indexes) == 1 for indexes in indexes_by_external_id.values())
+    latest = {node.index: node for node in nodes(fake_client)}
+    model = next(
+        node for node in latest.values() if node.node_type is NodeType.LLM_CALL
+    )
+    tool = next(
+        node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
+    )
+    assert model.index < tool.index
+    # The hook created the tool node before the turn arrived, so the turn took
+    # the index reserved below it and the tool node never moved.
+    assert tool.index == hooked.index
+    assert tool.started_at == hooked.started_at
+    assert tool.parent_index == model.index
+
+
+async def test_split_turn_with_two_hooked_tools_keeps_every_parent_below_its_node(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    for tool_id in ("tool-1", "tool-2"):
+        await recorder.record_tool_hook(
+            {"tool_use_id": tool_id, "tool_name": "lookup", "tool_input": {"q": 1}},
+            event="before",
+        )
+    await recorder.record_message(_split_delivery(ThinkingBlock("planning", "sig")))
+    await recorder.record_message(
+        _split_delivery(ToolUseBlock("tool-1", "lookup", {"q": 1}))
+    )
+    await recorder.record_message(
+        _split_delivery(ToolUseBlock("tool-2", "lookup", {"q": 2}))
+    )
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    model = next(
+        node for node in latest.values() if node.node_type is NodeType.LLM_CALL
+    )
+    tools = [node for node in latest.values() if node.node_type is NodeType.TOOL_CALL]
+    assert sorted(latest) == [0, 1, 2, 3]
+    assert len(tools) == 2
+    assert all(tool.parent_index == model.index for tool in tools)
+    assert all(node.parent_index < node.index for node in latest.values() if node.index)
+
+
+async def test_split_turn_merges_reasoning_and_text_into_one_node(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    await recorder.record_message(
+        _split_delivery(ThinkingBlock("weighing options", "sig"))
+    )
+    await recorder.record_message(_split_delivery(TextBlock("final answer")))
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    model = next(
+        node for node in latest.values() if node.node_type is NodeType.LLM_CALL
+    )
+    assert model.reasoning == "weighing options"
+    assert model.outputs == {"text": ["final answer"]}
+
+
+async def test_split_turn_keeps_text_when_tool_use_arrives_separately(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    await recorder.record_message(_split_delivery(TextBlock("looking that up")))
+    await recorder.record_message(
+        _split_delivery(ToolUseBlock("tool-1", "lookup", {"q": 1}))
+    )
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    model = next(
+        node for node in latest.values() if node.node_type is NodeType.LLM_CALL
+    )
+    tool = next(
+        node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
+    )
+    assert model.outputs == {"text": ["looking that up"]}
+    assert tool.parent_index == model.index
+
+
+async def test_redelivered_identical_assistant_message_is_recorded_once(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    for _ in range(2):
+        await recorder.record_message(
+            _split_delivery(TextBlock("done"), ThinkingBlock("planning", "sig"))
+        )
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    model_nodes = [
+        node for node in latest.values() if node.node_type is NodeType.LLM_CALL
+    ]
+    assert len(model_nodes) == 1
+    assert model_nodes[0].outputs == {"text": ["done"]}
+    assert model_nodes[0].reasoning == "planning"
 
 
 async def test_replayable_tool_preserves_full_arguments_for_history_key(
@@ -453,6 +608,246 @@ async def test_error_terminal_records_native_failure_fields(
     update = fake_client.sessions.updated[-1][1]
     assert update.status is SessionStatus.FAILED
     assert update.error == "native failure"
+
+
+def _failed_terminal(
+    *,
+    subtype: str = "success",
+    result: str | None = None,
+    errors: list[str] | None = None,
+    terminal_reason: str | None = None,
+    api_error_status: int | None = None,
+) -> ResultMessage:
+    """Build the terminal shape the CLI emits when the provider call fails."""
+    return ResultMessage(
+        subtype=subtype,
+        duration_ms=20,
+        duration_api_ms=10,
+        is_error=True,
+        num_turns=1,
+        session_id="session-1",
+        total_cost_usd=None,
+        usage=None,
+        result=result,
+        errors=errors,
+        terminal_reason=terminal_reason,
+        api_error_status=api_error_status,
+        uuid="result-error",
+    )
+
+
+async def test_api_error_terminal_records_the_readable_cause_and_status(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+
+    await finalize_terminal(
+        recorder,
+        _failed_terminal(result="API Error: 529 Overloaded", api_error_status=529),
+    )
+
+    root = {node.index: node for node in nodes(fake_client)}[0]
+    assert root.status is NodeStatus.FAILED
+    assert root.error == "API Error: 529 Overloaded"
+    update = fake_client.sessions.updated[-1][1]
+    assert update.status is SessionStatus.FAILED
+    assert update.error == "API Error: 529 Overloaded"
+    assert update.metadata["terminal"]["api_error_status"] == 529
+
+
+@pytest.mark.parametrize(
+    ("subtype", "expected"),
+    [("error", "error"), ("success", "Claude reported a failed result")],
+)
+async def test_failed_terminal_never_records_the_success_subtype_as_the_error(
+    fake_client: FakeClient, subtype: str, expected: str
+) -> None:
+    recorder = await _recorder(fake_client)
+
+    await finalize_terminal(recorder, _failed_terminal(subtype=subtype))
+
+    root = {node.index: node for node in nodes(fake_client)}[0]
+    assert root.error == expected
+    assert fake_client.sessions.updated[-1][1].error == expected
+
+
+async def test_failed_terminal_prefers_the_terminal_reason_over_the_subtype(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+
+    await finalize_terminal(
+        recorder, _failed_terminal(subtype="error", terminal_reason="max_turns")
+    )
+
+    root = {node.index: node for node in nodes(fake_client)}[0]
+    assert root.error == "max_turns"
+
+
+async def test_failed_terminal_never_records_a_completed_reason_as_the_error(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+
+    await finalize_terminal(
+        recorder, _failed_terminal(terminal_reason="completed", api_error_status=529)
+    )
+
+    expected = "Claude reported a failed result"
+    root = {node.index: node for node in nodes(fake_client)}[0]
+    assert root.error == expected
+    assert fake_client.sessions.updated[-1][1].error == expected
+
+
+async def test_terminal_output_tokens_reconcile_onto_the_root_span(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    for identity in ("message-1", "message-2"):
+        await recorder.record_message(
+            AssistantMessage(
+                content=[TextBlock("part")],
+                model="claude-test",
+                message_id=identity,
+                usage={"input_tokens": 7, "output_tokens": 3},
+            )
+        )
+    terminal = _terminal()
+    terminal.usage = {
+        "input_tokens": 14,
+        "output_tokens": 138,
+        "cache_read_input_tokens": 5,
+        "output_tokens_details": {"thinking_tokens": 90},
+    }
+
+    await finalize_terminal(recorder, terminal)
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    root = latest[0]
+    assert root.tokens is not None
+    assert root.tokens.output_tokens == 132
+    assert root.tokens.input_tokens == 0
+    assert root.tokens.cached_input_tokens == 5
+    assert root.tokens.reasoning_tokens == 90
+    rollup = [node.tokens for node in latest.values() if node.tokens is not None]
+    assert sum(tokens.input_tokens or 0 for tokens in rollup) == 14
+    assert sum(tokens.output_tokens or 0 for tokens in rollup) == 138
+    assert sum(tokens.cached_input_tokens or 0 for tokens in rollup) == 5
+    assert sum(tokens.reasoning_tokens or 0 for tokens in rollup) == 90
+
+
+async def test_recorded_tokens_above_the_terminal_total_are_never_negated(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    for identity in ("message-1", "message-2"):
+        await recorder.record_message(
+            AssistantMessage(
+                content=[TextBlock("part")],
+                model="claude-test",
+                message_id=identity,
+                usage={"input_tokens": 900, "output_tokens": 3},
+            )
+        )
+    terminal = _terminal()
+    terminal.usage = {"input_tokens": 900, "output_tokens": 138}
+
+    await finalize_terminal(recorder, terminal)
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    root = latest[0]
+    assert root.tokens is not None
+    assert root.tokens.input_tokens == 0
+    assert root.tokens.output_tokens == 132
+    rollup = [node.tokens for node in latest.values() if node.tokens is not None]
+    assert sum(tokens.input_tokens or 0 for tokens in rollup) == 1800
+
+
+async def test_failure_without_a_terminal_leaves_root_span_tokens_unset(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    await recorder.record_message(
+        AssistantMessage(
+            content=[TextBlock("done")],
+            model="claude-test",
+            message_id="message-1",
+            usage={"input_tokens": 7, "output_tokens": 3},
+        )
+    )
+
+    await finalize_failure(recorder, RuntimeError("native failure"))
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    assert latest[0].tokens is None
+    rollup = [node.tokens for node in latest.values() if node.tokens is not None]
+    assert sum(tokens.output_tokens or 0 for tokens in rollup) == 3
+
+
+async def test_thinking_tokens_are_recorded_as_reasoning_tokens(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+
+    await recorder.record_message(
+        AssistantMessage(
+            content=[TextBlock("done")],
+            model="claude-test",
+            message_id="message-1",
+            usage={
+                "input_tokens": 7,
+                "output_tokens": 3,
+                "output_tokens_details": {"thinking_tokens": 2},
+            },
+        )
+    )
+
+    model = nodes(fake_client)[-1]
+    assert model.tokens is not None
+    assert model.tokens.reasoning_tokens == 2
+
+
+async def test_root_span_records_the_bounded_prompt_sent_to_claude(
+    fake_client: FakeClient,
+) -> None:
+    prompt = "x" * (16 * 1024 + 1)
+    recorder = await InvocationRecorder.start(
+        client=cast(KitaruAPIClient, fake_client),
+        inputs={"request": "refund"},
+        agent_id=uuid.uuid4(),
+        agent_version_id=None,
+        session_name=None,
+        replay=False,
+        effective_prompt=prompt,
+    )
+
+    await finalize_terminal(recorder, _terminal())
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    assert latest[0].attributes["effective_prompt"] == {
+        "value": prompt[: 16 * 1024],
+        "truncated": True,
+    }
+    assert fake_client.sessions.created[0].inputs == {"request": "refund"}
+
+
+async def test_root_span_records_a_short_prompt_as_a_plain_string(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await InvocationRecorder.start(
+        client=cast(KitaruAPIClient, fake_client),
+        inputs={"request": "refund"},
+        agent_id=uuid.uuid4(),
+        agent_version_id=None,
+        session_name=None,
+        replay=False,
+        effective_prompt="candidate prompt",
+    )
+
+    await finalize_terminal(recorder, _terminal())
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    assert latest[0].attributes["effective_prompt"] == "candidate prompt"
 
 
 async def test_native_error_is_primary_when_finalization_also_fails(

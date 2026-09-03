@@ -22,6 +22,7 @@ class FakeSessions:
         self.created: list[Any] = []
         self.updated: list[tuple[uuid.UUID, Any]] = []
         self.node_batches: list[tuple[uuid.UUID, Any]] = []
+        self.external_id_by_index: dict[int, str | None] = {}
 
     async def create(self, request: Any) -> Any:
         self.created.append(request)
@@ -32,8 +33,33 @@ class FakeSessions:
             error = self.client.ingest_error
             self.client.ingest_error = None
             raise error
+        self._check_external_ids(request)
         self.node_batches.append((session_id, request))
         return []
+
+    def _check_external_ids(self, request: Any) -> None:
+        """Reject a write the server's unique (session, external_id) index would.
+
+        Storing one external id at two indexes raises a database integrity
+        error the API reports as HTTP 500, so a node the adapter has already
+        written cannot be moved to another index.
+        """
+        for node in request.nodes:
+            clash = [
+                index
+                for index, external_id in self.external_id_by_index.items()
+                if index != node.index
+                and external_id is not None
+                and external_id == node.external_id
+            ]
+            if clash:
+                raise RuntimeError(
+                    "500: duplicate key value violates unique constraint "
+                    '"uq_session_node_session_id_external_id": '
+                    f"external_id {node.external_id!r} is stored at index "
+                    f"{clash[0]} and was written again at index {node.index}"
+                )
+            self.external_id_by_index[node.index] = node.external_id
 
     async def update(self, session_id: uuid.UUID, request: Any) -> None:
         self.updated.append((session_id, request))

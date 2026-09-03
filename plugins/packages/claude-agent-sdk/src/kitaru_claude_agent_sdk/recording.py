@@ -78,6 +78,7 @@ _SAFE_OPTION_FIELDS = frozenset(
         "system_prompt",
     }
 )
+_SUCCESS_STATES = frozenset({"success", "completed"})
 
 
 @dataclass(frozen=True)
@@ -176,30 +177,71 @@ def _capture(value: Any, *, depth: int = 0) -> Any:
     return {"unsupported_type": type(value).__name__}
 
 
+def _get_integer(value: Mapping[str, Any], *names: str) -> int | None:
+    """Read the first integer among alternate spellings of one usage field."""
+    for name in names:
+        candidate = value.get(name)
+        if isinstance(candidate, int) and not isinstance(candidate, bool):
+            return candidate
+    return None
+
+
+def _get_thinking_tokens(value: Mapping[str, Any]) -> int | None:
+    """Read Claude's nested thinking count for Kitaru's reasoning field."""
+    for name in ("output_tokens_details", "outputTokensDetails"):
+        details = value.get(name)
+        if isinstance(details, Mapping):
+            return _get_integer(details, "thinking_tokens", "thinkingTokens")
+    return None
+
+
 def _get_token_usage(value: Mapping[str, Any] | None) -> TokenUsage | None:
     """Map Claude's public usage dictionary to Kitaru token fields."""
     if not value:
         return None
 
-    def integer(*names: str) -> int | None:
-        for name in names:
-            candidate = value.get(name)
-            if isinstance(candidate, int) and not isinstance(candidate, bool):
-                return candidate
-        return None
-
-    input_tokens = integer("input_tokens", "inputTokens")
-    cache_creation_tokens = integer(
-        "cache_creation_input_tokens", "cacheCreationInputTokens"
+    input_tokens = _get_integer(value, "input_tokens", "inputTokens")
+    cache_creation_tokens = _get_integer(
+        value, "cache_creation_input_tokens", "cacheCreationInputTokens"
     )
     if cache_creation_tokens is not None:
         input_tokens = (input_tokens or 0) + cache_creation_tokens
 
     return TokenUsage(
         input_tokens=input_tokens,
-        output_tokens=integer("output_tokens", "outputTokens"),
-        cached_input_tokens=integer("cache_read_input_tokens", "cacheReadInputTokens"),
+        output_tokens=_get_integer(value, "output_tokens", "outputTokens"),
+        cached_input_tokens=_get_integer(
+            value, "cache_read_input_tokens", "cacheReadInputTokens"
+        ),
+        reasoning_tokens=_get_thinking_tokens(value),
     )
+
+
+def _get_remaining_tokens(total: int | None, recorded: list[int | None]) -> int | None:
+    """Return how much of a total the recorded counts leave, never below zero."""
+    if total is None:
+        return None
+    return max(total - sum(value or 0 for value in recorded), 0)
+
+
+def _get_terminal_error_text(message: ResultMessage) -> str:
+    """Choose the most readable cause the terminal message carries.
+
+    A provider API error arrives as ``subtype="success"`` with ``is_error``
+    set and the cause in ``result``, so falling straight through to the
+    CLI state fields would store the word "success" as the failure reason.
+    """
+    reported_errors = "; ".join(message.errors) if message.errors else None
+    # subtype and terminal_reason name a CLI state rather than a cause, so a
+    # state that reads as a success would be stored as the failure reason.
+    subtype = None if message.subtype in _SUCCESS_STATES else message.subtype
+    terminal_reason = (
+        None if message.terminal_reason in _SUCCESS_STATES else message.terminal_reason
+    )
+    for candidate in (reported_errors, message.result, terminal_reason, subtype):
+        if candidate:
+            return _captured_text(candidate)
+    return "Claude reported a failed result"
 
 
 def _get_terminal_metadata(message: ResultMessage) -> dict[str, Any]:
@@ -216,7 +258,55 @@ def _get_terminal_metadata(message: ResultMessage) -> dict[str, Any]:
         terminal["stop_reason"] = message.stop_reason
     if message.terminal_reason is not None:
         terminal["terminal_reason"] = message.terminal_reason
+    if message.api_error_status is not None:
+        terminal["api_error_status"] = message.api_error_status
     return {"terminal": terminal}
+
+
+@dataclass
+class _AssistantTurn:
+    """Content accumulated across every delivery of one assistant turn."""
+
+    started_at: datetime
+    ended_at: datetime
+    texts: list[str] = field(default_factory=list)
+    thoughts: list[str] = field(default_factory=list)
+    model: str | None = None
+    session_id: str | None = None
+    stop_reason: str | None = None
+    error: str | None = None
+    usage: dict[str, Any] | None = None
+    _blocks_seen: set[tuple[str, str]] = field(default_factory=set, repr=False)
+
+    def merge(self, message: AssistantMessage, *, observed_at: datetime) -> None:
+        """Fold one delivery into the turn without dropping earlier blocks."""
+        self.ended_at = observed_at
+        for block in message.content:
+            if isinstance(block, TextBlock):
+                self._collect("text", block.text, self.texts)
+            elif isinstance(block, ThinkingBlock):
+                self._collect("thinking", block.thinking, self.thoughts)
+        if message.model:
+            self.model = message.model
+        if message.session_id is not None:
+            self.session_id = message.session_id
+        if message.stop_reason is not None:
+            self.stop_reason = message.stop_reason
+        if message.error is not None and self.error is None:
+            self.error = message.error
+        if message.usage:
+            self.usage = dict(message.usage)
+
+    def _collect(self, kind: str, text: str, collected: list[str]) -> None:
+        """Keep each block once so a redelivered message cannot double it."""
+        # Keying on the content drops a genuine repetition of the same string
+        # inside one turn. The delivery's own identity would keep it, but the
+        # SDK does not document whether a redelivered AssistantMessage reuses
+        # its uuid, and doubling a whole turn is the worse failure.
+        if (kind, text) in self._blocks_seen:
+            return
+        self._blocks_seen.add((kind, text))
+        collected.append(text)
 
 
 @dataclass
@@ -228,11 +318,17 @@ class InvocationRecorder:
     started_at: datetime
     captured_inputs: Any
     safe_options: dict[str, Any]
+    effective_prompt: Any = None
     replayable_tool_names: frozenset[str] = frozenset()
     next_index: int = 1
     finalized: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _message_indexes: dict[str, int] = field(default_factory=dict, repr=False)
+    _assistant_turns: dict[str, _AssistantTurn] = field(
+        default_factory=dict, repr=False
+    )
+    _recorded_turns: list[_AssistantTurn] = field(default_factory=list, repr=False)
+    _pending_turn_index: int | None = field(default=None, repr=False)
     _tool_cache_keys: dict[str, str] = field(default_factory=dict, repr=False)
     _effective_tool_inputs: dict[str, dict[str, Any]] = field(
         default_factory=dict, repr=False
@@ -259,6 +355,7 @@ class InvocationRecorder:
         session_name: str | None,
         replay: bool,
         safe_options: Mapping[str, Any] | None = None,
+        effective_prompt: str | None = None,
         replayable_tool_names: frozenset[str] = frozenset(),
     ) -> "InvocationRecorder":
         """Create the session and root before Claude execution starts."""
@@ -284,12 +381,16 @@ class InvocationRecorder:
                 adapter_version=ADAPTER_VERSION,
             )
         )
+        captured_prompt = (
+            _capture(effective_prompt) if effective_prompt is not None else None
+        )
         recorder = cls(
             client=client,
             session_id=session.id,
             started_at=started_at,
             captured_inputs=captured_inputs,
             safe_options=selected_options,
+            effective_prompt=captured_prompt,
             replayable_tool_names=replayable_tool_names,
         )
         try:
@@ -303,7 +404,7 @@ class InvocationRecorder:
                     started_at=started_at,
                     inputs=captured_inputs,
                     outputs=None,
-                    attributes={"options": selected_options},
+                    attributes=recorder._get_root_attributes(),
                 )
             )
         except BaseException as error:
@@ -385,6 +486,12 @@ class InvocationRecorder:
                         attributes["replay"] = replay_event
             node = self._tool_nodes.get(tool_id)
             if node is None:
+                # A stored node can never move: the server keeps one row per
+                # (session, external_id), so rewriting the turn at a lower
+                # index would collide with the row it left behind. Hold an
+                # index below this tool node for the turn that requested it,
+                # which the CLI may deliver after this hook.
+                self._reserve_turn_index()
                 node = self._new_node(
                     node_type=NodeType.TOOL_CALL,
                     name=tool_name or "tool",
@@ -490,9 +597,7 @@ class InvocationRecorder:
             if error is not None:
                 error_text = _error_text(error)
             elif terminal is not None and terminal.is_error:
-                error_text = _captured_text(
-                    "; ".join(terminal.errors or []) or terminal.subtype
-                )
+                error_text = _get_terminal_error_text(terminal)
             session_outputs = (
                 terminal.result if terminal is not None and not failed else None
             )
@@ -502,6 +607,9 @@ class InvocationRecorder:
                 Decimal(str(terminal.total_cost_usd))
                 if terminal is not None and terminal.total_cost_usd is not None
                 else None
+            )
+            tokens = (
+                self._get_unrecorded_tokens(terminal) if terminal is not None else None
             )
             first_failure: BaseException | None = None
             try:
@@ -534,7 +642,8 @@ class InvocationRecorder:
                             inputs=self.captured_inputs,
                             outputs=root_outputs,
                             cost=cost,
-                            attributes={"options": self.safe_options},
+                            tokens=tokens,
+                            attributes=self._get_root_attributes(),
                             metadata=metadata,
                         )
                     )
@@ -565,6 +674,58 @@ class InvocationRecorder:
             if first_failure is not None:
                 raise first_failure
 
+    def _get_root_attributes(self) -> dict[str, Any]:
+        """Return the attributes the root span carries."""
+        return {
+            "options": self.safe_options,
+            "effective_prompt": self.effective_prompt,
+        }
+
+    def _get_unrecorded_tokens(self, terminal: ResultMessage) -> TokenUsage | None:
+        """Return the terminal totals the per-call counts have not covered.
+
+        ``AssistantMessage.usage`` is the ``message_start`` snapshot, so its
+        output count is a placeholder the terminal message later corrects.
+        Carrying the difference on the root span, the way the terminal cost is
+        already carried there, adds the session rollup up to Claude's own
+        totals without counting a turn twice. A difference is never negative,
+        so a field whose recorded counts already exceed Claude's total keeps a
+        rollup above that total rather than subtracting from another node.
+        """
+        totals = _get_token_usage(terminal.usage)
+        if totals is None:
+            return None
+        recorded = [
+            usage
+            for usage in (_get_token_usage(turn.usage) for turn in self._recorded_turns)
+            if usage is not None
+        ]
+        remainder = TokenUsage(
+            input_tokens=_get_remaining_tokens(
+                totals.input_tokens, [usage.input_tokens for usage in recorded]
+            ),
+            output_tokens=_get_remaining_tokens(
+                totals.output_tokens, [usage.output_tokens for usage in recorded]
+            ),
+            cached_input_tokens=_get_remaining_tokens(
+                totals.cached_input_tokens,
+                [usage.cached_input_tokens for usage in recorded],
+            ),
+            reasoning_tokens=_get_remaining_tokens(
+                totals.reasoning_tokens, [usage.reasoning_tokens for usage in recorded]
+            ),
+        )
+        if not any(
+            (
+                remainder.input_tokens,
+                remainder.output_tokens,
+                remainder.cached_input_tokens,
+                remainder.reasoning_tokens,
+            )
+        ):
+            return None
+        return remainder
+
     def _fail_unfinished_nodes(
         self, *, ended_at: datetime, error: str
     ) -> list[SessionNodeCreateRequest]:
@@ -587,45 +748,29 @@ class InvocationRecorder:
 
     async def _record_assistant(self, message: AssistantMessage) -> None:
         identity = message.message_id or message.uuid
-        model_index = self._message_indexes.get(identity) if identity else None
-        if model_index is None:
-            provisional_indexes = [
-                self._tool_nodes[block.id].index
-                for block in message.content
-                if isinstance(block, ToolUseBlock) and block.id in self._tool_nodes
-            ]
-            model_index = min(provisional_indexes, default=self.next_index)
-            if model_index == self.next_index:
-                self.next_index += 1
-            if identity:
-                self._message_indexes[identity] = model_index
-        texts = [
-            block.text for block in message.content if isinstance(block, TextBlock)
-        ]
-        thoughts = [
-            block.thinking
-            for block in message.content
-            if isinstance(block, ThinkingBlock)
-        ]
+        observed_at = datetime.now(UTC)
+        model_index = self._resolve_assistant_index(identity)
+        turn = self._get_assistant_turn(identity, observed_at)
+        turn.merge(message, observed_at=observed_at)
         model_node = SessionNodeCreateRequest(
             index=model_index,
             parent_index=self._parent_for(message.parent_tool_use_id),
             external_id=identity,
             node_type=NodeType.LLM_CALL,
             name="assistant",
-            status=NodeStatus.FAILED if message.error else NodeStatus.COMPLETED,
-            error=message.error,
-            started_at=datetime.now(UTC),
-            ended_at=datetime.now(UTC),
+            status=NodeStatus.FAILED if turn.error else NodeStatus.COMPLETED,
+            error=turn.error,
+            started_at=turn.started_at,
+            ended_at=turn.ended_at,
             inputs=None,
-            outputs={"text": texts},
-            reasoning="\n".join(thoughts) or None,
-            model=message.model,
+            outputs={"text": list(turn.texts)},
+            reasoning="\n".join(turn.thoughts) or None,
+            model=turn.model,
             model_provider="anthropic",
-            tokens=_get_token_usage(message.usage),
+            tokens=_get_token_usage(turn.usage),
             attributes={
-                "session_id": message.session_id,
-                "stop_reason": message.stop_reason,
+                "session_id": turn.session_id,
+                "stop_reason": turn.stop_reason,
             },
         )
         await self._persist(model_node)
@@ -634,6 +779,36 @@ class InvocationRecorder:
                 await self._record_tool_use(block, model_index)
             elif isinstance(block, ToolResultBlock):
                 await self._record_tool_result(block)
+
+    def _resolve_assistant_index(self, identity: str | None) -> int:
+        """Return the index for one turn, reusing it on every later delivery."""
+        cached = self._message_indexes.get(identity) if identity else None
+        if cached is not None:
+            return cached
+        index = self._pending_turn_index
+        if index is None:
+            index = self.next_index
+            self.next_index += 1
+        else:
+            self._pending_turn_index = None
+        if identity:
+            self._message_indexes[identity] = index
+        return index
+
+    def _get_assistant_turn(
+        self, identity: str | None, observed_at: datetime
+    ) -> _AssistantTurn:
+        """Return the accumulator for one assistant turn, creating it when absent."""
+        turn = self._assistant_turns.get(identity) if identity else None
+        if turn is None:
+            # A delivery with no identity gets its own node, so it also gets
+            # its own accumulator, and every accumulator is one llm_call node
+            # the terminal-token reconciliation must subtract exactly once.
+            turn = _AssistantTurn(started_at=observed_at, ended_at=observed_at)
+            self._recorded_turns.append(turn)
+            if identity:
+                self._assistant_turns[identity] = turn
+        return turn
 
     async def _record_user(self, message: UserMessage) -> None:
         if isinstance(message.content, str):
@@ -678,7 +853,7 @@ class InvocationRecorder:
         }
         if replay_event is not None:
             attributes["replay"] = replay_event
-        if node is None or node.index == parent_index:
+        if node is None:
             node = self._new_node(
                 node_type=NodeType.TOOL_CALL,
                 name=block.name,
@@ -688,20 +863,20 @@ class InvocationRecorder:
                 inputs=inputs,
                 outputs=None,
                 tool_name=block.name,
-                attributes=(
-                    {
-                        **cast(dict[str, Any], node.attributes),
-                        **attributes,
-                    }
-                    if node is not None
-                    else attributes
-                ),
+                attributes=attributes,
             )
         else:
             node = node.model_copy(
                 update={
                     "name": block.name,
-                    "parent_index": parent_index,
+                    # A hook allocates this node before the turn is delivered,
+                    # and the turn reserves an index below it, so the turn is
+                    # the parent. Keep the root when that ordering did not
+                    # hold: relocating a stored node would collide with the
+                    # (session, external_id) row it left behind.
+                    "parent_index": (
+                        parent_index if parent_index < node.index else node.parent_index
+                    ),
                     "inputs": inputs,
                     "tool_name": block.name,
                     "attributes": {
@@ -867,6 +1042,12 @@ class InvocationRecorder:
         if values.get("status") is not NodeStatus.IN_PROGRESS:
             values.setdefault("ended_at", now)
         return SessionNodeCreateRequest(index=index, **values)
+
+    def _reserve_turn_index(self) -> None:
+        """Hold one index for an assistant turn the CLI has not delivered."""
+        if self._pending_turn_index is None:
+            self._pending_turn_index = self.next_index
+            self.next_index += 1
 
     def _parent_for(self, external_id: str | None) -> int:
         if external_id is None:

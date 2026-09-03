@@ -16,6 +16,7 @@
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Mapping, Sequence
@@ -74,6 +75,7 @@ from .recording import (
 
 _FINALIZATION_FAILURE_NOTE = "Kitaru could not finalize the failed recording."
 _INNER_CLOSE_FAILURE_NOTE = "Kitaru could not close the Claude query iterator."
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -173,6 +175,7 @@ class KitaruClaudeRunner:
                     session_name=self._session_name,
                     replay=resolved.replay is not None,
                     safe_options=safe_options,
+                    effective_prompt=run_prompt,
                     replayable_tool_names=frozenset(replayable_tools),
                 )
             except BaseException as error:
@@ -238,18 +241,36 @@ class KitaruClaudeRunner:
                 if not recorder.finalized:
                     failure = await finalize_failure(recorder, error)
                     if failure is not None:
-                        _add_failure_note(error, _FINALIZATION_FAILURE_NOTE)
+                        _report_secondary_failure(
+                            error,
+                            _FINALIZATION_FAILURE_NOTE,
+                            failure,
+                            session_id=recorder.session_id,
+                        )
                 raise
         finally:
             if inner is not None:
+                session_id = recorder.session_id if recorder is not None else None
                 try:
                     await inner.aclose()
                 except BaseException as close_error:
                     if primary_error is not None:
-                        _add_failure_note(primary_error, _INNER_CLOSE_FAILURE_NOTE)
+                        _report_secondary_failure(
+                            primary_error,
+                            _INNER_CLOSE_FAILURE_NOTE,
+                            close_error,
+                            session_id=session_id,
+                        )
                     else:
                         if recorder is not None and not recorder.finalized:
-                            await finalize_failure(recorder, close_error)
+                            failure = await finalize_failure(recorder, close_error)
+                            if failure is not None:
+                                _report_secondary_failure(
+                                    close_error,
+                                    _FINALIZATION_FAILURE_NOTE,
+                                    failure,
+                                    session_id=session_id,
+                                )
                         raise
 
     def _validate_identity(self) -> None:
@@ -842,6 +863,23 @@ async def _close_client_preserving_error(client: Any, error: BaseException) -> N
         await client.close()
     except BaseException:
         _add_failure_note(error, "Kitaru could not close the preflight client.")
+
+
+def _report_secondary_failure(
+    primary_error: BaseException,
+    note: str,
+    failure: BaseException,
+    *,
+    session_id: uuid.UUID | None,
+) -> None:
+    """Attach a secondary failure to the primary error, or log it instead."""
+    if isinstance(primary_error, GeneratorExit):
+        # Closing the generator is what raised GeneratorExit here, and the
+        # close machinery discards the exception together with any note added
+        # to it, so a log record is the only report that survives.
+        _LOGGER.warning("%s Session %s: %r", note, session_id, failure)
+        return
+    _add_failure_note(primary_error, note)
 
 
 def _add_failure_note(error: BaseException, note: str) -> None:
