@@ -206,14 +206,18 @@ def call_parser(
     try:
         iterator = iter(parser(payload, params))
     except Exception as exc:
-        raise SessionImportError(f"Parser raised an error: {exc}") from exc
+        raise SessionImportError(
+            f"Parser raised an error: {type(exc).__name__}: {exc}"
+        ) from exc
     while True:
         try:
             item = next(iterator)
         except StopIteration:
             return
         except Exception as exc:
-            raise SessionImportError(f"Parser raised an error: {exc}") from exc
+            raise SessionImportError(
+                f"Parser raised an error: {type(exc).__name__}: {exc}"
+            ) from exc
         if not isinstance(item, ImportedSession | ImportFailure):
             raise SessionImportError(
                 f"Parser yielded an item that is not an ImportedSession or "
@@ -243,14 +247,18 @@ async def call_fetcher(fetcher: Fetcher, query: dict[str, Any]) -> AsyncIterator
     try:
         iterator = fetcher(query)
     except Exception as exc:
-        raise SessionImportError(f"Fetcher raised an error: {exc}") from exc
+        raise SessionImportError(
+            f"Fetcher raised an error: {type(exc).__name__}: {exc}"
+        ) from exc
     while True:
         try:
             payload = await anext(iterator)
         except StopAsyncIteration:
             return
         except Exception as exc:
-            raise SessionImportError(f"Fetcher raised an error: {exc}") from exc
+            raise SessionImportError(
+                f"Fetcher raised an error: {type(exc).__name__}: {exc}"
+            ) from exc
         if not isinstance(payload, bytes):
             raise SessionImportError(
                 f"Fetcher yielded an item that is not bytes: {payload!r}"
