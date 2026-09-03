@@ -253,7 +253,7 @@ async def test_device_login_exposes_the_selected_workspace(
     )
     await session.close()
 
-    assert login.token.access_token == "cp-token-1"
+    assert login.access_token == "cp-token-1"
     assert login.device_metadata == {"tenant_id": str(WORKSPACE_ID)}
 
 

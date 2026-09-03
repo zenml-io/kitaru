@@ -276,11 +276,11 @@ async def _login_managed_cloud(
             open_browser=not no_browser,
             prompt=_show_device_prompt,
         )
-        workspace_id = _get_selected_workspace_id(device_login.device_metadata)
+        workspace_id = _get_selected_workspace_id(device_login.device_metadata or {})
         workspace = await _wait_for_managed_workspace(
             session,
             workspace_id,
-            device_login.token.access_token,
+            device_login.access_token,
         )
     finally:
         await session.close()
@@ -310,7 +310,7 @@ async def _login_managed_cloud(
             server_url,
             credential_store,
             MANAGED_CLOUD_API_URL,
-            device_login.token.access_token,
+            device_login.access_token,
         )
         set_server_url(server_url)
     except OSError as error:

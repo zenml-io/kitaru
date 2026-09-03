@@ -17,7 +17,6 @@ import logging
 import uuid
 import webbrowser
 from collections.abc import Callable
-from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
@@ -71,14 +70,6 @@ class ControlPlaneToken(BaseModel):
     access_token: str
     expires_in: int
     device_metadata: dict[str, str] | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ControlPlaneDeviceLogin:
-    """Token and workspace selection returned by a device login."""
-
-    token: ApiToken
-    device_metadata: dict[str, str]
 
 
 class ControlPlaneKitaruServiceStatus(BaseModel):
@@ -197,14 +188,14 @@ class ControlPlaneSession:
             prompt=prompt,
             workspace_id=workspace_id,
         )
-        return result.token
+        return ApiToken.issued(result.access_token, result.expires_in)
 
     async def device_login_with_metadata(
         self,
         open_browser: bool = True,
         prompt: Callable[[ControlPlaneDeviceAuthorization], None] | None = None,
         workspace_id: str | None = None,
-    ) -> ControlPlaneDeviceLogin:
+    ) -> ControlPlaneToken:
         """Authorize this machine against the control plane.
 
         The call blocks until a signed-in account confirms the user code in a
@@ -220,7 +211,7 @@ class ControlPlaneSession:
             DeviceLoginError: The authorization expired or was refused.
 
         Returns:
-            Token and workspace selection issued for the authorized device.
+            Control plane token and workspace selection issued for the device.
         """
         client_id = get_client_id()
         device = describe_this_device()
@@ -265,11 +256,8 @@ class ControlPlaneSession:
             exchange, authorization.expires_in, authorization.interval
         )
         issued = ControlPlaneToken.model_validate(confirmed.json())
-        token = self._store_issued_token(issued)
-        return ControlPlaneDeviceLogin(
-            token=token,
-            device_metadata=issued.device_metadata or {},
-        )
+        self._store_issued_token(issued)
+        return issued
 
     async def get_workspace(
         self, workspace_id: uuid.UUID, access_token: str

@@ -28,8 +28,8 @@ from kitaru.cli.output import CLIError
 from kitaru.client.config import get_server_url, set_server_url
 from kitaru.client.control_plane import (
     MANAGED_CLOUD_API_URL,
-    ControlPlaneDeviceLogin,
     ControlPlaneSession,
+    ControlPlaneToken,
     ControlPlaneWorkspace,
 )
 from kitaru.client.credential_store import CredentialStore
@@ -136,10 +136,11 @@ async def test_bare_login_connects_to_the_browser_selected_managed_workspace(
 
         async def device_login_with_metadata(
             self, *, open_browser: bool, prompt: object
-        ) -> ControlPlaneDeviceLogin:
+        ) -> ControlPlaneToken:
             calls.append(("device", open_browser, prompt))
-            return ControlPlaneDeviceLogin(
-                token=ApiToken.issued("control-plane-token", 3600),
+            return ControlPlaneToken(
+                access_token="control-plane-token",
+                expires_in=3600,
                 device_metadata={"tenant_id": str(WORKSPACE_ID)},
             )
 
@@ -225,11 +226,10 @@ async def test_bare_login_rejects_a_mismatched_workspace_server(
         def __init__(self, *_args, **_kwargs) -> None:
             pass
 
-        async def device_login_with_metadata(
-            self, **_kwargs
-        ) -> ControlPlaneDeviceLogin:
-            return ControlPlaneDeviceLogin(
-                token=ApiToken.issued("control-plane-token", 3600),
+        async def device_login_with_metadata(self, **_kwargs) -> ControlPlaneToken:
+            return ControlPlaneToken(
+                access_token="control-plane-token",
+                expires_in=3600,
                 device_metadata={"tenant_id": str(WORKSPACE_ID)},
             )
 
@@ -280,11 +280,10 @@ async def test_bare_login_requires_the_browser_to_select_a_workspace(
         def __init__(self, *_args, **_kwargs) -> None:
             pass
 
-        async def device_login_with_metadata(
-            self, **_kwargs
-        ) -> ControlPlaneDeviceLogin:
-            return ControlPlaneDeviceLogin(
-                token=ApiToken.issued("control-plane-token", 3600),
+        async def device_login_with_metadata(self, **_kwargs) -> ControlPlaneToken:
+            return ControlPlaneToken(
+                access_token="control-plane-token",
+                expires_in=3600,
                 device_metadata={},
             )
 
