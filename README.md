@@ -44,19 +44,19 @@ Kitaru turns that history into something you can test:
 
 ## ⚡ Get started
 
-**1. Install and log in.** Run this inside your agent's repository. It adds Kitaru to that project's environment with `uv` (so the worker can replay your agent next to its dependencies), installs the coding-agent skills, and registers the MCP server with Claude Code and Codex. Anywhere else it installs an isolated CLI instead. It ends by printing the two ways to get a server: `kitaru login --local` (Docker, free) or the managed cloud (14-day trial, no credit card required):
+**1. Install.** Open a terminal in your agent's repository and run one line. It adds Kitaru to that project's environment with `uv` (the worker that replays your agent has to live next to its dependencies), installs the coding-agent skills, and registers the MCP server with Claude Code and Codex. It ends by printing the two ways to get a server: `kitaru login --local` (Docker, free) or the managed cloud (14-day trial, no credit card required).
 
 ```bash
 curl -fsSL https://kitaru.ai/install | bash
 ```
 
-Already in Claude Code, Codex, or Cursor? Paste this instead and let it run the same installer:
+Already in Claude Code, Codex, or Cursor? Open the repository there and paste this instead:
 
 ```
-Set up Kitaru on this machine by following https://kitaru.ai/install.md. Use the one-line installer and tell me what it did.
+Set up Kitaru in this repository by following https://kitaru.ai/install.md. Use the one-line installer and tell me what it did.
 ```
 
-Prefer to do it by hand, or want Kitaru inside your project's environment? The local server is FastAPI + Postgres, and `kitaru login --local` provisions it with Docker:
+Prefer to do it by hand? The local server is FastAPI + Postgres, and `kitaru login --local` provisions it with Docker:
 
 ```bash
 uv add "kitaru[cli,worker,mcp]" kitaru-pydantic-ai    # or: pip install
