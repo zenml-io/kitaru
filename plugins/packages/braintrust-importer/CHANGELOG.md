@@ -4,6 +4,7 @@
 
 - Fetch traces directly from the Braintrust API through the `adapter` extra.
 - Import API-fetched traces oldest first in a single payload, so traces sharing a session are grouped instead of dropped as duplicates.
+- Fetch traces concurrently, bounded by the fetch query's `concurrency` key.
 
 ## 0.2.0
 

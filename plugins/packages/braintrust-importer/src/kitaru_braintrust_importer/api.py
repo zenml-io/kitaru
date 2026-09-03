@@ -23,7 +23,7 @@ from typing import Any
 import httpx
 
 from kitaru.env import get_required_env
-from kitaru.task.importer import FetchQuery
+from kitaru.task.importer import FetchQuery, gather_bounded
 
 __all__ = ["fetch", "fetch_spans", "serialize_spans", "wait_for_spans"]
 
@@ -184,7 +184,8 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
 
     Every fetched trace's rows land in a single payload, oldest trace
     first, so the parser groups them into Kitaru sessions itself instead
-    of seeing one trace at a time.
+    of seeing one trace at a time. Traces are fetched concurrently, up to
+    the query's concurrency, and merged back into that order.
 
     Args:
         query: Fetch query.
@@ -196,16 +197,24 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         The trace payload bytes, or nothing when no trace matches.
     """
     parsed = BraintrustFetchQuery.model_validate(query)
-    rows: list[dict[str, Any]] = []
     async with httpx.AsyncClient() as client:
         if parsed.trace_ids is not None:
-            for trace_id in parsed.trace_ids:
-                rows.extend(await fetch_spans(parsed.project_id, trace_id, client))
+            trace_ids = parsed.trace_ids
         else:
             since, until = parsed.get_window()
-            async for trace_id in _list_root_span_ids(
-                client, parsed.project_id, since, until
-            ):
-                rows.extend(await fetch_spans(parsed.project_id, trace_id, client))
+            trace_ids = [
+                trace_id
+                async for trace_id in _list_root_span_ids(
+                    client, parsed.project_id, since, until
+                )
+            ]
+        row_batches = await gather_bounded(
+            (
+                fetch_spans(parsed.project_id, trace_id, client)
+                for trace_id in trace_ids
+            ),
+            parsed.concurrency,
+        )
+    rows = [row for batch in row_batches for row in batch]
     if rows:
         yield serialize_spans(rows)

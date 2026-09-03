@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the importer contract and the import flow."""
 
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -65,6 +66,7 @@ from kitaru.task.importer import (
     call_fetcher,
     call_parser,
     flatten_nodes,
+    gather_bounded,
     run,
     session_request,
 )
@@ -244,6 +246,29 @@ def test_fetch_query_window_defaults_until_to_now() -> None:
         {"since": "2026-01-01T00:00:00Z", "until": "2026-01-03T00:00:00Z"}
     )
     assert query.get_window() == (query.since, query.until)
+
+
+def test_fetch_query_concurrency_defaults_and_rejects_zero() -> None:
+    assert FetchQuery.model_validate({"trace_ids": []}).concurrency == 4
+    with pytest.raises(ValueError):
+        FetchQuery.model_validate({"trace_ids": [], "concurrency": 0})
+
+
+async def test_gather_bounded_limits_in_flight_and_keeps_order() -> None:
+    in_flight = 0
+    peak = 0
+
+    async def _work(value: int) -> int:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return value
+
+    results = await gather_bounded((_work(value) for value in range(6)), 2)
+    assert results == list(range(6))
+    assert peak == 2
 
 
 def test_flatten_nodes_assigns_depth_first_indexes_and_parents() -> None:

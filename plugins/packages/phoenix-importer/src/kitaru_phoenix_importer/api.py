@@ -23,7 +23,7 @@ import httpx
 from phoenix.client import AsyncClient
 from phoenix.client.utils.config import get_env_project_name
 
-from kitaru.task.importer import FetchQuery
+from kitaru.task.importer import FetchQuery, gather_bounded
 
 __all__ = ["fetch", "fetch_spans", "serialize_spans", "wait_for_spans"]
 
@@ -176,7 +176,8 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
 
     Every fetched trace's spans land in a single payload, oldest trace
     first, so the parser groups them into Kitaru sessions itself instead
-    of seeing one trace at a time.
+    of seeing one trace at a time. Traces are fetched concurrently, up to
+    the query's concurrency, and merged back into that order.
 
     Args:
         query: Fetch query with `project`, `trace_ids`, `since`, and `until`
@@ -199,8 +200,10 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         project = parsed.project or get_env_project_name()
         trace_ids = await _list_root_trace_ids(client, project, since, until)
 
-    spans: list[Any] = []
-    for trace_id in trace_ids:
-        spans.extend(await fetch_spans(trace_id, parsed.project, client))
+    span_batches = await gather_bounded(
+        (fetch_spans(trace_id, parsed.project, client) for trace_id in trace_ids),
+        parsed.concurrency,
+    )
+    spans = [span for batch in span_batches for span in batch]
     if spans:
         yield serialize_spans(spans)

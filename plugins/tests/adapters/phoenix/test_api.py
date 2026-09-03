@@ -48,6 +48,34 @@ async def test_trace_ids_fetches_exactly_those_traces_in_order(
     assert [node.name for node in sessions[0].nodes] == ["kitaru-run"]
 
 
+async def test_fetch_bounds_concurrency_and_preserves_order(
+    fake_phoenix: FakePhoenix,
+) -> None:
+    """Fetch at most the configured concurrency of traces at once, oldest first."""
+    trace_ids = ["trace-1", "trace-2", "trace-3", "trace-4"]
+    fake_phoenix.span_builders = [build_complete_spans] * len(trace_ids)
+    # Delays scramble completion order relative to submission order, so the
+    # merged result proves gather_bounded restores it rather than happening
+    # to already match it.
+    fake_phoenix.fetch_delays = [0.03, 0.01, 0.02, 0.0]
+
+    payloads = await collect_payloads(fetch({"trace_ids": trace_ids, "concurrency": 2}))
+
+    assert fake_phoenix.peak_in_flight == 2
+    assert len(payloads) == 1
+    sessions = [
+        session
+        for session in parse(payloads[0], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [session.external_id for session in sessions] == trace_ids
+
+    # The default query still works at the default concurrency.
+    fake_phoenix.span_builders = [build_complete_spans, build_complete_spans]
+    payloads = await collect_payloads(fetch({"trace_ids": ["trace-5", "trace-6"]}))
+    assert len(payloads) == 1
+
+
 async def test_time_window_lists_spans_across_two_pages(
     fake_phoenix: FakePhoenix, monkeypatch: pytest.MonkeyPatch
 ) -> None:

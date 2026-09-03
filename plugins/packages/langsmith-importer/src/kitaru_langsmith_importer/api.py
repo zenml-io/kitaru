@@ -23,7 +23,7 @@ from langsmith import Client
 from langsmith.schemas import Run
 from langsmith.utils import get_tracer_project
 
-from kitaru.task.importer import FetchQuery
+from kitaru.task.importer import FetchQuery, gather_bounded
 
 __all__ = ["fetch", "fetch_runs", "serialize_runs", "wait_for_runs"]
 
@@ -151,7 +151,9 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     so every fetched trace must reach it in a single payload. Yielding one
     payload per trace would let the first trace of a thread create the
     session and leave every later trace of that thread parsing to the same
-    external id, which the importer then drops as a duplicate.
+    external id, which the importer then drops as a duplicate. Traces are
+    fetched concurrently, up to the query's concurrency, and merged back
+    into that order.
 
     Args:
         query: Fetch query with trace_ids, since, until, and project_name.
@@ -178,8 +180,9 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
             until,
         )
 
-    all_runs: list[Run] = []
-    for trace_id in trace_ids:
-        all_runs.extend(await fetch_runs(client, trace_id))
+    run_batches = await gather_bounded(
+        (fetch_runs(client, trace_id) for trace_id in trace_ids), parsed.concurrency
+    )
+    all_runs = [run for batch in run_batches for run in batch]
     if all_runs:
         yield serialize_runs(all_runs)

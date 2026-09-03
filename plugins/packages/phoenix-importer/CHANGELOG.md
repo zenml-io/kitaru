@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Fetch traces from the Phoenix API by trace id or time window, importing them oldest first, installed through the `adapter` extra.
+- Fetch traces concurrently, bounded by the fetch query's `concurrency` key.
 
 ## 0.2.0
 

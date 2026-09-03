@@ -157,6 +157,38 @@ async def test_fetch_yields_nothing_for_an_empty_listing(
     assert fake_braintrust.requested == []
 
 
+async def test_fetch_bounds_concurrency_and_preserves_order(
+    fake_braintrust: FakeBraintrust,
+) -> None:
+    """Fetch at most the configured concurrency of traces at once, oldest first."""
+    trace_ids = ["root-a", "root-b", "root-c", "root-d"]
+    fake_braintrust.rows_builders = [build_complete_rows] * len(trace_ids)
+    # Delays scramble completion order relative to submission order, so the
+    # merged result proves gather_bounded restores it rather than happening
+    # to already match it.
+    fake_braintrust.fetch_delays = [0.03, 0.01, 0.02, 0.0]
+
+    payloads = await collect_payloads(
+        fetch({"project_id": "project-1", "trace_ids": trace_ids, "concurrency": 2})
+    )
+
+    assert fake_braintrust.peak_in_flight == 2
+    assert len(payloads) == 1
+    sessions = [
+        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+    ]
+    assert [session.external_id for session in sessions] == [
+        f"project-1:{trace_id}" for trace_id in trace_ids
+    ]
+
+    # The default query still works at the default concurrency.
+    fake_braintrust.rows_builders = [build_complete_rows, build_complete_rows]
+    payloads = await collect_payloads(
+        fetch({"project_id": "project-1", "trace_ids": ["root-e", "root-f"]})
+    )
+    assert len(payloads) == 1
+
+
 @pytest.mark.parametrize(
     ("query", "match"),
     [

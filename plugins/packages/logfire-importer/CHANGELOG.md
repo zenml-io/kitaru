@@ -5,6 +5,7 @@
 - Support Logfire 5.x for the `adapter` extra in addition to the existing 4.35+ line.
 - Fetch traces from the Logfire Query API by trace id or time window through the `adapter` extra.
 - Fetch traces from the Logfire Query API by trace id or time window through the `adapter` extra, importing traces oldest first and grouped by session.
+- Fetch traces from the Logfire Query API by trace id or time window through the `adapter` extra, importing traces oldest first and grouped by session, fetched concurrently bounded by the fetch query's `concurrency` key.
 
 ## 0.2.0
 

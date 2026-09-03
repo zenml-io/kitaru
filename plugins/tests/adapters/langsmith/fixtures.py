@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Shared LangSmith SDK fakes for the LangSmith adapter."""
 
+import threading
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -100,10 +102,26 @@ class FakeLangSmithClient:
         filter: str | None = None,
     ) -> Iterator[Run]:
         if trace_id is not None:
-            self._fake.requested.append(trace_id)
-            self._fake.events.append("poll")
-            assert self._fake.runs_builders, "unexpected run listing poll"
-            return iter(self._fake.runs_builders.pop(0)(trace_id))
+            with self._fake.lock:
+                self._fake.in_flight += 1
+                self._fake.peak_in_flight = max(
+                    self._fake.peak_in_flight, self._fake.in_flight
+                )
+                delay = (
+                    self._fake.fetch_delays.pop(0) if self._fake.fetch_delays else 0.0
+                )
+            try:
+                if delay:
+                    time.sleep(delay)
+                with self._fake.lock:
+                    self._fake.requested.append(trace_id)
+                    self._fake.events.append("poll")
+                    assert self._fake.runs_builders, "unexpected run listing poll"
+                    builder = self._fake.runs_builders.pop(0)
+                return iter(builder(trace_id))
+            finally:
+                with self._fake.lock:
+                    self._fake.in_flight -= 1
         self._fake.root_listing_calls.append(
             {
                 "project_name": project_name,
@@ -127,6 +145,10 @@ class FakeLangSmith:
         self.root_run_listings: list[list[Run]] = []
         self.root_listing_calls: list[dict[str, Any]] = []
         self.default_project_name = "fake-default-project"
+        self.fetch_delays: list[float] = []
+        self.in_flight = 0
+        self.peak_in_flight = 0
+        self.lock = threading.Lock()
         self.client = FakeLangSmithClient(self)
 
     @contextmanager
