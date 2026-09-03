@@ -27,6 +27,10 @@ from conftest import (
     local_settings,
     override_idempotency,
 )
+from kitaru.server.adapters.auth.passwords import (
+    MAX_PASSWORD_BYTES,
+    BcryptPasswordHasher,
+)
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -64,6 +68,41 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+
+@pytest.fixture
+async def bcrypt_client() -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app with the bcrypt password hasher."""
+    app = create_app(local_settings())
+    service = AccountService(
+        repository=FakeAccountRepository(),
+        password_hasher=BcryptPasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+    )
+    app.dependency_overrides[get_account_service] = lambda: service
+    app.dependency_overrides[authorize] = lambda: ACTOR
+    override_idempotency(app, ACTOR.account)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+
+async def test_create_user_rejects_password_over_bcrypt_limit(
+    bcrypt_client: httpx.AsyncClient,
+) -> None:
+    """Return 422 for a password longer than bcrypt hashes."""
+    response = await bcrypt_client.post(
+        "/api/v1/users",
+        json={"name": "alice", "password": "a" * (MAX_PASSWORD_BYTES + 1)},
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Password is longer than 72 bytes"}
+
+    response = await bcrypt_client.post(
+        "/api/v1/users",
+        json={"name": "alice", "password": "a" * MAX_PASSWORD_BYTES},
+    )
+    assert response.status_code == 201
 
 
 async def test_list_accounts(client: httpx.AsyncClient) -> None:

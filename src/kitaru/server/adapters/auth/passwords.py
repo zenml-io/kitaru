@@ -15,8 +15,14 @@
 
 import bcrypt
 
+from kitaru.server.domain.base import ValidationError
+
 # Bcrypt hash matching no password.
 _DUMMY_PASSWORD_HASH = "$2b$12$KaouCaqMdtw0BrBrlObaCu2mYxFaYfBftAuhk79q6EqK/YbQevgTa"
+
+# Bcrypt reads at most 72 bytes of input. Older releases silently truncate
+# longer passwords and newer releases raise, so the limit is enforced here.
+MAX_PASSWORD_BYTES = 72
 
 
 class BcryptPasswordHasher:
@@ -37,10 +43,16 @@ class BcryptPasswordHasher:
         Args:
             password: Plaintext password.
 
+        Raises:
+            ValidationError: The password is longer than 72 bytes.
+
         Returns:
             Bcrypt hash.
         """
-        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        encoded = password.encode("utf-8")
+        if len(encoded) > MAX_PASSWORD_BYTES:
+            raise ValidationError(f"Password is longer than {MAX_PASSWORD_BYTES} bytes")
+        return bcrypt.hashpw(encoded, bcrypt.gensalt()).decode("utf-8")
 
     def verify(self, password: str, password_hash: str) -> bool:
         """Verify a password against a bcrypt hash.
