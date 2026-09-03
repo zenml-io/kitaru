@@ -618,14 +618,15 @@ def _add_parameter_help(function: F, spec: CommandSpec) -> None:
     app,
     _spec(
         ("login",),
-        "Authenticate with a Kitaru server.",
+        "Authenticate with managed cloud (14-day trial, no credit card required) "
+        "or a Kitaru server.",
         parameters=(
             ParameterSpec(
                 "SERVER",
                 "URL",
                 "argument",
                 False,
-                "Managed or self-hosted instance URL.",
+                "Managed or self-hosted instance URL; omit for managed cloud.",
             ),
             ParameterSpec(
                 "--local",
@@ -703,7 +704,7 @@ async def login(
     api_key_stdin: bool = False,
     refresh: bool = False,
 ) -> CommandResult:
-    """Authenticate with a server and store its credential when required."""
+    """Authenticate with managed cloud or a server and store its credential."""
     invocation = _invocation()
     chosen_server = server or invocation.server
     if chosen_server and not local:

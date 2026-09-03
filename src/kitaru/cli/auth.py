@@ -13,7 +13,9 @@
 #  permissions and limitations under the License.
 """Authentication command orchestration over the existing SDK flows."""
 
+import asyncio
 import getpass
+import uuid
 from collections.abc import Callable
 from typing import TextIO, cast
 
@@ -25,12 +27,23 @@ from kitaru.cli.config import validate_server_url
 from kitaru.cli.output import CLIError, CommandResult, write_interaction
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.config import set_server_url
-from kitaru.client.control_plane import ControlPlaneDeviceAuthorization
-from kitaru.client.control_plane_auth import control_plane_login
+from kitaru.client.control_plane import (
+    MANAGED_CLOUD_API_URL,
+    ControlPlaneDeviceAuthorization,
+    ControlPlaneSession,
+    ControlPlaneWorkspace,
+)
+from kitaru.client.control_plane_auth import (
+    control_plane_login,
+    exchange_control_plane_credential,
+)
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken
 from kitaru.client.device_auth import device_login
 from kitaru.client.exceptions import NotFoundError
+
+_WORKSPACE_POLL_INTERVAL_SECONDS = 5
+_WORKSPACE_POLL_ATTEMPTS = 36
 
 
 async def login(
@@ -76,11 +89,6 @@ async def login(
     """
     if local and server:
         raise CLIError("invalid_arguments", "Pass either SERVER or --local, not both.")
-    if not local and not server:
-        raise CLIError(
-            "invalid_arguments",
-            "Login requires a SERVER argument or --local.",
-        )
     if upgrade and not local:
         raise CLIError("invalid_arguments", "--upgrade requires --local.")
     if port is not None and not local:
@@ -89,6 +97,16 @@ async def login(
         raise CLIError(
             "invalid_arguments",
             "--password-stdin and --api-key-stdin cannot be combined.",
+        )
+    if not local and server is None:
+        return await _login_managed_cloud(
+            credential_store=credential_store,
+            timeout=timeout,
+            non_interactive=non_interactive,
+            no_browser=no_browser,
+            username=username,
+            password_stdin=password_stdin,
+            api_key_stdin=api_key_stdin,
         )
     if local:
         _reject_auth_inputs(
@@ -220,6 +238,164 @@ async def login(
             "credential_kind": credential_kind,
             "credential_stored": credential_stored,
         }
+    )
+
+
+async def _login_managed_cloud(
+    *,
+    credential_store: CredentialStore,
+    timeout: float,
+    non_interactive: bool,
+    no_browser: bool,
+    username: str | None,
+    password_stdin: bool,
+    api_key_stdin: bool,
+) -> CommandResult:
+    """Authorize with managed cloud and connect to the selected workspace."""
+    _reject_control_plane_password(username, password_stdin)
+    if api_key_stdin:
+        raise CLIError(
+            "invalid_arguments",
+            "Bare managed-cloud login does not accept --api-key-stdin.",
+            hint="Pass the workspace URL when logging in with an API key.",
+        )
+    if non_interactive:
+        raise CLIError(
+            "interaction_required",
+            "Managed-cloud device login requires interaction.",
+            hint="Run `kitaru login` in an interactive terminal.",
+        )
+
+    session = ControlPlaneSession(
+        MANAGED_CLOUD_API_URL,
+        credential_store,
+        timeout=timeout,
+    )
+    try:
+        device_login = await session.device_login_with_metadata(
+            open_browser=not no_browser,
+            prompt=_show_device_prompt,
+        )
+        workspace_id = _get_selected_workspace_id(device_login.device_metadata)
+        workspace = await _wait_for_managed_workspace(
+            session,
+            workspace_id,
+            device_login.token.access_token,
+        )
+    finally:
+        await session.close()
+
+    server_url = validate_server_url(
+        cast(str, workspace.server_url), configuration=True
+    )
+    client = KitaruAPIClient(
+        base_url=server_url,
+        timeout=timeout,
+        analytics_source=AnalyticsSource.CLI,
+    )
+    try:
+        info = await client.info.get()
+        if (
+            info.auth_scheme is not AuthScheme.CONTROL_PLANE
+            or info.id != workspace_id
+            or info.control_plane_api_url != MANAGED_CLOUD_API_URL
+        ):
+            raise CLIError(
+                "invalid_configuration",
+                f"Managed workspace {workspace.name!r} returned inconsistent "
+                "Kitaru connection details.",
+            )
+        await exchange_control_plane_credential(
+            client,
+            server_url,
+            credential_store,
+            MANAGED_CLOUD_API_URL,
+            device_login.token.access_token,
+        )
+        set_server_url(server_url)
+    except OSError as error:
+        raise CLIError(
+            "invalid_configuration",
+            "Authentication succeeded but local connection state could not be "
+            f"stored: {error}",
+        ) from error
+    finally:
+        await client.close()
+
+    return CommandResult(
+        item={
+            "server_url": server_url,
+            "workspace_id": str(workspace.id),
+            "workspace_name": workspace.name,
+            "auth_scheme": info.auth_scheme.value,
+            "authentication": "authenticated",
+            "credential_kind": "device",
+            "credential_stored": True,
+        },
+        next_actions=["Run `kitaru status` to inspect the managed workspace."],
+    )
+
+
+def _get_selected_workspace_id(device_metadata: dict[str, str]) -> uuid.UUID:
+    """Read the workspace selected in the browser device flow."""
+    value = device_metadata.get("tenant_id")
+    if value is None:
+        raise CLIError(
+            "invalid_configuration",
+            "Managed-cloud login completed without a selected Kitaru workspace.",
+            hint="Run `kitaru login` again and select or create a workspace.",
+        )
+    try:
+        return uuid.UUID(value)
+    except ValueError as error:
+        raise CLIError(
+            "invalid_configuration",
+            "Managed-cloud login returned an invalid workspace ID.",
+        ) from error
+
+
+async def _wait_for_managed_workspace(
+    session: ControlPlaneSession,
+    workspace_id: uuid.UUID,
+    access_token: str,
+) -> ControlPlaneWorkspace:
+    """Wait for the selected managed workspace to expose its server URL."""
+    waiting = False
+    for attempt in range(_WORKSPACE_POLL_ATTEMPTS):
+        workspace = await session.get_workspace(workspace_id, access_token)
+        if workspace.workspace_type != "kitaru":
+            raise CLIError(
+                "invalid_configuration",
+                "The workspace selected during login is not a Kitaru workspace.",
+            )
+        if workspace.status == "available":
+            if workspace.server_url:
+                return workspace
+            raise CLIError(
+                "invalid_configuration",
+                f"Managed workspace {workspace.name!r} is available but has no "
+                "Kitaru server URL.",
+            )
+        if workspace.status not in {"not_initialized", "pending"}:
+            raise CLIError(
+                "invalid_configuration",
+                f"Managed workspace {workspace.name!r} is {workspace.status}.",
+                hint="Open https://cloud.kitaru.ai to inspect the workspace.",
+            )
+        if attempt == _WORKSPACE_POLL_ATTEMPTS - 1:
+            break
+        if not waiting:
+            write_interaction(
+                f"Waiting for managed workspace {workspace.name!r} to be ready."
+            )
+            waiting = True
+        await asyncio.sleep(_WORKSPACE_POLL_INTERVAL_SECONDS)
+    raise CLIError(
+        "timeout",
+        "The managed workspace is taking longer than expected to become ready.",
+        hint=(
+            "Open https://cloud.kitaru.ai to inspect it, then run `kitaru login` again."
+        ),
     )
 
 

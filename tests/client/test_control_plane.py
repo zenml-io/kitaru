@@ -30,6 +30,7 @@ from kitaru.client.device_grant import DeviceLoginError
 from kitaru.transport import RetryTransport
 
 CONTROL_PLANE_URL = "https://control-plane.example.com"
+WORKSPACE_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 
 class FakeControlPlane:
@@ -40,6 +41,7 @@ class FakeControlPlane:
         pending_polls: int = 0,
         login_error: dict[str, str] | None = None,
         verification_uri: str = "/devices/verify",
+        workspace_status: str = "available",
     ) -> None:
         """Initialize the stub.
 
@@ -48,10 +50,12 @@ class FakeControlPlane:
                 ``authorization_pending`` before the confirmation lands.
             login_error: OAuth 2.0 error body every login is refused with.
             verification_uri: Verification URI the authorization carries.
+            workspace_status: Status returned by the workspace endpoint.
         """
         self.pending_polls = pending_polls
         self.login_error = login_error
         self.verification_uri = verification_uri
+        self.workspace_status = workspace_status
         self.requests: list[httpx.Request] = []
         self.logins = 0
 
@@ -66,6 +70,19 @@ class FakeControlPlane:
         """
         self.requests.append(request)
         form = dict(httpx.QueryParams(request.content.decode()))
+        if request.url.path == f"/workspaces/{WORKSPACE_ID}":
+            return httpx.Response(
+                200,
+                json={
+                    "id": str(WORKSPACE_ID),
+                    "name": "my-kitaru",
+                    "workspace_type": "kitaru",
+                    "status": self.workspace_status,
+                    "kitaru_service": {
+                        "status": {"server_url": "https://my-kitaru.example.com"}
+                    },
+                },
+            )
         if request.url.path == "/auth/device_authorization":
             return httpx.Response(
                 200,
@@ -96,6 +113,7 @@ class FakeControlPlane:
                 "access_token": f"cp-token-{self.logins}",
                 "expires_in": 3600,
                 "token_type": "bearer",
+                "device_metadata": {"tenant_id": str(WORKSPACE_ID)},
             },
         )
 
@@ -222,6 +240,40 @@ async def test_device_login_polls_until_the_code_is_confirmed(
     assert form["grant_type"] == DEVICE_CODE_GRANT_TYPE
     assert form["device_code"] == "cp-device-code"
     assert uuid.UUID(form["client_id"])
+
+
+async def test_device_login_exposes_the_selected_workspace(
+    credential_store: CredentialStore,
+) -> None:
+    """Return the workspace metadata attached during browser verification."""
+    session = _session(credential_store, FakeControlPlane())
+
+    login = await session.device_login_with_metadata(
+        open_browser=False, prompt=lambda _: None
+    )
+    await session.close()
+
+    assert login.token.access_token == "cp-token-1"
+    assert login.device_metadata == {"tenant_id": str(WORKSPACE_ID)}
+
+
+async def test_get_workspace_uses_the_control_plane_bearer_token(
+    credential_store: CredentialStore,
+) -> None:
+    """Resolve the selected workspace and its Kitaru server URL."""
+    control_plane = FakeControlPlane()
+    session = _session(credential_store, control_plane)
+
+    workspace = await session.get_workspace(WORKSPACE_ID, "cp-token")
+    await session.close()
+
+    assert workspace.id == WORKSPACE_ID
+    assert workspace.workspace_type == "kitaru"
+    assert workspace.status == "available"
+    assert workspace.server_url == "https://my-kitaru.example.com"
+    request = control_plane.requests[-1]
+    assert request.url.path == f"/workspaces/{WORKSPACE_ID}"
+    assert request.headers["Authorization"] == "Bearer cp-token"
 
 
 async def test_device_login_sends_a_stable_client_id(
