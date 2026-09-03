@@ -16,10 +16,12 @@
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 import pytest
 
+from kitaru.task import importer as importer_module
 from kitaru.task.importer import ImportedSession
-from kitaru_braintrust_importer.api import fetch
+from kitaru_braintrust_importer.api import fetch, serialize_spans
 from kitaru_braintrust_importer.importer import parse
 
 from ..fetch_helpers import collect_payloads
@@ -187,6 +189,53 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
         fetch({"project_id": "project-1", "trace_ids": ["root-e", "root-f"]})
     )
     assert len(payloads) == 1
+
+
+async def test_fetch_waits_out_a_rate_limit_and_succeeds(
+    fake_braintrust: FakeBraintrust, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sleep for the reported delay once, then fetch the unthrottled payload."""
+    sleeps: list[float] = []
+
+    async def _sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(importer_module.asyncio, "sleep", _sleep)
+    fake_braintrust.rows_builders = [build_complete_rows]
+    fake_braintrust.raise_once = httpx.HTTPStatusError(
+        "rate limited",
+        request=httpx.Request("POST", "https://api.braintrust.dev/btql"),
+        response=httpx.Response(
+            429,
+            headers={"Retry-After": "5"},
+            request=httpx.Request("POST", "https://api.braintrust.dev/btql"),
+        ),
+    )
+
+    payloads = await collect_payloads(
+        fetch({"project_id": "project-1", "trace_ids": ["root-a"]})
+    )
+
+    assert sleeps == [5.0]
+    assert payloads == [serialize_spans(build_complete_rows("root-a"))]
+
+
+async def test_fetch_propagates_a_non_rate_limit_error(
+    fake_braintrust: FakeBraintrust,
+) -> None:
+    """Propagate a non-429 error unchanged, without retrying."""
+    fake_braintrust.raise_once = httpx.HTTPStatusError(
+        "server error",
+        request=httpx.Request("POST", "https://api.braintrust.dev/btql"),
+        response=httpx.Response(
+            500, request=httpx.Request("POST", "https://api.braintrust.dev/btql")
+        ),
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await collect_payloads(
+            fetch({"project_id": "project-1", "trace_ids": ["root-a"]})
+        )
 
 
 @pytest.mark.parametrize(

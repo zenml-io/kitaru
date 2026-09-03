@@ -20,7 +20,13 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from langfuse.api import Traces, TraceWithFullDetails
+from langfuse.api import (
+    ObservationsV2Meta,
+    ObservationsV2Response,
+    ObservationV2,
+    Traces,
+    TraceWithFullDetails,
+)
 from langfuse.types import TraceContext
 
 import kitaru_langfuse_importer.adapter as adapter_module
@@ -63,6 +69,51 @@ def build_observation(
     return record
 
 
+def build_observation_v2(
+    observation_id: str,
+    trace_id: str,
+    *,
+    parent_id: str | None = None,
+    observation_type: str = "SPAN",
+    end_time: str | None = "2026-07-24T10:00:01Z",
+    project_id: str = "project-1",
+    **extra: Any,
+) -> ObservationV2:
+    """Build one bulk-listed Langfuse v2 observation."""
+    fields: dict[str, Any] = {
+        "id": observation_id,
+        "trace_id": trace_id,
+        "project_id": project_id,
+        "type": observation_type,
+        "name": observation_id,
+        "start_time": "2026-07-24T10:00:00Z",
+        "level": "DEFAULT",
+        "environment": "default",
+        "usage_details": {"input": 3, "output": 5},
+        "cost_details": {"total": 0.001},
+        "input": None,
+        "output": None,
+        "metadata": None,
+        "model_parameters": None,
+        "provided_model_name": None,
+        **extra,
+    }
+    if end_time is not None:
+        fields["end_time"] = end_time
+    if parent_id is not None:
+        fields["parent_observation_id"] = parent_id
+    return ObservationV2.model_validate(fields)
+
+
+def build_observations_page(
+    observations: list[ObservationV2], *, cursor: str | None = None
+) -> ObservationsV2Response:
+    """Build one page of the Langfuse bulk observations listing response."""
+    return ObservationsV2Response(
+        data=observations, meta=ObservationsV2Meta(cursor=cursor)
+    )
+
+
 def build_trace(
     trace_id: str,
     observations: list[dict[str, Any]],
@@ -92,14 +143,22 @@ def build_trace(
     )
 
 
-def build_trace_page(trace_ids: list[str], page: int, total_pages: int) -> Traces:
+def build_trace_page(
+    trace_ids: list[str],
+    page: int,
+    total_pages: int,
+    *,
+    session_ids: dict[str, str] | None = None,
+) -> Traces:
     """Build one page of the Langfuse trace-list response."""
+    session_ids = session_ids or {}
     return Traces.model_validate(
         {
             "data": [
                 {
                     "id": trace_id,
                     "timestamp": "2026-07-24T10:00:00Z",
+                    "session_id": session_ids.get(trace_id),
                     "tags": [],
                     "public": False,
                     "environment": "default",
@@ -143,6 +202,8 @@ class FakeLangfuseClient:
     def __init__(self) -> None:
         self.trace_builders: list[TraceBuilder | Exception] = []
         self.trace_list_pages: list[Traces] = []
+        self.observation_pages: dict[str, list[ObservationsV2Response]] = {}
+        self.observation_calls: list[dict[str, Any]] = []
         self.requested: list[str] = []
         self.list_calls: list[dict[str, Any]] = []
         self.events: list[str] = []
@@ -151,7 +212,8 @@ class FakeLangfuseClient:
         self.in_flight = 0
         self.peak_in_flight = 0
         self.async_api = SimpleNamespace(
-            trace=SimpleNamespace(get=self._get, list=self._list)
+            trace=SimpleNamespace(get=self._get, list=self._list),
+            observations=SimpleNamespace(get_many=self._get_many),
         )
 
     async def _get(self, trace_id: str, **kwargs: Any) -> TraceWithFullDetails:
@@ -175,6 +237,14 @@ class FakeLangfuseClient:
         assert self.trace_list_pages, "unexpected trace list call"
         return self.trace_list_pages.pop(0)
 
+    async def _get_many(
+        self, *, trace_id: str, **kwargs: Any
+    ) -> ObservationsV2Response:
+        self.observation_calls.append({"trace_id": trace_id, **kwargs})
+        pages = self.observation_pages.get(trace_id)
+        assert pages, f"unexpected observations listing for trace {trace_id!r}"
+        return pages.pop(0)
+
     @contextmanager
     def start_as_current_observation(
         self, *, name: str, trace_context: TraceContext
@@ -186,6 +256,31 @@ class FakeLangfuseClient:
 
     def flush(self) -> None:
         self.events.append("flush")
+
+
+def seed_default_observations(fake: FakeLangfuseClient, trace_ids: list[str]) -> None:
+    """Populate the fake's bulk observations listing for the default trace shape.
+
+    Args:
+        fake: Fake Langfuse client to populate.
+        trace_ids: Trace ids to seed, each with a root span and a nested
+            generation matching `build_complete_trace`'s observations.
+    """
+    for trace_id in trace_ids:
+        fake.observation_pages[trace_id] = [
+            build_observations_page(
+                [
+                    build_observation_v2("obs-root", trace_id),
+                    build_observation_v2(
+                        "obs-llm",
+                        trace_id,
+                        parent_id="obs-root",
+                        observation_type="GENERATION",
+                        provided_model_name="gpt-5-nano",
+                    ),
+                ]
+            )
+        ]
 
 
 @pytest.fixture(autouse=True)
