@@ -199,15 +199,15 @@ async def test_is_covered_counts_workers_of_other_accounts(
 
 
 async def test_register_ephemeral_worker(service: WorkerService) -> None:
-    """Register a worker pinned to one job's tasks of the task's kind."""
-    task = AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4())
+    """Register a worker claiming every task of one job."""
+    job_id = uuid.uuid4()
     runtime = WorkerRuntime(platform="bare")
     worker = await service.register_ephemeral_worker(
-        task=task, runtime=runtime, actor=ACTOR
+        job_id=job_id, runtime=runtime, actor=ACTOR
     )
-    assert worker.name == f"job-{task.job_id}"
+    assert worker.name == f"job-{job_id}"
     assert worker.scope == WorkerScope(
-        claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=task.job_id
+        claims=UNSCOPED_WORKER_SCOPE.claims, job_id=job_id
     )
     assert worker.runtime == runtime
     assert worker.metadata == {"ephemeral": "true"}

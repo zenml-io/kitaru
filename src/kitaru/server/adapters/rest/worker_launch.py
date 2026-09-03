@@ -55,7 +55,7 @@ async def schedule_worker_launch(
     if await worker_service.is_covered(task):
         return
     worker = await worker_service.register_ephemeral_worker(
-        task,
+        task.job_id,
         WorkerRuntime(platform=settings.WORKER_LAUNCHER.backend.value),
         actor=actor,
     )

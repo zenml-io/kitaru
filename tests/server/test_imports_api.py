@@ -24,6 +24,7 @@ import pytest
 from fastapi import FastAPI
 
 from conftest import (
+    UNSCOPED_WORKER_SCOPE,
     FakeAccountRepository,
     FakeWorkerLauncher,
     JobAndTaskServices,
@@ -263,7 +264,7 @@ async def test_create_import_launches_an_ephemeral_worker(
     worker = await services.workers.get(launch.worker_id)
     assert worker.name == f"job-{job_id}"
     assert worker.scope == WorkerScope(
-        claims=[WorkerClaim(kind=TaskKind.IMPORTER)], job_id=job_id
+        claims=UNSCOPED_WORKER_SCOPE.claims, job_id=job_id
     )
     assert worker.runtime.platform == "modal"
     assert worker.metadata == {"ephemeral": "true"}

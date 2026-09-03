@@ -17,6 +17,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import WorkerClaim, WorkerRuntime, WorkerScope
 from kitaru.server.application.interfaces.worker_repository import WorkerRepository
 from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
@@ -109,12 +110,12 @@ class WorkerService:
         return any(worker.covers(task) for worker in workers)
 
     async def register_ephemeral_worker(
-        self, task: Task, runtime: WorkerRuntime, actor: AuthContext
+        self, job_id: uuid.UUID, runtime: WorkerRuntime, actor: AuthContext
     ) -> Worker:
-        """Register a worker scoped to one job's tasks of a task's kind.
+        """Register a worker claiming every task of one job.
 
         Args:
-            task: Task the worker is started for.
+            job_id: Id of the job the worker drains.
             runtime: Runtime the launcher reports.
             actor: Caller context.
 
@@ -122,8 +123,10 @@ class WorkerService:
             Stored worker.
         """
         return await self.register_worker(
-            name=f"job-{task.job_id}",
-            scope=WorkerScope(claims=[WorkerClaim(kind=task.kind)], job_id=task.job_id),
+            name=f"job-{job_id}",
+            scope=WorkerScope(
+                claims=[WorkerClaim(kind=kind) for kind in TaskKind], job_id=job_id
+            ),
             runtime=runtime,
             metadata={"ephemeral": "true"},
             actor=actor,
