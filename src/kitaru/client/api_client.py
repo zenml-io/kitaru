@@ -52,6 +52,7 @@ from kitaru.client.resources.experiments import ExperimentsResource
 from kitaru.client.resources.importers import ImportersResource
 from kitaru.client.resources.imports import ImportsResource
 from kitaru.client.resources.info import InfoResource
+from kitaru.client.resources.insights import InsightsResource
 from kitaru.client.resources.investigations import InvestigationsResource
 from kitaru.client.resources.jobs import JobsResource
 from kitaru.client.resources.replays import ReplaysResource
@@ -168,6 +169,7 @@ class KitaruAPIClient:
         self.importers = ImportersResource(self)
         self.imports = ImportsResource(self)
         self.info = InfoResource(self)
+        self.insights = InsightsResource(self)
         self.investigations = InvestigationsResource(self)
         self.jobs = JobsResource(self)
         self.replays = ReplaysResource(self)
