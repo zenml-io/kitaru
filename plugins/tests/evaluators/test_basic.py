@@ -40,6 +40,8 @@ def test_latency_reports_elapsed_seconds() -> None:
 
     assert result.name == "latency_seconds"
     assert result.score == 2.5
+    assert result.min_score == 0.0
+    assert result.max_score is None
 
 
 def test_cost_reports_session_rollup() -> None:
@@ -48,6 +50,8 @@ def test_cost_reports_session_rollup() -> None:
 
     assert result.name == "cost"
     assert result.score == 0.0125
+    assert result.min_score == 0.0
+    assert result.max_score is None
 
 
 def test_cost_uses_root_span_when_llm_cost_is_missing() -> None:
@@ -557,4 +561,6 @@ def test_tool_call_patterns_counts_repeated_tools() -> None:
 
     assert result.name == "tool_call_pattern"
     assert result.score == 1.0
-    assert result.value == "repeated-tools"
+    assert result.value is None
+    assert result.min_score == 0.0
+    assert result.max_score == 3.0
