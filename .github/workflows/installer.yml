@@ -103,7 +103,7 @@ jobs:
         shell: bash
         # Regression for the status-swallowing bug in `quiet`: an impossible
         # version pin makes `uv tool install` fail, and that must surface.
-        run: |
+        run: |-
           if cat install.sh | bash -s -- --no-login --no-skills --no-mcp --version=99.99.99; then
             echo "installer exited 0 on a failed install" >&2; exit 1
           fi
