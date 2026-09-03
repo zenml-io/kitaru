@@ -468,6 +468,7 @@ class FakeKitaruAPIClient:
         self.sessions = FakeSessionsResource()
         self.blobs = FakeBlobsResource()
         self.closed = False
+        self.auth_swaps: list[object] = []
 
     async def __aenter__(self) -> "FakeKitaruAPIClient":
         """Enter the context manager."""
@@ -482,7 +483,8 @@ class FakeKitaruAPIClient:
         return self
 
     def with_auth(self, auth: object) -> "FakeKitaruAPIClient":
-        """Return this fake, since it has no separate transport to view."""
+        """Record the auth and return this fake, which has no separate transport."""
+        self.auth_swaps.append(auth)
         return self
 
 

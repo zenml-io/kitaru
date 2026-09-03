@@ -43,6 +43,7 @@ from kitaru.api_models.v1.worker import (
     WorkerClaim,
     WorkerScope,
 )
+from kitaru.client.auth import RenewingTokenAuth
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.worker import worker as worker_module
 from kitaru.worker.blob_cache import BlobCache
@@ -712,6 +713,17 @@ def _fail_detect_runtime() -> NoReturn:
     raise AssertionError("runtime detection must be skipped")
 
 
+def _pre_registered_config(worker_id: uuid.UUID, tmp_path: Path) -> WorkerConfig:
+    """Build a worker config adopting a pre-registered worker."""
+    return WorkerConfig(
+        id=worker_id,
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
+        poll_interval=0.01,
+        blob_cache_root=tmp_path / "blobs",
+        payload_cache_root=tmp_path / "payloads",
+    )
+
+
 async def test_run_pre_registered_loads_the_worker_and_adopts_its_scope(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -723,6 +735,7 @@ async def test_run_pre_registered_loads_the_worker_and_adopts_its_scope(
 
     monkeypatch.setattr(worker_module, "KitaruAPIClient", _fake_client)
     monkeypatch.setattr(worker_module, "detect_runtime", _fail_detect_runtime)
+    monkeypatch.setenv("KITARU_API_TOKEN", "worker-token")
 
     worker_id = uuid.uuid4()
     job_id = uuid.uuid4()
@@ -737,14 +750,7 @@ async def test_run_pre_registered_loads_the_worker_and_adopts_its_scope(
         make_job_response(kind=JobKind.IMPORT, status=JobStatus.COMPLETED)
     )
 
-    config = WorkerConfig(
-        id=worker_id,
-        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
-        poll_interval=0.01,
-        blob_cache_root=tmp_path / "blobs",
-        payload_cache_root=tmp_path / "payloads",
-    )
-    worker = Worker(config)
+    worker = Worker(_pre_registered_config(worker_id, tmp_path))
 
     await worker.run()
 
@@ -755,5 +761,38 @@ async def test_run_pre_registered_loads_the_worker_and_adopts_its_scope(
         heartbeat_worker_id == worker_id
         for heartbeat_worker_id, _ in client.workers.heartbeats
     )
+    assert client.auth_swaps == []
     assert client.closed is True
     assert worker._config.scope == loaded_scope
+
+
+async def test_run_pre_registered_renews_through_an_account_credential(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without a worker token in the environment, the worker renews its own token."""
+    client = FakeKitaruAPIClient()
+
+    def _fake_client(*args: object, **kwargs: object) -> FakeKitaruAPIClient:
+        return client
+
+    monkeypatch.setattr(worker_module, "KitaruAPIClient", _fake_client)
+    monkeypatch.delenv("KITARU_API_TOKEN", raising=False)
+
+    worker_id = uuid.uuid4()
+    client.workers.get_response = make_worker_response(
+        id=worker_id,
+        name="job-worker",
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)]),
+    )
+    client.tasks.claim_responses.append(TaskClaimResponse(tasks=[]))
+    stop = asyncio.Event()
+    stop.set()
+
+    await Worker(_pre_registered_config(worker_id, tmp_path)).run(stop=stop)
+
+    assert client.workers.created == []
+    assert client.workers.get_calls == [worker_id]
+    assert len(client.auth_swaps) == 1
+    auth = client.auth_swaps[0]
+    assert isinstance(auth, RenewingTokenAuth)
+    assert auth._source.get_cached_token() is None

@@ -69,6 +69,23 @@ _CGROUP_PATH = Path("/proc/1/cgroup")
 _CGROUP_CONTAINER_MARKERS = ("docker", "kubepods", "containerd")
 
 
+def _authenticate_as_worker(
+    api_client: KitaruAPIClient, worker_id: uuid.UUID, token: str | None = None
+) -> KitaruAPIClient:
+    """Return a client renewing a worker token through the account credential.
+
+    Args:
+        api_client: Client authenticating with the account credential.
+        worker_id: Id of the worker to authenticate as.
+        token: Worker token to start from, renewed on first use when omitted.
+
+    Returns:
+        Client authenticated as the worker.
+    """
+    source = WorkerTokenSource(api_client, worker_id, token)
+    return api_client.with_auth(RenewingTokenAuth(source))
+
+
 def default_worker_name() -> str:
     """Derive the default worker name from the hostname and process id.
 
@@ -217,31 +234,33 @@ class Worker:
         response = await api_client.workers.create(registration)
         worker = response.worker
         logger.info("Registered worker %s (%s).", name, worker.id)
-        source = WorkerTokenSource(
+        client = _authenticate_as_worker(
             api_client, worker.id, response.token.get_secret_value()
         )
-        client = api_client.with_auth(RenewingTokenAuth(source))
         return worker, client
 
     async def _load_pre_registered(
         self, api_client: KitaruAPIClient, worker_id: uuid.UUID
     ) -> tuple[WorkerResponse, KitaruAPIClient]:
-        """Load a worker the server pre-registered.
+        """Load a pre-registered worker and authenticate as it.
 
         Args:
-            api_client: Client authenticating with the worker's token.
+            api_client: Client pointed at the target server.
             worker_id: Id of the pre-registered worker.
 
         Returns:
-            Loaded worker and the client unchanged.
+            Loaded worker and a client authenticated as it. With a worker
+            token in the environment that is the client unchanged, otherwise
+            a client renewing a worker token through the account credential.
         """
         worker = await api_client.workers.get(worker_id)
         self._config = self._config.model_copy(update={"scope": worker.scope})
         logger.info("Loaded worker %s (%s).", worker.name, worker.id)
-        # The server minted this worker's token for the sandbox lifetime, so
-        # the worker keeps the environment client's static bearer token and
-        # never renews it.
-        return worker, api_client
+        if os.environ.get("KITARU_API_TOKEN"):
+            # The renew route rejects worker principals, so a worker token
+            # stays the static bearer for its lifetime.
+            return worker, api_client
+        return worker, _authenticate_as_worker(api_client, worker.id)
 
     async def _supervise_heartbeat(self, heartbeat: WorkerHeartbeat) -> None:
         """Run the heartbeat, restarting it after an unexpected exception.
