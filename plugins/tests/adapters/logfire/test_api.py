@@ -22,16 +22,22 @@ from kitaru_logfire_importer.api import fetch
 from kitaru_logfire_importer.importer import parse
 
 from ..fetch_helpers import collect_payloads
-from .fixtures import FakeLogfire, build_complete_rows, build_list_row
+from .fixtures import (
+    FakeLogfire,
+    build_complete_rows,
+    build_conversation_rows,
+    build_list_row,
+)
 
 TRACE_ID_1 = "a" * 32
 TRACE_ID_2 = "b" * 32
+TRACE_ID_3 = "c" * 32
 
 
-async def test_fetch_by_trace_ids_fetches_exactly_those_traces_in_order(
+async def test_fetch_by_trace_ids_fetches_exactly_those_traces_into_one_payload(
     fake_logfire: FakeLogfire,
 ) -> None:
-    """Fetch exactly the requested trace ids, in the order given."""
+    """Fetch exactly the requested trace ids, concatenated in order."""
     fake_logfire.fetch_builders = [build_complete_rows, build_complete_rows]
 
     payloads = await collect_payloads(
@@ -41,11 +47,13 @@ async def test_fetch_by_trace_ids_fetches_exactly_those_traces_in_order(
     assert fake_logfire.events == ["fetch", "fetch"]
     assert fake_logfire.requested == [TRACE_ID_1, TRACE_ID_2]
     assert fake_logfire.fetch_min_timestamps == ["2026-07-24T09:00:00+00:00"] * 2
-    assert len(payloads) == 2
-    for payload in payloads:
-        sessions = list(parse(payload, {}))
-        assert len(sessions) == 1
-        assert isinstance(sessions[0], ImportedSession)
+    assert len(payloads) == 1
+    # Both traces share the default conversation id, so the parser groups
+    # them into one session instead of dropping the second as a duplicate.
+    sessions = list(parse(payloads[0], {}))
+    assert len(sessions) == 1
+    assert isinstance(sessions[0], ImportedSession)
+    assert sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_1, TRACE_ID_2]
 
 
 async def test_fetch_by_trace_ids_without_since_uses_the_earliest_bound(
@@ -64,7 +72,7 @@ async def test_fetch_by_trace_ids_without_since_uses_the_earliest_bound(
 async def test_fetch_by_time_window_lists_trace_ids_and_fetches_each(
     fake_logfire: FakeLogfire,
 ) -> None:
-    """List trace ids within the window, then fetch each one."""
+    """List trace ids within the window, then fetch each into one payload."""
     fake_logfire.list_builders = [
         lambda: [
             build_list_row(TRACE_ID_1, "2026-07-24T09:00:00Z"),
@@ -82,7 +90,44 @@ async def test_fetch_by_time_window_lists_trace_ids_and_fetches_each(
     assert fake_logfire.list_max_timestamps == ["2026-07-24T10:00:00+00:00"]
     assert fake_logfire.requested == [TRACE_ID_1, TRACE_ID_2]
     assert fake_logfire.fetch_min_timestamps == ["2026-07-24T09:00:00+00:00"] * 2
-    assert len(payloads) == 2
+    assert len(payloads) == 1
+
+
+async def test_fetch_by_time_window_groups_a_shared_session_into_one_session(
+    fake_logfire: FakeLogfire,
+) -> None:
+    """Group traces sharing a session id even when listed apart in the window."""
+    fake_logfire.list_builders = [
+        lambda: [
+            build_list_row(TRACE_ID_1, "2026-07-24T09:00:00Z"),
+            build_list_row(TRACE_ID_2, "2026-07-24T09:05:00Z"),
+            build_list_row(TRACE_ID_3, "2026-07-24T09:10:00Z"),
+        ]
+    ]
+    fake_logfire.fetch_builders = [
+        lambda trace_id: build_conversation_rows(trace_id, "conversation-a"),
+        lambda trace_id: build_conversation_rows(trace_id, "conversation-b"),
+        lambda trace_id: build_conversation_rows(trace_id, "conversation-a"),
+    ]
+
+    payloads = await collect_payloads(
+        fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
+    )
+
+    assert len(payloads) == 1
+    sessions = [
+        session
+        for session in parse(payloads[0], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert len(sessions) == 2
+    by_trace_ids = {
+        tuple(session.metadata["logfire.trace_ids"]): session for session in sessions
+    }
+    shared = by_trace_ids[(TRACE_ID_1, TRACE_ID_3)]
+    assert len(shared.nodes) == 2
+    assert {node.trace_id for node in shared.nodes} == {TRACE_ID_1, TRACE_ID_3}
+    assert by_trace_ids[(TRACE_ID_2,)].nodes[0].trace_id == TRACE_ID_2
 
 
 async def test_fetch_by_time_window_defaults_until_to_now(

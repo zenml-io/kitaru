@@ -583,7 +583,9 @@ class PhoenixTraceImporter:
         values, failures = _parse_values(content)
         traces, trace_metadata, trace_lines, expansion_failures = _expand_values(values)
         failures.extend(expansion_failures)
-        for trace_id, spans in sorted(traces.items()):
+        # traces preserves the payload's span order, so iterating it
+        # directly emits sessions in first-appearance order.
+        for trace_id, spans in traces.items():
             try:
                 session = self._parse_trace(
                     trace_id, spans, trace_metadata.get(trace_id, {})

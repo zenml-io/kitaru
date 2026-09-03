@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Fetch traces directly from the Langfuse API by trace id or time window, through the `adapter` extra.
+- Import traces oldest first and grouped by session, fixing later traces in a session being dropped as duplicates.
 
 ## 0.2.0
 

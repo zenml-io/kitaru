@@ -534,7 +534,10 @@ class LogfireRecordsImporter:
             if fallback:
                 fallback_sessions.add(key)
 
-        for (source_instance, session_id), session_traces in sorted(grouped.items()):
+        # Iterate grouped in insertion order, which follows the
+        # first-appearance order of records in the payload, so ingestion
+        # follows payload order rather than a sort of the group keys.
+        for (source_instance, session_id), session_traces in grouped.items():
             try:
                 session = self._parse_session(
                     source_instance,

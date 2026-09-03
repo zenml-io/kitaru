@@ -16,8 +16,10 @@
 import re
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
+from langsmith.schemas import Run
 
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.task.importer import ImportedSession
@@ -26,13 +28,40 @@ from kitaru_langsmith_importer.api import fetch
 from kitaru_langsmith_importer.importer import parse
 
 from ..fetch_helpers import collect_payloads
-from .fixtures import PROJECT_ID, FakeLangSmith, build_complete_runs, build_run
+from .fixtures import (
+    PROJECT_ID,
+    FakeLangSmith,
+    RunsBuilder,
+    build_complete_runs,
+    build_run,
+)
 
 
-async def test_fetch_by_trace_ids_fetches_exactly_those_in_order(
+def _threaded_trace_runs(thread_id: str | None) -> RunsBuilder:
+    """Build a runs builder whose root run carries a thread id, if given."""
+
+    def build(trace_id: str) -> list[Run]:
+        root_kwargs: dict[str, Any] = (
+            {"extra": {"metadata": {"thread_id": thread_id}}} if thread_id else {}
+        )
+        return [
+            build_run(trace_id, trace_id, **root_kwargs),
+            build_run(
+                str(uuid.uuid5(uuid.NAMESPACE_OID, f"{trace_id}-llm")),
+                trace_id,
+                parent_run_id=trace_id,
+                name="llm-call",
+                run_type="llm",
+            ),
+        ]
+
+    return build
+
+
+async def test_fetch_by_trace_ids_fetches_exactly_those_in_one_payload(
     fake_langsmith_api: FakeLangSmith,
 ) -> None:
-    """Fetch the given trace ids in order and yield a parseable payload each."""
+    """Fetch the given trace ids in order and yield one combined payload."""
     trace_id_1 = str(uuid.uuid4())
     trace_id_2 = str(uuid.uuid4())
     fake_langsmith_api.runs_builders = [build_complete_runs, build_complete_runs]
@@ -41,25 +70,35 @@ async def test_fetch_by_trace_ids_fetches_exactly_those_in_order(
 
     assert fake_langsmith_api.requested == [trace_id_1, trace_id_2]
     assert fake_langsmith_api.root_listing_calls == []
-    assert len(payloads) == 2
-    sessions = list(parse(payloads[0], _PARSER_PARAMS))
-    assert len(sessions) == 1
-    session = sessions[0]
-    assert isinstance(session, ImportedSession)
-    assert session.external_id == f"{PROJECT_ID}:{trace_id_1}"
-    assert session.status == SessionStatus.COMPLETED
+    assert len(payloads) == 1
+    # join_on=trace_id forces one session per trace, matching how the
+    # live-recording adapter parses its own fetched payloads.
+    sessions = [
+        item
+        for item in parse(payloads[0], _PARSER_PARAMS)
+        if isinstance(item, ImportedSession)
+    ]
+    assert [session.external_id for session in sessions] == [
+        f"{PROJECT_ID}:{trace_id_1}",
+        f"{PROJECT_ID}:{trace_id_2}",
+    ]
+    assert all(session.status == SessionStatus.COMPLETED for session in sessions)
 
 
-async def test_fetch_time_window_lists_root_runs_and_fetches_each_distinct_trace_once(
+async def test_fetch_time_window_lists_root_runs_oldest_first_and_dedupes(
     fake_langsmith_api: FakeLangSmith,
 ) -> None:
-    """List root runs in the window and fetch each distinct trace once."""
+    """List root runs oldest first and fetch each distinct trace once."""
     trace_id_1 = str(uuid.uuid4())
     trace_id_2 = str(uuid.uuid4())
-    root_run_1 = build_run(trace_id_1, trace_id_1)
-    root_run_2 = build_run(trace_id_2, trace_id_2)
-    # The same trace can surface twice in a root run listing, the fetch
-    # must still request it once.
+    root_run_1 = build_run(
+        trace_id_1, trace_id_1, start_time=datetime(2026, 7, 24, 11, tzinfo=UTC)
+    )
+    root_run_2 = build_run(
+        trace_id_2, trace_id_2, start_time=datetime(2026, 7, 24, 10, tzinfo=UTC)
+    )
+    # The listing is out of order and the same trace can surface twice, the
+    # fetch must still sort oldest first and request each trace once.
     fake_langsmith_api.root_run_listings = [[root_run_1, root_run_1, root_run_2]]
     fake_langsmith_api.runs_builders = [build_complete_runs, build_complete_runs]
 
@@ -73,14 +112,70 @@ async def test_fetch_time_window_lists_root_runs_and_fetches_each_distinct_trace
         )
     )
 
-    assert len(payloads) == 2
-    assert fake_langsmith_api.requested == [trace_id_1, trace_id_2]
+    assert len(payloads) == 1
+    # root_run_2 started earlier than root_run_1, so it is fetched first.
+    assert fake_langsmith_api.requested == [trace_id_2, trace_id_1]
     assert len(fake_langsmith_api.root_listing_calls) == 1
     call = fake_langsmith_api.root_listing_calls[0]
     assert call["project_name"] == "my-project"
     assert call["is_root"] is True
     assert call["start_time"] == datetime(2026, 7, 1, tzinfo=UTC)
     assert call["filter"] == 'lt(end_time, "2026-08-01T00:00:00+00:00")'
+
+
+async def test_fetch_time_window_groups_shared_thread_traces_into_one_session(
+    fake_langsmith_api: FakeLangSmith,
+) -> None:
+    """Fetch a thread's traces into one payload that parses into one session."""
+    trace_id_1 = str(uuid.uuid4())
+    trace_id_2 = str(uuid.uuid4())
+    trace_id_3 = str(uuid.uuid4())
+    thread_id = "thread-shared"
+    # trace_3 starts earliest, then trace_1, then trace_2, listed out of order.
+    root_run_3 = build_run(
+        trace_id_3, trace_id_3, start_time=datetime(2026, 7, 24, 9, tzinfo=UTC)
+    )
+    root_run_1 = build_run(
+        trace_id_1, trace_id_1, start_time=datetime(2026, 7, 24, 10, tzinfo=UTC)
+    )
+    root_run_2 = build_run(
+        trace_id_2, trace_id_2, start_time=datetime(2026, 7, 24, 11, tzinfo=UTC)
+    )
+    fake_langsmith_api.root_run_listings = [[root_run_2, root_run_3, root_run_1]]
+    fake_langsmith_api.runs_builders = [
+        _threaded_trace_runs(None),
+        _threaded_trace_runs(thread_id),
+        _threaded_trace_runs(thread_id),
+    ]
+
+    payloads = await collect_payloads(
+        fetch({"since": "2026-07-01T00:00:00Z", "until": "2026-08-01T00:00:00Z"})
+    )
+
+    assert len(payloads) == 1
+    assert fake_langsmith_api.requested == [trace_id_3, trace_id_1, trace_id_2]
+
+    sessions = [
+        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+    ]
+    assert len(sessions) == 2
+    shared_session = next(
+        session
+        for session in sessions
+        if session.external_id == f"{PROJECT_ID}:{thread_id}"
+    )
+    assert [turn["source_trace_id"] for turn in shared_session.inputs["turns"]] == [
+        trace_id_1,
+        trace_id_2,
+    ]
+    assert {node.trace_id for node in shared_session.nodes} == {trace_id_1, trace_id_2}
+
+    solo_session = next(
+        session
+        for session in sessions
+        if session.external_id == f"{PROJECT_ID}:{trace_id_3}"
+    )
+    assert solo_session.inputs["turns"][0]["source_trace_id"] == trace_id_3
 
 
 async def test_fetch_time_window_falls_back_to_the_default_project(

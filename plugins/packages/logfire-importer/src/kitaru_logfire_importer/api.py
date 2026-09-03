@@ -192,7 +192,7 @@ async def _list_root_trace_ids(
 
 
 async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    """Fetch parser payloads from the Logfire Query API.
+    """Fetch every trace matched by the query into one parser payload.
 
     Args:
         query: Fetch query. `trace_ids` fetches exactly those traces in
@@ -203,7 +203,8 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         ValueError: The query is invalid.
 
     Yields:
-        One NDJSON trace payload per fetched trace.
+        One NDJSON payload concatenating every fetched trace, oldest
+        first. Nothing when there is nothing to fetch.
     """
     parsed = FetchQuery.model_validate(query)
     read_token = get_required_env("LOGFIRE_READ_TOKEN")
@@ -216,10 +217,18 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
             # point, so fall back to the earliest possible timestamp
             # instead.
             min_timestamp = parsed.since or datetime.min.replace(tzinfo=UTC)
-            for trace_id in parsed.trace_ids:
-                yield await fetch_trace(trace_id, min_timestamp, client)
-            return
+            trace_ids = parsed.trace_ids
+        else:
+            since, until = parsed.get_window()
+            min_timestamp = since
+            trace_ids = await _list_root_trace_ids(client, since, until)
 
-        since, until = parsed.get_window()
-        for trace_id in await _list_root_trace_ids(client, since, until):
-            yield await fetch_trace(trace_id, since, client)
+        trace_payloads = [
+            await fetch_trace(trace_id, min_timestamp, client) for trace_id in trace_ids
+        ]
+        # Concatenate into one payload so the parser groups traces sharing
+        # a session id into one Kitaru session instead of splitting them
+        # across separate parse calls, where only the first trace of a
+        # session would survive deduplication.
+        if trace_payloads:
+            yield b"\n".join(trace_payloads)

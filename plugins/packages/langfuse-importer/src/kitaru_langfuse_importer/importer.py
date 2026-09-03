@@ -1241,7 +1241,9 @@ class LangfuseJSONLImporter:
                 fallback_sessions.add(session_id)
 
         sessions: list[ImportedSession] = []
-        for source_id, traces in sorted(session_traces.items()):
+        # Emit sessions in payload order, not sorted by session id, so
+        # ingestion follows the fetch or upload order.
+        for source_id, traces in session_traces.items():
             try:
                 sessions.append(
                     self._parse_session(

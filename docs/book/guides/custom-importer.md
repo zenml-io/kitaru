@@ -67,7 +67,7 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         yield fetch_trace_bytes(trace_id)
 ```
 
-`fetch` receives the import's `--query` (or `source.query` on the request) and yields one parser payload per trace. Each yielded payload runs through your `parse` entrypoint with the import's `params`, exactly like a file upload would. Raise from the fetcher to end the import task with the failure recorded in the import stats, an `ImportFailure` inside the loop isolates one trace instead.
+`fetch` receives the import's `--query` (or `source.query` on the request) and yields parser payloads. Each yielded payload runs through your `parse` entrypoint with the import's `params`, exactly like a file upload would, so every trace that `parse` groups into one session must be in the same payload. The built-in importers yield one payload holding every fetched trace, oldest first. Raise from the fetcher to end the import task with the failure recorded in the import stats.
 
 A script source names the fetch entrypoint as a bare attribute, like the parse entrypoint. A package source names it as `module:attribute`. There is no `--fetch-entrypoint` flag on `kitaru importer register` yet, so set it through the API directly, for example with the Python client:
 

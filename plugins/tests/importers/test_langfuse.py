@@ -428,6 +428,21 @@ def test_redacted_session_ids_fall_back_to_trace_ids() -> None:
     ]
 
 
+def test_emits_sessions_in_first_appearance_order() -> None:
+    """Emit sessions in payload order, not sorted by session id."""
+    parsed = sessions(
+        jsonl(
+            observation("root-1", "trace-1", session_id="session-zebra"),
+            observation("root-2", "trace-2", session_id="session-alpha"),
+        )
+    )
+
+    assert [session.metadata["langfuse.session_id"] for session in parsed] == [
+        "session-zebra",
+        "session-alpha",
+    ]
+
+
 def test_imports_pretty_printed_json_array() -> None:
     """Accept the JSON array format advertised by the importer."""
     content = json.dumps(

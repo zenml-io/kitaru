@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Fetch traces from the Phoenix API by trace id or time window, installed through the `adapter` extra.
+- Fetch traces from the Phoenix API by trace id or time window, importing them oldest first, installed through the `adapter` extra.
 
 ## 0.2.0
 

@@ -100,6 +100,36 @@ def build_complete_rows(trace_id: str) -> list[dict[str, Any]]:
     ]
 
 
+def build_conversation_rows(
+    trace_id: str,
+    conversation_id: str,
+    *,
+    start_timestamp: str = "2026-07-24T10:00:00Z",
+) -> list[dict[str, Any]]:
+    """Build finished rows carrying an explicit conversation id."""
+    return [
+        build_row(
+            "root",
+            trace_id,
+            span_name="kitaru-run",
+            start_timestamp=start_timestamp,
+            attributes={"gen_ai.conversation.id": conversation_id},
+        ),
+        build_row(
+            "llm",
+            trace_id,
+            parent_span_id="root",
+            span_name="llm-call",
+            start_timestamp=start_timestamp,
+            attributes={
+                "gen_ai.conversation.id": conversation_id,
+                "gen_ai.operation.name": "chat",
+                "gen_ai.request.model": "gpt-5-nano",
+            },
+        ),
+    ]
+
+
 def build_list_row(trace_id: str, start_timestamp: str) -> dict[str, Any]:
     """Build one trace-listing result row."""
     return {"trace_id": trace_id, "start_timestamp": start_timestamp}
