@@ -421,41 +421,20 @@ async def ingest_session(
     return session
 
 
-def _resolve_parser(details: ImportTaskDetails) -> Parser:
-    """Load the parser callable named by a task's plugin spec.
+def _resolve_entrypoint(details: ImportTaskDetails, entrypoint: str) -> Any:
+    """Load a callable named in the form of the task's plugin spec entrypoint.
 
     Args:
         details: Import task details.
+        entrypoint: Attribute name for a script plugin, module:attribute for
+            a package plugin.
 
     Raises:
         SessionImportError: The plugin file or module fails to import, or
             the entrypoint is missing or not callable.
 
     Returns:
-        Parser callable.
-    """
-    try:
-        if isinstance(details.plugin, ScriptPluginSpec):
-            path = Path(get_required_env("KITARU_TASK_PLUGIN_PATH"))
-            return load_plugin_entrypoint(path, details.plugin.entrypoint, _LABEL)
-        return load_source_ref(details.plugin.entrypoint, _LABEL)
-    except PluginLoadError as exc:
-        raise SessionImportError(str(exc)) from exc
-
-
-def _resolve_fetcher(details: ImportTaskDetails, entrypoint: str) -> Fetcher:
-    """Load the fetcher callable named by an API source's entrypoint.
-
-    Args:
-        details: Import task details.
-        entrypoint: Fetch entrypoint, in the form of the plugin's entrypoint.
-
-    Raises:
-        SessionImportError: The plugin file or module fails to import, or
-            the entrypoint is missing or not callable.
-
-    Returns:
-        Fetcher callable.
+        Loaded callable.
     """
     try:
         if isinstance(details.plugin, ScriptPluginSpec):
@@ -483,7 +462,7 @@ async def _iter_payloads(details: ImportTaskDetails) -> AsyncIterator[bytes]:
         yield Path(get_required_env("KITARU_TASK_PAYLOAD_PATH")).read_bytes()
         return
     assert isinstance(details.source, ApiSourceSpec)
-    fetcher = _resolve_fetcher(details, details.source.entrypoint)
+    fetcher = _resolve_entrypoint(details, details.source.entrypoint)
     async for payload in call_fetcher(fetcher, details.source.query):
         yield payload
 
@@ -504,7 +483,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
     details = spec.details
     if not isinstance(details, ImportTaskDetails):
         raise SessionImportError(f"Task {task_id} is not an importer task")
-    parser = _resolve_parser(details)
+    parser = _resolve_entrypoint(details, details.plugin.entrypoint)
 
     created = 0
     skipped = 0
