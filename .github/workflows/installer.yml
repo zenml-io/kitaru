@@ -66,12 +66,12 @@ jobs:
             if [ "$SOURCE" = "url" ]; then curl -fsSL https://kitaru.ai/install; else cat install.sh; fi
           }
           for attempt in 1 2 3 4 5; do
-            get_script | bash -s -- --no-login && exit 0
+            get_script | bash -s -- && exit 0
             echo "installer attempt $attempt failed; retrying in 30s" >&2
             sleep 30
           done
           echo "::group::verbose rerun for diagnostics"
-          get_script | bash -s -- --no-login --verbose || true
+          get_script | bash -s -- --verbose || true
           echo "::endgroup::"
           exit 1
       - name: Verify
@@ -98,13 +98,13 @@ jobs:
             | grep -q ".local/bin" || { echo "PATH not persisted"; exit 1; }
       - name: Re-run is an upgrade, not an error
         shell: bash
-        run: cat install.sh | bash -s -- --no-login --no-skills --no-mcp --quiet
+        run: cat install.sh | bash -s -- --no-skills --no-mcp --quiet
       - name: A failed install must exit nonzero (quiet path)
         shell: bash
         # Regression for the status-swallowing bug in `quiet`: an impossible
         # version pin makes `uv tool install` fail, and that must surface.
         run: |-
-          if cat install.sh | bash -s -- --no-login --no-skills --no-mcp --version=99.99.99; then
+          if cat install.sh | bash -s -- --no-skills --no-mcp --version=99.99.99; then
             echo "installer exited 0 on a failed install" >&2; exit 1
           fi
           echo "failed install correctly exited nonzero"

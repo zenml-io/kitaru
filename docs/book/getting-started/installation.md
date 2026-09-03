@@ -5,7 +5,7 @@ icon: download
 
 # Installation
 
-One command installs everything a first session needs. It needs [Docker](https://docs.docker.com/get-started/get-docker/) for the local server (the CLI installs without it) and works on macOS, Linux, WSL, and Git Bash on Windows:
+One command installs everything a first session needs, on macOS, Linux, WSL, and Git Bash on Windows:
 
 ```bash
 curl -fsSL https://kitaru.ai/install | bash
@@ -16,9 +16,9 @@ What it does, in order:
 1. Installs the `kitaru` CLI and the `kitaru-mcp` server into an isolated [uv](https://docs.astral.sh/uv/) environment, installing uv first if you do not have it. No system Python is required.
 2. Installs the [agent skills](../agent-native/setup.md) into `~/.agents/skills`, and into `~/.claude/skills` and `~/.codex/skills` when Claude Code or Codex is installed.
 3. Registers the MCP server with Claude Code and Codex.
-4. Runs `kitaru login --local`, which starts the server and PostgreSQL in Docker and logs you in. If Docker is not running, it prints that command for later instead.
+4. Stops and prints the two ways to get a server: `kitaru login --local` for one on this machine in Docker (free, open source), or the managed cloud at https://cloud.kitaru.ai (14-day trial, no credit card required).
 
-Nothing needs `sudo`, everything lands under your home directory, and running it again upgrades. Options: `--server https://your-team.kitaru.ai` logs in to a team server instead of starting a local one, `--with kitaru-pydantic-ai` adds an adapter to the same environment, `--no-login`, `--no-skills`, `--no-mcp` skip steps, and `--no-modify-path` leaves your shell rc files alone. `bash -s -- --help` after the pipe lists everything.
+Nothing needs `sudo`, everything lands under your home directory, and running it again upgrades. Options: `--server https://your-team.kitaru.ai` points the MCP server at a team server instead of the local one, `--with kitaru-pydantic-ai` adds an adapter to the same environment, `--no-skills` and `--no-mcp` skip steps, and `--no-modify-path` leaves your shell rc files alone. `bash -s -- --help` after the pipe lists everything.
 
 Prefer to do it by hand? The installer is three commands, which you can run yourself:
 
@@ -33,7 +33,7 @@ then point your assistant at `kitaru-mcp` as described in [Set up your coding ag
 Already inside Claude Code, Codex, or Cursor? Paste this instead and it runs the same installer for you:
 
 ```
-Set up Kitaru on this machine by following https://kitaru.ai/install.md. Use the one-line installer, tell me what it did, and stop before logging in if Docker is not running.
+Set up Kitaru on this machine by following https://kitaru.ai/install.md. Use the one-line installer and tell me what it did.
 ```
 
 ## Verify
@@ -42,7 +42,7 @@ Set up Kitaru on this machine by following https://kitaru.ai/install.md. Use the
 kitaru doctor
 ```
 
-It checks the CLI, the server connection, authentication, and whether the skills are installed. If the installer skipped login because Docker was not running, start Docker and run `kitaru login --local`; the section below covers the local server's lifecycle.
+It checks the CLI, the server connection, authentication, and whether the skills are installed. Server connection and authentication fail until you have run `kitaru login --local` (needs [Docker](https://docs.docker.com/get-started/get-docker/)) or logged in to a managed or team server; the sections below cover both.
 
 Then read the [Quickstart](quickstart.md). It is written as prompts for your coding agent, and everything it needs is now in place.
 

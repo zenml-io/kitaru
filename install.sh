@@ -3,7 +3,6 @@
 #
 #   curl -fsSL https://kitaru.ai/install | bash
 #   curl -fsSL https://kitaru.ai/install | bash -s -- --pre
-#   curl -fsSL https://kitaru.ai/install | bash -s -- --server https://team.kitaru.ai
 #
 # What it does, in order:
 #   1. Makes sure `uv` is available (installs it from astral.sh if not).
@@ -15,8 +14,9 @@
 #      ~/.codex/skills when those CLIs are installed. No Node needed.
 #   4. Registers the Kitaru MCP server with Claude Code and Codex if their
 #      CLIs are installed; prints the JSON for everything else.
-#   5. If Docker is running and there is a terminal, runs `kitaru login --local`
-#      to start the local server. Otherwise tells you the one command to run.
+#   5. Stops there and prints the two ways to get a server: local in Docker
+#      (`kitaru login --local`) or the managed cloud. Login is a decision, so
+#      the script does not make it for you.
 #
 # Nothing here needs sudo. Everything lands under $HOME. Re-running upgrades.
 #
@@ -36,10 +36,9 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 KITARU_VERSION="${KITARU_VERSION:-}"          # pin, e.g. 0.24.0
 KITARU_PRE="${KITARU_PRE:-0}"                 # allow pre-releases
-KITARU_SERVER="${KITARU_SERVER:-}"            # team server URL instead of --local
+KITARU_SERVER="${KITARU_SERVER:-}"            # point the MCP server at a team server
 KITARU_SKIP_SKILLS="${KITARU_SKIP_SKILLS:-0}"
 KITARU_SKIP_MCP="${KITARU_SKIP_MCP:-0}"
-KITARU_SKIP_LOGIN="${KITARU_SKIP_LOGIN:-0}"
 KITARU_QUIET="${KITARU_QUIET:-0}"
 KITARU_VERBOSE="${KITARU_VERBOSE:-0}"
 KITARU_WITH=()                                # extra packages, e.g. kitaru-pydantic-ai
@@ -58,18 +57,17 @@ Usage: install.sh [options]
   --pre               Allow pre-release versions
   --with=PKG          Also install PKG into the same environment (repeatable),
                       e.g. --with=kitaru-pydantic-ai --with=kitaru-langgraph
-  --server=URL        Log in to a team/self-hosted server instead of starting
-                      a local one
+  --server=URL        Point the MCP server at a team/self-hosted server
+                      (default: the local server, http://localhost:8000)
   --no-skills         Skip installing the coding-agent skills
   --no-mcp            Skip registering the MCP server with Claude Code / Codex
-  --no-login          Skip `kitaru login` (just install the CLI)
   --no-modify-path    Do not edit shell rc files; you add ~/.local/bin yourself
   --quiet             Only print errors
   --verbose           Print every command
   -h, --help          This text
 
 Environment equivalents: KITARU_VERSION, KITARU_PRE=1, KITARU_SERVER,
-KITARU_SKIP_SKILLS=1, KITARU_SKIP_MCP=1, KITARU_SKIP_LOGIN=1,
+KITARU_SKIP_SKILLS=1, KITARU_SKIP_MCP=1,
 KITARU_NO_MODIFY_PATH=1, KITARU_QUIET=1, KITARU_VERBOSE=1,
 KITARU_PYTHON (default 3.12), NO_COLOR.
 USAGE
@@ -86,7 +84,6 @@ while [ $# -gt 0 ]; do
     --server) shift; KITARU_SERVER="${1:-}" ;;
     --no-skills) KITARU_SKIP_SKILLS=1 ;;
     --no-mcp) KITARU_SKIP_MCP=1 ;;
-    --no-login) KITARU_SKIP_LOGIN=1 ;;
     --no-modify-path) KITARU_NO_MODIFY_PATH=1 ;;
     --quiet) KITARU_QUIET=1 ;;
     --verbose) KITARU_VERBOSE=1 ;;
@@ -365,121 +362,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Login (local server via Docker, or a team server)
-# ---------------------------------------------------------------------------
-DOCKER_HINT=""
-docker_running() {
-  have docker || { DOCKER_HINT="Docker is not installed."; return 1; }
-  local err; err="$(docker info 2>&1 >/dev/null)" && return 0
-  case "$err" in
-    *"permission denied"*|*"Permission denied"*)
-      DOCKER_HINT="Docker is installed but this user cannot reach it. Add yourself to the docker group (sudo usermod -aG docker \$USER, then log out and in), or start Docker Desktop." ;;
-    *) DOCKER_HINT="Docker is not running." ;;
-  esac
-  return 1
-}
-# A real terminal we can read from: stdin is one, or /dev/tty actually opens
-# (checking the device node's permission bits is not enough in containers).
-has_tty() { [ -t 0 ] || { : </dev/tty; } 2>/dev/null; }
-
-login_cmd() {
-  if [ -n "$KITARU_SERVER" ]; then printf 'kitaru login %s' "$KITARU_SERVER"
-  else printf 'kitaru login --local'; fi
-}
-
-# `kitaru login --local` refuses to replace an existing local server container
-# from an older release unless told to with --upgrade (the database is kept).
-# Running the installer is that approval: its documented contract is that a
-# re-run upgrades. So on exactly that conflict, retry with --upgrade.
-LOCAL_UPGRADE_HINT="kitaru login --local --upgrade"
-login_local() {
-  # $1 = stdin source: /dev/tty when there is one, /dev/null otherwise
-  # (`kitaru login --local` needs no interaction).
-  local in="$1" out; out="$(mktemp)"
-  if "$KITARU_BIN" login --local <"$in" 2>&1 | tee "$out"; then
-    rm -f "$out"; LOGGED_IN=1; return 0
-  fi
-  # Only the "older local server" conflict tells you to pass --upgrade. Other
-  # conflicts (say, port 8000 taken by something Kitaru does not own) share
-  # the same error kind and must not trigger an upgrade.
-  if grep -q -- "--upgrade" "$out"; then
-    rm -f "$out"
-    note "An older local server is running. Upgrading it to match kitaru $("$KITARU_BIN" --version); your database is kept."
-    if "$KITARU_BIN" login --local --upgrade <"$in"; then LOGGED_IN=1; return 0; fi
-    warn "Local server upgrade did not complete. Run: $LOCAL_UPGRADE_HINT"
-    return 1
-  fi
-  # Surface the CLI's own explanation when it came back as JSON (no tty).
-  local msg hint
-  msg="$(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' "$out" | head -1)"
-  hint="$(sed -n 's/.*"hint":"\([^"]*\)".*/\1/p' "$out" | head -1)"
-  rm -f "$out"
-  # Port taken by something Kitaru does not own (a dev server, another app):
-  # try the next few ports, letting the CLI tell us which are free. It
-  # remembers the chosen port for later logins and logout.
-  if port_in_use "$msg"; then
-    local port
-    for port in 9000 9001 9002 9003 9004; do
-      note "$msg Trying port $port."
-      out="$(mktemp)"
-      if "$KITARU_BIN" login --local --port "$port" <"$in" 2>&1 | tee "$out"; then
-        rm -f "$out"; LOGGED_IN=1; return 0
-      fi
-      msg="$(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' "$out" | head -1)"
-      hint="$(sed -n 's/.*"hint":"\([^"]*\)".*/\1/p' "$out" | head -1)"
-      rm -f "$out"
-      port_in_use "$msg" || break
-    done
-    warn "Local server did not start.${msg:+ $msg}"
-    if [ -n "$hint" ]; then note "$hint"; fi
-    note "Then run: kitaru login --local --port <free port>"
-    return 1
-  fi
-  warn "Local server did not start.${msg:+ $msg}"
-  if [ -n "$hint" ]; then note "$hint"; fi
-  note "Then run: kitaru login --local  (or: kitaru login --local --port 9000)"
-  return 1
-}
-
-port_in_use() { printf '%s' "$1" | grep -qi "port .* in use"; }
-
-LOGGED_IN=0
-if [ "$KITARU_SKIP_LOGIN" = "1" ]; then
-  note "Skipping login (--no-login)"
-elif [ -z "$KITARU_SERVER" ] && ! docker_running; then
-  warn "$DOCKER_HINT The local Kitaru server was not started."
-  note "Fix that, then run: kitaru login --local"
-  note "Or use a team server: kitaru login https://<your-team>.kitaru.ai"
-elif [ -n "$KITARU_SERVER" ]; then
-  # Team login uses a device flow and needs a terminal.
-  if has_tty; then
-    step "Logging in ($(login_cmd))"
-    "$KITARU_BIN" login "$KITARU_SERVER" </dev/tty && LOGGED_IN=1 || warn "Login did not complete. Run: $(login_cmd)"
-  else
-    note "No terminal attached, so login was not run. Next: $(login_cmd)"
-  fi
-else
-  step "Logging in (kitaru login --local)"
-  if has_tty; then login_local /dev/tty; else login_local /dev/null; fi
-fi
-
-# ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 say ""
 say "${C_GREEN}◆${C_RESET} ${C_BOLD}Kitaru is installed.${C_RESET}"
 say ""
-if ! command -v kitaru >/dev/null 2>&1 || [ "${TOOL_BIN}" != "$(dirname "$(command -v kitaru)")" ]; then
+if [ "$(PATH="$ORIG_PATH" command -v kitaru 2>/dev/null || true)" != "$KITARU_BIN" ]; then
   say "  Open a new terminal so 'kitaru' is on your PATH."
+  say ""
 fi
-if [ "$LOGGED_IN" = "0" ]; then
-  say "  1. $(login_cmd)"
-  say "  2. Open your coding agent in your agent's repo and say:"
+if [ -n "$KITARU_SERVER" ]; then
+  say "  Next, log in to your server:"
+  say ""
+  say "    ${C_BOLD}kitaru login $KITARU_SERVER${C_RESET}"
 else
-  say "  Open your coding agent in your agent's repo and say:"
+  say "  Next, pick where your Kitaru server lives:"
+  say ""
+  say "    ${C_BOLD}kitaru login --local${C_RESET}       local, in Docker. Free, open source."
+  say "    ${C_BOLD}https://cloud.kitaru.ai${C_RESET}    managed cloud. 14-day trial, no credit card required."
+  say "                               then: kitaru login <your workspace URL>"
 fi
 say ""
-say "     ${C_BOLD}Use kitaru-investigation to investigate this agent.${C_RESET}"
+say "  Then, in your agent's repo, tell your coding agent:"
+say "    ${C_BOLD}Use kitaru-investigation to investigate this agent.${C_RESET}"
 say ""
 say "  No agent yet?  ${C_BOLD}Use kitaru-guided-tour to show me Kitaru on the example agent.${C_RESET}"
 say "  Check setup:   kitaru doctor"
