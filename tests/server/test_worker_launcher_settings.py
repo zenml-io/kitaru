@@ -18,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 
 from conftest import local_settings
-from kitaru.server import worker_launcher_settings
+from kitaru import images
 from kitaru.server.worker_launcher_settings import (
     ModalWorkerLauncherSettings,
     WorkerLauncherBackend,
@@ -57,7 +57,7 @@ def test_image_defaults_to_the_published_worker_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Resolve the published worker image at the installed version when unset."""
-    monkeypatch.setattr(worker_launcher_settings, "version", lambda name: "0.25.0rc1")
+    monkeypatch.setattr(images, "version", lambda name: "0.25.0rc1")
     assert (
         WorkerLauncherSettings().get_image() == "zenmldocker/kitaru-worker:0.25.0-rc.1"
     )
@@ -65,7 +65,7 @@ def test_image_defaults_to_the_published_worker_image(
 
 def test_image_override_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     """A configured image is used as is."""
-    monkeypatch.setattr(worker_launcher_settings, "version", lambda name: "0.25.0")
+    monkeypatch.setattr(images, "version", lambda name: "0.25.0")
     settings = WorkerLauncherSettings(image="registry.example.com/worker:custom")
     assert settings.get_image() == "registry.example.com/worker:custom"
 
@@ -74,7 +74,7 @@ def test_image_required_for_a_development_build(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Name the image variable when no published image exists for this build."""
-    monkeypatch.setattr(worker_launcher_settings, "version", lambda name: "0.25.0.dev3")
+    monkeypatch.setattr(images, "version", lambda name: "0.25.0.dev3")
     with pytest.raises(ValueError, match="KITARU_SERVER_WORKER_LAUNCHER__IMAGE"):
         WorkerLauncherSettings().get_image()
 

@@ -14,12 +14,11 @@
 """Worker launcher backend configuration."""
 
 from enum import StrEnum
-from importlib.metadata import version
 from typing import Self
 
 from pydantic import BaseModel, SecretStr, model_validator
 
-from kitaru.images import get_worker_image
+from kitaru.images import WORKER_IMAGE_REPOSITORY, get_image
 
 DEFAULT_WORKER_COMMAND = "python -m kitaru.worker"
 
@@ -79,7 +78,7 @@ class WorkerLauncherSettings(BaseModel):
         if self.image is not None:
             return self.image
         try:
-            return get_worker_image(version("kitaru"))
+            return get_image(WORKER_IMAGE_REPOSITORY)
         except ValueError as error:
             raise ValueError(
                 f"Set KITARU_SERVER_WORKER_LAUNCHER__IMAGE, {error}"

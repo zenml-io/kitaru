@@ -30,7 +30,7 @@ from typing import Literal, Protocol
 from urllib.parse import urlsplit
 
 import httpx
-from packaging.version import InvalidVersion, Version
+from packaging.version import InvalidVersion
 from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.cli.output import CLIError
@@ -41,7 +41,7 @@ from kitaru.client.config import (
     normalize_server_url,
     write_json_file,
 )
-from kitaru.images import SERVER_IMAGE_REPOSITORY, get_image_tag
+from kitaru.images import SERVER_IMAGE_REPOSITORY, get_image
 
 DEFAULT_LOCAL_PORT = 8000
 LOCAL_PORT_ENV = "KITARU_LOCAL_PORT"
@@ -531,20 +531,19 @@ def _get_server_image(package_version: str) -> tuple[str, bool]:
             )
         return image, True
     try:
-        parsed_version = Version(package_version)
+        image = get_image(SERVER_IMAGE_REPOSITORY, package_version)
     except InvalidVersion as error:
         raise CLIError(
             "invalid_configuration",
             f"The installed Kitaru version {package_version!r} is invalid.",
         ) from error
-    if parsed_version.is_devrelease or parsed_version.local is not None:
+    except ValueError as error:
         raise CLIError(
             "invalid_configuration",
             "No published local server image is available for this development build.",
             hint=f"Set {LOCAL_IMAGE_ENV} to a compatible local image.",
-        )
-    image_version = get_image_tag(parsed_version)
-    return f"{SERVER_IMAGE_REPOSITORY}:{image_version}", False
+        ) from error
+    return image, False
 
 
 async def _ensure_image(

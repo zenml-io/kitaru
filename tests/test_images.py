@@ -14,48 +14,50 @@
 """Tests for published container image references."""
 
 import pytest
-from packaging.version import Version
 
-from kitaru.images import get_image_tag, get_worker_image
+from kitaru import images
+from kitaru.images import WORKER_IMAGE_REPOSITORY, get_image, get_image_tag
 
 
 @pytest.mark.parametrize(
-    ("package_version", "image_version"),
+    ("package_version", "tag"),
     [
         ("0.22.0", "0.22.0"),
+        ("0.22.0rc5", "0.22.0-rc.5"),
         ("0.22.0rc5.post2", "0.22.0-rc.5.post.2"),
-        ("0.22.0.dev3", "0.22.0-dev.3"),
-        ("0.22.0+macos.arm64", "0.22.0-local.macos.arm64"),
         ("1!0.22.0rc5", "1.epoch.0.22.0-rc.5"),
-        (
-            "0.22.0rc5.post2.dev3+macos.arm64",
-            "0.22.0-rc.5.post.2.dev.3.local.macos.arm64",
-        ),
     ],
 )
-def test_image_version_formatter_supports_pep440_suffixes(
-    package_version: str, image_version: str
-) -> None:
-    """All canonical PEP 440 suffixes produce Docker-compatible tags."""
-    assert get_image_tag(Version(package_version)) == image_version
+def test_image_tag_formats_released_versions(package_version: str, tag: str) -> None:
+    """Released PEP 440 versions map to Docker-compatible tags."""
+    assert get_image_tag(package_version) == tag
 
 
-@pytest.mark.parametrize(
-    ("package_version", "image"),
-    [
-        ("0.25.0", "zenmldocker/kitaru-worker:0.25.0"),
-        ("0.25.0rc1", "zenmldocker/kitaru-worker:0.25.0-rc.1"),
-    ],
-)
-def test_worker_image_matches_the_published_tag(
-    package_version: str, image: str
-) -> None:
-    """Released versions map to the published worker image tag."""
-    assert get_worker_image(package_version) == image
-
-
-@pytest.mark.parametrize("package_version", ["0.25.0.dev3", "0.25.0+macos.arm64"])
-def test_worker_image_rejects_unpublished_builds(package_version: str) -> None:
-    """Development and local builds have no published worker image."""
+@pytest.mark.parametrize("package_version", ["0.22.0.dev3", "0.22.0+macos.arm64"])
+def test_image_tag_rejects_unpublished_builds(package_version: str) -> None:
+    """Development and local builds have no published image."""
     with pytest.raises(ValueError, match="development build"):
-        get_worker_image(package_version)
+        get_image_tag(package_version)
+
+
+def test_image_tag_rejects_an_invalid_version() -> None:
+    """A version that is not PEP 440 raises."""
+    with pytest.raises(ValueError):
+        get_image_tag("not-a-version")
+
+
+def test_image_tag_defaults_to_the_installed_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Omitting the version reads the installed Kitaru version."""
+    monkeypatch.setattr(images, "version", lambda name: "0.25.0rc1")
+    assert get_image_tag() == "0.25.0-rc.1"
+
+
+def test_image_joins_the_repository_and_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An image reference is the repository at the version's tag."""
+    monkeypatch.setattr(images, "version", lambda name: "0.25.0")
+    assert get_image(WORKER_IMAGE_REPOSITORY) == "zenmldocker/kitaru-worker:0.25.0"
+    assert get_image(WORKER_IMAGE_REPOSITORY, "0.24.0") == (
+        "zenmldocker/kitaru-worker:0.24.0"
+    )

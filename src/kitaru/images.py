@@ -14,6 +14,7 @@
 """Published container images."""
 
 import re
+from importlib.metadata import version
 
 from packaging.version import Version
 
@@ -21,46 +22,49 @@ SERVER_IMAGE_REPOSITORY = "zenmldocker/kitaru-server"
 WORKER_IMAGE_REPOSITORY = "zenmldocker/kitaru-worker"
 
 
-def get_image_tag(version: Version) -> str:
-    """Format a PEP 440 version as a Docker-compatible image tag.
+def get_image_tag(package_version: str | None = None) -> str:
+    """Get the published image tag for a package version.
 
     Args:
-        version: Parsed package version.
+        package_version: PEP 440 version, the installed Kitaru version when
+            omitted.
+
+    Raises:
+        ValueError: The version is invalid, or a development or local build
+            with no published image.
 
     Returns:
         Image tag.
     """
-    canonical_version = str(version)
-    base_version = version.base_version
-    image_base_version = base_version.replace("!", ".epoch.")
-    suffix = canonical_version.removeprefix(base_version)
-    if not suffix:
-        return image_base_version
-
-    public_suffix, local_separator, local_suffix = suffix.partition("+")
-    public_suffix = re.sub(r"([A-Za-z]+)([0-9]+)", r"\1.\2", public_suffix).strip(".")
-    suffix_parts = [public_suffix] if public_suffix else []
-    if local_separator:
-        suffix_parts.append(f"local.{local_suffix}")
-    return f"{image_base_version}-{'.'.join(suffix_parts)}"
-
-
-def get_worker_image(package_version: str) -> str:
-    """Build the published worker image reference for a package version.
-
-    Args:
-        package_version: Installed Kitaru version.
-
-    Raises:
-        ValueError: The version is a development or local build, which has no
-            published image.
-
-    Returns:
-        Worker image reference.
-    """
+    if package_version is None:
+        package_version = version("kitaru")
     parsed_version = Version(package_version)
     if parsed_version.is_devrelease or parsed_version.local is not None:
         raise ValueError(
-            f"No published worker image exists for development build {package_version}"
+            f"No published image exists for development build {package_version}"
         )
-    return f"{WORKER_IMAGE_REPOSITORY}:{get_image_tag(parsed_version)}"
+    base_version = parsed_version.base_version
+    tag = base_version.replace("!", ".epoch.")
+    suffix = str(parsed_version).removeprefix(base_version)
+    if not suffix:
+        return tag
+    suffix = re.sub(r"([A-Za-z]+)([0-9]+)", r"\1.\2", suffix).strip(".")
+    return f"{tag}-{suffix}"
+
+
+def get_image(repository: str, package_version: str | None = None) -> str:
+    """Get the published image reference for a package version.
+
+    Args:
+        repository: Image repository.
+        package_version: PEP 440 version, the installed Kitaru version when
+            omitted.
+
+    Raises:
+        ValueError: The version is invalid, or a development or local build
+            with no published image.
+
+    Returns:
+        Image reference.
+    """
+    return f"{repository}:{get_image_tag(package_version)}"

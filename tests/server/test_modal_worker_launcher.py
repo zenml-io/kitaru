@@ -23,7 +23,7 @@ pytest.importorskip("modal")
 
 import modal
 
-from kitaru.server import worker_launcher_settings
+from kitaru import images
 from kitaru.server.adapters.worker_launcher.modal import ModalWorkerLauncher
 from kitaru.server.application.models.worker import WorkerLaunch
 from kitaru.server.worker_launcher_settings import (
@@ -207,7 +207,7 @@ async def test_launch_defaults_to_the_published_worker_image(
     fake_modal: _FakeModal, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Run the published worker image at the installed version when unset."""
-    monkeypatch.setattr(worker_launcher_settings, "version", lambda name: "0.25.0")
+    monkeypatch.setattr(images, "version", lambda name: "0.25.0")
     launcher = ModalWorkerLauncher(_settings(image=None))
 
     await launcher.launch(_command())
