@@ -335,6 +335,8 @@ class FakeWorkersResource:
         """Initialize the resource with an empty call log."""
         self.created: list[Any] = []
         self.create_response = make_worker_registration_response()
+        self.get_calls: list[uuid.UUID] = []
+        self.get_response = make_worker_response()
         self.heartbeats: list[tuple[uuid.UUID, Any]] = []
         self.heartbeat_responses: deque[Any] = deque()
 
@@ -342,6 +344,11 @@ class FakeWorkersResource:
         """Record the request and return the scripted worker."""
         self.created.append(request)
         return self.create_response
+
+    async def get(self, worker_id: uuid.UUID) -> WorkerResponse:
+        """Record the call and return the scripted worker."""
+        self.get_calls.append(worker_id)
+        return self.get_response
 
     async def heartbeat(self, worker_id: uuid.UUID, request: Any) -> Any:
         """Record the request and return or raise the next scripted result."""

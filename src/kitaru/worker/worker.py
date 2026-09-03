@@ -20,6 +20,7 @@ import os
 import platform
 import re
 import socket
+import uuid
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -32,7 +33,11 @@ from kitaru.api_models.v1.task import (
     TaskUpdateRequest,
     TaskWithSpec,
 )
-from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
+from kitaru.api_models.v1.worker import (
+    WorkerCreateRequest,
+    WorkerResponse,
+    WorkerRuntime,
+)
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.auth import RenewingTokenAuth
 from kitaru.client.exceptions import APIError
@@ -153,30 +158,23 @@ class Worker:
                 Defaults to an event nothing else sets.
         """
         stop = stop if stop is not None else asyncio.Event()
-        name = self._config.name or default_worker_name()
         blob_cache_root = self._config.blob_cache_root or DEFAULT_BLOB_CACHE_ROOT
         payload_cache_root = (
             self._config.payload_cache_root or DEFAULT_PAYLOAD_CACHE_ROOT
         )
 
-        registration = WorkerCreateRequest(
-            name=name,
-            scope=self._config.scope,
-            runtime=detect_runtime(),
-            metadata=self._config.metadata,
-        )
-        async with KitaruAPIClient() as registration_client:
+        async with KitaruAPIClient() as api_client:
             # Task process environments inherit KITARU_API_URL from the
             # worker's environment, so pin it to the server this worker
-            # registered with.
-            os.environ["KITARU_API_URL"] = registration_client.base_url
-            response = await registration_client.workers.create(registration)
-            worker = response.worker
-            logger.info("Registered worker %s (%s).", name, worker.id)
-            source = WorkerTokenSource(
-                registration_client, worker.id, response.token.get_secret_value()
-            )
-            client = registration_client.with_auth(RenewingTokenAuth(source))
+            # connects to.
+            os.environ["KITARU_API_URL"] = api_client.base_url
+            worker_id = self._config.id
+            if worker_id is None:
+                name, worker, client = await self._register(api_client)
+            else:
+                name, worker, client = await self._load_pre_registered(
+                    api_client, worker_id
+                )
             ctx = ExecutionContext(
                 client=client,
                 blob_cache=BlobCache(blob_cache_root),
@@ -198,6 +196,54 @@ class Worker:
                 with contextlib.suppress(asyncio.CancelledError):
                     await heartbeat_task
                 logger.info("Worker %s stopped.", name)
+
+    async def _register(
+        self, api_client: KitaruAPIClient
+    ) -> tuple[str, WorkerResponse, KitaruAPIClient]:
+        """Register a new worker and authenticate as it with a renewing token.
+
+        Args:
+            api_client: Client pointed at the target server.
+
+        Returns:
+            Worker name, registered worker, and a client authenticated with a
+            token the worker renews for itself.
+        """
+        name = self._config.name or default_worker_name()
+        registration = WorkerCreateRequest(
+            name=name,
+            scope=self._config.scope,
+            runtime=detect_runtime(),
+            metadata=self._config.metadata,
+        )
+        response = await api_client.workers.create(registration)
+        worker = response.worker
+        logger.info("Registered worker %s (%s).", name, worker.id)
+        source = WorkerTokenSource(
+            api_client, worker.id, response.token.get_secret_value()
+        )
+        client = api_client.with_auth(RenewingTokenAuth(source))
+        return name, worker, client
+
+    async def _load_pre_registered(
+        self, api_client: KitaruAPIClient, worker_id: uuid.UUID
+    ) -> tuple[str, WorkerResponse, KitaruAPIClient]:
+        """Load a worker the server pre-registered.
+
+        Args:
+            api_client: Client authenticating with the worker's token.
+            worker_id: Id of the pre-registered worker.
+
+        Returns:
+            Worker name, loaded worker, and the client unchanged.
+        """
+        worker = await api_client.workers.get(worker_id)
+        self._config = self._config.model_copy(update={"scope": worker.scope})
+        logger.info("Loaded worker %s (%s).", worker.name, worker.id)
+        # The server minted this worker's token for the sandbox lifetime, so
+        # the worker keeps the environment client's static bearer token and
+        # never renews it.
+        return worker.name, worker, api_client
 
     async def _supervise_heartbeat(self, heartbeat: WorkerHeartbeat) -> None:
         """Run the heartbeat, restarting it after an unexpected exception.

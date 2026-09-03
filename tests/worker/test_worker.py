@@ -18,7 +18,7 @@ import os
 import socket
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import httpx
 import pytest
@@ -29,9 +29,10 @@ from fakes import (
     make_claimed,
     make_job_response,
     make_task,
+    make_worker_response,
 )
 
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.task import (
     TaskClaimResponse,
     TaskKind,
@@ -704,3 +705,92 @@ async def test_run_pins_the_api_url_to_the_registration_server(
     await Worker(config).run(stop=stop)
 
     assert os.environ["KITARU_API_URL"] == "https://stored.example.com"
+
+
+def _fail_detect_runtime() -> NoReturn:
+    """Fail if the pre-registered mode calls runtime detection."""
+    raise AssertionError("runtime detection must be skipped")
+
+
+async def test_run_pre_registered_loads_the_worker_instead_of_registering(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A pre-registered worker id loads the worker row instead of registering."""
+    client = FakeKitaruAPIClient()
+
+    def _fake_client(*args: object, **kwargs: object) -> FakeKitaruAPIClient:
+        return client
+
+    monkeypatch.setattr(worker_module, "KitaruAPIClient", _fake_client)
+    monkeypatch.setattr(worker_module, "detect_runtime", _fail_detect_runtime)
+
+    worker_id = uuid.uuid4()
+    job_id = uuid.uuid4()
+    loaded_scope = WorkerScope(
+        claims=[WorkerClaim(kind=TaskKind.IMPORTER)], job_id=job_id
+    )
+    client.workers.get_response = make_worker_response(
+        id=worker_id, name="job-worker", scope=loaded_scope
+    )
+    client.tasks.claim_responses.append(TaskClaimResponse(tasks=[]))
+    client.jobs.get_responses.append(
+        make_job_response(kind=JobKind.IMPORT, status=JobStatus.COMPLETED)
+    )
+
+    config = WorkerConfig(
+        id=worker_id,
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
+        poll_interval=0.01,
+        blob_cache_root=tmp_path / "blobs",
+        payload_cache_root=tmp_path / "payloads",
+    )
+
+    await Worker(config).run()
+
+    assert client.workers.created == []
+    assert client.workers.get_calls == [worker_id]
+    assert client.jobs.get_calls == [job_id]
+    assert all(
+        heartbeat_worker_id == worker_id
+        for heartbeat_worker_id, _ in client.workers.heartbeats
+    )
+    assert client.closed is True
+
+
+async def test_run_pre_registered_adopts_the_stored_scope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A pre-registered worker replaces its configured scope with the loaded one."""
+    client = FakeKitaruAPIClient()
+
+    def _fake_client(*args: object, **kwargs: object) -> FakeKitaruAPIClient:
+        return client
+
+    monkeypatch.setattr(worker_module, "KitaruAPIClient", _fake_client)
+    monkeypatch.setattr(worker_module, "detect_runtime", _fail_detect_runtime)
+
+    worker_id = uuid.uuid4()
+    job_id = uuid.uuid4()
+    loaded_scope = WorkerScope(
+        claims=[WorkerClaim(kind=TaskKind.IMPORTER)], job_id=job_id
+    )
+    client.workers.get_response = make_worker_response(
+        id=worker_id, name="job-worker", scope=loaded_scope
+    )
+    client.tasks.claim_responses.append(TaskClaimResponse(tasks=[]))
+    client.jobs.get_responses.append(
+        make_job_response(kind=JobKind.IMPORT, status=JobStatus.COMPLETED)
+    )
+
+    config = WorkerConfig(
+        id=worker_id,
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
+        poll_interval=0.01,
+        blob_cache_root=tmp_path / "blobs",
+        payload_cache_root=tmp_path / "payloads",
+    )
+    worker = Worker(config)
+
+    await worker.run()
+
+    assert worker._config.scope == loaded_scope

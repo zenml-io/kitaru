@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Worker configuration read from the environment."""
 
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ class WorkerConfig(BaseSettings):
         env_prefix="KITARU_WORKER_", env_nested_delimiter="__", frozen=True
     )
 
+    id: uuid.UUID | None = None
     name: str | None = None
     scope: WorkerScope = WorkerScope(
         claims=[WorkerClaim(kind=kind) for kind in TaskKind]

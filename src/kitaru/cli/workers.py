@@ -109,11 +109,19 @@ def build_worker_config(
 ) -> Any:
     """Merge explicit CLI values over ``KITARU_WORKER_*`` settings.
 
-    The optional job id refines the configured scope. It does not discard
-    configured claims or selectors.
+    The optional job id refines the configured scope without discarding
+    configured claims or selectors. A pre-registered worker id read from the
+    environment rejects all three scope flags.
     """
     _, config_type = load_worker_runtime()
     base = config_type()
+    if base.id is not None and (
+        claims is not None or selectors is not None or job_id is not None
+    ):
+        raise CLIError(
+            "invalid_arguments",
+            "--claim, --selector, and --job-id cannot be set with KITARU_WORKER_ID.",
+        )
     scope = WorkerScope(
         claims=_parse_claims(claims) if claims is not None else base.scope.claims,
         selectors=(
@@ -352,6 +360,13 @@ async def start_worker(
 
 def _worker_summary(config: Any) -> dict[str, Any]:
     """Return a non-secret lifecycle projection of worker configuration."""
+    if config.id is not None:
+        return {
+            "name": config.name,
+            "id": str(config.id),
+            "concurrency": config.concurrency,
+            "claim_batch_size": config.claim_batch_size,
+        }
     return {
         "name": config.name,
         "claims": [_claim_syntax(claim) for claim in config.scope.claims],
