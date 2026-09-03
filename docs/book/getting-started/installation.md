@@ -14,8 +14,8 @@ curl -fsSL https://kitaru.ai/install | bash
 That one command:
 
 1. Adds `kitaru[cli,mcp,worker]` to the project's environment with `uv add`. The worker that replays your agent has to live next to your agent's dependencies, so this is the environment that matters. uv is installed first if you do not have it; no system Python and no `sudo` are needed.
-2. Installs the [agent skills](../agent-native/setup.md) into `~/.agents/skills`, plus `~/.claude/skills` and `~/.codex/skills` when Claude Code or Codex is installed.
-3. Registers the MCP server with Claude Code (in the repo's `.mcp.json`) and Codex, as `uv run --directory <repo> kitaru-mcp`.
+2. Runs `kitaru setup`, which installs the [agent skills](../agent-native/setup.md) into `~/.agents/skills`, plus `~/.claude/skills` and `~/.codex/skills` when Claude Code or Codex is installed.
+3. The same `kitaru setup` registers the MCP server with every coding agent it finds: Claude Code (in the repo's `.mcp.json`), Codex, Cursor (`.cursor/mcp.json` in the repo), and Windsurf, as `uv run --directory <repo> kitaru-mcp`. Anything else gets the JSON to paste.
 4. Prints the two ways to get a server, and stops:
 
 ```
@@ -25,7 +25,7 @@ uv run kitaru login            managed cloud. 14-day trial, no credit card requi
 
 (Inside a project Kitaru is not on your PATH, hence `uv run`. The isolated install uses plain `kitaru`.)
 
-Works on macOS, Linux, WSL, and Git Bash on Windows. Running it again upgrades.
+Works on macOS, Linux, WSL, and Git Bash on Windows. Running it again upgrades. Installed a new coding agent later? Run `uv run kitaru setup` (or `kitaru setup`) and it wires that one up too; `--mode` and the global `--server` pick the MCP capability mode and target server.
 
 {% hint style="info" %}
 **Not in a repository?** Run it anywhere and it installs an isolated `kitaru` CLI on your PATH instead (a `uv tool` environment under `~/.local/share/uv/tools/kitaru`). That is enough to log in, import traces, run evaluators, and serve MCP, but replays need Kitaru inside the agent's own project, so re-run the installer there when you have one. `--project` and `--global` force either mode.
@@ -37,7 +37,7 @@ Works on macOS, Linux, WSL, and Git Bash on Windows. Running it again upgrades.
 | `--with kitaru-pydantic-ai` | Also install a package into the same environment (repeatable) |
 | `--server https://your-team.kitaru.ai` | Point the MCP server at a team server instead of `http://localhost:8000` |
 | `--project` / `--global` | Force the in-project or the isolated install |
-| `--no-skills`, `--no-mcp` | Skip those steps |
+| `--no-skills`, `--no-mcp` | Skip those steps (`kitaru setup` takes the same flags later) |
 | `--no-modify-path` | Leave your shell rc files alone (global mode) |
 
 `curl -fsSL https://kitaru.ai/install | bash -s -- --help` lists everything, with environment-variable equivalents.
@@ -46,13 +46,13 @@ Works on macOS, Linux, WSL, and Git Bash on Windows. Running it again upgrades.
 
 ```bash
 uv add "kitaru[cli,mcp,worker]" kitaru-pydantic-ai    # into this project; pick your adapter
-npx skills add zenml-io/kitaru-skills                  # the coding-agent skills
-uv run kitaru login                             # managed cloud; 14-day trial, no credit card required
-uv run kitaru login --local                     # local server in Docker
-# or: uv run kitaru login <team-url>            # an existing managed or self-hosted workspace
+uv run kitaru setup                                   # skills + MCP server for every coding agent found
+uv run kitaru login                                   # managed cloud; 14-day trial, no credit card required
+uv run kitaru login --local                           # local server in Docker
+# or: uv run kitaru login <team-url>                  # an existing managed or self-hosted workspace
 ```
 
-plus registering `uv run kitaru-mcp --server http://localhost:8000 --mode standard` with your assistant, as described in [Set up your coding agent](../agent-native/setup.md).
+`kitaru setup` is what the installer runs for steps 2 and 3; [Set up your coding agent](../agent-native/setup.md) describes what it writes and how to do it by hand.
 
 **Already inside Claude Code, Codex, or Cursor?** Open your agent's repository there, paste this, and it runs the same installer for you:
 
@@ -66,7 +66,7 @@ Set up Kitaru in this repository by following https://kitaru.ai/install.md. Use 
 kitaru doctor
 ```
 
-It checks the CLI, the server connection, authentication, and whether the skills are installed. Server connection and authentication fail until you have run `kitaru login --local` (needs [Docker](https://docs.docker.com/get-started/get-docker/)) or `kitaru login` for the managed cloud; the sections below cover both.
+It checks the CLI, the server connection, authentication, and whether the skills are installed (`kitaru setup` installs them if not). Server connection and authentication fail until you have run `kitaru login --local` (needs [Docker](https://docs.docker.com/get-started/get-docker/)) or `kitaru login` for the managed cloud; the sections below cover both.
 
 Then read the [Quickstart](quickstart.md). It is written as prompts for your coding agent, and everything it needs is now in place.
 

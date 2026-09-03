@@ -447,6 +447,9 @@ def _emit_human_detail(
     if view.renderer == "doctor":
         _emit_doctor(console, value)
         return
+    if view.renderer == "setup":
+        _emit_setup(console, value)
+        return
     if not view.sections:
         fields = tuple(
             field for field in view.fields if field.min_console_width <= console.width
@@ -507,6 +510,42 @@ def _emit_doctor(console: Console, value: dict[str, Any]) -> None:
             Text(_display_value(check.get("detail"))),
         )
     console.print(table)
+
+
+def _emit_setup(console: Console, value: dict[str, Any]) -> None:
+    """Render setup steps as a checklist plus the manual MCP snippet."""
+    install = _display_value(value.get("install"))
+    console.print(
+        f"Kitaru MCP server: [bold]{_display_value(value.get('server_url'))}[/bold] "
+        f"in [bold]{_display_value(value.get('mode'))}[/bold] mode "
+        f"({install} install)."
+    )
+    steps = value.get("steps")
+    if isinstance(steps, list) and steps:
+        table = Table(title="Steps", title_justify="left")
+        table.add_column("Step")
+        table.add_column("Target")
+        table.add_column("Status")
+        table.add_column("Detail")
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            status = _display_value(step.get("status"))
+            table.add_row(
+                Text(_display_value(step.get("kind"))),
+                Text(_display_value(step.get("target"))),
+                Text(status, style=_SETUP_STATUS_STYLES.get(status, "")),
+                Text(_display_value(step.get("detail"))),
+            )
+        console.print(table)
+    if isinstance(steps, list) and any(
+        isinstance(step, dict) and step.get("target") == "manual" for step in steps
+    ):
+        console.print("For any other MCP client, add:")
+        console.print(json.dumps(value.get("mcp_snippet"), indent=2))
+
+
+_SETUP_STATUS_STYLES = {"done": "green", "skipped": "yellow", "failed": "red"}
 
 
 def _emit_human_section(

@@ -14,12 +14,14 @@
 #          `kitaru` and `kitaru-mcp` on PATH (~/.local/bin). Good for the CLI,
 #          MCP server, imports and evaluators; replays need the project form.
 #      --project / --global force either.
-#   3. Installs the Kitaru agent skills (zenml-io/kitaru-skills) from the
-#      repository tarball into ~/.agents/skills, plus ~/.claude/skills and
-#      ~/.codex/skills when those CLIs are installed. No Node needed.
-#   4. Registers the Kitaru MCP server with Claude Code and Codex if their
-#      CLIs are installed; prints the JSON for everything else.
-#   5. Stops there and prints the two ways to get a server: local in Docker
+#   3. Runs `kitaru setup`, which installs the Kitaru agent skills
+#      (zenml-io/kitaru-skills) into ~/.agents/skills plus ~/.claude/skills
+#      and ~/.codex/skills when those CLIs are installed, and registers the
+#      Kitaru MCP server with Claude Code, Codex, Cursor, and Windsurf when
+#      found (printing the JSON for everything else). Re-run `kitaru setup`
+#      after installing a new coding agent. Kitaru releases before `setup`
+#      existed get the same steps done by this script instead.
+#   4. Stops there and prints the two ways to get a server: local in Docker
 #      (`kitaru login --local`) or the managed cloud (`kitaru login`). Login
 #      is a decision, so the script does not make it for you.
 #
@@ -306,7 +308,33 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Coding-agent skills
+# 3. Skills and MCP registration, via `kitaru setup`
+# ---------------------------------------------------------------------------
+# The CLI owns client detection so it can be re-run after installing a new
+# coding agent. `schema setup` is offline and only succeeds on versions that
+# have the command; older ones fall through to the bash implementation below.
+SETUP_DONE=0
+if [ "$KITARU_SKIP_SKILLS" = "1" ] && [ "$KITARU_SKIP_MCP" = "1" ]; then
+  note "Skipping skills and MCP registration (--no-skills --no-mcp)"
+  SETUP_DONE=1
+elif "$KITARU_BIN" schema setup >/dev/null 2>&1; then
+  step "Running kitaru setup (skills and MCP registration)"
+  SETUP_ARGS=(--mode "$KITARU_MCP_MODE")
+  [ "$KITARU_SKIP_SKILLS" = "1" ] && SETUP_ARGS+=(--no-skills)
+  [ "$KITARU_SKIP_MCP" = "1" ] && SETUP_ARGS+=(--no-mcp)
+  SETUP_SERVER_ARGS=()
+  [ -n "$KITARU_SERVER" ] && SETUP_SERVER_ARGS=(--server "$KITARU_SERVER")
+  if [ "$KITARU_QUIET" = "1" ]; then
+    quiet "$KITARU_BIN" "${SETUP_SERVER_ARGS[@]}" setup "${SETUP_ARGS[@]}" || warn "kitaru setup failed; run it again later: $KITARU_BIN setup"
+  else
+    "$KITARU_BIN" "${SETUP_SERVER_ARGS[@]}" setup "${SETUP_ARGS[@]}" </dev/null || warn "kitaru setup failed; run it again later: $KITARU_BIN setup"
+  fi
+  SETUP_DONE=1
+fi
+
+if [ "$SETUP_DONE" = "0" ]; then
+# ---------------------------------------------------------------------------
+# 3a. Coding-agent skills (Kitaru releases without `kitaru setup`)
 # ---------------------------------------------------------------------------
 # Destinations: ~/.agents/skills is the cross-agent location; ~/.claude and
 # ~/.codex get their own copy when that CLI is installed or the dir exists.
@@ -370,7 +398,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. MCP server registration
+# 3b. MCP server registration (Kitaru releases without `kitaru setup`)
 # ---------------------------------------------------------------------------
 MCP_SERVER_URL="${KITARU_SERVER:-$KITARU_LOCAL_URL}"
 MCP_ARGS=(--server "$MCP_SERVER_URL" --mode "$KITARU_MCP_MODE")
@@ -417,6 +445,8 @@ else
   fi
 fi
 
+fi  # SETUP_DONE
+
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
@@ -453,6 +483,7 @@ if [ "$KITARU_SCOPE" = "global" ]; then
 fi
 say ""
 say "  No agent yet?  ${C_BOLD}Use kitaru-guided-tour to show me Kitaru on the example agent.${C_RESET}"
+say "  New editor?    $K setup   (wires skills and MCP into it)"
 say "  Check setup:   $K doctor"
 say "  Docs:          https://docs.zenml.io/kitaru"
 say ""
