@@ -37,6 +37,22 @@ class ModalWorkerLauncher:
         self._image = settings.get_image()
         self._command = shlex.split(settings.command)
         self._timeout_seconds = settings.timeout_seconds
+        self._client: modal.Client | None = None
+
+    async def _get_client(self) -> modal.Client:
+        """Get the Modal client, opening it on the first call.
+
+        Returns:
+            Authenticated client.
+        """
+        # from_credentials returns the client with its connection open and the
+        # SDK exposes no close, so one client serves every launch.
+        if self._client is None:
+            self._client = await modal.Client.from_credentials.aio(
+                self._modal_settings.token_id,
+                self._modal_settings.token_secret.get_secret_value(),
+            )
+        return self._client
 
     async def launch(self, command: WorkerLaunch) -> None:
         """Start a worker for a job.
@@ -44,26 +60,22 @@ class ModalWorkerLauncher:
         Args:
             command: Worker launch.
         """
-        client = await modal.Client.from_credentials.aio(
-            self._modal_settings.token_id,
-            self._modal_settings.token_secret.get_secret_value(),
+        client = await self._get_client()
+        app = await modal.App.lookup.aio(
+            self._modal_settings.app_name, client=client, create_if_missing=True
         )
-        async with client:
-            app = await modal.App.lookup.aio(
-                self._modal_settings.app_name, client=client, create_if_missing=True
-            )
-            await modal.Sandbox.create.aio(
-                *self._command,
-                app=app,
-                image=modal.Image.from_registry(self._image),
-                env={
-                    "KITARU_API_URL": command.server_url,
-                    "KITARU_API_TOKEN": command.worker_token.get_secret_value(),
-                    "KITARU_WORKER_ID": str(command.worker_id),
-                    "KITARU_WORKER_TIMEOUT": str(self._timeout_seconds),
-                },
-                timeout=self._timeout_seconds,
-                cpu=self._modal_settings.cpu,
-                memory=self._modal_settings.memory_mb,
-                client=client,
-            )
+        await modal.Sandbox.create.aio(
+            *self._command,
+            app=app,
+            image=modal.Image.from_registry(self._image),
+            env={
+                "KITARU_API_URL": command.server_url,
+                "KITARU_API_TOKEN": command.worker_token.get_secret_value(),
+                "KITARU_WORKER_ID": str(command.worker_id),
+                "KITARU_WORKER_TIMEOUT": str(self._timeout_seconds),
+            },
+            timeout=self._timeout_seconds,
+            cpu=self._modal_settings.cpu,
+            memory=self._modal_settings.memory_mb,
+            client=client,
+        )

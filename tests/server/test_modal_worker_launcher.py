@@ -57,16 +57,13 @@ class _CallRecorder:
 
 
 class _FakeClient:
-    """Fake Modal client recording whether it was closed."""
-
-    def __init__(self) -> None:
-        self.closed = False
+    """Fake Modal client that, like the SDK, is already open when returned."""
 
     async def __aenter__(self) -> "_FakeClient":
-        return self
+        raise AssertionError("from_credentials clients are already open")
 
     async def __aexit__(self, *exc_info: object) -> None:
-        self.closed = True
+        raise AssertionError("from_credentials clients are already open")
 
 
 class _FakeModal(NamedTuple):
@@ -169,7 +166,6 @@ async def test_launch_creates_sandbox_with_resource_limits(
     assert kwargs["cpu"] == 2.0
     assert kwargs["memory"] == 4096
     assert kwargs["client"] is fake_modal.client
-    assert fake_modal.client.closed is True
 
 
 async def test_launch_without_resource_limits_passes_none_through(
@@ -215,3 +211,16 @@ async def test_launch_defaults_to_the_published_worker_image(
     assert fake_modal.from_registry.calls == [
         (("zenmldocker/kitaru-worker:0.25.0",), {})
     ]
+
+
+async def test_launch_reuses_the_client_across_launches(
+    fake_modal: _FakeModal,
+) -> None:
+    """Open the Modal client once and reuse it for every launch."""
+    launcher = ModalWorkerLauncher(_settings())
+
+    await launcher.launch(_command())
+    await launcher.launch(_command())
+
+    assert len(fake_modal.from_credentials.calls) == 1
+    assert len(fake_modal.sandbox_create.calls) == 2
