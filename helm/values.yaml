@@ -340,6 +340,46 @@ server:
       # this value directly.
       secretAccessKey:
 
+  # Worker launcher backend configuration.
+  workerLauncher:
+    # The worker launcher backend to use. Use one of:
+    #
+    # none - Do not launch ephemeral workers.
+    # modal - Launch ephemeral workers as Modal sandboxes.
+    #
+    # server.serverURL must be set when a backend is configured, since the
+    # sandbox dials back to the server.
+    backend: none
+
+    # Settings for the modal backend. Only used when backend is set to modal.
+    modal:
+      # The Modal API token id.
+      tokenID:
+
+      # The Modal API token secret. For production deployments, consider
+      # referencing an existing Kubernetes secret through
+      # server.environmentSecretKeyRefs instead of setting this value
+      # directly.
+      tokenSecret:
+
+      # The worker image the sandbox runs. Use the published
+      # zenmldocker/kitaru-worker tag matching the server version.
+      image:
+
+      # The Modal app name the sandbox runs under.
+      appName: kitaru-workers
+
+      # The sandbox lifetime in seconds, and the worker's KITARU_WORKER_TIMEOUT.
+      timeoutSeconds: 3600
+
+      # The number of CPU cores to allocate to the sandbox. If not set, uses
+      # the Modal default.
+      cpu:
+
+      # The amount of memory in megabytes to allocate to the sandbox. If not
+      # set, uses the Modal default.
+      memoryMB:
+
   # The size in bytes above which payload content is moved out of the
   # database into blob storage instead of stored inline.
   payloadOffloadThresholdBytes: 20480

@@ -75,6 +75,31 @@ blob_storage__s3__access_key_id: {{ .accessKeyID | quote }}
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{- if eq .Kitaru.workerLauncher.backend "modal" }}
+worker_launcher__backend: {{ .Kitaru.workerLauncher.backend | quote }}
+{{- with .Kitaru.workerLauncher.modal }}
+{{- if .tokenID }}
+worker_launcher__modal__token_id: {{ .tokenID | quote }}
+{{- end }}
+{{- if .image }}
+worker_launcher__modal__image: {{ .image | quote }}
+{{- end }}
+{{- if .appName }}
+worker_launcher__modal__app_name: {{ .appName | quote }}
+{{- end }}
+{{- if .timeoutSeconds }}
+worker_launcher__modal__timeout_seconds: {{ .timeoutSeconds | quote }}
+{{- end }}
+{{- if .cpu }}
+worker_launcher__modal__cpu: {{ .cpu | quote }}
+{{- end }}
+{{- if .memoryMB }}
+worker_launcher__modal__memory_mb: {{ .memoryMB | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{- if .Kitaru.payloadOffloadThresholdBytes }}
 payload_offload_threshold_bytes: {{ .Kitaru.payloadOffloadThresholdBytes | quote }}
 {{- end }}
@@ -216,6 +241,9 @@ default_account_password: {{ .Kitaru.auth.defaultAccount.password | quote }}
 {{- end }}
 {{- if and (eq .Kitaru.blobStorage.backend "s3") .Kitaru.blobStorage.s3.secretAccessKey }}
 blob_storage__s3__secret_access_key: {{ .Kitaru.blobStorage.s3.secretAccessKey | quote }}
+{{- end }}
+{{- if and (eq .Kitaru.workerLauncher.backend "modal") .Kitaru.workerLauncher.modal.tokenSecret }}
+worker_launcher__modal__token_secret: {{ .Kitaru.workerLauncher.modal.tokenSecret | quote }}
 {{- end }}
 {{- end }}
 

@@ -29,6 +29,7 @@ kitaru worker start
 | `KITARU_WORKER_SCOPE__CLAIMS` | all | JSON list of claims, such as `{"kind":"agent"}` or `{"kind":"agent","agent_version_id":"<UUID>"}` |
 | `KITARU_WORKER_SCOPE__SELECTORS` | none | JSON label selectors (e.g. limit to one agent version's environment) |
 | `KITARU_WORKER_SCOPE__JOB_ID` | none | Claim one job's tasks, drain, exit |
+| `KITARU_WORKER_ID` | none | Id of a worker the server pre-registered. Skips registration, adopts the stored scope, and uses `KITARU_API_TOKEN` as is. Not combinable with claim, selector, or job id flags. |
 | `KITARU_WORKER_TIMEOUT` | none | Wall-clock lifetime; unset runs until stopped |
 | `KITARU_WORKER_POLL_INTERVAL` | 2s | Sleep after an empty claim |
 | `KITARU_WORKER_HEARTBEAT_INTERVAL` | 10s | Liveness reporting cadence |
@@ -59,6 +60,8 @@ kitaru worker start --job-id "$JOB_ID" --timeout 1800
 ```
 
 This is the pattern for [CI regression gates](../guides/regression-suite.md): the runner that starts the experiment also executes it, using the PR's own checkout as the agent environment.
+
+**Ephemeral workers started by the server.** With a [worker launcher](configuration.md) configured, an import whose task no live worker covers gets a worker registered for that job. The server starts it in a sandbox from the published `zenmldocker/kitaru-worker` image with `KITARU_WORKER_ID` set. From there the worker drains the job and exits like the CI pattern above.
 
 ## Operational behavior
 
