@@ -3779,6 +3779,21 @@ class FakeWorkerRepository:
         page, next_cursor = _paginate_fake(workers, worker_filter)
         return [worker.model_copy() for worker in page], next_cursor
 
+    async def list_live(self, cutoff: datetime) -> list[Worker]:
+        """List workers seen at or after a cutoff.
+
+        Args:
+            cutoff: Bound the last heartbeat must be at or after.
+
+        Returns:
+            Live workers in id order.
+        """
+        live = [
+            worker for worker in self._workers.values() if worker.last_seen_at >= cutoff
+        ]
+        live.sort(key=lambda worker: worker.id)
+        return [worker.model_copy() for worker in live]
+
     async def delete(self, worker_id: uuid.UUID) -> None:
         """Delete a worker by id.
 

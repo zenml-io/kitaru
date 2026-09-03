@@ -17,7 +17,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from kitaru.analytics.events import AnalyticsEvent
-from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.worker import WorkerClaim, WorkerRuntime, WorkerScope
 from kitaru.server.application.interfaces.worker_repository import WorkerRepository
 from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
 from kitaru.server.application.models.worker import WorkerFilter
@@ -25,6 +25,7 @@ from kitaru.server.application.services.analytics_events import (
     build_worker_registered_properties,
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.domain.task import Task
 from kitaru.server.domain.worker import Worker, WorkerAccessDenied
 
 
@@ -84,6 +85,42 @@ class WorkerService:
                 build_worker_registered_properties(stored),
             )
         return stored
+
+    async def is_covered(self, task: Task) -> bool:
+        """Report whether a live worker's scope claims the task.
+
+        Args:
+            task: Candidate task.
+
+        Returns:
+            Whether a worker within the liveness window covers the task.
+        """
+        cutoff = datetime.now(UTC) - timedelta(seconds=self._liveness_timeout_seconds)
+        # Claiming is not filtered by account, so every live worker on the
+        # server counts.
+        workers = await self._repository.list_live(cutoff)
+        return any(worker.covers(task) for worker in workers)
+
+    async def register_ephemeral_worker(
+        self, task: Task, runtime: WorkerRuntime, actor: AuthContext
+    ) -> Worker:
+        """Register a worker scoped to one job's tasks of a task's kind.
+
+        Args:
+            task: Task the worker is started for.
+            runtime: Runtime the launcher reports.
+            actor: Caller context.
+
+        Returns:
+            Stored worker.
+        """
+        return await self.register_worker(
+            name=f"job-{task.job_id}",
+            scope=WorkerScope(claims=[WorkerClaim(kind=task.kind)], job_id=task.job_id),
+            runtime=runtime,
+            metadata={"ephemeral": "true"},
+            actor=actor,
+        )
 
     async def get_worker(self, worker_id: uuid.UUID, actor: AuthContext) -> Worker:
         """Get a worker by id.
