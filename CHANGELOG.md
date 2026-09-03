@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Setting a password longer than 72 bytes on `POST /api/v1/users`, `PATCH /api/v1/users/{account_id}`, or `POST /api/v1/users/{account_id}/activate` now returns HTTP 422 instead of HTTP 500. bcrypt reads at most 72 bytes, and a longer password is rejected rather than silently truncated.
+- The OpenAPI schema now declares the plaintext secret fields of `WorkerTokenResponse`, `WorkerRegistrationResponse`, `TaskWithSpec`, and `SecretWithValuesResponse` as plain strings. They were marked write-only, which forbade the value the server sends. Request schemas keep the write-only password format.
 - A NUL byte or another C0 control character in a user-supplied string now returns HTTP 422 instead of HTTP 500. Request string fields reject the characters at validation, and a database error caused by a value the database cannot store maps to HTTP 422 as a backstop.
 - Getting or updating an evaluator or importer version with a version number outside PostgreSQL's 32-bit integer range now returns HTTP 422 instead of HTTP 500.
 - Reusing an `Idempotency-Key` registered on another route against `POST /api/v1/api-keys` or `POST /api/v1/api-keys/{api_key_id}/rotate` now returns HTTP 422 instead of HTTP 500. The stored response is only decrypted after the request fingerprint matches, and a stored response that cannot be decrypted returns HTTP 409.
