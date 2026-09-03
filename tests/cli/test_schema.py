@@ -109,6 +109,9 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert {error["kind"]: error["exit_code"] for error in login["errors"]}[
         "authentication_failed"
     ] == 3
+    assert {error["kind"]: error["exit_code"] for error in login["errors"]}[
+        "timeout"
+    ] == 7
     assert any(
         parameter["name"] == "--api-key-stdin" for parameter in login["parameters"]
     )

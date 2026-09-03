@@ -688,6 +688,7 @@ def _add_parameter_help(function: F, spec: CommandSpec) -> None:
             "authentication_failed",
             "interaction_required",
             "network_error",
+            "timeout",
             "internal_error",
         ),
     ),
