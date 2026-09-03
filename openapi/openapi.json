@@ -1057,6 +1057,67 @@
         "title": "Body_upload_blob_api_v1_blobs_post",
         "type": "object"
       },
+      "CategoricalInsightData": {
+        "additionalProperties": false,
+        "description": "Categorical insight data.",
+        "properties": {
+          "type": {
+            "const": "categorical",
+            "default": "categorical",
+            "title": "Type",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unit of the values.",
+            "title": "Unit"
+          },
+          "values": {
+            "description": "Values per category.",
+            "items": {
+              "$ref": "#/components/schemas/CategoryValue"
+            },
+            "minItems": 1,
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "values"
+        ],
+        "title": "CategoricalInsightData",
+        "type": "object"
+      },
+      "CategoryValue": {
+        "additionalProperties": false,
+        "description": "Category value.",
+        "properties": {
+          "label": {
+            "description": "Category label.",
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "description": "Measured value.",
+            "minimum": 0.0,
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "title": "CategoryValue",
+        "type": "object"
+      },
       "CohortCreateRequest": {
         "additionalProperties": false,
         "description": "Cohort create request.",
@@ -3192,6 +3253,85 @@
         "title": "FilterOp",
         "type": "string"
       },
+      "HistogramBin": {
+        "additionalProperties": false,
+        "description": "Histogram bin.",
+        "properties": {
+          "count": {
+            "description": "Observations in the bin.",
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "lower_bound": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inclusive lower bound, None on an open-ended first bin.",
+            "title": "Lower Bound"
+          },
+          "upper_bound": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exclusive upper bound, None on an open-ended last bin.",
+            "title": "Upper Bound"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "HistogramBin",
+        "type": "object"
+      },
+      "HistogramInsightData": {
+        "additionalProperties": false,
+        "description": "Histogram insight data.",
+        "properties": {
+          "bins": {
+            "description": "Bins, in ascending order.",
+            "items": {
+              "$ref": "#/components/schemas/HistogramBin"
+            },
+            "minItems": 1,
+            "title": "Bins",
+            "type": "array"
+          },
+          "type": {
+            "const": "histogram",
+            "default": "histogram",
+            "title": "Type",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unit of the values.",
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "bins"
+        ],
+        "title": "HistogramInsightData",
+        "type": "object"
+      },
       "HistoryConfig": {
         "additionalProperties": false,
         "description": "History tool config.",
@@ -3696,6 +3836,218 @@
           }
         },
         "title": "ImporterVersionUpdateRequest",
+        "type": "object"
+      },
+      "InsightBatchCreateRequest": {
+        "additionalProperties": false,
+        "description": "Insight batch create request.",
+        "properties": {
+          "agent_id": {
+            "description": "Agent the insights belong to.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "insights": {
+            "description": "Insights to create, in input order.",
+            "items": {
+              "$ref": "#/components/schemas/InsightInput"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Insights",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent_id",
+          "insights"
+        ],
+        "title": "InsightBatchCreateRequest",
+        "type": "object"
+      },
+      "InsightInput": {
+        "additionalProperties": false,
+        "description": "Insight input.",
+        "properties": {
+          "data": {
+            "description": "Insight data.",
+            "discriminator": {
+              "mapping": {
+                "categorical": "#/components/schemas/CategoricalInsightData",
+                "histogram": "#/components/schemas/HistogramInsightData",
+                "text": "#/components/schemas/TextInsightData"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TextInsightData"
+              },
+              {
+                "$ref": "#/components/schemas/CategoricalInsightData"
+              },
+              {
+                "$ref": "#/components/schemas/HistogramInsightData"
+              }
+            ],
+            "title": "Data"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Insight description.",
+            "title": "Description"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "title": {
+            "description": "Insight title.",
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "data"
+        ],
+        "title": "InsightInput",
+        "type": "object"
+      },
+      "InsightResponse": {
+        "description": "Insight response.",
+        "properties": {
+          "agent_id": {
+            "description": "Agent the insight belongs to.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "data": {
+            "description": "Insight data.",
+            "discriminator": {
+              "mapping": {
+                "categorical": "#/components/schemas/CategoricalInsightData",
+                "histogram": "#/components/schemas/HistogramInsightData",
+                "text": "#/components/schemas/TextInsightData"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TextInsightData"
+              },
+              {
+                "$ref": "#/components/schemas/CategoricalInsightData"
+              },
+              {
+                "$ref": "#/components/schemas/HistogramInsightData"
+              }
+            ],
+            "title": "Data"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Insight description.",
+            "title": "Description"
+          },
+          "id": {
+            "description": "Insight id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "Insight title.",
+            "title": "Title",
+            "type": "string"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "owner_id",
+          "id",
+          "agent_id",
+          "title",
+          "description",
+          "data",
+          "metadata"
+        ],
+        "title": "InsightResponse",
+        "type": "object"
+      },
+      "InsightUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Insight update request.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New insight description.",
+            "title": "Description"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New insight title.",
+            "title": "Title"
+          }
+        },
+        "title": "InsightUpdateRequest",
         "type": "object"
       },
       "InvestigationAnswerCreateRequest": {
@@ -4932,6 +5284,36 @@
           "next_cursor"
         ],
         "title": "Page[ImporterVersionResponse]",
+        "type": "object"
+      },
+      "Page_InsightResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/InsightResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[InsightResponse]",
         "type": "object"
       },
       "Page_InvestigationResponse_": {
@@ -8516,6 +8898,28 @@
           "command"
         ],
         "title": "TeardownCommandHook",
+        "type": "object"
+      },
+      "TextInsightData": {
+        "additionalProperties": false,
+        "description": "Text insight data.",
+        "properties": {
+          "content": {
+            "description": "Markdown content.",
+            "title": "Content",
+            "type": "string"
+          },
+          "type": {
+            "const": "text",
+            "default": "text",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "TextInsightData",
         "type": "object"
       },
       "TokenErrorCode": {
@@ -17448,6 +17852,505 @@
         "summary": "Get Info",
         "tags": [
           "info"
+        ]
+      }
+    },
+    "/api/v1/insights": {
+      "get": {
+        "description": "List insights.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Insight service.\n    actor: Caller context.\n    params: Insight list params.\n\nReturns:\n    Page of insights.",
+        "operationId": "list_insights_api_v1_insights_get",
+        "parameters": [
+          {
+            "description": "Cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter expression, JSON-encoded in the query string.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_InsightResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "List Insights",
+        "tags": [
+          "insights"
+        ]
+      },
+      "post": {
+        "description": "Create a batch of insights for one agent in one shot.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist,\nand 422 on validation.\n\nArgs:\n    body: Insight batch create request.\n    service: Insight service.\n    actor: Caller context.\n\nReturns:\n    Created insights in input order.",
+        "operationId": "create_insights_api_v1_insights_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InsightBatchCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InsightResponse"
+                  },
+                  "title": "Response Create Insights Api V1 Insights Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Create Insights",
+        "tags": [
+          "insights"
+        ]
+      }
+    },
+    "/api/v1/insights/{insight_id}": {
+      "delete": {
+        "description": "Delete an insight.\n\nClients observe HTTP 204 on success and 404 when no insight has this id.\n\nArgs:\n    insight_id: Id of the insight.\n    service: Insight service.\n    actor: Caller context.",
+        "operationId": "delete_insight_api_v1_insights__insight_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "insight_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Insight Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Delete Insight",
+        "tags": [
+          "insights"
+        ]
+      },
+      "get": {
+        "description": "Get an insight by id.\n\nClients observe HTTP 200 on success and 404 when no insight has this id.\n\nArgs:\n    insight_id: Id of the insight.\n    service: Insight service.\n    actor: Caller context.\n\nReturns:\n    Stored insight.",
+        "operationId": "get_insight_api_v1_insights__insight_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "insight_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Insight Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Insight",
+        "tags": [
+          "insights"
+        ]
+      },
+      "patch": {
+        "description": "Update an insight's title and description.\n\nClients observe HTTP 200 on success, 404 when no insight has this id,\nand 422 when the update clears the insight title.\n\nArgs:\n    insight_id: Id of the insight.\n    body: Insight update request.\n    service: Insight service.\n    actor: Caller context.\n\nReturns:\n    Updated insight.",
+        "operationId": "update_insight_api_v1_insights__insight_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "insight_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Insight Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InsightUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Update Insight",
+        "tags": [
+          "insights"
         ]
       }
     },
