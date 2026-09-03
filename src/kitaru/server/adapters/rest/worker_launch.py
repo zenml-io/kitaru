@@ -44,7 +44,7 @@ async def schedule_worker_launch(
 ) -> None:
     """Register a worker for the job and launch it after the response.
 
-    A job whose tasks are all covered by live workers suppresses the launch.
+    A live worker whose scope covers the job's task suppresses the launch.
 
     Args:
         job: Created job.
@@ -75,6 +75,8 @@ async def schedule_worker_launch(
         server_url=settings.SERVER_URL,
         job_id=job.id,
     )
+    # Background tasks run after the route commits, so the worker is persisted
+    # in the DB by then.
     background_tasks.add_task(_launch_worker, launcher, launch)
 
 

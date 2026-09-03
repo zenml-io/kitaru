@@ -21,7 +21,7 @@ SERVER_IMAGE_REPOSITORY = "zenmldocker/kitaru-server"
 WORKER_IMAGE_REPOSITORY = "zenmldocker/kitaru-worker"
 
 
-def format_image_version(version: Version) -> str:
+def get_image_tag(version: Version) -> str:
     """Format a PEP 440 version as a Docker-compatible image tag.
 
     Args:
@@ -63,4 +63,4 @@ def get_worker_image(package_version: str) -> str:
         raise ValueError(
             f"No published worker image exists for development build {package_version}"
         )
-    return f"{WORKER_IMAGE_REPOSITORY}:{format_image_version(parsed_version)}"
+    return f"{WORKER_IMAGE_REPOSITORY}:{get_image_tag(parsed_version)}"

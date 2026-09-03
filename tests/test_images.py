@@ -16,7 +16,7 @@
 import pytest
 from packaging.version import Version
 
-from kitaru.images import format_image_version, get_worker_image
+from kitaru.images import get_image_tag, get_worker_image
 
 
 @pytest.mark.parametrize(
@@ -37,7 +37,7 @@ def test_image_version_formatter_supports_pep440_suffixes(
     package_version: str, image_version: str
 ) -> None:
     """All canonical PEP 440 suffixes produce Docker-compatible tags."""
-    assert format_image_version(Version(package_version)) == image_version
+    assert get_image_tag(Version(package_version)) == image_version
 
 
 @pytest.mark.parametrize(

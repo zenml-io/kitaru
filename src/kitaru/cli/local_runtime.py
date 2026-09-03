@@ -41,7 +41,7 @@ from kitaru.client.config import (
     normalize_server_url,
     write_json_file,
 )
-from kitaru.images import SERVER_IMAGE_REPOSITORY, format_image_version
+from kitaru.images import SERVER_IMAGE_REPOSITORY, get_image_tag
 
 DEFAULT_LOCAL_PORT = 8000
 LOCAL_PORT_ENV = "KITARU_LOCAL_PORT"
@@ -543,7 +543,7 @@ def _get_server_image(package_version: str) -> tuple[str, bool]:
             "No published local server image is available for this development build.",
             hint=f"Set {LOCAL_IMAGE_ENV} to a compatible local image.",
         )
-    image_version = format_image_version(parsed_version)
+    image_version = get_image_tag(parsed_version)
     return f"{SERVER_IMAGE_REPOSITORY}:{image_version}", False
 
 
