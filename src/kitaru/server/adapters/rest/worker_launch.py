@@ -44,7 +44,7 @@ async def schedule_worker_launch(
 ) -> None:
     """Register a worker for the job and launch it after the response.
 
-    A live worker whose scope covers the job's task suppresses the launch.
+    A job whose tasks are all covered by live workers suppresses the launch.
 
     Args:
         job: Created job.
@@ -56,10 +56,8 @@ async def schedule_worker_launch(
         background_tasks: Tasks run after the response is sent.
         actor: Caller context.
     """
-    # An import job holds exactly one task.
     tasks, _ = await job_service.list_job_tasks(job.id, TaskFilter(), actor=actor)
-    task = tasks[0]
-    if await worker_service.is_covered(task):
+    if await worker_service.is_covered(tasks):
         return
     worker = await worker_service.register_ephemeral_worker(
         job.id,
@@ -77,9 +75,6 @@ async def schedule_worker_launch(
         server_url=settings.SERVER_URL,
         job_id=job.id,
     )
-    # The route class commits the session before the response goes out and
-    # Starlette runs background tasks after it, so the worker row is
-    # committed before the sandbox starts.
     background_tasks.add_task(_launch_worker, launcher, launch)
 
 

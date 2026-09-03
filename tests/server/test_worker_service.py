@@ -35,7 +35,7 @@ from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.task import AgentTask
+from kitaru.server.domain.task import AgentTask, ImportTask
 from kitaru.server.domain.worker import WorkerAccessDenied, WorkerNotFound
 from kitaru.server.filtering import FilterCondition
 
@@ -165,7 +165,7 @@ async def test_is_covered_matches_claim_cases(
         session_id=uuid.uuid4(),
     )
     await create_worker(repository, ACTOR.account.id, scope=case.scope(ids))
-    assert await service.is_covered(case.task(ids)) is case.covered
+    assert await service.is_covered([case.task(ids)]) is case.covered
 
 
 async def test_is_covered_ignores_stale_workers(
@@ -179,13 +179,39 @@ async def test_is_covered_ignores_stale_workers(
         last_seen_at=datetime.now(UTC) - timedelta(minutes=5),
     )
     task = AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4())
-    assert await service.is_covered(task) is False
+    assert await service.is_covered([task]) is False
 
 
 async def test_is_covered_without_workers(service: WorkerService) -> None:
     """No live workers means no task is covered."""
     task = AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4())
-    assert await service.is_covered(task) is False
+    assert await service.is_covered([task]) is False
+
+
+async def test_is_covered_requires_every_task(
+    service: WorkerService, repository: FakeWorkerRepository
+) -> None:
+    """One uncovered task among covered ones leaves the job uncovered."""
+    await create_worker(
+        repository,
+        ACTOR.account.id,
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
+    )
+    job_id = uuid.uuid4()
+    agent_task = AgentTask(job_id=job_id, agent_version_id=uuid.uuid4())
+    import_task = ImportTask(
+        job_id=job_id,
+        plugin_version_id=uuid.uuid4(),
+        payload_blob_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+    )
+    assert await service.is_covered([agent_task]) is True
+    assert await service.is_covered([agent_task, import_task]) is False
+
+
+async def test_is_covered_without_tasks(service: WorkerService) -> None:
+    """A job with nothing to run needs no worker."""
+    assert await service.is_covered([]) is True
 
 
 async def test_is_covered_counts_workers_of_other_accounts(
@@ -195,7 +221,7 @@ async def test_is_covered_counts_workers_of_other_accounts(
     other = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))
     await create_worker(repository, other.account.id, scope=UNSCOPED_WORKER_SCOPE)
     task = AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4())
-    assert await service.is_covered(task) is True
+    assert await service.is_covered([task]) is True
 
 
 async def test_register_ephemeral_worker(service: WorkerService) -> None:

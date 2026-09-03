@@ -14,6 +14,7 @@
 """Worker use cases."""
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from kitaru.analytics.events import AnalyticsEvent
@@ -95,19 +96,20 @@ class WorkerService:
             )
         return stored
 
-    async def is_covered(self, task: Task) -> bool:
-        """Report whether a live worker's scope claims the task.
+    async def is_covered(self, tasks: Sequence[Task]) -> bool:
+        """Report whether live workers' scopes claim every task.
 
         Args:
-            task: Candidate task.
+            tasks: Candidate tasks.
 
         Returns:
-            Whether a worker within the liveness window covers the task.
+            Whether each task is covered by a worker within the liveness
+            window.
         """
         # Claiming is not filtered by account, so every live worker on the
         # server counts.
         workers = await self._repository.list_live(self._get_live_cutoff())
-        return any(worker.covers(task) for worker in workers)
+        return all(any(worker.covers(task) for worker in workers) for task in tasks)
 
     async def register_ephemeral_worker(
         self, job_id: uuid.UUID, runtime: WorkerRuntime, actor: AuthContext
