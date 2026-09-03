@@ -63,8 +63,11 @@ jobs:
         # lagging a publish by a few seconds.
         run: |
           get_script() {
-            if [ "$SOURCE" = "url" ]; then curl -fsSL https://kitaru.ai/install; else cat install.sh; fi
+            if [ "$SOURCE" = "url" ]; then curl -fsSL https://kitaru.ai/install; else cat "$GITHUB_WORKSPACE/install.sh"; fi
           }
+          # Run from an empty directory: the checkout is itself a Python project,
+          # which would put the installer into project mode.
+          cd "$(mktemp -d)"
           for attempt in 1 2 3 4 5; do
             get_script | bash -s -- && exit 0
             echo "installer attempt $attempt failed; retrying in 30s" >&2
@@ -98,15 +101,16 @@ jobs:
             | grep -q ".local/bin" || { echo "PATH not persisted"; exit 1; }
       - name: Re-run is an upgrade, not an error
         shell: bash
-        run: cat install.sh | bash -s -- --no-skills --no-mcp --quiet
+        run: cd "$(mktemp -d)" && cat "$GITHUB_WORKSPACE/install.sh" | bash -s --
+          --no-skills --no-mcp --quiet
       - name: Inside a project, install into that project's environment
         shell: bash
         run: |
           set -euxo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          mkdir demo-agent && cd demo-agent
+          cd "$(mktemp -d)"
           uv init --quiet -p 3.12 --name demo-agent .
-          cat ../install.sh | bash -s -- --no-skills --no-mcp
+          cat "$GITHUB_WORKSPACE/install.sh" | bash -s -- --no-skills --no-mcp
           grep -q 'kitaru\[cli,mcp,worker\]' pyproject.toml
           uv run kitaru --version
           uv run kitaru-mcp --help >/dev/null
@@ -115,7 +119,8 @@ jobs:
         # Regression for the status-swallowing bug in `quiet`: an impossible
         # version pin makes `uv tool install` fail, and that must surface.
         run: |-
-          if cat install.sh | bash -s -- --no-skills --no-mcp --version=99.99.99; then
+          cd "$(mktemp -d)"
+          if cat "$GITHUB_WORKSPACE/install.sh" | bash -s -- --no-skills --no-mcp --version=99.99.99; then
             echo "installer exited 0 on a failed install" >&2; exit 1
           fi
           echo "failed install correctly exited nonzero"

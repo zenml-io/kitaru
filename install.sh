@@ -253,7 +253,7 @@ if [ "$KITARU_SCOPE" = "project" ]; then
   UV_ADD=(add --quiet)
   [ "$KITARU_PRE" = "1" ] && UV_ADD+=(--prerelease allow)
   quiet "$UV" "${UV_ADD[@]}" "$SPEC" "${EXTRA_PKGS[@]:+${EXTRA_PKGS[@]}}" \
-    || die "uv add failed (Kitaru needs Python >= 3.11; check requires-python). Re-run with --verbose for details."
+    || die "uv add failed (uv's message is above; Kitaru needs Python >= 3.11). To install outside this project instead: --global"
   VENV_DIR="${UV_PROJECT_ENVIRONMENT:-$PROJECT_DIR/.venv}"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) TOOL_BIN="$VENV_DIR/Scripts" ;;
