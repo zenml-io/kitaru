@@ -67,6 +67,7 @@ from kitaru.task.importer import (
     call_parser,
     flatten_nodes,
     gather_bounded,
+    retry_rate_limited,
     run,
     session_request,
 )
@@ -269,6 +270,47 @@ async def test_gather_bounded_limits_in_flight_and_keeps_order() -> None:
     results = await gather_bounded((_work(value) for value in range(6)), 2)
     assert results == list(range(6))
     assert peak == 2
+
+
+async def test_retry_rate_limited_sleeps_and_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+
+    async def _sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", _sleep)
+    calls = 0
+
+    async def _call() -> str:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise RuntimeError("429")
+        return "done"
+
+    def _retry_after(exc: Exception) -> float | None:
+        return 2.5 if str(exc) == "429" else None
+
+    assert await retry_rate_limited(_call, _retry_after) == "done"
+    assert sleeps == [2.5, 2.5]
+
+
+async def test_retry_rate_limited_gives_up_and_passes_other_errors() -> None:
+    async def _limited() -> None:
+        raise RuntimeError("429")
+
+    async def _other() -> None:
+        raise ValueError("boom")
+
+    def _retry_after(exc: Exception) -> float | None:
+        return 0 if str(exc) == "429" else None
+
+    with pytest.raises(RuntimeError):
+        await retry_rate_limited(_limited, _retry_after, max_retries=2)
+    with pytest.raises(ValueError):
+        await retry_rate_limited(_other, _retry_after)
 
 
 def test_flatten_nodes_assigns_depth_first_indexes_and_parents() -> None:

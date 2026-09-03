@@ -66,12 +66,14 @@ __all__ = [
     "flatten_nodes",
     "gather_bounded",
     "ingest_session",
+    "retry_rate_limited",
     "run",
     "session_request",
 ]
 
 NODE_BATCH_SIZE = 200
 DEFAULT_FETCH_CONCURRENCY = 4
+MAX_RATE_LIMIT_RETRIES = 10
 
 T = TypeVar("T")
 
@@ -207,6 +209,34 @@ async def gather_bounded(
             return await awaitable
 
     return list(await asyncio.gather(*(_run(item) for item in awaitables)))
+
+
+async def retry_rate_limited(
+    call: Callable[[], Awaitable[T]],
+    get_retry_after: Callable[[Exception], float | None],
+    max_retries: int = MAX_RATE_LIMIT_RETRIES,
+) -> T:
+    """Await a call, sleeping and retrying while it reports a rate limit.
+
+    Args:
+        call: Factory of the awaitable to run.
+        get_retry_after: Seconds to wait when the exception is a rate limit,
+            None when it is not.
+        max_retries: Retries before the rate limit error propagates.
+
+    Returns:
+        Result of the call.
+    """
+    retries = 0
+    while True:
+        try:
+            return await call()
+        except Exception as exc:
+            retry_after = get_retry_after(exc)
+            if retry_after is None or retries >= max_retries:
+                raise
+            retries += 1
+            await asyncio.sleep(retry_after)
 
 
 def call_parser(
