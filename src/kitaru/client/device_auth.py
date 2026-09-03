@@ -38,7 +38,7 @@ async def device_login(
 ) -> ApiToken:
     """Authorize this machine against a server and store the token it gets.
 
-    The call blocks until a signed-in account confirms the user code in a
+    The call blocks until a signed-in account completes authorization in a
     browser, or until the authorization expires.
 
     Args:
@@ -46,8 +46,8 @@ async def device_login(
         base_url: Server base URL credentials are stored under.
         store: Credential store the device authorization is written to.
         open_browser: Whether to open the verification page.
-        prompt: Called with the authorization so the caller can show the user
-            code. Defaults to logging it.
+        prompt: Called with the authorization so the caller can show the
+            verification URL. Defaults to logging it.
 
     Raises:
         DeviceLoginError: The authorization expired or was refused.
@@ -66,9 +66,8 @@ async def device_login(
         prompt(authorization)
     else:
         logger.info(
-            "Open %s and confirm the code %s.",
+            "Open %s to continue.",
             authorization.verification_uri_complete,
-            authorization.user_code,
         )
     if open_browser:
         webbrowser.open(authorization.verification_uri_complete)
