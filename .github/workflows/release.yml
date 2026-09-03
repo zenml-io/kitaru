@@ -160,6 +160,19 @@ jobs:
         with:
           packages-dir: package-dist
           skip-existing: true
+  installer-smoke:
+    # After the package is on PyPI, fetch the installer the way users do
+    # (https://kitaru.ai/install, served from main by the docs worker) and
+    # prove it installs the version just published. This alerts (fails the
+    # workflow) but does not gate the rest of the release: a runner or PyPI
+    # propagation flake must not leave a half-published release.
+    needs: [build, publish-python]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/installer.yml
+    with:
+      version: ${{ needs.build.outputs.version }}
+      source: url
   publish-deployables:
     needs: [build, publish-python]
     runs-on: ubuntu-latest
