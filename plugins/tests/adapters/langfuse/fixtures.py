@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from langfuse.api import TraceWithFullDetails
+from langfuse.api import Traces, TraceWithFullDetails
 from langfuse.types import TraceContext
 
 import kitaru_langfuse_importer.adapter as adapter_module
@@ -87,6 +87,31 @@ def build_trace(
     )
 
 
+def build_trace_page(trace_ids: list[str], page: int, total_pages: int) -> Traces:
+    """Build one page of the Langfuse trace-list response."""
+    return Traces.model_validate(
+        {
+            "data": [
+                {
+                    "id": trace_id,
+                    "timestamp": "2026-07-24T10:00:00Z",
+                    "tags": [],
+                    "public": False,
+                    "environment": "default",
+                    "html_path": f"/project/project-1/traces/{trace_id}",
+                }
+                for trace_id in trace_ids
+            ],
+            "meta": {
+                "page": page,
+                "limit": max(len(trace_ids), 1),
+                "total_items": len(trace_ids),
+                "total_pages": total_pages,
+            },
+        }
+    )
+
+
 def build_complete_trace(trace_id: str) -> TraceWithFullDetails:
     """Build one finished trace with a root span and a nested generation."""
     return build_trace(
@@ -109,10 +134,14 @@ class FakeLangfuseClient:
 
     def __init__(self) -> None:
         self.trace_builders: list[TraceBuilder | Exception] = []
+        self.trace_list_pages: list[Traces] = []
         self.requested: list[str] = []
+        self.list_calls: list[dict[str, Any]] = []
         self.events: list[str] = []
         self.trace_contexts: list[TraceContext] = []
-        self.async_api = SimpleNamespace(trace=SimpleNamespace(get=self._get))
+        self.async_api = SimpleNamespace(
+            trace=SimpleNamespace(get=self._get, list=self._list)
+        )
 
     async def _get(self, trace_id: str) -> TraceWithFullDetails:
         self.requested.append(trace_id)
@@ -122,6 +151,11 @@ class FakeLangfuseClient:
         if isinstance(builder, Exception):
             raise builder
         return builder(trace_id)
+
+    async def _list(self, **kwargs: Any) -> Traces:
+        self.list_calls.append(kwargs)
+        assert self.trace_list_pages, "unexpected trace list call"
+        return self.trace_list_pages.pop(0)
 
     @contextmanager
     def start_as_current_observation(

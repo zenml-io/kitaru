@@ -41,6 +41,13 @@ _POLL_SQL_PATTERN = re.compile(
 _FETCH_SQL_PATTERN = re.compile(
     r"SELECT \* FROM records WHERE trace_id = '(?P<trace_id>[0-9a-f]{32})'"
 )
+_LIST_SQL_PATTERN = re.compile(
+    r"SELECT DISTINCT trace_id, start_timestamp FROM records "
+    r"WHERE parent_span_id IS NULL "
+    r"AND start_timestamp >= '(?P<since>[^']+)' "
+    r"AND start_timestamp <= '(?P<until>[^']+)' "
+    r"ORDER BY start_timestamp"
+)
 
 
 def build_row(
@@ -91,6 +98,11 @@ def build_complete_rows(trace_id: str) -> list[dict[str, Any]]:
             },
         ),
     ]
+
+
+def build_list_row(trace_id: str, start_timestamp: str) -> dict[str, Any]:
+    """Build one trace-listing result row."""
+    return {"trace_id": trace_id, "start_timestamp": start_timestamp}
 
 
 def ndjson(rows: list[dict[str, Any]]) -> bytes:
@@ -165,15 +177,22 @@ class _FakeAsyncClient:
             "accept": "application/x-ndjson",
             "authorization": f"Bearer {READ_TOKEN}",
         }
-        match = _FETCH_SQL_PATTERN.fullmatch(json["sql"])
-        assert match is not None, f"unexpected fetch query: {json['sql']}"
-        self._fake.requested.append(match["trace_id"])
-        self._fake.fetch_min_timestamps.append(json["min_timestamp"])
-        self._fake.events.append("fetch")
-        assert self._fake.fetch_builders, "unexpected records fetch"
-        return _FakeResponse(
-            ndjson(self._fake.fetch_builders.pop(0)(match["trace_id"]))
-        )
+        fetch_match = _FETCH_SQL_PATTERN.fullmatch(json["sql"])
+        if fetch_match is not None:
+            trace_id = fetch_match["trace_id"]
+            self._fake.requested.append(trace_id)
+            self._fake.fetch_min_timestamps.append(json["min_timestamp"])
+            self._fake.events.append("fetch")
+            assert self._fake.fetch_builders, "unexpected records fetch"
+            return _FakeResponse(ndjson(self._fake.fetch_builders.pop(0)(trace_id)))
+
+        list_match = _LIST_SQL_PATTERN.fullmatch(json["sql"])
+        assert list_match is not None, f"unexpected query: {json['sql']}"
+        self._fake.list_min_timestamps.append(json["min_timestamp"])
+        self._fake.list_max_timestamps.append(json["max_timestamp"])
+        self._fake.events.append("list")
+        assert self._fake.list_builders, "unexpected trace listing"
+        return _FakeResponse(ndjson(self._fake.list_builders.pop(0)()))
 
 
 class FakeLogfire:
@@ -182,9 +201,12 @@ class FakeLogfire:
     def __init__(self) -> None:
         self.poll_builders: list[RowsBuilder] = []
         self.fetch_builders: list[RowsBuilder] = []
+        self.list_builders: list[Callable[[], list[dict[str, Any]]]] = []
         self.requested: list[str] = []
         self.poll_min_timestamps: list[datetime] = []
         self.fetch_min_timestamps: list[str] = []
+        self.list_min_timestamps: list[str] = []
+        self.list_max_timestamps: list[str] = []
         self.events: list[str] = []
         self.trace_ids: list[int] = []
 

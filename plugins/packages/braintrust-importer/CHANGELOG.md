@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fetch traces directly from the Braintrust API through the `adapter` extra.
+
 ## 0.2.0
 
 - Add the Braintrust importer-backed adapter, installed through the `adapter` extra.

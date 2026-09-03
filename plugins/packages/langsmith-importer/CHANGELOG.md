@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fetch traces from the LangSmith API by trace id or time window through the `adapter` extra.
+
 ## 0.2.0
 
 - Add the LangSmith importer-backed adapter, installed through the `adapter` extra.

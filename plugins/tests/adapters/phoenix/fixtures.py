@@ -14,6 +14,7 @@
 """Shared OTel SDK provider and Phoenix client fakes for the Phoenix adapter."""
 
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -27,6 +28,7 @@ import kitaru_phoenix_importer.adapter as adapter_module
 import kitaru_phoenix_importer.api as api_module
 
 SpansBuilder = Callable[[str], list[dict[str, Any]]] | Exception
+ListPage = list[dict[str, Any]] | Exception
 
 PROJECT = "test-project"
 
@@ -80,18 +82,33 @@ class _FakeSpans:
         self._fake = fake
 
     async def get_spans(
-        self, *, project_identifier: str, trace_ids: Sequence[str], limit: int
+        self,
+        *,
+        project_identifier: str,
+        trace_ids: Sequence[str] | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        limit: int,
     ) -> list[dict[str, Any]]:
-        assert len(trace_ids) == 1
-        self._fake.requested.append(trace_ids[0])
         self._fake.project_identifiers.append(project_identifier)
         self._fake.limits.append(limit)
-        self._fake.events.append("get-spans")
-        assert self._fake.span_builders, "unexpected span query"
-        builder = self._fake.span_builders.pop(0)
-        if isinstance(builder, Exception):
-            raise builder
-        return builder(trace_ids[0])
+        if trace_ids is not None:
+            assert len(trace_ids) == 1
+            self._fake.requested.append(trace_ids[0])
+            self._fake.events.append("get-spans")
+            assert self._fake.span_builders, "unexpected span query"
+            builder = self._fake.span_builders.pop(0)
+            if isinstance(builder, Exception):
+                raise builder
+            return builder(trace_ids[0])
+
+        self._fake.events.append("list-spans")
+        self._fake.list_windows.append((start_time, end_time))
+        assert self._fake.list_pages, "unexpected span listing"
+        page = self._fake.list_pages.pop(0)
+        if isinstance(page, Exception):
+            raise page
+        return page
 
 
 class _FakeAsyncClient:
@@ -110,6 +127,8 @@ class FakePhoenix:
         self.project_identifiers: list[str] = []
         self.limits: list[int] = []
         self.events: list[str] = []
+        self.list_pages: list[ListPage] = []
+        self.list_windows: list[tuple[datetime | None, datetime | None]] = []
         self.exporter = InMemorySpanExporter()
         self.provider = TracerProvider()
         self.provider.add_span_processor(SimpleSpanProcessor(self.exporter))

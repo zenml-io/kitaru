@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fetch traces from the Phoenix API by trace id or time window, installed through the `adapter` extra.
+
 ## 0.2.0
 
 - Add the Arize Phoenix importer-backed adapter, installed through the `adapter` extra.

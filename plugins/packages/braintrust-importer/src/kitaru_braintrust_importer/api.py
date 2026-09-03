@@ -16,16 +16,20 @@
 import asyncio
 import json
 import os
+from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Any
 
 import httpx
 
 from kitaru.env import get_required_env
+from kitaru.task.importer import FetchQuery
 
-__all__ = ["fetch_spans", "serialize_spans", "wait_for_spans"]
+__all__ = ["fetch", "fetch_spans", "serialize_spans", "wait_for_spans"]
 
 _POLL_INTERVAL = 2.0
 _DEFAULT_API_URL = "https://api.braintrust.dev"
+_LIST_PAGE_SIZE = 1000
 
 
 async def _query_spans(
@@ -53,6 +57,54 @@ async def _query_spans(
     )
     response.raise_for_status()
     return response.json()["data"]
+
+
+async def _list_root_span_ids(
+    project_id: str, since: datetime, until: datetime
+) -> list[str]:
+    """List root span ids of a project in ascending start-time order.
+
+    Args:
+        project_id: Braintrust project id.
+        since: Lower bound of root span start time.
+        until: Upper bound of root span start time.
+
+    Returns:
+        Root span ids.
+    """
+    api_url = os.environ.get("BRAINTRUST_API_URL") or _DEFAULT_API_URL
+    since_ts, until_ts = since.timestamp(), until.timestamp()
+    query = (
+        f"select: root_span_id | from: project_logs('{project_id}') spans"
+        f" | filter: NOT EXISTS(span_parents) AND"
+        f" ((created >= '{since.isoformat()}' AND created <= '{until.isoformat()}')"
+        f" OR (metrics.start >= {since_ts} AND metrics.start <= {until_ts}))"
+        f" | sort: created asc"
+        f" | limit: {_LIST_PAGE_SIZE}"
+    )
+    root_span_ids: list[str] = []
+    cursor: str | None = None
+    async with httpx.AsyncClient() as client:
+        while True:
+            body: dict[str, Any] = {"query": query}
+            if cursor is not None:
+                body["cursor"] = cursor
+            response = await client.post(
+                f"{api_url}/btql",
+                headers={
+                    "Authorization": f"Bearer {get_required_env('BRAINTRUST_API_KEY')}"
+                },
+                json=body,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            rows = payload["data"]
+            root_span_ids.extend(
+                str(row["root_span_id"]) for row in rows if row.get("root_span_id")
+            )
+            cursor = payload.get("cursor")
+            if not cursor:
+                return root_span_ids
 
 
 def _roots_have_ended(rows: list[dict[str, Any]]) -> bool:
@@ -113,3 +165,32 @@ def serialize_spans(rows: list[dict[str, Any]]) -> bytes:
     """
     # Serialize with the events envelope the importer parser expects.
     return json.dumps({"events": rows}).encode("utf-8")
+
+
+class BraintrustFetchQuery(FetchQuery):
+    """Braintrust fetch query."""
+
+    project_id: str
+
+
+async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
+    """Fetch parser payloads for traces matching a query.
+
+    Args:
+        query: Fetch query.
+
+    Raises:
+        ValueError: The query is invalid.
+
+    Yields:
+        Trace payload bytes.
+    """
+    parsed = BraintrustFetchQuery.model_validate(query)
+    if parsed.trace_ids is not None:
+        trace_ids = parsed.trace_ids
+    else:
+        since, until = parsed.get_window()
+        trace_ids = await _list_root_span_ids(parsed.project_id, since, until)
+    for trace_id in trace_ids:
+        rows = await fetch_spans(parsed.project_id, trace_id)
+        yield serialize_spans(rows)

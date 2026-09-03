@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fetch traces from the Logfire Query API by trace id or time window through the `adapter` extra.
+
 ## 0.2.0
 
 - Add the Logfire importer-backed adapter, installed through the `adapter` extra.
