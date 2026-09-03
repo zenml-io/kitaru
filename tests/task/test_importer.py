@@ -15,7 +15,7 @@
 
 import json
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -44,14 +44,25 @@ from kitaru.api_models.v1.session import SessionListParams, SessionOrigin, Sessi
 from kitaru.api_models.v1.session_node import (
     SessionNodeListParams,
 )
+from kitaru.api_models.v1.task import (
+    ApiSourceSpec,
+    ImportTaskDetails,
+    PackagePluginSpec,
+    ScriptPluginSpec,
+    TaskKind,
+    TaskSpecResponse,
+)
 from kitaru.client.exceptions import APIError
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.task.importer import (
     MAX_IMPORT_FAILURES,
     NODE_BATCH_SIZE,
+    FetchQuery,
     ImportedSession,
     SessionImportError,
+    _resolve_fetcher,
+    call_fetcher,
     call_parser,
     flatten_nodes,
     run,
@@ -114,6 +125,125 @@ def test_call_parser_rejects_unknown_item() -> None:
 
     with pytest.raises(SessionImportError, match="ImportedSession"):
         next(call_parser(parser, b"", {}))
+
+
+async def test_call_fetcher_is_lazy() -> None:
+    """Not advance the fetcher until the caller iterates."""
+    started = False
+
+    async def fetcher(query: dict) -> AsyncIterator[bytes]:
+        nonlocal started
+        started = True
+        yield b"payload"
+
+    iterator = call_fetcher(fetcher, {})
+    assert started is False
+    await anext(iterator)
+    assert started is True
+
+
+async def test_call_fetcher_wraps_start_failure() -> None:
+    """Wrap an exception raised while calling the fetcher."""
+
+    def fetcher(query: dict) -> Any:
+        raise ValueError("bad query")
+
+    with pytest.raises(SessionImportError, match="bad query"):
+        await anext(call_fetcher(fetcher, {}))
+
+
+async def test_call_fetcher_wraps_mid_stream_crash() -> None:
+    """Yield payloads until the fetcher crashes, then wrap the crash."""
+
+    async def fetcher(query: dict) -> AsyncIterator[bytes]:
+        yield b"first"
+        raise ValueError("boom")
+
+    iterator = call_fetcher(fetcher, {})
+    first = await anext(iterator)
+    assert first == b"first"
+    with pytest.raises(SessionImportError, match="boom"):
+        await anext(iterator)
+
+
+async def test_call_fetcher_rejects_non_bytes_item() -> None:
+    """Raise SessionImportError when the fetcher yields an item that is not bytes."""
+
+    async def fetcher(query: dict) -> Any:
+        yield "not bytes"
+
+    with pytest.raises(SessionImportError, match="not bytes"):
+        await anext(call_fetcher(fetcher, {}))
+
+
+def test_resolve_fetcher_script_plugin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Load a script plugin's fetch entrypoint from KITARU_TASK_PLUGIN_PATH."""
+    plugin_path = tmp_path / "importer.py"
+    plugin_path.write_text("def fetch(query):\n    return query\n")
+    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
+    source = ApiSourceSpec(entrypoint="fetch", query={})
+    details = ImportTaskDetails(
+        plugin=ScriptPluginSpec(entrypoint="parse", blob_id=uuid.uuid4(), sha256="x"),
+        source=source,
+        agent_id=uuid.uuid4(),
+        params={},
+    )
+
+    fetcher = _resolve_fetcher(details, source.entrypoint)
+
+    assert fetcher({"a": 1}) == {"a": 1}
+
+
+def test_resolve_fetcher_package_plugin() -> None:
+    """Load a package plugin's fetch entrypoint by module:attribute."""
+    source = ApiSourceSpec(entrypoint="json:dumps", query={})
+    details = ImportTaskDetails(
+        plugin=PackagePluginSpec(entrypoint="pkg.mod:parse", requirement="pkg==1.0"),
+        source=source,
+        agent_id=uuid.uuid4(),
+        params={},
+    )
+
+    fetcher = _resolve_fetcher(details, source.entrypoint)
+
+    assert fetcher({"a": 1}) == '{"a": 1}'
+
+
+def test_fetch_query_requires_since_without_trace_ids() -> None:
+    with pytest.raises(ValueError, match="since is required"):
+        FetchQuery.model_validate({})
+    query = FetchQuery.model_validate({"trace_ids": ["t1"]})
+    assert query.since is None
+
+
+def test_fetch_query_rejects_unknown_keys_and_naive_datetimes() -> None:
+    with pytest.raises(ValueError, match="project"):
+        FetchQuery.model_validate({"since": "2026-01-01T00:00:00Z", "project": "x"})
+    with pytest.raises(ValueError):
+        FetchQuery.model_validate({"since": "2026-01-01T00:00:00"})
+    with pytest.raises(ValueError):
+        FetchQuery.model_validate({"trace_ids": "t1"})
+
+
+def test_fetch_query_rejects_an_inverted_window() -> None:
+    with pytest.raises(ValueError, match="until must not be before since"):
+        FetchQuery.model_validate(
+            {"since": "2026-01-02T00:00:00Z", "until": "2026-01-01T00:00:00Z"}
+        )
+
+
+def test_fetch_query_window_defaults_until_to_now() -> None:
+    query = FetchQuery.model_validate({"since": "2026-01-01T00:00:00Z"})
+    since, until = query.get_window()
+    assert since == query.since
+    assert until.tzinfo is not None
+    assert until > since
+    query = FetchQuery.model_validate(
+        {"since": "2026-01-01T00:00:00Z", "until": "2026-01-03T00:00:00Z"}
+    )
+    assert query.get_window() == (query.since, query.until)
 
 
 def test_flatten_nodes_assigns_depth_first_indexes_and_parents() -> None:
@@ -418,6 +548,55 @@ async def _create_importer_task(
     return task.id, plugin_path
 
 
+async def _create_api_source_task(
+    task_app: TaskAppFixture,
+    script: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    query: dict[str, Any] | None = None,
+) -> uuid.UUID:
+    """Stub a running import task spec sourced from an API fetcher.
+
+    Args:
+        task_app: Task app fixture the task spec is built against.
+        script: Parser and fetcher script source written to the plugin file.
+        tmp_path: Temporary directory the plugin file is written under.
+        monkeypatch: Fixture used to stub the plugin path and task spec.
+        query: Query passed to the fetch entrypoint.
+
+    Returns:
+        Id of the stubbed running import task.
+    """
+    plugin_path = tmp_path / "importer.py"
+    plugin_path.write_text(script)
+    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
+
+    task_id = uuid.uuid4()
+    spec = TaskSpecResponse(
+        task_id=task_id,
+        kind=TaskKind.IMPORTER,
+        timeout_seconds=30,
+        run=None,
+        env={},
+        secret_env={},
+        details=ImportTaskDetails(
+            plugin=ScriptPluginSpec(
+                entrypoint="parse", blob_id=uuid.uuid4(), sha256="x"
+            ),
+            source=ApiSourceSpec(entrypoint="fetch", query=query or {}),
+            agent_id=task_app.agent.id,
+            params={},
+        ),
+    )
+
+    async def fake_get_spec(requested_task_id: uuid.UUID) -> TaskSpecResponse:
+        assert requested_task_id == task_id
+        return spec
+
+    monkeypatch.setattr(task_app.client.tasks, "get_spec", fake_get_spec)
+    return task_id
+
+
 async def test_importer_flow_batches_nodes_and_dedups(
     task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -573,6 +752,98 @@ async def test_run_caps_failure_samples_without_losing_count(
     written = ImportStats.model_validate(json.loads(result_path.read_text()))
     assert written.failed == failure_count
     assert len(written.failures) == MAX_IMPORT_FAILURES
+
+
+_API_FETCH_PARSER_SCRIPT = """
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.task.importer import ImportedSession
+
+
+def parse(payload: bytes, params: dict):
+    external_id = payload.decode()
+    yield ImportedSession(
+        status=SessionStatus.COMPLETED,
+        name=external_id,
+        inputs=None,
+        outputs=None,
+        error=None,
+        started_at=None,
+        ended_at=None,
+        external_id=external_id,
+        metadata={},
+        nodes=[],
+    )
+
+
+async def fetch(query: dict):
+    for trace_id in query["trace_ids"]:
+        yield trace_id.encode()
+"""
+
+_API_FETCH_CRASHING_SCRIPT = """
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.task.importer import ImportedSession
+
+
+def parse(payload: bytes, params: dict):
+    yield ImportedSession(
+        status=SessionStatus.COMPLETED,
+        name="session-1",
+        inputs=None,
+        outputs=None,
+        error=None,
+        started_at=None,
+        ended_at=None,
+        external_id="session-1",
+        metadata={},
+        nodes=[],
+    )
+
+
+async def fetch(query: dict):
+    yield b"first"
+    raise RuntimeError("fetcher exploded")
+"""
+
+
+async def test_run_with_api_source_parses_every_fetched_payload(
+    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fetch payloads from an API source with the query and parse every one."""
+    result_path = tmp_path / "result.json"
+    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
+    task_id = await _create_api_source_task(
+        task_app,
+        _API_FETCH_PARSER_SCRIPT,
+        tmp_path,
+        monkeypatch,
+        query={"trace_ids": ["a", "b", "c"]},
+    )
+
+    await run(task_app.client, str(task_id))
+
+    written = ImportStats.model_validate(json.loads(result_path.read_text()))
+    assert written.created == 3
+    assert written.failed == 0
+
+
+async def test_run_with_api_source_mid_stream_fetch_crash_writes_partial_stats(
+    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Write the stats gathered so far and re-raise on a fetcher crash."""
+    result_path = tmp_path / "result.json"
+    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
+    task_id = await _create_api_source_task(
+        task_app, _API_FETCH_CRASHING_SCRIPT, tmp_path, monkeypatch
+    )
+
+    with pytest.raises(SessionImportError, match="fetcher exploded"):
+        await run(task_app.client, str(task_id))
+
+    written = ImportStats.model_validate(json.loads(result_path.read_text()))
+    assert written.created == 1
+    assert written.failed == 1
+    assert "fetcher exploded" in written.failures[0].error
 
 
 async def test_importer_flow_rejects_non_importer_task(
