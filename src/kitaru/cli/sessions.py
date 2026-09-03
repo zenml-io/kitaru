@@ -13,16 +13,22 @@
 #  permissions and limitations under the License.
 """Session import and inspection commands."""
 
+import re
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
-from kitaru.api_models.v1.imports import ImportCreateRequest, ImportStats
+from kitaru.api_models.v1.imports import (
+    ApiImportSource,
+    BlobImportSource,
+    ImportCreateRequest,
+    ImportStats,
+)
 from kitaru.api_models.v1.job import JobResponse, JobStatus
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import (
@@ -69,6 +75,70 @@ def _read_payload(path: Path) -> bytes:
         raise CLIError(
             "invalid_arguments", f"FILE could not be read: {reason}."
         ) from None
+
+
+_RELATIVE_DURATION = re.compile(r"(?P<amount>\d+)(?P<unit>[dhm])")
+_DURATION_UNITS = {"d": "days", "h": "hours", "m": "minutes"}
+
+
+def _resolve_time_option(value: str | None, option: str) -> str | None:
+    """Resolve an absolute or relative --since/--until value to an ISO timestamp."""
+    if value is None:
+        return None
+    match = _RELATIVE_DURATION.fullmatch(value)
+    if match is not None:
+        unit = _DURATION_UNITS[match["unit"]]
+        resolved = datetime.now(UTC) - timedelta(**{unit: int(match["amount"])})
+        return resolved.isoformat()
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise CLIError(
+            "invalid_arguments",
+            f"{option} must be an ISO 8601 timestamp or a relative duration "
+            "like 7d, 12h, or 30m.",
+        ) from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise CLIError(
+            "invalid_arguments",
+            f"{option} must include a timezone, such as Z or +02:00.",
+        )
+    return value
+
+
+def _build_api_query(
+    since: str | None,
+    until: str | None,
+    trace_ids: list[str] | None,
+    query: str | None,
+) -> dict[str, Any] | None:
+    """Merge --since, --until, and --trace-id into --query, rejecting overlaps."""
+    resolved_since = _resolve_time_option(since, "--since")
+    resolved_until = _resolve_time_option(until, "--until")
+    if (
+        resolved_since is None
+        and resolved_until is None
+        and not trace_ids
+        and query is None
+    ):
+        return None
+    parsed_query = parse_json_object(query, option="--query")
+    collected: dict[str, Any] = {}
+    if resolved_since is not None:
+        collected["since"] = resolved_since
+    if resolved_until is not None:
+        collected["until"] = resolved_until
+    if trace_ids:
+        collected["trace_ids"] = trace_ids
+    overlap = sorted(set(collected) & set(parsed_query))
+    if overlap:
+        keys = ", ".join(overlap)
+        raise CLIError(
+            "invalid_arguments",
+            f"--query cannot set {keys}. Already set by --since, --until, "
+            "or --trace-id.",
+        )
+    return {**parsed_query, **collected}
 
 
 def _normalize_import_tags(tags: list[str] | None, *, wait: bool) -> list[str]:
@@ -241,7 +311,7 @@ def _terminal_import_result(
 
 async def import_sessions(
     client: Any,
-    path: Path,
+    path: Path | None,
     *,
     importer: str,
     agent: str,
@@ -254,9 +324,13 @@ async def import_sessions(
     interval: float | None,
     timeout: float | None,
     join_on: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    trace_ids: list[str] | None = None,
+    query: str | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
-    """Upload a local payload and create one import job."""
+    """Upload a local payload or an API selection, then create one import job."""
     tags = _normalize_import_tags(tags, wait=wait)
     if evaluator_params and not evaluators:
         raise CLIError(
@@ -291,7 +365,22 @@ async def import_sessions(
                 "--join-on cannot be combined with join_on in --params.",
             )
         parsed_params["join_on"] = join_on
-    content = _read_payload(path)
+
+    api_query = _build_api_query(
+        since=since, until=until, trace_ids=trace_ids, query=query
+    )
+    if path is not None and api_query is not None:
+        raise CLIError(
+            "invalid_arguments",
+            "FILE cannot be combined with --since, --until, --trace-id, or --query.",
+        )
+    if path is None and api_query is None:
+        raise CLIError(
+            "invalid_arguments",
+            "Provide FILE or one of --since, --until, --trace-id, --query.",
+        )
+    content = _read_payload(path) if path is not None else None
+
     importer_parent, importer_version = await get_plugin_version(
         client.importers, importer, "Importer"
     )
@@ -303,8 +392,6 @@ async def import_sessions(
             client, evaluators, evaluator_params or []
         )
 
-    blob = await client.blobs.upload(content, media_type=media_type, filename=path.name)
-    blob_identity = _blob_metadata(blob)
     identity = {
         "importer": {
             "id": str(importer_parent.id),
@@ -318,8 +405,21 @@ async def import_sessions(
             "version_id": str(agent_version.id),
             "version": agent_version.version,
         },
-        "blob": blob_identity,
     }
+
+    blob_identity: dict[str, Any] | None = None
+    if path is not None:
+        assert content is not None
+        blob = await client.blobs.upload(
+            content, media_type=media_type, filename=path.name
+        )
+        blob_identity = _blob_metadata(blob)
+        identity["blob"] = blob_identity
+        source: BlobImportSource | ApiImportSource = BlobImportSource(blob_id=blob.id)
+    else:
+        assert api_query is not None
+        identity["query"] = api_query
+        source = ApiImportSource(query=api_query)
     if tags:
         identity["tags"] = tags
     if evaluator_identity:
@@ -329,7 +429,7 @@ async def import_sessions(
         version=importer_version.version,
         agent_id=agent_parent.id,
         agent_version_id=agent_version.id,
-        payload_blob_id=blob.id,
+        source=source,
         params=parsed_params,
         evaluators=configs,
     )
@@ -338,6 +438,8 @@ async def import_sessions(
             request, idempotency_key=idempotency_key
         )
     except APIError as error:
+        if blob_identity is None:
+            raise
         raise CLIError(
             "partial_failure",
             "The payload was uploaded, but the import job could not be created.",
@@ -350,9 +452,11 @@ async def import_sessions(
                     "detail": error.detail,
                 },
             },
-            hint=f"The uploaded blob {blob.id} was not deleted.",
+            hint=f"The uploaded blob {blob_identity['id']} was not deleted.",
         ) from error
     except Exception as error:
+        if blob_identity is None:
+            raise
         raise CLIError(
             "partial_failure",
             "The payload was uploaded, but the import job could not be created.",
@@ -362,7 +466,7 @@ async def import_sessions(
                 "blob": blob_identity,
                 "error": {"type": type(error).__name__},
             },
-            hint=f"The uploaded blob {blob.id} was not deleted.",
+            hint=f"The uploaded blob {blob_identity['id']} was not deleted.",
         ) from error
 
     identity["import_id"] = str(created_import.id)

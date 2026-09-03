@@ -17,9 +17,10 @@ from kitaru.mcp.models.management import EvaluatorSelection
 
 
 class SessionImportRequest(MCPModel):
-    """Import sessions from an existing payload blob."""
+    """Import sessions from an existing payload blob or a provider API selection."""
 
-    payload_blob_id: uuid.UUID
+    payload_blob_id: uuid.UUID | None = None
+    query: dict[str, JsonValue] | None = None
     importer_id: uuid.UUID
     importer_version: int = Field(ge=1)
     agent_version_id: uuid.UUID
@@ -29,6 +30,12 @@ class SessionImportRequest(MCPModel):
         default=None,
         description=IDEMPOTENCY_KEY_DESCRIPTION,
     )
+
+    @model_validator(mode="after")
+    def _validate_source(self) -> "SessionImportRequest":
+        if (self.payload_blob_id is None) == (self.query is None):
+            raise ValueError("exactly one of payload_blob_id or query is required")
+        return self
 
 
 class EvaluationStart(MCPModel):
