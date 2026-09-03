@@ -13,32 +13,55 @@
 #  permissions and limitations under the License.
 """Tests for the import routes."""
 
+import logging
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import httpx
 import pytest
+from fastapi import FastAPI
 
 from conftest import (
+    FakeAccountRepository,
+    FakeWorkerLauncher,
     JobAndTaskServices,
     build_job_and_task_services,
     create_agent,
     create_blob,
     create_plugin,
+    create_worker,
+    local_settings,
     override_idempotency,
+    stub_auth_session,
 )
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.worker import WorkerClaim, WorkerScope
+from kitaru.server.adapters.auth.auth_service import AuthService
+from kitaru.server.adapters.auth.jwt import JWTToken
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    get_auth_service,
+    get_auth_session,
     get_job_service,
     get_task_service,
+    get_worker_service,
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
 from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.models.worker import WorkerFilter
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import ImportTask
+from kitaru.server.worker_launcher_settings import (
+    ModalWorkerLauncherSettings,
+    WorkerLauncherBackend,
+    WorkerLauncherSettings,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
@@ -50,57 +73,103 @@ def services() -> JobAndTaskServices:
 
 
 @pytest.fixture
-async def client(
+def launcher() -> FakeWorkerLauncher:
+    """Provide a fake worker launcher recording launches."""
+    return FakeWorkerLauncher()
+
+
+@pytest.fixture
+async def app(
     services: JobAndTaskServices,
-) -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Provide an HTTP client for the app with fake-backed job and task services."""
+    launcher: FakeWorkerLauncher,
+    auth_service: AuthService,
+    account_repository: FakeAccountRepository,
+) -> FastAPI:
+    """Provide the app wired to fake-backed services and a fake worker launcher."""
+    # auth_service resolves tokens against this same repository, so the actor
+    # a worker token is minted for must be loadable from it.
+    await account_repository.create(ACCOUNT)
     app = create_app(
         APISettings(
             DB_HOST="localhost",
             SECRET_ENCRYPTION_KEY="test-encryption-key",
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+            SERVER_URL="https://kitaru.example.com",
+            WORKER_LAUNCHER=WorkerLauncherSettings(
+                backend=WorkerLauncherBackend.MODAL,
+                modal=ModalWorkerLauncherSettings(
+                    token_id="ak-test",
+                    token_secret="as-test",
+                    image="zenmldocker/kitaru-worker:1.0.0",
+                    timeout_seconds=120,
+                ),
+            ),
         )
     )
     app.dependency_overrides[get_job_service] = lambda: services.job_service
     app.dependency_overrides[get_task_service] = lambda: services.task_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     override_idempotency(app, ACCOUNT)
+    app.dependency_overrides[get_worker_service] = lambda: WorkerService(
+        repository=services.workers, liveness_timeout_seconds=60
+    )
+    app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_auth_session] = stub_auth_session
+    app.state.worker_launcher = launcher
+    return app
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app with fake-backed job and task services."""
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 
 
-async def test_create_import(
-    client: httpx.AsyncClient, services: JobAndTaskServices
-) -> None:
-    """Create an import job holding one importer task."""
+async def _create_import_inputs(services: JobAndTaskServices) -> dict[str, Any]:
+    """Build the request body for a create-import request.
+
+    Args:
+        services: Fake-backed job and task services.
+
+    Returns:
+        JSON body for a create-import request.
+    """
     plugin = await create_plugin(
         services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
     )
-    version = await services.plugins.create_version(
+    await services.plugins.create_version(
         plugin.id,
         ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
         display_version=None,
     )
     payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
     agent = await create_agent(services.agents, ACCOUNT.id)
-
-    response = await client.post(
-        "/api/v1/imports",
-        json={
-            "importer": "csv",
-            "agent_id": str(agent.id),
-            "payload_blob_id": str(payload.id),
-            "params": {
-                "delimiter": ",",
-                "join_on": "/metadata/customer~1case_id",
-            },
+    return {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "payload_blob_id": str(payload.id),
+        "params": {
+            "delimiter": ",",
+            "join_on": "/metadata/customer~1case_id",
         },
+    }
+
+
+async def test_create_import(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Create an import job holding one importer task."""
+    response = await client.post(
+        "/api/v1/imports", json=await _create_import_inputs(services)
     )
     assert response.status_code == 201
     job = response.json()
     assert job["status"] == "pending"
 
+    plugin = await services.plugins.get_by_name(PluginKind.IMPORTER, "csv")
+    version = await services.plugins.get_version(plugin.id, plugin.latest_version)
     tasks, _ = await services.task_service.list_tasks(
         TaskFilter(job_id=uuid.UUID(job["id"])), actor=AuthContext(account=ACCOUNT)
     )
@@ -171,3 +240,110 @@ async def test_create_import_not_found_for_unknown_payload(
         },
     )
     assert response.status_code == 404
+
+
+async def test_create_import_launches_an_ephemeral_worker(
+    client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    launcher: FakeWorkerLauncher,
+    auth_service: AuthService,
+) -> None:
+    """Register and launch an ephemeral worker pinned to the job."""
+    response = await client.post(
+        "/api/v1/imports", json=await _create_import_inputs(services)
+    )
+    assert response.status_code == 201
+    job_id = uuid.UUID(response.json()["id"])
+
+    assert len(launcher.launches) == 1
+    launch = launcher.launches[0]
+    assert launch.job_id == job_id
+    assert launch.server_url == "https://kitaru.example.com"
+
+    worker = await services.workers.get(launch.worker_id)
+    assert worker.name == f"job-{job_id}"
+    assert worker.scope == WorkerScope(
+        claims=[WorkerClaim(kind=TaskKind.IMPORTER)], job_id=job_id
+    )
+    assert worker.runtime.platform == "modal"
+    assert worker.metadata == {"ephemeral": "true"}
+
+    context = await auth_service.resolve(launch.worker_token.get_secret_value())
+    assert isinstance(context.principal, WorkerPrincipal)
+    assert context.principal.worker_id == launch.worker_id
+
+    decoded = JWTToken.decode(launch.worker_token.get_secret_value(), local_settings())
+    expected_expiry = datetime.now(UTC) + timedelta(
+        seconds=120 + local_settings().TASK_TOKEN_EXPIRY_LEEWAY_SECONDS
+    )
+    assert abs((decoded.expires_at - expected_expiry).total_seconds()) < 5
+
+
+async def test_create_import_skips_the_launch_when_a_live_worker_covers_the_task(
+    client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    launcher: FakeWorkerLauncher,
+) -> None:
+    """Skip registering and launching a worker when a live worker covers the task."""
+    live_worker = await create_worker(
+        services.workers,
+        ACCOUNT.id,
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)]),
+    )
+
+    response = await client.post(
+        "/api/v1/imports", json=await _create_import_inputs(services)
+    )
+    assert response.status_code == 201
+
+    assert launcher.launches == []
+    workers, _ = await services.workers.query(WorkerFilter(), None)
+    assert [worker.id for worker in workers] == [live_worker.id]
+
+
+async def test_create_import_without_a_launcher_registers_nothing(
+    app: FastAPI,
+    client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    launcher: FakeWorkerLauncher,
+) -> None:
+    """Skip registering and launching a worker when no launcher is configured."""
+    app.state.worker_launcher = None
+
+    response = await client.post(
+        "/api/v1/imports", json=await _create_import_inputs(services)
+    )
+    assert response.status_code == 201
+
+    assert launcher.launches == []
+    workers, _ = await services.workers.query(WorkerFilter(), None)
+    assert workers == []
+
+
+async def test_create_import_returns_201_when_the_launch_fails(
+    client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    launcher: FakeWorkerLauncher,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Observe HTTP 201 when the background launch fails, with the failure logged."""
+    launcher.error = RuntimeError("modal is down")
+
+    with caplog.at_level(logging.ERROR):
+        response = await client.post(
+            "/api/v1/imports", json=await _create_import_inputs(services)
+        )
+    assert response.status_code == 201
+    job_id = response.json()["id"]
+
+    workers, _ = await services.workers.query(WorkerFilter(), None)
+    assert len(workers) == 1
+    worker = workers[0]
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "Failed to launch worker" in message
+        and str(worker.id) in message
+        and job_id in message
+        for message in messages
+    )

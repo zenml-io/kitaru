@@ -114,7 +114,7 @@ from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.application.models.tag import TagFilter
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy
-from kitaru.server.application.models.worker import WorkerFilter
+from kitaru.server.application.models.worker import WorkerFilter, WorkerLaunch
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.blob_service import BlobService
@@ -4016,6 +4016,28 @@ class FakeBlobDataStore:
             sha256: Content hash.
         """
         self._content.pop(sha256, None)
+
+
+class FakeWorkerLauncher:
+    """In-memory worker launcher recording launches."""
+
+    def __init__(self) -> None:
+        """Initialize the launcher."""
+        self.launches: list[WorkerLaunch] = []
+        self.error: Exception | None = None
+
+    async def launch(self, command: WorkerLaunch) -> None:
+        """Record a launch, or raise the configured error.
+
+        Args:
+            command: Worker launch.
+
+        Raises:
+            Exception: The fake was configured to raise.
+        """
+        if self.error is not None:
+            raise self.error
+        self.launches.append(command)
 
 
 async def create_blob(

@@ -1820,12 +1820,19 @@ export interface paths {
          * @description Import sessions from a payload blob, as a job holding one importer task.
          *
          *     Clients observe HTTP 201 on success and 404 when the importer, the
-         *     version, the payload blob, or the agent does not exist.
+         *     version, the payload blob, or the agent does not exist. With a worker
+         *     launcher configured and no live worker covering the job's task, a worker
+         *     pinned to the job is registered and launched after the response is sent.
          *
          *     Args:
          *         body: Import create request.
          *         service: Job service.
+         *         worker_service: Worker service.
+         *         auth_service: Authentication service for the current request.
          *         actor: Caller context.
+         *         settings: API settings for this process.
+         *         launcher: Worker launcher, None when no backend is configured.
+         *         background_tasks: Tasks run after the response is sent.
          *
          *     Returns:
          *         Created job.
