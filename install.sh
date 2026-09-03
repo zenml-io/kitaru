@@ -399,15 +399,24 @@ login_local() {
   if "$KITARU_BIN" login --local <"$in" 2>&1 | tee "$out"; then
     rm -f "$out"; LOGGED_IN=1; return 0
   fi
-  if grep -qi -- "conflict\|--upgrade" "$out"; then
+  # Only the "older local server" conflict tells you to pass --upgrade. Other
+  # conflicts (say, port 8000 taken by something Kitaru does not own) share
+  # the same error kind and must not trigger an upgrade.
+  if grep -q -- "--upgrade" "$out"; then
     rm -f "$out"
     note "An older local server is running. Upgrading it to match kitaru $("$KITARU_BIN" --version); your database is kept."
     if "$KITARU_BIN" login --local --upgrade <"$in"; then LOGGED_IN=1; return 0; fi
     warn "Local server upgrade did not complete. Run: $LOCAL_UPGRADE_HINT"
     return 1
   fi
+  # Surface the CLI's own explanation when it came back as JSON (no tty).
+  local msg hint
+  msg="$(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' "$out" | head -1)"
+  hint="$(sed -n 's/.*"hint":"\([^"]*\)".*/\1/p' "$out" | head -1)"
   rm -f "$out"
-  warn "Local server did not start. Run: kitaru login --local"
+  warn "Local server did not start.${msg:+ $msg}"
+  if [ -n "$hint" ]; then note "$hint"; fi
+  note "Then run: kitaru login --local  (or: kitaru login --local --port 9000)"
   return 1
 }
 
