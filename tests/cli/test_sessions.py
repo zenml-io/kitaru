@@ -18,7 +18,7 @@ import traceback
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -522,7 +522,8 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
         "agent_id": str(client.agent.id),
         "agent_version_id": str(client.agent_version.id),
         "version": 2,
-        "payload_blob_id": str(client.blob.id),
+        "source": {"type": "blob", "blob_id": str(client.blob.id)},
+        "payload_blob_id": None,
         "params": {
             "secret_value": "not-for-receipt",
             "join_on": "/metadata/conversation~1id",
@@ -1042,3 +1043,122 @@ def test_terminal_import_rejects_missing_or_malformed_completed_result(
         sessions._terminal_import_result(job, observed, identity={})
 
     assert error.value.kind == "internal_error"
+
+
+def test_resolve_time_option_relative_duration_resolves_near_now() -> None:
+    """A relative --since duration resolves to a UTC timestamp near now."""
+    before = datetime.now(UTC) - timedelta(days=7)
+    resolved = sessions._resolve_time_option("7d", "--since")
+    after = datetime.now(UTC) - timedelta(days=7)
+
+    assert resolved is not None
+    parsed = datetime.fromisoformat(resolved)
+    assert before <= parsed <= after
+
+
+async def test_session_import_api_query_merges_options_and_uploads_nothing() -> None:
+    """An API import builds the merged query and performs no upload."""
+    client = StubImportClient()
+
+    result = await sessions.import_sessions(
+        client,
+        None,
+        importer="jsonl@2",
+        agent="assistant@3",
+        params=None,
+        media_type="application/octet-stream",
+        wait=False,
+        interval=None,
+        timeout=None,
+        since="2026-08-01T00:00:00Z",
+        trace_ids=["trace-1", "trace-2"],
+        query='{"project_id":"proj-1"}',
+    )
+
+    assert client.uploads == []
+    [request] = client.requests
+    expected_query = {
+        "project_id": "proj-1",
+        "since": "2026-08-01T00:00:00Z",
+        "trace_ids": ["trace-1", "trace-2"],
+    }
+    assert request.model_dump(mode="json")["source"] == {
+        "type": "api",
+        "query": expected_query,
+    }
+    assert result.item["query"] == expected_query
+    assert "blob" not in result.item
+
+
+async def test_session_import_query_clash_rejected_before_remote_call() -> None:
+    """A --query key already set by --since is rejected before any lookup."""
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            None,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type="application/octet-stream",
+            wait=False,
+            interval=None,
+            timeout=None,
+            since="2026-08-01T00:00:00Z",
+            query='{"since":"2026-08-02T00:00:00Z"}',
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []
+    assert client.requests == []
+
+
+async def test_session_import_rejects_path_combined_with_since(
+    tmp_path: Path,
+) -> None:
+    """FILE and an API selection option cannot be combined."""
+    payload = tmp_path / "payload.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type="application/jsonl",
+            wait=False,
+            interval=None,
+            timeout=None,
+            since="7d",
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []
+
+
+async def test_session_import_rejects_neither_path_nor_api_selection() -> None:
+    """Omitting both FILE and every API selection option is rejected."""
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            None,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type="application/octet-stream",
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []

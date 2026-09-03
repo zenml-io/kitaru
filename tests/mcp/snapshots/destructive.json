@@ -1411,6 +1411,19 @@
               "title": "Entrypoint",
               "type": "string"
             },
+            "fetch_entrypoint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Module and attribute fetching payloads from an API, as module:attribute.",
+              "title": "Fetch Entrypoint"
+            },
             "requirement": {
               "description": "Pinned PEP 508 requirement.",
               "title": "Requirement",
@@ -1714,6 +1727,19 @@
               "description": "Attribute in the file.",
               "title": "Entrypoint",
               "type": "string"
+            },
+            "fetch_entrypoint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Attribute in the file fetching payloads from an API.",
+              "title": "Fetch Entrypoint"
             },
             "type": {
               "const": "script",
@@ -8358,7 +8384,7 @@
         },
         "SessionImportRequest": {
           "additionalProperties": false,
-          "description": "Import sessions from an existing payload blob.",
+          "description": "Import sessions from an existing payload blob or a provider API selection.",
           "properties": {
             "agent_version_id": {
               "format": "uuid",
@@ -8401,13 +8427,33 @@
               "type": "object"
             },
             "payload_blob_id": {
-              "format": "uuid",
-              "title": "Payload Blob Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Payload Blob Id"
+            },
+            "query": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Query"
             }
           },
           "required": [
-            "payload_blob_id",
             "importer_id",
             "importer_version",
             "agent_version_id"
@@ -11551,6 +11597,19 @@
               "title": "Entrypoint",
               "type": "string"
             },
+            "fetch_entrypoint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Module and attribute fetching payloads from an API, as module:attribute.",
+              "title": "Fetch Entrypoint"
+            },
             "requirement": {
               "description": "Pinned PEP 508 requirement.",
               "title": "Requirement",
@@ -11584,6 +11643,19 @@
               "description": "Attribute in the file.",
               "title": "Entrypoint",
               "type": "string"
+            },
+            "fetch_entrypoint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Attribute in the file fetching payloads from an API.",
+              "title": "Fetch Entrypoint"
             },
             "type": {
               "const": "script",
@@ -11825,6 +11897,19 @@
               "title": "Entrypoint",
               "type": "string"
             },
+            "fetch_entrypoint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Module and attribute fetching payloads from an API, as module:attribute.",
+              "title": "Fetch Entrypoint"
+            },
             "requirement": {
               "description": "Pinned PEP 508 requirement.",
               "title": "Requirement",
@@ -11858,6 +11943,19 @@
               "description": "Attribute in the file.",
               "title": "Entrypoint",
               "type": "string"
+            },
+            "fetch_entrypoint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Attribute in the file fetching payloads from an API.",
+              "title": "Fetch Entrypoint"
             },
             "type": {
               "const": "script",

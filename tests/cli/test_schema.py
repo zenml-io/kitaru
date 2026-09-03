@@ -197,12 +197,20 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     import_parameters = {
         parameter["name"]: parameter for parameter in session_import["parameters"]
     }
-    assert import_parameters["FILE"]["required"] is True
+    assert import_parameters["FILE"]["required"] is False
     assert import_parameters["--importer"]["required"] is True
     assert import_parameters["--agent"]["required"] is True
-    assert {"--params", "--media-type", "--wait", "--interval", "--timeout"} <= set(
-        import_parameters
-    )
+    assert {
+        "--params",
+        "--media-type",
+        "--since",
+        "--until",
+        "--trace-id",
+        "--query",
+        "--wait",
+        "--interval",
+        "--timeout",
+    } <= set(import_parameters)
     import_errors = {error["kind"] for error in session_import["errors"]}
     assert {
         "partial_failure",

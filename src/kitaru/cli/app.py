@@ -3708,9 +3708,16 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
     session_app,
     _spec(
         ("session", "import"),
-        "Upload a local payload and create an import job.",
+        "Upload a local payload or fetch from a provider API, and create "
+        "an import job.",
         parameters=(
-            ParameterSpec("FILE", "path", "argument", True, "Local payload file."),
+            ParameterSpec(
+                "FILE",
+                "path",
+                "argument",
+                False,
+                "Local payload file. Omit for an API import.",
+            ),
             ParameterSpec(
                 "--importer",
                 "reference",
@@ -3734,6 +3741,37 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
                 "option",
                 False,
                 "Group source traces by the value at this RFC 6901 JSON Pointer.",
+            ),
+            ParameterSpec(
+                "--since",
+                "timestamp or duration",
+                "option",
+                False,
+                "For an API import, fetch traces at or after this ISO 8601 "
+                "timestamp or relative duration such as 7d, 12h, or 30m.",
+            ),
+            ParameterSpec(
+                "--until",
+                "timestamp or duration",
+                "option",
+                False,
+                "For an API import, fetch traces before this ISO 8601 "
+                "timestamp or relative duration such as 7d, 12h, or 30m.",
+            ),
+            ParameterSpec(
+                "--trace-id",
+                "text[]",
+                "option",
+                False,
+                "For an API import, fetch exactly these provider trace ids.",
+            ),
+            ParameterSpec(
+                "--query",
+                "JSON object",
+                "option",
+                False,
+                "Additional importer-defined API selection fields, merged "
+                "with --since, --until, and --trace-id.",
             ),
             ParameterSpec(
                 "--tag",
@@ -3777,13 +3815,17 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
     ),
 )
 async def session_import(
-    file: Path,
+    file: Path | None = None,
     /,
     *,
     importer: str,
     agent: str,
     params: str | None = None,
     join_on: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    trace_id: list[str] | None = None,
+    query: str | None = None,
     tag: list[str] | None = None,
     evaluator: list[str] | None = None,
     evaluator_params: list[str] | None = None,
@@ -3793,7 +3835,7 @@ async def session_import(
     timeout: float | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
-    """Upload a local payload and create one import job."""
+    """Upload a local payload or an API selection, then create one import job."""
     async with _open_asset_client() as client:
         return await sessions.import_sessions(
             client,
@@ -3802,6 +3844,10 @@ async def session_import(
             agent=agent,
             params=params,
             join_on=join_on,
+            since=since,
+            until=until,
+            trace_ids=trace_id,
+            query=query,
             tags=tag,
             evaluators=evaluator,
             evaluator_params=evaluator_params,

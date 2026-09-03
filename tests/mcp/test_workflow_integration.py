@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from pydantic import ValidationError
 
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.mcp.errors import MCPToolError
@@ -156,6 +157,47 @@ async def test_session_import_forwards_evaluators() -> None:
     )
 
     assert client.request.evaluators == [evaluator]
+
+
+async def test_api_query_import_skips_blob_lookup() -> None:
+    """An API import performs no blob lookup and reports the query in the receipt."""
+    client = _ImportClient()
+    query = {"since": "2026-08-01T00:00:00Z", "trace_ids": ["trace-1"]}
+
+    result = cast(
+        dict[str, Any],
+        await handle_session_import(
+            _get_state(client),
+            SessionImportRequest(
+                query=query,
+                importer_id=uuid.uuid4(),
+                importer_version=2,
+                agent_version_id=uuid.uuid4(),
+            ),
+        ),
+    )
+
+    assert client.calls == ["importer_version", "importer", "agent_version", "create"]
+    assert result["query"] == query
+    assert "blob_id" not in result
+
+
+def test_session_import_requires_exactly_one_source() -> None:
+    """Setting both or neither of payload_blob_id and query is rejected."""
+    with pytest.raises(ValidationError, match="exactly one"):
+        SessionImportRequest(
+            importer_id=uuid.uuid4(),
+            importer_version=2,
+            agent_version_id=uuid.uuid4(),
+        )
+    with pytest.raises(ValidationError, match="exactly one"):
+        SessionImportRequest(
+            payload_blob_id=uuid.uuid4(),
+            query={"since": "2026-08-01T00:00:00Z"},
+            importer_id=uuid.uuid4(),
+            importer_version=2,
+            agent_version_id=uuid.uuid4(),
+        )
 
 
 async def test_evaluator_selections_use_name_version_dto_and_cache_parent() -> None:

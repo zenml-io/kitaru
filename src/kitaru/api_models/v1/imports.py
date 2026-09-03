@@ -98,9 +98,13 @@ class ImportListParams(FilterableListParams):
         Returns:
             The validated request.
         """
-        if self.source is not None and self.payload_blob_id is not None:
+        legacy = (
+            "payload_blob_id" in self.model_fields_set
+            and self.payload_blob_id is not None
+        )
+        if self.source is not None and legacy:
             raise ValueError("source and payload_blob_id are mutually exclusive")
-        if self.source is None and self.payload_blob_id is None:
+        if self.source is None and not legacy:
             raise ValueError("source is required")
         return self
 
@@ -112,8 +116,9 @@ class ImportListParams(FilterableListParams):
         """
         if self.source is not None:
             return self.source
-        assert self.payload_blob_id is not None
-        return BlobImportSource(blob_id=self.payload_blob_id)
+        blob_id = self.payload_blob_id
+        assert blob_id is not None
+        return BlobImportSource(blob_id=blob_id)
 
 
 class ImportFailure(ResponseModel):
