@@ -158,11 +158,27 @@ PluginSpec = Annotated[
 ]
 
 
-class PayloadSpec(ResponseModel):
-    """Payload spec."""
+class BlobSourceSpec(ResponseModel):
+    """Blob source spec."""
 
+    type: Literal["blob"] = Field(default="blob")
     blob_id: uuid.UUID = Field(description="Blob holding the payload.")
     sha256: str = Field(description="Blob content hash.")
+
+
+class ApiSourceSpec(ResponseModel):
+    """API source spec."""
+
+    type: Literal["api"] = Field(default="api")
+    entrypoint: str = Field(
+        description="Fetch entrypoint, in the form of the plugin's entrypoint."
+    )
+    query: dict[str, JsonValue] = Field(
+        description="Importer-defined selection of what to fetch."
+    )
+
+
+SourceSpec = Annotated[BlobSourceSpec | ApiSourceSpec, Field(discriminator="type")]
 
 
 class AgentTaskDetails(ResponseModel):
@@ -192,7 +208,7 @@ class ImportTaskDetails(ResponseModel):
 
     kind: Literal["importer"] = Field(default="importer")
     plugin: PluginSpec = Field(description="Importer plugin to load.")
-    payload: PayloadSpec = Field(description="Payload to parse.")
+    source: SourceSpec = Field(description="Where the payload comes from.")
     provider: str | None = Field(
         default=None, description="Source system named on the import."
     )
