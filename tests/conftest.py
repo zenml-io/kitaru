@@ -101,6 +101,7 @@ from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.experiment import ExperimentFilter
 from kitaru.server.application.models.experiment_run import ExperimentRunFilter
+from kitaru.server.application.models.insight import InsightFilter
 from kitaru.server.application.models.investigation import (
     InvestigationFilter,
     InvestigationSessionFilter,
@@ -195,6 +196,7 @@ from kitaru.server.domain.idempotency_key import (
     IdempotencyKeyAlreadyExists,
     IdempotencyKeyResponseUndecryptable,
 )
+from kitaru.server.domain.insight import Insight, InsightNotFound
 from kitaru.server.domain.investigation import (
     Investigation,
     InvestigationNotFound,
@@ -7134,3 +7136,117 @@ class FakeAnnotationRepository:
         for annotation_id, annotation in list(self._annotations.items()):
             if annotation.investigation_session_id in deleted:
                 del self._annotations[annotation_id]
+
+
+class FakeInsightRepository:
+    """In-memory insight repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._insights: dict[uuid.UUID, Insight] = {}
+
+    async def create(self, insights: list[Insight]) -> list[Insight]:
+        """Persist a batch of new insights in one transaction.
+
+        Args:
+            insights: Insights to store, in input order.
+
+        Returns:
+            Stored insights in input order, with timestamps set.
+        """
+        now = datetime.now(UTC)
+        stored = [
+            insight.model_copy(update={"created": now, "updated": now})
+            for insight in insights
+        ]
+        for insight in stored:
+            self._insights[insight.id] = insight
+        return [insight.model_copy() for insight in stored]
+
+    async def get(self, insight_id: uuid.UUID) -> Insight:
+        """Load an insight by id.
+
+        Args:
+            insight_id: Id of the insight.
+
+        Raises:
+            InsightNotFound: No insight has this id.
+
+        Returns:
+            Stored insight.
+        """
+        stored = self._insights.get(insight_id)
+        if stored is None:
+            raise InsightNotFound(insight_id)
+        return stored.model_copy()
+
+    def _evaluate_type_condition(
+        self, insight: Insight, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a type filter condition against an insight's data type.
+
+        Args:
+            insight: Insight to evaluate.
+            condition: Validated type condition.
+
+        Returns:
+            Whether the insight's data type matches.
+        """
+        return _matches_condition(insight.data.type, condition)
+
+    async def query(
+        self, insight_filter: InsightFilter
+    ) -> tuple[list[Insight], str | None]:
+        """Query insights matching a filter.
+
+        Args:
+            insight_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching insights and the next cursor.
+        """
+        insights = list(self._insights.values())
+        if insight_filter.expression is not None:
+            resolvers = {"type": self._evaluate_type_condition}
+            insights = [
+                insight
+                for insight in insights
+                if _evaluate_filter_expression(
+                    insight, insight_filter.expression, resolvers
+                )
+            ]
+        page, next_cursor = _paginate_fake(insights, insight_filter)
+        return [insight.model_copy() for insight in page], next_cursor
+
+    async def update(self, insight: Insight) -> Insight:
+        """Persist changes to an existing insight.
+
+        Args:
+            insight: Insight with modified fields.
+
+        Raises:
+            InsightNotFound: No insight has this id.
+
+        Returns:
+            Stored insight with the updated timestamp renewed.
+        """
+        stored = self._insights.get(insight.id)
+        if stored is None:
+            raise InsightNotFound(insight.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = insight.model_copy(update={"created": stored.created, "updated": now})
+        self._insights[insight.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, insight_id: uuid.UUID) -> None:
+        """Delete an insight by id.
+
+        Args:
+            insight_id: Id of the insight.
+
+        Raises:
+            InsightNotFound: No insight has this id.
+        """
+        if insight_id not in self._insights:
+            raise InsightNotFound(insight_id)
+        del self._insights[insight_id]

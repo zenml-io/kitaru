@@ -22,6 +22,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.annotation import Annotation
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.insight import Insight
 from kitaru.server.domain.investigation import Investigation
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import Plugin, PluginKind, PluginSource
@@ -331,6 +332,21 @@ def build_investigation_created_properties(
         Event properties.
     """
     return {"session_count": investigation.total_sessions}
+
+
+def build_insight_created_properties(insights: list[Insight]) -> dict[str, Any]:
+    """Build the properties of an insight batch creation.
+
+    Args:
+        insights: Created insights.
+
+    Returns:
+        Event properties.
+    """
+    return {
+        "insight_count": len(insights),
+        "insight_types": sorted({insight.data.type for insight in insights}),
+    }
 
 
 def build_annotation_created_properties(annotation: Annotation) -> dict[str, Any]:
