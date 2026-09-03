@@ -81,7 +81,8 @@ jobs:
         with:
           name: hypothesis-examples-${{ matrix.name }}
           path: .hypothesis/examples
-          if-no-files-found: ignore
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Open issue on scheduled failure
         if: failure() && github.event_name == 'schedule'
         env:
