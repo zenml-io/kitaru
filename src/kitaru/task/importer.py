@@ -13,12 +13,13 @@
 #  permissions and limitations under the License.
 """Importer plugin contract and the import flow."""
 
+import asyncio
 import uuid
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, TypeVar
 
 import httpx
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -63,12 +64,16 @@ __all__ = [
     "call_fetcher",
     "call_parser",
     "flatten_nodes",
+    "gather_bounded",
     "ingest_session",
     "run",
     "session_request",
 ]
 
 NODE_BATCH_SIZE = 200
+DEFAULT_FETCH_CONCURRENCY = 4
+
+T = TypeVar("T")
 
 _LABEL = "Importer"
 
@@ -150,6 +155,7 @@ class FetchQuery(BaseModel):
     trace_ids: list[str] | None = None
     since: AwareDatetime | None = None
     until: AwareDatetime | None = None
+    concurrency: int = Field(default=DEFAULT_FETCH_CONCURRENCY, ge=1)
 
     @model_validator(mode="after")
     def _check_window(self) -> Self:
@@ -180,6 +186,27 @@ class FetchQuery(BaseModel):
         """
         assert self.since is not None
         return self.since, self.until or datetime.now(UTC)
+
+
+async def gather_bounded(
+    awaitables: Iterable[Awaitable[T]], concurrency: int
+) -> list[T]:
+    """Await every awaitable with at most concurrency in flight, in input order.
+
+    Args:
+        awaitables: Awaitables to run.
+        concurrency: Maximum number in flight at once.
+
+    Returns:
+        Results in input order.
+    """
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _run(awaitable: Awaitable[T]) -> T:
+        async with semaphore:
+            return await awaitable
+
+    return list(await asyncio.gather(*(_run(item) for item in awaitables)))
 
 
 def call_parser(

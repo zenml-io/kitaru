@@ -15,7 +15,7 @@
 
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -37,21 +37,33 @@ from .fixtures import (
 )
 
 
-def _threaded_trace_runs(thread_id: str | None) -> RunsBuilder:
-    """Build a runs builder whose root run carries a thread id, if given."""
+def _threaded_trace_runs(
+    thread_ids: dict[str, str | None], start_times: dict[str, datetime]
+) -> RunsBuilder:
+    """Build a runs builder whose root run carries the thread id of its trace.
+
+    Fetches run concurrently, so the fake cannot rely on trace ids arriving
+    in a fixed order. Looking the thread id and start time up by trace id,
+    instead of by call position, keeps the builder correct regardless of
+    dispatch order.
+    """
 
     def build(trace_id: str) -> list[Run]:
+        thread_id = thread_ids.get(trace_id)
         root_kwargs: dict[str, Any] = (
             {"extra": {"metadata": {"thread_id": thread_id}}} if thread_id else {}
         )
         return [
-            build_run(trace_id, trace_id, **root_kwargs),
+            build_run(
+                trace_id, trace_id, start_time=start_times[trace_id], **root_kwargs
+            ),
             build_run(
                 str(uuid.uuid5(uuid.NAMESPACE_OID, f"{trace_id}-llm")),
                 trace_id,
                 parent_run_id=trace_id,
                 name="llm-call",
                 run_type="llm",
+                start_time=start_times[trace_id] + timedelta(seconds=1),
             ),
         ]
 
@@ -68,7 +80,9 @@ async def test_fetch_by_trace_ids_fetches_exactly_those_in_one_payload(
 
     payloads = await collect_payloads(fetch({"trace_ids": [trace_id_1, trace_id_2]}))
 
-    assert fake_langsmith_api.requested == [trace_id_1, trace_id_2]
+    # Fetches run concurrently across threads, so dispatch order is not
+    # guaranteed, but each requested trace is still fetched exactly once.
+    assert sorted(fake_langsmith_api.requested) == sorted([trace_id_1, trace_id_2])
     assert fake_langsmith_api.root_listing_calls == []
     assert len(payloads) == 1
     # join_on=trace_id forces one session per trace, matching how the
@@ -83,6 +97,37 @@ async def test_fetch_by_trace_ids_fetches_exactly_those_in_one_payload(
         f"{PROJECT_ID}:{trace_id_2}",
     ]
     assert all(session.status == SessionStatus.COMPLETED for session in sessions)
+
+
+async def test_fetch_bounds_concurrency_and_preserves_order(
+    fake_langsmith_api: FakeLangSmith,
+) -> None:
+    """Fetch at most the configured concurrency of traces at once, oldest first."""
+    trace_ids = [str(uuid.uuid4()) for _ in range(4)]
+    fake_langsmith_api.runs_builders = [build_complete_runs] * len(trace_ids)
+    # Delays scramble completion order relative to submission order, so the
+    # merged result proves gather_bounded restores it rather than happening
+    # to already match it.
+    fake_langsmith_api.fetch_delays = [0.03, 0.01, 0.02, 0.0]
+
+    payloads = await collect_payloads(fetch({"trace_ids": trace_ids, "concurrency": 2}))
+
+    assert fake_langsmith_api.peak_in_flight == 2
+    assert len(payloads) == 1
+    sessions = [
+        item
+        for item in parse(payloads[0], _PARSER_PARAMS)
+        if isinstance(item, ImportedSession)
+    ]
+    assert [session.external_id for session in sessions] == [
+        f"{PROJECT_ID}:{trace_id}" for trace_id in trace_ids
+    ]
+
+    # The default query still works at the default concurrency.
+    other_trace_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    fake_langsmith_api.runs_builders = [build_complete_runs, build_complete_runs]
+    payloads = await collect_payloads(fetch({"trace_ids": other_trace_ids}))
+    assert len(payloads) == 1
 
 
 async def test_fetch_time_window_lists_root_runs_oldest_first_and_dedupes(
@@ -113,8 +158,17 @@ async def test_fetch_time_window_lists_root_runs_oldest_first_and_dedupes(
     )
 
     assert len(payloads) == 1
-    # root_run_2 started earlier than root_run_1, so it is fetched first.
-    assert fake_langsmith_api.requested == [trace_id_2, trace_id_1]
+    # Fetches run concurrently across threads, so dispatch order is not
+    # guaranteed, but each distinct trace is still fetched exactly once.
+    assert sorted(fake_langsmith_api.requested) == sorted([trace_id_1, trace_id_2])
+    # root_run_2 started earlier than root_run_1, so it is merged first.
+    sessions = [
+        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+    ]
+    assert [session.external_id for session in sessions] == [
+        f"{PROJECT_ID}:{trace_id_2}",
+        f"{PROJECT_ID}:{trace_id_1}",
+    ]
     assert len(fake_langsmith_api.root_listing_calls) == 1
     call = fake_langsmith_api.root_listing_calls[0]
     assert call["project_name"] == "my-project"
@@ -142,18 +196,29 @@ async def test_fetch_time_window_groups_shared_thread_traces_into_one_session(
         trace_id_2, trace_id_2, start_time=datetime(2026, 7, 24, 11, tzinfo=UTC)
     )
     fake_langsmith_api.root_run_listings = [[root_run_2, root_run_3, root_run_1]]
-    fake_langsmith_api.runs_builders = [
-        _threaded_trace_runs(None),
-        _threaded_trace_runs(thread_id),
-        _threaded_trace_runs(thread_id),
-    ]
+    # The fetched root runs carry the same start times as their listing rows,
+    # so the parser's turn ordering, which sorts by started_at, resolves
+    # unambiguously instead of tying on identical default timestamps.
+    builder = _threaded_trace_runs(
+        {trace_id_3: None, trace_id_1: thread_id, trace_id_2: thread_id},
+        {
+            trace_id_3: datetime(2026, 7, 24, 9, tzinfo=UTC),
+            trace_id_1: datetime(2026, 7, 24, 10, tzinfo=UTC),
+            trace_id_2: datetime(2026, 7, 24, 11, tzinfo=UTC),
+        },
+    )
+    fake_langsmith_api.runs_builders = [builder, builder, builder]
 
     payloads = await collect_payloads(
         fetch({"since": "2026-07-01T00:00:00Z", "until": "2026-08-01T00:00:00Z"})
     )
 
     assert len(payloads) == 1
-    assert fake_langsmith_api.requested == [trace_id_3, trace_id_1, trace_id_2]
+    # Fetches run concurrently across threads, so dispatch order is not
+    # guaranteed, but each distinct trace is still fetched exactly once.
+    assert sorted(fake_langsmith_api.requested) == sorted(
+        [trace_id_3, trace_id_1, trace_id_2]
+    )
 
     sessions = [
         item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)

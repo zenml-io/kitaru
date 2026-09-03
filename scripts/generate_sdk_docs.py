@@ -390,6 +390,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "Parser",
                 "Fetcher",
                 "FetchQuery",
+                "gather_bounded",
                 "call_parser",
                 "call_fetcher",
                 "flatten_nodes",

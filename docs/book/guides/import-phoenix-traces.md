@@ -81,6 +81,7 @@ Omitting FILE and setting `--since` selects an API import: the worker calls the 
 | `trace_ids` | Phoenix trace ids to fetch. When present, exactly those traces are fetched and the time window is ignored. |
 | `since` | Timezone-aware ISO 8601 datetime, lower bound of span start time. Required when `trace_ids` is absent. |
 | `until` | Timezone-aware ISO 8601 datetime, upper bound of span start time. Defaults to now. |
+| `concurrency` | Traces fetched at once. Defaults to 4. |
 
 Pass `project` through `--query '{"project": "my-project"}'`. The worker needs `kitaru-phoenix-importer[adapter]` installed (the default plugin catalog already installs it that way) and, in its environment, `PHOENIX_ENDPOINT` or `PHOENIX_COLLECTOR_ENDPOINT`, `PHOENIX_API_KEY`, and `PHOENIX_PROJECT` for the default project. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping and limits below apply the same way.
 

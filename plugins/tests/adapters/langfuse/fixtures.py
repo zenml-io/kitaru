@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Shared Langfuse SDK fakes for the Langfuse adapter."""
 
+import asyncio
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -146,18 +147,28 @@ class FakeLangfuseClient:
         self.list_calls: list[dict[str, Any]] = []
         self.events: list[str] = []
         self.trace_contexts: list[TraceContext] = []
+        self.fetch_delays: list[float] = []
+        self.in_flight = 0
+        self.peak_in_flight = 0
         self.async_api = SimpleNamespace(
             trace=SimpleNamespace(get=self._get, list=self._list)
         )
 
     async def _get(self, trace_id: str, **kwargs: Any) -> TraceWithFullDetails:
-        self.requested.append(trace_id)
-        self.events.append("poll")
-        assert self.trace_builders, "unexpected trace poll"
-        builder = self.trace_builders.pop(0)
-        if isinstance(builder, Exception):
-            raise builder
-        return builder(trace_id)
+        self.in_flight += 1
+        self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+        try:
+            if self.fetch_delays:
+                await asyncio.sleep(self.fetch_delays.pop(0))
+            self.requested.append(trace_id)
+            self.events.append("poll")
+            assert self.trace_builders, "unexpected trace poll"
+            builder = self.trace_builders.pop(0)
+            if isinstance(builder, Exception):
+                raise builder
+            return builder(trace_id)
+        finally:
+            self.in_flight -= 1
 
     async def _list(self, **kwargs: Any) -> Traces:
         self.list_calls.append(kwargs)

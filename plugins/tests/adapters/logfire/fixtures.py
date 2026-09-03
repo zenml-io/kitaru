@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Shared Logfire SDK and Query API fakes for the Logfire adapter."""
 
+import asyncio
 import json
 import re
 import secrets
@@ -210,11 +211,20 @@ class _FakeAsyncClient:
         fetch_match = _FETCH_SQL_PATTERN.fullmatch(json["sql"])
         if fetch_match is not None:
             trace_id = fetch_match["trace_id"]
-            self._fake.requested.append(trace_id)
-            self._fake.fetch_min_timestamps.append(json["min_timestamp"])
-            self._fake.events.append("fetch")
-            assert self._fake.fetch_builders, "unexpected records fetch"
-            return _FakeResponse(ndjson(self._fake.fetch_builders.pop(0)(trace_id)))
+            self._fake.in_flight += 1
+            self._fake.peak_in_flight = max(
+                self._fake.peak_in_flight, self._fake.in_flight
+            )
+            try:
+                if self._fake.fetch_delays:
+                    await asyncio.sleep(self._fake.fetch_delays.pop(0))
+                self._fake.requested.append(trace_id)
+                self._fake.fetch_min_timestamps.append(json["min_timestamp"])
+                self._fake.events.append("fetch")
+                assert self._fake.fetch_builders, "unexpected records fetch"
+                return _FakeResponse(ndjson(self._fake.fetch_builders.pop(0)(trace_id)))
+            finally:
+                self._fake.in_flight -= 1
 
         list_match = _LIST_SQL_PATTERN.fullmatch(json["sql"])
         assert list_match is not None, f"unexpected query: {json['sql']}"
@@ -239,6 +249,9 @@ class FakeLogfire:
         self.list_max_timestamps: list[str] = []
         self.events: list[str] = []
         self.trace_ids: list[int] = []
+        self.fetch_delays: list[float] = []
+        self.in_flight = 0
+        self.peak_in_flight = 0
 
     @contextmanager
     def span(self, name: str) -> Iterator[SimpleNamespace]:

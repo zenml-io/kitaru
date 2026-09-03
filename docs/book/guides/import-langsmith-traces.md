@@ -78,6 +78,7 @@ Omitting FILE and setting `--since` selects an API import: the worker calls the 
 | `trace_ids` | LangSmith trace ids to fetch. When present, exactly those traces are fetched and the time window is ignored. |
 | `since` | Timezone-aware ISO 8601 datetime, lower bound of trace start time. Required when `trace_ids` is absent. |
 | `until` | Timezone-aware ISO 8601 datetime, upper bound of trace end time. Defaults to now. |
+| `concurrency` | Traces fetched at once. Defaults to 4. |
 | `project_name` | LangSmith project to fetch from. Defaults to the SDK's tracer project, read from `LANGSMITH_PROJECT` (or `LANGCHAIN_PROJECT`) in the environment. |
 
 Pass `project_name` through `--query '{"project_name": "my-project"}'`. The worker needs `kitaru-langsmith-importer[adapter]` installed (the default plugin catalog already installs it that way) and `LANGSMITH_API_KEY` in its environment, plus `LANGSMITH_ENDPOINT` for a self-hosted instance. Each fetched trace is parsed the same way an uploaded export would be, so the mapping, dedup, and limitations below apply the same way.

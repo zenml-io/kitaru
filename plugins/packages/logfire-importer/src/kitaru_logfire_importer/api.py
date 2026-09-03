@@ -24,7 +24,7 @@ from logfire._internal.config import get_base_url_from_token
 from logfire.query_client import AsyncLogfireQueryClient
 
 from kitaru.env import get_required_env
-from kitaru.task.importer import FetchQuery
+from kitaru.task.importer import FetchQuery, gather_bounded
 
 __all__ = ["fetch", "fetch_trace", "wait_for_trace"]
 
@@ -194,6 +194,9 @@ async def _list_root_trace_ids(
 async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     """Fetch every trace matched by the query into one parser payload.
 
+    Traces are fetched concurrently, up to the query's concurrency, and
+    merged back in fetch order.
+
     Args:
         query: Fetch query. `trace_ids` fetches exactly those traces in
             order and ignores the time window. Otherwise `since` is
@@ -223,9 +226,10 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
             min_timestamp = since
             trace_ids = await _list_root_trace_ids(client, since, until)
 
-        trace_payloads = [
-            await fetch_trace(trace_id, min_timestamp, client) for trace_id in trace_ids
-        ]
+        trace_payloads = await gather_bounded(
+            (fetch_trace(trace_id, min_timestamp, client) for trace_id in trace_ids),
+            parsed.concurrency,
+        )
         # Concatenate into one payload so the parser groups traces sharing
         # a session id into one Kitaru session instead of splitting them
         # across separate parse calls, where only the first trace of a

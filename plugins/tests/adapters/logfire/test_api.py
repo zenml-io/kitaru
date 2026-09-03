@@ -69,6 +69,47 @@ async def test_fetch_by_trace_ids_without_since_uses_the_earliest_bound(
     ]
 
 
+async def test_fetch_bounds_concurrency_and_preserves_order(
+    fake_logfire: FakeLogfire,
+) -> None:
+    """Fetch at most the configured concurrency of traces at once, oldest first."""
+    trace_ids = [str(digit) * 32 for digit in range(1, 5)]
+    fake_logfire.fetch_builders = [build_complete_rows] * len(trace_ids)
+    # Delays scramble completion order relative to submission order, so the
+    # merged result proves gather_bounded restores it rather than happening
+    # to already match it.
+    fake_logfire.fetch_delays = [0.03, 0.01, 0.02, 0.0]
+
+    payloads = await collect_payloads(
+        fetch(
+            {
+                "trace_ids": trace_ids,
+                "since": "2026-07-24T09:00:00Z",
+                "concurrency": 2,
+            }
+        )
+    )
+
+    assert fake_logfire.peak_in_flight == 2
+    assert len(payloads) == 1
+    sessions = [
+        session
+        for session in parse(payloads[0], {})
+        if isinstance(session, ImportedSession)
+    ]
+    # All four traces share the default conversation id, so the parser
+    # groups them into one session, merged in fetch order.
+    assert len(sessions) == 1
+    assert sessions[0].metadata["logfire.trace_ids"] == trace_ids
+
+    # The default query still works at the default concurrency.
+    fake_logfire.fetch_builders = [build_complete_rows, build_complete_rows]
+    payloads = await collect_payloads(
+        fetch({"trace_ids": [TRACE_ID_1, TRACE_ID_2], "since": "2026-07-24T09:00:00Z"})
+    )
+    assert len(payloads) == 1
+
+
 async def test_fetch_by_time_window_lists_trace_ids_and_fetches_each(
     fake_logfire: FakeLogfire,
 ) -> None:

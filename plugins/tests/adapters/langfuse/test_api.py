@@ -158,6 +158,34 @@ async def test_fetch_yields_nothing_for_an_empty_listing(
     assert fake_langfuse.requested == []
 
 
+async def test_fetch_bounds_concurrency_and_preserves_order(
+    fake_langfuse: FakeLangfuseClient,
+) -> None:
+    """Fetch at most the configured concurrency of traces at once, oldest first."""
+    trace_ids = ["trace-1", "trace-2", "trace-3", "trace-4"]
+    fake_langfuse.trace_builders = [build_complete_trace] * len(trace_ids)
+    # Delays scramble completion order relative to submission order, so the
+    # merged result proves gather_bounded restores it rather than happening
+    # to already match it.
+    fake_langfuse.fetch_delays = [0.03, 0.01, 0.02, 0.0]
+
+    payloads = await collect_payloads(fetch({"trace_ids": trace_ids, "concurrency": 2}))
+
+    assert fake_langfuse.peak_in_flight == 2
+    assert len(payloads) == 1
+    sessions = [
+        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+    ]
+    assert [session.metadata["langfuse.trace_ids"][0] for session in sessions] == (
+        trace_ids
+    )
+
+    # The default query still works at the default concurrency.
+    fake_langfuse.trace_builders = [build_complete_trace, build_complete_trace]
+    payloads = await collect_payloads(fetch({"trace_ids": ["trace-5", "trace-6"]}))
+    assert len(payloads) == 1
+
+
 async def test_fetch_rejects_an_invalid_query(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:

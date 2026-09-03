@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Shared OTel SDK provider and Phoenix client fakes for the Phoenix adapter."""
 
+import asyncio
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
@@ -94,13 +95,22 @@ class _FakeSpans:
         self._fake.limits.append(limit)
         if trace_ids is not None:
             assert len(trace_ids) == 1
-            self._fake.requested.append(trace_ids[0])
-            self._fake.events.append("get-spans")
-            assert self._fake.span_builders, "unexpected span query"
-            builder = self._fake.span_builders.pop(0)
-            if isinstance(builder, Exception):
-                raise builder
-            return builder(trace_ids[0])
+            self._fake.in_flight += 1
+            self._fake.peak_in_flight = max(
+                self._fake.peak_in_flight, self._fake.in_flight
+            )
+            try:
+                if self._fake.fetch_delays:
+                    await asyncio.sleep(self._fake.fetch_delays.pop(0))
+                self._fake.requested.append(trace_ids[0])
+                self._fake.events.append("get-spans")
+                assert self._fake.span_builders, "unexpected span query"
+                builder = self._fake.span_builders.pop(0)
+                if isinstance(builder, Exception):
+                    raise builder
+                return builder(trace_ids[0])
+            finally:
+                self._fake.in_flight -= 1
 
         self._fake.events.append("list-spans")
         self._fake.list_windows.append((start_time, end_time))
@@ -129,6 +139,9 @@ class FakePhoenix:
         self.events: list[str] = []
         self.list_pages: list[ListPage] = []
         self.list_windows: list[tuple[datetime | None, datetime | None]] = []
+        self.fetch_delays: list[float] = []
+        self.in_flight = 0
+        self.peak_in_flight = 0
         self.exporter = InMemorySpanExporter()
         self.provider = TracerProvider()
         self.provider.add_span_processor(SimpleSpanProcessor(self.exporter))

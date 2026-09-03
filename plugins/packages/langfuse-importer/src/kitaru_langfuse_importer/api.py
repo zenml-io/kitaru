@@ -23,7 +23,7 @@ from langfuse import get_client
 from langfuse.api import NotFoundError, ObservationsView, TraceWithFullDetails
 from langfuse.api.core import RequestOptions
 
-from kitaru.task.importer import FetchQuery
+from kitaru.task.importer import FetchQuery, gather_bounded
 
 __all__ = [
     "fetch",
@@ -155,7 +155,9 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
 
     The parser groups traces into sessions by Langfuse session id, so every
     matching trace must reach it in a single payload for that grouping to
-    work. A time-window query lists and fetches traces oldest first.
+    work. A time-window query lists traces oldest first, then fetches them
+    concurrently, up to the query's concurrency, and merges them back into
+    that order.
 
     Args:
         query: Fetch query with `trace_ids`, `since`, and `until` keys.
@@ -169,12 +171,12 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     parsed = FetchQuery.model_validate(query)
 
     if parsed.trace_ids is not None:
-        traces = [await fetch_trace(trace_id) for trace_id in parsed.trace_ids]
+        trace_ids = parsed.trace_ids
     else:
         since, until = parsed.get_window()
-        traces = [
-            await fetch_trace(trace_id)
-            async for trace_id in _list_trace_ids(since, until)
-        ]
+        trace_ids = [trace_id async for trace_id in _list_trace_ids(since, until)]
+    traces = await gather_bounded(
+        (fetch_trace(trace_id) for trace_id in trace_ids), parsed.concurrency
+    )
     if traces:
         yield serialize_traces(traces)

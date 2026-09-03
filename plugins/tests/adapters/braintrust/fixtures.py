@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Shared Braintrust SDK and BTQL fakes for the Braintrust adapter."""
 
+import asyncio
 import re
 import secrets
 from collections.abc import Callable
@@ -149,7 +150,14 @@ class _FakeAsyncClient:
     async def post(
         self, url: str, *, headers: dict[str, str], json: dict[str, Any]
     ) -> _FakeResponse:
-        return self._fake.post(url, headers, json)
+        self._fake.in_flight += 1
+        self._fake.peak_in_flight = max(self._fake.peak_in_flight, self._fake.in_flight)
+        try:
+            if self._fake.fetch_delays:
+                await asyncio.sleep(self._fake.fetch_delays.pop(0))
+            return self._fake.post(url, headers, json)
+        finally:
+            self._fake.in_flight -= 1
 
 
 class FakeBraintrust:
@@ -166,6 +174,9 @@ class FakeBraintrust:
         self.list_pages: list[tuple[list[str], str | None]] = []
         self.list_queries: list[dict[str, str]] = []
         self.list_cursors_received: list[str | None] = []
+        self.fetch_delays: list[float] = []
+        self.in_flight = 0
+        self.peak_in_flight = 0
 
     def start_span(self, *, name: str) -> Any:
         if self.no_active_logger:
