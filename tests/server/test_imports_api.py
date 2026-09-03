@@ -24,7 +24,6 @@ import pytest
 from fastapi import FastAPI
 
 from conftest import (
-    UNSCOPED_WORKER_SCOPE,
     FakeAccountRepository,
     FakeEphemeralWorkers,
     JobAndTaskServices,
@@ -127,17 +126,24 @@ async def client(app: FastAPI) -> AsyncGenerator[httpx.AsyncClient, None]:
         yield client
 
 
-async def _create_import_inputs(services: JobAndTaskServices) -> dict[str, Any]:
+async def _create_import_inputs(
+    services: JobAndTaskServices, builtin: bool = False
+) -> dict[str, Any]:
     """Build the request body for a create-import request.
 
     Args:
         services: Fake-backed job and task services.
+        builtin: Whether the importer lives in the reserved namespace.
 
     Returns:
         JSON body for a create-import request.
     """
+    name = "kitaru/csv" if builtin else "csv"
     plugin = await create_plugin(
-        services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
+        services.plugins,
+        None if builtin else ACCOUNT.id,
+        PluginKind.IMPORTER,
+        name=name,
     )
     await services.plugins.create_version(
         plugin.id,
@@ -147,7 +153,7 @@ async def _create_import_inputs(services: JobAndTaskServices) -> dict[str, Any]:
     payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
     agent = await create_agent(services.agents, ACCOUNT.id)
     return {
-        "importer": "csv",
+        "importer": name,
         "agent_id": str(agent.id),
         "payload_blob_id": str(payload.id),
         "params": {
@@ -250,7 +256,7 @@ async def test_create_import_starts_an_ephemeral_worker(
 ) -> None:
     """Register and start an ephemeral worker pinned to the job."""
     response = await client.post(
-        "/api/v1/imports", json=await _create_import_inputs(services)
+        "/api/v1/imports", json=await _create_import_inputs(services, builtin=True)
     )
     assert response.status_code == 201
     job_id = uuid.UUID(response.json()["id"])
@@ -263,7 +269,11 @@ async def test_create_import_starts_an_ephemeral_worker(
     worker = await services.workers.get(spec.worker_id)
     assert worker.name == f"job-{job_id}"
     assert worker.scope == WorkerScope(
-        claims=UNSCOPED_WORKER_SCOPE.claims, job_id=job_id
+        claims=[
+            WorkerClaim(kind=TaskKind.IMPORTER),
+            WorkerClaim(kind=TaskKind.EVALUATOR),
+        ],
+        job_id=job_id,
     )
     assert worker.runtime.platform == "modal"
     assert worker.metadata == {"ephemeral": "true"}
@@ -292,13 +302,28 @@ async def test_create_import_skips_the_start_when_a_live_worker_covers_the_task(
     )
 
     response = await client.post(
-        "/api/v1/imports", json=await _create_import_inputs(services)
+        "/api/v1/imports", json=await _create_import_inputs(services, builtin=True)
     )
     assert response.status_code == 201
 
     assert ephemeral_workers.starts == []
     workers, _ = await services.workers.query(WorkerFilter(), None)
     assert [worker.id for worker in workers] == [live_worker.id]
+
+
+async def test_create_import_skips_the_start_for_a_user_plugin(
+    client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+) -> None:
+    """Skip registering and starting a worker for a user importer."""
+    response = await client.post(
+        "/api/v1/imports", json=await _create_import_inputs(services)
+    )
+    assert response.status_code == 201
+    workers, _ = await services.workers.query(WorkerFilter(include_stale=True), None)
+    assert workers == []
+    assert ephemeral_workers.starts == []
 
 
 async def test_create_import_without_an_ephemeral_worker_backend_registers_nothing(
@@ -331,7 +356,7 @@ async def test_create_import_returns_201_when_the_start_fails(
 
     with caplog.at_level(logging.ERROR):
         response = await client.post(
-            "/api/v1/imports", json=await _create_import_inputs(services)
+            "/api/v1/imports", json=await _create_import_inputs(services, builtin=True)
         )
     assert response.status_code == 201
     job_id = response.json()["id"]

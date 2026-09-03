@@ -4420,7 +4420,7 @@ class FakePluginRepository:
 
 async def create_plugin(
     repository: FakePluginRepository,
-    owner_id: uuid.UUID,
+    owner_id: uuid.UUID | None,
     kind: PluginKind,
     name: str = "plugin",
     description: str | None = None,

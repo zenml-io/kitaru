@@ -114,7 +114,7 @@ class WorkerService:
     async def register_ephemeral_worker(
         self, job_id: uuid.UUID, runtime: WorkerRuntime, actor: AuthContext
     ) -> Worker:
-        """Register a worker claiming every task of one job.
+        """Register a worker claiming the import and evaluation tasks of one job.
 
         Args:
             job_id: Id of the job the worker drains.
@@ -127,7 +127,11 @@ class WorkerService:
         return await self.register_worker(
             name=f"job-{job_id}",
             scope=WorkerScope(
-                claims=[WorkerClaim(kind=kind) for kind in TaskKind], job_id=job_id
+                claims=[
+                    WorkerClaim(kind=TaskKind.IMPORTER),
+                    WorkerClaim(kind=TaskKind.EVALUATOR),
+                ],
+                job_id=job_id,
             ),
             runtime=runtime,
             metadata={"ephemeral": "true"},

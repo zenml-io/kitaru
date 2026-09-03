@@ -46,7 +46,7 @@ from kitaru.server.application.services.plugin_resolution import (
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import Job, JobAlreadySettled, JobNotSettled
-from kitaru.server.domain.plugin import PluginKind
+from kitaru.server.domain.plugin import Plugin, PluginKind
 from kitaru.server.domain.task import AgentTask, EvaluationTask, ImportTask, Task
 
 AGENT_VERSION_LABEL = "agent_version"
@@ -157,6 +157,26 @@ class JobService:
         """
         _ = actor
         return await self._repository.get(job_id)
+
+    async def get_task_plugin(
+        self, task: EvaluationTask | ImportTask, actor: AuthContext
+    ) -> Plugin:
+        """Get the plugin a task runs.
+
+        Args:
+            task: Evaluation or import task.
+            actor: Caller context.
+
+        Raises:
+            PluginVersionIdNotFound: No plugin version has the task's id.
+            PluginNotFound: The version's plugin does not exist.
+
+        Returns:
+            Stored plugin.
+        """
+        _ = actor
+        version = await self._plugins.get_version_by_id(task.plugin_version_id)
+        return await self._plugins.get(version.plugin_id)
 
     async def list_jobs(
         self, job_filter: JobFilter, actor: AuthContext

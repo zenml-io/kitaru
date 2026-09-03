@@ -14,6 +14,7 @@
 """Ephemeral worker start scheduling."""
 
 import logging
+from collections.abc import Sequence
 
 from fastapi import BackgroundTasks
 from pydantic import SecretStr
@@ -28,6 +29,9 @@ from kitaru.server.application.models.worker import EphemeralWorkerSpec
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.job import Job
+from kitaru.server.domain.names import NAMESPACE_SEPARATOR, RESERVED_NAMESPACE
+from kitaru.server.domain.plugin import Plugin
+from kitaru.server.domain.task import EvaluationTask, ImportTask, Task
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +48,8 @@ async def start_ephemeral_worker(
 ) -> None:
     """Register a worker for the job and start it after the response.
 
-    A live worker whose scope covers the job's task suppresses the start.
+    A live worker whose scope covers the job's tasks suppresses the start, as
+    does any agent task or any task of a plugin outside the reserved namespace.
 
     Args:
         job: Created job.
@@ -57,6 +62,8 @@ async def start_ephemeral_worker(
         actor: Caller context.
     """
     tasks, _ = await job_service.list_job_tasks(job.id, TaskFilter(), actor=actor)
+    if not await _is_eligible(tasks, job_service, actor):
+        return
     if await worker_service.is_covered(tasks):
         return
     worker = await worker_service.register_ephemeral_worker(
@@ -78,6 +85,40 @@ async def start_ephemeral_worker(
     # Background tasks run after the route commits, so the worker is persisted
     # in the DB by then.
     background_tasks.add_task(_start_worker, ephemeral_workers, spec)
+
+
+def _is_builtin(plugin: Plugin) -> bool:
+    """Report whether a plugin lives in the reserved namespace.
+
+    Args:
+        plugin: Stored plugin.
+
+    Returns:
+        Whether the plugin is built in.
+    """
+    return plugin.name.startswith(f"{RESERVED_NAMESPACE}{NAMESPACE_SEPARATOR}")
+
+
+async def _is_eligible(
+    tasks: Sequence[Task], job_service: JobService, actor: AuthContext
+) -> bool:
+    """Report whether an ephemeral worker may run every task.
+
+    Args:
+        tasks: Tasks of the job.
+        job_service: Job service.
+        actor: Caller context.
+
+    Returns:
+        Whether every task is a non-agent task of a built-in plugin.
+    """
+    for task in tasks:
+        if not isinstance(task, EvaluationTask | ImportTask):
+            return False
+        plugin = await job_service.get_task_plugin(task, actor=actor)
+        if not _is_builtin(plugin):
+            return False
+    return True
 
 
 async def _start_worker(
