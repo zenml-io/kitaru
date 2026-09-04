@@ -71,6 +71,11 @@ _VERSION_PARENT_FIELD: dict[type, str] = {
     ImporterVersionResponse: "importer_id",
     AnalyzerVersionResponse: "analyzer_id",
 }
+_FILTER_CLASS: dict[PluginKind, type[PluginFilter]] = {
+    PluginKind.EVALUATOR: EvaluatorFilter,
+    PluginKind.IMPORTER: ImporterFilter,
+    PluginKind.ANALYZER: AnalyzerFilter,
+}
 
 
 def plugin_source_to_domain(source: WirePluginSource) -> DomainPluginSource:
@@ -184,15 +189,7 @@ def plugin_list_params_to_filter(
         Evaluator, importer, or analyzer filter, scoped to the given kind.
     """
     expression = filter_to_expression(filter_) if filter_ is not None else None
-    if kind is PluginKind.EVALUATOR:
-        filter_class = EvaluatorFilter
-    elif kind is PluginKind.IMPORTER:
-        filter_class = ImporterFilter
-    elif kind is PluginKind.ANALYZER:
-        filter_class = AnalyzerFilter
-    else:
-        filter_class = PluginFilter
-    return filter_class(
+    return _FILTER_CLASS[kind](
         kind=kind,
         expression=expression,
         cursor=params.cursor,
