@@ -65,11 +65,13 @@ uv run kitaru login --local                           # local server in Docker
 # or: uv run kitaru login <your-team-url>
 ```
 
-**2. Make your coding assistant Kitaru-capable.** This is the intended way to drive Kitaru: skills teach the method, and the MCP server gives your assistant bounded operations.
+**2. Make your coding assistant Kitaru-capable.** This is the intended way to drive Kitaru: skills teach the method, and the MCP server gives your assistant bounded operations. The installer already did this; one command does it again for any coding agent you install later (Claude Code, Codex, Cursor, Windsurf):
 
 ```bash
-npx skills add zenml-io/kitaru-skills
+uv run kitaru setup            # or: kitaru setup --mode read-only, --no-skills, --no-mcp
 ```
+
+It installs the [skills](https://github.com/zenml-io/kitaru-skills) into `~/.agents/skills` (plus each agent's own skills directory) and registers `kitaru-mcp` with every agent it finds. For any other MCP client it prints the JSON to paste:
 
 ```json
 {
