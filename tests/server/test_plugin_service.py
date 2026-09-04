@@ -124,6 +124,19 @@ def importer_service(
     )
 
 
+@pytest.fixture
+def analyzer_service(
+    repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+) -> PluginService:
+    """Provide a plugin service bound to the analyzer kind, sharing the repository."""
+    return PluginService(
+        kind=PluginKind.ANALYZER,
+        repository=repository,
+        blob_repository=blob_repository,
+    )
+
+
 async def test_create_plugin(evaluator_service: PluginService) -> None:
     """Create a plugin owned by the caller."""
     plugin = await evaluator_service.create_plugin(
@@ -202,6 +215,19 @@ async def test_create_plugin_importer_allows_provider(
         actor=ACTOR,
     )
     assert plugin.provider == "langfuse"
+
+
+async def test_create_plugin_analyzer_rejects_provider(
+    analyzer_service: PluginService,
+) -> None:
+    """Reject a provider on an analyzer plugin."""
+    with pytest.raises(InvalidPluginProvider):
+        await analyzer_service.create_plugin(
+            PluginCreate(
+                name="trends", description=None, provider="langfuse", metadata={}
+            ),
+            actor=ACTOR,
+        )
 
 
 async def test_evaluator_and_importer_share_a_name(
@@ -633,4 +659,15 @@ async def test_create_plugin_importer_rejects_agent_id(
     with pytest.raises(InvalidPluginAgentScope):
         await importer_service.create_plugin(
             PluginCreate(name="langfuse-import", agent_id=agent.id), actor=ACTOR
+        )
+
+
+async def test_create_plugin_analyzer_rejects_agent_id(
+    analyzer_service: PluginService, agent_repository: FakeAgentRepository
+) -> None:
+    """Reject an agent id on an analyzer plugin."""
+    agent = await create_agent(agent_repository, ACTOR.account.id)
+    with pytest.raises(InvalidPluginAgentScope):
+        await analyzer_service.create_plugin(
+            PluginCreate(name="trends", agent_id=agent.id), actor=ACTOR
         )

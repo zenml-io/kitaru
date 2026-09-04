@@ -28,6 +28,7 @@ from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.imports import ImportCreate, ImportFilter
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
+from kitaru.server.application.services.analyzer_resolution import validate_analyzers
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
 from kitaru.server.application.services.plugin_resolution import (
     get_plugin_task_labels,
@@ -61,8 +62,8 @@ class ImportService:
             task_repository: Task repository.
             agent_repository: Agent repository.
             agent_version_repository: Agent version repository.
-            plugin_repository: Plugin repository, for importer and evaluator
-                resolution.
+            plugin_repository: Plugin repository, for importer, evaluator,
+                and analyzer resolution.
             blob_repository: Blob repository, for the payload lookup.
         """
         self._repository = repository
@@ -85,17 +86,19 @@ class ImportService:
             actor: Caller context.
 
         Raises:
-            PluginNotFound: No importer has this name, or an evaluator config
-                names an unknown evaluator.
+            PluginNotFound: No importer has this name, or an evaluator or
+                analyzer config names an unknown plugin.
             PluginVersionNotFound: The importer has no version with this
-                number, or an evaluator config names an unknown version.
+                number, or an evaluator or analyzer config names an unknown
+                version.
             BlobNotFound: No blob has the payload id.
             AgentNotFound: No agent has this id.
             AgentVersionNotFound: No agent version has this id.
             AgentVersionAgentMismatch: The agent version belongs to another
                 agent.
             ValidationError: An evaluator config is scoped to another agent,
-                or two configs resolve to the same evaluator version.
+                or two evaluator or analyzer configs resolve to the same
+                plugin version.
 
         Returns:
             Created import.
@@ -115,6 +118,7 @@ class ImportService:
         evaluators = await validate_evaluators(
             command.evaluators, self._plugins, agent.id, actor
         )
+        analyzers = await validate_analyzers(command.analyzers, self._plugins, actor)
         job = await self._jobs.create(
             Job(owner_id=actor.account.id, kind=JobKind.IMPORT)
         )
@@ -128,6 +132,7 @@ class ImportService:
                 payload_blob_id=payload.id,
                 params=command.params,
                 evaluators=evaluators,
+                analyzers=analyzers,
             )
         )
         # The job was just created in this call and cannot have settled yet, so

@@ -29,7 +29,10 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.imports import ImportCreate, ImportFilter
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.replay_config import (
+    AnalyzerConfigInput,
+    EvaluatorConfigInput,
+)
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
@@ -84,11 +87,24 @@ async def _evaluator_version(
     )
 
 
+async def _analyzer_version(services: JobAndTaskServices, name: str) -> PluginVersion:
+    """Register an analyzer with one version."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.ANALYZER, name=name
+    )
+    return await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="analyze"),
+        display_version=None,
+    )
+
+
 async def _import_command(
     services: JobAndTaskServices,
     agent: Agent | None = None,
     agent_version_id: uuid.UUID | None = None,
     evaluators: list[EvaluatorConfigInput] | None = None,
+    analyzers: list[AnalyzerConfigInput] | None = None,
 ) -> ImportCreate:
     """Build a create command naming a stored payload and agent."""
     payload = await create_blob(services.blobs, ACTOR.account.id, content=b"csv-data")
@@ -101,6 +117,7 @@ async def _import_command(
         payload_blob_id=payload.id,
         params={"delimiter": ","},
         evaluators=evaluators if evaluators is not None else [],
+        analyzers=analyzers if analyzers is not None else [],
     )
 
 
@@ -194,6 +211,58 @@ async def test_create_import_rejects_duplicate_evaluator_versions(
         evaluators=[
             EvaluatorConfigInput(evaluator="accuracy"),
             EvaluatorConfigInput(evaluator="accuracy", version=1),
+        ],
+    )
+    with pytest.raises(ValidationError):
+        await services.import_service.create_import(command, actor=ACTOR)
+
+
+async def test_create_import_stores_the_resolved_analyzers(
+    services: JobAndTaskServices,
+) -> None:
+    """The import row carries the analyzers resolved to concrete versions."""
+    await _importer_version(services)
+    analyzer_version = await _analyzer_version(services, "trends")
+    command = await _import_command(
+        services,
+        analyzers=[AnalyzerConfigInput(analyzer="trends", params={"k": 1})],
+    )
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert len(import_.analyzers) == 1
+    analyzer = import_.analyzers[0]
+    assert analyzer.analyzer == "trends"
+    assert analyzer.version == 1
+    assert analyzer.params == {"k": 1}
+    assert analyzer.analyzer_version_id == analyzer_version.id
+    stored = await services.imports.get(import_.id)
+    assert stored.analyzers == import_.analyzers
+
+
+async def test_create_import_rejects_an_unknown_analyzer(
+    services: JobAndTaskServices,
+) -> None:
+    """An analyzer config naming no analyzer is rejected."""
+    await _importer_version(services)
+    command = await _import_command(
+        services, analyzers=[AnalyzerConfigInput(analyzer="does-not-exist")]
+    )
+    with pytest.raises(PluginNotFound):
+        await services.import_service.create_import(command, actor=ACTOR)
+
+
+async def test_create_import_rejects_duplicate_analyzer_versions(
+    services: JobAndTaskServices,
+) -> None:
+    """Two analyzer configs resolving to one version are rejected."""
+    await _importer_version(services)
+    await _analyzer_version(services, "trends")
+    command = await _import_command(
+        services,
+        analyzers=[
+            AnalyzerConfigInput(analyzer="trends"),
+            AnalyzerConfigInput(analyzer="trends", version=1),
         ],
     )
     with pytest.raises(ValidationError):

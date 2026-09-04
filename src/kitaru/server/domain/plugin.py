@@ -44,6 +44,7 @@ class PluginKind(StrEnum):
 
     EVALUATOR = "evaluator"
     IMPORTER = "importer"
+    ANALYZER = "analyzer"
 
 
 class PluginNotFound(NotFoundError):
@@ -128,19 +129,27 @@ class PluginVersionIdNotFound(NotFoundError):
 
 
 class InvalidPluginProvider(ValidationError):
-    """Raised when an evaluator plugin carries a provider."""
+    """Raised when a plugin kind that does not carry a provider has one set."""
 
-    def __init__(self) -> None:
-        """Initialize the error."""
-        super().__init__("Evaluator plugins do not carry a provider")
+    def __init__(self, kind: PluginKind) -> None:
+        """Initialize the error.
+
+        Args:
+            kind: Kind that does not carry a provider.
+        """
+        super().__init__(f"{kind.value.capitalize()} plugins do not carry a provider")
 
 
 class InvalidPluginAgentScope(ValidationError):
-    """Raised when an importer plugin carries an agent id."""
+    """Raised when a plugin kind that does not carry an agent id has one set."""
 
-    def __init__(self) -> None:
-        """Initialize the error."""
-        super().__init__("Importer plugins do not carry an agent id")
+    def __init__(self, kind: PluginKind) -> None:
+        """Initialize the error.
+
+        Args:
+            kind: Kind that does not carry an agent id.
+        """
+        super().__init__(f"{kind.value.capitalize()} plugins do not carry an agent id")
 
 
 class InvalidPluginRequirement(ValidationError):
@@ -281,31 +290,38 @@ class Plugin(DomainModel):
 
     @model_validator(mode="after")
     def _check_provider(self) -> "Plugin":
-        """Reject a provider on an evaluator plugin.
+        """Reject a provider on an evaluator or analyzer plugin.
 
         Raises:
-            InvalidPluginProvider: The kind is evaluator and provider is set.
+            InvalidPluginProvider: The kind is evaluator or analyzer and
+                provider is set.
 
         Returns:
             The validated plugin.
         """
-        if self.kind is PluginKind.EVALUATOR and self.provider is not None:
-            raise InvalidPluginProvider
+        if (
+            self.kind in (PluginKind.EVALUATOR, PluginKind.ANALYZER)
+            and self.provider is not None
+        ):
+            raise InvalidPluginProvider(self.kind)
         return self
 
     @model_validator(mode="after")
     def _check_agent_id(self) -> "Plugin":
-        """Reject an agent id on an importer plugin.
+        """Reject an agent id on an importer or analyzer plugin.
 
         Raises:
-            InvalidPluginAgentScope: The kind is importer and agent_id is
-                set.
+            InvalidPluginAgentScope: The kind is importer or analyzer and
+                agent_id is set.
 
         Returns:
             The validated plugin.
         """
-        if self.kind is PluginKind.IMPORTER and self.agent_id is not None:
-            raise InvalidPluginAgentScope
+        if (
+            self.kind in (PluginKind.IMPORTER, PluginKind.ANALYZER)
+            and self.agent_id is not None
+        ):
+            raise InvalidPluginAgentScope(self.kind)
         return self
 
     def update_description(self, description: str | None) -> None:
