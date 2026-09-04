@@ -23,7 +23,7 @@ from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from itertools import pairwise
 from typing import Any, Literal, Self
@@ -394,6 +394,7 @@ class _State:
     timing_available: int = 0
     identity_available: int = 0
     tool_calls: int = 0
+    ambiguous_tool_outputs: int = 0
     contribution_truncated: bool = False
     maximum_contributors_available: int = 0
 
@@ -765,13 +766,7 @@ def _scan_session(
                 node_id=call.id,
             )
         if call.outputs is None:
-            _record(
-                state,
-                "null-tool-results",
-                session_id,
-                category=label,
-                node_id=call.id,
-            )
+            state.ambiguous_tool_outputs += 1
         elif _is_empty_result(call.outputs):
             _record(
                 state,
@@ -876,9 +871,20 @@ def _scan_session(
             break
 
 
-def _percent(numerator: int, denominator: int) -> int:
-    """Return a whole percentage without dividing by zero."""
-    return round(100 * numerator / denominator) if denominator else 0
+def _percent(numerator: int, denominator: int) -> int | float:
+    """Return a bounded percentage without hiding sparse nonzero shares."""
+    if not denominator:
+        return 0
+    value = (Decimal(numerator) * 100 / Decimal(denominator)).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    if numerator > 0:
+        value = max(value, Decimal("0.01"))
+    if numerator < denominator:
+        value = min(value, Decimal("99.99"))
+    if value == value.to_integral_value():
+        return int(value)
+    return float(value)
 
 
 def _contributions(state: _State, session_ids: set[uuid.UUID]) -> list[uuid.UUID]:
@@ -1089,18 +1095,6 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             "sessions.",
             "user messages containing literal correction phrases",
             "Language markers are literal leads, not judgments of sentiment or intent.",
-        ),
-        (
-            "null-tool-results",
-            "null-tool-results",
-            "tool_health",
-            70,
-            "MISSING TOOL RESULTS",
-            "{share}% of sessions contain a null tool result",
-            "The profiler found {count} null results across {affected} sessions; "
-            "{top} appears most often.",
-            "tool calls with a null recorded result",
-            "Null results may reflect instrumentation rather than agent behavior.",
         ),
         (
             "empty-tool-results",
@@ -1498,6 +1492,11 @@ def profile_sessions(
         caveats.append(
             "Tool identity coverage is incomplete because names or finite inputs are "
             "missing."
+        )
+    if state.ambiguous_tool_outputs:
+        caveats.append(
+            "Tool outputs recorded as null were not profiled because the normalized "
+            "contract cannot distinguish an explicit null from an omitted payload."
         )
     if not state.text_available:
         caveats.append(
