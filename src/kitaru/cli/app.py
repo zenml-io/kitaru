@@ -44,6 +44,7 @@ from kitaru.cli import (
     evaluations,
     experiment_runs,
     experiments,
+    insights,
     investigations,
     jobs,
     local_runtime,
@@ -140,6 +141,11 @@ annotation_app = App(
     help=GROUP_DESCRIPTIONS["annotation"],
     default_parameter=Parameter(negative=False),
 )
+insight_app = App(
+    name="insight",
+    help=GROUP_DESCRIPTIONS["insight"],
+    default_parameter=Parameter(negative=False),
+)
 investigation_app = App(
     name="investigation",
     help=GROUP_DESCRIPTIONS["investigation"],
@@ -222,6 +228,7 @@ app.command(annotation_app, name="annotation")
 app.command(cohort_app, name="cohort")
 app.command(experiment_app, name="experiment")
 app.command(importer_app, name="importer")
+app.command(insight_app, name="insight")
 app.command(investigation_app, name="investigation")
 app.command(evaluator_app, name="evaluator")
 app.command(session_app, name="session")
@@ -1861,6 +1868,181 @@ async def cohort_version_delete(
     """Delete one exact immutable cohort version."""
     async with _open_asset_client() as client:
         return await cohorts.delete_cohort_version(client, version, force=force)
+
+
+@_register(
+    insight_app,
+    _spec(
+        ("insight", "create"),
+        "Create a batch of insights for one agent.",
+        parameters=(
+            ParameterSpec(
+                "--agent",
+                "reference",
+                "option",
+                True,
+                "Agent UUID or case-sensitive name.",
+            ),
+            ParameterSpec(
+                "--insight",
+                "JSON[]",
+                "option",
+                True,
+                "Insight JSON object; repeat for each created insight.",
+            ),
+            _IDEMPOTENCY_KEY_PARAMETER,
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_remote_create",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def insight_create(
+    *,
+    agent: str,
+    insight: list[str],
+    idempotency_key: str | None = None,
+) -> CommandResult:
+    """Create a batch of insights for one agent."""
+    async with _open_asset_client() as client:
+        return await insights.create_insights(
+            client,
+            agent=agent,
+            insight=insight,
+            idempotency_key=idempotency_key,
+        )
+
+
+@_register(
+    insight_app,
+    _spec(
+        ("insight", "list"),
+        "List insights.",
+        parameters=(
+            *_LIST_PARAMETERS,
+            ParameterSpec(
+                "--agent",
+                "reference",
+                "option",
+                False,
+                "Only insights for this exact agent UUID or name.",
+            ),
+            ParameterSpec(
+                "--type",
+                "text|categorical|histogram",
+                "option",
+                False,
+                "Only insights with this data type.",
+            ),
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def insight_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+    agent: str | None = None,
+    type: Literal["text", "categorical", "histogram"] | None = None,
+) -> CommandResult:
+    """List one server page of insights."""
+    async with _open_asset_client() as client:
+        return await insights.list_insights(
+            client,
+            size=size,
+            cursor=cursor,
+            sort=sort,
+            filter=filter,
+            agent=agent,
+            type=type,
+        )
+
+
+@_register(
+    insight_app,
+    _spec(
+        ("insight", "get"),
+        "Get an insight by exact UUID.",
+        parameters=(ParameterSpec("INSIGHT", "UUID", "argument", True, "Insight ID."),),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def insight_get(insight: uuid.UUID, /) -> CommandResult:
+    """Get one insight by UUID."""
+    async with _open_asset_client() as client:
+        return await insights.get_insight(client, insight)
+
+
+@_register(
+    insight_app,
+    _spec(
+        ("insight", "update"),
+        "Update selected insight fields.",
+        parameters=(
+            ParameterSpec("INSIGHT", "UUID", "argument", True, "Insight ID."),
+            ParameterSpec("--title", "string", "option", False, "New title."),
+            ParameterSpec(
+                "--description", "string", "option", False, "New description."
+            ),
+            ParameterSpec(
+                "--clear-description",
+                "boolean",
+                "option",
+                False,
+                "Clear the description.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def insight_update(
+    insight: uuid.UUID,
+    /,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    clear_description: bool = False,
+) -> CommandResult:
+    """Update selected fields on one insight."""
+    async with _open_asset_client() as client:
+        return await insights.update_insight(
+            client,
+            insight,
+            title=title,
+            description=description,
+            clear_description=clear_description,
+        )
+
+
+@_register(
+    insight_app,
+    _spec(
+        ("insight", "delete"),
+        "Delete an insight.",
+        parameters=(
+            ParameterSpec("INSIGHT", "UUID", "argument", True, "Insight ID."),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def insight_delete(
+    insight: uuid.UUID, /, *, force: bool = False
+) -> CommandResult:
+    """Delete one insight by UUID."""
+    async with _open_asset_client() as client:
+        return await insights.delete_insight(client, insight, force=force)
 
 
 @_register(

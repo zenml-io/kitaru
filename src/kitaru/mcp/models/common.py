@@ -19,6 +19,7 @@ from kitaru.api_models.v1.evaluator import EvaluatorResponse, EvaluatorVersionRe
 from kitaru.api_models.v1.experiment import ExperimentResponse
 from kitaru.api_models.v1.experiment_run import ExperimentRunResponse
 from kitaru.api_models.v1.importer import ImporterResponse, ImporterVersionResponse
+from kitaru.api_models.v1.insight import InsightResponse
 from kitaru.api_models.v1.investigation import (
     InvestigationResponse,
     InvestigationSessionResponse,
@@ -146,19 +147,26 @@ class ActivityReadResult(ToolResult):
     data: ActivityItem | PageData[ActivityItem] | None = None
 
 
-ReviewItem = InvestigationResponse | InvestigationSessionResponse | AnnotationResponse
+ReviewItem = (
+    InvestigationResponse
+    | InvestigationSessionResponse
+    | AnnotationResponse
+    | InsightResponse
+)
 
 
 class ReviewReadResult(ToolResult):
-    """Typed investigation and annotation read result."""
+    """Typed investigation, annotation, and insight read result."""
 
     data: ReviewItem | PageData[ReviewItem] | None = None
 
 
 class ReviewManageResult(ToolResult):
-    """Typed investigation and annotation management result."""
+    """Typed investigation, annotation, and insight management result."""
 
-    data: ReviewItem | TagResponse | TagLinkResponse | None = None
+    data: ReviewItem | TagResponse | TagLinkResponse | list[InsightResponse] | None = (
+        None
+    )
     links: dict[Literal["review"], str] = Field(default_factory=dict)
 
 
@@ -253,6 +261,7 @@ DeleteKind = Literal[
     "cohort_version",
     "experiment",
     "experiment_run",
+    "insight",
     "investigation",
     "annotation",
     "evaluator",
