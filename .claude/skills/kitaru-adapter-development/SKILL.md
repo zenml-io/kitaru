@@ -25,6 +25,8 @@ Preserve the framework's ordinary behavior, configured hooks and state, public e
 
 ## Package and documentation work
 
+Python feature PRs follow the version and dependency ownership rules in `plugins/AGENTS.md`. Leave existing package versions unchanged. Use the exact development dependency from `plugins/DEVELOPMENT.md` only when the adapter needs unreleased core; release prep selects the published compatibility floor.
+
 For a new Python adapter, inspect the current package inventory and update only the required integration points:
 
 - `plugins/packages/<slug>/pyproject.toml`, README, changelog, source package, public exports, and focused tests
