@@ -559,7 +559,7 @@ def test_bounds_sessions_nodes_text_evidence_candidates_and_projection() -> None
     assert result.coverage.sessions_available == 4
     assert result.coverage.sessions_analyzed == 2
     assert result.coverage.nodes_available == 12
-    assert result.coverage.nodes_analyzed == 4
+    assert result.coverage.nodes_analyzed == 3
     assert result.coverage.inspected_text_bytes <= 12
     assert len(result.candidates) <= 3
     assert all(len(candidate.evidence) <= 1 for candidate in result.candidates)
@@ -567,7 +567,57 @@ def test_bounds_sessions_nodes_text_evidence_candidates_and_projection() -> None
         len(candidate.contributing_session_ids) <= 1 for candidate in result.candidates
     )
     dimensions = {item.dimension for item in result.coverage.truncations}
-    assert {"sessions", "nodes", "text_bytes", "contributing_sessions"} <= dimensions
+    assert {"sessions", "nodes", "text_bytes"} <= dimensions
+
+
+def test_node_distributions_exclude_sessions_with_truncated_node_lists() -> None:
+    complete = _calls(
+        1,
+        [("complete_tool", {"id": 1}, NodeStatus.COMPLETED, "ok")],
+    )
+    truncated = _calls(
+        2,
+        [
+            ("partial_tool", {"id": 1}, NodeStatus.FAILED, None),
+            ("partial_tool", {"id": 1}, NodeStatus.FAILED, None),
+        ],
+    )
+    empty_but_complete = _session(3)
+
+    result = profile_sessions(
+        [complete, truncated, empty_but_complete],
+        config=ProfilingConfig(max_nodes=2),
+    )
+
+    distribution = _candidate(result, "tool-call-distribution")
+    assert distribution.contributing_session_ids == [
+        complete.session.id,
+        empty_but_complete.session.id,
+    ]
+    assert distribution.coverage.sessions_analyzed == 2
+    assert distribution.coverage.occurrences == 2
+    assert sum(bin_.count for bin_ in distribution.data.bins) == 2
+    assert "tool-error-mix" not in {candidate.id for candidate in result.candidates}
+    assert result.coverage.nodes_available == 3
+    assert result.coverage.nodes_analyzed == 1
+    assert "node-derived" in " ".join(result.coverage.caveats).lower()
+
+
+def test_contribution_truncation_reports_actual_distribution_contributors() -> None:
+    sessions = [_session(number) for number in range(1, 4)]
+
+    result = profile_sessions(
+        sessions,
+        config=ProfilingConfig(max_contributing_sessions=1),
+    )
+
+    truncation = next(
+        item
+        for item in result.coverage.truncations
+        if item.dimension == "contributing_sessions"
+    )
+    assert truncation.available == 3
+    assert truncation.analyzed == 1
 
 
 def test_text_truncation_reports_the_actual_available_bytes() -> None:

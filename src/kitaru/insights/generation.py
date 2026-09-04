@@ -318,6 +318,21 @@ def _outcome_categories(value: str) -> set[str]:
     return categories
 
 
+def _trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
+    """Derive permitted outcome language from profiler-controlled semantics."""
+    semantic_names = " ".join(
+        (
+            candidate.id.replace("_", " "),
+            candidate.family.replace("_", " "),
+            *(fact.name.replace("_", " ") for fact in candidate.facts),
+        )
+    )
+    categories = _outcome_categories(semantic_names)
+    if candidate.family == "outcome":
+        categories.update({"failure", "completion", "in_progress"})
+    return categories
+
+
 def _validate_page_copy(value: str) -> None:
     """Validate friendly page framing separately from candidate facts."""
     _validate_copy_safety(value)
@@ -330,16 +345,7 @@ def _validate_page_copy(value: str) -> None:
 def _validate_card_copy(value: str, candidate: CandidateFinding) -> None:
     """Validate one card only against the deterministic candidate it explains."""
     _validate_copy_safety(value)
-    factual_copy = " ".join(
-        (
-            candidate.title,
-            candidate.fallback_description,
-            candidate.caveat or "",
-            candidate.data.model_dump_json(),
-            *(str(fact.value) for fact in candidate.facts),
-        )
-    )
-    allowed_outcomes = _outcome_categories(factual_copy)
+    allowed_outcomes = _trusted_outcome_categories(candidate)
     remaining = _without_known_labels(value, _quantified_labels(candidate))
     if _NUMERIC_TOKEN.search(remaining) or _QUANTITY_TOKEN.search(remaining):
         raise ValueError("editor card copy contains a numeric or quantitative claim")
@@ -488,6 +494,7 @@ async def generate_model_plan(
             raise ValueError("analyst returned the wrong receipt stage")
         selection = validate_analyst_plan(analyst_response.value, profiling.candidates)
         receipts.append(analyst_response.receipt)
+        observation_started = loop.time()
         await observe_safely(
             observer,
             GenerationEvent(
@@ -500,6 +507,7 @@ async def generate_model_plan(
                 },
             ),
         )
+        deadline += loop.time() - observation_started
     except TimeoutError:
         receipts.append(
             ProviderReceipt(

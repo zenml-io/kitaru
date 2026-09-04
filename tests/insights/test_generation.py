@@ -344,7 +344,10 @@ def test_editor_allows_friendly_variant_of_grounded_outcome(
     profiling_result: ProfilingResult,
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
-        update={"fallback_description": "A session failed."}
+        update={
+            "family": "outcome",
+            "fallback_description": "A session failed.",
+        }
     )
     selection = AnalystPlan(
         selected_candidate_ids=[candidate.id],
@@ -363,6 +366,36 @@ def test_editor_allows_friendly_variant_of_grounded_outcome(
         }
     )
     assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+def test_chart_label_cannot_authorize_outcome_claim(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="failed", value=1)]
+            )
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Model mix",
+                    description="Failures are worth investigating.",
+                )
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="unsupported outcome"):
+        validate_editorial_plan(copy, selection, [candidate])
 
 
 def test_deterministic_plan_makes_no_model_call(
@@ -401,6 +434,54 @@ async def test_two_calls_on_valid_path(profiling_result: ProfilingResult) -> Non
     assert len(result.diagnostics.provider_receipts) == 2
     assert [event.name for event in events] == ["analyst", "editor"]
     assert {event.run_id for event in events} == {"pipeline-run"}
+
+
+async def test_observer_wait_does_not_consume_model_deadline(
+    profiling_result: ProfilingResult,
+) -> None:
+    class TimedGenerator(FakeGenerator):
+        async def analyze(self, *, projection, config, timeout_seconds):
+            await asyncio.sleep(0.04)
+            return await super().analyze(
+                projection=projection,
+                config=config,
+                timeout_seconds=timeout_seconds,
+            )
+
+        async def edit(self, *, projection, config, timeout_seconds):
+            await asyncio.sleep(0.04)
+            return await super().edit(
+                projection=projection,
+                config=config,
+                timeout_seconds=timeout_seconds,
+            )
+
+    class SlowObserver:
+        async def record(self, event) -> None:
+            await asyncio.sleep(0.08)
+
+    first = profiling_result.candidates[0].id
+    generator = TimedGenerator(
+        AnalystPlan(
+            selected_candidate_ids=[first],
+            recommended_candidate_id=first,
+            rationale="Useful.",
+        ),
+        _editor([first]),
+    )
+    result = await generate_model_plan(
+        profiling_result,
+        generator=generator,
+        config=ModelGenerationConfig(
+            model="test-model",
+            total_timeout_seconds=0.12,
+            analyst_timeout_seconds=0.1,
+            editor_timeout_seconds=0.1,
+        ),
+        observer=SlowObserver(),
+    )
+    assert generator.calls == ["analyst", "editor"]
+    assert result.mode == GenerationMode.MODEL_BACKED
 
 
 async def test_analyst_failure_skips_editor(profiling_result: ProfilingResult) -> None:
