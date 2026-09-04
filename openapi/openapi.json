@@ -663,6 +663,26 @@
         "title": "AnnotationUpdateRequest",
         "type": "object"
       },
+      "ApiImportSource": {
+        "additionalProperties": false,
+        "description": "API import source.",
+        "properties": {
+          "query": {
+            "additionalProperties": true,
+            "description": "Importer-defined selection of what to fetch.",
+            "title": "Query",
+            "type": "object"
+          },
+          "type": {
+            "const": "api",
+            "default": "api",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "ApiImportSource",
+        "type": "object"
+      },
       "ApiKeyCreateRequest": {
         "additionalProperties": false,
         "description": "API key create request.",
@@ -870,6 +890,34 @@
         "title": "ApiKeyUpdateRequest",
         "type": "object"
       },
+      "ApiSourceSpec": {
+        "description": "API source spec.",
+        "properties": {
+          "entrypoint": {
+            "description": "Fetch entrypoint, in the form of the plugin's entrypoint.",
+            "title": "Entrypoint",
+            "type": "string"
+          },
+          "query": {
+            "additionalProperties": true,
+            "description": "Importer-defined selection of what to fetch.",
+            "title": "Query",
+            "type": "object"
+          },
+          "type": {
+            "const": "api",
+            "default": "api",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entrypoint",
+          "query"
+        ],
+        "title": "ApiSourceSpec",
+        "type": "object"
+      },
       "AuthScheme": {
         "description": "Authentication scheme.",
         "enum": [
@@ -969,6 +1017,29 @@
         "title": "BinnedInsightData",
         "type": "object"
       },
+      "BlobImportSource": {
+        "additionalProperties": false,
+        "description": "Blob import source.",
+        "properties": {
+          "blob_id": {
+            "description": "Blob holding the payload to parse.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "blob",
+            "default": "blob",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blob_id"
+        ],
+        "title": "BlobImportSource",
+        "type": "object"
+      },
       "BlobResponse": {
         "description": "Blob response.",
         "properties": {
@@ -1008,6 +1079,34 @@
           "created"
         ],
         "title": "BlobResponse",
+        "type": "object"
+      },
+      "BlobSourceSpec": {
+        "description": "Blob source spec.",
+        "properties": {
+          "blob_id": {
+            "description": "Blob holding the payload.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Blob content hash.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "type": {
+            "const": "blob",
+            "default": "blob",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blob_id",
+          "sha256"
+        ],
+        "title": "BlobSourceSpec",
         "type": "object"
       },
       "Body_device_authorization_api_v1_device_authorization_post": {
@@ -3411,10 +3510,44 @@
             "type": "object"
           },
           "payload_blob_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
             "description": "Blob holding the payload to parse.",
-            "format": "uuid",
-            "title": "Payload Blob Id",
-            "type": "string"
+            "title": "Payload Blob Id"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "api": "#/components/schemas/ApiImportSource",
+                    "blob": "#/components/schemas/BlobImportSource"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/BlobImportSource"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ApiImportSource"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the payload comes from.",
+            "title": "Source"
           },
           "version": {
             "anyOf": [
@@ -3431,8 +3564,7 @@
         },
         "required": [
           "importer",
-          "agent_id",
-          "payload_blob_id"
+          "agent_id"
         ],
         "title": "ImportCreateRequest",
         "type": "object"
@@ -3563,10 +3695,36 @@
             "type": "object"
           },
           "payload_blob_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Blob holding the payload parsed.",
-            "format": "uuid",
-            "title": "Payload Blob Id",
-            "type": "string"
+            "title": "Payload Blob Id"
+          },
+          "source": {
+            "description": "Where the payload comes from.",
+            "discriminator": {
+              "mapping": {
+                "api": "#/components/schemas/ApiImportSource",
+                "blob": "#/components/schemas/BlobImportSource"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlobImportSource"
+              },
+              {
+                "$ref": "#/components/schemas/ApiImportSource"
+              }
+            ],
+            "title": "Source"
           },
           "stats": {
             "anyOf": [
@@ -3592,7 +3750,7 @@
           "owner_id",
           "id",
           "agent_id",
-          "payload_blob_id",
+          "source",
           "params",
           "evaluators"
         ],
@@ -3656,10 +3814,6 @@
             "title": "Params",
             "type": "object"
           },
-          "payload": {
-            "$ref": "#/components/schemas/PayloadSpec",
-            "description": "Payload to parse."
-          },
           "plugin": {
             "description": "Importer plugin to load.",
             "discriminator": {
@@ -3690,11 +3844,30 @@
             ],
             "description": "Source system named on the import.",
             "title": "Provider"
+          },
+          "source": {
+            "description": "Where the payload comes from.",
+            "discriminator": {
+              "mapping": {
+                "api": "#/components/schemas/ApiSourceSpec",
+                "blob": "#/components/schemas/BlobSourceSpec"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlobSourceSpec"
+              },
+              {
+                "$ref": "#/components/schemas/ApiSourceSpec"
+              }
+            ],
+            "title": "Source"
           }
         },
         "required": [
           "plugin",
-          "payload",
+          "source",
           "agent_id",
           "params"
         ],
@@ -5008,6 +5181,18 @@
             "title": "Entrypoint",
             "type": "string"
           },
+          "fetch_entrypoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Module and attribute fetching payloads from an API, as module:attribute.",
+            "title": "Fetch Entrypoint"
+          },
           "requirement": {
             "description": "Pinned PEP 508 requirement.",
             "title": "Requirement",
@@ -5938,28 +6123,6 @@
         "title": "PassthroughConfig",
         "type": "object"
       },
-      "PayloadSpec": {
-        "description": "Payload spec.",
-        "properties": {
-          "blob_id": {
-            "description": "Blob holding the payload.",
-            "format": "uuid",
-            "title": "Blob Id",
-            "type": "string"
-          },
-          "sha256": {
-            "description": "Blob content hash.",
-            "title": "Sha256",
-            "type": "string"
-          }
-        },
-        "required": [
-          "blob_id",
-          "sha256"
-        ],
-        "title": "PayloadSpec",
-        "type": "object"
-      },
       "ReplayCreateRequest": {
         "additionalProperties": false,
         "description": "Replay create request.",
@@ -6434,6 +6597,18 @@
             "description": "Attribute in the file.",
             "title": "Entrypoint",
             "type": "string"
+          },
+          "fetch_entrypoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Attribute in the file fetching payloads from an API.",
+            "title": "Fetch Entrypoint"
           },
           "type": {
             "const": "script",

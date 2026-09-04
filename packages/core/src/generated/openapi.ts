@@ -4126,6 +4126,24 @@ export interface components {
             value: unknown;
         };
         /**
+         * ApiImportSource
+         * @description API import source.
+         */
+        ApiImportSource: {
+            /**
+             * Query
+             * @description Importer-defined selection of what to fetch.
+             */
+            query?: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "api";
+        };
+        /**
          * ApiKeyCreateRequest
          * @description API key create request.
          */
@@ -4265,6 +4283,29 @@ export interface components {
             active: boolean;
         };
         /**
+         * ApiSourceSpec
+         * @description API source spec.
+         */
+        ApiSourceSpec: {
+            /**
+             * Entrypoint
+             * @description Fetch entrypoint, in the form of the plugin's entrypoint.
+             */
+            entrypoint: string;
+            /**
+             * Query
+             * @description Importer-defined selection of what to fetch.
+             */
+            query: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "api";
+        };
+        /**
          * AuthScheme
          * @description Authentication scheme.
          * @enum {string}
@@ -4319,6 +4360,23 @@ export interface components {
             unit?: string | null;
         };
         /**
+         * BlobImportSource
+         * @description Blob import source.
+         */
+        BlobImportSource: {
+            /**
+             * Blob Id
+             * Format: uuid
+             * @description Blob holding the payload to parse.
+             */
+            blob_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "blob";
+        };
+        /**
          * BlobResponse
          * @description Blob response.
          */
@@ -4350,6 +4408,28 @@ export interface components {
              * @description Content size in bytes.
              */
             size: number;
+        };
+        /**
+         * BlobSourceSpec
+         * @description Blob source spec.
+         */
+        BlobSourceSpec: {
+            /**
+             * Blob Id
+             * Format: uuid
+             * @description Blob holding the payload.
+             */
+            blob_id: string;
+            /**
+             * Sha256
+             * @description Blob content hash.
+             */
+            sha256: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "blob";
         };
         /** Body_device_authorization_api_v1_device_authorization_post */
         Body_device_authorization_api_v1_device_authorization_post: {
@@ -5674,10 +5754,15 @@ export interface components {
             };
             /**
              * Payload Blob Id
-             * Format: uuid
+             * @deprecated
              * @description Blob holding the payload to parse.
              */
-            payload_blob_id: string;
+            payload_blob_id?: string | null;
+            /**
+             * Source
+             * @description Where the payload comes from.
+             */
+            source?: (components["schemas"]["BlobImportSource"] | components["schemas"]["ApiImportSource"]) | null;
             /**
              * Version
              * @description Importer version, an omitted value resolves to latest.
@@ -5768,10 +5853,14 @@ export interface components {
             };
             /**
              * Payload Blob Id
-             * Format: uuid
              * @description Blob holding the payload parsed.
              */
-            payload_blob_id: string;
+            payload_blob_id?: string | null;
+            /**
+             * Source
+             * @description Where the payload comes from.
+             */
+            source: components["schemas"]["BlobImportSource"] | components["schemas"]["ApiImportSource"];
             /** @description Stats from a completed import. */
             stats?: components["schemas"]["ImportStats"] | null;
             /**
@@ -5830,8 +5919,6 @@ export interface components {
             params: {
                 [key: string]: unknown;
             };
-            /** @description Payload to parse. */
-            payload: components["schemas"]["PayloadSpec"];
             /**
              * Plugin
              * @description Importer plugin to load.
@@ -5842,6 +5929,11 @@ export interface components {
              * @description Source system named on the import.
              */
             provider?: string | null;
+            /**
+             * Source
+             * @description Where the payload comes from.
+             */
+            source: components["schemas"]["BlobSourceSpec"] | components["schemas"]["ApiSourceSpec"];
         };
         /**
          * ImporterCreateRequest
@@ -6595,6 +6687,11 @@ export interface components {
              */
             entrypoint: string;
             /**
+             * Fetch Entrypoint
+             * @description Module and attribute fetching payloads from an API, as module:attribute.
+             */
+            fetch_entrypoint?: string | null;
+            /**
              * Requirement
              * @description Pinned PEP 508 requirement.
              */
@@ -7015,23 +7112,6 @@ export interface components {
             type: "passthrough";
         };
         /**
-         * PayloadSpec
-         * @description Payload spec.
-         */
-        PayloadSpec: {
-            /**
-             * Blob Id
-             * Format: uuid
-             * @description Blob holding the payload.
-             */
-            blob_id: string;
-            /**
-             * Sha256
-             * @description Blob content hash.
-             */
-            sha256: string;
-        };
-        /**
          * ReplayCreateRequest
          * @description Replay create request.
          */
@@ -7283,6 +7363,11 @@ export interface components {
              * @description Attribute in the file.
              */
             entrypoint: string;
+            /**
+             * Fetch Entrypoint
+             * @description Attribute in the file fetching payloads from an API.
+             */
+            fetch_entrypoint?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
