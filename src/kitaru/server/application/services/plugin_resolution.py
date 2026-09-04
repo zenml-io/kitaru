@@ -14,8 +14,9 @@
 """Generic plugin and plugin version resolution."""
 
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
-from kitaru.server.domain.names import RESERVED_LABEL_PREFIX, get_namespace
+from kitaru.server.domain.names import get_namespace
 from kitaru.server.domain.plugin import Plugin, PluginKind, PluginVersion
+from kitaru.server.domain.task import RESERVED_LABEL_PREFIX
 
 
 async def resolve_plugin(

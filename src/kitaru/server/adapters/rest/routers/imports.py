@@ -13,33 +13,19 @@
 #  permissions and limitations under the License.
 """Import routes."""
 
-import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, Depends, status
 
 from kitaru.api_models.v1.imports import ImportCreateRequest
 from kitaru.api_models.v1.job import JobResponse
-from kitaru.server.adapters.auth.auth_service import AuthService
-from kitaru.server.adapters.rest.dependencies import (
-    authorize,
-    get_app_settings,
-    get_auth_service,
-    get_ephemeral_workers,
-    get_job_service,
-    get_server_id_state,
-    get_worker_service,
-)
-from kitaru.server.adapters.rest.ephemeral_workers import start_ephemeral_worker
+from kitaru.server.adapters.rest.dependencies import authorize, get_job_service
 from kitaru.server.adapters.rest.mapping.imports import import_create_to_command
 from kitaru.server.adapters.rest.mapping.jobs import job_to_response
 from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
-from kitaru.server.api.config import APISettings
-from kitaru.server.application.interfaces.ephemeral_workers import EphemeralWorkers
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.job_service import JobService
-from kitaru.server.application.services.worker_service import WorkerService
 
 router = APIRouter(route_class=KitaruAPIRoute)
 
@@ -51,15 +37,7 @@ router = APIRouter(route_class=KitaruAPIRoute)
 async def create_import(
     body: ImportCreateRequest,
     service: Annotated[JobService, Depends(get_job_service)],
-    worker_service: Annotated[WorkerService, Depends(get_worker_service)],
-    auth_service: Annotated[AuthService, Depends(get_auth_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-    settings: Annotated[APISettings, Depends(get_app_settings)],
-    ephemeral_workers: Annotated[
-        EphemeralWorkers | None, Depends(get_ephemeral_workers)
-    ],
-    server_id: Annotated[uuid.UUID | None, Depends(get_server_id_state)],
-    background_tasks: BackgroundTasks,
 ) -> JobResponse:
     """Import sessions from a payload blob, as a job holding one importer task.
 
@@ -69,29 +47,11 @@ async def create_import(
     Args:
         body: Import create request.
         service: Job service.
-        worker_service: Worker service.
-        auth_service: Authentication service for the current request.
         actor: Caller context.
-        settings: API settings for this process.
-        ephemeral_workers: Ephemeral worker backend, None when none is configured.
-        server_id: Persisted server id, None before startup resolved it.
-        background_tasks: Tasks run after the response is sent.
 
     Returns:
         Created job.
     """
     command = import_create_to_command(body)
     job = await service.create_import(command, actor=actor)
-    if ephemeral_workers is not None:
-        await start_ephemeral_worker(
-            job,
-            service,
-            worker_service,
-            auth_service,
-            ephemeral_workers,
-            settings,
-            server_id,
-            background_tasks,
-            actor,
-        )
     return job_to_response(job)

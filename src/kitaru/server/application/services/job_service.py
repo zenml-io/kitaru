@@ -47,12 +47,16 @@ from kitaru.server.application.services.plugin_resolution import (
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import Job, JobAlreadySettled, JobNotSettled
-from kitaru.server.domain.names import RESERVED_LABEL_PREFIX
 from kitaru.server.domain.plugin import PluginKind
-from kitaru.server.domain.task import AgentTask, EvaluationTask, ImportTask, Task
+from kitaru.server.domain.task import (
+    RESERVED_LABEL_PREFIX,
+    AgentTask,
+    EvaluationTask,
+    ImportTask,
+    Task,
+)
 
 AGENT_VERSION_LABEL = f"{RESERVED_LABEL_PREFIX}agent_version"
-# TODO: Drop the unprefixed label, see DEPRECATIONS.md.
 LEGACY_AGENT_VERSION_LABEL = "agent_version"
 SESSION_NAME_ENV = "KITARU_SESSION_NAME"
 

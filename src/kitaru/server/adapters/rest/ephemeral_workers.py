@@ -33,10 +33,11 @@ from kitaru.server.application.services.worker_service import (
     get_ephemeral_scope,
 )
 from kitaru.server.domain.job import Job
-from kitaru.server.domain.names import RESERVED_LABEL_PREFIX
 from kitaru.server.domain.worker import Worker, scope_covers
 
 logger = logging.getLogger(__name__)
+
+SANDBOX_TAG_PREFIX = "kitaru/"
 
 
 async def start_ephemeral_worker(
@@ -109,13 +110,13 @@ def _get_tags(
         Tags.
     """
     tags = {
-        f"{RESERVED_LABEL_PREFIX}worker_id": str(worker.id),
-        f"{RESERVED_LABEL_PREFIX}job_id": str(worker.scope.job_id),
-        f"{RESERVED_LABEL_PREFIX}account_id": str(actor.account.id),
-        f"{RESERVED_LABEL_PREFIX}server_version": version("kitaru"),
+        f"{SANDBOX_TAG_PREFIX}worker_id": str(worker.id),
+        f"{SANDBOX_TAG_PREFIX}job_id": str(worker.scope.job_id),
+        f"{SANDBOX_TAG_PREFIX}account_id": str(actor.account.id),
+        f"{SANDBOX_TAG_PREFIX}server_version": version("kitaru"),
     }
     if server_id is not None:
-        tags[f"{RESERVED_LABEL_PREFIX}server_id"] = str(server_id)
+        tags[f"{SANDBOX_TAG_PREFIX}server_id"] = str(server_id)
     return tags
 
 

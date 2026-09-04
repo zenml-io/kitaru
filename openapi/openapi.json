@@ -17727,7 +17727,7 @@
     },
     "/api/v1/imports": {
       "post": {
-        "description": "Import sessions from a payload blob, as a job holding one importer task.\n\nClients observe HTTP 201 on success and 404 when the importer, the\nversion, the payload blob, or the agent does not exist.\n\nArgs:\n    body: Import create request.\n    service: Job service.\n    worker_service: Worker service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n    settings: API settings for this process.\n    ephemeral_workers: Ephemeral worker backend, None when none is configured.\n    background_tasks: Tasks run after the response is sent.\n\nReturns:\n    Created job.",
+        "description": "Import sessions from a payload blob, as a job holding one importer task.\n\nClients observe HTTP 201 on success and 404 when the importer, the\nversion, the payload blob, or the agent does not exist.\n\nArgs:\n    body: Import create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
         "operationId": "create_import_api_v1_imports_post",
         "parameters": [
           {

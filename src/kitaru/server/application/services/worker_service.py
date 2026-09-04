@@ -139,8 +139,6 @@ class WorkerService:
             Whether each task is covered by a worker within the liveness
             window.
         """
-        # Claiming is not filtered by account, so every live worker on the
-        # server counts.
         workers = await self._repository.list_live(self._get_live_cutoff())
         return all(any(worker.covers(task) for worker in workers) for task in tasks)
 

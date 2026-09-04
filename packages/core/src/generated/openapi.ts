@@ -1825,12 +1825,7 @@ export interface paths {
          *     Args:
          *         body: Import create request.
          *         service: Job service.
-         *         worker_service: Worker service.
-         *         auth_service: Authentication service for the current request.
          *         actor: Caller context.
-         *         settings: API settings for this process.
-         *         ephemeral_workers: Ephemeral worker backend, None when none is configured.
-         *         background_tasks: Tasks run after the response is sent.
          *
          *     Returns:
          *         Created job.
