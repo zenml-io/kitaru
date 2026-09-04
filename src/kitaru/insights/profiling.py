@@ -258,6 +258,7 @@ class _DistributionSpec:
     description: str
     values: Sequence[float]
     session_ids: set[uuid.UUID]
+    sessions_analyzed: int
     bounds: Sequence[float]
     unit: str
 
@@ -269,6 +270,7 @@ class _State:
     config: ProfilingConfig
     payload_budget: _PayloadBudget = field(init=False)
     analyzed_session_ids: set[uuid.UUID] = field(default_factory=set)
+    node_session_ids: set[uuid.UUID] = field(default_factory=set)
     signals: dict[str, _Aggregate] = field(
         default_factory=lambda: defaultdict(_Aggregate)
     )
@@ -293,6 +295,7 @@ class _State:
     identity_available: int = 0
     tool_calls: int = 0
     contribution_truncated: bool = False
+    maximum_contributors_available: int = 0
 
     def __post_init__(self) -> None:
         """Initialize the traversal budget from the immutable config."""
@@ -611,18 +614,30 @@ def _scan_session(
     state: _State,
     session: SessionWithNodesResponse,
     nodes: list[SessionNodeResponse],
+    *,
+    nodes_complete: bool,
 ) -> None:
     """Add one bounded normalized session to aggregate state."""
     session_id = session.session.id
     state.analyzed_session_ids.add(session_id)
     state.statuses[session.session.status.value] += 1
     state.status_sessions[session.session.status.value].add(session_id)
-    calls = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
-    llm_calls = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
-    state.tool_calls += len(calls)
-    state.tool_counts.append(len(calls))
-    state.model_counts.append(len(llm_calls))
-    state.activity_counts.append(len(nodes))
+    calls = (
+        [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
+        if nodes_complete
+        else []
+    )
+    llm_calls = (
+        [node for node in nodes if node.node_type is NodeType.LLM_CALL]
+        if nodes_complete
+        else []
+    )
+    if nodes_complete:
+        state.node_session_ids.add(session_id)
+        state.tool_calls += len(calls)
+        state.tool_counts.append(len(calls))
+        state.model_counts.append(len(llm_calls))
+        state.activity_counts.append(len(nodes))
 
     if session.session.started_at is not None and session.session.ended_at is not None:
         duration = (
@@ -712,7 +727,7 @@ def _scan_session(
             node_id=calls[start].id,
         )
 
-    messages = _selected_user_texts(state, session, nodes)
+    messages = _selected_user_texts(state, session, nodes if nodes_complete else [])
     state.text_available = state.text_available or bool(messages)
     state.text_bytes_available += sum(
         len(message.encode("utf-8")) for message, _ in messages
@@ -771,6 +786,9 @@ def _percent(numerator: int, denominator: int) -> int:
 def _contributions(state: _State, session_ids: set[uuid.UUID]) -> list[uuid.UUID]:
     """Return a bounded stable contribution set."""
     ordered = sorted(session_ids, key=str)
+    state.maximum_contributors_available = max(
+        state.maximum_contributors_available, len(ordered)
+    )
     if len(ordered) > state.config.max_contributing_sessions:
         state.contribution_truncated = True
     return ordered[: state.config.max_contributing_sessions]
@@ -835,7 +853,10 @@ def _signal_candidate(
         return None
     contributions = _contributions(state, aggregate.sessions)
     contribution_ids = set(contributions)
-    share = _percent(len(aggregate.sessions), len(state.tool_counts))
+    eligible_session_ids = (
+        state.analyzed_session_ids if family == "language" else state.node_session_ids
+    )
+    share = _percent(len(aggregate.sessions), len(eligible_session_ids))
     values = aggregate.categories
     unit = "occurrences"
     if len(values) == 1:
@@ -843,7 +864,7 @@ def _signal_candidate(
             {
                 "Matching sessions": len(aggregate.sessions),
                 "Other sessions": max(
-                    len(state.tool_counts) - len(aggregate.sessions), 0
+                    len(eligible_session_ids) - len(aggregate.sessions), 0
                 ),
             }
         )
@@ -870,7 +891,7 @@ def _signal_candidate(
             DeterministicFact(name="affected_share_percent", value=share),
         ],
         coverage=CandidateCoverage(
-            sessions_analyzed=len(state.tool_counts),
+            sessions_analyzed=len(eligible_session_ids),
             affected_sessions=len(aggregate.sessions),
             occurrences=aggregate.count,
             evidence_available=aggregate.count,
@@ -892,7 +913,6 @@ def _signal_candidate(
 
 def _build_candidates(state: _State) -> list[CandidateFinding]:
     """Build the complete ranked candidate collection."""
-    all_session_ids = state.analyzed_session_ids
     candidates: list[CandidateFinding] = []
     signal_specs = (
         (
@@ -1050,7 +1070,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
         if candidate is not None:
             candidates.append(candidate)
 
-    analyzed_sessions = len(state.tool_counts)
+    analyzed_sessions = len(state.analyzed_session_ids)
     failed_ids = state.status_sessions.get(SessionStatus.FAILED.value, set())
     if analyzed_sessions and failed_ids:
         affected_ids = failed_ids
@@ -1119,7 +1139,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 "closer inspection."
             ),
             values=state.tool_counts,
-            session_ids=all_session_ids,
+            session_ids=state.node_session_ids,
+            sessions_analyzed=len(state.node_session_ids),
             bounds=[3, 6, 10, 15],
             unit="calls",
         ),
@@ -1134,7 +1155,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 "imported sessions."
             ),
             values=state.model_counts,
-            session_ids=all_session_ids,
+            session_ids=state.node_session_ids,
+            sessions_analyzed=len(state.node_session_ids),
             bounds=[2, 3, 5],
             unit="calls",
         ),
@@ -1149,7 +1171,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 "activity as outcome quality."
             ),
             values=state.activity_counts,
-            session_ids=all_session_ids,
+            session_ids=state.node_session_ids,
+            sessions_analyzed=len(state.node_session_ids),
             bounds=[10, 20, 30, 50],
             unit="nodes",
         ),
@@ -1165,6 +1188,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             ),
             values=state.durations,
             session_ids=state.duration_session_ids,
+            sessions_analyzed=analyzed_sessions,
             bounds=[5, 15, 30, 60],
             unit="seconds",
         ),
@@ -1200,7 +1224,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                     DeterministicFact(name="maximum", value=max(spec.values)),
                 ],
                 coverage=CandidateCoverage(
-                    sessions_analyzed=analyzed_sessions,
+                    sessions_analyzed=spec.sessions_analyzed,
                     affected_sessions=len(spec.session_ids),
                     occurrences=len(spec.values),
                     evidence_available=len(spec.values),
@@ -1244,7 +1268,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                     ),
                 ],
                 coverage=CandidateCoverage(
-                    sessions_analyzed=analyzed_sessions,
+                    sessions_analyzed=len(state.node_session_ids),
                     affected_sessions=len(model_sessions),
                     occurrences=sum(state.models.values()),
                     evidence_available=sum(state.models.values()),
@@ -1294,21 +1318,23 @@ def profile_sessions(
     ]
     nodes_available = sum(len(session.nodes) for session in sessions)
     remaining_nodes = selected_config.max_nodes
-    selected: list[tuple[SessionWithNodesResponse, list[SessionNodeResponse]]] = []
+    selected: list[
+        tuple[SessionWithNodesResponse, list[SessionNodeResponse], bool]
+    ] = []
     for session in selected_sessions:
-        if remaining_nodes == 0:
-            selected.append((session, []))
+        if len(session.nodes) > remaining_nodes:
+            selected.append((session, [], False))
+            remaining_nodes = 0
             continue
         ordered_nodes = sorted(
             session.nodes, key=lambda node: (node.index, str(node.id))
         )
-        retained = ordered_nodes[:remaining_nodes]
-        selected.append((session, retained))
-        remaining_nodes -= len(retained)
+        selected.append((session, ordered_nodes, True))
+        remaining_nodes -= len(ordered_nodes)
 
     state = _State(config=selected_config)
-    for session, nodes in selected:
-        _scan_session(state, session, nodes)
+    for session, nodes, nodes_complete in selected:
+        _scan_session(state, session, nodes, nodes_complete=nodes_complete)
 
     candidates = _build_candidates(state)
 
@@ -1321,7 +1347,9 @@ def profile_sessions(
                 analyzed=len(selected_sessions),
             )
         )
-    nodes_analyzed = sum(len(nodes) for _, nodes in selected)
+    nodes_analyzed = sum(
+        len(nodes) for _, nodes, nodes_complete in selected if nodes_complete
+    )
     if nodes_analyzed < nodes_available:
         truncations.append(
             CoverageTruncation(
@@ -1337,14 +1365,10 @@ def profile_sessions(
             )
         )
     if state.contribution_truncated:
-        max_available = max(
-            (len(aggregate.sessions) for aggregate in state.signals.values()),
-            default=selected_config.max_contributing_sessions + 1,
-        )
         truncations.append(
             CoverageTruncation(
                 dimension="contributing_sessions",
-                available=max_available,
+                available=state.maximum_contributors_available,
                 analyzed=selected_config.max_contributing_sessions,
             )
         )
@@ -1363,6 +1387,11 @@ def profile_sessions(
         "The profiler uses normalized sessions and does not read persisted "
         "evaluation results."
     ]
+    if any(not nodes_complete for _, _, nodes_complete in selected):
+        caveats.append(
+            "Node-derived profiling excludes sessions whose node lists were "
+            "truncated by the configured node limit."
+        )
     if state.timing_available < len(selected_sessions):
         caveats.append(
             "Timing coverage is incomplete because valid session bounds are missing."
