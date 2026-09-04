@@ -15,6 +15,7 @@
 
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.worker.handlers.agent import AgentHandler
+from kitaru.worker.handlers.analysis import AnalysisHandler
 from kitaru.worker.handlers.base import TaskHandler
 from kitaru.worker.handlers.evaluation import EvaluationHandler
 from kitaru.worker.handlers.imports import ImportHandler
@@ -23,4 +24,5 @@ HANDLERS: dict[TaskKind, TaskHandler] = {
     TaskKind.AGENT: AgentHandler(),
     TaskKind.EVALUATOR: EvaluationHandler(),
     TaskKind.IMPORTER: ImportHandler(),
+    TaskKind.ANALYZER: AnalysisHandler(),
 }

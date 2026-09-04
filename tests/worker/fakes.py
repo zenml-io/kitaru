@@ -24,6 +24,7 @@ from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionResponse, SessionStatus
 from kitaru.api_models.v1.task import (
     AgentTaskDetails,
+    AnalysisTaskDetails,
     EvaluationTaskDetails,
     ImportTaskDetails,
     PackagePluginSpec,
@@ -203,6 +204,46 @@ def make_importer_spec(
             payload=payload,
             agent_id=agent_id or uuid.uuid4(),
             params={},
+        ),
+    )
+
+
+def make_analyzer_spec(
+    task_id: uuid.UUID,
+    plugin: ScriptPluginSpec | PackagePluginSpec,
+    timeout_seconds: int = 30,
+    agent_id: uuid.UUID | None = None,
+    input_session_ids: list[uuid.UUID] | None = None,
+    extra_env: dict[str, str] | None = None,
+    secret_env: dict[str, str] | None = None,
+) -> TaskSpecResponse:
+    """Build an analyzer task spec.
+
+    Args:
+        task_id: Task the spec belongs to.
+        plugin: Analyzer plugin to load.
+        timeout_seconds: Process timeout.
+        agent_id: Agent the insights belong to.
+        input_session_ids: Sessions being analyzed.
+        extra_env: Creator-set environment extras.
+        secret_env: Secrets merged into the process environment.
+
+    Returns:
+        Analyzer task spec.
+    """
+    return TaskSpecResponse(
+        task_id=task_id,
+        kind=TaskKind.ANALYZER,
+        timeout_seconds=timeout_seconds,
+        run=None,
+        env=extra_env or {},
+        secret_env=secret_env or {},
+        details=AnalysisTaskDetails(
+            analyzer_name="insight",
+            params={},
+            plugin=plugin,
+            agent_id=agent_id or uuid.uuid4(),
+            input_session_ids=input_session_ids or [uuid.uuid4()],
         ),
     )
 
