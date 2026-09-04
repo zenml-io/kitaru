@@ -248,23 +248,39 @@ def test_editor_validates_numbers_against_each_card_only(
         ("# Tool behavior", "markup"),
         ("Inspect this\x00pattern.", "control"),
         ("This causes retries.", "unsupported claim"),
+        ("This is causing retries.", "unsupported claim"),
+        ("This results in retries.", "unsupported claim"),
+        ("This resulted in retries.", "unsupported claim"),
+        ("This is resulting in retries.", "unsupported claim"),
+        ("This leads to retries.", "unsupported claim"),
+        ("This led to retries.", "unsupported claim"),
+        ("This is leading to retries.", "unsupported claim"),
         ("This pattern drives retries.", "unsupported claim"),
         ("This pattern drove retries.", "unsupported claim"),
+        ("This pattern may drive retries.", "unsupported claim"),
+        ("This pattern is driving retries.", "unsupported claim"),
         ("Retries are driven by this pattern.", "unsupported claim"),
         ("This pattern stems from retries.", "unsupported claim"),
         ("This pattern stemmed from retries.", "unsupported claim"),
         ("This pattern produces retries.", "unsupported claim"),
+        ("This pattern may produce retries.", "unsupported claim"),
         ("This pattern produced retries.", "unsupported claim"),
         ("This pattern creates retries.", "unsupported claim"),
+        ("This pattern may create retries.", "unsupported claim"),
         ("This pattern created retries.", "unsupported claim"),
         ("This pattern triggers retries.", "unsupported claim"),
+        ("This pattern may trigger retries.", "unsupported claim"),
         ("This pattern triggered retries.", "unsupported claim"),
         ("This pattern is responsible for retries.", "unsupported claim"),
         ("Retries are attributable to this pattern.", "unsupported claim"),
         ("This pattern contributes to retries.", "unsupported claim"),
         ("This pattern gives rise to retries.", "unsupported claim"),
+        ("This pattern is giving rise to retries.", "unsupported claim"),
+        ("This pattern has given rise to retries.", "unsupported claim"),
         ("This pattern brought about retries.", "unsupported claim"),
+        ("This pattern is bringing about retries.", "unsupported claim"),
         ("Retries arise from this pattern.", "unsupported claim"),
+        ("Retries are arising from this pattern.", "unsupported claim"),
         ("Retries originated from this pattern.", "unsupported claim"),
         ("This pattern explains retries.", "unsupported claim"),
         ("This pattern determines retries.", "unsupported claim"),
@@ -561,8 +577,9 @@ def test_causal_substrings_in_plain_prose_are_allowed(
                     id=candidate.id,
                     eyebrow="Tool behavior",
                     description=(
-                        "Drivers, stemware, triggerfish, and recreated paths are "
-                        "worth inspecting."
+                        "Causality, resultant metrics, leadership, driveways, "
+                        "producers, creatures, triggerfish, giveaways, and "
+                        "upbringings are worth inspecting."
                     ),
                 )
             ]
