@@ -634,11 +634,10 @@ async def test_claim_pending_matches_coverage_cases(
     ids = CoverageIds(
         job_id=setup.job_id,
         other_job_id=uuid.uuid4(),
-        agent_id=setup.agent_id,
         agent_version_id=setup.agent_version_id,
         agent_version_id_2=setup.agent_version_id_2,
         plugin_version_id=setup.plugin_version_id,
-        payload_blob_id=setup.payload_blob_id,
+        import_id=uuid.uuid4(),
         session_id=setup.session_id,
     )
     task = await setup.tasks.create(case.task(ids))

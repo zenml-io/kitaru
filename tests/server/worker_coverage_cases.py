@@ -28,7 +28,6 @@ class CoverageIds(NamedTuple):
 
     job_id: uuid.UUID
     other_job_id: uuid.UUID
-    agent_id: uuid.UUID
     agent_version_id: uuid.UUID
     agent_version_id_2: uuid.UUID
     plugin_version_id: uuid.UUID

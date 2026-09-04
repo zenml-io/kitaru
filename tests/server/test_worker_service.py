@@ -157,7 +157,6 @@ async def test_is_covered_matches_claim_cases(
     ids = CoverageIds(
         job_id=uuid.uuid4(),
         other_job_id=uuid.uuid4(),
-        agent_id=uuid.uuid4(),
         agent_version_id=uuid.uuid4(),
         agent_version_id_2=uuid.uuid4(),
         plugin_version_id=uuid.uuid4(),
