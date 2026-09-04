@@ -192,6 +192,16 @@ evaluator_version_app = App(
     help="Register and inspect evaluator versions.",
     default_parameter=Parameter(negative=False),
 )
+analyzer_app = App(
+    name="analyzer",
+    help=GROUP_DESCRIPTIONS["analyzer"],
+    default_parameter=Parameter(negative=False),
+)
+analyzer_version_app = App(
+    name="version",
+    help="Register and inspect analyzer versions.",
+    default_parameter=Parameter(negative=False),
+)
 session_app = App(
     name="session",
     help=GROUP_DESCRIPTIONS["session"],
@@ -228,8 +238,10 @@ investigation_app.command(investigation_session_app, name="session")
 experiment_app.command(experiment_run_app, name="run")
 importer_app.command(importer_version_app, name="version")
 evaluator_app.command(evaluator_version_app, name="version")
+analyzer_app.command(analyzer_version_app, name="version")
 app.command(config_app, name="config")
 app.command(agent_app, name="agent")
+app.command(analyzer_app, name="analyzer")
 app.command(annotation_app, name="annotation")
 app.command(cohort_app, name="cohort")
 app.command(experiment_app, name="experiment")
@@ -3193,8 +3205,17 @@ async def _register_plugin_version_command(
         )
 
 
+def _plugin_resource(client: Any, kind: str) -> Any:
+    """Return the SDK resource for one plugin kind."""
+    if kind == "importer":
+        return client.importers
+    if kind == "analyzer":
+        return client.analyzers
+    return client.evaluators
+
+
 async def _list_plugin_command(
-    kind: Literal["importer", "evaluator"],
+    kind: Literal["importer", "evaluator", "analyzer"],
     *,
     size: int,
     cursor: str | None,
@@ -3206,14 +3227,14 @@ async def _list_plugin_command(
         kind, size=size, cursor=cursor, sort=sort, filter=filter
     )
     async with _open_asset_client() as client:
-        resource = client.importers if kind == "importer" else client.evaluators
+        resource = _plugin_resource(client, kind)
         return registration.page_result(await resource.list(params), size=size)
 
 
 async def _get_plugin_command(kind: str, reference: str) -> CommandResult:
-    """Get one exact importer or evaluator."""
+    """Get one exact importer, evaluator, or analyzer."""
     async with _open_asset_client() as client:
-        resource = client.importers if kind == "importer" else client.evaluators
+        resource = _plugin_resource(client, kind)
         item = await registration.resolve_asset(resource, reference, kind.title())
         return CommandResult(item=item.model_dump(mode="json"))
 
@@ -3226,10 +3247,10 @@ async def _list_plugin_versions_command(
     cursor: str | None,
     sort: str,
 ) -> CommandResult:
-    """List one server page of importer or evaluator versions."""
+    """List one server page of importer, evaluator, or analyzer versions."""
     params = registration.version_list_params(size=size, cursor=cursor, sort=sort)
     async with _open_asset_client() as client:
-        resource = client.importers if kind == "importer" else client.evaluators
+        resource = _plugin_resource(client, kind)
         parent = await registration.resolve_asset(resource, reference, kind.title())
         return registration.page_result(
             await resource.list_versions(parent.id, params), size=size
@@ -3237,9 +3258,9 @@ async def _list_plugin_versions_command(
 
 
 async def _get_plugin_version_command(kind: str, reference: str) -> CommandResult:
-    """Get one exact importer or evaluator version."""
+    """Get one exact importer, evaluator, or analyzer version."""
     async with _open_asset_client() as client:
-        resource = client.importers if kind == "importer" else client.evaluators
+        resource = _plugin_resource(client, kind)
         _, item = await registration.get_plugin_version(
             resource, reference, kind.title()
         )
@@ -3705,6 +3726,174 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
 
 
 @_register(
+    analyzer_app,
+    _spec(
+        ("analyzer", "register"),
+        "Create an analyzer and its first version.",
+        parameters=_plugin_register_parameters("analyzer"),
+        read_only=False,
+        side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
+        idempotency="non_idempotent_parent_then_version",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def analyzer_register(
+    name: str,
+    /,
+    *,
+    script: Path | None = None,
+    package: str | None = None,
+    entrypoint: str | None = None,
+    description: str | None = None,
+    metadata: str | None = None,
+    display_version: str | None = None,
+) -> CommandResult:
+    """Create an analyzer parent, source, and initial version."""
+    return await _register_plugin_command(
+        "analyzer",
+        name,
+        script=script,
+        package=package,
+        entrypoint=entrypoint,
+        description=description,
+        provider=None,
+        metadata=metadata,
+        agent_id=None,
+        display_version=display_version,
+    )
+
+
+@_register(
+    analyzer_app,
+    _spec(
+        ("analyzer", "list"),
+        "List analyzers.",
+        parameters=_LIST_PARAMETERS,
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def analyzer_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of analyzers."""
+    return await _list_plugin_command(
+        "analyzer", size=size, cursor=cursor, sort=sort, filter=filter
+    )
+
+
+@_register(
+    analyzer_app,
+    _spec(
+        ("analyzer", "get"),
+        "Get an analyzer by exact UUID or case-sensitive name.",
+        parameters=(
+            ParameterSpec(
+                "ANALYZER", "reference", "argument", True, "Analyzer UUID or name."
+            ),
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def analyzer_get(analyzer: str, /) -> CommandResult:
+    """Get one exact analyzer."""
+    return await _get_plugin_command("analyzer", analyzer)
+
+
+@_register(
+    analyzer_version_app,
+    _spec(
+        ("analyzer", "version", "register"),
+        "Create the next version of an existing analyzer.",
+        parameters=(
+            ParameterSpec(
+                "ANALYZER", "reference", "argument", True, "Analyzer UUID or name."
+            ),
+            *_PLUGIN_SOURCE_PARAMETERS,
+            _IDEMPOTENCY_KEY_PARAMETER,
+        ),
+        read_only=False,
+        side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
+        idempotency="non_idempotent_server_assigned_version",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def analyzer_version_register(
+    analyzer: str,
+    /,
+    *,
+    script: Path | None = None,
+    package: str | None = None,
+    entrypoint: str | None = None,
+    display_version: str | None = None,
+    idempotency_key: str | None = None,
+) -> CommandResult:
+    """Create the next analyzer version."""
+    return await _register_plugin_version_command(
+        "analyzer",
+        analyzer,
+        script=script,
+        package=package,
+        entrypoint=entrypoint,
+        display_version=display_version,
+        idempotency_key=idempotency_key,
+    )
+
+
+@_register(
+    analyzer_version_app,
+    _spec(
+        ("analyzer", "version", "list"),
+        "List versions of an exact analyzer.",
+        parameters=(
+            ParameterSpec(
+                "ANALYZER", "reference", "argument", True, "Analyzer UUID or name."
+            ),
+            *_VERSION_LIST_PARAMETERS,
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def analyzer_version_list(
+    analyzer: str,
+    /,
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+) -> CommandResult:
+    """List one server page of analyzer versions."""
+    return await _list_plugin_versions_command(
+        "analyzer", analyzer, size=size, cursor=cursor, sort=sort
+    )
+
+
+@_register(
+    analyzer_version_app,
+    _spec(
+        ("analyzer", "version", "get"),
+        "Get an analyzer version by exact PARENT@VERSION reference.",
+        parameters=(
+            ParameterSpec(
+                "ANALYZER@VERSION",
+                "reference",
+                "argument",
+                True,
+                "Exact version reference.",
+            ),
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def analyzer_version_get(analyzer_version: str, /) -> CommandResult:
+    """Get one exact analyzer version, accepting @latest for reads."""
+    return await _get_plugin_version_command("analyzer", analyzer_version)
+
+
+@_register(
     session_app,
     _spec(
         ("session", "import"),
@@ -3757,6 +3946,20 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
                 "Parameters for a selected evaluator token.",
             ),
             ParameterSpec(
+                "--analyzer",
+                "ANALYZER@VERSION[]",
+                "option",
+                False,
+                "Exact analyzer version run once over every imported session.",
+            ),
+            ParameterSpec(
+                "--analyzer-params",
+                "ANALYZER@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected analyzer token.",
+            ),
+            ParameterSpec(
                 "--media-type",
                 "string",
                 "option",
@@ -3787,6 +3990,8 @@ async def session_import(
     tag: list[str] | None = None,
     evaluator: list[str] | None = None,
     evaluator_params: list[str] | None = None,
+    analyzer: list[str] | None = None,
+    analyzer_params: list[str] | None = None,
     media_type: str = "application/octet-stream",
     wait: bool = False,
     interval: float | None = None,
@@ -3805,6 +4010,8 @@ async def session_import(
             tags=tag,
             evaluators=evaluator,
             evaluator_params=evaluator_params,
+            analyzers=analyzer,
+            analyzer_params=analyzer_params,
             media_type=media_type,
             wait=wait,
             interval=interval,

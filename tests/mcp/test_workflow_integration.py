@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.management import EvaluatorSelection
@@ -156,6 +156,24 @@ async def test_session_import_forwards_evaluators() -> None:
     )
 
     assert client.request.evaluators == [evaluator]
+
+
+async def test_session_import_forwards_analyzers() -> None:
+    client = _ImportClient()
+    analyzer = AnalyzerConfig(analyzer="clustering", version=1, params={"min_size": 5})
+
+    await handle_session_import(
+        _get_state(client),
+        SessionImportRequest(
+            payload_blob_id=uuid.uuid4(),
+            importer_id=uuid.uuid4(),
+            importer_version=2,
+            agent_version_id=uuid.uuid4(),
+            analyzers=[analyzer],
+        ),
+    )
+
+    assert client.request.analyzers == [analyzer]
 
 
 async def test_evaluator_selections_use_name_version_dto_and_cache_parent() -> None:

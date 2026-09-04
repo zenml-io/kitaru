@@ -19,6 +19,7 @@ from enum import StrEnum
 from typing import Any
 
 from kitaru.api_models.v1.agent import AgentListParams
+from kitaru.api_models.v1.analyzer import AnalyzerListParams
 from kitaru.api_models.v1.cohort import CohortListParams
 from kitaru.api_models.v1.evaluator import EvaluatorListParams
 from kitaru.api_models.v1.experiment import ExperimentListParams
@@ -30,6 +31,7 @@ class ParentKind(StrEnum):
     """Parent resource families supporting bounded reference lookup."""
 
     AGENT = "agent"
+    ANALYZER = "analyzer"
     COHORT = "cohort"
     EXPERIMENT = "experiment"
     IMPORTER = "importer"
@@ -73,6 +75,7 @@ async def resolve_parent_resource(
 
     params_type = {
         ParentKind.AGENT: AgentListParams,
+        ParentKind.ANALYZER: AnalyzerListParams,
         ParentKind.COHORT: CohortListParams,
         ParentKind.EXPERIMENT: ExperimentListParams,
         ParentKind.IMPORTER: ImporterListParams,

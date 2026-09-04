@@ -76,6 +76,8 @@ EXPECTED_IDEMPOTENT_ROUTES = {
     ("POST", "/api/v1/evaluators/{evaluator_id}/versions"),
     ("POST", "/api/v1/importers"),
     ("POST", "/api/v1/importers/{importer_id}/versions"),
+    ("POST", "/api/v1/analyzers"),
+    ("POST", "/api/v1/analyzers/{analyzer_id}/versions"),
     ("POST", "/api/v1/tags"),
     ("POST", "/api/v1/secrets"),
     ("POST", "/api/v1/service-accounts"),
