@@ -27,10 +27,9 @@
 #
 # Nothing here needs sudo. Everything lands under $HOME. Re-running upgrades.
 #
-# Design borrowed from raindrop.sh/install (step output, tty handling,
-# --no-* escape hatches) and astral.sh/uv/install.sh (no root, no assumptions
-# about the system Python). Kitaru ships as a Python package, not a binary, so
-# uv is the one dependency this script will install for you.
+# Design follows astral.sh/uv/install.sh (no root, no assumptions about the
+# system Python, --no-* escape hatches). Kitaru ships as a Python package, not
+# a binary, so uv is the one dependency this script will install for you.
 
 # Bash-only, but fail politely under sh/dash/zsh-as-sh. This line is POSIX so
 # it runs before the shell reaches any bash syntax below.
