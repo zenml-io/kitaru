@@ -53,6 +53,7 @@ from kitaru.server.adapters.rest.routers import (
     accounts,
     agent_versions,
     agents,
+    analyzers,
     annotations,
     api_keys,
     auth,
@@ -404,6 +405,12 @@ def create_app(settings: APISettings) -> FastAPI:
         agent_versions.router,
         prefix="/api/v1/agent-versions",
         tags=["agent-versions"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        analyzers.router,
+        prefix="/api/v1/analyzers",
+        tags=["analyzers"],
         responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(

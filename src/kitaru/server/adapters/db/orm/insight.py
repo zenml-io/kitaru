@@ -35,8 +35,13 @@ _INSIGHT_DATA_ADAPTER: TypeAdapter[InsightData] = TypeAdapter(InsightData)
 
 INSIGHT_OWNER_ID_FOREIGN_KEY = foreign_key_name("insight", ["owner_id"])
 INSIGHT_AGENT_ID_FOREIGN_KEY = foreign_key_name("insight", ["agent_id"])
+INSIGHT_ANALYZER_VERSION_ID_FOREIGN_KEY = foreign_key_name(
+    "insight", ["analyzer_version_id"]
+)
+INSIGHT_TASK_ID_FOREIGN_KEY = foreign_key_name("insight", ["task_id"])
 INSIGHT_OWNER_ID_INDEX = index_name("insight", ["owner_id"])
 INSIGHT_AGENT_ID_INDEX = index_name("insight", ["agent_id"])
+INSIGHT_ANALYZER_VERSION_ID_INDEX = index_name("insight", ["analyzer_version_id"])
 
 TYPE_LENGTH = 32
 
@@ -55,18 +60,37 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=INSIGHT_AGENT_ID_FOREIGN_KEY,
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["analyzer_version_id"],
+            ["plugin_version.id"],
+            name=INSIGHT_ANALYZER_VERSION_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
+        ),
+        ForeignKeyConstraint(
+            ["task_id"],
+            ["task.id"],
+            name=INSIGHT_TASK_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
+        ),
         Index(INSIGHT_OWNER_ID_INDEX, "owner_id"),
         Index(INSIGHT_AGENT_ID_INDEX, "agent_id"),
+        Index(INSIGHT_ANALYZER_VERSION_ID_INDEX, "analyzer_version_id"),
     )
 
     owner_id: Mapped[uuid.UUID]
     agent_id: Mapped[uuid.UUID]
+    analyzer_version_id: Mapped[uuid.UUID | None]
+    task_id: Mapped[uuid.UUID | None]
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     title: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     description: Mapped[str | None] = mapped_column(Text)
     type: Mapped[str] = mapped_column(String(TYPE_LENGTH))
     data: Mapped[dict[str, Any]] = mapped_column(JSONB)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB)
+    analyzer_params: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
+    params_hash: Mapped[str | None] = mapped_column(String(64))
 
     @classmethod
     def from_domain(cls, insight: Insight) -> "InsightORM":
@@ -82,12 +106,16 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             id=insight.id,
             owner_id=insight.owner_id,
             agent_id=insight.agent_id,
+            analyzer_version_id=insight.analyzer_version_id,
+            task_id=insight.task_id,
             name=insight.name,
             title=insight.title,
             description=insight.description,
             type=insight.data.type,
             data=insight.data.model_dump(mode="json"),
             metadata_=insight.metadata,
+            analyzer_params=insight.analyzer_params,
+            params_hash=insight.params_hash,
         )
 
     def to_domain(self) -> Insight:
@@ -100,11 +128,15 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             id=self.id,
             owner_id=self.owner_id,
             agent_id=self.agent_id,
+            analyzer_version_id=self.analyzer_version_id,
+            task_id=self.task_id,
             name=self.name,
             title=self.title,
             description=self.description,
             data=_INSIGHT_DATA_ADAPTER.validate_python(self.data),
             metadata=self.metadata_,
+            analyzer_params=self.analyzer_params,
+            params_hash=self.params_hash,
             created=self.created,
             updated=self.updated,
         )

@@ -73,6 +73,7 @@ from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import (
     AgentTask,
+    AnalysisTask,
     DuplicateEvaluationTask,
     EvaluationTask,
     ImportTask,
@@ -90,6 +91,7 @@ class Setup(NamedTuple):
     jobs: JobRepository
     owner_id: uuid.UUID
     job_id: uuid.UUID
+    agent_id: uuid.UUID
     agent_version_id: uuid.UUID
     agent_version_id_2: uuid.UUID
     plugin_version_id: uuid.UUID
@@ -160,6 +162,7 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
         jobs=SQLJobRepository(session),
         owner_id=owner.id,
         job_id=job.id,
+        agent_id=agent.id,
         agent_version_id=agent_version.id,
         agent_version_id_2=agent_version_2.id,
         plugin_version_id=plugin_version.id,
@@ -183,6 +186,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             jobs=jobs,
             owner_id=owner_id,
             job_id=job.id,
+            agent_id=uuid.uuid4(),
             agent_version_id=uuid.uuid4(),
             agent_version_id_2=uuid.uuid4(),
             plugin_version_id=uuid.uuid4(),
@@ -270,6 +274,27 @@ async def test_import_task_round_trips_its_fields(setup: Setup) -> None:
     created = await setup.tasks.create(task)
     assert isinstance(created, ImportTask)
     assert created.import_id == import_id
+
+
+async def test_analysis_task_round_trips_its_fields(setup: Setup) -> None:
+    """An analysis task round-trips its agent id, session ids, and params."""
+    input_session_ids = [uuid.uuid4(), uuid.uuid4()]
+    task = AnalysisTask(
+        job_id=setup.job_id,
+        plugin_version_id=setup.plugin_version_id,
+        agent_id=setup.agent_id,
+        input_session_ids=input_session_ids,
+        params={"threshold": 0.5},
+    )
+    created = await setup.tasks.create(task)
+    assert isinstance(created, AnalysisTask)
+    assert created.plugin_version_id == setup.plugin_version_id
+    assert created.agent_id == setup.agent_id
+    assert created.input_session_ids == input_session_ids
+    assert created.params == {"threshold": 0.5}
+
+    loaded = await setup.tasks.get(created.id)
+    assert loaded == created
 
 
 async def test_list_by_job_orders_by_id(setup: Setup) -> None:

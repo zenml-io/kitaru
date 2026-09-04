@@ -21,6 +21,11 @@ instead of duplicating them.
 
 from typing import Any, TypeVar
 
+from kitaru.api_models.v1.analyzer import (
+    AnalyzerCreateRequest,
+    AnalyzerUpdateRequest,
+    AnalyzerVersionResponse,
+)
 from kitaru.api_models.v1.base import ListParams, TimestampedResponseModel
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
@@ -38,6 +43,7 @@ from kitaru.api_models.v1.plugin import PluginSource as WirePluginSource
 from kitaru.api_models.v1.plugin import ScriptPluginSource as WireScriptPluginSource
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.plugin import (
+    AnalyzerFilter,
     EvaluatorFilter,
     ImporterFilter,
     PluginCreate,
@@ -63,6 +69,7 @@ PluginVersionResponseT = TypeVar(
 _VERSION_PARENT_FIELD: dict[type, str] = {
     EvaluatorVersionResponse: "evaluator_id",
     ImporterVersionResponse: "importer_id",
+    AnalyzerVersionResponse: "analyzer_id",
 }
 
 
@@ -174,10 +181,17 @@ def plugin_list_params_to_filter(
         filter_: Filter expression, when present on the wire params.
 
     Returns:
-        Evaluator or importer filter, scoped to the given kind.
+        Evaluator, importer, or analyzer filter, scoped to the given kind.
     """
     expression = filter_to_expression(filter_) if filter_ is not None else None
-    filter_class = EvaluatorFilter if kind is PluginKind.EVALUATOR else ImporterFilter
+    if kind is PluginKind.EVALUATOR:
+        filter_class = EvaluatorFilter
+    elif kind is PluginKind.IMPORTER:
+        filter_class = ImporterFilter
+    elif kind is PluginKind.ANALYZER:
+        filter_class = AnalyzerFilter
+    else:
+        filter_class = PluginFilter
     return filter_class(
         kind=kind,
         expression=expression,
@@ -188,12 +202,12 @@ def plugin_list_params_to_filter(
 
 
 def plugin_create_to_command(
-    body: EvaluatorCreateRequest | ImporterCreateRequest,
+    body: EvaluatorCreateRequest | ImporterCreateRequest | AnalyzerCreateRequest,
 ) -> PluginCreate:
-    """Convert an evaluator or importer create request to a plugin command.
+    """Convert an evaluator, importer, or analyzer create request to a plugin command.
 
     Args:
-        body: Evaluator or importer create request.
+        body: Evaluator, importer, or analyzer create request.
 
     Returns:
         Create command.
@@ -213,12 +227,12 @@ def plugin_create_to_command(
 
 
 def plugin_update_to_command(
-    body: EvaluatorUpdateRequest | ImporterUpdateRequest,
+    body: EvaluatorUpdateRequest | ImporterUpdateRequest | AnalyzerUpdateRequest,
 ) -> PluginUpdate:
-    """Convert an evaluator or importer update request to a plugin command.
+    """Convert an evaluator, importer, or analyzer update request to a plugin command.
 
     Args:
-        body: Evaluator or importer update request.
+        body: Evaluator, importer, or analyzer update request.
 
     Returns:
         Plugin update command.

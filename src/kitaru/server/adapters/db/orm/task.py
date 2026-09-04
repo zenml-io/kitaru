@@ -17,6 +17,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from pydantic import TypeAdapter
 from sqlalchemy import (
     DateTime,
     ForeignKeyConstraint,
@@ -43,10 +44,13 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.task import (
     TERMINAL_TASK_STATUSES,
     AgentTask,
+    AnalysisTask,
     EvaluationTask,
     ImportTask,
     Task,
 )
+
+_INPUT_SESSION_IDS_ADAPTER: TypeAdapter[list[uuid.UUID]] = TypeAdapter(list[uuid.UUID])
 
 KIND_LENGTH = 16
 STATUS_LENGTH = 16
@@ -54,12 +58,14 @@ ON_FAILURE_LENGTH = 16
 
 TASK_JOB_ID_FOREIGN_KEY = foreign_key_name("task", ["job_id"])
 TASK_WORKER_ID_FOREIGN_KEY = foreign_key_name("task", ["worker_id"])
+TASK_AGENT_ID_FOREIGN_KEY = foreign_key_name("task", ["agent_id"])
 TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT = unique_constraint_name(
     "task", ["job_id", "input_session_id", "plugin_version_id"]
 )
 TASK_JOB_ID_STATUS_INDEX = index_name("task", ["job_id", "status"])
 TASK_INPUT_SESSION_ID_INDEX = index_name("task", ["input_session_id"])
 TASK_IMPORT_ID_INDEX = index_name("task", ["import_id"])
+TASK_AGENT_ID_INDEX = index_name("task", ["agent_id"])
 # Partial indexes covering the queue scans: a scope claiming everything reads
 # pending rows in id order, a kind claim reads them per kind, and a
 # version-pinned claim reads them per agent version. The staleness sweep
@@ -91,6 +97,12 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=TASK_WORKER_ID_FOREIGN_KEY,
             ondelete="SET NULL",
         ),
+        ForeignKeyConstraint(
+            ["agent_id"],
+            ["agent.id"],
+            name=TASK_AGENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
         UniqueConstraint(
             "job_id",
             "input_session_id",
@@ -100,6 +112,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(TASK_JOB_ID_STATUS_INDEX, "job_id", "status"),
         Index(TASK_INPUT_SESSION_ID_INDEX, "input_session_id"),
         Index(TASK_IMPORT_ID_INDEX, "import_id"),
+        Index(TASK_AGENT_ID_INDEX, "agent_id"),
         Index(TASK_PENDING_ID_INDEX, "id", postgresql_where=text(PENDING_PREDICATE)),
         Index(
             TASK_PENDING_KIND_INDEX,
@@ -130,6 +143,10 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     plugin_version_id: Mapped[uuid.UUID | None]
     input_session_id: Mapped[uuid.UUID | None]
     import_id: Mapped[uuid.UUID | None]
+    agent_id: Mapped[uuid.UUID | None]
+    input_session_ids: Mapped[list[Any] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     attempt: Mapped[int]
     on_failure: Mapped[str] = mapped_column(String(ON_FAILURE_LENGTH))
@@ -184,6 +201,13 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             row.inputs = task.params
         elif isinstance(task, ImportTask):
             row.import_id = task.import_id
+        elif isinstance(task, AnalysisTask):
+            row.plugin_version_id = task.plugin_version_id
+            row.agent_id = task.agent_id
+            row.input_session_ids = _INPUT_SESSION_IDS_ADAPTER.dump_python(
+                task.input_session_ids, mode="json"
+            )
+            row.inputs = task.params
         return row
 
     def apply(self, task: Task) -> None:
@@ -249,4 +273,17 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         if kind is TaskKind.IMPORTER:
             assert self.import_id is not None
             return ImportTask(import_id=self.import_id, **shared)
+        if kind is TaskKind.ANALYZER:
+            assert self.plugin_version_id is not None
+            assert self.agent_id is not None
+            assert self.input_session_ids is not None
+            return AnalysisTask(
+                plugin_version_id=self.plugin_version_id,
+                agent_id=self.agent_id,
+                input_session_ids=_INPUT_SESSION_IDS_ADAPTER.validate_python(
+                    self.input_session_ids
+                ),
+                params=self.inputs if self.inputs is not None else {},
+                **shared,
+            )
         raise ValueError(f"Unknown task kind '{self.kind}'")

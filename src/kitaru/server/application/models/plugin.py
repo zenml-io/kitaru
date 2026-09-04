@@ -56,6 +56,15 @@ class ImporterFilter(PluginFilter):
     }
 
 
+class AnalyzerFilter(PluginFilter):
+    """Analyzer list filter."""
+
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "name": FilterField(value_type=str, ops=STRING_OPS),
+    }
+
+
 class PluginVersionFilter(ListFilter):
     """Plugin version list filter."""
 
