@@ -36,7 +36,8 @@ _QUANTITY_TOKEN = re.compile(
     r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
     r"nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
     r"hundreds?|thousands?|millions?|billions?|trillions?|dozens?|"
-    r"once|twice|thrice)\b",
+    r"once|twice|thrice|all|every|each|both|half|halves|"
+    r"double|doubled|doubles|doubling|triple|tripled|triples|tripling)\b",
     flags=re.IGNORECASE,
 )
 _LINK = re.compile(r"(?:https?://|www\.)", flags=re.IGNORECASE)
@@ -47,6 +48,7 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _UNSUPPORTED_CLAIM = re.compile(
     r"\b(?:causes?|caused|because|due to|results? in|leads? to|"
     r"more|most|less|fewer|higher|lower|increase[ds]?|decrease[ds]?|"
+    r"slower|slowest|faster|fastest|better|best|worse|worst|"
     r"healthy|correct|incorrect)\b",
     flags=re.IGNORECASE,
 )
@@ -273,14 +275,23 @@ def _validate_copy_safety(value: str) -> None:
 
 
 def _quantified_labels(candidate: CandidateFinding) -> set[str]:
-    """Return exact chart labels containing otherwise forbidden quantities."""
+    """Return quantity-bearing labels that also contain an identity token."""
     if not isinstance(candidate.data, CategoricalInsightData):
         return set()
     return {
         item.label
         for item in candidate.data.values
-        if _NUMERIC_TOKEN.search(item.label) or _QUANTITY_TOKEN.search(item.label)
+        if _is_identity_bearing_quantified_label(item.label)
     }
+
+
+def _is_identity_bearing_quantified_label(label: str) -> bool:
+    """Distinguish names containing quantities from labels that are quantities."""
+    if not (_NUMERIC_TOKEN.search(label) or _QUANTITY_TOKEN.search(label)):
+        return False
+    without_quantities = _QUANTITY_TOKEN.sub("", label)
+    without_quantities = _NUMERIC_TOKEN.sub("", without_quantities)
+    return bool(re.search(r"[A-Za-z]", without_quantities))
 
 
 def _without_known_labels(value: str, labels: set[str]) -> str:

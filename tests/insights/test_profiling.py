@@ -195,7 +195,6 @@ def test_profiles_evaluator_compatible_retries_failures_and_cycles() -> None:
         "failed-identical-retries",
         "adjacent-same-tool-failures",
         "short-tool-cycles",
-        "null-tool-results",
         "empty-tool-results",
     ):
         candidate = _candidate(result, candidate_id)
@@ -225,6 +224,53 @@ def test_near_matches_do_not_trigger_retry_or_cycle_signals() -> None:
     assert "failed-identical-retries" not in ids
     assert "adjacent-same-tool-failures" not in ids
     assert "short-tool-cycles" not in ids
+
+
+def test_omitted_tool_output_does_not_claim_an_explicit_null_result() -> None:
+    session = _calls(
+        1,
+        [("lookup", {"id": 1}, NodeStatus.COMPLETED, None)],
+    )
+
+    result = profile_sessions([session])
+
+    assert "null-tool-results" not in {candidate.id for candidate in result.candidates}
+    assert "omitted" in " ".join(result.coverage.caveats).lower()
+
+
+@pytest.mark.parametrize(
+    ("affected", "expected_share"),
+    [(1, 0.4), (249, 99.6)],
+)
+def test_sparse_signal_percentages_match_title_fact_and_chart(
+    affected: int,
+    expected_share: float,
+) -> None:
+    sessions = [
+        _session(
+            number,
+            inputs={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "WRONG" if number <= affected else "Looks fine",
+                    }
+                ]
+            },
+        )
+        for number in range(1, 251)
+    ]
+
+    candidate = _candidate(profile_sessions(sessions), "correction-language")
+    facts = {fact.name: fact.value for fact in candidate.facts}
+    chart = {value.label: value.value for value in candidate.data.values}
+
+    assert candidate.title.startswith(f"{expected_share}%")
+    assert facts["affected_share_percent"] == expected_share
+    assert chart == {
+        "Matching sessions": affected,
+        "Other sessions": 250 - affected,
+    }
 
 
 def test_profiles_literal_user_text_signals_without_retaining_text() -> None:

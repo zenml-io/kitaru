@@ -249,6 +249,23 @@ def test_editor_validates_numbers_against_each_card_only(
         ("Inspect this\x00pattern.", "control"),
         ("This causes retries.", "unsupported claim"),
         ("This has higher activity.", "unsupported claim"),
+        ("This path is slower.", "unsupported claim"),
+        ("This path is slowest.", "unsupported claim"),
+        ("This path is faster.", "unsupported claim"),
+        ("This path is fastest.", "unsupported claim"),
+        ("This result is better.", "unsupported claim"),
+        ("This result is best.", "unsupported claim"),
+        ("This result is worse.", "unsupported claim"),
+        ("This result is worst.", "unsupported claim"),
+        ("All sessions need attention.", "quantitative"),
+        ("Every session needs attention.", "quantitative"),
+        ("Each session needs attention.", "quantitative"),
+        ("Both tools need attention.", "quantitative"),
+        ("Half the sessions need attention.", "quantitative"),
+        ("The rate doubled.", "quantitative"),
+        ("The rate is doubling.", "quantitative"),
+        ("The rate tripled.", "quantitative"),
+        ("The rate is tripling.", "quantitative"),
     ],
 )
 def test_editor_rejects_fabricated_or_unsafe_card_copy(
@@ -333,6 +350,100 @@ def test_editor_allows_exact_known_word_quantity_label(
                     id=candidate.id,
                     eyebrow="Model mix",
                     description="Model Two is worth investigating.",
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+@pytest.mark.parametrize(
+    ("label", "description"),
+    [
+        ("2", "2 is worth investigating."),
+        ("100%", "100% is worth investigating."),
+        ("Two", "Two is worth investigating."),
+        ("All", "All are worth investigating."),
+    ],
+)
+def test_quantity_only_label_cannot_mask_fabricated_quantity(
+    profiling_result: ProfilingResult,
+    label: str,
+    description: str,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "data": CategoricalInsightData(values=[CategoryValue(label=label, value=1)])
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description=description,
+                )
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="numeric or quantitative"):
+        validate_editorial_plan(copy, selection, [candidate])
+
+
+def test_known_label_must_match_at_an_exact_boundary(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="gpt-5.4", value=1)]
+            )
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Model mix",
+                    description="gpt-5.4x is worth investigating.",
+                )
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="numeric"):
+        validate_editorial_plan(copy, selection, [candidate])
+
+
+def test_comparative_substrings_in_plain_prose_are_allowed(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description=(
+                        "Breakfast requests and bestseller paths are worth inspecting."
+                    ),
                 )
             ]
         }
