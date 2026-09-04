@@ -316,6 +316,7 @@ class TestAllowlistConfiguration:
             "kitaru.client",
             "kitaru.client.resources",
             "kitaru.task",
+            "kitaru.task.analyzer",
             "kitaru.task.evaluator",
             "kitaru.task.importer",
         }
@@ -376,6 +377,7 @@ class TestAllowlistConfiguration:
         # A symbol newly added to a published module's __all__ must show up
         # here too, or it silently never reaches the reference site.
         import kitaru.client
+        import kitaru.task.analyzer
         import kitaru.task.evaluator
         import kitaru.task.importer
 
@@ -384,6 +386,7 @@ class TestAllowlistConfiguration:
         worker_entrypoints = {"run"}
         for module_path, module in [
             ("kitaru.client", kitaru.client),
+            ("kitaru.task.analyzer", kitaru.task.analyzer),
             ("kitaru.task.evaluator", kitaru.task.evaluator),
             ("kitaru.task.importer", kitaru.task.importer),
         ]:
