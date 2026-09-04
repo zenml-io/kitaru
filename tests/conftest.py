@@ -114,7 +114,7 @@ from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.application.models.tag import TagFilter
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy
-from kitaru.server.application.models.worker import WorkerFilter
+from kitaru.server.application.models.worker import EphemeralWorkerSpec, WorkerFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.blob_service import BlobService
@@ -3779,6 +3779,21 @@ class FakeWorkerRepository:
         page, next_cursor = _paginate_fake(workers, worker_filter)
         return [worker.model_copy() for worker in page], next_cursor
 
+    async def list_live(self, cutoff: datetime) -> list[Worker]:
+        """List workers seen at or after a cutoff.
+
+        Args:
+            cutoff: Bound the last heartbeat must be at or after.
+
+        Returns:
+            Live workers in id order.
+        """
+        live = [
+            worker for worker in self._workers.values() if worker.last_seen_at >= cutoff
+        ]
+        live.sort(key=lambda worker: worker.id)
+        return [worker.model_copy() for worker in live]
+
     async def delete(self, worker_id: uuid.UUID) -> None:
         """Delete a worker by id.
 
@@ -4001,6 +4016,28 @@ class FakeBlobDataStore:
             sha256: Content hash.
         """
         self._content.pop(sha256, None)
+
+
+class FakeEphemeralWorkers:
+    """In-memory ephemeral worker backend recording starts."""
+
+    def __init__(self) -> None:
+        """Initialize the backend."""
+        self.starts: list[EphemeralWorkerSpec] = []
+        self.error: Exception | None = None
+
+    async def start(self, spec: EphemeralWorkerSpec) -> None:
+        """Record a start, or raise the configured error.
+
+        Args:
+            spec: Ephemeral worker spec.
+
+        Raises:
+            Exception: The fake was configured to raise.
+        """
+        if self.error is not None:
+            raise self.error
+        self.starts.append(spec)
 
 
 async def create_blob(
@@ -4383,7 +4420,7 @@ class FakePluginRepository:
 
 async def create_plugin(
     repository: FakePluginRepository,
-    owner_id: uuid.UUID,
+    owner_id: uuid.UUID | None,
     kind: PluginKind,
     name: str = "plugin",
     description: str | None = None,

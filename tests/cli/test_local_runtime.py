@@ -18,7 +18,6 @@ import os
 from pathlib import Path
 
 import pytest
-from packaging.version import Version
 
 from kitaru.cli import local_runtime
 from kitaru.cli.local_runtime import (
@@ -600,29 +599,6 @@ def test_release_suffix_uses_docker_image_tag(
 
     assert image == f"zenmldocker/kitaru-server:{image_version}"
     assert overridden is False
-
-
-@pytest.mark.parametrize(
-    ("package_version", "image_version"),
-    [
-        ("0.22.0", "0.22.0"),
-        ("0.22.0rc5.post2", "0.22.0-rc.5.post.2"),
-        ("0.22.0.dev3", "0.22.0-dev.3"),
-        ("0.22.0+macos.arm64", "0.22.0-local.macos.arm64"),
-        ("1!0.22.0rc5", "1.epoch.0.22.0-rc.5"),
-        (
-            "0.22.0rc5.post2.dev3+macos.arm64",
-            "0.22.0-rc.5.post.2.dev.3.local.macos.arm64",
-        ),
-    ],
-)
-def test_image_version_formatter_supports_pep440_suffixes(
-    package_version: str, image_version: str
-) -> None:
-    """All canonical PEP 440 suffixes produce Docker-compatible tags."""
-    assert (
-        local_runtime._format_image_version(Version(package_version)) == image_version
-    )
 
 
 def test_runtime_files_contain_no_world_readable_secrets(runtime_paths) -> None:

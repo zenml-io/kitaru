@@ -405,6 +405,37 @@ async def test_worker_token_resolves_to_a_worker_principal(
     assert context.principal.worker_id == worker_id
 
 
+async def test_issue_worker_token_with_a_timeout(
+    service: AuthService,
+    account_repository: FakeAccountRepository,
+) -> None:
+    """A worker timeout sets the expiry to the timeout plus the leeway."""
+    account = await create_account(account_repository)
+    worker_id = uuid.uuid4()
+    now = datetime.now(UTC)
+
+    issued = service.issue_worker_token(
+        worker_id=worker_id, account_id=account.id, timeout_seconds=10
+    )
+    expected_expiry = now + timedelta(
+        seconds=10 + local_settings().TASK_TOKEN_EXPIRY_LEEWAY_SECONDS
+    )
+    assert abs((issued.expires_at - expected_expiry).total_seconds()) < 2
+    context = await service.resolve(issued.token)
+    assert isinstance(context.principal, WorkerPrincipal)
+    assert context.principal.worker_id == worker_id
+
+    default_issued = service.issue_worker_token(
+        worker_id=worker_id, account_id=account.id
+    )
+    expected_default_expiry = now + timedelta(
+        seconds=local_settings().WORKER_TOKEN_LIFETIME_SECONDS
+    )
+    assert (
+        abs((default_issued.expires_at - expected_default_expiry).total_seconds()) < 2
+    )
+
+
 async def test_task_token_resolves_to_a_task_principal(
     service: AuthService,
     account_repository: FakeAccountRepository,

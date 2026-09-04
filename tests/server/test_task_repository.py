@@ -22,6 +22,7 @@ from typing import Any, NamedTuple
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from worker_coverage_cases import COVERAGE_CASES, CoverageCase, CoverageIds
 
 from conftest import (
     UNSCOPED_WORKER_SCOPE,
@@ -655,6 +656,31 @@ async def test_claim_pending_full_scope_takes_an_older_task_of_any_kind(
         UNSCOPED_WORKER_SCOPE, setup.worker_id, 1, datetime.now(UTC)
     )
     assert [task.id for task in claimed] == [evaluation_task.id]
+
+
+@pytest.mark.parametrize(
+    "case", COVERAGE_CASES, ids=[case.name for case in COVERAGE_CASES]
+)
+async def test_claim_pending_matches_coverage_cases(
+    setup: Setup, case: CoverageCase
+) -> None:
+    """Claim agrees with the shared worker coverage cases."""
+    ids = CoverageIds(
+        job_id=setup.job_id,
+        other_job_id=uuid.uuid4(),
+        agent_id=setup.agent_id,
+        agent_version_id=setup.agent_version_id,
+        agent_version_id_2=setup.agent_version_id_2,
+        plugin_version_id=setup.plugin_version_id,
+        payload_blob_id=setup.payload_blob_id,
+        session_id=setup.session_id,
+    )
+    task = await setup.tasks.create(case.task(ids))
+    claimed = await setup.tasks.claim_pending(
+        case.scope(ids), setup.worker_id, 10, datetime.now(UTC)
+    )
+    expected = [task.id] if case.covered else []
+    assert [claimed_task.id for claimed_task in claimed] == expected
 
 
 async def test_claim_stale(setup: Setup) -> None:

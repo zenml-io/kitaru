@@ -14,18 +14,54 @@
 """Worker use cases."""
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from kitaru.analytics.events import AnalyticsEvent
-from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.worker import (
+    LabelSelector,
+    WorkerClaim,
+    WorkerRuntime,
+    WorkerScope,
+)
 from kitaru.server.application.interfaces.worker_repository import WorkerRepository
 from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.services.analytics_events import (
     build_worker_registered_properties,
 )
+from kitaru.server.application.services.plugin_resolution import (
+    PLUGIN_NAMESPACE_LABEL,
+)
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.domain.names import RESERVED_NAMESPACE
+from kitaru.server.domain.task import Task
 from kitaru.server.domain.worker import Worker, WorkerAccessDenied
+
+
+def get_ephemeral_scope(job_id: uuid.UUID) -> WorkerScope:
+    """Build the scope of an ephemeral worker pinned to a job.
+
+    Args:
+        job_id: Id of the job the worker drains.
+
+    Returns:
+        Scope claiming the job's import and evaluation tasks of plugins in
+        the reserved namespace.
+    """
+    return WorkerScope(
+        claims=[
+            WorkerClaim(kind=TaskKind.IMPORTER),
+            WorkerClaim(kind=TaskKind.EVALUATOR),
+        ],
+        selectors=[
+            LabelSelector(
+                key=PLUGIN_NAMESPACE_LABEL, values=[RESERVED_NAMESPACE], required=True
+            )
+        ],
+        job_id=job_id,
+    )
 
 
 class WorkerService:
@@ -47,6 +83,14 @@ class WorkerService:
         self._repository = repository
         self._liveness_timeout_seconds = liveness_timeout_seconds
         self._analytics = analytics
+
+    def _get_live_cutoff(self) -> datetime:
+        """Compute the earliest last heartbeat of a live worker.
+
+        Returns:
+            Start of the liveness window.
+        """
+        return datetime.now(UTC) - timedelta(seconds=self._liveness_timeout_seconds)
 
     async def register_worker(
         self,
@@ -84,6 +128,40 @@ class WorkerService:
                 build_worker_registered_properties(stored),
             )
         return stored
+
+    async def is_covered(self, tasks: Sequence[Task]) -> bool:
+        """Report whether live workers' scopes claim every task.
+
+        Args:
+            tasks: Candidate tasks.
+
+        Returns:
+            Whether each task is covered by a worker within the liveness
+            window.
+        """
+        workers = await self._repository.list_live(self._get_live_cutoff())
+        return all(any(worker.covers(task) for worker in workers) for task in tasks)
+
+    async def register_ephemeral_worker(
+        self, job_id: uuid.UUID, runtime: WorkerRuntime, actor: AuthContext
+    ) -> Worker:
+        """Register a worker with the ephemeral scope of one job.
+
+        Args:
+            job_id: Id of the job the worker drains.
+            runtime: Runtime the backend reports.
+            actor: Caller context.
+
+        Returns:
+            Stored worker.
+        """
+        return await self.register_worker(
+            name=f"job-{job_id}",
+            scope=get_ephemeral_scope(job_id),
+            runtime=runtime,
+            metadata={"ephemeral": "true"},
+            actor=actor,
+        )
 
     async def get_worker(self, worker_id: uuid.UUID, actor: AuthContext) -> Worker:
         """Get a worker by id.
@@ -140,9 +218,7 @@ class WorkerService:
         _ = actor
         live_cutoff = None
         if not worker_filter.include_stale:
-            live_cutoff = datetime.now(UTC) - timedelta(
-                seconds=self._liveness_timeout_seconds
-            )
+            live_cutoff = self._get_live_cutoff()
         return await self._repository.query(worker_filter, live_cutoff)
 
     async def delete_worker(self, worker_id: uuid.UUID, actor: AuthContext) -> None:

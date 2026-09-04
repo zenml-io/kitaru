@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from worker_coverage_cases import COVERAGE_CASES, CoverageCase, CoverageIds
 
 from conftest import UNSCOPED_WORKER_SCOPE, FakeWorkerRepository, create_worker
 from kitaru.analytics.events import AnalyticsEvent
@@ -34,6 +35,7 @@ from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.task import AgentTask, ImportTask
 from kitaru.server.domain.worker import WorkerAccessDenied, WorkerNotFound
 from kitaru.server.filtering import FilterCondition
 
@@ -143,6 +145,108 @@ async def test_register_worker_same_name_creates_a_second_worker(
     assert second.id != first.id
     assert (await service.get_worker(first.id, actor=ACTOR)).scope == first.scope
     assert (await service.get_worker(second.id, actor=ACTOR)).scope == second.scope
+
+
+@pytest.mark.parametrize(
+    "case", COVERAGE_CASES, ids=[case.name for case in COVERAGE_CASES]
+)
+async def test_is_covered_matches_claim_cases(
+    service: WorkerService, repository: FakeWorkerRepository, case: CoverageCase
+) -> None:
+    """is_covered agrees with the shared worker coverage cases."""
+    ids = CoverageIds(
+        job_id=uuid.uuid4(),
+        other_job_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        agent_version_id=uuid.uuid4(),
+        agent_version_id_2=uuid.uuid4(),
+        plugin_version_id=uuid.uuid4(),
+        payload_blob_id=uuid.uuid4(),
+        session_id=uuid.uuid4(),
+    )
+    await create_worker(repository, ACTOR.account.id, scope=case.scope(ids))
+    assert await service.is_covered([case.task(ids)]) is case.covered
+
+
+async def test_is_covered_ignores_stale_workers(
+    service: WorkerService, repository: FakeWorkerRepository
+) -> None:
+    """A covering worker outside the liveness window does not count."""
+    await create_worker(
+        repository,
+        ACTOR.account.id,
+        scope=UNSCOPED_WORKER_SCOPE,
+        last_seen_at=datetime.now(UTC) - timedelta(minutes=5),
+    )
+    task = AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4())
+    assert await service.is_covered([task]) is False
+
+
+async def test_is_covered_without_workers(service: WorkerService) -> None:
+    """No live workers means no task is covered."""
+    task = AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4())
+    assert await service.is_covered([task]) is False
+
+
+async def test_is_covered_requires_every_task(
+    service: WorkerService, repository: FakeWorkerRepository
+) -> None:
+    """One uncovered task among covered ones leaves the job uncovered."""
+    await create_worker(
+        repository,
+        ACTOR.account.id,
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
+    )
+    job_id = uuid.uuid4()
+    agent_task = AgentTask(job_id=job_id, agent_version_id=uuid.uuid4())
+    import_task = ImportTask(
+        job_id=job_id,
+        plugin_version_id=uuid.uuid4(),
+        payload_blob_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+    )
+    assert await service.is_covered([agent_task]) is True
+    assert await service.is_covered([agent_task, import_task]) is False
+
+
+async def test_is_covered_without_tasks(service: WorkerService) -> None:
+    """A job with nothing to run needs no worker."""
+    assert await service.is_covered([]) is True
+
+
+async def test_is_covered_counts_workers_of_other_accounts(
+    service: WorkerService, repository: FakeWorkerRepository
+) -> None:
+    """A live worker owned by another account still covers the task."""
+    other = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))
+    await create_worker(repository, other.account.id, scope=UNSCOPED_WORKER_SCOPE)
+    task = AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4())
+    assert await service.is_covered([task]) is True
+
+
+async def test_register_ephemeral_worker(service: WorkerService) -> None:
+    """Register a worker with the ephemeral scope of one job."""
+    job_id = uuid.uuid4()
+    runtime = WorkerRuntime(platform="bare")
+    worker = await service.register_ephemeral_worker(
+        job_id=job_id, runtime=runtime, actor=ACTOR
+    )
+    assert worker.name == f"job-{job_id}"
+    assert worker.scope == WorkerScope(
+        claims=[
+            WorkerClaim(kind=TaskKind.IMPORTER),
+            WorkerClaim(kind=TaskKind.EVALUATOR),
+        ],
+        selectors=[
+            LabelSelector(
+                key="kitaru/plugin_namespace", values=["kitaru"], required=True
+            )
+        ],
+        job_id=job_id,
+    )
+    assert worker.runtime == runtime
+    assert worker.metadata == {"ephemeral": "true"}
+    assert worker.owner_id == ACTOR.account.id
 
 
 async def test_renew_worker_stamps_last_seen_at(service: WorkerService) -> None:

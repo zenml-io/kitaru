@@ -167,6 +167,53 @@ def test_config_merge_rejects_an_invalid_claim_value() -> None:
     assert error.value.kind == "invalid_arguments"
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"claims": ["agent"]},
+        {"selectors": ["env=prod"]},
+        {"job_id": uuid.uuid4()},
+    ],
+)
+def test_config_merge_rejects_scope_flags_with_a_worker_id(
+    monkeypatch: pytest.MonkeyPatch, kwargs: dict[str, Any]
+) -> None:
+    """A scope flag alongside KITARU_WORKER_ID raises a CLI error."""
+    monkeypatch.setenv("KITARU_WORKER_ID", str(uuid.uuid4()))
+    with pytest.raises(CLIError) as error:
+        workers.build_worker_config(**kwargs)
+    assert error.value.kind == "invalid_arguments"
+
+
+def test_config_merge_keeps_a_worker_id_without_scope_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worker id from the environment survives a merge with no scope flags."""
+    worker_id = uuid.uuid4()
+    monkeypatch.setenv("KITARU_WORKER_ID", str(worker_id))
+
+    config = workers.build_worker_config(concurrency=2)
+
+    assert config.id == worker_id
+    assert config.concurrency == 2
+
+
+def test_worker_summary_reports_the_id_instead_of_a_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lifecycle summary reports a pre-registered id instead of scope fields."""
+    worker_id = uuid.uuid4()
+    monkeypatch.setenv("KITARU_WORKER_ID", str(worker_id))
+
+    config = workers.build_worker_config(concurrency=2)
+    summary = workers._worker_summary(config)
+
+    assert summary["id"] == str(worker_id)
+    assert "claims" not in summary
+    assert "selectors" not in summary
+    assert "job_id" not in summary
+
+
 def test_configure_worker_logging_installs_the_requested_level(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -36,14 +36,16 @@ from kitaru.server.application.interfaces.replay_repository import ReplayReposit
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.payload_store import PayloadStore
+from kitaru.server.application.services.job_service import get_agent_task_labels
+from kitaru.server.application.services.plugin_resolution import (
+    get_plugin_task_labels,
+)
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import AgentTask, EvaluationTask, Task
 from kitaru.server.utils import hash_params
-
-AGENT_VERSION_LABEL = "agent_version"
 
 
 async def create_replay_pipelines(
@@ -128,7 +130,7 @@ async def create_replay_pipelines(
                 job_id=job.id,
                 agent_version_id=agent_version_id,
                 inputs=baseline.inputs.value if baseline.inputs is not None else None,
-                labels={AGENT_VERSION_LABEL: str(agent_version_id)},
+                labels=get_agent_task_labels(agent_version_id),
                 on_failure=TaskOnFailure.ABORT,
             )
         )
@@ -150,6 +152,7 @@ async def create_replay_pipelines(
                     job_id=job.id,
                     plugin_version_id=evaluator.evaluator_version_id,
                     input_session_id=baseline.id,
+                    labels=get_plugin_task_labels(evaluator.evaluator),
                     params=evaluator.params,
                     on_failure=TaskOnFailure.ABORT,
                 )
@@ -196,6 +199,7 @@ async def append_result_evaluations(
             job_id=task.job_id,
             plugin_version_id=evaluator.evaluator_version_id,
             input_session_id=replay.result_session_id,
+            labels=get_plugin_task_labels(evaluator.evaluator),
             params=evaluator.params,
             on_failure=TaskOnFailure.ABORT,
         )

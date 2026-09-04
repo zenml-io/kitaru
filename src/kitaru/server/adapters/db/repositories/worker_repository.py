@@ -130,6 +130,23 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
         )
         return [row.to_domain() for row in rows], next_cursor
 
+    async def list_live(self, cutoff: datetime) -> list[Worker]:
+        """List workers seen at or after a cutoff.
+
+        Args:
+            cutoff: Bound the last heartbeat must be at or after.
+
+        Returns:
+            Live workers in id order.
+        """
+        statement = (
+            select(WorkerORM)
+            .where(WorkerORM.last_seen_at >= cutoff)
+            .order_by(WorkerORM.id)
+        )
+        rows = (await self._session.scalars(statement)).all()
+        return [row.to_domain() for row in rows]
+
     async def delete(self, worker_id: uuid.UUID) -> None:
         """Delete a worker by id.
 

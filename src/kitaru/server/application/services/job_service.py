@@ -40,6 +40,7 @@ from kitaru.server.application.services.agent_version_resolution import (
 )
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
 from kitaru.server.application.services.plugin_resolution import (
+    get_plugin_task_labels,
     resolve_plugin,
     resolve_plugin_version,
 )
@@ -47,10 +48,30 @@ from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import Job, JobAlreadySettled, JobNotSettled
 from kitaru.server.domain.plugin import PluginKind
-from kitaru.server.domain.task import AgentTask, EvaluationTask, ImportTask, Task
+from kitaru.server.domain.task import (
+    RESERVED_LABEL_PREFIX,
+    AgentTask,
+    EvaluationTask,
+    ImportTask,
+    Task,
+)
 
-AGENT_VERSION_LABEL = "agent_version"
+AGENT_VERSION_LABEL = f"{RESERVED_LABEL_PREFIX}agent_version"
+LEGACY_AGENT_VERSION_LABEL = "agent_version"
 SESSION_NAME_ENV = "KITARU_SESSION_NAME"
+
+
+def get_agent_task_labels(agent_version_id: uuid.UUID) -> dict[str, str]:
+    """Build the labels stamped on a task running an agent version.
+
+    Args:
+        agent_version_id: Id of the agent version.
+
+    Returns:
+        Labels.
+    """
+    value = str(agent_version_id)
+    return {AGENT_VERSION_LABEL: value, LEGACY_AGENT_VERSION_LABEL: value}
 
 
 async def add_tasks(
@@ -288,7 +309,7 @@ class JobService:
                 job_id=job.id,
                 agent_version_id=agent_version.id,
                 inputs=command.inputs,
-                labels={AGENT_VERSION_LABEL: str(agent_version.id)},
+                labels=get_agent_task_labels(agent_version.id),
                 env=env,
             )
         )
@@ -338,6 +359,7 @@ class JobService:
                 payload_blob_id=payload.id,
                 agent_id=agent.id,
                 agent_version_id=command.agent_version_id,
+                labels=get_plugin_task_labels(plugin.name),
                 params=command.params,
             )
         )
@@ -396,6 +418,7 @@ class JobService:
                         job_id=job.id,
                         plugin_version_id=evaluator.evaluator_version_id,
                         input_session_id=session_id,
+                        labels=get_plugin_task_labels(evaluator.evaluator),
                         params=evaluator.params,
                         on_failure=TaskOnFailure.CONTINUE,
                     )
