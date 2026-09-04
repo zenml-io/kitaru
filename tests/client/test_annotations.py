@@ -22,6 +22,7 @@ from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
     FakeAnnotationRepository,
+    FakeImportRepository,
     FakeInvestigationRepository,
     FakeReplayRepository,
     FakeSessionNodeRepository,
@@ -95,6 +96,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(agent_repository),
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=build_payload_store().store,
     )
     app.dependency_overrides[get_investigation_service] = lambda: InvestigationService(

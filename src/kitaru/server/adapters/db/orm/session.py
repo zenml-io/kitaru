@@ -57,12 +57,14 @@ SESSION_AGENT_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_id"])
 SESSION_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_version_id"])
 SESSION_OWNER_ID_FOREIGN_KEY = foreign_key_name("session", ["owner_id"])
 SESSION_TASK_ID_FOREIGN_KEY = foreign_key_name("session", ["task_id"])
+SESSION_IMPORT_ID_FOREIGN_KEY = foreign_key_name("session", ["import_id"])
 SESSION_INPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name("session", ["inputs_blob_id"])
 SESSION_OUTPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name("session", ["outputs_blob_id"])
 SESSION_AGENT_ID_ID_INDEX = index_name("session", ["agent_id", "id"])
 SESSION_AGENT_VERSION_ID_ID_INDEX = index_name("session", ["agent_version_id", "id"])
 SESSION_STATUS_INDEX = index_name("session", ["status"])
 SESSION_TASK_ID_INDEX = index_name("session", ["task_id"])
+SESSION_IMPORT_ID_INDEX = index_name("session", ["import_id"])
 SESSION_OWNER_ID_INDEX = index_name("session", ["owner_id"])
 
 STATUS_LENGTH = 32
@@ -110,6 +112,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             use_alter=True,
         ),
         ForeignKeyConstraint(
+            ["import_id"],
+            ["import.id"],
+            name=SESSION_IMPORT_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
+        ),
+        ForeignKeyConstraint(
             ["inputs_blob_id"], ["blob.id"], name=SESSION_INPUTS_BLOB_ID_FOREIGN_KEY
         ),
         ForeignKeyConstraint(
@@ -119,6 +127,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(SESSION_AGENT_VERSION_ID_ID_INDEX, "agent_version_id", "id"),
         Index(SESSION_STATUS_INDEX, "status"),
         Index(SESSION_TASK_ID_INDEX, "task_id"),
+        Index(SESSION_IMPORT_ID_INDEX, "import_id"),
         Index(SESSION_OWNER_ID_INDEX, "owner_id"),
     )
 
@@ -127,6 +136,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     number: Mapped[int]
     agent_version_id: Mapped[uuid.UUID | None]
     task_id: Mapped[uuid.UUID | None]
+    import_id: Mapped[uuid.UUID | None]
     origin: Mapped[str] = mapped_column(String(ORIGIN_LENGTH))
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     name: Mapped[str | None] = mapped_column(Text)
@@ -190,6 +200,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.number = session.number
         self.agent_version_id = session.agent_version_id
         self.task_id = session.task_id
+        self.import_id = session.import_id
         self.origin = session.origin.value
         self.status = session.status.value
         self.name = session.name
@@ -262,6 +273,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             number=self.number,
             agent_version_id=self.agent_version_id,
             task_id=self.task_id,
+            import_id=self.import_id,
             origin=SessionOrigin(self.origin),
             status=SessionStatus(self.status),
             name=self.name,

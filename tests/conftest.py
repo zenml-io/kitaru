@@ -123,6 +123,7 @@ from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
 from kitaru.server.application.services.experiment_service import ExperimentService
+from kitaru.server.application.services.import_service import ImportService
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.task_service import TaskService
@@ -6525,6 +6526,7 @@ class TaskSubstrate(NamedTuple):
     workers: FakeWorkerRepository
     tasks: FakeTaskRepository
     jobs: FakeJobRepository
+    imports: FakeImportRepository
 
 
 def _build_task_substrate() -> TaskSubstrate:
@@ -6543,6 +6545,7 @@ def _build_task_substrate() -> TaskSubstrate:
     tasks = FakeTaskRepository(sessions=sessions)
     jobs = FakeJobRepository(tasks=tasks)
     tasks.jobs = jobs
+    imports = FakeImportRepository()
     return TaskSubstrate(
         sessions=sessions,
         agents=agents,
@@ -6553,6 +6556,7 @@ def _build_task_substrate() -> TaskSubstrate:
         workers=workers,
         tasks=tasks,
         jobs=jobs,
+        imports=imports,
     )
 
 
@@ -6561,6 +6565,7 @@ class JobAndTaskServices(NamedTuple):
 
     job_service: JobService
     task_service: TaskService
+    import_service: ImportService
     jobs: FakeJobRepository
     tasks: FakeTaskRepository
     sessions: FakeSessionRepository
@@ -6570,6 +6575,7 @@ class JobAndTaskServices(NamedTuple):
     blobs: FakeBlobRepository
     secrets: FakeSecretRepository
     workers: FakeWorkerRepository
+    imports: FakeImportRepository
 
 
 def build_job_and_task_services(
@@ -6592,6 +6598,7 @@ def build_job_and_task_services(
         task_repository=substrate.tasks,
         job_repository=substrate.jobs,
         dispatcher=EventDispatcher(),
+        import_repository=substrate.imports,
     )
     task_policy = policy if policy is not None else TaskPolicy()
     replays = FakeReplayRepository()
@@ -6601,6 +6608,7 @@ def build_job_and_task_services(
         blob_repository=substrate.blobs,
         secret_repository=substrate.secrets,
         replay_repository=replays,
+        import_repository=substrate.imports,
         policy=task_policy,
     )
     task_service = TaskService(
@@ -6617,16 +6625,24 @@ def build_job_and_task_services(
         repository=substrate.jobs,
         task_repository=substrate.tasks,
         session_repository=substrate.sessions,
+        agent_version_repository=substrate.agent_versions,
+        plugin_repository=substrate.plugins,
+        transitions=transitions,
+        policy=task_policy,
+    )
+    import_service = ImportService(
+        repository=substrate.imports,
+        job_repository=substrate.jobs,
+        task_repository=substrate.tasks,
         agent_repository=substrate.agents,
         agent_version_repository=substrate.agent_versions,
         plugin_repository=substrate.plugins,
         blob_repository=substrate.blobs,
-        transitions=transitions,
-        policy=task_policy,
     )
     return JobAndTaskServices(
         job_service=job_service,
         task_service=task_service,
+        import_service=import_service,
         jobs=substrate.jobs,
         tasks=substrate.tasks,
         sessions=substrate.sessions,
@@ -6636,6 +6652,7 @@ def build_job_and_task_services(
         blobs=substrate.blobs,
         secrets=substrate.secrets,
         workers=substrate.workers,
+        imports=substrate.imports,
     )
 
 
@@ -6664,6 +6681,7 @@ class ReplayServices(NamedTuple):
     workers: FakeWorkerRepository
     evaluations: FakeEvaluationRepository
     tags: FakeTagRepository
+    imports: FakeImportRepository
     transitions: TaskTransitions
     payload_store: PayloadStore
 
@@ -6694,6 +6712,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     workers = substrate.workers
     tasks = substrate.tasks
     jobs = substrate.jobs
+    imports = substrate.imports
     tags = FakeTagRepository()
     cohorts = FakeCohortRepository(tags=tags)
     experiment_runs = FakeExperimentRunRepository(tag_repository=tags)
@@ -6723,7 +6742,10 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_repository=sessions,
     )
     transitions = TaskTransitions(
-        task_repository=tasks, job_repository=jobs, dispatcher=dispatcher
+        task_repository=tasks,
+        job_repository=jobs,
+        dispatcher=dispatcher,
+        import_repository=imports,
     )
     task_policy = policy if policy is not None else TaskPolicy()
     spec_builder = TaskSpecBuilder(
@@ -6732,6 +6754,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         blob_repository=blobs,
         secret_repository=secrets,
         replay_repository=replays,
+        import_repository=imports,
         policy=task_policy,
     )
     task_service = TaskService(
@@ -6748,10 +6771,8 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         repository=jobs,
         task_repository=tasks,
         session_repository=sessions,
-        agent_repository=agents,
         agent_version_repository=agent_versions,
         plugin_repository=plugins,
-        blob_repository=blobs,
         transitions=transitions,
         policy=task_policy,
     )
@@ -6813,6 +6834,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         workers=workers,
         evaluations=evaluations,
         tags=tags,
+        imports=imports,
         transitions=transitions,
         payload_store=payload_store,
     )

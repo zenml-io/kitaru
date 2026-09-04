@@ -27,6 +27,7 @@ from conftest import (
     FakeCohortRepository,
     FakeCohortVersionRepository,
     FakeEvaluationRepository,
+    FakeImportRepository,
     FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
@@ -147,6 +148,7 @@ async def client(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=payload_store,
     )
     node_service = SessionNodeService(

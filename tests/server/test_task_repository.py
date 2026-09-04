@@ -90,11 +90,9 @@ class Setup(NamedTuple):
     jobs: JobRepository
     owner_id: uuid.UUID
     job_id: uuid.UUID
-    agent_id: uuid.UUID
     agent_version_id: uuid.UUID
     agent_version_id_2: uuid.UUID
     plugin_version_id: uuid.UUID
-    payload_blob_id: uuid.UUID
     session_id: uuid.UUID
     worker_id: uuid.UUID
     worker_id_2: uuid.UUID
@@ -133,15 +131,6 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
         ScriptPluginSource(blob_id=code_blob.id, entrypoint="score"),
         display_version=None,
     )
-    payload, _ = await SQLBlobRepository(session).create(
-        Blob(
-            owner_id=owner.id,
-            sha256="0" * 64,
-            size=4,
-            media_type="text/csv",
-            stored_in=BlobStorageBackend.DATABASE,
-        )
-    )
     stored_session = await SQLSessionRepository(session, engine).create(
         Session(owner_id=owner.id, agent_id=agent.id, number=1, origin="recorded")
     )
@@ -171,11 +160,9 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
         jobs=SQLJobRepository(session),
         owner_id=owner.id,
         job_id=job.id,
-        agent_id=agent.id,
         agent_version_id=agent_version.id,
         agent_version_id_2=agent_version_2.id,
         plugin_version_id=plugin_version.id,
-        payload_blob_id=payload.id,
         session_id=stored_session.id,
         worker_id=worker.id,
         worker_id_2=worker_2.id,
@@ -196,11 +183,9 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             jobs=jobs,
             owner_id=owner_id,
             job_id=job.id,
-            agent_id=uuid.uuid4(),
             agent_version_id=uuid.uuid4(),
             agent_version_id_2=uuid.uuid4(),
             plugin_version_id=uuid.uuid4(),
-            payload_blob_id=uuid.uuid4(),
             session_id=uuid.uuid4(),
             worker_id=uuid.uuid4(),
             worker_id_2=uuid.uuid4(),

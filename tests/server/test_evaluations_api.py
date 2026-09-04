@@ -23,7 +23,6 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
-    FakeBlobRepository,
     FakeEvaluationRepository,
     FakeJobRepository,
     FakePluginRepository,
@@ -99,10 +98,8 @@ async def client(
         repository=jobs,
         task_repository=tasks,
         session_repository=session_repository,
-        agent_repository=agents,
         agent_version_repository=FakeAgentVersionRepository(agents),
         plugin_repository=plugin_repository,
-        blob_repository=FakeBlobRepository(),
         transitions=transitions,
         policy=TaskPolicy(),
     )

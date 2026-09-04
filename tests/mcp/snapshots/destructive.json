@@ -3798,6 +3798,20 @@
               "title": "Id",
               "type": "string"
             },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import the session was created by.",
+              "title": "Import Id"
+            },
             "imported_from": {
               "anyOf": [
                 {
@@ -4438,6 +4452,20 @@
               "title": "Id",
               "type": "string"
             },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import the session was created by.",
+              "title": "Import Id"
+            },
             "imported_from": {
               "anyOf": [
                 {
@@ -4664,20 +4692,6 @@
         "TaskResponse": {
           "description": "Task response.",
           "properties": {
-            "agent_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Agent an importer task creates sessions under.",
-              "title": "Agent Id"
-            },
             "agent_version_id": {
               "anyOf": [
                 {
@@ -4778,6 +4792,20 @@
               "title": "Id",
               "type": "string"
             },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import run by an importer task.",
+              "title": "Import Id"
+            },
             "input_session_id": {
               "anyOf": [
                 {
@@ -4814,20 +4842,6 @@
               "$ref": "#/$defs/TaskOnFailure",
               "description": "Effect of a hard failure on the job."
             },
-            "payload_blob_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Payload blob for an importer task.",
-              "title": "Payload Blob Id"
-            },
             "plugin_version_id": {
               "anyOf": [
                 {
@@ -4839,7 +4853,7 @@
                 }
               ],
               "default": null,
-              "description": "Plugin version run by an evaluator or importer task.",
+              "description": "Plugin version run by an evaluator task.",
               "title": "Plugin Version Id"
             },
             "result": {
@@ -8095,6 +8109,41 @@
     "description": "Import sessions from one existing blob and return the queued job.",
     "inputSchema": {
       "$defs": {
+        "EvaluatorConfig": {
+          "additionalProperties": false,
+          "description": "Evaluator config.",
+          "properties": {
+            "evaluator": {
+              "description": "Evaluator name.",
+              "title": "Evaluator",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": true,
+              "description": "Parameters passed to the evaluator.",
+              "title": "Params",
+              "type": "object"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Evaluator version, an omitted value resolves to latest.",
+              "title": "Version"
+            }
+          },
+          "required": [
+            "evaluator"
+          ],
+          "title": "EvaluatorConfig",
+          "type": "object"
+        },
         "SessionImportRequest": {
           "additionalProperties": false,
           "description": "Import sessions from an existing payload blob.",
@@ -8103,6 +8152,13 @@
               "format": "uuid",
               "title": "Agent Version Id",
               "type": "string"
+            },
+            "evaluators": {
+              "items": {
+                "$ref": "#/$defs/EvaluatorConfig"
+              },
+              "title": "Evaluators",
+              "type": "array"
             },
             "idempotency_key": {
               "anyOf": [
@@ -8310,6 +8366,11 @@
               "title": "Idempotency",
               "type": "string"
             },
+            "import_id": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            },
             "importer_id": {
               "format": "uuid",
               "title": "Importer Id",
@@ -8337,6 +8398,7 @@
             "importer_version_id",
             "agent_id",
             "agent_version_id",
+            "import_id",
             "result"
           ],
           "title": "SessionImportReceipt",

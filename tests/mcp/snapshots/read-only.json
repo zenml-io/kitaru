@@ -3798,6 +3798,20 @@
               "title": "Id",
               "type": "string"
             },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import the session was created by.",
+              "title": "Import Id"
+            },
             "imported_from": {
               "anyOf": [
                 {
@@ -4438,6 +4452,20 @@
               "title": "Id",
               "type": "string"
             },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import the session was created by.",
+              "title": "Import Id"
+            },
             "imported_from": {
               "anyOf": [
                 {
@@ -4664,20 +4692,6 @@
         "TaskResponse": {
           "description": "Task response.",
           "properties": {
-            "agent_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Agent an importer task creates sessions under.",
-              "title": "Agent Id"
-            },
             "agent_version_id": {
               "anyOf": [
                 {
@@ -4778,6 +4792,20 @@
               "title": "Id",
               "type": "string"
             },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import run by an importer task.",
+              "title": "Import Id"
+            },
             "input_session_id": {
               "anyOf": [
                 {
@@ -4814,20 +4842,6 @@
               "$ref": "#/$defs/TaskOnFailure",
               "description": "Effect of a hard failure on the job."
             },
-            "payload_blob_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Payload blob for an importer task.",
-              "title": "Payload Blob Id"
-            },
             "plugin_version_id": {
               "anyOf": [
                 {
@@ -4839,7 +4853,7 @@
                 }
               ],
               "default": null,
-              "description": "Plugin version run by an evaluator or importer task.",
+              "description": "Plugin version run by an evaluator task.",
               "title": "Plugin Version Id"
             },
             "result": {

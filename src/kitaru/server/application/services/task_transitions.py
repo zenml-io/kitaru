@@ -25,12 +25,14 @@ from kitaru.server.application.events import (
     JobsSettled,
     TaskTerminal,
 )
+from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.imports import Import
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import Plugin
 from kitaru.server.domain.task import EvaluationTask, ImportTask, Task
@@ -64,6 +66,7 @@ class TaskTransitions:
         dispatcher: EventDispatcher,
         analytics: ServerAnalytics | None = None,
         plugin_repository: PluginRepository | None = None,
+        import_repository: ImportRepository | None = None,
     ) -> None:
         """Initialize the dispatch.
 
@@ -74,12 +77,15 @@ class TaskTransitions:
             analytics: Analytics tracker, None skips tracking.
             plugin_repository: Plugin repository, None skips the plugin
                 properties on tracked events.
+            import_repository: Import repository, None skips tracking import
+                task events.
         """
         self._tasks = task_repository
         self._jobs = job_repository
         self._dispatcher = dispatcher
         self._analytics = analytics
         self._plugins = plugin_repository
+        self._imports = import_repository
 
     async def apply_status(
         self, task: Task, transition: Callable[[Task], None]
@@ -341,11 +347,14 @@ class TaskTransitions:
         if self._analytics is None:
             return
         if isinstance(task, ImportTask):
+            import_ = await self._get_task_import(task.import_id)
+            if import_ is None:
+                return
             self._analytics.track(
                 job.owner_id,
                 AnalyticsEvent.IMPORT_COMPLETED,
                 analytics_events.build_import_completed_properties(
-                    task, await self._get_task_plugin(task.plugin_version_id)
+                    task, await self._get_task_plugin(import_.importer_version_id)
                 ),
             )
         elif isinstance(task, EvaluationTask):
@@ -356,6 +365,23 @@ class TaskTransitions:
                     task, await self._get_task_plugin(task.plugin_version_id)
                 ),
             )
+
+    async def _get_task_import(self, import_id: uuid.UUID) -> Import | None:
+        """Load the import behind an import task.
+
+        Args:
+            import_id: Id of the import the task ran.
+
+        Returns:
+            Stored import, or None without an import repository and None when
+            the import has been deleted since the task named it.
+        """
+        if self._imports is None:
+            return None
+        try:
+            return await self._imports.get(import_id)
+        except NotFoundError:
+            return None
 
     async def _get_task_plugin(self, plugin_version_id: uuid.UUID) -> Plugin | None:
         """Load the plugin behind a task's plugin version.

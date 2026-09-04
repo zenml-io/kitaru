@@ -60,6 +60,7 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("session", "agent_version_id"): "SET NULL",
     ("session", "owner_id"): None,
     ("session", "task_id"): "SET NULL",
+    ("session", "import_id"): "SET NULL",
     ("session", "inputs_blob_id"): None,
     ("session", "outputs_blob_id"): None,
     ("cohort_version_session", "cohort_version_id"): "CASCADE",
@@ -97,6 +98,12 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("annotation", "session_id"): "CASCADE",
     ("insight", "agent_id"): "CASCADE",
     ("insight", "owner_id"): None,
+    ("import", "agent_id"): "CASCADE",
+    ("import", "agent_version_id"): "SET NULL",
+    ("import", "importer_version_id"): None,
+    ("import", "job_id"): "SET NULL",
+    ("import", "owner_id"): None,
+    ("import", "payload_blob_id"): None,
 }
 
 

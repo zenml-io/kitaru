@@ -18,6 +18,7 @@ from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
+from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.secret_repository import SecretRepository
@@ -53,6 +54,7 @@ class TaskSpecBuilder:
         blob_repository: BlobRepository,
         secret_repository: SecretRepository,
         replay_repository: ReplayRepository,
+        import_repository: ImportRepository,
         policy: TaskPolicy,
     ) -> None:
         """Initialize the builder.
@@ -63,6 +65,7 @@ class TaskSpecBuilder:
             blob_repository: Blob repository.
             secret_repository: Secret repository.
             replay_repository: Replay repository.
+            import_repository: Import repository.
             policy: Task execution policy.
         """
         self._agent_versions = agent_version_repository
@@ -70,6 +73,7 @@ class TaskSpecBuilder:
         self._blobs = blob_repository
         self._secrets = secret_repository
         self._replays = replay_repository
+        self._imports = import_repository
         self._policy = policy
 
     async def build_spec(self, task: Task) -> TaskSpec:
@@ -170,16 +174,21 @@ class TaskSpecBuilder:
             task: Import task.
 
         Raises:
-            PluginVersionIdNotFound: The task names an unknown plugin version.
+            ImportNotFound: The task names an unknown import.
+            PluginVersionIdNotFound: The import names an unknown plugin
+                version.
             BlobNotFound: The script plugin or the payload names an unknown
                 blob.
 
         Returns:
             Execution spec.
         """
-        plugin_version = await self._plugins.get_version_by_id(task.plugin_version_id)
+        import_ = await self._imports.get(task.import_id)
+        plugin_version = await self._plugins.get_version_by_id(
+            import_.importer_version_id
+        )
         plugin = await self._plugins.get(plugin_version.plugin_id)
-        payload = await self._blobs.get(task.payload_blob_id)
+        payload = await self._blobs.get(import_.payload_blob_id)
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.IMPORTER,
@@ -189,8 +198,8 @@ class TaskSpecBuilder:
                 plugin=await self._plugin_spec(plugin_version),
                 payload=PayloadSpec(blob_id=payload.id, sha256=payload.sha256),
                 provider=plugin.provider,
-                agent_id=task.agent_id,
-                params=task.params,
+                agent_id=import_.agent_id,
+                params=import_.params,
             ),
         )
 

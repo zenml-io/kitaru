@@ -70,6 +70,9 @@ from kitaru.server.adapters.db.repositories.experiment_run_repository import (
 from kitaru.server.adapters.db.repositories.idempotency_key_repository import (
     SQLIdempotencyKeyRepository,
 )
+from kitaru.server.adapters.db.repositories.import_repository import (
+    SQLImportRepository,
+)
 from kitaru.server.adapters.db.repositories.insight_repository import (
     SQLInsightRepository,
 )
@@ -141,6 +144,7 @@ from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
 from kitaru.server.application.services.experiment_service import ExperimentService
+from kitaru.server.application.services.import_service import ImportService
 from kitaru.server.application.services.insight_service import InsightService
 from kitaru.server.application.services.investigation_service import (
     InvestigationService,
@@ -564,6 +568,7 @@ def get_session_service(
         task_repository=SQLTaskRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         replay_repository=SQLReplayRepository(session),
+        import_repository=SQLImportRepository(session),
         payload_store=payload_store,
         analytics=analytics,
     )
@@ -608,6 +613,7 @@ def _build_task_transitions(
         dispatcher=build_event_dispatcher(session, engine, analytics),
         analytics=analytics,
         plugin_repository=SQLPluginRepository(session),
+        import_repository=SQLImportRepository(session),
     )
 
 
@@ -632,12 +638,32 @@ def get_job_service(
         repository=SQLJobRepository(session),
         task_repository=SQLTaskRepository(session),
         session_repository=SQLSessionRepository(session, engine),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        plugin_repository=SQLPluginRepository(session),
+        transitions=_build_task_transitions(session, engine, analytics),
+        policy=get_task_policy(settings),
+    )
+
+
+def get_import_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ImportService:
+    """Return an import service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Import service bound to the SQL repositories.
+    """
+    return ImportService(
+        repository=SQLImportRepository(session),
+        job_repository=SQLJobRepository(session),
+        task_repository=SQLTaskRepository(session),
         agent_repository=SQLAgentRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
         blob_repository=SQLBlobRepository(session),
-        transitions=_build_task_transitions(session, engine, analytics),
-        policy=get_task_policy(settings),
     )
 
 
@@ -668,6 +694,7 @@ def get_task_service(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         ),
         replay_repository=replay_repository,
+        import_repository=SQLImportRepository(session),
         policy=policy,
     )
     return TaskService(

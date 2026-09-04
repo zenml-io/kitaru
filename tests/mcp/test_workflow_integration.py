@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 
+from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.management import EvaluatorSelection
@@ -20,12 +21,16 @@ class _ImportClient:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.idempotency_key: str | None = None
+        self.request: Any = None
+        self.import_id = uuid.uuid4()
+        self.job_id = uuid.uuid4()
         self.blobs = SimpleNamespace(get=self._get_blob)
         self.importers = SimpleNamespace(
             get_version=self._get_importer_version, get=self._get_importer
         )
         self.agent_versions = SimpleNamespace(get=self._get_agent_version)
         self.imports = SimpleNamespace(create=self._create_import)
+        self.jobs = SimpleNamespace(get=self._get_job)
 
     async def _get_blob(self, item_id: uuid.UUID) -> object:
         self.calls.append("blob")
@@ -44,11 +49,17 @@ class _ImportClient:
         return SimpleNamespace(id=item_id, agent_id=uuid.uuid4())
 
     async def _create_import(
-        self, _request: object, idempotency_key: str | None = None
+        self, request: object, idempotency_key: str | None = None
     ) -> object:
         self.calls.append("create")
+        self.request = request
         self.idempotency_key = idempotency_key
-        return SimpleNamespace(model_dump=lambda **_kwargs: {"id": str(uuid.uuid4())})
+        return SimpleNamespace(id=self.import_id, job_id=self.job_id)
+
+    async def _get_job(self, job_id: uuid.UUID) -> object:
+        assert job_id == self.job_id
+        self.calls.append("job")
+        return SimpleNamespace(model_dump=lambda **_kwargs: {"id": str(job_id)})
 
 
 class _EvaluatorClient:
@@ -81,7 +92,7 @@ def _get_state(client: object) -> MCPServerState:
 
 
 async def test_existing_blob_import_uses_four_bounded_preflight_reads() -> None:
-    """Import performs four direct reads, one create, and no traversal or polling."""
+    """Import performs four direct reads, one create, one job read, and no polling."""
     client = _ImportClient()
     result = cast(
         dict[str, Any],
@@ -101,9 +112,13 @@ async def test_existing_blob_import_uses_four_bounded_preflight_reads() -> None:
         "importer",
         "agent_version",
         "create",
+        "job",
     ]
     assert result["operation"] == "session_import"
     assert result["idempotency"] == "domain-deduplicated-only"
+    assert result["import_id"] == str(client.import_id)
+    assert result["result"] == {"id": str(client.job_id)}
+    assert client.request.evaluators == []
 
 
 async def test_session_import_forwards_idempotency_key() -> None:
@@ -121,6 +136,26 @@ async def test_session_import_forwards_idempotency_key() -> None:
     )
 
     assert client.idempotency_key == "retry-import-1"
+
+
+async def test_session_import_forwards_evaluators() -> None:
+    client = _ImportClient()
+    evaluator = EvaluatorConfig(
+        evaluator="accuracy", version=2, params={"threshold": 0.8}
+    )
+
+    await handle_session_import(
+        _get_state(client),
+        SessionImportRequest(
+            payload_blob_id=uuid.uuid4(),
+            importer_id=uuid.uuid4(),
+            importer_version=2,
+            agent_version_id=uuid.uuid4(),
+            evaluators=[evaluator],
+        ),
+    )
+
+    assert client.request.evaluators == [evaluator]
 
 
 async def test_evaluator_selections_use_name_version_dto_and_cache_parent() -> None:

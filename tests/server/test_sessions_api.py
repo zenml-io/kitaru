@@ -28,6 +28,7 @@ from conftest import (
     FakeCohortVersionRepository,
     FakeEvaluationRepository,
     FakeIdempotencyKeyRepository,
+    FakeImportRepository,
     FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
@@ -162,6 +163,7 @@ async def client(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=payload_store,
     )
     node_service = SessionNodeService(
@@ -970,6 +972,7 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=build_payload_store().store,
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
@@ -1031,6 +1034,7 @@ def _build_task_scoped_app(
         if agent_version_repository is not None
         else FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=payload_store,
     )
     app.dependency_overrides[get_session_node_service] = lambda: SessionNodeService(

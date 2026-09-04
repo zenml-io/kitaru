@@ -25,6 +25,7 @@ from typing import Any
 
 import pytest
 
+from kitaru.api_models.v1.imports import ImportResponse
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import (
     SessionListParams,
@@ -112,19 +113,42 @@ class StubImportClient:
         self.agent_version = SimpleNamespace(
             id=uuid.uuid4(), agent_id=self.agent.id, version=3
         )
+        self.evaluator = SimpleNamespace(
+            id=uuid.uuid4(), name="quality", latest_version=3
+        )
+        self.evaluator_version = SimpleNamespace(
+            id=uuid.uuid4(), evaluator_id=self.evaluator.id, version=3
+        )
         self.blob = SimpleNamespace(
             id=uuid.uuid4(), sha256="a" * 64, size=7, media_type="application/jsonl"
         )
         self.job = _job()
+        now = datetime(2026, 8, 3, tzinfo=UTC)
+        self.import_response = ImportResponse(
+            id=uuid.uuid4(),
+            owner_id=self.job.owner_id,
+            job_id=self.job.id,
+            agent_id=self.agent.id,
+            agent_version_id=self.agent_version.id,
+            importer_version_id=self.importer_version.id,
+            payload_blob_id=self.blob.id,
+            params={},
+            evaluators=[],
+            created=now,
+            updated=now,
+        )
         self.uploads: list[tuple[bytes, str, str | None]] = []
         self.requests: list[Any] = []
         self.create_idempotency_keys: list[str | None] = []
         self.lookup_calls: list[str] = []
+        self.job_get_calls: list[uuid.UUID] = []
         self.create_error = create_error
         self.importers = self._Importers(self)
         self.agents = self._Agents(self)
+        self.evaluators = self._Evaluators(self)
         self.blobs = self._Blobs(self)
         self.imports = self._Imports(self)
+        self.jobs = self._Jobs(self)
 
     class _Importers:
         def __init__(self, owner: "StubImportClient") -> None:
@@ -161,6 +185,19 @@ class StubImportClient:
             assert parent_id == self.owner.agent.id
             yield self.owner.agent_version
 
+    class _Evaluators:
+        def __init__(self, owner: "StubImportClient") -> None:
+            self.owner = owner
+
+        async def list(self, params: Any) -> Any:
+            self.owner.lookup_calls.append("evaluator")
+            return SimpleNamespace(items=[self.owner.evaluator], next_cursor=None)
+
+        async def get_version(self, parent_id: uuid.UUID, version: int) -> Any:
+            assert parent_id == self.owner.evaluator.id
+            assert version == self.owner.evaluator_version.version
+            return self.owner.evaluator_version
+
     class _Blobs:
         def __init__(self, owner: "StubImportClient") -> None:
             self.owner = owner
@@ -177,11 +214,20 @@ class StubImportClient:
 
         async def create(
             self, request: Any, idempotency_key: str | None = None
-        ) -> JobResponse:
+        ) -> ImportResponse:
             self.owner.requests.append(request)
             self.owner.create_idempotency_keys.append(idempotency_key)
             if self.owner.create_error is not None:
                 raise self.owner.create_error
+            return self.owner.import_response
+
+    class _Jobs:
+        def __init__(self, owner: "StubImportClient") -> None:
+            self.owner = owner
+
+        async def get(self, job_id: uuid.UUID) -> JobResponse:
+            assert job_id == self.owner.job.id
+            self.owner.job_get_calls.append(job_id)
             return self.owner.job
 
 
@@ -481,10 +527,15 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
             "secret_value": "not-for-receipt",
             "join_on": "/metadata/conversation~1id",
         },
+        "evaluators": [],
     }
+    assert client.job_get_calls == [client.job.id]
     assert result.event == "created"
     assert result.item["operation"] == "session_import"
     assert result.item["terminal"] is False
+    assert result.item["import_id"] == str(client.import_response.id)
+    assert result.item["job"]["id"] == str(client.job.id)
+    assert "evaluators" not in result.item
     assert result.item["importer"] == {
         "id": str(client.importer.id),
         "name": "jsonl",
@@ -501,6 +552,66 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
     assert str(payload) not in repr(result)
     assert "secret_value" not in repr(result)
     assert result.next_actions[-1] == "kitaru session list"
+
+
+async def test_session_import_forwards_evaluators(tmp_path: Path) -> None:
+    """Import resolves exact evaluator versions and sends their configs."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    result = await sessions.import_sessions(
+        client,
+        payload,
+        importer="jsonl@2",
+        agent="assistant@3",
+        params=None,
+        evaluators=["quality@3"],
+        evaluator_params=['quality@3={"threshold": 0.8}'],
+        media_type="application/jsonl",
+        wait=False,
+        interval=None,
+        timeout=None,
+    )
+
+    [request] = client.requests
+    assert request.model_dump(mode="json")["evaluators"] == [
+        {"evaluator": "quality", "version": 3, "params": {"threshold": 0.8}}
+    ]
+    assert result.item["evaluators"] == [
+        {
+            "id": str(client.evaluator.id),
+            "name": "quality",
+            "version_id": str(client.evaluator_version.id),
+            "version": 3,
+        }
+    ]
+
+
+async def test_session_import_rejects_evaluator_params_without_evaluator(
+    tmp_path: Path,
+) -> None:
+    """Evaluator parameters without a selected evaluator fail before upload."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            evaluator_params=['quality@3={"threshold": 0.8}'],
+            media_type="application/jsonl",
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.uploads == []
 
 
 @pytest.mark.parametrize(
@@ -866,6 +977,8 @@ def test_session_import_argv_registers_streaming_created_receipt(
                 "assistant@3",
                 "--join-on",
                 "/metadata/customer~1case_id",
+                "--evaluator",
+                "quality@3",
                 "--media-type",
                 "application/jsonl",
             ]
@@ -878,8 +991,10 @@ def test_session_import_argv_registers_streaming_created_receipt(
     assert document["command"] == "session.import"
     assert document["event"] == "created"
     assert document["item"]["job"]["id"] == str(client.job.id)
+    assert document["item"]["import_id"] == str(client.import_response.id)
     assert client.uploads == [(b'{"x":1}', "application/jsonl", "payload.jsonl")]
     assert client.requests[0].params == {"join_on": "/metadata/customer~1case_id"}
+    assert [config.evaluator for config in client.requests[0].evaluators] == ["quality"]
 
 
 @pytest.mark.parametrize("join_on", ["metadata.case_id", "/metadata/case~2id"])

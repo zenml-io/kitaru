@@ -198,6 +198,7 @@ class SessionImportReceipt(MCPModel):
     importer_version_id: uuid.UUID
     agent_id: uuid.UUID
     agent_version_id: uuid.UUID
+    import_id: uuid.UUID
     result: JobResponse
 
 

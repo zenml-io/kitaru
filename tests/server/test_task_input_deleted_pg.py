@@ -177,7 +177,7 @@ async def _import_job(
         },
     )
     assert response.status_code == 201, response.text
-    return response.json()["id"], payload_blob_id
+    return response.json()["job_id"], payload_blob_id
 
 
 async def _agent_run_job(client: httpx.AsyncClient, agent_id: str) -> tuple[str, str]:
