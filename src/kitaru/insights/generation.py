@@ -381,7 +381,7 @@ def _outcome_categories(value: str) -> set[str]:
 
 
 def _trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
-    """Derive permitted outcome language from profiler-controlled semantics."""
+    """Permit outcome language only for observed session-status categories."""
     if (
         candidate.id == "session-outcomes"
         and candidate.family == "outcome"
@@ -393,14 +393,7 @@ def _trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
             if item.value > 0
             and (outcome := _SESSION_STATUS_OUTCOMES.get(item.label)) is not None
         }
-    semantic_names = " ".join(
-        (
-            candidate.id.replace("_", " "),
-            candidate.family.replace("_", " "),
-            *(fact.name.replace("_", " ") for fact in candidate.facts),
-        )
-    )
-    return _outcome_categories(semantic_names)
+    return set()
 
 
 def _has_negated_outcome(value: str) -> bool:

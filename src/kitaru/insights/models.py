@@ -18,7 +18,7 @@ import uuid
 from enum import StrEnum
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from kitaru.api_models.v1.insight import (
     BinnedInsightData,
@@ -34,6 +34,16 @@ MAX_NAME_LENGTH = 255
 MAX_INVESTIGATION_PROMPT_LENGTH = 16_000
 
 _NAME_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$")
+
+
+def _require_utf8(value: object) -> object:
+    """Reject strings that cannot cross the JSON UTF-8 serialization boundary."""
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise ValueError("must be valid UTF-8 text") from error
+    return value
 
 
 class _InsightGenerationModel(BaseModel):
@@ -61,6 +71,8 @@ class SourceImportContext(_InsightGenerationModel):
         description="Source provider recorded on the import task, when available.",
     )
 
+    _validate_provider_utf8 = field_validator("provider", mode="before")(_require_utf8)
+
 
 class InsightGenerationContext(_InsightGenerationModel):
     """Caller-supplied identity and source context for one generation run."""
@@ -73,6 +85,10 @@ class InsightGenerationContext(_InsightGenerationModel):
     )
     source_import: SourceImportContext = Field(
         description="Import scope whose normalized sessions were analyzed."
+    )
+
+    _validate_agent_name_utf8 = field_validator("agent_name", mode="before")(
+        _require_utf8
     )
 
 
