@@ -6740,6 +6740,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         experiment_run_repository=experiment_runs,
         evaluation_repository=evaluations,
         session_repository=sessions,
+        import_repository=imports,
     )
     transitions = TaskTransitions(
         task_repository=tasks,
