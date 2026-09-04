@@ -63,7 +63,7 @@ Set up Kitaru in this repository by following https://kitaru.ai/install.md. Use 
 ## Verify
 
 ```bash
-kitaru doctor
+kitaru doctor        # or: uvx kitaru doctor, before you open a new terminal
 ```
 
 It checks the CLI, the server connection, authentication, and whether the skills are installed (`kitaru setup` installs them if not). Server connection and authentication fail until you have run `kitaru login --local` (needs [Docker](https://docs.docker.com/get-started/get-docker/)) or `kitaru login` for the managed cloud; the sections below cover both.

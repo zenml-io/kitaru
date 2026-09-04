@@ -488,9 +488,10 @@ def _emit_root(console: Console, value: dict[str, Any]) -> None:
 def _emit_doctor(console: Console, value: dict[str, Any]) -> None:
     """Render diagnostic checks as an operational checklist."""
     healthy = bool(value.get("healthy"))
-    label = "healthy" if healthy else "needs attention"
-    style = "green" if healthy else "red"
-    console.print(f"Kitaru is [{style}]{label}[/{style}].")
+    if healthy:
+        console.print("Kitaru is [green]healthy[/green].")
+    else:
+        console.print("Kitaru [red]needs attention[/red].")
     checks = value.get("checks")
     if not isinstance(checks, list) or not checks:
         return

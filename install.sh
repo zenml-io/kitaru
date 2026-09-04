@@ -453,13 +453,23 @@ say ""
 say "${C_GREEN}◆${C_RESET} ${C_BOLD}Kitaru is installed.${C_RESET}"
 say ""
 # In project mode kitaru is not on PATH; every command goes through uv run.
-if [ "$KITARU_SCOPE" = "project" ]; then K="uv run kitaru"; else K="kitaru"; fi
+# In global mode the tool dir may not be on this shell's PATH yet; `uvx kitaru`
+# (uv tool run) reuses the environment just installed, so the printed commands
+# work right now instead of after a new terminal.
+if [ "$KITARU_SCOPE" = "project" ]; then
+  K="uv run kitaru"
+elif [ "$(PATH="$ORIG_PATH" command -v kitaru 2>/dev/null || true)" != "$KITARU_BIN" ]; then
+  K="uvx kitaru"
+else
+  K="kitaru"
+fi
 if [ "$KITARU_SCOPE" = "project" ]; then
   say "  Installed into this project's environment, so run it as ${C_BOLD}uv run kitaru ...${C_RESET}"
   say "  (or activate $VENV_DIR)."
   say ""
-elif [ "$(PATH="$ORIG_PATH" command -v kitaru 2>/dev/null || true)" != "$KITARU_BIN" ]; then
-  say "  Open a new terminal so 'kitaru' is on your PATH."
+elif [ "$K" = "uvx kitaru" ]; then
+  say "  'kitaru' is not on this shell's PATH yet. Run it as ${C_BOLD}uvx kitaru ...${C_RESET} for now;"
+  say "  a new terminal will have plain 'kitaru'."
   say ""
 fi
 if [ -n "$KITARU_SERVER" ]; then
