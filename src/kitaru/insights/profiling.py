@@ -58,6 +58,7 @@ MAX_LABEL_LENGTH = 120
 MAX_ROLE_LENGTH = 32
 MAX_SELECTOR_LENGTH = 1_024
 MAX_SELECTOR_SEGMENTS = 64
+_DECIMAL_BASE_SIZE = Decimal(0).__sizeof__()
 
 _CORRECTION_PATTERN = re.compile(
     r"\b(?:that(?:'s| is) not|you (?:didn't|did not)|doesn't work|does not work|"
@@ -246,10 +247,16 @@ def _bounded_decimal_text(value: Decimal, limit: int) -> str | None:
     """Format a finite Decimal only when its canonical fixed form fits."""
     if not value.is_finite():
         return None
-    sign, digits, exponent = value.as_tuple()
+    # CPython's Decimal stores coefficient digits inline or in the allocation
+    # reported here. Bounding that allocation before as_tuple() keeps coefficient
+    # copying and trailing-zero inspection proportional to the payload budget.
+    if Decimal.__sizeof__(value) > _DECIMAL_BASE_SIZE + limit:
+        return None
     if not value:
-        text = "-0" if sign else "0"
-        return text if len(text) + 2 <= limit else None
+        return "0" if limit >= 3 else None
+    sign, digits, exponent = value.as_tuple()
+    if len(digits) > limit:
+        return None
     decimal_exponent = int(exponent)
     digit_count = len(digits)
     while decimal_exponent < 0 and digit_count > 1 and digits[digit_count - 1] == 0:
@@ -468,6 +475,15 @@ def sanitize_label(value: str | None) -> str | None:
     return candidate
 
 
+def _validated_exact_name(value: str | None) -> str | None:
+    """Return a safe bounded name without changing exact identity semantics."""
+    if value is None or sanitize_label(value) is None:
+        return None
+    if _CONTROL_PATTERN.search(value):
+        return None
+    return value
+
+
 def _normalize_observed(
     value: Any, budget: _PayloadBudget, *, depth: int = 0
 ) -> tuple[Any, bool]:
@@ -527,7 +543,7 @@ def _tool_identity(
     node: SessionNodeResponse, budget: _PayloadBudget
 ) -> tuple[str, str] | None:
     """Return evaluator-compatible exact tool name and canonical inputs."""
-    tool_name = sanitize_label(node.tool_name)
+    tool_name = _validated_exact_name(node.tool_name)
     if tool_name is None or node.inputs is None:
         return None
     normalized, complete = _normalize_observed(node.inputs, budget)
@@ -876,9 +892,9 @@ def _scan_session(
     for position, (first, second) in enumerate(pairwise(calls)):
         first_identity = identities[position]
         second_identity = identities[position + 1]
-        first_tool_name = sanitize_label(first.tool_name)
-        second_tool_name = sanitize_label(second.tool_name)
-        label = first_tool_name or "Unavailable tool"
+        first_tool_name = _validated_exact_name(first.tool_name)
+        second_tool_name = _validated_exact_name(second.tool_name)
+        label = sanitize_label(first.tool_name) or "Unavailable tool"
         if first_identity is not None and first_identity == second_identity:
             _record(
                 state,
