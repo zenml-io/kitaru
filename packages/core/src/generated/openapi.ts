@@ -6547,22 +6547,12 @@ export interface components {
              */
             agent_id: string;
             /**
-             * Analyzer Name
-             * @description Name of the analyzer that produced the insight.
-             */
-            analyzer_name?: string | null;
-            /**
              * Analyzer Params
              * @description Params the analyzer ran with.
              */
             analyzer_params?: {
                 [key: string]: unknown;
             } | null;
-            /**
-             * Analyzer Version
-             * @description Version of the analyzer that produced the insight.
-             */
-            analyzer_version?: number | null;
             /**
              * Analyzer Version Id
              * @description Analyzer version that produced the insight.

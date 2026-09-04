@@ -154,7 +154,7 @@ async def test_get_insight(service: InsightService, agent_id: uuid.UUID) -> None
         actor=ACTOR,
     )
     loaded = await service.get_insight(created[0].id, actor=ACTOR)
-    assert loaded.insight == created[0]
+    assert loaded == created[0]
 
 
 async def test_get_insight_not_found(service: InsightService) -> None:
@@ -187,7 +187,7 @@ async def test_list_insights(service: InsightService, agent_id: uuid.UUID) -> No
 
     insights, next_cursor = await service.list_insights(InsightFilter(), actor=ACTOR)
     assert next_cursor is None
-    assert [item.insight.title for item in insights] == ["categorical", "text"]
+    assert [insight.title for insight in insights] == ["categorical", "text"]
 
     insights, _ = await service.list_insights(
         InsightFilter(
@@ -195,7 +195,7 @@ async def test_list_insights(service: InsightService, agent_id: uuid.UUID) -> No
         ),
         actor=ACTOR,
     )
-    assert [item.insight.title for item in insights] == ["text"]
+    assert [insight.title for insight in insights] == ["text"]
 
 
 async def test_list_insights_filters_by_agent_id(
@@ -232,7 +232,7 @@ async def test_list_insights_filters_by_agent_id(
         ),
         actor=ACTOR,
     )
-    assert [item.insight.id for item in insights] == [matching[0].id]
+    assert [insight.id for insight in insights] == [matching[0].id]
 
 
 async def test_list_insights_filters_by_name(
@@ -268,7 +268,7 @@ async def test_list_insights_filters_by_name(
         ),
         actor=ACTOR,
     )
-    assert [item.insight.id for item in insights] == [matching[0].id]
+    assert [insight.id for insight in insights] == [matching[0].id]
 
 
 async def test_update_insight_title(
@@ -289,10 +289,10 @@ async def test_update_insight_title(
     updated = await service.update_insight(
         created[0].id, InsightUpdate(title="renamed"), actor=ACTOR
     )
-    assert updated.insight.title == "renamed"
-    assert updated.insight.updated is not None
+    assert updated.title == "renamed"
+    assert updated.updated is not None
     assert created[0].updated is not None
-    assert updated.insight.updated >= created[0].updated
+    assert updated.updated >= created[0].updated
 
 
 async def test_update_insight_description(
@@ -316,8 +316,8 @@ async def test_update_insight_description(
     updated = await service.update_insight(
         created[0].id, InsightUpdate(description="new"), actor=ACTOR
     )
-    assert updated.insight.title == "first"
-    assert updated.insight.description == "new"
+    assert updated.title == "first"
+    assert updated.description == "new"
 
 
 async def test_update_insight_description_cleared(
@@ -341,7 +341,7 @@ async def test_update_insight_description_cleared(
     updated = await service.update_insight(
         created[0].id, InsightUpdate(description=None), actor=ACTOR
     )
-    assert updated.insight.description is None
+    assert updated.description is None
 
 
 async def test_update_insight_omitted_fields_unchanged(
@@ -363,8 +363,8 @@ async def test_update_insight_omitted_fields_unchanged(
         actor=ACTOR,
     )
     updated = await service.update_insight(created[0].id, InsightUpdate(), actor=ACTOR)
-    assert updated.insight.title == "first"
-    assert updated.insight.description == "old"
+    assert updated.title == "first"
+    assert updated.description == "old"
 
 
 async def test_update_insight_cannot_clear_title(

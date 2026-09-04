@@ -63,8 +63,6 @@ from kitaru.server.domain.plugin import (
 from kitaru.server.domain.task import AnalysisTask, TaskNotFound
 from kitaru.server.filtering import FilterCondition
 
-AnalyzerVersion = tuple[uuid.UUID, str, int]
-
 
 class Setup(NamedTuple):
     """Insight repository under test, plus rows an insight can reference."""
@@ -73,7 +71,7 @@ class Setup(NamedTuple):
     owner_id: uuid.UUID
     agent_id: uuid.UUID
     make_agent_id: Callable[[], Awaitable[uuid.UUID]]
-    make_analyzer_version: Callable[[], Awaitable[AnalyzerVersion]]
+    make_analyzer_version_id: Callable[[], Awaitable[uuid.UUID]]
     make_task_id: Callable[[uuid.UUID], Awaitable[uuid.UUID]]
 
 
@@ -98,7 +96,7 @@ async def _seed_postgres(session: AsyncSession) -> Setup:
         )
         return created.id
 
-    async def make_analyzer_version() -> AnalyzerVersion:
+    async def make_analyzer_version_id() -> uuid.UUID:
         code_blob, _ = await blobs.create(
             Blob(
                 owner_id=owner.id,
@@ -120,7 +118,7 @@ async def _seed_postgres(session: AsyncSession) -> Setup:
             ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
             display_version=None,
         )
-        return version.id, plugin.name, version.version
+        return version.id
 
     async def make_task_id(analyzer_version_id: uuid.UUID) -> uuid.UUID:
         job = await jobs.create(Job(owner_id=owner.id, kind=JobKind.SESSION_RUN))
@@ -139,7 +137,7 @@ async def _seed_postgres(session: AsyncSession) -> Setup:
         owner_id=owner.id,
         agent_id=agent.id,
         make_agent_id=make_agent_id,
-        make_analyzer_version=make_analyzer_version,
+        make_analyzer_version_id=make_analyzer_version_id,
         make_task_id=make_task_id,
     )
 
@@ -157,7 +155,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         async def make_agent_id() -> uuid.UUID:
             return uuid.uuid4()
 
-        async def make_analyzer_version() -> AnalyzerVersion:
+        async def make_analyzer_version_id() -> uuid.UUID:
             plugin = await plugin_repository.create(
                 Plugin(owner_id=owner_id, kind=PluginKind.ANALYZER, name="trends")
             )
@@ -166,7 +164,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
                 ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="analyze"),
                 display_version=None,
             )
-            return version.id, plugin.name, version.version
+            return version.id
 
         async def make_task_id(analyzer_version_id: uuid.UUID) -> uuid.UUID:
             task = await task_repository.create(
@@ -184,7 +182,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             owner_id=owner_id,
             agent_id=agent_id,
             make_agent_id=make_agent_id,
-            make_analyzer_version=make_analyzer_version,
+            make_analyzer_version_id=make_analyzer_version_id,
             make_task_id=make_task_id,
         )
         return
@@ -271,7 +269,7 @@ async def test_create_many_names_a_missing_task() -> None:
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session_with_engine() as (session, _):
         setup = await _seed_postgres(session)
-        analyzer_version_id, _, _ = await setup.make_analyzer_version()
+        analyzer_version_id = await setup.make_analyzer_version_id()
         with pytest.raises(TaskNotFound):
             await setup.insights.create_many(
                 [
@@ -286,12 +284,8 @@ async def test_create_many_names_a_missing_task() -> None:
 
 
 async def test_create_and_get_carries_provenance(setup: Setup) -> None:
-    """Round-trip an insight's provenance fields and its joined analyzer info."""
-    (
-        analyzer_version_id,
-        analyzer_name,
-        analyzer_version,
-    ) = await setup.make_analyzer_version()
+    """Round-trip an insight's provenance fields."""
+    analyzer_version_id = await setup.make_analyzer_version_id()
     task_id = await setup.make_task_id(analyzer_version_id)
     created = await _create_insight(
         setup.insights,
@@ -308,18 +302,7 @@ async def test_create_and_get_carries_provenance(setup: Setup) -> None:
     assert created.params_hash == "a" * 64
 
     loaded = await setup.insights.get(created.id)
-    assert loaded.insight == created
-    assert loaded.analyzer_name == analyzer_name
-    assert loaded.analyzer_version == analyzer_version
-
-
-async def test_get_manual_insight_carries_no_analyzer(setup: Setup) -> None:
-    """Pair a manual insight with a null analyzer name and version."""
-    created = await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
-    loaded = await setup.insights.get(created.id)
-    assert loaded.insight == created
-    assert loaded.analyzer_name is None
-    assert loaded.analyzer_version is None
+    assert loaded == created
 
 
 async def test_get_not_found(setup: Setup) -> None:
@@ -340,7 +323,7 @@ async def test_query_filters_by_agent_id(setup: Setup) -> None:
             )
         )
     )
-    assert [item.insight.id for item in insights] == [matching.id]
+    assert [insight.id for insight in insights] == [matching.id]
 
 
 async def test_query_filters_by_name(setup: Setup) -> None:
@@ -354,7 +337,7 @@ async def test_query_filters_by_name(setup: Setup) -> None:
             expression=FilterCondition(field="name", op=FilterOp.EQ, value="first")
         )
     )
-    assert [item.insight.id for item in insights] == [matching.id]
+    assert [insight.id for insight in insights] == [matching.id]
 
 
 async def test_query_filters_by_type(setup: Setup) -> None:
@@ -376,32 +359,7 @@ async def test_query_filters_by_type(setup: Setup) -> None:
             expression=FilterCondition(field="type", op=FilterOp.EQ, value="text")
         )
     )
-    assert [item.insight.id for item in insights] == [text.id]
-
-
-async def test_query_joins_analyzer_info(setup: Setup) -> None:
-    """Join the analyzer name and version onto every queried insight."""
-    (
-        analyzer_version_id,
-        analyzer_name,
-        analyzer_version,
-    ) = await setup.make_analyzer_version()
-    task_id = await setup.make_task_id(analyzer_version_id)
-    await _create_insight(
-        setup.insights,
-        setup.owner_id,
-        setup.agent_id,
-        analyzer_version_id=analyzer_version_id,
-        task_id=task_id,
-    )
-    await _create_insight(setup.insights, setup.owner_id, setup.agent_id, name="manual")
-
-    insights, _ = await setup.insights.query(InsightFilter())
-    by_name = {item.insight.name: item for item in insights}
-    assert by_name["insight"].analyzer_name == analyzer_name
-    assert by_name["insight"].analyzer_version == analyzer_version
-    assert by_name["manual"].analyzer_name is None
-    assert by_name["manual"].analyzer_version is None
+    assert [insight.id for insight in insights] == [text.id]
 
 
 async def test_query_walks_pages(setup: Setup) -> None:
@@ -418,7 +376,7 @@ async def test_query_walks_pages(setup: Setup) -> None:
         insights, next_cursor = await setup.insights.query(
             InsightFilter(cursor=cursor, size=2)
         )
-        collected.extend(item.insight for item in insights)
+        collected.extend(insights)
         if next_cursor is None:
             break
         cursor = next_cursor
@@ -442,7 +400,7 @@ async def test_update(setup: Setup) -> None:
     assert created.updated is not None
     assert updated.updated >= created.updated
     loaded = await setup.insights.get(created.id)
-    assert loaded.insight == updated
+    assert loaded == updated
 
 
 async def test_update_not_found(setup: Setup) -> None:

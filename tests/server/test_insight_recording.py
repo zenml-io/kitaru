@@ -38,6 +38,7 @@ from kitaru.server.application.models.insight import InsightFilter
 from kitaru.server.application.models.task import TaskUpdate
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
+from kitaru.server.domain.insight import Insight
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import AnalysisTask
 from kitaru.server.filtering import FilterCondition
@@ -128,13 +129,15 @@ def _insight_result(name: str) -> dict[str, Any]:
     }
 
 
-async def _agent_insights(services: ReplayServices, agent_id: uuid.UUID) -> list[Any]:
-    items, _ = await services.insights.query(
+async def _agent_insights(
+    services: ReplayServices, agent_id: uuid.UUID
+) -> list[Insight]:
+    insights, _ = await services.insights.query(
         InsightFilter(
             expression=FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
         )
     )
-    return [item.insight for item in items]
+    return insights
 
 
 async def test_completed_task_writes_one_insight_per_result(

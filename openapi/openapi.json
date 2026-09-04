@@ -4579,18 +4579,6 @@
             "title": "Agent Id",
             "type": "string"
           },
-          "analyzer_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Name of the analyzer that produced the insight.",
-            "title": "Analyzer Name"
-          },
           "analyzer_params": {
             "anyOf": [
               {
@@ -4603,18 +4591,6 @@
             ],
             "description": "Params the analyzer ran with.",
             "title": "Analyzer Params"
-          },
-          "analyzer_version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Version of the analyzer that produced the insight.",
-            "title": "Analyzer Version"
           },
           "analyzer_version_id": {
             "anyOf": [
