@@ -8,7 +8,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-21T13:30:41.590138Z"
+exclude-newer = "2026-08-31T17:27:16.688477Z"
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
@@ -830,15 +830,15 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.24.0"
+version = "0.25.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5c/c9/070f9c12a48aaec98cad5f7c141f7c925187ffdc4b342134684444b2dc0f/kitaru-0.24.0.tar.gz", hash = "sha256:88ddcf45fec8f19e072e93957321243ebc3dc620fa43632e9bdbb1f46c5b054f", size = 4954857, upload-time = "2026-09-01T13:44:03.347Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/e6/b353b3cc754ddc4a2a616b3c94735b9ff68c7d05a98e784aad951fc3b32e/kitaru-0.25.0.tar.gz", hash = "sha256:d3079d45a9e8d3bfa807c4746eb28fe03af1470e4ea046d2bda7ce4a66725f52", size = 5080368, upload-time = "2026-09-03T17:15:44.965Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/88/ad/9c1bee23a6b1276ad3e46ca219adf50565531688e804c0f5f7d172183943/kitaru-0.24.0-py3-none-any.whl", hash = "sha256:b3e06d929a4fa2c9274b244de2c91ff0b4843bbdbb24a4da3021bc10c3452424", size = 2866475, upload-time = "2026-09-01T13:44:00.897Z" },
+    { url = "https://files.pythonhosted.org/packages/de/5e/d989e7b4b0fe193f179f6942b1014a4f5d9a6f446ffff28fca9ad08df0c3/kitaru-0.25.0-py3-none-any.whl", hash = "sha256:5fc3d393434d23ff4b659edc5fc688ba241e8416e103873b60a2fe46bc4e531d", size = 2887766, upload-time = "2026-09-03T17:15:42.881Z" },
 ]
 
 [package.optional-dependencies]
@@ -872,14 +872,14 @@ worker = [
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kitaru" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e9/db/5f37c422855796461e213b56b2b3e063113d624c17bac6466d54c3102ef9/kitaru_langfuse_importer-0.1.1.tar.gz", hash = "sha256:8805f97d50187d2dc8aae9dacfb6c172c7f7c8f006a351f32c9b678ebc96df0e", size = 15160, upload-time = "2026-08-20T13:59:49.14Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/db/c565235573b1e736b3760893b05f71a4d635ab83aec4ee71b92002026607/kitaru_langfuse_importer-0.2.0.tar.gz", hash = "sha256:d8c8901a3f2b62337c937134cbb684515ce9a5ac49c4e08109c8eda0ead18bba", size = 19299, upload-time = "2026-09-03T17:16:53.387Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/0c/5745ff96656fef52bcd74f73acc9c2e6ea2af8bb66b66582b0015afa2cac/kitaru_langfuse_importer-0.1.1-py3-none-any.whl", hash = "sha256:676421b2f2a6284537719ce4955c0aa8e22faea0db083c921cc731218f98d0ca", size = 12962, upload-time = "2026-08-20T13:59:48.102Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/9f/4b229e8b4e3178b74aa2c9616500dfe74396d1e4fc46ffdfba280b1a878e/kitaru_langfuse_importer-0.2.0-py3-none-any.whl", hash = "sha256:5fa9549462468b48c4b6fde210564c3f86a54fb910d77f37ed2f9136151ceb2c", size = 18217, upload-time = "2026-09-03T17:16:52.084Z" },
 ]
 
 [[package]]
