@@ -268,7 +268,7 @@ def _bounded_decimal_text(value: Decimal, limit: int) -> str | None:
 
 
 def _scalar_json_size(value: Any, limit: int) -> int | None:
-    """Return the bounded encoded size of a supported scalar."""
+    """Return the bounded immediate JSON size of a supported value."""
     if value is None:
         return 4 if limit >= 4 else None
     if isinstance(value, bool):
@@ -310,6 +310,21 @@ def _scalar_json_size(value: Any, limit: int) -> int | None:
         return _json_string_size(text, limit)
     if isinstance(value, uuid.UUID):
         return 38 if limit >= 38 else None
+    if isinstance(value, (list, tuple)):
+        size = 2 + max(len(value) - 1, 0)
+        return size if size <= limit else None
+    if isinstance(value, dict):
+        size = 2 + len(value) + max(len(value) - 1, 0)
+        if size > limit:
+            return None
+        if not all(isinstance(key, str) for key in value):
+            return 0
+        for key in value:
+            key_size = _json_string_size(key, limit - size)
+            if key_size is None:
+                return None
+            size += key_size
+        return size
     return 0
 
 
@@ -389,6 +404,7 @@ class _State:
     )
     text_bytes_available: int = 0
     inspected_text_bytes: int = 0
+    text_inspected_session_ids: set[uuid.UUID] = field(default_factory=set)
     text_available: bool = False
     text_truncated: bool = False
     timing_available: int = 0
@@ -472,8 +488,6 @@ def _normalize_observed(
         normalized_dict: dict[str, Any] = {}
         complete = True
         for key in sorted(value):
-            if not budget.consume(key, depth=depth + 1):
-                return None, False
             converted, available = _normalize_observed(
                 value[key], budget, depth=depth + 1
             )
@@ -825,16 +839,19 @@ def _scan_session(
     state.text_bytes_available += sum(
         len(message.encode("utf-8")) for message, _ in messages
     )
+    fully_inspected = bool(messages)
     for message, node_id in messages:
         encoded = message.encode("utf-8")
         remaining = state.config.max_text_bytes - state.inspected_text_bytes
         if remaining <= 0:
             state.text_truncated = True
+            fully_inspected = False
             break
         inspected = encoded[:remaining].decode("utf-8", errors="ignore")
         state.inspected_text_bytes += len(inspected.encode("utf-8"))
         if len(encoded) > remaining:
             state.text_truncated = True
+            fully_inspected = False
         if _CORRECTION_PATTERN.search(inspected):
             _record(
                 state,
@@ -869,6 +886,8 @@ def _scan_session(
             )
         if len(encoded) > remaining:
             break
+    if fully_inspected:
+        state.text_inspected_session_ids.add(session_id)
 
 
 def _percent(numerator: int, denominator: int) -> int | float:
@@ -958,8 +977,12 @@ def _signal_candidate(
     contributions = _contributions(state, aggregate.sessions)
     contribution_ids = set(contributions)
     eligible_session_ids = (
-        state.analyzed_session_ids if family == "language" else state.node_session_ids
+        state.text_inspected_session_ids
+        if family == "language"
+        else state.node_session_ids
     )
+    if family == "language" and not aggregate.sessions <= eligible_session_ids:
+        return None
     share = _percent(len(aggregate.sessions), len(eligible_session_ids))
     values = aggregate.categories
     unit = "occurrences"
