@@ -395,6 +395,9 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
     first_candidate = profiling.candidates[0]
     profiling = profiling.model_copy(
         update={
+            "coverage": profiling.coverage.model_copy(
+                update={"caveats": [f"Existing caveat {index}" for index in range(10)]}
+            ),
             "candidates": [
                 first_candidate,
                 first_candidate.model_copy(
@@ -405,7 +408,7 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
                         "title": "A second deterministic pattern",
                     }
                 ),
-            ]
+            ],
         }
     )
     monkeypatch.setattr(
@@ -431,6 +434,9 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
         item.dimension == "serialized_result_bytes"
         for item in bounded.coverage.truncations
     )
+    assert len(bounded.coverage.caveats) == 10
+    assert "Existing caveat 9" in bounded.coverage.caveats[-1]
+    assert "Lower-priority cards were omitted" in bounded.coverage.caveats[-1]
     assert all(
         bounded.card_metadata(insight).coverage == bounded.coverage
         for insight in bounded.insights

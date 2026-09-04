@@ -58,6 +58,7 @@ from kitaru.insights.profiling import (
 )
 
 PROMPT_VERSION = "2026-09-04.1"
+_MAX_COVERAGE_CAVEATS = 10
 
 
 class _OutputBoundError(ValueError):
@@ -91,6 +92,15 @@ class InsightGenerationConfig(BaseModel):
     model: ModelGenerationConfig | None = None
     max_contributing_sessions_per_insight: int = Field(default=250, ge=1, le=1000)
     max_result_bytes: int = Field(default=1_000_000, ge=1_000, le=10_000_000)
+
+
+def _append_coverage_caveat(caveats: Sequence[str], message: str) -> list[str]:
+    """Add a disclosure without exceeding the Coverage caveat limit."""
+    retained = list(caveats)
+    if len(retained) < _MAX_COVERAGE_CAVEATS:
+        return [*retained, message]
+    retained[-1] = f"{retained[-1]} {message}"
+    return retained
 
 
 def _empty_result(
@@ -196,10 +206,10 @@ def _output_coverage(
                     analyzed=maximum_contributions,
                 ),
             ],
-            "caveats": [
-                *profiling.coverage.caveats,
+            "caveats": _append_coverage_caveat(
+                profiling.coverage.caveats,
                 "Card contribution references were limited by output configuration.",
-            ],
+            ),
         }
     )
 
@@ -237,13 +247,13 @@ def _assemble_result(
                             analyzed=MAX_INVESTIGATION_PROMPT_LENGTH,
                         ),
                     ],
-                    "caveats": [
-                        *base_coverage.caveats,
+                    "caveats": _append_coverage_caveat(
+                        base_coverage.caveats,
                         (
                             "Selected cards with oversized investigation prompts "
                             "were omitted."
                         ),
-                    ],
+                    ),
                 }
             )
 
@@ -363,10 +373,10 @@ def _get_oversize_result(
         coverage = result.coverage.model_copy(
             update={
                 "truncations": [*result.coverage.truncations, truncation],
-                "caveats": [
-                    *result.coverage.caveats,
+                "caveats": _append_coverage_caveat(
+                    result.coverage.caveats,
                     "Lower-priority cards were omitted to fit the result byte limit.",
-                ],
+                ),
             }
         )
         retained = result.insights[:retained_count]
@@ -435,10 +445,10 @@ def _get_oversize_result(
     coverage = result.coverage.model_copy(
         update={
             "truncations": [*result.coverage.truncations, truncation],
-            "caveats": [
-                *result.coverage.caveats,
+            "caveats": _append_coverage_caveat(
+                result.coverage.caveats,
                 "No generated card fit within the configured result byte limit.",
-            ],
+            ),
         }
     )
     return _empty_result(
@@ -597,10 +607,10 @@ async def generate_insights(
                         analyzed=error.maximum,
                     ),
                 ],
-                "caveats": [
-                    *profiling.coverage.caveats,
+                "caveats": _append_coverage_caveat(
+                    profiling.coverage.caveats,
                     "No selected card fit within the investigation prompt limit.",
-                ],
+                ),
             }
         )
         return await _finalize_result(
