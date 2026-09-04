@@ -6428,19 +6428,6 @@
               "title": "Agent Id",
               "type": "string"
             },
-            "analyzer_name": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Name of the analyzer that produced the insight.",
-              "title": "Analyzer Name"
-            },
             "analyzer_params": {
               "anyOf": [
                 {
@@ -6454,19 +6441,6 @@
               "default": null,
               "description": "Params the analyzer ran with.",
               "title": "Analyzer Params"
-            },
-            "analyzer_version": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Version of the analyzer that produced the insight.",
-              "title": "Analyzer Version"
             },
             "analyzer_version_id": {
               "anyOf": [
@@ -10377,19 +10351,6 @@
               "title": "Agent Id",
               "type": "string"
             },
-            "analyzer_name": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Name of the analyzer that produced the insight.",
-              "title": "Analyzer Name"
-            },
             "analyzer_params": {
               "anyOf": [
                 {
@@ -10403,19 +10364,6 @@
               "default": null,
               "description": "Params the analyzer ran with.",
               "title": "Analyzer Params"
-            },
-            "analyzer_version": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Version of the analyzer that produced the insight.",
-              "title": "Analyzer Version"
             },
             "analyzer_version_id": {
               "anyOf": [
