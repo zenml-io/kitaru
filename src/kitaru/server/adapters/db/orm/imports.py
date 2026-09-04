@@ -43,7 +43,6 @@ IMPORT_IMPORTER_VERSION_ID_FOREIGN_KEY = foreign_key_name(
 )
 IMPORT_PAYLOAD_BLOB_ID_FOREIGN_KEY = foreign_key_name("import", ["payload_blob_id"])
 IMPORT_JOB_ID_UNIQUE_CONSTRAINT = unique_constraint_name("import", ["job_id"])
-IMPORT_OWNER_ID_INDEX = index_name("import", ["owner_id"])
 IMPORT_AGENT_ID_INDEX = index_name("import", ["agent_id"])
 
 
@@ -79,7 +78,6 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["payload_blob_id"], ["blob.id"], name=IMPORT_PAYLOAD_BLOB_ID_FOREIGN_KEY
         ),
         UniqueConstraint("job_id", name=IMPORT_JOB_ID_UNIQUE_CONSTRAINT),
-        Index(IMPORT_OWNER_ID_INDEX, "owner_id"),
         Index(IMPORT_AGENT_ID_INDEX, "agent_id"),
     )
 

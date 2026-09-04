@@ -84,7 +84,6 @@ def upgrade() -> None:
     )
     with op.batch_alter_table("import", schema=None) as batch_op:
         batch_op.create_index("ix_import_agent_id", ["agent_id"], unique=False)
-        batch_op.create_index("ix_import_owner_id", ["owner_id"], unique=False)
 
     with op.batch_alter_table("session", schema=None) as batch_op:
         batch_op.add_column(sa.Column("import_id", sa.Uuid(), nullable=True))
@@ -121,6 +120,5 @@ def downgrade() -> None:
         batch_op.drop_column("import_id")
 
     with op.batch_alter_table("import", schema=None) as batch_op:
-        batch_op.drop_index("ix_import_owner_id")
         batch_op.drop_index("ix_import_agent_id")
     op.drop_table("import")
