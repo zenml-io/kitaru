@@ -3,12 +3,14 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from packaging.version import Version
 from scripts.release_units import (
     ReleaseInventoryError,
+    build_plugin_checks,
     build_plugin_matrix,
     default_requirements,
     format_inventory,
@@ -138,13 +140,13 @@ def test_inventory_describes_core_and_eleven_plugin_distributions() -> None:
 
 def test_default_requirements_are_derived_from_release_units() -> None:
     assert set(default_requirements(load_inventory()).values()) == {
-        "kitaru-braintrust-importer==0.1.0",
-        "kitaru-evaluator==0.1.2",
-        "kitaru-jsonl-importer==0.1.0",
-        "kitaru-langfuse-importer==0.1.1",
-        "kitaru-langsmith-importer==0.1.0",
-        "kitaru-logfire-importer==0.1.1",
-        "kitaru-phoenix-importer==0.1.0",
+        "kitaru-braintrust-importer==0.2.0",
+        "kitaru-evaluator==0.1.3",
+        "kitaru-jsonl-importer==0.1.1",
+        "kitaru-langfuse-importer==0.2.0",
+        "kitaru-langsmith-importer==0.2.0",
+        "kitaru-logfire-importer==0.2.0",
+        "kitaru-phoenix-importer==0.2.0",
     }
 
 
@@ -610,10 +612,10 @@ def test_inventory_rejects_an_adapter_in_the_default_catalog(
     ("old", "new"),
     [
         (
+            'requirement="kitaru-langfuse-importer==0.2.0"',
             'requirement="kitaru-langfuse-importer==0.1.1"',
-            'requirement="kitaru-langfuse-importer==0.1.0"',
         ),
-        ('display_version="0.1.1"', 'display_version="0.1.0"'),
+        ('display_version="0.2.0"', 'display_version="0.1.1"'),
     ],
 )
 def test_inventory_rejects_stale_server_default_versions(
@@ -624,7 +626,7 @@ def test_inventory_rejects_stale_server_default_versions(
 
     with pytest.raises(
         ReleaseInventoryError,
-        match=r"server default requirement and display version must match 0\.1\.1",
+        match=r"server default requirement and display version must match 0\.2\.0",
     ):
         load_inventory(release_repo)
 
@@ -641,18 +643,60 @@ def test_text_and_json_outputs_contain_the_same_unit_identities() -> None:
     assert all(unit.distribution in text_output for unit in inventory.units)
 
 
-def test_plugin_matrix_is_generated_from_the_ten_plugin_units() -> None:
-    matrix = build_plugin_matrix(load_inventory())
+def test_plugin_matrix_is_generated_from_the_plugin_units_in_three_shards() -> None:
+    inventory = load_inventory()
+    matrix = build_plugin_matrix(inventory)
 
-    assert matrix == {
-        "include": [
-            {
-                "package": slug,
-                "path": f"plugins/packages/{slug}",
-            }
-            for slug in EXPECTED_UNITS
-            if slug != "kitaru"
-        ]
+    shards = matrix["include"]
+    assert [shard["shard"] for shard in shards] == ["1/3", "2/3", "3/3"]
+    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [4, 3, 3]
+    assert [
+        package_path
+        for shard in shards
+        for package_path in shard["package_paths"].splitlines()
+    ] == [unit.path for unit in inventory.plugin_units]
+
+
+@pytest.mark.parametrize("plugin_count", [0, 1, 2, 8])
+def test_plugin_matrix_uses_only_nonempty_balanced_shards(plugin_count: int) -> None:
+    inventory = load_inventory()
+    plugin_units = inventory.plugin_units[:plugin_count]
+    reduced_inventory = replace(
+        inventory,
+        units=(inventory.units[0], *plugin_units),
+    )
+
+    shards = build_plugin_matrix(reduced_inventory)["include"]
+
+    assert len(shards) == min(plugin_count, 3)
+    assert all(shard["package_paths"] for shard in shards)
+    assert [
+        package_path
+        for shard in shards
+        for package_path in shard["package_paths"].splitlines()
+    ] == [unit.path for unit in plugin_units]
+    shard_sizes = [len(shard["package_paths"].splitlines()) for shard in shards]
+    if shard_sizes:
+        assert max(shard_sizes) - min(shard_sizes) <= 1
+
+
+@pytest.mark.parametrize("plugin_count", [0, 1, 2, 8])
+def test_plugin_checks_match_each_dynamic_matrix_shard(plugin_count: int) -> None:
+    inventory = load_inventory()
+    plugin_units = inventory.plugin_units[:plugin_count]
+    reduced_inventory = replace(
+        inventory,
+        units=(inventory.units[0], *plugin_units),
+    )
+
+    matrix = build_plugin_matrix(reduced_inventory)["include"]
+    checks = build_plugin_checks(reduced_inventory)
+
+    assert checks == {
+        unit.slug: frozenset({f"plugin packages ({shard['shard']})"})
+        for shard in matrix
+        for unit in plugin_units
+        if unit.path in shard["package_paths"].splitlines()
     }
 
 
@@ -771,10 +815,27 @@ def test_ci_plugin_matrix_is_loaded_from_the_release_inventory() -> None:
         "matrix: ${{ fromJSON(needs.release-units.outputs.plugin-matrix).matrix }}"
         in workflow
     )
-    assert "PACKAGE_PATH: ${{ matrix.path }}" in workflow
+    assert "PACKAGE_PATHS: ${{ matrix.package_paths }}" in workflow
+    assert "set -euo pipefail" in workflow
     assert "--package" in workflow
-    assert '"$PACKAGE_PATH"' in workflow
+    assert '"$package_path"' in workflow
+    assert "</dev/null" in workflow
     assert "          - braintrust-importer\n" not in workflow
+
+
+def test_ci_artifact_contracts_share_one_runner() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    artifact_job = workflow.split("\n  artifact-contracts:\n", maxsplit=1)[1].split(
+        "\n  test:\n", maxsplit=1
+    )[0]
+
+    assert "\n  client-import:\n" not in workflow
+    assert "\n  cli-artifact-contract:\n" not in workflow
+    assert "\n  mcp-wheel-contract:\n" not in workflow
+    assert "Test clean client import" in artifact_job
+    assert '"$RUNNER_TEMP/client-import/bin/python"' in artifact_job
+    assert "smoke_cli_artifacts.py" in artifact_job
+    assert "Test clean base and MCP wheel installations" in artifact_job
 
 
 def test_ci_quickstart_example_job_enforces_the_walkthrough() -> None:
@@ -804,16 +865,18 @@ def test_ci_quickstart_example_job_enforces_the_walkthrough() -> None:
 
 def test_each_unit_exposes_its_exact_release_critical_checks() -> None:
     inventory = load_inventory()
+    plugin_checks = build_plugin_checks(inventory)
 
     assert "Quickstart example end to end" in inventory.common_checks
+    assert "artifact-contracts" in inventory.common_checks
+    assert "client-import" not in inventory.common_checks
     assert "Public template against current Kitaru" not in inventory.common_checks
     for unit in inventory.units:
         assert inventory.common_checks <= unit.required_checks
         if unit.slug == "kitaru":
-            assert "cli-artifact-contract" in unit.required_checks
-            assert "mcp-wheel-contract" in unit.required_checks
+            assert "artifact-contracts" in unit.required_checks
         else:
-            assert f"plugin package ({unit.slug})" in unit.required_checks
+            assert plugin_checks[unit.slug] <= unit.required_checks
 
 
 def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:

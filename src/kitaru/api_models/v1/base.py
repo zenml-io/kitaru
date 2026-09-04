@@ -28,11 +28,13 @@ from pydantic import (
     Field,
     PlainSerializer,
     SecretStr,
+    WithJsonSchema,
 )
 
 PlainSerializedSecretStr = Annotated[
     SecretStr,
     PlainSerializer(lambda value: value.get_secret_value(), when_used="json"),
+    WithJsonSchema({"type": "string"}, mode="serialization"),
 ]
 
 FiniteFloat = Annotated[float, AllowInfNan(False)]

@@ -26,7 +26,6 @@ from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType, SessionNodeResponse
 from kitaru.task.evaluator import SessionView
 
-_ENCODING_REVISION = 1
 _EVIDENCE_LIMIT = 20
 _RESULT_VALUE_MAX_BYTES = 64_000
 _UNAVAILABLE = {"$kitaru": "unavailable"}
@@ -107,11 +106,6 @@ def _canonical_json(value: Any) -> str:
     )
 
 
-def _hash(value: Any) -> str:
-    """Hash a normalized value using UTF-8 encoded canonical JSON."""
-    return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
-
-
 def _token_fields(tokens: Any) -> Any:
     """Select the token fields used by the evaluator bundles."""
     if tokens is None:
@@ -124,75 +118,23 @@ def _token_fields(tokens: Any) -> Any:
     }
 
 
-def _input_envelope(view: SessionView) -> dict[str, Any]:
-    """Select the union of score-relevant fields in supplied node order."""
-    session = view.session
-    selected_session = {
-        "cost": session.cost,
-        "ended_at": session.ended_at,
-        "error": session.error,
-        "id": session.id,
-        "inputs": session.inputs,
-        "llm_call_count": session.llm_call_count,
-        "outputs": session.outputs,
-        "started_at": session.started_at,
-        "status": session.status,
-        "tokens": _token_fields(session.tokens),
-        "tool_call_count": session.tool_call_count,
-    }
-    selected_nodes = [
-        {
-            "cost": node.cost,
-            "ended_at": node.ended_at,
-            "error": node.error,
-            "id": node.id,
-            "index": node.index,
-            "inputs": node.inputs,
-            "model": node.model,
-            "node_type": node.node_type,
-            "outputs": node.outputs,
-            "parent_id": node.parent_id,
-            "parent_index": node.parent_index,
-            "provider": node.model_provider,
-            "requested_model": node.requested_model,
-            "secondary_parent_ids": node.secondary_parent_ids,
-            "secondary_parent_indexes": node.secondary_parent_indexes,
-            "started_at": node.started_at,
-            "status": node.status,
-            "tokens": _token_fields(node.tokens),
-            "tool_name": node.tool_name,
-        }
-        for node in view.nodes
-    ]
-    normalized, _ = _normalize_observed(
-        {
-            "encoding_revision": _ENCODING_REVISION,
-            "nodes": selected_nodes,
-            "session": selected_session,
-        }
+def _float_result(
+    name: str,
+    score: Decimal | int | float,
+    explanation: str,
+    *,
+    max_score: Decimal | int | float | None = None,
+    passed: bool | None = None,
+) -> EvaluationResult:
+    """Create a non-negative numeric result with its available scale."""
+    return EvaluationResult(
+        name=name,
+        score=float(score),
+        min_score=0.0,
+        max_score=float(max_score) if max_score is not None else None,
+        explanation=explanation,
+        passed=passed,
     )
-    return normalized
-
-
-def _base_results(view: SessionView, config: dict[str, Any]) -> list[EvaluationResult]:
-    """Emit stable retry receipts shared by every bundle."""
-    normalized_config, complete = _normalize_observed(
-        {"encoding_revision": _ENCODING_REVISION, "parameters": config}
-    )
-    if not complete:
-        raise ValueError("configuration must contain only finite JSON values")
-    return [
-        EvaluationResult(
-            name="input_sha256",
-            value=_hash(_input_envelope(view)),
-            explanation="Hash of the revision-1 materialized input envelope.",
-        ),
-        EvaluationResult(
-            name="config_sha256",
-            value=_hash(normalized_config),
-            explanation="Hash of the normalized revision-1 evaluator parameters.",
-        ),
-    ]
 
 
 def _json_result(
@@ -227,17 +169,14 @@ def _finding_result(
     findings: list[dict[str, Any]],
     explanation: str,
     *,
-    limit: int = _EVIDENCE_LIMIT,
+    max_score: int | None = None,
 ) -> EvaluationResult:
-    """Encode bounded localized evidence and retain its unbounded count."""
-    return _json_result(
+    """Count localized findings against an optional opportunity total."""
+    return _float_result(
         name,
-        {
-            "evidence": findings[:limit],
-            "total": len(findings),
-            "truncated": len(findings) > limit,
-        },
+        len(findings),
         explanation,
+        max_score=max_score,
     )
 
 
@@ -462,40 +401,38 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
                             "scope": "node",
                         }
                     )
-    results = _base_results(session, {})
+    results: list[EvaluationResult] = []
     results.extend(
         [
-            _json_result(
+            _float_result(
                 "terminality",
-                {
-                    "status": session.session.status.value,
-                    "terminal": _is_terminal(session),
-                },
+                int(_is_terminal(session)),
                 "Recorded session status and terminality.",
+                max_score=1,
             ),
-            _json_result(
+            _float_result(
                 "node_order",
-                {
-                    "ordered": ordered,
-                    "duplicate_ids": duplicate_ids,
-                    "duplicate_indexes": duplicate_indexes,
-                },
+                int(ordered and not duplicate_ids and not duplicate_indexes),
                 "Supplied node ordering and identity diagnostics.",
+                max_score=1,
             ),
             _finding_result(
                 "parent_linkage",
                 parent_findings,
                 "Nodes with missing or nonpreceding parent indexes.",
+                max_score=len(nodes),
             ),
             _finding_result(
                 "chronology_findings",
                 chronology,
                 "Nodes whose recorded end precedes their start.",
+                max_score=len(nodes),
             ),
-            _json_result(
+            _float_result(
                 "payload_coverage",
-                {"complete": payload_complete, "total": len(nodes)},
+                payload_complete,
                 "Nodes with both input and output payloads present.",
+                max_score=len(nodes),
             ),
             _json_result(
                 "recorded_counts",
@@ -513,25 +450,23 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
                 value=_resource_value(duration),
                 explanation="Terminal wall-clock duration when valid timestamps exist.",
             ),
-            _json_result(
+            _float_result(
                 "cost_coverage",
-                {
-                    "node_recorded": sum(node.cost is not None for node in cost_nodes),
-                    "node_total": len(cost_nodes),
-                    "session": _resource_value(session.session.cost),
-                },
+                sum(node.cost is not None for node in cost_nodes)
+                + int(session.session.cost is not None),
                 "Availability of session and call-level cost evidence.",
+                max_score=len(cost_nodes) + 1,
             ),
-            _json_result(
+            _float_result(
                 "token_coverage",
-                {
-                    "node_complete": token_complete,
-                    "node_total": len(llm_nodes),
-                    "session_complete": session.session.tokens is not None
+                token_complete
+                + int(
+                    session.session.tokens is not None
                     and session.session.tokens.input_tokens is not None
-                    and session.session.tokens.output_tokens is not None,
-                },
+                    and session.session.tokens.output_tokens is not None
+                ),
                 "Availability of input and output token evidence.",
+                max_score=len(llm_nodes) + 1,
             ),
             _finding_result(
                 "resource_integrity",
@@ -656,41 +591,33 @@ def output_contract(
         normalized_expected, expected_complete = _normalize_observed(expected)
         if not expected_complete:
             raise ValueError("expected must contain only finite JSON values")
-    config: dict[str, Any] = {}
-    if expected is not _UNSET:
-        config["expected"] = normalized_expected
-    if paths is not None:
-        config["required_paths"] = paths
-    if type_requirements is not None:
-        config["type_requirements"] = dict(sorted(type_requirements.items()))
-    results = _base_results(session, config)
+    results: list[EvaluationResult] = []
     output_available = session.session.outputs is not None and output_complete
     terminal = _is_terminal(session)
     results.append(
-        EvaluationResult(
+        _float_result(
             name="output_availability",
-            value="available" if output_available else "unavailable",
+            score=int(output_available),
+            max_score=1,
             explanation="Whether a non-null output can be compared safely.",
         )
     )
     if expected is not _UNSET:
+        matched = False
         passed = None
         if output_available:
-            passed = _canonical_json(normalized_output) == _canonical_json(
+            matched = _canonical_json(normalized_output) == _canonical_json(
                 normalized_expected
             )
+            passed = matched
             if passed and not terminal:
                 passed = None
         results.append(
-            _json_result(
+            _float_result(
                 "exact_output",
-                {
-                    "expected_sha256": _hash(normalized_expected),
-                    "observed_sha256": (
-                        _hash(normalized_output) if output_available else None
-                    ),
-                },
+                int(matched),
                 "Exact canonical JSON comparison of recorded and expected output.",
+                max_score=1,
                 passed=passed,
             )
         )
@@ -703,10 +630,11 @@ def output_contract(
                 if not _resolve_pointer(normalized_output, path)[0]
             ]
         results.append(
-            _json_result(
+            _float_result(
                 "required_paths",
-                {"missing": missing, "required": paths},
-                "Required RFC 6901 JSON Pointer paths.",
+                len(missing) if output_available else 0,
+                "Missing required RFC 6901 JSON Pointer paths.",
+                max_score=len(paths),
                 passed=(False if missing else True if terminal else None)
                 if output_available
                 else None,
@@ -730,13 +658,11 @@ def output_contract(
                         }
                     )
         results.append(
-            _json_result(
+            _float_result(
                 "type_requirements",
-                {
-                    "mismatches": mismatches,
-                    "required": dict(sorted(type_requirements.items())),
-                },
-                "Expected JSON types at RFC 6901 paths.",
+                len(mismatches) if output_available else 0,
+                "JSON type requirement mismatches at RFC 6901 paths.",
+                max_score=len(type_requirements),
                 passed=(False if mismatches else True if terminal else None)
                 if output_available
                 else None,
@@ -832,31 +758,26 @@ def trajectory_signals(session: SessionView) -> list[EvaluationResult]:
         repeats.append(evidence)
         if first.status is NodeStatus.FAILED:
             retries.append(evidence)
-    results = _base_results(session, {})
+    results: list[EvaluationResult] = []
     results.extend(
         [
-            _json_result(
+            _float_result(
                 "tool_identity_coverage",
-                {
-                    "complete": sum(identity is not None for identity in identities),
-                    "total": len(calls),
-                    "unknown_indexes": [
-                        call.index
-                        for call, identity in zip(calls, identities, strict=True)
-                        if identity is None
-                    ],
-                },
+                sum(identity is not None for identity in identities),
                 "Tool calls with exact name and canonically encodable inputs.",
+                max_score=len(calls),
             ),
             _finding_result(
                 "adjacent_identical_calls",
                 repeats,
                 "Adjacent exact tool-call identities.",
+                max_score=max(len(calls) - 1, 0),
             ),
             _finding_result(
                 "failed_identical_retries",
                 retries,
                 "Adjacent exact calls whose first call is recorded failed.",
+                max_score=max(len(calls) - 1, 0),
             ),
             _finding_result(
                 "short_cycles",
@@ -913,27 +834,38 @@ def tool_health(session: SessionView) -> list[EvaluationResult]:
             repeated_failures.append(
                 {"indexes": [first.index, second.index], "tool_name": first.tool_name}
             )
-    results = _base_results(session, {})
+    results: list[EvaluationResult] = []
     results.extend(
         [
-            _finding_result("failed_calls", failed, "Tool calls recorded as failed."),
             _finding_result(
-                "null_results", null, "Tool calls with a null recorded result."
+                "failed_calls",
+                failed,
+                "Tool calls recorded as failed.",
+                max_score=len(calls),
+            ),
+            _finding_result(
+                "null_results",
+                null,
+                "Tool calls with a null recorded result.",
+                max_score=len(calls),
             ),
             _finding_result(
                 "empty_results",
                 empty,
                 "Tool calls with an empty string or container result.",
+                max_score=len(calls),
             ),
             _finding_result(
                 "error_status_inconsistencies",
                 inconsistent,
                 "Tool calls whose error field disagrees with recorded status.",
+                max_score=len(calls),
             ),
             _finding_result(
                 "adjacent_repeated_failures",
                 repeated_failures,
                 "Adjacent failed calls to the same named tool.",
+                max_score=max(len(calls) - 1, 0),
             ),
         ]
     )
@@ -965,29 +897,21 @@ def timing_profile(
         )
     ]
 
-    overlaps: list[dict[str, Any]] = []
     overlap_total = 0
     active_heap: list[tuple[datetime, str]] = []
-    active: dict[str, SessionNodeResponse] = {}
+    active: set[str] = set()
     for started_at, ended_at, node, _ in sorted(
         intervals, key=lambda item: (item[0], item[2].index, str(item[2].id))
     ):
         while active_heap and active_heap[0][0] <= started_at:
             _, node_id = heapq.heappop(active_heap)
-            active.pop(node_id, None)
+            active.discard(node_id)
         overlap_total += len(active)
-        if len(overlaps) < limit:
-            for other in sorted(
-                active.values(), key=lambda item: (item.index, str(item.id))
-            ):
-                if len(overlaps) == limit:
-                    break
-                overlaps.append({"indexes": [other.index, node.index]})
         node_id = str(node.id)
-        active[node_id] = node
+        active.add(node_id)
         heapq.heappush(active_heap, (ended_at, node_id))
     wall_clock = _duration(session.session.started_at, session.session.ended_at)
-    results = _base_results(session, {"evidence_limit": limit})
+    results: list[EvaluationResult] = []
     results.extend(
         [
             EvaluationResult(
@@ -995,14 +919,11 @@ def timing_profile(
                 value=_resource_value(wall_clock),
                 explanation="Valid recorded session wall-clock duration.",
             ),
-            _json_result(
+            _float_result(
                 "node_duration_coverage",
-                {
-                    "complete": len(intervals) + len(invalid),
-                    "total": len(nodes),
-                    "valid": len(intervals),
-                },
-                "Node records with both timing endpoints and valid intervals.",
+                len(intervals),
+                "Node records with both timing endpoints and a valid interval.",
+                max_score=len(nodes),
             ),
             _json_result(
                 "slowest_nodes",
@@ -1013,20 +934,17 @@ def timing_profile(
                 },
                 "Longest valid node intervals in descending duration order.",
             ),
-            _json_result(
+            _float_result(
                 "overlapping_intervals",
-                {
-                    "evidence": overlaps,
-                    "total": overlap_total,
-                    "truncated": overlap_total > len(overlaps),
-                },
+                overlap_total,
                 "Pairs of node intervals that overlap in recorded time.",
+                max_score=len(intervals) * (len(intervals) - 1) // 2,
             ),
             _finding_result(
                 "invalid_intervals",
                 invalid,
                 "Node intervals whose end precedes their start.",
-                limit=limit,
+                max_score=len(nodes),
             ),
         ]
     )
@@ -1091,15 +1009,11 @@ def _budget_result(
         passed = True
     else:
         passed = None
-    return _json_result(
+    return _float_result(
         name,
-        {
-            "ceiling": _format_decimal(ceiling),
-            "observed": {
-                key: _resource_value(value) for key, value in observations.items()
-            },
-        },
+        max(available, default=Decimal(0)),
         explanation,
+        max_score=ceiling,
         passed=passed,
     )
 
@@ -1129,12 +1043,7 @@ def resource_budget(
             raise ValueError(f"{name} must be an integer")
     if all(value is None for value in ceilings.values()):
         raise ValueError("at least one resource ceiling is required")
-    config = {
-        name: _format_decimal(value)
-        for name, value in ceilings.items()
-        if value is not None
-    }
-    results = _base_results(session, config)
+    results: list[EvaluationResult] = []
     terminal = _is_terminal(session)
     nodes = _analysis_nodes(session)
     tool_count = sum(node.node_type is NodeType.TOOL_CALL for node in nodes)
@@ -1281,16 +1190,7 @@ def tool_policy(
     if required is None and forbidden is None and max_calls_per_tool is None:
         raise ValueError("at least one tool policy rule is required")
     maximums = dict(sorted((max_calls_per_tool or {}).items()))
-    config = {
-        key: value
-        for key, value in {
-            "forbidden_tools": forbidden,
-            "max_calls_per_tool": maximums or None,
-            "required_tools": required,
-        }.items()
-        if value is not None
-    }
-    results = _base_results(session, config)
+    results: list[EvaluationResult] = []
     calls = _tool_calls(session)
     known, name_coverage = _get_tool_name_coverage(calls)
     complete = _is_terminal(session) and len(known) == len(calls)
@@ -1299,10 +1199,11 @@ def tool_policy(
     if required is not None:
         missing = [name for name in required if counts[name] == 0]
         results.append(
-            _json_result(
+            _float_result(
                 "required_tools",
-                {"missing": missing, "required": required},
-                "Required exact tool names.",
+                len(missing),
+                "Missing required exact tool names.",
+                max_score=len(required),
                 passed=(not missing) if complete else None,
             )
         )
@@ -1310,10 +1211,11 @@ def tool_policy(
         violations = [name for name in forbidden if counts[name] > 0]
         passed = False if violations else True if complete else None
         results.append(
-            _json_result(
+            _float_result(
                 "forbidden_tools",
-                {"forbidden": forbidden, "violations": violations},
-                "Forbidden exact tool names.",
+                len(violations),
+                "Forbidden exact tool names observed.",
+                max_score=len(forbidden),
                 passed=passed,
             )
         )
@@ -1325,10 +1227,11 @@ def tool_policy(
         ]
         passed = False if violations else True if complete else None
         results.append(
-            _json_result(
+            _float_result(
                 "per_tool_maximums",
-                {"maximums": maximums, "violations": violations},
-                "Maximum recorded calls per exact tool name.",
+                len(violations),
+                "Per-tool call maximum violations.",
+                max_score=len(maximums),
                 passed=passed,
             )
         )
@@ -1347,14 +1250,11 @@ def _get_tool_name_coverage(
 ) -> tuple[list[str], EvaluationResult]:
     """Return known tool names and their coverage result."""
     known = [call.tool_name for call in calls if call.tool_name is not None]
-    return known, _json_result(
+    return known, _float_result(
         "tool_name_coverage",
-        {
-            "complete": len(known),
-            "total": len(calls),
-            "unknown_indexes": [call.index for call in calls if call.tool_name is None],
-        },
+        len(known),
         "Tool calls with exact recorded names.",
+        max_score=len(calls),
     )
 
 
@@ -1388,42 +1288,46 @@ def llm_call_signals(session: SessionView) -> list[EvaluationResult]:
         and node.model is not None
         and node.requested_model != node.model
     ]
-    results = _base_results(session, {})
+    results: list[EvaluationResult] = []
     results.extend(
         [
-            _finding_result("failed_calls", failed, "LLM calls recorded as failed."),
             _finding_result(
-                "empty_results", empty, "LLM calls with null or empty recorded output."
+                "failed_calls",
+                failed,
+                "LLM calls recorded as failed.",
+                max_score=len(calls),
+            ),
+            _finding_result(
+                "empty_results",
+                empty,
+                "LLM calls with null or empty recorded output.",
+                max_score=len(calls),
             ),
             _finding_result(
                 "adjacent_identical_inputs",
                 repeated,
                 "Adjacent LLM calls with exact canonical inputs.",
+                max_score=max(len(calls) - 1, 0),
             ),
             _finding_result(
                 "requested_model_mismatches",
                 mismatches,
                 "Calls whose requested and served model names differ.",
+                max_score=len(calls),
             ),
-            _json_result(
+            _float_result(
                 "metadata_coverage",
-                {
-                    "complete_model": sum(node.model is not None for node in calls),
-                    "complete_provider": sum(
-                        node.model_provider is not None for node in calls
-                    ),
-                    "complete_requested_model": sum(
-                        node.requested_model is not None for node in calls
-                    ),
-                    "complete_tokens": sum(
-                        node.tokens is not None
-                        and node.tokens.input_tokens is not None
-                        and node.tokens.output_tokens is not None
-                        for node in calls
-                    ),
-                    "total": len(calls),
-                },
+                sum(node.model is not None for node in calls)
+                + sum(node.model_provider is not None for node in calls)
+                + sum(node.requested_model is not None for node in calls)
+                + sum(
+                    node.tokens is not None
+                    and node.tokens.input_tokens is not None
+                    and node.tokens.output_tokens is not None
+                    for node in calls
+                ),
                 "Coverage of LLM model, provider, and token metadata.",
+                max_score=4 * len(calls),
             ),
         ]
     )
@@ -1443,14 +1347,7 @@ def model_policy(
         raise ValueError("require_requested_model_match must be a boolean")
     if models is None and providers is None and not require_requested_model_match:
         raise ValueError("at least one model policy rule is required")
-    config: dict[str, Any] = {
-        "require_requested_model_match": require_requested_model_match
-    }
-    if models is not None:
-        config["allowed_models"] = models
-    if providers is not None:
-        config["allowed_providers"] = providers
-    results = _base_results(session, config)
+    results: list[EvaluationResult] = []
     calls = _llm_calls(session)
     terminal = _is_terminal(session)
     can_pass = terminal and bool(calls)
@@ -1462,10 +1359,11 @@ def model_policy(
         ]
         complete = can_pass and all(node.model is not None for node in calls)
         results.append(
-            _json_result(
+            _float_result(
                 "allowed_models",
-                {"allowed": models, "violations": violations},
-                "Allowed exact served model names.",
+                len(violations),
+                "Calls outside the allowed exact served model names.",
+                max_score=len(calls),
                 passed=False if violations else True if complete else None,
             )
         )
@@ -1477,10 +1375,11 @@ def model_policy(
         ]
         complete = can_pass and all(node.model_provider is not None for node in calls)
         results.append(
-            _json_result(
+            _float_result(
                 "allowed_providers",
-                {"allowed": providers, "violations": violations},
-                "Allowed exact provider names.",
+                len(violations),
+                "Calls outside the allowed exact provider names.",
+                max_score=len(calls),
                 passed=False if violations else True if complete else None,
             )
         )
@@ -1501,10 +1400,11 @@ def model_policy(
             for node in calls
         )
         results.append(
-            _json_result(
+            _float_result(
                 "requested_model_match",
-                {"mismatches": mismatches},
-                "Exact equality of requested and served model names.",
+                len(mismatches),
+                "Calls whose requested and served model names differ.",
+                max_score=len(calls),
                 passed=False if mismatches else True if complete else None,
             )
         )
@@ -1534,7 +1434,7 @@ def workflow_conformance(
         raise ValueError("expected_tools must be a non-empty list of non-empty strings")
     if mode not in _WORKFLOW_MODES:
         raise ValueError(f"mode must be one of {sorted(_WORKFLOW_MODES)}")
-    results = _base_results(session, {"expected_tools": expected_tools, "mode": mode})
+    results: list[EvaluationResult] = []
     calls = _tool_calls(session)
     observed, name_coverage = _get_tool_name_coverage(calls)
     matched = False
@@ -1559,10 +1459,11 @@ def workflow_conformance(
     results.extend(
         [
             name_coverage,
-            _json_result(
+            _float_result(
                 "workflow_match",
-                {"expected": expected_tools, "mode": mode, "observed": observed},
+                int(matched),
                 "Exact recorded tool sequence comparison under the selected mode.",
+                max_score=1,
                 passed=passed,
             ),
         ]

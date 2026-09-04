@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.24.0+dev"
+version = "0.25.0+dev"
 description = "Record, replay, and improve AI agents in production."
 readme = "README.md"
 license = "Apache-2.0"
@@ -85,6 +85,9 @@ otel = [
 ]
 s3 = [
     "obstore>=0.11.1",
+]
+modal = [
+    "modal>=1.5,<2",
 ]
 
 [project.scripts]

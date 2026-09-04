@@ -96,7 +96,10 @@ async def test_create_session_run(
         TaskFilter(job_id=uuid.UUID(job["id"])), actor=AuthContext(account=ACCOUNT)
     )
     assert len(tasks) == 1
-    assert tasks[0].labels == {"agent_version": str(version.id)}
+    assert tasks[0].labels == {
+        "kitaru/agent_version": str(version.id),
+        "agent_version": str(version.id),
+    }
     assert tasks[0].env == {"KITARU_SESSION_NAME": "run-1"}
 
 

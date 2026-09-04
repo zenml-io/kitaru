@@ -15,6 +15,8 @@ The importer rebuilds span hierarchy and conservatively identifies model and too
 
 See the [Logfire import guide](https://docs.zenml.io/kitaru/guides/import-logfire-traces) for accepted formats, parameters, deduplication behavior, and fidelity limits.
 
+Nested span paths support up to 64 levels, counting a root as level 1. Invalid costs, token counts, embedded JSON, and text that cannot serialize reject the affected grouped session; unrelated sessions continue. A trace rejected before grouping does not prevent a valid sibling trace from importing into the same session.
+
 ## Adapter
 
 Install the package with the `adapter` extra to use the adapter, which adds the provider SDK it needs:

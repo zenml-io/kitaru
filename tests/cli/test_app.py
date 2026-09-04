@@ -601,6 +601,27 @@ def test_transport_error_without_request_uses_selected_server() -> None:
     assert error.details == {"server_url": "https://api.example.com/kitaru"}
 
 
+def test_bare_login_dispatches_without_a_server(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Leave the target empty so auth orchestration starts managed-cloud login."""
+    captured: dict[str, Any] = {}
+
+    async def fake_login(**options: Any) -> CommandResult:
+        captured.update(options)
+        return CommandResult(item={"server_url": "https://managed.example.com"})
+
+    monkeypatch.setattr(app_module.auth_commands, "login", fake_login)
+
+    assert app_module.main(["login", "--output", "json"]) == 0
+
+    assert captured["server"] is None
+    assert captured["local"] is False
+    assert captured["non_interactive"] is True
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["item"]["server_url"] == "https://managed.example.com"
+
+
 def test_login_network_error_preserves_selected_server_path(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

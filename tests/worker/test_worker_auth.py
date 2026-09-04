@@ -120,6 +120,21 @@ async def test_initial_token_is_served_without_renewing() -> None:
     assert repository.renewal_calls == 0
 
 
+async def test_source_without_initial_token_renews_on_fetch() -> None:
+    """Cache nothing before the first renewal, then serve the issued token."""
+    app, repository, account_token = await _registration_app()
+    client = asgi_api_client(app, api_key=account_token)
+    registered = await client.workers.create(_registration_request())
+    source = WorkerTokenSource(client, registered.worker.id)
+
+    assert source.get_cached_token() is None
+    token = await source.fetch_token()
+
+    assert isinstance(token, str)
+    assert repository.renewal_calls == 1
+    assert source.get_cached_token() == token
+
+
 async def test_fetch_renews_and_caches_the_fresh_token() -> None:
     """Renew the worker token and serve the freshly issued token from the cache."""
     app, repository, account_token = await _registration_app()

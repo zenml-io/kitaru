@@ -15,7 +15,7 @@ You do not need to memorize commands to start. Kitaru is built for your coding a
 **No agent in production yet?** When you are ready to try it yourself, ask your assistant for the guided tour. The skill clones Kitaru and enters the [PydanticAI returns agent example](https://github.com/zenml-io/kitaru/tree/main/examples/python/pydantic_ai_ticket_resolver), prepares a three-session review for you to judge, turns one accepted finding into an evaluator without a paid model call, and ends with one approved replay experiment. Prefer to see every command yourself? The [returns agent tutorial](../tutorials/returns-agent/README.md) walks the same ground manually.
 {% endhint %}
 
-Before starting, [install Kitaru and log in](installation.md), then [set up your coding agent](../agent-native/setup.md): the MCP server gives it bounded Kitaru operations, and the skills teach it the procedures.
+Before starting, run `curl -fsSL https://kitaru.ai/install | bash`. It [installs Kitaru](installation.md), logs you in locally, and [sets up your coding agent](../agent-native/setup.md): the MCP server gives it bounded Kitaru operations, and the skills teach it the procedures.
 
 ## First: get your runs into Kitaru
 

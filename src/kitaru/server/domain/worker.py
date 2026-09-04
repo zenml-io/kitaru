@@ -18,7 +18,7 @@ from datetime import datetime
 
 from pydantic import Field
 
-from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.worker import WorkerClaim, WorkerRuntime, WorkerScope
 from kitaru.server.domain.base import (
     DomainModel,
     ForbiddenError,
@@ -27,6 +27,7 @@ from kitaru.server.domain.base import (
 )
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
+from kitaru.server.domain.task import AgentTask, Task
 
 
 class WorkerNotFound(NotFoundError):
@@ -78,6 +79,49 @@ class WorkerAccessDenied(ForbiddenError):
         super().__init__(f"Worker {worker_id} is not accessible to this caller")
 
 
+def _claim_matches(claim: WorkerClaim, task: Task) -> bool:
+    """Report whether one claim covers a task.
+
+    Args:
+        claim: Claim from the worker's scope.
+        task: Candidate task.
+
+    Returns:
+        Whether the claim covers the task.
+    """
+    if claim.agent_version_id is not None:
+        return (
+            isinstance(task, AgentTask)
+            and task.agent_version_id == claim.agent_version_id
+        )
+    return task.kind is claim.kind
+
+
+def scope_covers(scope: WorkerScope, task: Task) -> bool:
+    """Report whether a scope claims the task.
+
+    Mirrors the claim conditions of the SQL task repository, so the two
+    must change together.
+
+    Args:
+        scope: Worker scope.
+        task: Candidate task.
+
+    Returns:
+        Whether a worker with the scope would claim the task.
+    """
+    if scope.job_id is not None and task.job_id != scope.job_id:
+        return False
+    for selector in scope.selectors or []:
+        if selector.key not in task.labels:
+            if selector.required:
+                return False
+            continue
+        if task.labels[selector.key] not in selector.values:
+            return False
+    return any(_claim_matches(claim, task) for claim in scope.claims)
+
+
 class Worker(DomainModel):
     """Worker."""
 
@@ -102,3 +146,14 @@ class Worker(DomainModel):
             Whether the worker is considered alive.
         """
         return (now - self.last_seen_at).total_seconds() <= timeout_seconds
+
+    def covers(self, task: Task) -> bool:
+        """Report whether the worker's scope claims the task.
+
+        Args:
+            task: Candidate task.
+
+        Returns:
+            Whether the worker would claim the task.
+        """
+        return scope_covers(self.scope, task)

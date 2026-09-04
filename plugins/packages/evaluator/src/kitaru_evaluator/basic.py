@@ -64,6 +64,7 @@ def cost(session: SessionView) -> EvaluationResult:
     return EvaluationResult(
         name="cost",
         score=float(recorded_cost),
+        min_score=0.0,
         explanation=f"The session recorded a total cost of {recorded_cost}.",
     )
 
@@ -76,12 +77,14 @@ def latency(session: SessionView) -> EvaluationResult:
         return EvaluationResult(
             name="latency_seconds",
             score=0.0,
+            min_score=0.0,
             explanation="The session has no complete timing information.",
         )
     duration = max((ended_at - started_at).total_seconds(), 0.0)
     return EvaluationResult(
         name="latency_seconds",
         score=duration,
+        min_score=0.0,
         explanation=f"The session ran for {duration:.3f} seconds.",
     )
 
@@ -95,16 +98,11 @@ def tool_call_patterns(session: SessionView) -> EvaluationResult:
     ]
     counts = Counter(tool_names)
     repeated_calls = sum(count - 1 for count in counts.values() if count > 1)
-    if not tool_names:
-        pattern = "no-tool-calls"
-    elif repeated_calls:
-        pattern = "repeated-tools"
-    else:
-        pattern = "distinct-tools"
     return EvaluationResult(
         name="tool_call_pattern",
         score=float(repeated_calls),
-        value=pattern,
+        min_score=0.0,
+        max_score=float(len(tool_names)),
         explanation=(
             f"Found {len(tool_names)} tool calls and {repeated_calls} repeated calls."
         ),

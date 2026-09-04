@@ -262,6 +262,20 @@ def test_run_imports_the_trace_of_a_raising_function(
     assert len(client.sessions.batches) == 1
 
 
+def test_run_preserves_the_function_error_when_importing_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the function error when its trace cannot be fetched."""
+    adapter, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter.fetch_error = RuntimeError("fetch failed")
+
+    def func() -> None:
+        raise ValueError("agent failed")
+
+    with pytest.raises(ValueError, match="agent failed"):
+        adapter.run(func)
+
+
 async def test_run_async_imports_the_trace_of_a_raising_function(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -283,6 +297,20 @@ async def test_run_async_imports_the_trace_of_a_raising_function(
         "fetch:trace-1",
     ]
     assert len(client.sessions.created) == 1
+
+
+async def test_run_async_preserves_the_function_error_when_importing_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the coroutine error when its trace cannot be fetched."""
+    adapter, _ = _adapter(monkeypatch, _single_session_parser)
+    adapter.fetch_error = RuntimeError("fetch failed")
+
+    async def func() -> None:
+        raise ValueError("agent failed")
+
+    with pytest.raises(ValueError, match="agent failed"):
+        await adapter.run_async(func)
 
 
 def test_run_rejects_a_parse_without_sessions(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -160,6 +160,19 @@ jobs:
         with:
           packages-dir: package-dist
           skip-existing: true
+  installer-smoke:
+    # After the package is on PyPI, fetch the installer the way users do
+    # (https://kitaru.ai/install, served from main by the docs worker) and
+    # prove it installs the version just published. This alerts (fails the
+    # workflow) but does not gate the rest of the release: a runner or PyPI
+    # propagation flake must not leave a half-published release.
+    needs: [build, publish-python]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/installer.yml
+    with:
+      version: ${{ needs.build.outputs.version }}
+      source: url
   publish-deployables:
     needs: [build, publish-python]
     runs-on: ubuntu-latest
@@ -460,3 +473,22 @@ jobs:
             --draft \
             --title "Start Kitaru $VERSION development" \
             --body "$body"
+  notify-failure:
+    # Any failed job in the release chain, including the non-gating installer
+    # smoke, pings the SRE Discord channel.
+    needs:
+      - build
+      - publish-python
+      - installer-smoke
+      - publish-deployables
+      - promote-latest
+      - create-release
+      - advance-maintenance-branch
+      - create-development-reset-pr
+    if: failure()
+    permissions: {}
+    uses: ./.github/workflows/notify-failure.yml
+    with:
+      title: Release ${{ github.ref_name }}
+    secrets:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_SRE }}
