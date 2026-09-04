@@ -22,6 +22,7 @@ from conftest import (
     build_job_and_task_services,
     build_worker_actor,
     create_agent,
+    create_analysis_task,
     create_blob,
     create_import,
     create_import_task,
@@ -34,7 +35,11 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
-from kitaru.server.domain.task import ImportTaskDetails, ScriptPluginSpec
+from kitaru.server.domain.task import (
+    AnalysisTaskDetails,
+    ImportTaskDetails,
+    ScriptPluginSpec,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -93,6 +98,47 @@ async def test_import_spec_is_built_from_the_import_row(
     assert spec.details.payload.sha256 == payload.sha256
     assert spec.details.agent_id == agent.id
     assert spec.details.params == {"delimiter": ","}
+
+
+async def test_analysis_spec_is_built_from_the_task(
+    services: JobAndTaskServices,
+) -> None:
+    """The analyzer spec takes its plugin, agent, sessions, and params off the task."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.ANALYZER, name="trends"
+    )
+    code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
+        display_version=None,
+    )
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    session_ids = [uuid.uuid4(), uuid.uuid4()]
+    task = await create_analysis_task(
+        services.tasks,
+        job.id,
+        plugin_version_id=version.id,
+        agent_id=agent.id,
+        input_session_ids=session_ids,
+        params={"focus": "errors"},
+    )
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert spec.timeout_seconds == (
+        services.task_service._policy.analyzer_timeout_seconds
+    )
+    assert spec.hooks == []
+    assert isinstance(spec.details, AnalysisTaskDetails)
+    assert isinstance(spec.details.plugin, ScriptPluginSpec)
+    assert spec.details.plugin.blob_id == code_blob.id
+    assert spec.details.plugin.sha256 == code_blob.sha256
+    assert spec.details.analyzer_name == "trends"
+    assert spec.details.agent_id == agent.id
+    assert spec.details.input_session_ids == session_ids
+    assert spec.details.params == {"focus": "errors"}
 
 
 async def test_missing_import_row_cancels_the_task_at_claim(

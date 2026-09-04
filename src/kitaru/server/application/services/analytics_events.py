@@ -28,7 +28,7 @@ from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import Plugin, PluginKind, PluginSource
 from kitaru.server.domain.replay_config import ReplayConfig
 from kitaru.server.domain.session import Session
-from kitaru.server.domain.task import EvaluationTask, ImportTask, Task
+from kitaru.server.domain.task import AnalysisTask, EvaluationTask, ImportTask, Task
 from kitaru.server.domain.worker import Worker
 
 
@@ -195,6 +195,29 @@ def build_evaluation_completed_properties(
         **_plugin_properties(plugin),
         **_duration_properties(task.started_at, task.ended_at),
     }
+
+
+def build_analysis_completed_properties(
+    task: AnalysisTask, plugin: Plugin | None
+) -> dict[str, Any]:
+    """Build the properties of an analysis task's transition to a terminal status.
+
+    Args:
+        task: Analysis task that transitioned to a terminal status.
+        plugin: Analyzer plugin the task ran.
+
+    Returns:
+        Event properties.
+    """
+    properties: dict[str, Any] = {
+        "status": task.status.value,
+        "session_count": len(task.input_session_ids),
+        **_plugin_properties(plugin),
+        **_duration_properties(task.started_at, task.ended_at),
+    }
+    if isinstance(task.result, list):
+        properties["insight_count"] = len(task.result)
+    return properties
 
 
 def build_job_completed_properties(job: Job, tasks: list[Task]) -> dict[str, Any]:

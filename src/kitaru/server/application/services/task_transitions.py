@@ -35,7 +35,7 @@ from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import Plugin
-from kitaru.server.domain.task import EvaluationTask, ImportTask, Task
+from kitaru.server.domain.task import AnalysisTask, EvaluationTask, ImportTask, Task
 
 
 def _settlement_outcome(tasks: list[Task]) -> tuple[JobStatus, str | None]:
@@ -365,6 +365,14 @@ class TaskTransitions:
                 job.owner_id,
                 AnalyticsEvent.EVALUATION_COMPLETED,
                 analytics_events.build_evaluation_completed_properties(
+                    task, await self._get_task_plugin(task.plugin_version_id)
+                ),
+            )
+        elif isinstance(task, AnalysisTask):
+            self._analytics.track(
+                job.owner_id,
+                AnalyticsEvent.ANALYSIS_COMPLETED,
+                analytics_events.build_analysis_completed_properties(
                     task, await self._get_task_plugin(task.plugin_version_id)
                 ),
             )
