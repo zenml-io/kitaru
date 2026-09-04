@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Added evaluators to imports. Pass `evaluators` on `POST /api/v1/imports`, or `--evaluator` to `kitaru session import`, and every listed evaluator scores every imported session once the import finishes. A failed evaluator marks the job failed while the import's `stats` still records the parse outcome. Added `GET /api/v1/imports` and `GET /api/v1/imports/{import_id}`, with `client.imports.list(...)` and `client.imports.get(...)`, the `kitaru import list` and `kitaru import get` commands, and the `import` kind of the MCP `kitaru_activity_read` tool, to read imports back with their `stats` and `error`. Sessions created by an import carry `import_id`.
+- Added `kitaru setup`, which installs the agent skills from `zenml-io/kitaru-skills` into `~/.agents/skills` (plus `~/.claude/skills` and `~/.codex/skills` when those CLIs are present) and registers `kitaru-mcp` with every detected coding agent: Claude Code and Codex through their own `mcp add` commands, Cursor and Windsurf through their JSON configuration files. Inside a project it launches the server through `uv run --directory <project>` and uses Claude Code's project scope; a tool install points at the absolute `kitaru-mcp` path. Re-running replaces the previous entry, so it is safe to run again after installing a new editor. `--mode` and the global `--server` select the MCP capability mode and target; `--no-skills` and `--no-mcp` skip either half. The one-line installer now runs it instead of carrying its own client detection.
 - Added agent-scoped insights. Create a batch of insights for an agent with `client.insights.create(...)` or `POST /api/v1/insights`, each carrying a name, a title, an optional description, and data of type `text`, `categorical`, or `binned`. Insights can be listed with filters on `agent_id`, `name`, and `type`, fetched, updated in title and description, and deleted.
+- Added evaluators to imports. Pass `evaluators` on `POST /api/v1/imports`, or `--evaluator` to `kitaru session import`, and every listed evaluator scores every imported session once the import finishes. A failed evaluator marks the job failed while the import's `stats` still records the parse outcome. Added `GET /api/v1/imports` and `GET /api/v1/imports/{import_id}`, with `client.imports.list(...)` and `client.imports.get(...)`, the `kitaru import list` and `kitaru import get` commands, and the `import` kind of the MCP `kitaru_activity_read` tool, to read imports back with their `stats` and `error`. Sessions created by an import carry `import_id`.
 
 ### Changed
 
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `kitaru doctor` no longer prints "Kitaru is needs attention", and its missing-skills hint points at `kitaru setup`. The one-line installer prints `uvx kitaru ...` for its next steps when the tool directory is not on the current shell's PATH yet, so they work without opening a new terminal.
 - `if_missing` baseline scoring now adopts every evaluation an evaluator call produced instead of only one of them, so a rerun's baseline aggregates no longer lose metrics from an evaluator that returns multiple results.
 
 ## [0.25.0] - 2026-09-03

@@ -56,6 +56,7 @@ from kitaru.cli import (
     workers,
 )
 from kitaru.cli import auth as auth_commands
+from kitaru.cli import setup as setup_commands
 from kitaru.cli.config import (
     CONFIG_KEYS,
     ResolvedTarget,
@@ -930,6 +931,59 @@ async def doctor() -> CommandResult:
         credential_store=invocation.credential_store,
         explicit_server=invocation.server,
         timeout=invocation.request_timeout,
+    )
+
+
+@_register(
+    app,
+    _spec(
+        ("setup",),
+        "Install the agent skills and register the MCP server with every "
+        "detected coding agent. Re-run after installing a new one. The global "
+        "--server picks the server the MCP server targets.",
+        parameters=(
+            ParameterSpec(
+                "--mode",
+                "string",
+                "option",
+                False,
+                "MCP capability mode: read-only, standard (default), or destructive.",
+            ),
+            ParameterSpec(
+                "--no-skills", "boolean", "option", False, "Skip installing the skills."
+            ),
+            ParameterSpec(
+                "--no-mcp",
+                "boolean",
+                "option",
+                False,
+                "Skip registering the MCP server.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("writes_local_file", "executes_local_code"),
+        idempotency="idempotent",
+        errors=(
+            "invalid_arguments",
+            "invalid_configuration",
+            "network_error",
+            "internal_error",
+        ),
+    ),
+)
+async def setup(
+    *,
+    mode: Annotated[str, Parameter(name="--mode")] = "standard",
+    no_skills: Annotated[bool, Parameter(name="--no-skills")] = False,
+    no_mcp: Annotated[bool, Parameter(name="--no-mcp")] = False,
+) -> CommandResult:
+    """Wire skills and the MCP server into installed coding agents."""
+    invocation = _invocation()
+    return await setup_commands.setup(
+        server=invocation.server,
+        mode=mode,
+        install_skills=not no_skills,
+        register_mcp=not no_mcp,
     )
 
 

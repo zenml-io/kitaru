@@ -75,6 +75,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "replay",
         "schema",
         "session",
+        "setup",
         "status",
         "version",
         "worker",

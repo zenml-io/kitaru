@@ -44,7 +44,7 @@ Kitaru turns that history into something you can test:
 
 ## ⚡ Get started
 
-**1. Install.** Open a terminal in your agent's repository and run one line. It adds Kitaru to that project's environment with `uv` (the worker that replays your agent has to live next to its dependencies), installs the coding-agent skills, and registers the MCP server with Claude Code and Codex. It ends by printing the two ways to get a server: `kitaru login --local` (Docker, free) or `kitaru login` for the managed cloud (14-day trial, no credit card required).
+**1. Install.** Open a terminal in your agent's repository and run one line. It adds Kitaru to that project's environment with `uv` (the worker that replays your agent has to live next to its dependencies), installs the coding-agent skills, and registers the MCP server with Claude Code, Codex, Cursor, and Windsurf (that part is `kitaru setup`, re-run it after installing a new editor). It ends by printing the two ways to get a server: `kitaru login --local` (Docker, free) or `kitaru login` for the managed cloud (14-day trial, no credit card required).
 
 ```bash
 curl -fsSL https://kitaru.ai/install | bash
@@ -65,11 +65,13 @@ uv run kitaru login --local                           # local server in Docker
 # or: uv run kitaru login <your-team-url>
 ```
 
-**2. Make your coding assistant Kitaru-capable.** This is the intended way to drive Kitaru: skills teach the method, and the MCP server gives your assistant bounded operations.
+**2. Make your coding assistant Kitaru-capable.** This is the intended way to drive Kitaru: skills teach the method, and the MCP server gives your assistant bounded operations. The installer already did this; one command does it again for any coding agent you install later (Claude Code, Codex, Cursor, Windsurf):
 
 ```bash
-npx skills add zenml-io/kitaru-skills
+uv run kitaru setup            # or: kitaru setup --mode read-only, --no-skills, --no-mcp
 ```
+
+It installs the [skills](https://github.com/zenml-io/kitaru-skills) into `~/.agents/skills` (plus each agent's own skills directory) and registers `kitaru-mcp` with every agent it finds. For any other MCP client it prints the JSON to paste:
 
 ```json
 {
