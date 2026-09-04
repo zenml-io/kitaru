@@ -72,7 +72,7 @@ _UNSUPPORTED_CLAIM = re.compile(
 _OUTCOME_TOKEN = re.compile(
     r"\b(?:fail(?:ed|ing|s)?|failures?|succeed(?:ed|ing|s)?|"
     r"success|successes|successful|successfully|complete(?:d|s)?|"
-    r"completion(?:s)?|completing|"
+    r"completion(?:s)?|completing|finish(?:ed|es|ing)?|done|"
     r"in[ -]progress|"
     r"timed?[ -]out|timeouts?|cancel(?:ed|led|ation|ations|ing|s)?|"
     r"abandon(?:ed|ing|s)?|abandonments?|errors?|errored)\b",
@@ -384,7 +384,10 @@ def _outcome_categories(value: str) -> set[str]:
             categories.add("failure")
         elif token.startswith(("success", "succeed")):
             categories.add("success")
-        elif token.startswith(("complete", "completion", "completing")):
+        elif (
+            token.startswith(("complete", "completion", "completing", "finish"))
+            or token == "done"
+        ):
             categories.add("completion")
         elif token.startswith("in"):
             categories.add("in_progress")

@@ -210,6 +210,10 @@ class ProviderReceipt(_InsightGenerationModel):
     latency_ms: int = Field(ge=0)
     outcome: Literal["succeeded", "failed", "timed_out"]
 
+    _validate_provider_text_utf8 = field_validator(
+        "request_id", "model", mode="before"
+    )(_require_utf8)
+
 
 class GenerationDiagnostics(_InsightGenerationModel):
     """Bounded, content-free diagnostics for one generation run."""
