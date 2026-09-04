@@ -48,6 +48,7 @@ class OpenAIInsightGenerator:
                 "OpenAI credentials are required for model-backed insights"
             )
         module: Any = importlib.import_module("openai")
+        self._timeout_errors = _timeout_error_types(module)
         self._client: Any = module.AsyncOpenAI(api_key=credential, max_retries=0)
 
     def __repr__(self) -> str:
@@ -138,7 +139,9 @@ class OpenAIInsightGenerator:
                 store=False,
                 timeout=timeout_seconds,
             )
-        except Exception:
+        except Exception as error:
+            if isinstance(error, self._timeout_errors):
+                raise TimeoutError(f"{stage} request timed out") from None
             raise OpenAIInsightGenerationError(f"{stage} request failed") from None
         parsed = response.output_parsed
         if parsed is None:
@@ -163,6 +166,19 @@ class OpenAIInsightGenerator:
 def _bounded_string(value: object) -> str | None:
     """Keep only bounded provider receipt strings."""
     return value if isinstance(value, str) and 0 < len(value) <= 255 else None
+
+
+def _timeout_error_types(module: Any) -> tuple[type[Exception], ...]:
+    """Resolve optional SDK timeout types without importing OpenAI eagerly."""
+    timeout_types: list[type[Exception]] = [TimeoutError]
+    provider_timeout = getattr(module, "APITimeoutError", None)
+    if (
+        isinstance(provider_timeout, type)
+        and issubclass(provider_timeout, Exception)
+        and provider_timeout not in timeout_types
+    ):
+        timeout_types.append(provider_timeout)
+    return tuple(timeout_types)
 
 
 def _nonnegative_int(value: object) -> int | None:

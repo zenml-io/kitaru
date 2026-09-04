@@ -529,6 +529,122 @@ def test_payload_traversal_is_bounded_for_deep_and_wide_inputs() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "large_value",
+    [10**10_000, Decimal("1e10000")],
+    ids=["huge-int", "huge-decimal"],
+)
+def test_payload_byte_bound_rejects_huge_numeric_tool_inputs(
+    large_value: int | Decimal,
+) -> None:
+    session = _calls(
+        1,
+        [
+            ("lookup", large_value, NodeStatus.COMPLETED, "ok"),
+            ("lookup", large_value, NodeStatus.COMPLETED, "ok"),
+        ],
+    )
+
+    result = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_bytes=100),
+    )
+
+    assert "payload" in " ".join(result.coverage.caveats).lower()
+    assert "adjacent-identical-calls" not in {
+        candidate.id for candidate in result.candidates
+    }
+
+
+@pytest.mark.parametrize("value", [12345, Decimal("1.20")])
+def test_payload_byte_bound_counts_exact_json_scalar_size(
+    value: int | Decimal,
+) -> None:
+    session = _calls(
+        1,
+        [
+            ("lookup", value, NodeStatus.COMPLETED, "ok"),
+            ("lookup", value, NodeStatus.COMPLETED, "ok"),
+        ],
+    )
+    encoded_size = 5
+
+    exact = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_bytes=encoded_size * 2),
+    )
+    short = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_bytes=encoded_size * 2 - 1),
+    )
+
+    assert "adjacent-identical-calls" in {
+        candidate.id for candidate in exact.candidates
+    }
+    assert "adjacent-identical-calls" not in {
+        candidate.id for candidate in short.candidates
+    }
+    assert "payload" in " ".join(short.coverage.caveats).lower()
+
+
+@pytest.mark.parametrize(
+    ("value", "encoded_size"),
+    [
+        (True, 4),
+        (1.5, 3),
+        (NOW, 29),
+        (_id(999), 38),
+        (ExampleEnum.VALUE, 7),
+    ],
+)
+def test_payload_byte_bound_counts_other_supported_scalars_once(
+    value: object,
+    encoded_size: int,
+) -> None:
+    session = _calls(
+        1,
+        [
+            ("lookup", value, NodeStatus.COMPLETED, "ok"),
+            ("lookup", value, NodeStatus.COMPLETED, "ok"),
+        ],
+    )
+
+    exact = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_bytes=encoded_size * 2),
+    )
+    short = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_bytes=encoded_size * 2 - 1),
+    )
+
+    assert "adjacent-identical-calls" in {
+        candidate.id for candidate in exact.candidates
+    }
+    assert "adjacent-identical-calls" not in {
+        candidate.id for candidate in short.candidates
+    }
+
+
+def test_enum_payload_counts_one_traversal_item() -> None:
+    session = _calls(
+        1,
+        [
+            ("lookup", ExampleEnum.VALUE, NodeStatus.COMPLETED, "ok"),
+            ("lookup", ExampleEnum.VALUE, NodeStatus.COMPLETED, "ok"),
+        ],
+    )
+
+    result = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_items=2),
+    )
+
+    assert "adjacent-identical-calls" in {
+        candidate.id for candidate in result.candidates
+    }
+
+
 def test_bounds_sessions_nodes_text_evidence_candidates_and_projection() -> None:
     sessions = [
         _calls(
