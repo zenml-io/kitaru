@@ -146,6 +146,7 @@ Adapters are **not** extras. Each ships as its own distribution, so you install 
 | [PydanticAI](../adapters/pydantic-ai.md) | `kitaru-pydantic-ai` |
 | [LangGraph](../adapters/langgraph.md) (also LangChain agents, Deep Agents) | `kitaru-langgraph` |
 | [OpenAI Agents SDK](../adapters/openai-agents.md) | `kitaru-openai-agents` |
+| [Claude Agent SDK](../adapters/claude-agent-sdk.md) | `kitaru-claude-agent-sdk` |
 
 ### TypeScript SDK and adapters
 
