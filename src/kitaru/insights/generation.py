@@ -53,7 +53,7 @@ _UNSUPPORTED_CLAIM = re.compile(
     r"\b(?:caus(?:e|es|ed|ing)|because|due to|"
     r"(?:result|results|resulted|resulting)\s+in|"
     r"(?:lead|leads|led|leading)\s+to|"
-    r"drive|drives|drove|driving|driven\s+by|"
+    r"drive|drives|drove|driving|driven|"
     r"(?:stems?|stemmed|stemming)\s+from|"
     r"produc(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|"
     r"trigger(?:s|ed|ing)?|responsible\s+for|attributable\s+to|"
@@ -82,6 +82,11 @@ _OUTCOME_TOKEN = re.compile(
     r"in[ -]progress|"
     r"timed?[ -]out|timeouts?|cancel(?:ed|led|ation|ations|ing|s)?|"
     r"abandon(?:ed|ing|s)?|abandonments?|errors?|errored)\b",
+    flags=re.IGNORECASE,
+)
+_WORK_SUCCESS_TOKEN = re.compile(
+    r"\b(?:work|works|worked|working)\s+(?:"
+    r"as\s+(?:expected|intended|designed)|correctly|properly|normally)\b",
     flags=re.IGNORECASE,
 )
 _NEGATION_TOKEN = re.compile(
@@ -405,7 +410,14 @@ def _outcome_categories(value: str) -> set[str]:
             categories.add("abandonment")
         else:
             categories.add("error")
+    if _WORK_SUCCESS_TOKEN.search(value):
+        categories.add("success")
     return categories
+
+
+def _has_outcome_wording(value: str) -> bool:
+    """Return whether copy contains a bounded outcome assertion."""
+    return bool(_OUTCOME_TOKEN.search(value) or _WORK_SUCCESS_TOKEN.search(value))
 
 
 def _trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
@@ -427,7 +439,7 @@ def _trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
 def _has_negated_outcome(value: str) -> bool:
     """Reject grammatical negation in the same clause as an outcome term."""
     return any(
-        _OUTCOME_TOKEN.search(clause) and _NEGATION_TOKEN.search(clause)
+        _has_outcome_wording(clause) and _NEGATION_TOKEN.search(clause)
         for clause in re.split(r"[.;!?\n]+", value)
     )
 
@@ -439,7 +451,7 @@ def _validate_page_copy(value: str) -> None:
         raise ValueError("editor page copy contains a negated outcome claim")
     if _NUMERIC_TOKEN.search(value) or _QUANTITY_TOKEN.search(value):
         raise ValueError("editor page copy contains a numeric or quantitative claim")
-    if _OUTCOME_TOKEN.search(value):
+    if _has_outcome_wording(value):
         raise ValueError("editor page copy contains an unsupported outcome claim")
 
 
