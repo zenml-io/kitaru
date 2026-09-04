@@ -10,7 +10,7 @@ from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.mcp.models.common import IDEMPOTENCY_KEY_DESCRIPTION, DeleteKind, MCPModel
 from kitaru.mcp.models.management import EvaluatorSelection
@@ -25,6 +25,7 @@ class SessionImportRequest(MCPModel):
     agent_version_id: uuid.UUID
     params: dict[str, JsonValue] = Field(default_factory=dict)
     evaluators: list[EvaluatorConfig] = Field(default_factory=list)
+    analyzers: list[AnalyzerConfig] = Field(default_factory=list)
     idempotency_key: str | None = Field(
         default=None,
         description=IDEMPOTENCY_KEY_DESCRIPTION,

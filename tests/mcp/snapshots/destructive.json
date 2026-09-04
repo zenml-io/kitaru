@@ -153,6 +153,7 @@
           "description": "Parent resource families supporting UUID-or-name lookup.",
           "enum": [
             "agent",
+            "analyzer",
             "cohort",
             "experiment",
             "importer",
@@ -196,7 +197,8 @@
                 "agent",
                 "cohort",
                 "importer",
-                "evaluator"
+                "evaluator",
+                "analyzer"
               ],
               "title": "Kind",
               "type": "string"
@@ -394,7 +396,8 @@
                 "agent",
                 "cohort",
                 "importer",
-                "evaluator"
+                "evaluator",
+                "analyzer"
               ],
               "title": "Kind",
               "type": "string"
@@ -657,6 +660,171 @@
             "capabilities"
           ],
           "title": "AgentVersionResponse",
+          "type": "object"
+        },
+        "AnalyzerResponse": {
+          "description": "Analyzer response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Analyzer description.",
+              "title": "Description"
+            },
+            "id": {
+              "description": "Analyzer id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "latest_version": {
+              "description": "Highest version number created for this analyzer.",
+              "title": "Latest Version",
+              "type": "integer"
+            },
+            "logo_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Analyzer logo URL.",
+              "title": "Logo Url"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "description": "Analyzer name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id of the owning account, null for a default plugin.",
+              "title": "Owner Id"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name",
+            "description",
+            "logo_url",
+            "metadata",
+            "latest_version"
+          ],
+          "title": "AnalyzerResponse",
+          "type": "object"
+        },
+        "AnalyzerVersionResponse": {
+          "description": "Analyzer version response.",
+          "properties": {
+            "analyzer_id": {
+              "description": "Analyzer this version belongs to.",
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "display_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Human-readable designator.",
+              "title": "Display Version"
+            },
+            "id": {
+              "description": "Analyzer version id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "source": {
+              "description": "Analyzer code to load.",
+              "discriminator": {
+                "mapping": {
+                  "package": "#/$defs/PackagePluginSource",
+                  "script": "#/$defs/ScriptPluginSource"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ScriptPluginSource"
+                },
+                {
+                  "$ref": "#/$defs/PackagePluginSource"
+                }
+              ],
+              "title": "Source"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "version": {
+              "description": "Server-assigned version number.",
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "id",
+            "analyzer_id",
+            "version",
+            "display_version",
+            "source"
+          ],
+          "title": "AnalyzerVersionResponse",
           "type": "object"
         },
         "CohortResponse": {
@@ -1430,7 +1598,7 @@
           "title": "PackagePluginSource",
           "type": "object"
         },
-        "PageData_Union_CohortResponse__ExperimentResponse__ImporterResponse__EvaluatorResponse__AgentVersionResponse__CohortVersionResponse__ImporterVersionResponse__EvaluatorVersionResponse__AgentResponse__TagResponse__WorkerResponse__": {
+        "PageData_Union_CohortResponse__ExperimentResponse__ImporterResponse__EvaluatorResponse__AnalyzerResponse__AgentVersionResponse__CohortVersionResponse__ImporterVersionResponse__EvaluatorVersionResponse__AnalyzerVersionResponse__AgentResponse__TagResponse__WorkerResponse__": {
           "additionalProperties": false,
           "properties": {
             "items": {
@@ -1449,6 +1617,9 @@
                     "$ref": "#/$defs/EvaluatorResponse"
                   },
                   {
+                    "$ref": "#/$defs/AnalyzerResponse"
+                  },
+                  {
                     "$ref": "#/$defs/AgentVersionResponse"
                   },
                   {
@@ -1459,6 +1630,9 @@
                   },
                   {
                     "$ref": "#/$defs/EvaluatorVersionResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/AnalyzerVersionResponse"
                   },
                   {
                     "$ref": "#/$defs/AgentResponse"
@@ -1482,7 +1656,7 @@
             "items",
             "page"
           ],
-          "title": "PageData[Union[CohortResponse, ExperimentResponse, ImporterResponse, EvaluatorResponse, AgentVersionResponse, CohortVersionResponse, ImporterVersionResponse, EvaluatorVersionResponse, AgentResponse, TagResponse, WorkerResponse]]",
+          "title": "PageData[Union[CohortResponse, ExperimentResponse, ImporterResponse, EvaluatorResponse, AnalyzerResponse, AgentVersionResponse, CohortVersionResponse, ImporterVersionResponse, EvaluatorVersionResponse, AnalyzerVersionResponse, AgentResponse, TagResponse, WorkerResponse]]",
           "type": "object"
         },
         "PageMetadata": {
@@ -1869,7 +2043,8 @@
           "enum": [
             "agent",
             "evaluator",
-            "importer"
+            "importer",
+            "analyzer"
           ],
           "title": "TaskKind",
           "type": "string"
@@ -2316,6 +2491,9 @@
               "$ref": "#/$defs/EvaluatorResponse"
             },
             {
+              "$ref": "#/$defs/AnalyzerResponse"
+            },
+            {
               "$ref": "#/$defs/AgentVersionResponse"
             },
             {
@@ -2328,6 +2506,9 @@
               "$ref": "#/$defs/EvaluatorVersionResponse"
             },
             {
+              "$ref": "#/$defs/AnalyzerVersionResponse"
+            },
+            {
               "$ref": "#/$defs/AgentResponse"
             },
             {
@@ -2337,7 +2518,7 @@
               "$ref": "#/$defs/WorkerResponse"
             },
             {
-              "$ref": "#/$defs/PageData_Union_CohortResponse__ExperimentResponse__ImporterResponse__EvaluatorResponse__AgentVersionResponse__CohortVersionResponse__ImporterVersionResponse__EvaluatorVersionResponse__AgentResponse__TagResponse__WorkerResponse__"
+              "$ref": "#/$defs/PageData_Union_CohortResponse__ExperimentResponse__ImporterResponse__EvaluatorResponse__AnalyzerResponse__AgentVersionResponse__CohortVersionResponse__ImporterVersionResponse__EvaluatorVersionResponse__AnalyzerVersionResponse__AgentResponse__TagResponse__WorkerResponse__"
             },
             {
               "type": "null"
@@ -2816,6 +2997,41 @@
     "name": "kitaru_activity_read",
     "outputSchema": {
       "$defs": {
+        "AnalyzerConfig": {
+          "additionalProperties": false,
+          "description": "Analyzer config.",
+          "properties": {
+            "analyzer": {
+              "description": "Analyzer name.",
+              "title": "Analyzer",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": true,
+              "description": "Parameters passed to the analyzer.",
+              "title": "Params",
+              "type": "object"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Analyzer version, an omitted value resolves to latest.",
+              "title": "Version"
+            }
+          },
+          "required": [
+            "analyzer"
+          ],
+          "title": "AnalyzerConfig",
+          "type": "object"
+        },
         "BaselineEvaluationMode": {
           "description": "Baseline evaluation mode.",
           "enum": [
@@ -3366,6 +3582,14 @@
               "description": "Agent version recorded on the imported sessions.",
               "title": "Agent Version Id"
             },
+            "analyzers": {
+              "description": "Analyzers run against every imported session.",
+              "items": {
+                "$ref": "#/$defs/AnalyzerConfig"
+              },
+              "title": "Analyzers",
+              "type": "array"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -3472,7 +3696,8 @@
             "agent_id",
             "payload_blob_id",
             "params",
-            "evaluators"
+            "evaluators",
+            "analyzers"
           ],
           "title": "ImportResponse",
           "type": "object"
@@ -4883,7 +5108,8 @@
           "enum": [
             "agent",
             "evaluator",
-            "importer"
+            "importer",
+            "analyzer"
           ],
           "title": "TaskKind",
           "type": "string"
@@ -4901,6 +5127,20 @@
         "TaskResponse": {
           "description": "Task response.",
           "properties": {
+            "agent_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Agent for an analysis task.",
+              "title": "Agent Id"
+            },
             "agent_version_id": {
               "anyOf": [
                 {
@@ -5028,6 +5268,23 @@
               "default": null,
               "description": "Input session for an evaluator task.",
               "title": "Input Session Id"
+            },
+            "input_session_ids": {
+              "anyOf": [
+                {
+                  "items": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Input sessions for an analysis task.",
+              "title": "Input Session Ids"
             },
             "job_id": {
               "description": "Owning job.",
@@ -6149,6 +6406,60 @@
               "format": "uuid",
               "title": "Agent Id",
               "type": "string"
+            },
+            "analyzer_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Name of the analyzer that produced the insight.",
+              "title": "Analyzer Name"
+            },
+            "analyzer_params": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Params the analyzer ran with.",
+              "title": "Analyzer Params"
+            },
+            "analyzer_version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Version of the analyzer that produced the insight.",
+              "title": "Analyzer Version"
+            },
+            "analyzer_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Analyzer version that produced the insight.",
+              "title": "Analyzer Version Id"
             },
             "created": {
               "description": "Creation time.",
@@ -8321,6 +8632,41 @@
     "description": "Import sessions from one existing blob and return the queued job.",
     "inputSchema": {
       "$defs": {
+        "AnalyzerConfig": {
+          "additionalProperties": false,
+          "description": "Analyzer config.",
+          "properties": {
+            "analyzer": {
+              "description": "Analyzer name.",
+              "title": "Analyzer",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": true,
+              "description": "Parameters passed to the analyzer.",
+              "title": "Params",
+              "type": "object"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Analyzer version, an omitted value resolves to latest.",
+              "title": "Version"
+            }
+          },
+          "required": [
+            "analyzer"
+          ],
+          "title": "AnalyzerConfig",
+          "type": "object"
+        },
         "EvaluatorConfig": {
           "additionalProperties": false,
           "description": "Evaluator config.",
@@ -8364,6 +8710,13 @@
               "format": "uuid",
               "title": "Agent Version Id",
               "type": "string"
+            },
+            "analyzers": {
+              "items": {
+                "$ref": "#/$defs/AnalyzerConfig"
+              },
+              "title": "Analyzers",
+              "type": "array"
             },
             "evaluators": {
               "items": {
@@ -10002,6 +10355,60 @@
               "format": "uuid",
               "title": "Agent Id",
               "type": "string"
+            },
+            "analyzer_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Name of the analyzer that produced the insight.",
+              "title": "Analyzer Name"
+            },
+            "analyzer_params": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Params the analyzer ran with.",
+              "title": "Analyzer Params"
+            },
+            "analyzer_version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Version of the analyzer that produced the insight.",
+              "title": "Analyzer Version"
+            },
+            "analyzer_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Analyzer version that produced the insight.",
+              "title": "Analyzer Version Id"
             },
             "created": {
               "description": "Creation time.",
@@ -11975,6 +12382,653 @@
         "ok"
       ],
       "title": "EvaluatorsManageResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": false
+    },
+    "description": "Create or update analyzer parents and blob- or package-backed versions.",
+    "inputSchema": {
+      "$defs": {
+        "AnalyzerCreate": {
+          "additionalProperties": false,
+          "description": "Create an analyzer parent.",
+          "properties": {
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Description"
+            },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "operation": {
+              "const": "create",
+              "title": "Operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "name"
+          ],
+          "title": "AnalyzerCreate",
+          "type": "object"
+        },
+        "AnalyzerUpdate": {
+          "additionalProperties": false,
+          "description": "Sparsely update an analyzer parent.",
+          "properties": {
+            "analyzer_id": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            },
+            "clear_description": {
+              "default": false,
+              "title": "Clear Description",
+              "type": "boolean"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Description"
+            },
+            "metadata": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Metadata"
+            },
+            "operation": {
+              "const": "update",
+              "title": "Operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "analyzer_id"
+          ],
+          "title": "AnalyzerUpdate",
+          "type": "object"
+        },
+        "AnalyzerVersionCreate": {
+          "additionalProperties": false,
+          "description": "Create a version from an existing blob or exact package pin.",
+          "properties": {
+            "analyzer_id": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            },
+            "display_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Display Version"
+            },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
+            },
+            "operation": {
+              "const": "create_version",
+              "title": "Operation",
+              "type": "string"
+            },
+            "source": {
+              "discriminator": {
+                "mapping": {
+                  "package": "#/$defs/PackagePluginSource",
+                  "script": "#/$defs/ScriptPluginSource"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ScriptPluginSource"
+                },
+                {
+                  "$ref": "#/$defs/PackagePluginSource"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          "required": [
+            "operation",
+            "analyzer_id",
+            "source"
+          ],
+          "title": "AnalyzerVersionCreate",
+          "type": "object"
+        },
+        "AnalyzerVersionUpdate": {
+          "additionalProperties": false,
+          "description": "Set or clear one analyzer version display label.",
+          "properties": {
+            "analyzer_id": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            },
+            "clear_display_version": {
+              "default": false,
+              "title": "Clear Display Version",
+              "type": "boolean"
+            },
+            "display_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Display Version"
+            },
+            "operation": {
+              "const": "update_version",
+              "title": "Operation",
+              "type": "string"
+            },
+            "version": {
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "operation",
+            "analyzer_id",
+            "version"
+          ],
+          "title": "AnalyzerVersionUpdate",
+          "type": "object"
+        },
+        "PackagePluginSource": {
+          "additionalProperties": false,
+          "description": "Package plugin source.",
+          "properties": {
+            "entrypoint": {
+              "description": "Module and attribute, as module:attribute.",
+              "title": "Entrypoint",
+              "type": "string"
+            },
+            "requirement": {
+              "description": "Pinned PEP 508 requirement.",
+              "title": "Requirement",
+              "type": "string"
+            },
+            "type": {
+              "const": "package",
+              "default": "package",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "requirement",
+            "entrypoint"
+          ],
+          "title": "PackagePluginSource",
+          "type": "object"
+        },
+        "ScriptPluginSource": {
+          "additionalProperties": false,
+          "description": "Script plugin source.",
+          "properties": {
+            "blob_id": {
+              "description": "Blob holding the script.",
+              "format": "uuid",
+              "title": "Blob Id",
+              "type": "string"
+            },
+            "entrypoint": {
+              "description": "Attribute in the file.",
+              "title": "Entrypoint",
+              "type": "string"
+            },
+            "type": {
+              "const": "script",
+              "default": "script",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "blob_id",
+            "entrypoint"
+          ],
+          "title": "ScriptPluginSource",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "discriminator": {
+            "mapping": {
+              "create": "#/$defs/AnalyzerCreate",
+              "create_version": "#/$defs/AnalyzerVersionCreate",
+              "update": "#/$defs/AnalyzerUpdate",
+              "update_version": "#/$defs/AnalyzerVersionUpdate"
+            },
+            "propertyName": "operation"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AnalyzerCreate"
+            },
+            {
+              "$ref": "#/$defs/AnalyzerUpdate"
+            },
+            {
+              "$ref": "#/$defs/AnalyzerVersionCreate"
+            },
+            {
+              "$ref": "#/$defs/AnalyzerVersionUpdate"
+            }
+          ],
+          "title": "Request"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "analyzers_manage_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_analyzers_manage",
+    "outputSchema": {
+      "$defs": {
+        "AnalyzerResponse": {
+          "description": "Analyzer response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Analyzer description.",
+              "title": "Description"
+            },
+            "id": {
+              "description": "Analyzer id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "latest_version": {
+              "description": "Highest version number created for this analyzer.",
+              "title": "Latest Version",
+              "type": "integer"
+            },
+            "logo_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Analyzer logo URL.",
+              "title": "Logo Url"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "description": "Analyzer name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id of the owning account, null for a default plugin.",
+              "title": "Owner Id"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name",
+            "description",
+            "logo_url",
+            "metadata",
+            "latest_version"
+          ],
+          "title": "AnalyzerResponse",
+          "type": "object"
+        },
+        "AnalyzerVersionResponse": {
+          "description": "Analyzer version response.",
+          "properties": {
+            "analyzer_id": {
+              "description": "Analyzer this version belongs to.",
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "display_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Human-readable designator.",
+              "title": "Display Version"
+            },
+            "id": {
+              "description": "Analyzer version id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "source": {
+              "description": "Analyzer code to load.",
+              "discriminator": {
+                "mapping": {
+                  "package": "#/$defs/PackagePluginSource",
+                  "script": "#/$defs/ScriptPluginSource"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ScriptPluginSource"
+                },
+                {
+                  "$ref": "#/$defs/PackagePluginSource"
+                }
+              ],
+              "title": "Source"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "version": {
+              "description": "Server-assigned version number.",
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "id",
+            "analyzer_id",
+            "version",
+            "display_version",
+            "source"
+          ],
+          "title": "AnalyzerVersionResponse",
+          "type": "object"
+        },
+        "PackagePluginSource": {
+          "additionalProperties": false,
+          "description": "Package plugin source.",
+          "properties": {
+            "entrypoint": {
+              "description": "Module and attribute, as module:attribute.",
+              "title": "Entrypoint",
+              "type": "string"
+            },
+            "requirement": {
+              "description": "Pinned PEP 508 requirement.",
+              "title": "Requirement",
+              "type": "string"
+            },
+            "type": {
+              "const": "package",
+              "default": "package",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "requirement",
+            "entrypoint"
+          ],
+          "title": "PackagePluginSource",
+          "type": "object"
+        },
+        "ScriptPluginSource": {
+          "additionalProperties": false,
+          "description": "Script plugin source.",
+          "properties": {
+            "blob_id": {
+              "description": "Blob holding the script.",
+              "format": "uuid",
+              "title": "Blob Id",
+              "type": "string"
+            },
+            "entrypoint": {
+              "description": "Attribute in the file.",
+              "title": "Entrypoint",
+              "type": "string"
+            },
+            "type": {
+              "const": "script",
+              "default": "script",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "blob_id",
+            "entrypoint"
+          ],
+          "title": "ScriptPluginSource",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Analyzer parent or version management result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AnalyzerResponse"
+            },
+            {
+              "$ref": "#/$defs/AnalyzerVersionResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "AnalyzersManageResult",
       "type": "object"
     }
   },

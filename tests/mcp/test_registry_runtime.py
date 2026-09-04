@@ -34,6 +34,7 @@ EXPECTED = {
         "kitaru_review_manage",
         "kitaru_workflow_start",
         "kitaru_evaluators_manage",
+        "kitaru_analyzers_manage",
     ],
     CapabilityMode.DESTRUCTIVE: [
         "kitaru_registry_read",
@@ -45,6 +46,7 @@ EXPECTED = {
         "kitaru_review_manage",
         "kitaru_workflow_start",
         "kitaru_evaluators_manage",
+        "kitaru_analyzers_manage",
         "kitaru_workflow_cancel",
         "kitaru_delete",
     ],
@@ -84,7 +86,7 @@ async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:
         combined = _compact_size(tool["inputSchema"]) + _compact_size(
             tool["outputSchema"]
         )
-        assert combined < 41 * 1024
+        assert combined < 42 * 1024
     assert _compact_size({"tools": dumped}) < 192 * 1024
     assert len(tools) <= 12
 

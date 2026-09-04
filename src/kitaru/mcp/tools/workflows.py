@@ -26,6 +26,7 @@ async def handle_session_import(
         payload_blob_id=blob.id,
         params=request.params,
         evaluators=request.evaluators,
+        analyzers=request.analyzers,
     )
     created_import = await state.client.imports.create(
         dto, idempotency_key=request.idempotency_key

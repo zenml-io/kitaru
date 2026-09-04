@@ -9,6 +9,11 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, TypeVar, cast
 
 from kitaru.api_models.v1.agent import AgentListParams, AgentResponse
+from kitaru.api_models.v1.analyzer import (
+    AnalyzerListParams,
+    AnalyzerResponse,
+    AnalyzerVersionResponse,
+)
 from kitaru.api_models.v1.base import JsonValue, Page
 from kitaru.api_models.v1.cohort import CohortListParams, CohortResponse
 from kitaru.api_models.v1.evaluator import (
@@ -24,6 +29,7 @@ from kitaru.api_models.v1.importer import (
     ImporterVersionResponse,
 )
 from kitaru.client.resources.agents import AgentsResource
+from kitaru.client.resources.analyzers import AnalyzersResource
 from kitaru.client.resources.cohorts import CohortsResource
 from kitaru.client.resources.evaluators import EvaluatorsResource
 from kitaru.client.resources.experiments import ExperimentsResource
@@ -37,6 +43,7 @@ class ParentKind(StrEnum):
     """Parent resource families supporting UUID-or-name lookup."""
 
     AGENT = "agent"
+    ANALYZER = "analyzer"
     COHORT = "cohort"
     EXPERIMENT = "experiment"
     IMPORTER = "importer"
@@ -48,6 +55,7 @@ class PluginKind(StrEnum):
 
     IMPORTER = "importer"
     EVALUATOR = "evaluator"
+    ANALYZER = "analyzer"
 
 
 @dataclass(slots=True)
@@ -69,6 +77,7 @@ ParentResponse = (
     | ExperimentResponse
     | ImporterResponse
     | EvaluatorResponse
+    | AnalyzerResponse
 )
 ParentResource = (
     AgentsResource
@@ -76,8 +85,11 @@ ParentResource = (
     | ExperimentsResource
     | ImportersResource
     | EvaluatorsResource
+    | AnalyzersResource
 )
-PluginVersionResponse = ImporterVersionResponse | EvaluatorVersionResponse
+PluginVersionResponse = (
+    ImporterVersionResponse | EvaluatorVersionResponse | AnalyzerVersionResponse
+)
 ParentT = TypeVar("ParentT", bound=ParentResponse)
 
 
@@ -94,8 +106,10 @@ async def resolve_parent(
         resource = client.experiments
     elif kind is ParentKind.IMPORTER:
         resource = client.importers
-    else:
+    elif kind is ParentKind.EVALUATOR:
         resource = client.evaluators
+    else:
+        resource = client.analyzers
     return await _resolve_parent_resource(resource, kind, reference)
 
 
@@ -108,7 +122,9 @@ async def resolve_plugin_version(
     """Resolve one plugin version through its direct endpoint."""
     if kind is PluginKind.IMPORTER:
         return await client.importers.get_version(parent_id, version)
-    return await client.evaluators.get_version(parent_id, version)
+    if kind is PluginKind.EVALUATOR:
+        return await client.evaluators.get_version(parent_id, version)
+    return await client.analyzers.get_version(parent_id, version)
 
 
 async def _resolve_parent_resource(
@@ -143,9 +159,13 @@ async def _resolve_parent_resource(
         page = await cast(ImportersResource, resource).list(
             ImporterListParams(size=2, filter=name_filter)
         )
-    else:
+    elif kind is ParentKind.EVALUATOR:
         page = await cast(EvaluatorsResource, resource).list(
             EvaluatorListParams(size=2, filter=name_filter)
+        )
+    else:
+        page = await cast(AnalyzersResource, resource).list(
+            AnalyzerListParams(size=2, filter=name_filter)
         )
     return _select_parent(page, kind, normalized)
 
