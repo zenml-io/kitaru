@@ -430,6 +430,10 @@ def sanitize_label(value: str | None) -> str | None:
     candidate = value.strip()
     if not candidate or len(candidate) > MAX_LABEL_LENGTH:
         return None
+    try:
+        candidate.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
     redacted = redact_data(candidate)
     if not isinstance(redacted, str) or redacted != candidate or "***" in redacted:
         return None

@@ -334,6 +334,127 @@ async def test_rejects_result_that_exceeds_serialized_bound() -> None:
     )
 
 
+async def test_result_byte_bound_retains_largest_ordered_card_prefix(
+    monkeypatch,
+) -> None:
+    sessions = [
+        _session(1, status=SessionStatus.FAILED),
+        _session(2, status=SessionStatus.COMPLETED),
+    ]
+    profiling = insight_pipeline.profile_sessions(sessions)
+    first_candidate = profiling.candidates[0]
+    profiling = profiling.model_copy(
+        update={
+            "candidates": [
+                first_candidate,
+                first_candidate.model_copy(
+                    update={
+                        "id": "second-candidate",
+                        "family": "second-family",
+                        "rank": first_candidate.rank + 1,
+                        "title": "A second deterministic pattern",
+                    }
+                ),
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        insight_pipeline,
+        "profile_sessions",
+        lambda sessions, config: profiling,
+    )
+    full = await generate_insights(sessions, context=_context())
+    maximum = len(full.model_dump_json().encode("utf-8")) - 1
+
+    bounded = await generate_insights(
+        sessions,
+        context=_context(),
+        config=InsightGenerationConfig(max_result_bytes=maximum),
+    )
+
+    assert 0 < len(bounded.insights) < len(full.insights)
+    assert [item.name for item in bounded.insights] == [
+        item.name for item in full.insights[: len(bounded.insights)]
+    ]
+    assert bounded.diagnostics == full.diagnostics
+    assert any(
+        item.dimension == "serialized_result_bytes"
+        for item in bounded.coverage.truncations
+    )
+    assert all(
+        bounded.card_metadata(insight).coverage == bounded.coverage
+        for insight in bounded.insights
+    )
+
+
+async def test_result_byte_bound_neutralizes_removed_recommendation(
+    monkeypatch,
+) -> None:
+    sessions = [
+        _session(1, status=SessionStatus.FAILED),
+        _session(2, status=SessionStatus.COMPLETED),
+    ]
+    profiling = insight_pipeline.profile_sessions(sessions)
+    first_candidate = profiling.candidates[0]
+    profiling = profiling.model_copy(
+        update={
+            "candidates": [
+                first_candidate,
+                first_candidate.model_copy(
+                    update={
+                        "id": "second-candidate",
+                        "family": "second-family",
+                        "rank": first_candidate.rank + 1,
+                        "title": "A second deterministic pattern",
+                    }
+                ),
+            ]
+        }
+    )
+    plan = generate_deterministic_plan(profiling)
+    tail_id = plan.selection.selected_candidate_ids[-1]
+    plan = plan.model_copy(
+        update={
+            "selection": plan.selection.model_copy(
+                update={"recommended_candidate_id": tail_id}
+            ),
+            "editorial": plan.editorial.model_copy(
+                update={
+                    "recommendation_title": "Investigate the tail pattern",
+                    "recommendation_description": "Start with the tail pattern.",
+                }
+            ),
+        }
+    )
+    monkeypatch.setattr(
+        insight_pipeline,
+        "profile_sessions",
+        lambda sessions, config: profiling,
+    )
+    monkeypatch.setattr(
+        insight_pipeline,
+        "generate_deterministic_plan",
+        lambda profiling: plan,
+    )
+    full = await generate_insights(sessions, context=_context())
+    maximum = len(full.model_dump_json().encode("utf-8")) - 1
+
+    bounded = await generate_insights(
+        sessions,
+        context=_context(),
+        config=InsightGenerationConfig(max_result_bytes=maximum),
+    )
+
+    assert tail_id not in {insight.name for insight in bounded.insights}
+    assert bounded.recommendation is not None
+    assert bounded.recommendation.insight_name == bounded.insights[0].name
+    assert bounded.recommendation.title == "Recommended next step"
+    assert bounded.recommendation.description == (
+        "Start here and use the copied prompt to define a focused cohort."
+    )
+    assert bounded.card_metadata(bounded.insights[0]).recommended is True
+
+
 async def test_oversized_prompt_omits_only_the_affected_card(monkeypatch) -> None:
     sessions = [
         _session(1, status=SessionStatus.FAILED),

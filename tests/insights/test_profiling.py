@@ -516,6 +516,41 @@ def test_sanitize_label_masks_embedded_credential_families() -> None:
     assert sanitize_label("rotate_password") == "rotate_password"
 
 
+def test_sanitize_label_rejects_invalid_utf8_and_preserves_unicode() -> None:
+    assert sanitize_label("réserver_订单") == "réserver_订单"
+    assert sanitize_label("invalid-\ud800-label") is None
+
+
+def test_invalid_utf8_tool_and_model_labels_cannot_break_serialization() -> None:
+    invalid = "invalid-\ud800-label"
+    tool_session = _calls(
+        1,
+        [(invalid, {"id": 1}, NodeStatus.FAILED, "error")],
+    )
+    model_session_id = _id(102)
+    model_session = _session(
+        2,
+        [
+            _node(
+                0,
+                session_id=model_session_id,
+                node_type=NodeType.LLM_CALL,
+                tool_name=None,
+                model=invalid,
+                inputs={},
+                outputs="ok",
+            )
+        ],
+    )
+
+    result = profile_sessions([tool_session, model_session])
+    tool_errors = _candidate(result, "tool-error-mix")
+
+    assert "Unavailable tool" in tool_errors.fallback_description
+    assert "model-mix" not in {candidate.id for candidate in result.candidates}
+    result.model_dump_json()
+
+
 def test_contributing_session_limit_matches_candidate_contract() -> None:
     with pytest.raises(ValidationError):
         ProfilingConfig(max_contributing_sessions=1_001)
