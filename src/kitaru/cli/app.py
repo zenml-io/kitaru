@@ -44,6 +44,7 @@ from kitaru.cli import (
     evaluations,
     experiment_runs,
     experiments,
+    imports,
     insights,
     investigations,
     jobs,
@@ -166,6 +167,11 @@ experiment_run_app = App(
     help="Start, inspect, watch, cancel, and delete experiment runs.",
     default_parameter=Parameter(negative=False),
 )
+import_app = App(
+    name="import",
+    help=GROUP_DESCRIPTIONS["import"],
+    default_parameter=Parameter(negative=False),
+)
 importer_app = App(
     name="importer",
     help=GROUP_DESCRIPTIONS["importer"],
@@ -227,6 +233,7 @@ app.command(agent_app, name="agent")
 app.command(annotation_app, name="annotation")
 app.command(cohort_app, name="cohort")
 app.command(experiment_app, name="experiment")
+app.command(import_app, name="import")
 app.command(importer_app, name="importer")
 app.command(insight_app, name="insight")
 app.command(investigation_app, name="investigation")
@@ -2841,6 +2848,46 @@ async def replay_get(replay: uuid.UUID, /) -> CommandResult:
     """Get one replay without remapping its status."""
     async with _open_asset_client() as client:
         return await replays.get_replay(client, replay)
+
+
+@_register(
+    import_app,
+    _spec(
+        ("import", "list"),
+        "List imports.",
+        parameters=_LIST_PARAMETERS,
+        errors=_COLLECTION_READ_ERRORS,
+    ),
+)
+async def import_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of imports."""
+    async with _open_asset_client() as client:
+        return await imports.list_imports(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    import_app,
+    _spec(
+        ("import", "get"),
+        "Get one import by exact UUID.",
+        parameters=(
+            ParameterSpec("IMPORT_ID", "UUID", "argument", True, "Import ID."),
+        ),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def import_get(import_id: uuid.UUID, /) -> CommandResult:
+    """Get one import without remapping its status."""
+    async with _open_asset_client() as client:
+        return await imports.get_import(client, import_id)
 
 
 @_register(

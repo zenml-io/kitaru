@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Added evaluators to imports. Pass `evaluators` on `POST /api/v1/imports`, or `--evaluator` to `kitaru session import`, and every listed evaluator scores every imported session once the import finishes. A failed evaluator marks the job failed while the import's `stats` still records the parse outcome. Added `GET /api/v1/imports` and `GET /api/v1/imports/{import_id}`, with `client.imports.list(...)` and `client.imports.get(...)`, to read imports back with their `stats` and `error`. Sessions created by an import carry `import_id`.
+- Added evaluators to imports. Pass `evaluators` on `POST /api/v1/imports`, or `--evaluator` to `kitaru session import`, and every listed evaluator scores every imported session once the import finishes. A failed evaluator marks the job failed while the import's `stats` still records the parse outcome. Added `GET /api/v1/imports` and `GET /api/v1/imports/{import_id}`, with `client.imports.list(...)` and `client.imports.get(...)` and the `kitaru import list` and `kitaru import get` commands, to read imports back with their `stats` and `error`. Sessions created by an import carry `import_id`.
 - Added agent-scoped insights. Create a batch of insights for an agent with `client.insights.create(...)` or `POST /api/v1/insights`, each carrying a name, a title, an optional description, and data of type `text`, `categorical`, or `binned`. Insights can be listed with filters on `agent_id`, `name`, and `type`, fetched, updated in title and description, and deleted.
 
 ### Changed

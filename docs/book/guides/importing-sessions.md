@@ -198,6 +198,11 @@ Send this object to `POST /api/v1/imports`. Each `evaluators` entry names an eva
 
 Read an import back with `GET /api/v1/imports/{import_id}` or `client.imports.get(import_id)`, and list imports with `GET /api/v1/imports` or `client.imports.list(...)`, filterable on `id`, `agent_id`, and `job_id`.
 
+```bash
+kitaru import list --output json
+kitaru import get <import-id> --output json
+```
+
 Existing integrations can continue to send `params.join_on` as a dotted path. The explicit CLI option accepts JSON Pointer syntax only. Langfuse also retains its older `join_path` plus `join_key` parameters for compatibility, but new integrations should use `join_on`.
 
 ## What provider importers normalize
