@@ -17,7 +17,10 @@ import uuid
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.agent_repository import AgentRepository
-from kitaru.server.application.interfaces.insight_repository import InsightRepository
+from kitaru.server.application.interfaces.insight_repository import (
+    InsightRepository,
+    InsightWithAnalyzer,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.insight import (
     InsightCreate,
@@ -91,7 +94,9 @@ class InsightService:
                 )
         return insights
 
-    async def get_insight(self, insight_id: uuid.UUID, actor: AuthContext) -> Insight:
+    async def get_insight(
+        self, insight_id: uuid.UUID, actor: AuthContext
+    ) -> InsightWithAnalyzer:
         """Get an insight by id.
 
         Args:
@@ -102,14 +107,14 @@ class InsightService:
             InsightNotFound: No insight has this id.
 
         Returns:
-            Stored insight.
+            Stored insight paired with its analyzer name and version.
         """
         _ = actor
         return await self._repository.get(insight_id)
 
     async def list_insights(
         self, insight_filter: InsightFilter, actor: AuthContext
-    ) -> tuple[list[Insight], str | None]:
+    ) -> tuple[list[InsightWithAnalyzer], str | None]:
         """List insights matching a filter.
 
         Args:
@@ -124,7 +129,7 @@ class InsightService:
 
     async def update_insight(
         self, insight_id: uuid.UUID, command: InsightUpdate, actor: AuthContext
-    ) -> Insight:
+    ) -> InsightWithAnalyzer:
         """Partially update an insight's title and description.
 
         Args:
@@ -137,10 +142,11 @@ class InsightService:
             ValidationError: The command clears the insight title.
 
         Returns:
-            Updated insight.
+            Updated insight paired with its analyzer name and version.
         """
         _ = actor
-        insight = await self._repository.get(insight_id)
+        item = await self._repository.get(insight_id)
+        insight = item.insight
         fields = command.model_fields_set
         if "title" in fields:
             if command.title is None:
@@ -148,7 +154,8 @@ class InsightService:
             insight.update_title(command.title)
         if "description" in fields:
             insight.update_description(command.description)
-        return await self._repository.update(insight)
+        insight = await self._repository.update(insight)
+        return InsightWithAnalyzer(insight, item.analyzer_name, item.analyzer_version)
 
     async def delete_insight(self, insight_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete an insight.

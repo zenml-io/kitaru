@@ -28,7 +28,7 @@ from kitaru.api_models.v1.base import (
     ResponseModel,
 )
 from kitaru.api_models.v1.filter import FilterableListParams
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
 
 MAX_IMPORT_FAILURES = 20
 DEFAULT_FETCH_CONCURRENCY = 4
@@ -137,6 +137,10 @@ class ImportCreateRequest(RequestModel):
         default_factory=list,
         description="Evaluators run against every imported session.",
     )
+    analyzers: list[AnalyzerConfig] = Field(
+        default_factory=list,
+        description="Analyzers run against every imported session.",
+    )
 
     @model_validator(mode="after")
     def _source_xor_payload_blob_id(self) -> Self:
@@ -221,6 +225,9 @@ class ImportResponse(OwnedResponseModel):
     )
     evaluators: list[EvaluatorConfig] = Field(
         description="Evaluators run against every imported session."
+    )
+    analyzers: list[AnalyzerConfig] = Field(
+        description="Analyzers run against every imported session."
     )
     stats: ImportStats | None = Field(
         default=None, description="Stats from a completed import."
