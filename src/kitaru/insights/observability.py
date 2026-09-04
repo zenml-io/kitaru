@@ -6,6 +6,9 @@
 import asyncio
 import importlib
 import os
+import threading
+from collections.abc import Callable
+from contextlib import suppress
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -46,6 +49,41 @@ async def observe_safely(
     except Exception:
         # Telemetry must not alter a generation result.
         return
+
+
+def _settle_daemon_future(
+    future: asyncio.Future[None], error: Exception | None
+) -> None:
+    """Settle a live handoff future while ignoring late thread completion."""
+    if future.done():
+        return
+    if error is None:
+        future.set_result(None)
+    else:
+        future.set_exception(error)
+
+
+async def _run_in_daemon_thread(callback: Callable[[], None]) -> None:
+    """Run blocking telemetry without joining its thread at process exit."""
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[None] = loop.create_future()
+
+    def run() -> None:
+        error: Exception | None = None
+        try:
+            callback()
+        except Exception as caught:
+            error = caught
+        # The event loop may already be closed after a telemetry timeout.
+        with suppress(RuntimeError):
+            loop.call_soon_threadsafe(_settle_daemon_future, future, error)
+
+    threading.Thread(
+        target=run,
+        name="kitaru-insight-observation",
+        daemon=True,
+    ).start()
+    await future
 
 
 class LangfuseGenerationObserver:
@@ -89,7 +127,7 @@ class LangfuseGenerationObserver:
     async def record(self, event: GenerationEvent) -> None:
         """Record an event using the installed Langfuse client's event API."""
         payload = event.model_dump(mode="json")
-        await asyncio.to_thread(self._record_sync, payload)
+        await _run_in_daemon_thread(lambda: self._record_sync(payload))
 
     def _record_sync(self, payload: dict[str, object]) -> None:
         """Bridge the synchronous optional client without blocking generation."""

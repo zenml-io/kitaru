@@ -4,6 +4,8 @@
 """Tests for metadata-only insight generation observation."""
 
 import asyncio
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -133,3 +135,52 @@ async def test_langfuse_observer_uses_dedicated_config_and_metadata_only(
     ]
     assert ended == [True]
     assert "insight-secret" not in repr(observer)
+
+
+async def test_langfuse_sync_exception_is_best_effort() -> None:
+    class BrokenClient:
+        def start_observation(self, **kwargs):
+            raise RuntimeError("unavailable")
+
+    observer = object.__new__(LangfuseGenerationObserver)
+    observer._client = BrokenClient()
+
+    await observe_safely(
+        observer,
+        GenerationEvent(name="validation", run_id="run", metadata={}),
+    )
+
+
+def test_blocking_langfuse_call_does_not_delay_event_loop_shutdown() -> None:
+    script = """
+import asyncio
+import time
+from kitaru.insights.observability import (
+    GenerationEvent,
+    LangfuseGenerationObserver,
+    observe_safely,
+)
+
+class BlockingClient:
+    def start_observation(self, **kwargs):
+        time.sleep(10)
+
+observer = object.__new__(LangfuseGenerationObserver)
+observer._client = BlockingClient()
+asyncio.run(
+    observe_safely(
+        observer,
+        GenerationEvent(name="validation", run_id="run", metadata={}),
+        timeout_seconds=0.01,
+    )
+)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=2,
+    )
+
+    assert result.returncode == 0, result.stderr

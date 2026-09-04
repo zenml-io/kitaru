@@ -51,6 +51,11 @@ _UNSUPPORTED_CLAIM = re.compile(
     r"\b(?:causes?|caused|because|due to|results? in|leads? to|"
     r"more|most|less|fewer|higher|lower|increase[ds]?|decrease[ds]?|"
     r"slower|slowest|faster|fastest|better|best|worse|worst|"
+    r"longer|longest|shorter|shortest|larger|largest|smaller|smallest|"
+    r"greater|greatest|bigger|biggest|quicker|quickest|easier|easiest|"
+    r"harder|hardest|cheaper|cheapest|costlier|costliest|"
+    r"stronger|strongest|weaker|weakest|newer|newest|older|oldest|"
+    r"earlier|earliest|later|latest|"
     r"healthy|correct|incorrect)\b",
     flags=re.IGNORECASE,
 )
@@ -312,6 +317,10 @@ def _page_copy(plan: EditorialPlan) -> list[str]:
 
 def _validate_copy_safety(value: str) -> None:
     """Reject content that the frontend must not render as editorial copy."""
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        raise ValueError("editor copy must be valid UTF-8 text") from None
     if _CONTROL.search(value):
         raise ValueError("editor copy contains control characters")
     if _LINK.search(value):
