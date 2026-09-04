@@ -162,6 +162,22 @@ class FailingAnalyst(InsightModelGenerator):
         raise AssertionError("editor must not run after analyst failure")
 
 
+class MalformedReceiptGenerator(InsightModelGenerator):
+    """Simulate a provider-neutral adapter returning a malformed receipt."""
+
+    async def analyze(self, *, projection, config, timeout_seconds):
+        ProviderReceipt(
+            stage="analyst",
+            request_id="broken-\ud800-id",
+            latency_ms=1,
+            outcome="succeeded",
+        )
+        raise AssertionError("receipt validation must fail first")
+
+    async def edit(self, *, projection, config, timeout_seconds):
+        raise AssertionError("editor must not run after analyst failure")
+
+
 class SuccessfulGenerator(InsightModelGenerator):
     """Return valid analyst and editorial values for one candidate."""
 
@@ -302,6 +318,23 @@ async def test_analyst_failure_uses_stable_deterministic_selection() -> None:
     ]
     assert result.diagnostics.fallback_reason == "analyst_failed"
     assert generator.editor_called is False
+
+
+async def test_malformed_custom_provider_receipt_falls_back_safely() -> None:
+    result = await generate_insights(
+        [
+            _session(1, status=SessionStatus.FAILED),
+            _session(2, status=SessionStatus.COMPLETED),
+        ],
+        context=_context(),
+        config=InsightGenerationConfig(model=ModelGenerationConfig(model="test-model")),
+        generator=MalformedReceiptGenerator(),
+    )
+
+    assert result.mode is GenerationMode.DETERMINISTIC_FALLBACK
+    assert result.diagnostics.fallback_reason == "analyst_failed"
+    assert result.diagnostics.provider_receipts[0].request_id is None
+    result.model_dump_json().encode("utf-8")
 
 
 async def test_model_result_uses_one_pipeline_run_id_and_final_event() -> None:

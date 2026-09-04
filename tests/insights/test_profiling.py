@@ -62,6 +62,13 @@ class ExplosiveRoleCollection(list[object]):
         raise AssertionError("structured roles must not be stringified")
 
 
+class ExplosiveMapping(dict[str, object]):
+    """Mapping whose keys must not be visited after its width is rejected."""
+
+    def __iter__(self):
+        raise AssertionError("over-budget mapping keys must not be inspected")
+
+
 def _id(number: int) -> uuid.UUID:
     return uuid.UUID(f"01990000-0000-7000-8000-{number:012d}")
 
@@ -683,6 +690,45 @@ def test_payload_traversal_is_bounded_for_deep_and_wide_inputs() -> None:
     assert "adjacent-identical-calls" not in {
         candidate.id for candidate in result.candidates
     }
+
+
+def test_structured_text_ignores_unhashable_discriminator() -> None:
+    session = _session(
+        1,
+        inputs={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": ["text"], "text": "WRONG!!!"}],
+                }
+            ]
+        },
+    )
+
+    result = profile_sessions([session])
+
+    assert "correction-language" in {candidate.id for candidate in result.candidates}
+
+
+def test_mapping_width_is_rejected_before_key_inspection() -> None:
+    session = _calls(
+        1,
+        [
+            (
+                "lookup",
+                ExplosiveMapping({"first": 1, "second": 2}),
+                NodeStatus.COMPLETED,
+                "ok",
+            )
+        ],
+    )
+
+    result = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_items=1),
+    )
+
+    assert "payload" in " ".join(result.coverage.caveats).lower()
 
 
 @pytest.mark.parametrize(
