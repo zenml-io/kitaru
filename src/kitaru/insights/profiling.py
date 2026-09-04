@@ -338,16 +338,22 @@ class _PayloadBudget:
     items: int = 0
     bytes: int = 0
     truncated: bool = False
+    truncation_count: int = 0
+
+    def _record_truncation(self) -> None:
+        """Record one rejected traversal step."""
+        self.truncated = True
+        self.truncation_count += 1
 
     def consume(self, value: Any, *, depth: int) -> bool:
         """Account for one value, rejecting it before an over-budget traversal."""
         if depth > self.max_depth or self.items >= self.max_items:
-            self.truncated = True
+            self._record_truncation()
             return False
         remaining = self.max_bytes - self.bytes
         size = _scalar_json_size(value, remaining)
         if size is None:
-            self.truncated = True
+            self._record_truncation()
             return False
         self.items += 1
         self.bytes += size
@@ -356,7 +362,7 @@ class _PayloadBudget:
     def can_enter(self, size: int) -> bool:
         """Reject a container whose immediate children exceed the remaining budget."""
         if size > self.max_items - self.items:
-            self.truncated = True
+            self._record_truncation()
             return False
         return True
 
@@ -542,21 +548,21 @@ def _decode_pointer_part(part: str) -> str | None:
 
 def _resolve_pointer(
     document: Any, pointer: str | None, budget: _PayloadBudget
-) -> tuple[bool, Any]:
+) -> tuple[bool, Any, int]:
     """Resolve a valid RFC 6901 pointer without raising on source data."""
     if pointer is None:
-        return False, None
+        return False, None, 0
     if pointer == "":
-        return True, document
+        return True, document, 0
     if not pointer.startswith("/"):
-        return False, None
+        return False, None, 0
     current = document
     for depth, raw_part in enumerate(pointer[1:].split("/")):
         if not budget.consume(current, depth=depth):
-            return False, None
+            return False, None, 0
         part = _decode_pointer_part(raw_part)
         if part is None:
-            return False, None
+            return False, None, 0
         if isinstance(current, dict) and part in current:
             current = current[part]
         elif (
@@ -568,14 +574,16 @@ def _resolve_pointer(
         ):
             current = current[int(part)]
         else:
-            return False, None
-    return True, current
+            return False, None, 0
+    return True, current, len(pointer[1:].split("/"))
 
 
-def _text_parts(value: Any, budget: _PayloadBudget) -> list[str]:
+def _text_parts(
+    value: Any, budget: _PayloadBudget, *, start_depth: int = 0
+) -> list[str]:
     """Extract strings from common structured message text containers."""
     texts: list[str] = []
-    stack: list[tuple[Any, int]] = [(value, 0)]
+    stack: list[tuple[Any, int]] = [(value, start_depth)]
     while stack:
         current, depth = stack.pop()
         if not budget.consume(current, depth=depth):
@@ -616,7 +624,9 @@ def _user_messages(value: Any, budget: _PayloadBudget) -> list[str]:
         if str(current.get("role", "")).lower() == "user":
             for key in ("content", "parts", "text"):
                 if key in current:
-                    messages.extend(_text_parts(current[key], budget))
+                    messages.extend(
+                        _text_parts(current[key], budget, start_depth=depth + 1)
+                    )
             continue
         keys = sorted(key for key in current if isinstance(key, str))
         if budget.can_enter(len(keys)):
@@ -628,9 +638,10 @@ def _selected_user_texts(
     state: _State,
     session: SessionWithNodesResponse,
     nodes: list[SessionNodeResponse],
-) -> list[tuple[str, uuid.UUID | None]]:
+) -> tuple[list[tuple[str, uuid.UUID | None]], bool]:
     """Select user text using explicit selectors before conservative recursion."""
     deduplicated: dict[str, uuid.UUID | None] = {}
+    truncations_before = state.payload_budget.truncation_count
 
     def add_texts(texts: Sequence[str], node_id: uuid.UUID | None) -> None:
         for text in texts:
@@ -638,13 +649,13 @@ def _selected_user_texts(
             if normalized:
                 deduplicated.setdefault(normalized, node_id)
 
-    found, value = _resolve_pointer(
+    found, value, value_depth = _resolve_pointer(
         session.session.inputs,
         session.session.input_text_selector,
         state.payload_budget,
     )
     session_texts = (
-        _text_parts(value, state.payload_budget)
+        _text_parts(value, state.payload_budget, start_depth=value_depth)
         if found
         else _user_messages(session.session.inputs, state.payload_budget)
     )
@@ -652,16 +663,19 @@ def _selected_user_texts(
     for node in nodes:
         if node.node_type is not NodeType.LLM_CALL:
             continue
-        found, value = _resolve_pointer(
+        found, value, value_depth = _resolve_pointer(
             node.inputs, node.input_text_selector, state.payload_budget
         )
         node_texts = (
-            _text_parts(value, state.payload_budget)
+            _text_parts(value, state.payload_budget, start_depth=value_depth)
             if found
             else _user_messages(node.inputs, state.payload_budget)
         )
         add_texts(node_texts, node.id)
-    return sorted(deduplicated.items(), key=lambda item: (item[0], str(item[1] or "")))
+    selected = sorted(
+        deduplicated.items(), key=lambda item: (item[0], str(item[1] or ""))
+    )
+    return selected, state.payload_budget.truncation_count == truncations_before
 
 
 def _record(
@@ -838,8 +852,12 @@ def _scan_session(
             node_id=calls[start].id,
         )
 
-    messages = _selected_user_texts(state, session, nodes if nodes_complete else [])
+    messages, payload_complete = _selected_user_texts(
+        state, session, nodes if nodes_complete else []
+    )
     state.text_available = state.text_available or bool(messages)
+    if not payload_complete:
+        return
     state.text_bytes_available += sum(
         len(message.encode("utf-8")) for message, _ in messages
     )
