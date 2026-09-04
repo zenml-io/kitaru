@@ -346,20 +346,73 @@ def _assemble_result(
 def _get_oversize_result(
     result: InsightGenerationResult, maximum: int
 ) -> InsightGenerationResult | None:
-    """Replace an over-budget result with an honest bounded empty result."""
+    """Retain the largest ordered card prefix that fits the result byte bound."""
     available = len(result.model_dump_json().encode("utf-8"))
     if available <= maximum:
         return None
+
+    truncation = CoverageTruncation(
+        dimension="serialized_result_bytes",
+        available=available,
+        analyzed=maximum,
+    )
+    for retained_count in range(len(result.insights) - 1, 0, -1):
+        coverage = result.coverage.model_copy(
+            update={
+                "truncations": [*result.coverage.truncations, truncation],
+                "caveats": [
+                    *result.coverage.caveats,
+                    "Lower-priority cards were omitted to fit the result byte limit.",
+                ],
+            }
+        )
+        retained = result.insights[:retained_count]
+        assert result.recommendation is not None
+        recommendation_id = result.recommendation.insight_name
+        recommendation = result.recommendation
+        if recommendation_id not in {insight.name for insight in retained}:
+            recommendation_id = retained[0].name
+            recommendation = PageRecommendation(
+                insight_name=recommendation_id,
+                title="Recommended next step",
+                description=(
+                    "Start here and use the copied prompt to define a focused cohort."
+                ),
+            )
+
+        bounded_insights: list[InsightInput] = []
+        for insight in retained:
+            metadata = result.card_metadata(insight).model_copy(
+                update={
+                    "coverage": coverage,
+                    "recommended": insight.name == recommendation_id,
+                }
+            )
+            bounded_insights.append(
+                insight.model_copy(
+                    update={
+                        "metadata": {
+                            INSIGHT_METADATA_KEY: metadata.model_dump(mode="json")
+                        }
+                    }
+                )
+            )
+
+        bounded = InsightGenerationResult.model_validate(
+            result.model_copy(
+                update={
+                    "coverage": coverage,
+                    "recommendation": recommendation,
+                    "insights": bounded_insights,
+                }
+            ).model_dump()
+        )
+        if len(bounded.model_dump_json().encode("utf-8")) <= maximum:
+            return bounded
+
     coverage = result.coverage.model_copy(
         update={
-            "truncations": [
-                *result.coverage.truncations,
-                CoverageTruncation(
-                    dimension="serialized_result_bytes",
-                    available=available,
-                    analyzed=maximum,
-                ),
-            ],
+            "truncations": [*result.coverage.truncations, truncation],
             "caveats": [
                 *result.coverage.caveats,
                 "No generated card fit within the configured result byte limit.",
