@@ -350,12 +350,15 @@ class TaskTransitions:
             import_ = await self._get_task_import(task.import_id)
             if import_ is None:
                 return
+            plugin = (
+                await self._get_task_plugin(import_.importer_version_id)
+                if import_.importer_version_id is not None
+                else None
+            )
             self._analytics.track(
                 job.owner_id,
                 AnalyticsEvent.IMPORT_COMPLETED,
-                analytics_events.build_import_completed_properties(
-                    task, await self._get_task_plugin(import_.importer_version_id)
-                ),
+                analytics_events.build_import_completed_properties(task, plugin),
             )
         elif isinstance(task, EvaluationTask):
             self._analytics.track(

@@ -37,6 +37,18 @@ class ImportNotFound(NotFoundError):
         super().__init__(f"Import {import_id} was not found")
 
 
+class ImportWithoutImporterVersion(NotFoundError):
+    """Raised when an import whose importer version was deleted is asked to run."""
+
+    def __init__(self, import_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            import_id: Id of the import.
+        """
+        super().__init__(f"Import {import_id} no longer names an importer version")
+
+
 class Import(DomainModel):
     """Import."""
 
@@ -45,7 +57,7 @@ class Import(DomainModel):
     job_id: uuid.UUID | None = None
     agent_id: uuid.UUID
     agent_version_id: uuid.UUID | None = None
-    importer_version_id: uuid.UUID
+    importer_version_id: uuid.UUID | None = None
     payload_blob_id: uuid.UUID
     params: dict[str, Any] = Field(default_factory=dict)
     evaluators: list[EvaluatorConfig] = Field(default_factory=list)

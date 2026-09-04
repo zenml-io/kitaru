@@ -311,6 +311,22 @@ async def test_delete_job_nulls_job_id() -> None:
         assert reloaded.job_id is None
 
 
+async def test_delete_importer_nulls_importer_version_id() -> None:
+    """Null an import's importer version pointer when the importer is deleted."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, _):
+        setup = await _seed_postgres(session)
+        created = await _create_import(setup)
+        plugins = SQLPluginRepository(session)
+        importer_version = await plugins.get_version_by_id(setup.importer_version_id)
+
+        await plugins.delete(importer_version.plugin_id)
+
+        reloaded = await setup.imports.get(created.id)
+        assert reloaded.importer_version_id is None
+
+
 async def test_delete_import_nulls_session_import_id() -> None:
     """Null a session's import pointer when the import row is deleted."""
     if not await postgres_available():

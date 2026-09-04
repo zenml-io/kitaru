@@ -100,7 +100,7 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("insight", "owner_id"): None,
     ("import", "agent_id"): "CASCADE",
     ("import", "agent_version_id"): "SET NULL",
-    ("import", "importer_version_id"): None,
+    ("import", "importer_version_id"): "SET NULL",
     ("import", "job_id"): "SET NULL",
     ("import", "owner_id"): None,
     ("import", "payload_blob_id"): None,

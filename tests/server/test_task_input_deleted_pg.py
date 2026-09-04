@@ -405,8 +405,8 @@ async def test_deleting_payload_blob_of_a_pending_import_is_refused() -> None:
         await _claim_hands_out(client, "importer", task_id)
 
 
-async def test_deleting_importer_of_a_pending_import_is_refused() -> None:
-    """Refuse deleting a pending import's importer, leaving the task claimable."""
+async def test_deleting_plugin_leaves_its_task_for_the_claim() -> None:
+    """Deleting a plugin keeps the task, which cancels when claimed."""
     settings = db_settings(DB_POOL_SIZE=20, DB_MAX_OVERFLOW=10)
     async with lifespan_client(settings) as client:
         agent = await _agent(client, "assistant")
@@ -414,15 +414,11 @@ async def test_deleting_importer_of_a_pending_import_is_refused() -> None:
         job_id, _blob_id = await _import_job(client, agent["id"], "importer-1")
         task_id = await _job_task_id(client, job_id)
 
-        importer_id = plugin["importer"]["id"]
-        response = await client.delete(f"/api/v1/importers/{importer_id}")
-        assert response.status_code == 409, response.text
+        response = await client.delete(f"/api/v1/importers/{plugin['importer']['id']}")
+        assert response.status_code == 204, response.text
 
-        assert (await client.get(f"/api/v1/importers/{importer_id}")).status_code == 200
-        assert (await client.get(f"/api/v1/tasks/{task_id}")).json()[
-            "status"
-        ] == "pending"
-        await _claim_hands_out(client, "importer", task_id)
+        assert (await client.get(f"/api/v1/tasks/{task_id}")).status_code == 200
+        await _claim_cancels_everything(client, "importer", task_id, job_id)
 
 
 async def test_deleting_agent_row_leaves_its_import_task_for_the_claim() -> None:
@@ -501,14 +497,15 @@ async def test_worker_calls_after_input_deleted_mid_flight_never_5xx() -> None:
         assert running_response.status_code == 200, running_response.text
         assert running_response.json()["status"] == "running"
 
-        # The import row pins its payload blob and importer, so both deletes
-        # are refused while the worker runs the task.
+        # The import row pins its payload blob, so that delete is refused
+        # while the worker runs the task. The importer delete goes through
+        # and nulls the import's importer version.
         blob_response = await client.delete(f"/api/v1/blobs/{blob_id}")
         assert blob_response.status_code == 409, blob_response.text
         importer_response = await client.delete(
             f"/api/v1/importers/{plugin['importer']['id']}"
         )
-        assert importer_response.status_code == 409, importer_response.text
+        assert importer_response.status_code == 204, importer_response.text
         # Cascade the import row away while the worker believes it still owns
         # a running task.
         await _delete_agent_row(settings, agent["id"])

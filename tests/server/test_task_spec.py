@@ -32,6 +32,7 @@ from conftest import (
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.imports import Import
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import ImportTaskDetails, ScriptPluginSpec
 
@@ -100,6 +101,33 @@ async def test_missing_import_row_cancels_the_task_at_claim(
     """A task whose import row is gone is canceled instead of handed out."""
     job = await create_job(services.jobs, ACTOR.account.id)
     task = await create_import_task(services.tasks, job.id, import_id=uuid.uuid4())
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+
+    assert claimed == []
+    stored = await services.tasks.get(task.id)
+    assert stored.status is TaskStatus.CANCELED
+
+
+async def test_import_without_importer_version_cancels_the_task_at_claim(
+    services: JobAndTaskServices,
+) -> None:
+    """A task whose import lost its importer version is canceled at claim."""
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    import_ = await services.imports.create(
+        Import(
+            owner_id=ACTOR.account.id,
+            job_id=job.id,
+            agent_id=agent.id,
+            importer_version_id=None,
+            payload_blob_id=uuid.uuid4(),
+        )
+    )
+    task = await create_import_task(services.tasks, job.id, import_id=import_.id)
     worker = await create_worker(services.workers, ACTOR.account.id)
 
     claimed = await services.task_service.claim_tasks(

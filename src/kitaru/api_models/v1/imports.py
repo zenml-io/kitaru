@@ -96,7 +96,9 @@ class ImportResponse(OwnedResponseModel):
         default=None,
         description="Agent version recorded on the imported sessions.",
     )
-    importer_version_id: uuid.UUID = Field(description="Importer version run.")
+    importer_version_id: uuid.UUID | None = Field(
+        default=None, description="Importer version run."
+    )
     payload_blob_id: uuid.UUID = Field(description="Blob holding the payload parsed.")
     params: dict[str, JsonValue] = Field(
         description="Parameters passed to the importer."

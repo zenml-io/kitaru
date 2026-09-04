@@ -73,6 +73,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["importer_version_id"],
             ["plugin_version.id"],
             name=IMPORT_IMPORTER_VERSION_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
         ),
         ForeignKeyConstraint(
             ["payload_blob_id"], ["blob.id"], name=IMPORT_PAYLOAD_BLOB_ID_FOREIGN_KEY
@@ -85,7 +86,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     job_id: Mapped[uuid.UUID | None]
     agent_id: Mapped[uuid.UUID]
     agent_version_id: Mapped[uuid.UUID | None]
-    importer_version_id: Mapped[uuid.UUID]
+    importer_version_id: Mapped[uuid.UUID | None]
     payload_blob_id: Mapped[uuid.UUID]
     params: Mapped[dict[str, Any]] = mapped_column(JSONB)
     evaluators: Mapped[list[Any]] = mapped_column(JSONB)

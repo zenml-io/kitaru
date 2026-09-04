@@ -26,6 +26,7 @@ from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
+from kitaru.server.domain.imports import ImportWithoutImporterVersion
 from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
@@ -175,6 +176,8 @@ class TaskSpecBuilder:
 
         Raises:
             ImportNotFound: The task names an unknown import.
+            ImportWithoutImporterVersion: The import's importer version was
+                deleted.
             PluginVersionIdNotFound: The import names an unknown plugin
                 version.
             BlobNotFound: The script plugin or the payload names an unknown
@@ -184,6 +187,8 @@ class TaskSpecBuilder:
             Execution spec.
         """
         import_ = await self._imports.get(task.import_id)
+        if import_.importer_version_id is None:
+            raise ImportWithoutImporterVersion(import_.id)
         plugin_version = await self._plugins.get_version_by_id(
             import_.importer_version_id
         )

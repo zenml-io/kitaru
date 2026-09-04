@@ -1679,8 +1679,8 @@ export interface paths {
          * Delete Importer
          * @description Delete an importer, cascading its versions.
          *
-         *     Clients observe HTTP 204 on success, 404 when no importer has this id,
-         *     and 409 when one of its versions is referenced by an import.
+         *     Clients observe HTTP 204 on success and 404 when no importer has this
+         *     id.
          *
          *     Args:
          *         importer_id: Id of the importer.
@@ -5745,10 +5745,9 @@ export interface components {
             id: string;
             /**
              * Importer Version Id
-             * Format: uuid
              * @description Importer version run.
              */
-            importer_version_id: string;
+            importer_version_id?: string | null;
             /**
              * Job Id
              * @description Job running the import.
@@ -14372,15 +14371,6 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorBody"];
-                };
-            };
-            /** @description Conflict */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };

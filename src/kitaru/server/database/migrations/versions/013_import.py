@@ -41,7 +41,7 @@ def upgrade() -> None:
         sa.Column("job_id", sa.Uuid(), nullable=True),
         sa.Column("agent_id", sa.Uuid(), nullable=False),
         sa.Column("agent_version_id", sa.Uuid(), nullable=True),
-        sa.Column("importer_version_id", sa.Uuid(), nullable=False),
+        sa.Column("importer_version_id", sa.Uuid(), nullable=True),
         sa.Column("payload_blob_id", sa.Uuid(), nullable=False),
         sa.Column("params", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column(
@@ -69,6 +69,7 @@ def upgrade() -> None:
             ["importer_version_id"],
             ["plugin_version.id"],
             name="fk_import_importer_version_id",
+            ondelete="SET NULL",
         ),
         sa.ForeignKeyConstraint(
             ["job_id"], ["job.id"], name="fk_import_job_id", ondelete="SET NULL"

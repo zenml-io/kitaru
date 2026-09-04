@@ -23,11 +23,6 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
-from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
-from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
-from kitaru.server.adapters.db.repositories.import_repository import (
-    SQLImportRepository,
-)
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
@@ -38,14 +33,10 @@ from kitaru.server.application.models.plugin import (
     PluginVersionFilter,
 )
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.agent import Agent
-from kitaru.server.domain.blob import Blob, BlobStorageBackend
-from kitaru.server.domain.imports import Import
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     PackagePluginSource,
     Plugin,
-    PluginInUse,
     PluginKind,
     PluginNotFound,
     PluginVersionNotFound,
@@ -264,42 +255,6 @@ async def test_create_version_plugin_not_found(setup: Setup) -> None:
     missing_id = uuid.uuid4()
     with pytest.raises(PluginNotFound, match=f"Plugin {missing_id} was not found"):
         await repository.create_version(missing_id, SOURCE_V1, display_version=None)
-
-
-async def test_delete_in_use_by_import() -> None:
-    """Reject deleting a plugin whose version an import references."""
-    if not await postgres_available():
-        pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
-        owner = await SQLAccountRepository(session).create(Account(name="owner"))
-        agent = await SQLAgentRepository(session).create(
-            Agent(owner_id=owner.id, name="assistant")
-        )
-        repository = SQLPluginRepository(session)
-        plugin = await repository.create(_plugin(owner.id, kind=PluginKind.IMPORTER))
-        importer_version = await repository.create_version(
-            plugin.id, SOURCE_V1, display_version=None
-        )
-        blob, _ = await SQLBlobRepository(session).create(
-            Blob(
-                owner_id=owner.id,
-                sha256="0" * 64,
-                size=4,
-                media_type="text/csv",
-                stored_in=BlobStorageBackend.DATABASE,
-            )
-        )
-        await SQLImportRepository(session).create(
-            Import(
-                owner_id=owner.id,
-                agent_id=agent.id,
-                importer_version_id=importer_version.id,
-                payload_blob_id=blob.id,
-            )
-        )
-
-        with pytest.raises(PluginInUse, match=f"Plugin {plugin.id} is in use"):
-            await repository.delete(plugin.id)
 
 
 async def test_delete_cascades_versions(setup: Setup) -> None:
