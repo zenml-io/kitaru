@@ -54,6 +54,29 @@ The Langfuse importer parses **Langfuse JSONL exports**, up to 50 MiB per payloa
 
 Import in slices as often as you like; dedup makes it safe.
 
+## Fetch traces from the Langfuse API
+
+Skip the export and upload, and let the import task fetch traces from Langfuse directly:
+
+```bash
+kitaru session import \
+  --importer kitaru/langfuse@latest \
+  --agent support-agent@latest \
+  --since 7d \
+  --tag imported-baseline --wait
+```
+
+Omitting FILE and setting `--since` selects an API import: the worker calls the Langfuse API instead of parsing an uploaded payload. `--since` and `--until` accept an ISO 8601 timestamp or a relative duration (`7d`, `12h`, `30m`). `--trace-id` (repeatable) fetches exactly those trace ids instead of a time window. The same selection is a query object on the SDK and REST request:
+
+| Query key | Meaning |
+| --- | --- |
+| `trace_ids` | Langfuse trace ids to fetch. When present, exactly those traces are fetched and the time window is ignored. |
+| `since` | Timezone-aware ISO 8601 datetime, lower bound of trace start time. Required when `trace_ids` is absent. |
+| `until` | Timezone-aware ISO 8601 datetime, upper bound of trace start time. Defaults to now. |
+| `concurrency` | Traces fetched at once. Defaults to 4. |
+
+The worker needs `kitaru-langfuse-importer[adapter]` installed (the default plugin catalog already installs it that way) and the Langfuse client credentials in its environment: `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` (or the older `LANGFUSE_HOST`) for a self-hosted instance. Each fetched trace is parsed the same way an uploaded export would be, so the `params` table above, and the dedup rules below, apply the same way.
+
 ## Dedup: one session per (imported_from, external_id)
 
 Every imported session records its source identity: `imported_from` (`langfuse`) and the trace's `external_id`. That pair is unique on the server, so re-importing an overlapping export **skips** what's already stored; the stats report it as `skipped`, not as an error. This is the property that makes "export the last 24 hours every night" a safe cron job rather than a duplication engine.

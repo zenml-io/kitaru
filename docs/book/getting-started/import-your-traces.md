@@ -48,6 +48,22 @@ kitaru session list --agent support-agent --origin imported
 
 The same import is two calls on the [Python client](../deploy/configuration.md) when you'd rather script it: upload the export with `client.blobs.upload(...)`, then create the import with `client.imports.create(ImportCreateRequest( importer="langfuse", agent_id=..., payload_blob_id=...))`.
 
+## Or skip the export
+
+Langfuse, LangSmith, Braintrust, Logfire, and Arize Phoenix importers can fetch traces themselves instead of you exporting a file first. Omit the file argument, name a time window instead, and the worker calls the provider's API directly:
+
+```bash
+kitaru session import \
+  --importer kitaru/langfuse@latest \
+  --agent support-agent@latest \
+  --since 7d \
+  --tag imported-baseline --wait
+```
+
+`--since` and `--until` accept an ISO 8601 timestamp or a relative duration such as `7d`, `12h`, or `30m`. `--trace-id` fetches exactly the trace ids you name instead of a window. The fetch runs on your worker, the same way the parse does, so provider credentials stay in your environment. Set them there as the provider's own SDK expects. Each provider's guide lists its query keys and the environment variables the worker needs.
+
+Use the file upload from step 2 when you already have an export, when you'd rather not hand a worker live API credentials, or for the Kitaru JSONL importer, which only accepts uploaded files. Use the API fetch to skip the export step for the five provider importers.
+
 ## Re-runs are safe
 
 Every imported session keeps its source identity (`imported_from` + `external_id`). Importing the same export twice, or a bigger export that overlaps an earlier one, skips what's already there instead of duplicating it. Import incrementally, as often as you like.

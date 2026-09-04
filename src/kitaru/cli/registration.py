@@ -96,6 +96,7 @@ class ScriptSource:
     path: Path
     content: bytes
     entrypoint: str
+    fetch_entrypoint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +105,7 @@ class PackageSource:
 
     requirement: str
     entrypoint: str
+    fetch_entrypoint: str | None = None
 
 
 PluginSourceInput = ScriptSource | PackageSource
@@ -337,7 +339,11 @@ def parse_env(values: list[str]) -> dict[str, str]:
 
 
 def prepare_plugin_source(
-    *, script: Path | None, package: str | None, entrypoint: str | None
+    *,
+    script: Path | None,
+    package: str | None,
+    entrypoint: str | None,
+    fetch_entrypoint: str | None = None,
 ) -> PluginSourceInput:
     """Validate exactly one script or package plugin source locally."""
     if (script is None) == (package is None):
@@ -347,12 +353,14 @@ def prepare_plugin_source(
     if entrypoint is None or not entrypoint.strip():
         raise CLIError("invalid_arguments", "--entrypoint is required.")
     if script is not None:
-        return validate_script_source(script, entrypoint)
+        return validate_script_source(script, entrypoint, fetch_entrypoint)
     assert package is not None
-    return validate_package_source(package, entrypoint)
+    return validate_package_source(package, entrypoint, fetch_entrypoint)
 
 
-def validate_script_source(path: Path, entrypoint: str) -> ScriptSource:
+def validate_script_source(
+    path: Path, entrypoint: str, fetch_entrypoint: str | None = None
+) -> ScriptSource:
     """Read and validate a Python script without executing it."""
     if not path.exists() or not path.is_file():
         raise CLIError(
@@ -362,6 +370,11 @@ def validate_script_source(path: Path, entrypoint: str) -> ScriptSource:
         raise CLIError(
             "invalid_arguments",
             "Script entrypoint must be one top-level attribute name.",
+        )
+    if fetch_entrypoint is not None and not _ATTRIBUTE_RE.fullmatch(fetch_entrypoint):
+        raise CLIError(
+            "invalid_arguments",
+            "Script fetch entrypoint must be one top-level attribute name.",
         )
     try:
         content = path.read_bytes()
@@ -377,12 +390,26 @@ def validate_script_source(path: Path, entrypoint: str) -> ScriptSource:
             "invalid_arguments",
             f"Script {str(path)!r} has no top-level attribute {entrypoint!r}.",
         )
-    return ScriptSource(path=path, content=content, entrypoint=entrypoint)
+    if fetch_entrypoint is not None and fetch_entrypoint not in names:
+        raise CLIError(
+            "invalid_arguments",
+            f"Script {str(path)!r} has no top-level attribute {fetch_entrypoint!r}.",
+        )
+    return ScriptSource(
+        path=path,
+        content=content,
+        entrypoint=entrypoint,
+        fetch_entrypoint=fetch_entrypoint,
+    )
 
 
-def validate_package_source(requirement: str, entrypoint: str) -> PackageSource:
+def validate_package_source(
+    requirement: str, entrypoint: str, fetch_entrypoint: str | None = None
+) -> PackageSource:
     """Validate one pinned PEP 508 requirement without importing it."""
     validate_module_entrypoint(entrypoint)
+    if fetch_entrypoint is not None:
+        validate_module_entrypoint(fetch_entrypoint)
     if len(requirement) > _MAX_REQUIREMENT_LENGTH:
         raise CLIError(
             "invalid_arguments",
@@ -407,7 +434,11 @@ def validate_package_source(requirement: str, entrypoint: str) -> PackageSource:
             "invalid_arguments",
             "--package must have one exact == version without a marker or URL.",
         )
-    return PackageSource(requirement=str(parsed), entrypoint=entrypoint)
+    return PackageSource(
+        requirement=str(parsed),
+        entrypoint=entrypoint,
+        fetch_entrypoint=fetch_entrypoint,
+    )
 
 
 def validate_module_entrypoint(reference: str) -> tuple[str, str]:
@@ -524,7 +555,9 @@ async def upload_plugin_source(
     if isinstance(source, PackageSource):
         return (
             PackagePluginSource(
-                requirement=source.requirement, entrypoint=source.entrypoint
+                requirement=source.requirement,
+                entrypoint=source.entrypoint,
+                fetch_entrypoint=source.fetch_entrypoint,
             ),
             None,
         )
@@ -533,7 +566,14 @@ async def upload_plugin_source(
         media_type="text/x-python",
         filename=source.path.name,
     )
-    return ScriptPluginSource(blob_id=blob.id, entrypoint=source.entrypoint), blob
+    return (
+        ScriptPluginSource(
+            blob_id=blob.id,
+            entrypoint=source.entrypoint,
+            fetch_entrypoint=source.fetch_entrypoint,
+        ),
+        blob,
+    )
 
 
 async def register_agent(

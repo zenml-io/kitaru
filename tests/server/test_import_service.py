@@ -40,6 +40,7 @@ from kitaru.server.domain.plugin import (
     PluginKind,
     PluginNotFound,
     PluginVersion,
+    PluginVersionWithoutFetchEntrypoint,
     ScriptPluginSource,
 )
 from kitaru.server.domain.task import ImportTask
@@ -198,6 +199,60 @@ async def test_create_import_rejects_duplicate_evaluator_versions(
     )
     with pytest.raises(ValidationError):
         await services.import_service.create_import(command, actor=ACTOR)
+
+
+async def test_create_import_from_an_api_stores_the_fetch_query(
+    services: JobAndTaskServices,
+) -> None:
+    """An API import stores its query and names no payload blob."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.IMPORTER, name="csv"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(
+            blob_id=uuid.uuid4(), entrypoint="run", fetch_entrypoint="fetch"
+        ),
+        display_version=None,
+    )
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    command = ImportCreate(
+        importer="csv",
+        agent_id=agent.id,
+        fetch_query={"since": "2026-08-01T00:00:00Z"},
+    )
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.payload_blob_id is None
+    assert import_.fetch_query == {"since": "2026-08-01T00:00:00Z"}
+
+
+async def test_create_import_from_an_api_rejects_a_version_without_fetch_entrypoint(
+    services: JobAndTaskServices,
+) -> None:
+    """An API import needs an importer version that declares a fetch entrypoint."""
+    await _importer_version(services)
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    command = ImportCreate(
+        importer="csv", agent_id=agent.id, fetch_query={"trace_ids": ["t1"]}
+    )
+
+    with pytest.raises(PluginVersionWithoutFetchEntrypoint):
+        await services.import_service.create_import(command, actor=ACTOR)
+
+
+def test_import_create_requires_exactly_one_source() -> None:
+    """The command rejects both or neither of payload_blob_id and fetch_query."""
+    with pytest.raises(ValueError, match="Exactly one"):
+        ImportCreate(importer="csv", agent_id=uuid.uuid4())
+    with pytest.raises(ValueError, match="Exactly one"):
+        ImportCreate(
+            importer="csv",
+            agent_id=uuid.uuid4(),
+            payload_blob_id=uuid.uuid4(),
+            fetch_query={},
+        )
 
 
 async def test_create_import_resolves_latest_version_by_default(

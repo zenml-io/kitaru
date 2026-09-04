@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fetch traces from the Logfire Query API by trace id or time window through the `adapter` extra, importing traces oldest first and grouped by session, fetched concurrently bounded by the fetch query's `concurrency` key.
+- Wait out a Logfire rate limit and retry instead of failing the import task.
+
 ## 0.2.0
 
 - Add the Logfire importer-backed adapter, installed through the `adapter` extra.

@@ -198,6 +198,25 @@ def test_keeps_same_named_sessions_from_projects_separate() -> None:
     ]
 
 
+def test_emits_sessions_in_first_appearance_order() -> None:
+    """Emit sessions in payload order rather than sorted by grouping key."""
+    parsed = parse(
+        jsonl(
+            row("root-2", trace_id="trace-2", project_id="project-2"),
+            row("root-1", trace_id="trace-1", project_id="project-1"),
+        )
+    )
+
+    assert [
+        session.external_id
+        for session in parsed
+        if isinstance(session, ImportedSession)
+    ] == [
+        "project-2:conversation-1",
+        "project-1:conversation-1",
+    ]
+
+
 def test_parses_streaming_query_api_ndjson() -> None:
     """Read schema, batched rows, and terminal messages from Query API v2."""
     payload = b"\n".join(

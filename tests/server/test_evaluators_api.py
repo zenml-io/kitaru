@@ -294,6 +294,7 @@ async def test_create_evaluator_version_script_source(
         "type": "script",
         "blob_id": str(blob.id),
         "entrypoint": "score",
+        "fetch_entrypoint": None,
     }
 
 

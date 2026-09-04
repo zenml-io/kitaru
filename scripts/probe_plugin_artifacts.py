@@ -8,6 +8,8 @@ import importlib.metadata
 import uuid
 from typing import cast
 
+from packaging.requirements import Requirement
+
 from kitaru.server.api import bootstrap
 from kitaru.server.api.bootstrap import (
     DEFAULT_PLUGIN_DEFINITIONS,
@@ -82,10 +84,12 @@ class _MemoryPluginRepository:
 
 async def _probe(expected_requirements: set[str], import_modules: set[str]) -> None:
     for requirement in expected_requirements:
-        distribution, separator, expected_version = requirement.partition("==")
-        if not separator:
+        parsed = Requirement(requirement)
+        specifiers = list(parsed.specifier)
+        if len(specifiers) != 1 or specifiers[0].operator != "==":
             raise RuntimeError(f"Bundled requirement is not exact: {requirement!r}")
-        installed_version = importlib.metadata.version(distribution)
+        expected_version = specifiers[0].version
+        installed_version = importlib.metadata.version(parsed.name)
         if installed_version != expected_version:
             raise RuntimeError(
                 f"Bundled requirement {requirement!r} installed as "

@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Shared Logfire SDK and Query API fakes for the Logfire adapter."""
 
+import asyncio
 import json
 import re
 import secrets
@@ -22,6 +23,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 import kitaru_logfire_importer.adapter as adapter_module
@@ -40,6 +42,13 @@ _POLL_SQL_PATTERN = re.compile(
 )
 _FETCH_SQL_PATTERN = re.compile(
     r"SELECT \* FROM records WHERE trace_id = '(?P<trace_id>[0-9a-f]{32})'"
+)
+_LIST_SQL_PATTERN = re.compile(
+    r"SELECT DISTINCT trace_id, start_timestamp FROM records "
+    r"WHERE parent_span_id IS NULL "
+    r"AND start_timestamp >= '(?P<since>[^']+)' "
+    r"AND start_timestamp <= '(?P<until>[^']+)' "
+    r"ORDER BY start_timestamp"
 )
 
 
@@ -93,6 +102,41 @@ def build_complete_rows(trace_id: str) -> list[dict[str, Any]]:
     ]
 
 
+def build_conversation_rows(
+    trace_id: str,
+    conversation_id: str,
+    *,
+    start_timestamp: str = "2026-07-24T10:00:00Z",
+) -> list[dict[str, Any]]:
+    """Build finished rows carrying an explicit conversation id."""
+    return [
+        build_row(
+            "root",
+            trace_id,
+            span_name="kitaru-run",
+            start_timestamp=start_timestamp,
+            attributes={"gen_ai.conversation.id": conversation_id},
+        ),
+        build_row(
+            "llm",
+            trace_id,
+            parent_span_id="root",
+            span_name="llm-call",
+            start_timestamp=start_timestamp,
+            attributes={
+                "gen_ai.conversation.id": conversation_id,
+                "gen_ai.operation.name": "chat",
+                "gen_ai.request.model": "gpt-5-nano",
+            },
+        ),
+    ]
+
+
+def build_list_row(trace_id: str, start_timestamp: str) -> dict[str, Any]:
+    """Build one trace-listing result row."""
+    return {"trace_id": trace_id, "start_timestamp": start_timestamp}
+
+
 def ndjson(rows: list[dict[str, Any]]) -> bytes:
     """Encode records rows as a Query API NDJSON stream."""
     messages = (
@@ -137,11 +181,13 @@ class _FakeQueryClient:
 class _FakeResponse:
     """Query API response fake."""
 
-    def __init__(self, content: bytes) -> None:
+    def __init__(self, content: bytes = b"", error: Exception | None = None) -> None:
         self.content = content
+        self._error = error
 
     def raise_for_status(self) -> None:
-        return None
+        if self._error is not None:
+            raise self._error
 
 
 class _FakeAsyncClient:
@@ -165,15 +211,35 @@ class _FakeAsyncClient:
             "accept": "application/x-ndjson",
             "authorization": f"Bearer {READ_TOKEN}",
         }
-        match = _FETCH_SQL_PATTERN.fullmatch(json["sql"])
-        assert match is not None, f"unexpected fetch query: {json['sql']}"
-        self._fake.requested.append(match["trace_id"])
-        self._fake.fetch_min_timestamps.append(json["min_timestamp"])
-        self._fake.events.append("fetch")
-        assert self._fake.fetch_builders, "unexpected records fetch"
-        return _FakeResponse(
-            ndjson(self._fake.fetch_builders.pop(0)(match["trace_id"]))
-        )
+        fetch_match = _FETCH_SQL_PATTERN.fullmatch(json["sql"])
+        if fetch_match is not None:
+            trace_id = fetch_match["trace_id"]
+            self._fake.in_flight += 1
+            self._fake.peak_in_flight = max(
+                self._fake.peak_in_flight, self._fake.in_flight
+            )
+            try:
+                if self._fake.fetch_delays:
+                    await asyncio.sleep(self._fake.fetch_delays.pop(0))
+                if self._fake.raise_once is not None:
+                    error = self._fake.raise_once
+                    self._fake.raise_once = None
+                    return _FakeResponse(error=error)
+                self._fake.requested.append(trace_id)
+                self._fake.fetch_min_timestamps.append(json["min_timestamp"])
+                self._fake.events.append("fetch")
+                assert self._fake.fetch_builders, "unexpected records fetch"
+                return _FakeResponse(ndjson(self._fake.fetch_builders.pop(0)(trace_id)))
+            finally:
+                self._fake.in_flight -= 1
+
+        list_match = _LIST_SQL_PATTERN.fullmatch(json["sql"])
+        assert list_match is not None, f"unexpected query: {json['sql']}"
+        self._fake.list_min_timestamps.append(json["min_timestamp"])
+        self._fake.list_max_timestamps.append(json["max_timestamp"])
+        self._fake.events.append("list")
+        assert self._fake.list_builders, "unexpected trace listing"
+        return _FakeResponse(ndjson(self._fake.list_builders.pop(0)()))
 
 
 class FakeLogfire:
@@ -182,11 +248,18 @@ class FakeLogfire:
     def __init__(self) -> None:
         self.poll_builders: list[RowsBuilder] = []
         self.fetch_builders: list[RowsBuilder] = []
+        self.list_builders: list[Callable[[], list[dict[str, Any]]]] = []
         self.requested: list[str] = []
         self.poll_min_timestamps: list[datetime] = []
         self.fetch_min_timestamps: list[str] = []
+        self.list_min_timestamps: list[str] = []
+        self.list_max_timestamps: list[str] = []
         self.events: list[str] = []
         self.trace_ids: list[int] = []
+        self.fetch_delays: list[float] = []
+        self.in_flight = 0
+        self.peak_in_flight = 0
+        self.raise_once: Exception | None = None
 
     @contextmanager
     def span(self, name: str) -> Iterator[SimpleNamespace]:
@@ -229,7 +302,8 @@ def fake_logfire(monkeypatch: pytest.MonkeyPatch) -> FakeLogfire:
         api_module,
         "httpx",
         SimpleNamespace(
-            AsyncClient=lambda *, base_url: _FakeAsyncClient(fake, base_url)
+            AsyncClient=lambda *, base_url: _FakeAsyncClient(fake, base_url),
+            HTTPStatusError=httpx.HTTPStatusError,
         ),
     )
     return fake

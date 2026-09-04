@@ -1392,6 +1392,7 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
         "type": "package",
         "requirement": "example==1.2.3",
         "entrypoint": "example:evaluate",
+        "fetch_entrypoint": None,
     }
     assert cast(Any, calls[3][1]).model_dump(exclude_unset=True) == {
         "display_version": None

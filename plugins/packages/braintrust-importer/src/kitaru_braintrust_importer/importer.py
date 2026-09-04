@@ -836,7 +836,7 @@ class BraintrustProjectLogImporter:
                 continue
             grouped[(source_instance, session_id)].extend(rows)
 
-        for (source_instance, source_id), session_records in sorted(grouped.items()):
+        for (source_instance, source_id), session_records in grouped.items():
             try:
                 session = self._parse_session(
                     source_instance,

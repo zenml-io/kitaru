@@ -104,6 +104,29 @@ kitaru session import logfire-records.jsonl \
 
 If no project identity is available from any of those three sources, the importer falls back to `source_instance` `logfire` and says so in the session's warnings.
 
+## 3. Or fetch from the Logfire API
+
+Skip the export and upload, and let the import task fetch records from Logfire directly:
+
+```bash
+kitaru session import \
+  --importer kitaru/logfire@latest \
+  --agent support-agent@latest \
+  --since 7d \
+  --tag imported-baseline --wait
+```
+
+Omitting FILE and setting `--since` selects an API import: the worker calls the Logfire Query API instead of parsing an uploaded payload. `--since` and `--until` accept an ISO 8601 timestamp or a relative duration (`7d`, `12h`, `30m`). `--trace-id` (repeatable) fetches exactly those trace ids instead of a time window. The same selection is a query object on the SDK and REST request:
+
+| Query key | Meaning |
+| --- | --- |
+| `trace_ids` | Logfire trace ids to fetch. When present, exactly those traces are fetched and the time window is ignored. |
+| `since` | Timezone-aware ISO 8601 datetime, lower bound of trace start time. Required when `trace_ids` is absent. Also used as the query's `min_timestamp`. |
+| `until` | Timezone-aware ISO 8601 datetime, upper bound of trace start time. Defaults to now. |
+| `concurrency` | Traces fetched at once. Defaults to 4. |
+
+The worker needs `kitaru-logfire-importer[adapter]` installed (the default plugin catalog already installs it that way) and `LOGFIRE_READ_TOKEN` in its environment. The token itself carries the Logfire host, so no separate host variable is needed. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way.
+
 ## What a trace becomes
 
 Every Logfire record becomes one node, and `parent_span_id` is rebuilt as the node tree, so a tool span nested under a model span stays nested. Node type is read from OpenTelemetry GenAI semantics:

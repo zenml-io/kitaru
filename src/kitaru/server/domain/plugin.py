@@ -135,6 +135,26 @@ class InvalidPluginProvider(ValidationError):
         super().__init__("Evaluator plugins do not carry a provider")
 
 
+class InvalidPluginFetchEntrypoint(ValidationError):
+    """Raised when an evaluator plugin version carries a fetch entrypoint."""
+
+    def __init__(self) -> None:
+        """Initialize the error."""
+        super().__init__("Evaluator plugin versions do not carry a fetch entrypoint")
+
+
+class PluginVersionWithoutFetchEntrypoint(ValidationError):
+    """Raised when an API import targets a version without a fetch entrypoint."""
+
+    def __init__(self, plugin_version_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            plugin_version_id: Id of the plugin version.
+        """
+        super().__init__(f"Plugin version {plugin_version_id} has no fetch entrypoint")
+
+
 class InvalidPluginAgentScope(ValidationError):
     """Raised when an importer plugin carries an agent id."""
 
@@ -248,6 +268,7 @@ class ScriptPluginSource(FrozenModel):
     type: Literal["script"] = "script"
     blob_id: uuid.UUID
     entrypoint: ScriptEntrypoint
+    fetch_entrypoint: ScriptEntrypoint | None = None
 
 
 class PackagePluginSource(FrozenModel):
@@ -256,6 +277,7 @@ class PackagePluginSource(FrozenModel):
     type: Literal["package"] = "package"
     requirement: PluginRequirement
     entrypoint: PackageEntrypoint
+    fetch_entrypoint: PackageEntrypoint | None = None
 
 
 PluginSource = Annotated[

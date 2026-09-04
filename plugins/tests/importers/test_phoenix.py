@@ -219,6 +219,20 @@ def test_parses_cli_trace_envelopes_and_preserves_annotations() -> None:
     assert len(first.nodes) == 1
 
 
+def test_emits_sessions_in_first_appearance_order() -> None:
+    """Follow payload order, not trace id order, when emitting sessions."""
+    content = jsonl(
+        span("root-b", trace_id="trace-b"),
+        span("root-a", trace_id="trace-a"),
+    )
+
+    sessions = parse(content)
+
+    assert [
+        item.external_id for item in sessions if isinstance(item, ImportedSession)
+    ] == ["trace-b", "trace-a"]
+
+
 def test_merges_metadata_when_a_trace_spans_cli_envelopes() -> None:
     """Retain metadata from every envelope contributing to one trace."""
     payload = jsonl(

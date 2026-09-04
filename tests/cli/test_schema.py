@@ -197,12 +197,20 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     import_parameters = {
         parameter["name"]: parameter for parameter in session_import["parameters"]
     }
-    assert import_parameters["FILE"]["required"] is True
+    assert import_parameters["FILE"]["required"] is False
     assert import_parameters["--importer"]["required"] is True
     assert import_parameters["--agent"]["required"] is True
-    assert {"--params", "--media-type", "--wait", "--interval", "--timeout"} <= set(
-        import_parameters
-    )
+    assert {
+        "--params",
+        "--media-type",
+        "--since",
+        "--until",
+        "--trace-id",
+        "--query",
+        "--wait",
+        "--interval",
+        "--timeout",
+    } <= set(import_parameters)
     import_errors = {error["kind"] for error in session_import["errors"]}
     assert {
         "partial_failure",
@@ -481,3 +489,24 @@ def test_idempotency_key_option_covers_only_single_create_commands() -> None:
         [command] = describe_schema(path)
         names = {parameter["name"] for parameter in command["parameters"]}
         assert "--idempotency-key" not in names, path
+
+
+def test_fetch_entrypoint_option_is_importer_only() -> None:
+    """--fetch-entrypoint is offered on importer registration and nowhere else."""
+    covered_paths = (
+        ("importer", "register"),
+        ("importer", "version", "register"),
+    )
+    for path in covered_paths:
+        [command] = describe_schema(path)
+        names = {parameter["name"] for parameter in command["parameters"]}
+        assert "--fetch-entrypoint" in names, path
+
+    uncovered_paths = (
+        ("evaluator", "register"),
+        ("evaluator", "version", "register"),
+    )
+    for path in uncovered_paths:
+        [command] = describe_schema(path)
+        names = {parameter["name"] for parameter in command["parameters"]}
+        assert "--fetch-entrypoint" not in names, path

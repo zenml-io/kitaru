@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from kitaru.base import FrozenModel
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
@@ -42,6 +42,23 @@ class ImportCreate(FrozenModel):
     agent_id: uuid.UUID
     agent_version_id: uuid.UUID | None = None
     version: int | None = None
-    payload_blob_id: uuid.UUID
+    payload_blob_id: uuid.UUID | None = None
+    fetch_query: dict[str, Any] | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     evaluators: list[EvaluatorConfigInput] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_source(self) -> "ImportCreate":
+        """Require exactly one of payload_blob_id and fetch_query.
+
+        Raises:
+            ValueError: Both or neither field is set.
+
+        Returns:
+            The validated command.
+        """
+        if (self.payload_blob_id is None) == (self.fetch_query is None):
+            raise ValueError(
+                "Exactly one of payload_blob_id or fetch_query is required"
+            )
+        return self

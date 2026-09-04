@@ -14,6 +14,8 @@ from email.policy import default
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
+from packaging.requirements import Requirement
+
 if __package__:
     from scripts.release_units import default_requirements, load_inventory
 else:
@@ -39,6 +41,14 @@ _REQUIRED_PROJECT_URLS = frozenset(
 
 class SmokeFailure(RuntimeError):
     """Report one failed plugin artifact assertion."""
+
+
+def _requirement_pins(requirement: str, name: str, version: str) -> bool:
+    """Return whether a requirement pins exactly one project version."""
+    parsed = Requirement(requirement)
+    return _canonicalize_name(parsed.name) == _canonicalize_name(name) and (
+        str(parsed.specifier) == f"=={version}"
+    )
 
 
 def _canonicalize_name(value: str) -> str:
@@ -451,7 +461,9 @@ def main() -> int:
                     raise SmokeFailure(
                         f"{name} has neither a default pin nor an artifact import"
                     )
-                if requirement is not None and requirement != f"{name}=={version}":
+                if requirement is not None and not _requirement_pins(
+                    requirement, name, version
+                ):
                     raise SmokeFailure(
                         f"{name}=={version} does not match the release inventory"
                     )
