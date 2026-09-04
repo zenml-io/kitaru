@@ -69,6 +69,8 @@ def upgrade() -> None:
                 server_default=sa.text("'[]'::jsonb"),
             )
         )
+        # Existing rows take the empty list, new rows always carry the column.
+        batch_op.alter_column("analyzers", server_default=None)
 
     with op.batch_alter_table("insight", schema=None) as batch_op:
         batch_op.add_column(sa.Column("analyzer_version_id", sa.Uuid(), nullable=True))
