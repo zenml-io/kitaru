@@ -275,6 +275,7 @@ def test_editor_validates_numbers_against_each_card_only(
         ("Minorities of sessions need attention.", "quantitative"),
         ("Numerous sessions need attention.", "quantitative"),
         ("A handful of sessions need attention.", "quantitative"),
+        ("No retries need attention.", "quantitative"),
     ],
 )
 def test_editor_rejects_fabricated_or_unsafe_card_copy(
@@ -593,6 +594,118 @@ def test_session_outcomes_rejects_unobserved_status_language(
         }
     )
     with pytest.raises(ValueError, match="unsupported outcome"):
+        validate_editorial_plan(copy, selection, [candidate])
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "No sessions failed.",
+        "Failures are not present.",
+        "Sessions never failed.",
+        "Sessions completed without failures.",
+    ],
+)
+def test_session_outcomes_rejects_negated_observed_status(
+    profiling_result: ProfilingResult,
+    description: str,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "id": "session-outcomes",
+            "family": "outcome",
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="failed", value=1)]
+            ),
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Session outcomes",
+                    description=description,
+                )
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="negated outcome"):
+        validate_editorial_plan(copy, selection, [candidate])
+
+
+def test_editor_allows_not_without_an_outcome_negation(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description="This pattern is not yet understood.",
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+def test_editor_allows_not_that_does_not_reverse_an_outcome(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "id": "session-outcomes",
+            "family": "outcome",
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="failed", value=1)]
+            ),
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Session outcomes",
+                    description="Failures should not be ignored.",
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+def test_editor_rejects_negated_outcome_in_page_copy(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={"intro_title": "No sessions failed"}
+    )
+    with pytest.raises(ValueError, match="negated outcome"):
         validate_editorial_plan(copy, selection, [candidate])
 
 

@@ -32,7 +32,7 @@ from kitaru.insights.profiling import (
 
 _NUMERIC_TOKEN = re.compile(r"\d+(?:[.,]\d+)*(?:%|[A-Za-z]+)?")
 _QUANTITY_TOKEN = re.compile(
-    r"\b(?:none|zero|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"\b(?:no|none|zero|one|two|three|four|five|six|seven|eight|nine|ten|"
     r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
     r"nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
     r"hundreds?|thousands?|millions?|billions?|trillions?|dozens?|"
@@ -399,9 +399,50 @@ def _trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
     return _outcome_categories(semantic_names)
 
 
+def _has_negated_outcome(value: str) -> bool:
+    """Detect direct polarity reversals close to an outcome expression."""
+    for outcome in _OUTCOME_TOKEN.finditer(value):
+        clause_start = max(
+            value.rfind(separator, 0, outcome.start()) for separator in ".;!?\n"
+        )
+        following_boundaries = [
+            position
+            for separator in ".;!?\n"
+            if (position := value.find(separator, outcome.end())) != -1
+        ]
+        clause_end = min(following_boundaries, default=len(value))
+        before = re.findall(
+            r"[A-Za-z]+", value[clause_start + 1 : outcome.start()].lower()
+        )
+        after = re.findall(r"[A-Za-z]+", value[outcome.end() : clause_end].lower())
+        if {"no", "not", "never", "without", "none", "absent"}.intersection(
+            before[-3:]
+        ):
+            return True
+        if {"no", "none", "absent"}.intersection(after[:3]):
+            return True
+        if {"not", "never"}.intersection(after[:3]) and {
+            "appear",
+            "appeared",
+            "exist",
+            "existed",
+            "found",
+            "occur",
+            "occurred",
+            "observed",
+            "present",
+            "recorded",
+            "seen",
+        }.intersection(after[:5]):
+            return True
+    return False
+
+
 def _validate_page_copy(value: str) -> None:
     """Validate friendly page framing separately from candidate facts."""
     _validate_copy_safety(value)
+    if _has_negated_outcome(value):
+        raise ValueError("editor page copy contains a negated outcome claim")
     if _NUMERIC_TOKEN.search(value) or _QUANTITY_TOKEN.search(value):
         raise ValueError("editor page copy contains a numeric or quantitative claim")
     if _OUTCOME_TOKEN.search(value):
@@ -413,6 +454,8 @@ def _validate_card_copy(value: str, candidate: CandidateFinding) -> None:
     _validate_copy_safety(value)
     allowed_outcomes = _trusted_outcome_categories(candidate)
     remaining = _without_known_labels(value, _quantified_labels(candidate))
+    if _has_negated_outcome(value):
+        raise ValueError("editor card copy contains a negated outcome claim")
     if _NUMERIC_TOKEN.search(remaining) or _QUANTITY_TOKEN.search(remaining):
         raise ValueError("editor card copy contains a numeric or quantitative claim")
     output_outcomes = _outcome_categories(value)
