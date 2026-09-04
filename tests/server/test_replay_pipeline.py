@@ -159,7 +159,10 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     assert baseline.inputs is not None
     assert agent_task.inputs == baseline.inputs.value
     assert agent_task.env == {}
-    assert agent_task.labels == {"agent_version": str(agent_version.id)}
+    assert agent_task.labels == {
+        "kitaru/agent_version": str(agent_version.id),
+        "agent_version": str(agent_version.id),
+    }
     assert agent_task.on_failure is TaskOnFailure.ABORT
 
     spec = await services.task_service.get_spec(agent_task.id, actor=ACTOR)
@@ -734,7 +737,10 @@ async def test_start_run_creates_one_agent_task_per_replay_with_matching_fields(
         assert baseline.inputs is not None
         assert agent_task.inputs == baseline.inputs.value
         assert agent_task.env == {}
-        assert agent_task.labels == {"agent_version": str(agent_version.id)}
+        assert agent_task.labels == {
+            "kitaru/agent_version": str(agent_version.id),
+            "agent_version": str(agent_version.id),
+        }
         assert agent_task.on_failure is TaskOnFailure.ABORT
 
         spec = await services.task_service.get_spec(agent_task.id, actor=ACTOR)

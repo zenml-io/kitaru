@@ -37,7 +37,7 @@ from conftest import (
     stub_auth_session,
 )
 from kitaru.api_models.v1.task import TaskKind
-from kitaru.api_models.v1.worker import WorkerClaim, WorkerScope
+from kitaru.api_models.v1.worker import LabelSelector, WorkerClaim, WorkerScope
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.jwt import JWTToken
 from kitaru.server.adapters.rest.dependencies import (
@@ -184,6 +184,7 @@ async def test_create_import(
     assert isinstance(task, ImportTask)
     assert task.kind.value == "importer"
     assert task.plugin_version_id == version.id
+    assert task.labels == {}
     assert task.params == {
         "delimiter": ",",
         "join_on": "/metadata/customer~1case_id",
@@ -272,6 +273,11 @@ async def test_create_import_starts_an_ephemeral_worker(
         claims=[
             WorkerClaim(kind=TaskKind.IMPORTER),
             WorkerClaim(kind=TaskKind.EVALUATOR),
+        ],
+        selectors=[
+            LabelSelector(
+                key="kitaru/plugin_namespace", values=["kitaru"], required=True
+            )
         ],
         job_id=job_id,
     )

@@ -97,6 +97,31 @@ def _claim_matches(claim: WorkerClaim, task: Task) -> bool:
     return task.kind is claim.kind
 
 
+def scope_covers(scope: WorkerScope, task: Task) -> bool:
+    """Report whether a scope claims the task.
+
+    Mirrors the claim conditions of the SQL task repository, so the two
+    must change together.
+
+    Args:
+        scope: Worker scope.
+        task: Candidate task.
+
+    Returns:
+        Whether a worker with the scope would claim the task.
+    """
+    if scope.job_id is not None and task.job_id != scope.job_id:
+        return False
+    for selector in scope.selectors or []:
+        if selector.key not in task.labels:
+            if selector.required:
+                return False
+            continue
+        if task.labels[selector.key] not in selector.values:
+            return False
+    return any(_claim_matches(claim, task) for claim in scope.claims)
+
+
 class Worker(DomainModel):
     """Worker."""
 
@@ -125,22 +150,10 @@ class Worker(DomainModel):
     def covers(self, task: Task) -> bool:
         """Report whether the worker's scope claims the task.
 
-        Mirrors the claim conditions of the SQL task repository, so the two
-        must change together.
-
         Args:
             task: Candidate task.
 
         Returns:
             Whether the worker would claim the task.
         """
-        if self.scope.job_id is not None and task.job_id != self.scope.job_id:
-            return False
-        for selector in self.scope.selectors or []:
-            if selector.key not in task.labels:
-                if selector.required:
-                    return False
-                continue
-            if task.labels[selector.key] not in selector.values:
-                return False
-        return any(_claim_matches(claim, task) for claim in self.scope.claims)
+        return scope_covers(self.scope, task)

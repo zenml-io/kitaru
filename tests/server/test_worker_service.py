@@ -225,7 +225,7 @@ async def test_is_covered_counts_workers_of_other_accounts(
 
 
 async def test_register_ephemeral_worker(service: WorkerService) -> None:
-    """Register a worker claiming the import and evaluation tasks of one job."""
+    """Register a worker with the ephemeral scope of one job."""
     job_id = uuid.uuid4()
     runtime = WorkerRuntime(platform="bare")
     worker = await service.register_ephemeral_worker(
@@ -236,6 +236,11 @@ async def test_register_ephemeral_worker(service: WorkerService) -> None:
         claims=[
             WorkerClaim(kind=TaskKind.IMPORTER),
             WorkerClaim(kind=TaskKind.EVALUATOR),
+        ],
+        selectors=[
+            LabelSelector(
+                key="kitaru/plugin_namespace", values=["kitaru"], required=True
+            )
         ],
         job_id=job_id,
     )

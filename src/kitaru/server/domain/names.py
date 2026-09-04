@@ -43,6 +43,7 @@ VERSION_ALLOWED_SEPARATORS = frozenset({"-", "_", ".", "+", "/"})
 RESERVED_NAMESPACE = "kitaru"
 
 NAMESPACE_SEPARATOR = "/"
+RESERVED_LABEL_PREFIX = f"{RESERVED_NAMESPACE}{NAMESPACE_SEPARATOR}"
 
 MAX_NAME_LENGTH = 255
 
@@ -125,6 +126,19 @@ def validate_version_name(value: str, max_length: int = MAX_NAME_LENGTH) -> str:
         Validated name.
     """
     return _validate(value, VERSION_ALLOWED_SEPARATORS, max_length)
+
+
+def get_namespace(value: str) -> str | None:
+    """Get the namespace of a namespaced name, None when it has none.
+
+    Args:
+        value: Namespaced name.
+
+    Returns:
+        Namespace.
+    """
+    namespace, separator, _ = value.partition(NAMESPACE_SEPARATOR)
+    return namespace if separator else None
 
 
 def validate_namespaced_name(value: str, max_length: int = MAX_NAME_LENGTH) -> str:
