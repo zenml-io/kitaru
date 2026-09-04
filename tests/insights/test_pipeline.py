@@ -402,6 +402,13 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
         bounded.card_metadata(insight).coverage == bounded.coverage
         for insight in bounded.insights
     )
+    for insight in bounded.insights:
+        prompt = bounded.card_metadata(insight).investigation_prompt
+        finding_json = prompt.split("Finding data: ", maxsplit=1)[1].split(
+            "\n\n", maxsplit=1
+        )[0]
+        finding = json.loads(finding_json)
+        assert finding["overall_coverage"] == bounded.coverage.model_dump(mode="json")
 
 
 async def test_result_byte_bound_neutralizes_removed_recommendation(
