@@ -28,20 +28,21 @@ import os
 import shutil
 import sys
 import tarfile
-from collections.abc import Iterable
+import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 import httpx
 
-from kitaru.cli.config import validate_server_url
+from kitaru.cli.config import resolve_target
 from kitaru.cli.output import CLIError, CommandResult
 from kitaru.cli.skill_discovery import SKILLS_URL, get_kitaru_skill_status
-from kitaru.client.config import get_server_url
 
 SKILLS_ARCHIVE_URL = f"{SKILLS_URL}/archive/refs/heads/main.tar.gz"
 DEFAULT_SERVER_URL = "http://localhost:8000"
+LOCAL_URL_ENV = "KITARU_LOCAL_URL"
 MCP_SERVER_NAME = "kitaru"
 McpMode = Literal["read-only", "standard", "destructive"]
 MCP_MODES: tuple[McpMode, ...] = ("read-only", "standard", "destructive")
@@ -74,10 +75,18 @@ class McpLaunch:
         return {"command": self.command, "args": list(self.args)}
 
 
+@dataclass(frozen=True, slots=True)
+class ExtractedSkills:
+    """Skills read out of the repository tarball."""
+
+    files: dict[str, dict[str, bytes]]
+    skipped: list[str]
+
+
 async def setup(
     *,
     server: str | None,
-    mode: McpMode,
+    mode: str,
     install_skills: bool,
     register_mcp: bool,
     cwd: Path | None = None,
@@ -87,7 +96,9 @@ async def setup(
 
     Args:
         server: Server URL the MCP server should target. Defaults to the
-            selected CLI server, then the local Docker server.
+            same resolution every other command uses (``KITARU_API_URL``,
+            then the stored server), then ``KITARU_LOCAL_URL``, then the
+            local Docker server.
         mode: MCP capability mode.
         install_skills: Whether to install the agent skills.
         register_mcp: Whether to register the MCP server.
@@ -96,87 +107,118 @@ async def setup(
 
     Returns:
         One step per client or location with its outcome, plus next actions.
+        The exit code is 1 when a detected client could not be configured or
+        no skill destination could be written.
 
     Raises:
-        CLIError: If the server URL is invalid or every step failed.
+        CLIError: If the mode or server URL is invalid.
     """
+    if mode not in MCP_MODES:
+        raise CLIError(
+            "invalid_arguments",
+            f"--mode must be one of {', '.join(MCP_MODES)}.",
+        )
     current = (cwd or Path.cwd()).absolute()
     user_home = (home or Path.home()).absolute()
-    launch = resolve_mcp_launch(current, user_home)
-    server_url = _resolve_server_url(server)
     steps: list[dict[str, Any]] = []
     warnings: list[str] = []
-    skill_names: list[str] = []
+    exit_code = 0
+
+    if not install_skills and not register_mcp:
+        warnings.append("Nothing to do: both --no-skills and --no-mcp were given.")
 
     if install_skills:
         destinations = skill_destinations(user_home)
+        outcomes = await _install_skills(destinations)
+        written = 0
+        for destination, outcome in zip(destinations, outcomes, strict=True):
+            steps.append(outcome)
+            if outcome["status"] == "done":
+                written += 1
+            else:
+                warnings.append(f"Skills, {destination}: {outcome['detail']}")
+        if written == 0:
+            exit_code = 1
+
+    # The launch is only needed for MCP registration. A kitaru[cli]-only
+    # install with --no-mcp must still get its skills.
+    launch: McpLaunch | None = None
+    server_url: str | None = None
+    snippet: dict[str, Any] | None = None
+    if register_mcp:
+        server_url = _resolve_server_url(server)
         try:
-            skill_names = await _install_skills(destinations)
+            launch = resolve_mcp_launch(current, user_home)
         except CLIError as error:
-            warnings.append(f"Skills were not installed: {error.message}")
-            for destination in destinations:
-                steps.append(_step("skills", str(destination), "failed", error.message))
+            detail = error.message + (f" {error.hint}" if error.hint else "")
+            steps.append(_step("mcp", "kitaru-mcp", "failed", detail))
+            warnings.append(f"MCP server not registered: {detail}")
+            exit_code = 1
         else:
-            for destination in destinations:
+            mcp_args = (*launch.args, "--server", server_url, "--mode", mode)
+            snippet = {
+                "mcpServers": {
+                    MCP_SERVER_NAME: {
+                        "command": launch.command,
+                        "args": list(mcp_args),
+                    }
+                }
+            }
+            clients = detect_mcp_clients(current, user_home, launch)
+            registered = 0
+            for client in clients:
+                step = await client.register(launch.command, mcp_args)
+                steps.append(step)
+                if step["status"] == "done":
+                    registered += 1
+                else:
+                    warnings.append(f"{client.name}: {step['detail']}")
+            if not clients:
                 steps.append(
                     _step(
-                        "skills",
-                        str(destination),
-                        "done",
-                        f"{len(skill_names)} skills: {', '.join(skill_names)}",
+                        "mcp",
+                        "manual",
+                        "skipped",
+                        "No configurable MCP client detected. Add the snippet "
+                        "below (mcp_snippet in JSON output) to your client's "
+                        "MCP configuration.",
                     )
                 )
-
-    mcp_args = (*launch.args, "--server", server_url, "--mode", mode)
-    snippet = {
-        "mcpServers": {
-            MCP_SERVER_NAME: {"command": launch.command, "args": list(mcp_args)}
-        }
-    }
-    if register_mcp:
-        registered = 0
-        for client in detect_mcp_clients(current, user_home, launch):
-            step = await client.register(launch.command, mcp_args)
-            steps.append(step)
-            if step["status"] == "done":
-                registered += 1
-            else:
-                warnings.append(f"{client.name}: {step['detail']}")
-        if registered == 0:
-            steps.append(
-                _step(
-                    "mcp",
-                    "manual",
-                    "skipped",
-                    "No configurable MCP client detected. Add the snippet below "
-                    "(mcp_snippet in JSON output) to your client's MCP "
-                    "configuration.",
+            elif registered == 0:
+                warnings.append(
+                    "The MCP server could not be registered with any detected "
+                    "client. Fix the errors above and run `kitaru setup` again."
                 )
-            )
+                exit_code = 1
 
-    if steps and all(step["status"] == "failed" for step in steps):
-        raise CLIError(
-            "internal_error",
-            "Every setup step failed.",
-            details={"steps": steps},
-        )
-
+    scope = launch.scope if launch else _scope_only(current)
     result_item: dict[str, Any] = {
-        "install": launch.scope,
-        "project_dir": str(launch.project_dir) if launch.project_dir else None,
+        "install": scope,
+        "project_dir": str(launch.project_dir)
+        if launch and launch.project_dir
+        else None,
         "server_url": server_url,
         "mode": mode,
         "skills": get_kitaru_skill_status(cwd=current, home=user_home)["skills"],
         "steps": steps,
         "mcp_snippet": snippet,
     }
-    next_actions = ["Restart your coding agent so it picks up the new MCP server."]
-    if launch.scope == "user":
+    next_actions: list[str] = []
+    if register_mcp and launch is not None:
+        next_actions.append(
+            "Restart your coding agent so it picks up the new MCP server."
+        )
+    if scope == "user":
         next_actions.append(
             "Replays need Kitaru inside the agent's own project: run "
             "`kitaru setup` again from that repository after adding it there."
         )
-    return CommandResult(item=result_item, warnings=warnings, next_actions=next_actions)
+    return CommandResult(
+        item=result_item,
+        warnings=warnings,
+        next_actions=next_actions,
+        exit_code=exit_code,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +256,13 @@ def resolve_mcp_launch(cwd: Path, home: Path) -> McpLaunch:
     return McpLaunch(command=str(executable), args=(), scope="user", project_dir=None)
 
 
+def _scope_only(cwd: Path) -> Literal["project", "user"]:
+    """Report the install scope without requiring kitaru-mcp to exist."""
+    if _find_project_dir(Path(sys.prefix), cwd) is not None:
+        return "project"
+    return "user"
+
+
 def _find_project_dir(prefix: Path, cwd: Path) -> Path | None:
     """Return the project a virtual environment belongs to, if any."""
     if prefix.name != ".venv":
@@ -241,11 +290,23 @@ def _find_sibling_executable(name: str) -> Path | None:
 
 
 def _resolve_server_url(explicit: str | None) -> str:
-    """Pick the server URL the MCP server should target."""
-    if explicit:
-        return validate_server_url(explicit)
-    stored = get_server_url()
-    return stored or DEFAULT_SERVER_URL
+    """Pick the server URL the MCP server should target.
+
+    Uses the same resolution as every other command (explicit option,
+    ``KITARU_API_URL``, stored server), then ``KITARU_LOCAL_URL`` as the
+    installer always has, then the default local Docker server.
+    """
+    try:
+        return resolve_target(explicit_server=explicit).server_url
+    except CLIError as error:
+        if error.kind != "invalid_configuration" or explicit is not None:
+            raise
+        if "No Kitaru server was resolved" not in error.message:
+            raise
+    local = os.environ.get(LOCAL_URL_ENV)
+    if local:
+        return resolve_target(explicit_server=local).server_url
+    return DEFAULT_SERVER_URL
 
 
 # ---------------------------------------------------------------------------
@@ -267,65 +328,135 @@ def skill_destinations(home: Path) -> list[Path]:
     return destinations
 
 
-async def _install_skills(destinations: Iterable[Path]) -> list[str]:
-    """Download the skills archive and copy every skill into each destination."""
-    archive = await _fetch_skills_archive()
-    skills = _extract_skills(archive)
+async def _install_skills(destinations: Sequence[Path]) -> list[dict[str, Any]]:
+    """Download the skills archive and install every skill into each destination.
+
+    Returns one step per destination. A destination is written skill by
+    skill through a staging directory and an atomic rename, so a failure
+    or interrupt leaves each skill either at its previous version or at the
+    new one, never half-copied, and the other destinations are unaffected.
+    """
+    try:
+        archive = await _fetch_skills_archive()
+        extracted = _extract_skills(archive)
+    except CLIError as error:
+        return [
+            _step("skills", str(destination), "failed", error.message)
+            for destination in destinations
+        ]
+    skills = extracted.files
     if not skills:
-        raise CLIError("internal_error", "The skills archive contained no skills.")
+        return [
+            _step(
+                "skills",
+                str(destination),
+                "failed",
+                "The skills archive contained no skills.",
+            )
+            for destination in destinations
+        ]
+    skipped_note = (
+        f" Skipped oversized files: {', '.join(extracted.skipped)}."
+        if extracted.skipped
+        else ""
+    )
+    outcomes: list[dict[str, Any]] = []
     for destination in destinations:
-        for name, files in skills.items():
-            target = destination / name
-            try:
-                if target.is_dir() and not target.is_symlink():
-                    shutil.rmtree(target)
-                elif target.exists() or target.is_symlink():
-                    target.unlink()
-                for relative, content in files.items():
-                    path = target / relative
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(content)
-            except OSError as error:
-                raise CLIError(
-                    "internal_error", f"Could not write {target}: {error}"
-                ) from error
-    for destination in destinations:
-        for name in skills:
-            if not (destination / name / "SKILL.md").is_file():
-                raise CLIError(
-                    "internal_error", f"{destination / name} is incomplete after copy."
+        try:
+            _write_skills(destination, skills)
+        except OSError as error:
+            outcomes.append(
+                _step("skills", str(destination), "failed", f"{error}{skipped_note}")
+            )
+            continue
+        outcomes.append(
+            _step(
+                "skills",
+                str(destination),
+                "done",
+                f"{len(skills)} skills: {', '.join(sorted(skills))}{skipped_note}",
+            )
+        )
+    return outcomes
+
+
+def _write_skills(destination: Path, skills: dict[str, dict[str, bytes]]) -> None:
+    """Replace each skill directory under ``destination`` atomically.
+
+    Every skill is written in full to a staging directory next to its final
+    location, then swapped in with a rename. The previous version is only
+    removed once the new one is complete.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    for name, files in skills.items():
+        target = destination / name
+        staging = Path(
+            tempfile.mkdtemp(prefix=f".{name}.", suffix=".staging", dir=destination)
+        )
+        try:
+            for relative, content in files.items():
+                path = staging / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+            if not (staging / "SKILL.md").is_file():
+                raise OSError(f"{name}: SKILL.md missing after extraction")
+            if target.is_symlink() or target.is_file():
+                target.unlink()
+            elif target.is_dir():
+                retired = Path(
+                    tempfile.mkdtemp(prefix=f".{name}.", suffix=".old", dir=destination)
                 )
-    return sorted(skills)
+                retired.rmdir()
+                os.replace(target, retired)
+                os.replace(staging, target)
+                shutil.rmtree(retired, ignore_errors=True)
+                continue
+            os.replace(staging, target)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
 
 
 async def _fetch_skills_archive() -> bytes:
-    """Download the skills repository tarball."""
+    """Download the skills repository tarball, refusing oversized bodies."""
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:
-            response = await client.get(SKILLS_ARCHIVE_URL)
+        async with (
+            httpx.AsyncClient(follow_redirects=True, timeout=60) as client,
+            client.stream("GET", SKILLS_ARCHIVE_URL) as response,
+        ):
             response.raise_for_status()
+            chunks: list[bytes] = []
+            size = 0
+            async for chunk in response.aiter_bytes():
+                size += len(chunk)
+                if size > _MAX_ARCHIVE_BYTES:
+                    raise CLIError(
+                        "internal_error",
+                        "The skills archive is unexpectedly large.",
+                    )
+                chunks.append(chunk)
     except httpx.HTTPError as error:
         raise CLIError(
             "network_error",
             f"Could not download the skills from {SKILLS_ARCHIVE_URL}: {error}",
             retryable=True,
         ) from error
-    if len(response.content) > _MAX_ARCHIVE_BYTES:
-        raise CLIError("internal_error", "The skills archive is unexpectedly large.")
-    return response.content
+    return b"".join(chunks)
 
 
-def _extract_skills(archive: bytes) -> dict[str, dict[str, bytes]]:
+def _extract_skills(archive: bytes) -> ExtractedSkills:
     """Read `skills/<name>/...` regular files out of the repository tarball.
 
     Members are read explicitly instead of extracted, so no archive path can
     escape the destination and no symlink or device entry is ever created.
+    Oversized members are skipped and reported by name.
     """
     skills: dict[str, dict[str, bytes]] = {}
+    skipped: list[str] = []
     try:
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
             for member in tar:
-                if not member.isfile() or member.size > _MAX_SKILL_FILE_BYTES:
+                if not member.isfile():
                     continue
                 parts = PurePosixPath(member.name).parts
                 # <repo>-<ref>/skills/<name>/<file...>
@@ -333,17 +464,23 @@ def _extract_skills(archive: bytes) -> dict[str, dict[str, bytes]]:
                     continue
                 if any(part in {"", ".", ".."} for part in parts):
                     continue
+                relative = str(Path(*parts[3:]))
+                if member.size > _MAX_SKILL_FILE_BYTES:
+                    skipped.append(f"{parts[2]}/{relative}")
+                    continue
                 name = parts[2]
                 extracted = tar.extractfile(member)
                 if extracted is None:
                     continue
-                relative = str(Path(*parts[3:]))
                 skills.setdefault(name, {})[relative] = extracted.read()
     except (tarfile.TarError, EOFError, OSError) as error:
         raise CLIError(
             "internal_error", f"The skills archive could not be read: {error}"
         ) from error
-    return {name: files for name, files in skills.items() if "SKILL.md" in files}
+    return ExtractedSkills(
+        files={name: files for name, files in skills.items() if "SKILL.md" in files},
+        skipped=skipped,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -372,16 +509,18 @@ class ClaudeCodeClient(McpClient):
         self.scope = scope
 
     async def register(self, command: str, args: tuple[str, ...]) -> dict[str, Any]:
-        """Replace any existing `kitaru` entry in the chosen scope."""
+        """Replace any existing `kitaru` entry and verify it is the one in use.
+
+        `claude mcp get` is scope-agnostic and reports whichever entry wins.
+        After adding ours, read it back: if the winning entry does not carry
+        our command, an entry in another scope shadows it and the user has to
+        remove that one.
+        """
         existing = await _run_command(self.executable, "mcp", "get", MCP_SERVER_NAME)
         if existing.returncode == 0:
-            removed = await _run_command(
+            await _run_command(
                 self.executable, "mcp", "remove", "--scope", self.scope, MCP_SERVER_NAME
             )
-            if removed.returncode != 0:
-                # The entry may live in another scope; adding still succeeds
-                # when the name is free in ours.
-                pass
         added = await _run_command(
             self.executable,
             "mcp",
@@ -395,6 +534,17 @@ class ClaudeCodeClient(McpClient):
         )
         if added.returncode != 0:
             return _step("mcp", self.name, "failed", _failure_detail(added))
+        current = await _run_command(self.executable, "mcp", "get", MCP_SERVER_NAME)
+        if current.returncode == 0 and command not in current.stdout:
+            return _step(
+                "mcp",
+                self.name,
+                "failed",
+                f"registered in {self.scope} scope, but an entry named "
+                f"'{MCP_SERVER_NAME}' in another scope still wins. Remove it "
+                f"with `claude mcp remove {MCP_SERVER_NAME}` in that scope and "
+                "run `kitaru setup` again.",
+            )
         return _step(
             "mcp", self.name, "done", f"server '{MCP_SERVER_NAME}', {self.scope} scope"
         )
@@ -428,7 +578,12 @@ class JsonFileClient(McpClient):
         self.path = path
 
     async def register(self, command: str, args: tuple[str, ...]) -> dict[str, Any]:
-        """Merge the `kitaru` entry into the file, keeping other servers."""
+        """Merge the `kitaru` entry into the file, keeping other servers.
+
+        The file is rewritten through a uniquely named temporary file in the
+        same directory and swapped in with a rename, preserving the original
+        file mode (these files can hold other servers' secrets).
+        """
         try:
             document = _read_json_object(self.path)
             servers = document.get("mcpServers")
@@ -437,11 +592,20 @@ class JsonFileClient(McpClient):
             servers[MCP_SERVER_NAME] = {"command": command, "args": list(args)}
             document["mcpServers"] = servers
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = self.path.with_name(self.path.name + ".tmp")
-            temporary.write_text(
-                json.dumps(document, indent=2) + "\n", encoding="utf-8"
+            mode = self.path.stat().st_mode if self.path.exists() else None
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent
             )
-            os.replace(temporary, self.path)
+            temporary = Path(temporary_name)
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    handle.write(json.dumps(document, indent=2) + "\n")
+                if mode is not None:
+                    os.chmod(temporary, mode)
+                os.replace(temporary, self.path)
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                raise
         except (OSError, ValueError) as error:
             return _step("mcp", self.name, "failed", f"{self.path}: {error}")
         return _step("mcp", self.name, "done", str(self.path))

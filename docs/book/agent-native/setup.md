@@ -15,7 +15,7 @@ Skills and MCP work together: the skills say how to work, and the server bounds 
 {% hint style="success" %}
 Used the [one-line installer](../getting-started/installation.md)? It ran `kitaru setup`, which installed the skills and registered the MCP server with every coding agent it found: Claude Code (in your repo's `.mcp.json` when run inside a repository, user scope otherwise), Codex, Cursor, and Windsurf, pointed at `http://localhost:8000` in `standard` mode. Skip to [Capability modes and tools](#capability-modes-and-tools) unless you use another assistant or a different server URL.
 
-Installed a new coding agent since, or changed servers? Run `kitaru setup` again (`uv run kitaru setup` inside a project). It replaces the previous `kitaru` entry rather than adding a second one; `--mode read-only` and the global `--server URL` change the mode and target, and `--no-skills` / `--no-mcp` limit it to one half.
+Installed a new coding agent since, or changed servers? Run `kitaru setup` again (`uv run kitaru setup` inside a project). It replaces the previous `kitaru` entry rather than adding a second one, and rewrites each installed skill directory from the current release (local edits under `~/.agents/skills/kitaru-*` are overwritten); `--mode read-only` and the global `--server URL` change the mode and target, and `--no-skills` / `--no-mcp` limit it to one half.
 {% endhint %}
 
 ## Install the MCP server

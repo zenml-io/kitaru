@@ -979,14 +979,9 @@ async def setup(
 ) -> CommandResult:
     """Wire skills and the MCP server into installed coding agents."""
     invocation = _invocation()
-    if mode not in setup_commands.MCP_MODES:
-        raise CLIError(
-            "invalid_arguments",
-            f"--mode must be one of {', '.join(setup_commands.MCP_MODES)}.",
-        )
     return await setup_commands.setup(
         server=invocation.server,
-        mode=mode,  # type: ignore[arg-type]
+        mode=mode,
         install_skills=not no_skills,
         register_mcp=not no_mcp,
     )
