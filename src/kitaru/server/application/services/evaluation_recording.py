@@ -58,8 +58,6 @@ async def record_task_evaluations(
     job = await job_repository.get(task.job_id)
     results = task.result if isinstance(task.result, list) else []
     params_hash = hash_params(task.params)
-    # One id per call, shared by every result it produced, so the whole set
-    # can be adopted together instead of only the row a ranking query picks.
     invocation_id = uuid7()
     evaluations = [
         Evaluation(

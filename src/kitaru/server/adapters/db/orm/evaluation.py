@@ -171,9 +171,8 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     evaluator_version_id: Mapped[uuid.UUID | None]
     session_id: Mapped[uuid.UUID]
     task_id: Mapped[uuid.UUID | None]
-    # No foreign key, identifies the evaluator call that produced this row
-    # alongside its siblings, and outlives the task the same way
-    # evaluator_version_id does.
+    # No foreign key, identifies the evaluator invocation that produced this row
+    # alongside its siblings.
     invocation_id: Mapped[uuid.UUID | None]
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     data_type: Mapped[str] = mapped_column(String(DATA_TYPE_LENGTH))
