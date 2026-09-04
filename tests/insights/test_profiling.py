@@ -69,6 +69,13 @@ class ExplosiveMapping(dict[str, object]):
         raise AssertionError("over-budget mapping keys must not be inspected")
 
 
+class ExplosiveCoefficientDecimal(Decimal):
+    """Large Decimal whose coefficient must be rejected before copying."""
+
+    def as_tuple(self):
+        raise AssertionError("over-budget Decimal coefficient must not be copied")
+
+
 def _id(number: int) -> uuid.UUID:
     return uuid.UUID(f"01990000-0000-7000-8000-{number:012d}")
 
@@ -217,6 +224,45 @@ def test_profiles_evaluator_compatible_retries_failures_and_cycles() -> None:
         assert candidate.coverage.affected_sessions == 1
         assert candidate.coverage.evidence_available >= len(candidate.evidence)
         assert all(item.session_id == session.session.id for item in candidate.evidence)
+
+
+def test_tool_identity_preserves_exact_whitespace_in_safe_names() -> None:
+    session = _calls(
+        1,
+        [
+            ("lookup", {"id": 1}, NodeStatus.FAILED, "error"),
+            (" lookup ", {"id": 1}, NodeStatus.FAILED, "error"),
+        ],
+    )
+
+    candidate_ids = {
+        candidate.id for candidate in profile_sessions([session]).candidates
+    }
+
+    assert candidate_ids.isdisjoint(
+        {
+            "adjacent-identical-calls",
+            "failed-identical-retries",
+            "adjacent-same-tool-failures",
+        }
+    )
+
+
+def test_decimal_signed_zero_matches_evaluator_identity() -> None:
+    session = _calls(
+        1,
+        [
+            ("lookup", Decimal("-0"), NodeStatus.FAILED, "error"),
+            ("lookup", Decimal("0"), NodeStatus.FAILED, "error"),
+        ],
+    )
+
+    candidate_ids = {
+        candidate.id for candidate in profile_sessions([session]).candidates
+    }
+
+    assert "adjacent-identical-calls" in candidate_ids
+    assert "failed-identical-retries" in candidate_ids
 
 
 def test_near_matches_do_not_trigger_retry_or_cycle_signals() -> None:
@@ -835,6 +881,27 @@ def test_payload_byte_bound_rejects_huge_numeric_tool_inputs(
     assert "adjacent-identical-calls" not in {
         candidate.id for candidate in result.candidates
     }
+
+
+def test_payload_byte_bound_rejects_decimal_before_copying_coefficient() -> None:
+    large_value = ExplosiveCoefficientDecimal("1." + "0" * 10_000)
+    session = _calls(
+        1,
+        [
+            ("lookup", large_value, NodeStatus.COMPLETED, "ok"),
+            ("lookup", large_value, NodeStatus.COMPLETED, "ok"),
+        ],
+    )
+
+    result = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_bytes=100),
+    )
+
+    assert "adjacent-identical-calls" not in {
+        candidate.id for candidate in result.candidates
+    }
+    assert "payload" in " ".join(result.coverage.caveats).lower()
 
 
 @pytest.mark.parametrize("value", [12345, Decimal("1.20")])
