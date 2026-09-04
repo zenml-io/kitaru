@@ -346,6 +346,32 @@ def test_repeated_user_turns_survive_mirrored_message_history() -> None:
     assert len(candidate.evidence) == 2
 
 
+def test_equal_selected_turns_from_separate_llm_calls_remain_distinct() -> None:
+    session_id = _id(101)
+    nodes = [
+        _node(
+            index,
+            session_id=session_id,
+            node_type=NodeType.LLM_CALL,
+            tool_name=None,
+            model="gpt-5.4",
+            inputs={"prompt": "WRONG"},
+            outputs="response",
+        )
+        for index in range(2)
+    ]
+    for node in nodes:
+        node.input_text_selector = "/prompt"
+    session = _session(1, nodes)
+
+    candidate = _candidate(profile_sessions([session]), "correction-language")
+
+    assert candidate.coverage.occurrences == 2
+    assert {fact.name: fact.value for fact in candidate.facts}["occurrences"] == 2
+    assert "appears 2 times" in candidate.fallback_description
+    assert {item.node_id for item in candidate.evidence} == {node.id for node in nodes}
+
+
 def test_non_user_text_and_close_language_matches_are_ignored() -> None:
     session = _session(
         1,
