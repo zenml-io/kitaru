@@ -45,7 +45,7 @@ from kitaru.insights import (
 )
 
 AGENT_ID = uuid.UUID("01990000-0000-7000-8000-000000000001")
-IMPORT_TASK_ID = uuid.UUID("01990000-0000-7000-8000-000000000002")
+IMPORT_ID = uuid.UUID("01990000-0000-7000-8000-000000000002")
 SESSION_A = uuid.UUID("01990000-0000-7000-8000-000000000003")
 SESSION_B = uuid.UUID("01990000-0000-7000-8000-000000000004")
 NODE_A = uuid.UUID("01990000-0000-7000-8000-000000000005")
@@ -56,7 +56,7 @@ def _context() -> InsightGenerationContext:
         agent_id=AGENT_ID,
         agent_name="returns-agent",
         source_import=SourceImportContext(
-            task_id=IMPORT_TASK_ID,
+            import_id=IMPORT_ID,
             provider="langfuse",
         ),
     )
@@ -77,13 +77,13 @@ def test_context_rejects_strings_that_are_not_utf8_encodable(
         "agent_id": AGENT_ID,
         "agent_name": "returns-agent",
         "source_import": {
-            "task_id": IMPORT_TASK_ID,
+            "import_id": IMPORT_ID,
             "provider": "langfuse",
         },
     }
     if field == "provider":
         context["source_import"] = {
-            "task_id": IMPORT_TASK_ID,
+            "import_id": IMPORT_ID,
             "provider": value,
         }
     else:
@@ -99,7 +99,7 @@ def test_context_preserves_valid_unicode() -> None:
         agent_id=AGENT_ID,
         agent_name="retürns-🤖",
         source_import=SourceImportContext(
-            task_id=IMPORT_TASK_ID,
+            import_id=IMPORT_ID,
             provider="långfüse",
         ),
     )

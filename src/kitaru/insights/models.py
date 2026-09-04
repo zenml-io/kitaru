@@ -63,25 +63,26 @@ class GenerationMode(StrEnum):
 class SourceImportContext(_InsightGenerationModel):
     """Stable context for the import whose sessions were analyzed."""
 
-    task_id: uuid.UUID = Field(description="Import task that created the sessions.")
+    import_id: uuid.UUID = Field(description="Import that created the sessions.")
     provider: str | None = Field(
         default=None,
         min_length=1,
         max_length=MAX_NAME_LENGTH,
-        description="Source provider recorded on the import task, when available.",
+        description="Source provider recorded on the sessions, when available.",
     )
 
     _validate_provider_utf8 = field_validator("provider", mode="before")(_require_utf8)
 
 
 class InsightGenerationContext(_InsightGenerationModel):
-    """Caller-supplied identity and source context for one generation run."""
+    """Identity and source context for one generation run."""
 
     agent_id: uuid.UUID = Field(description="Agent the generated Insights belong to.")
-    agent_name: str = Field(
+    agent_name: str | None = Field(
+        default=None,
         min_length=1,
         max_length=MAX_NAME_LENGTH,
-        description="Human-readable agent name used in investigation prompts.",
+        description="Human-readable agent name, when supplied by the caller.",
     )
     source_import: SourceImportContext = Field(
         description="Import scope whose normalized sessions were analyzed."

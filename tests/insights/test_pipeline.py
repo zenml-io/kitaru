@@ -46,7 +46,7 @@ from kitaru.insights.pipeline import (
 NOW = datetime(2026, 9, 4, tzinfo=UTC)
 OWNER_ID = uuid.UUID("01990000-0000-7000-8000-000000000001")
 AGENT_ID = uuid.UUID("01990000-0000-7000-8000-000000000002")
-IMPORT_TASK_ID = uuid.UUID("01990000-0000-7000-8000-000000000003")
+IMPORT_ID = uuid.UUID("01990000-0000-7000-8000-000000000003")
 
 
 def _session(number: int, *, status: SessionStatus) -> SessionWithNodesResponse:
@@ -59,7 +59,7 @@ def _session(number: int, *, status: SessionStatus) -> SessionWithNodesResponse:
             updated=NOW,
             agent_id=AGENT_ID,
             number=number,
-            task_id=IMPORT_TASK_ID,
+            import_id=IMPORT_ID,
             origin=SessionOrigin.IMPORTED,
             status=status,
             inputs={"message": "THAT IS WRONG!!!" if number == 1 else "please retry"},
@@ -81,7 +81,7 @@ def _context() -> InsightGenerationContext:
         agent_id=AGENT_ID,
         agent_name="returns-agent",
         source_import=SourceImportContext(
-            task_id=IMPORT_TASK_ID,
+            import_id=IMPORT_ID,
             provider="langfuse",
         ),
     )
@@ -229,7 +229,7 @@ async def test_empty_generation_preserves_utf8_context() -> None:
         agent_id=AGENT_ID,
         agent_name="retürns-🤖",
         source_import=SourceImportContext(
-            task_id=IMPORT_TASK_ID,
+            import_id=IMPORT_ID,
             provider="långfüse",
         ),
     )
@@ -258,7 +258,7 @@ async def test_deterministic_result_is_canonical_and_byte_stable() -> None:
         metadata = first.card_metadata(insight)
         assert set(insight.metadata) == {INSIGHT_METADATA_KEY}
         assert metadata.context == _context()
-        assert str(IMPORT_TASK_ID) in metadata.investigation_prompt
+        assert str(IMPORT_ID) in metadata.investigation_prompt
         assert (
             str(metadata.contributing_session_ids[0]) in metadata.investigation_prompt
         )
@@ -675,7 +675,7 @@ async def test_raises_when_even_empty_result_exceeds_serialized_bound() -> None:
         update={
             "agent_name": "a" * 255,
             "source_import": SourceImportContext(
-                task_id=IMPORT_TASK_ID,
+                import_id=IMPORT_ID,
                 provider="p" * 255,
             ),
         }
@@ -731,22 +731,22 @@ async def test_rejects_sessions_from_another_agent() -> None:
 
 
 @pytest.mark.parametrize(
-    ("origin", "task_id", "message"),
+    ("origin", "import_id", "message"),
     [
-        (SessionOrigin.RECORDED, IMPORT_TASK_ID, "originate from an import"),
-        (SessionOrigin.REPLAY, IMPORT_TASK_ID, "originate from an import"),
-        (SessionOrigin.IMPORTED, None, "source import task"),
-        (SessionOrigin.IMPORTED, uuid.UUID(int=1), "source import task"),
+        (SessionOrigin.RECORDED, IMPORT_ID, "originate from an import"),
+        (SessionOrigin.REPLAY, IMPORT_ID, "originate from an import"),
+        (SessionOrigin.IMPORTED, None, "source import"),
+        (SessionOrigin.IMPORTED, uuid.UUID(int=1), "source import"),
     ],
 )
 async def test_rejects_sessions_outside_the_source_import(
     origin: SessionOrigin,
-    task_id: uuid.UUID | None,
+    import_id: uuid.UUID | None,
     message: str,
 ) -> None:
     session = _session(1, status=SessionStatus.FAILED)
     session.session = session.session.model_copy(
-        update={"origin": origin, "task_id": task_id}
+        update={"origin": origin, "import_id": import_id}
     )
 
     with pytest.raises(ValueError, match=message):
@@ -756,9 +756,9 @@ async def test_rejects_sessions_outside_the_source_import(
 async def test_rejects_sessions_concatenated_from_multiple_imports() -> None:
     first = _session(1, status=SessionStatus.FAILED)
     second = _session(2, status=SessionStatus.COMPLETED)
-    second.session = second.session.model_copy(update={"task_id": uuid.uuid4()})
+    second.session = second.session.model_copy(update={"import_id": uuid.uuid4()})
 
-    with pytest.raises(ValueError, match="source import task"):
+    with pytest.raises(ValueError, match="source import"):
         await generate_insights([first, second], context=_context())
 
 

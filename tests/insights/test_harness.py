@@ -31,7 +31,7 @@ def _context() -> dict[str, object]:
         "agent_id": str(uuid.UUID("01990000-0000-7000-8000-000000000002")),
         "agent_name": "returns-agent",
         "source_import": {
-            "task_id": str(uuid.UUID("01990000-0000-7000-8000-000000000003")),
+            "import_id": str(uuid.UUID("01990000-0000-7000-8000-000000000003")),
             "provider": "synthetic",
         },
     }
