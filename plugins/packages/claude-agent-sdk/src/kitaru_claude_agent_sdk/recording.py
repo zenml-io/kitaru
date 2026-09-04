@@ -305,6 +305,7 @@ class _AssistantTurn:
         if message.usage:
             self.usage = dict(message.usage)
 
+
 @dataclass
 class InvocationRecorder:
     """Mutable Kitaru state isolated to one Claude query invocation."""
