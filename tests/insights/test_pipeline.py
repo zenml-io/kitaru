@@ -208,6 +208,23 @@ async def test_empty_input_returns_without_model_generation() -> None:
     assert observer.events[-1].metadata["outcome"] == "empty"
 
 
+async def test_empty_generation_preserves_utf8_context() -> None:
+    context = InsightGenerationContext(
+        agent_id=AGENT_ID,
+        agent_name="retürns-🤖",
+        source_import=SourceImportContext(
+            task_id=IMPORT_TASK_ID,
+            provider="långfüse",
+        ),
+    )
+
+    result = await generate_insights([], context=context)
+    restored = result.model_validate_json(result.model_dump_json())
+
+    assert restored.context == context
+    assert restored.empty_reason == "no_eligible_candidates"
+
+
 async def test_deterministic_result_is_canonical_and_byte_stable() -> None:
     sessions = [
         _session(1, status=SessionStatus.FAILED),

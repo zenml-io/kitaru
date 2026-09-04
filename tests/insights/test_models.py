@@ -62,6 +62,52 @@ def _context() -> InsightGenerationContext:
     )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("agent_name", "broken-\ud800-name"),
+        ("provider", "broken-\udfff-provider"),
+    ],
+)
+def test_context_rejects_strings_that_are_not_utf8_encodable(
+    field: str, value: str
+) -> None:
+    """Reject unpaired surrogates before JSON and byte-bound operations."""
+    context: dict[str, object] = {
+        "agent_id": AGENT_ID,
+        "agent_name": "returns-agent",
+        "source_import": {
+            "task_id": IMPORT_TASK_ID,
+            "provider": "langfuse",
+        },
+    }
+    if field == "provider":
+        context["source_import"] = {
+            "task_id": IMPORT_TASK_ID,
+            "provider": value,
+        }
+    else:
+        context[field] = value
+
+    with pytest.raises(ValidationError, match="valid UTF-8 text"):
+        InsightGenerationContext.model_validate(context)
+
+
+def test_context_preserves_valid_unicode() -> None:
+    """Accept and preserve valid non-ASCII context text."""
+    context = InsightGenerationContext(
+        agent_id=AGENT_ID,
+        agent_name="retürns-🤖",
+        source_import=SourceImportContext(
+            task_id=IMPORT_TASK_ID,
+            provider="långfüse",
+        ),
+    )
+
+    restored = InsightGenerationContext.model_validate_json(context.model_dump_json())
+    assert restored == context
+
+
 def _coverage() -> Coverage:
     return Coverage(
         sessions_available=3,
