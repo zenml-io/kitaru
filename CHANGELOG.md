@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added agent-scoped insights. Create a batch of insights for an agent with `client.insights.create(...)` or `POST /api/v1/insights`, each carrying a title, an optional description, and data of type `text`, `categorical`, or `histogram`. Insights can be listed with filters on `agent_id` and `type`, fetched, updated in title and description, and deleted.
+
 ## [0.25.0] - 2026-09-03
 
 ### Added
 
-- Added agent-scoped insights. Create a batch of insights for an agent with `client.insights.create(...)` or `POST /api/v1/insights`, each carrying a title, an optional description, and data of type `text`, `categorical`, or `histogram`. Insights can be listed with filters on `agent_id` and `type`, fetched, updated in title and description, and deleted.
 - Running `kitaru login` without a server now opens the managed-cloud device flow, connects to the Kitaru workspace selected or created in the browser, waits for a new workspace to become available, and stores it as the active server. Explicit server URLs and `kitaru login --local` keep their existing behavior.
 - Added `baseline_evaluation_mode` to replay and experiment run creation, with values `none`, `if_missing`, and `force`. `if_missing` scores baselines while skipping evaluators that already scored them, `force` always scores them fresh. A request that sets neither `baseline_evaluation_mode` nor the deprecated `evaluate_baselines` defaults to `if_missing`. `evaluate_baselines` is deprecated in favor of this field and still accepted on the wire, mapping `False` to `none` and `True` to `if_missing`. Setting both fields on one request returns HTTP 422.
 - Added `evaluator_params` to the evaluation response, the params the producing evaluator ran with, `None` on a manual row.
