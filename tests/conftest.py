@@ -261,6 +261,7 @@ from kitaru.server.domain.tag import (
 )
 from kitaru.server.domain.task import (
     AgentTask,
+    AnalysisTask,
     DuplicateEvaluationTask,
     EvaluationTask,
     ImportTask,
@@ -6495,6 +6496,49 @@ async def create_evaluation_task(
     return stored
 
 
+async def create_analysis_task(
+    repository: FakeTaskRepository,
+    job_id: uuid.UUID,
+    plugin_version_id: uuid.UUID | None = None,
+    agent_id: uuid.UUID | None = None,
+    input_session_ids: list[uuid.UUID] | None = None,
+    params: dict[str, Any] | None = None,
+    labels: dict[str, str] | None = None,
+    on_failure: TaskOnFailure = TaskOnFailure.CONTINUE,
+) -> AnalysisTask:
+    """Store an analyzer task in the fake repository.
+
+    Args:
+        repository: Fake task repository.
+        job_id: Id of the owning job.
+        plugin_version_id: Analyzer version the task runs.
+        agent_id: Agent the produced insights belong to.
+        input_session_ids: Sessions being analyzed.
+        params: Parameters passed to the analyzer.
+        labels: Labels matched by worker scope selectors.
+        on_failure: Effect of a hard failure on the job.
+
+    Returns:
+        Stored analyzer task.
+    """
+    task = AnalysisTask(
+        job_id=job_id,
+        plugin_version_id=(
+            plugin_version_id if plugin_version_id is not None else uuid.uuid4()
+        ),
+        agent_id=agent_id if agent_id is not None else uuid.uuid4(),
+        input_session_ids=(
+            input_session_ids if input_session_ids is not None else [uuid.uuid4()]
+        ),
+        params=params if params is not None else {},
+        labels=labels if labels is not None else {},
+        on_failure=on_failure,
+    )
+    stored = await repository.create(task)
+    assert isinstance(stored, AnalysisTask)
+    return stored
+
+
 async def create_import_task(
     repository: FakeTaskRepository,
     job_id: uuid.UUID,
@@ -6522,6 +6566,167 @@ async def create_import_task(
     return stored
 
 
+class FakeInsightRepository:
+    """In-memory insight repository."""
+
+    def __init__(self, plugin_repository: FakePluginRepository | None = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            plugin_repository: Fake plugin repository, consulted to
+                denormalize the analyzer name and version.
+        """
+        self._insights: dict[uuid.UUID, Insight] = {}
+        self._plugin_repository = plugin_repository
+
+    def _analyzer_info(
+        self, analyzer_version_id: uuid.UUID | None
+    ) -> tuple[str | None, int | None]:
+        """Resolve the analyzer name and version for a plugin version id.
+
+        Args:
+            analyzer_version_id: Id of the referenced plugin version.
+
+        Returns:
+            Analyzer name and version, both ``None`` when unresolved.
+        """
+        if analyzer_version_id is None or self._plugin_repository is None:
+            return None, None
+        version = self._plugin_repository._versions.get(analyzer_version_id)
+        if version is None:
+            return None, None
+        plugin = self._plugin_repository._plugins.get(version.plugin_id)
+        if plugin is None:
+            return None, None
+        return plugin.name, version.version
+
+    async def create_many(self, insights: list[Insight]) -> list[Insight]:
+        """Persist a batch of new insights in one transaction.
+
+        Args:
+            insights: Insights to store, in input order.
+
+        Raises:
+            PluginVersionIdNotFound: No plugin version has the analyzer
+                version id.
+
+        Returns:
+            Stored insights in input order, with timestamps set.
+        """
+        if not insights:
+            return []
+        analyzer_version_id = insights[0].analyzer_version_id
+        if (
+            analyzer_version_id is not None
+            and self._plugin_repository is not None
+            and analyzer_version_id not in self._plugin_repository._versions
+        ):
+            raise PluginVersionIdNotFound(analyzer_version_id)
+        now = datetime.now(UTC)
+        stored = [
+            insight.model_copy(update={"created": now, "updated": now})
+            for insight in insights
+        ]
+        for insight in stored:
+            self._insights[insight.id] = insight
+        return [insight.model_copy() for insight in stored]
+
+    async def get(self, insight_id: uuid.UUID) -> InsightWithAnalyzer:
+        """Load an insight by id, joined with its analyzer name and version.
+
+        Args:
+            insight_id: Id of the insight.
+
+        Raises:
+            InsightNotFound: No insight has this id.
+
+        Returns:
+            Stored insight paired with its analyzer name and version.
+        """
+        stored = self._insights.get(insight_id)
+        if stored is None:
+            raise InsightNotFound(insight_id)
+        name, version = self._analyzer_info(stored.analyzer_version_id)
+        return InsightWithAnalyzer(stored.model_copy(), name, version)
+
+    def _evaluate_type_condition(
+        self, insight: Insight, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a type filter condition against an insight's data type.
+
+        Args:
+            insight: Insight to evaluate.
+            condition: Validated type condition.
+
+        Returns:
+            Whether the insight's data type matches.
+        """
+        return _matches_condition(insight.data.type, condition)
+
+    async def query(
+        self, insight_filter: InsightFilter
+    ) -> tuple[list[InsightWithAnalyzer], str | None]:
+        """Query insights matching a filter.
+
+        Args:
+            insight_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching insights and the next cursor.
+        """
+        insights = list(self._insights.values())
+        if insight_filter.expression is not None:
+            resolvers = {"type": self._evaluate_type_condition}
+            insights = [
+                insight
+                for insight in insights
+                if _evaluate_filter_expression(
+                    insight, insight_filter.expression, resolvers
+                )
+            ]
+        page, next_cursor = _paginate_fake(insights, insight_filter)
+        items = [
+            InsightWithAnalyzer(
+                insight.model_copy(), *self._analyzer_info(insight.analyzer_version_id)
+            )
+            for insight in page
+        ]
+        return items, next_cursor
+
+    async def update(self, insight: Insight) -> Insight:
+        """Persist changes to an existing insight.
+
+        Args:
+            insight: Insight with modified fields.
+
+        Raises:
+            InsightNotFound: No insight has this id.
+
+        Returns:
+            Stored insight with the updated timestamp renewed.
+        """
+        stored = self._insights.get(insight.id)
+        if stored is None:
+            raise InsightNotFound(insight.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = insight.model_copy(update={"created": stored.created, "updated": now})
+        self._insights[insight.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, insight_id: uuid.UUID) -> None:
+        """Delete an insight by id.
+
+        Args:
+            insight_id: Id of the insight.
+
+        Raises:
+            InsightNotFound: No insight has this id.
+        """
+        if insight_id not in self._insights:
+            raise InsightNotFound(insight_id)
+        del self._insights[insight_id]
+
+
 class TaskSubstrate(NamedTuple):
     """Fake repositories shared by every job- and task-driving service builder."""
 
@@ -6535,6 +6740,7 @@ class TaskSubstrate(NamedTuple):
     tasks: FakeTaskRepository
     jobs: FakeJobRepository
     imports: FakeImportRepository
+    insights: FakeInsightRepository
 
 
 def _build_task_substrate() -> TaskSubstrate:
@@ -6554,6 +6760,7 @@ def _build_task_substrate() -> TaskSubstrate:
     jobs = FakeJobRepository(tasks=tasks)
     tasks.jobs = jobs
     imports = FakeImportRepository()
+    insights = FakeInsightRepository(plugin_repository=plugins)
     return TaskSubstrate(
         sessions=sessions,
         agents=agents,
@@ -6565,6 +6772,7 @@ def _build_task_substrate() -> TaskSubstrate:
         tasks=tasks,
         jobs=jobs,
         imports=imports,
+        insights=insights,
     )
 
 
@@ -6690,6 +6898,7 @@ class ReplayServices(NamedTuple):
     evaluations: FakeEvaluationRepository
     tags: FakeTagRepository
     imports: FakeImportRepository
+    insights: FakeInsightRepository
     transitions: TaskTransitions
     payload_store: PayloadStore
 
@@ -6721,6 +6930,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     tasks = substrate.tasks
     jobs = substrate.jobs
     imports = substrate.imports
+    insights = substrate.insights
     tags = FakeTagRepository()
     cohorts = FakeCohortRepository(tags=tags)
     experiment_runs = FakeExperimentRunRepository(tag_repository=tags)
@@ -6749,6 +6959,8 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         evaluation_repository=evaluations,
         session_repository=sessions,
         import_repository=imports,
+        insight_repository=insights,
+        agent_repository=agents,
     )
     transitions = TaskTransitions(
         task_repository=tasks,
@@ -6844,6 +7056,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         evaluations=evaluations,
         tags=tags,
         imports=imports,
+        insights=insights,
         transitions=transitions,
         payload_store=payload_store,
     )
@@ -7330,151 +7543,3 @@ class FakeAnnotationRepository:
         for annotation_id, annotation in list(self._annotations.items()):
             if annotation.investigation_session_id in deleted:
                 del self._annotations[annotation_id]
-
-
-class FakeInsightRepository:
-    """In-memory insight repository."""
-
-    def __init__(self, plugin_repository: FakePluginRepository | None = None) -> None:
-        """Initialize the repository.
-
-        Args:
-            plugin_repository: Fake plugin repository, consulted to
-                denormalize the analyzer name and version.
-        """
-        self._insights: dict[uuid.UUID, Insight] = {}
-        self._plugin_repository = plugin_repository
-
-    def _analyzer_info(
-        self, analyzer_version_id: uuid.UUID | None
-    ) -> tuple[str | None, int | None]:
-        """Resolve the analyzer name and version for a plugin version id.
-
-        Args:
-            analyzer_version_id: Id of the referenced plugin version.
-
-        Returns:
-            Analyzer name and version, both ``None`` when unresolved.
-        """
-        if analyzer_version_id is None or self._plugin_repository is None:
-            return None, None
-        version = self._plugin_repository._versions.get(analyzer_version_id)
-        if version is None:
-            return None, None
-        plugin = self._plugin_repository._plugins.get(version.plugin_id)
-        if plugin is None:
-            return None, None
-        return plugin.name, version.version
-
-    async def create_many(self, insights: list[Insight]) -> list[Insight]:
-        """Persist a batch of new insights in one transaction.
-
-        Args:
-            insights: Insights to store, in input order.
-
-        Returns:
-            Stored insights in input order, with timestamps set.
-        """
-        now = datetime.now(UTC)
-        stored = [
-            insight.model_copy(update={"created": now, "updated": now})
-            for insight in insights
-        ]
-        for insight in stored:
-            self._insights[insight.id] = insight
-        return [insight.model_copy() for insight in stored]
-
-    async def get(self, insight_id: uuid.UUID) -> InsightWithAnalyzer:
-        """Load an insight by id, joined with its analyzer name and version.
-
-        Args:
-            insight_id: Id of the insight.
-
-        Raises:
-            InsightNotFound: No insight has this id.
-
-        Returns:
-            Stored insight paired with its analyzer name and version.
-        """
-        stored = self._insights.get(insight_id)
-        if stored is None:
-            raise InsightNotFound(insight_id)
-        name, version = self._analyzer_info(stored.analyzer_version_id)
-        return InsightWithAnalyzer(stored.model_copy(), name, version)
-
-    def _evaluate_type_condition(
-        self, insight: Insight, condition: FilterCondition
-    ) -> bool:
-        """Evaluate a type filter condition against an insight's data type.
-
-        Args:
-            insight: Insight to evaluate.
-            condition: Validated type condition.
-
-        Returns:
-            Whether the insight's data type matches.
-        """
-        return _matches_condition(insight.data.type, condition)
-
-    async def query(
-        self, insight_filter: InsightFilter
-    ) -> tuple[list[InsightWithAnalyzer], str | None]:
-        """Query insights matching a filter.
-
-        Args:
-            insight_filter: Filter and pagination parameters.
-
-        Returns:
-            Page of matching insights and the next cursor.
-        """
-        insights = list(self._insights.values())
-        if insight_filter.expression is not None:
-            resolvers = {"type": self._evaluate_type_condition}
-            insights = [
-                insight
-                for insight in insights
-                if _evaluate_filter_expression(
-                    insight, insight_filter.expression, resolvers
-                )
-            ]
-        page, next_cursor = _paginate_fake(insights, insight_filter)
-        items = [
-            InsightWithAnalyzer(
-                insight.model_copy(), *self._analyzer_info(insight.analyzer_version_id)
-            )
-            for insight in page
-        ]
-        return items, next_cursor
-
-    async def update(self, insight: Insight) -> Insight:
-        """Persist changes to an existing insight.
-
-        Args:
-            insight: Insight with modified fields.
-
-        Raises:
-            InsightNotFound: No insight has this id.
-
-        Returns:
-            Stored insight with the updated timestamp renewed.
-        """
-        stored = self._insights.get(insight.id)
-        if stored is None:
-            raise InsightNotFound(insight.id)
-        now = _renewed_timestamp(stored.updated)
-        updated = insight.model_copy(update={"created": stored.created, "updated": now})
-        self._insights[insight.id] = updated
-        return updated.model_copy()
-
-    async def delete(self, insight_id: uuid.UUID) -> None:
-        """Delete an insight by id.
-
-        Args:
-            insight_id: Id of the insight.
-
-        Raises:
-            InsightNotFound: No insight has this id.
-        """
-        if insight_id not in self._insights:
-            raise InsightNotFound(insight_id)
-        del self._insights[insight_id]
