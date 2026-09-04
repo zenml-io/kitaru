@@ -13,10 +13,17 @@
 #  permissions and limitations under the License.
 """Imports resource."""
 
+import uuid
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
-from kitaru.api_models.v1.imports import ImportCreateRequest
-from kitaru.api_models.v1.job import JobResponse
+from kitaru.api_models.v1.base import Page
+from kitaru.api_models.v1.imports import (
+    ImportCreateRequest,
+    ImportListParams,
+    ImportResponse,
+)
+from kitaru.client.resources.pagination import iterate_pages
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -35,7 +42,7 @@ class ImportsResource:
 
     async def create(
         self, request: ImportCreateRequest, idempotency_key: str | None = None
-    ) -> JobResponse:
+    ) -> ImportResponse:
         """Import sessions from a payload blob.
 
         Args:
@@ -45,10 +52,10 @@ class ImportsResource:
 
         Raises:
             APIError: The request failed, including 404 when the importer,
-                the payload blob, or the agent does not exist.
+                the payload blob, the agent, or an evaluator does not exist.
 
         Returns:
-            Created job.
+            Created import.
         """
         response = await self._client.request(
             "POST",
@@ -56,4 +63,59 @@ class ImportsResource:
             json=request.model_dump(mode="json", exclude_unset=True),
             idempotency_key=idempotency_key,
         )
-        return JobResponse.model_validate(response.json())
+        return ImportResponse.model_validate(response.json())
+
+    async def get(self, import_id: uuid.UUID) -> ImportResponse:
+        """Get an import by id.
+
+        Args:
+            import_id: Id of the import.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                import.
+
+        Returns:
+            Stored import.
+        """
+        response = await self._client.request("GET", f"/api/v1/imports/{import_id}")
+        return ImportResponse.model_validate(response.json())
+
+    async def list(
+        self, params: ImportListParams | None = None
+    ) -> Page[ImportResponse]:
+        """List imports.
+
+        Args:
+            params: Import list params.
+
+        Raises:
+            APIError: The request failed.
+
+        Returns:
+            Page of imports.
+        """
+        params = params or ImportListParams()
+        response = await self._client.request(
+            "GET",
+            "/api/v1/imports",
+            params=params.model_dump(mode="json", exclude_unset=True),
+        )
+        return Page[ImportResponse].model_validate(response.json())
+
+    async def iter(
+        self, params: ImportListParams | None = None
+    ) -> AsyncIterator[ImportResponse]:
+        """Iterate over all imports.
+
+        Args:
+            params: Import list params.
+
+        Raises:
+            APIError: The request failed.
+
+        Returns:
+            Async iterator over every import.
+        """
+        async for item in iterate_pages(params or ImportListParams(), self.list):
+            yield item

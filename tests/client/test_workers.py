@@ -26,6 +26,7 @@ from conftest import (
     FakeAgentVersionRepository,
     FakeApiKeyRepository,
     FakeBlobRepository,
+    FakeImportRepository,
     FakeJobRepository,
     FakePasswordHasher,
     FakePluginRepository,
@@ -148,6 +149,7 @@ async def api_client(
         blob_repository=FakeBlobRepository(),
         secret_repository=FakeSecretRepository(),
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         policy=task_policy,
     )
     task_service = TaskService(

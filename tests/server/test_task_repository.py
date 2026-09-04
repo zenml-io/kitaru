@@ -90,11 +90,9 @@ class Setup(NamedTuple):
     jobs: JobRepository
     owner_id: uuid.UUID
     job_id: uuid.UUID
-    agent_id: uuid.UUID
     agent_version_id: uuid.UUID
     agent_version_id_2: uuid.UUID
     plugin_version_id: uuid.UUID
-    payload_blob_id: uuid.UUID
     session_id: uuid.UUID
     worker_id: uuid.UUID
     worker_id_2: uuid.UUID
@@ -133,15 +131,6 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
         ScriptPluginSource(blob_id=code_blob.id, entrypoint="score"),
         display_version=None,
     )
-    payload, _ = await SQLBlobRepository(session).create(
-        Blob(
-            owner_id=owner.id,
-            sha256="0" * 64,
-            size=4,
-            media_type="text/csv",
-            stored_in=BlobStorageBackend.DATABASE,
-        )
-    )
     stored_session = await SQLSessionRepository(session, engine).create(
         Session(owner_id=owner.id, agent_id=agent.id, number=1, origin="recorded")
     )
@@ -171,11 +160,9 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
         jobs=SQLJobRepository(session),
         owner_id=owner.id,
         job_id=job.id,
-        agent_id=agent.id,
         agent_version_id=agent_version.id,
         agent_version_id_2=agent_version_2.id,
         plugin_version_id=plugin_version.id,
-        payload_blob_id=payload.id,
         session_id=stored_session.id,
         worker_id=worker.id,
         worker_id_2=worker_2.id,
@@ -196,11 +183,9 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             jobs=jobs,
             owner_id=owner_id,
             job_id=job.id,
-            agent_id=uuid.uuid4(),
             agent_version_id=uuid.uuid4(),
             agent_version_id_2=uuid.uuid4(),
             plugin_version_id=uuid.uuid4(),
-            payload_blob_id=uuid.uuid4(),
             session_id=uuid.uuid4(),
             worker_id=uuid.uuid4(),
             worker_id_2=uuid.uuid4(),
@@ -279,19 +264,12 @@ async def test_evaluator_pair_uniqueness(setup: Setup) -> None:
 
 
 async def test_import_task_round_trips_its_fields(setup: Setup) -> None:
-    """An importer task round-trips its plugin, payload, and agent references."""
-    task = ImportTask(
-        job_id=setup.job_id,
-        plugin_version_id=setup.plugin_version_id,
-        payload_blob_id=setup.payload_blob_id,
-        agent_id=setup.agent_id,
-        params={"delimiter": ","},
-    )
+    """An importer task round-trips its import reference."""
+    import_id = uuid.uuid4()
+    task = ImportTask(job_id=setup.job_id, import_id=import_id)
     created = await setup.tasks.create(task)
     assert isinstance(created, ImportTask)
-    assert created.plugin_version_id == setup.plugin_version_id
-    assert created.payload_blob_id == setup.payload_blob_id
-    assert created.params == {"delimiter": ","}
+    assert created.import_id == import_id
 
 
 async def test_list_by_job_orders_by_id(setup: Setup) -> None:
@@ -401,12 +379,7 @@ async def test_claim_pending_kind_filter(setup: Setup) -> None:
     """Claim respects a kind-scoped worker."""
     agent_task = await setup.tasks.create(_agent_task(setup))
     import_task = await setup.tasks.create(
-        ImportTask(
-            job_id=setup.job_id,
-            plugin_version_id=setup.plugin_version_id,
-            payload_blob_id=setup.payload_blob_id,
-            agent_id=setup.agent_id,
-        )
+        ImportTask(job_id=setup.job_id, import_id=uuid.uuid4())
     )
     claimed = await setup.tasks.claim_pending(
         WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)]),
@@ -576,14 +549,7 @@ async def test_claim_pending_kind_isolation_across_claims(setup: Setup) -> None:
             input_session_id=setup.session_id,
         )
     )
-    await setup.tasks.create(
-        ImportTask(
-            job_id=setup.job_id,
-            plugin_version_id=setup.plugin_version_id,
-            payload_blob_id=setup.payload_blob_id,
-            agent_id=setup.agent_id,
-        )
-    )
+    await setup.tasks.create(ImportTask(job_id=setup.job_id, import_id=uuid.uuid4()))
 
     claimed_by_agent_scope = await setup.tasks.claim_pending(
         WorkerScope(
@@ -668,11 +634,10 @@ async def test_claim_pending_matches_coverage_cases(
     ids = CoverageIds(
         job_id=setup.job_id,
         other_job_id=uuid.uuid4(),
-        agent_id=setup.agent_id,
         agent_version_id=setup.agent_version_id,
         agent_version_id_2=setup.agent_version_id_2,
         plugin_version_id=setup.plugin_version_id,
-        payload_blob_id=setup.payload_blob_id,
+        import_id=uuid.uuid4(),
         session_id=setup.session_id,
     )
     task = await setup.tasks.create(case.task(ids))

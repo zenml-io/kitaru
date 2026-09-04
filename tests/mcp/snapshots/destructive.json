@@ -2405,6 +2405,7 @@
               "enum": [
                 "session",
                 "replay",
+                "import",
                 "evaluation",
                 "experiment_run",
                 "job"
@@ -2467,6 +2468,7 @@
               "enum": [
                 "session",
                 "replay",
+                "import",
                 "evaluation",
                 "experiment_run",
                 "job"
@@ -3307,6 +3309,210 @@
           "title": "HistoryScope",
           "type": "string"
         },
+        "ImportFailure": {
+          "description": "Import failure.",
+          "properties": {
+            "error": {
+              "description": "Failure reason.",
+              "title": "Error",
+              "type": "string"
+            },
+            "external_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "External id of the failed item.",
+              "title": "External Id"
+            },
+            "line": {
+              "description": "Line the failure occurred at.",
+              "title": "Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "line",
+            "error"
+          ],
+          "title": "ImportFailure",
+          "type": "object"
+        },
+        "ImportResponse": {
+          "description": "Import response.",
+          "properties": {
+            "agent_id": {
+              "description": "Agent imported sessions are created under.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "agent_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Agent version recorded on the imported sessions.",
+              "title": "Agent Version Id"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Error from a failed import.",
+              "title": "Error"
+            },
+            "evaluators": {
+              "description": "Evaluators run against every imported session.",
+              "items": {
+                "$ref": "#/$defs/EvaluatorConfig"
+              },
+              "title": "Evaluators",
+              "type": "array"
+            },
+            "id": {
+              "description": "Import id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "importer_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Importer version run.",
+              "title": "Importer Version Id"
+            },
+            "job_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Job running the import.",
+              "title": "Job Id"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": true,
+              "description": "Parameters passed to the importer.",
+              "title": "Params",
+              "type": "object"
+            },
+            "payload_blob_id": {
+              "description": "Blob holding the payload parsed.",
+              "format": "uuid",
+              "title": "Payload Blob Id",
+              "type": "string"
+            },
+            "stats": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ImportStats"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Stats from a completed import."
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "agent_id",
+            "payload_blob_id",
+            "params",
+            "evaluators"
+          ],
+          "title": "ImportResponse",
+          "type": "object"
+        },
+        "ImportStats": {
+          "description": "Import stats.",
+          "properties": {
+            "created": {
+              "description": "Sessions created.",
+              "title": "Created",
+              "type": "integer"
+            },
+            "failed": {
+              "description": "Items that failed to import.",
+              "title": "Failed",
+              "type": "integer"
+            },
+            "failures": {
+              "description": "Sample of failures.",
+              "items": {
+                "$ref": "#/$defs/ImportFailure"
+              },
+              "maxItems": 20,
+              "title": "Failures",
+              "type": "array"
+            },
+            "skipped": {
+              "description": "Sessions skipped as duplicates.",
+              "title": "Skipped",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "created",
+            "skipped",
+            "failed"
+          ],
+          "title": "ImportStats",
+          "type": "object"
+        },
         "JobStatus": {
           "description": "Job status.",
           "enum": [
@@ -3375,7 +3581,7 @@
           "title": "NodeType",
           "type": "string"
         },
-        "PageData_Union_SessionDetailResponse__SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__": {
+        "PageData_Union_SessionDetailResponse__SessionResponse__ReplayResponse__ImportResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__": {
           "additionalProperties": false,
           "properties": {
             "items": {
@@ -3389,6 +3595,9 @@
                   },
                   {
                     "$ref": "#/$defs/ReplayResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ImportResponse"
                   },
                   {
                     "$ref": "#/$defs/EvaluationResponse"
@@ -3418,7 +3627,7 @@
             "items",
             "page"
           ],
-          "title": "PageData[Union[SessionDetailResponse, SessionResponse, ReplayResponse, EvaluationResponse, ExperimentRunResponse, SessionNodeResponse, TaskResponse, _MCPJob]]",
+          "title": "PageData[Union[SessionDetailResponse, SessionResponse, ReplayResponse, ImportResponse, EvaluationResponse, ExperimentRunResponse, SessionNodeResponse, TaskResponse, _MCPJob]]",
           "type": "object"
         },
         "PageMetadata": {
@@ -3797,6 +4006,20 @@
               "format": "uuid",
               "title": "Id",
               "type": "string"
+            },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import the session was created by.",
+              "title": "Import Id"
             },
             "imported_from": {
               "anyOf": [
@@ -4438,6 +4661,20 @@
               "title": "Id",
               "type": "string"
             },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import the session was created by.",
+              "title": "Import Id"
+            },
             "imported_from": {
               "anyOf": [
                 {
@@ -4664,20 +4901,6 @@
         "TaskResponse": {
           "description": "Task response.",
           "properties": {
-            "agent_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Agent an importer task creates sessions under.",
-              "title": "Agent Id"
-            },
             "agent_version_id": {
               "anyOf": [
                 {
@@ -4778,6 +5001,20 @@
               "title": "Id",
               "type": "string"
             },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import run by an importer task.",
+              "title": "Import Id"
+            },
             "input_session_id": {
               "anyOf": [
                 {
@@ -4814,20 +5051,6 @@
               "$ref": "#/$defs/TaskOnFailure",
               "description": "Effect of a hard failure on the job."
             },
-            "payload_blob_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Payload blob for an importer task.",
-              "title": "Payload Blob Id"
-            },
             "plugin_version_id": {
               "anyOf": [
                 {
@@ -4839,7 +5062,7 @@
                 }
               ],
               "default": null,
-              "description": "Plugin version run by an evaluator or importer task.",
+              "description": "Plugin version run by an evaluator task.",
               "title": "Plugin Version Id"
             },
             "result": {
@@ -5223,6 +5446,9 @@
               "$ref": "#/$defs/ReplayResponse"
             },
             {
+              "$ref": "#/$defs/ImportResponse"
+            },
+            {
               "$ref": "#/$defs/EvaluationResponse"
             },
             {
@@ -5238,7 +5464,7 @@
               "$ref": "#/$defs/_MCPJob"
             },
             {
-              "$ref": "#/$defs/PageData_Union_SessionDetailResponse__SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__"
+              "$ref": "#/$defs/PageData_Union_SessionDetailResponse__SessionResponse__ReplayResponse__ImportResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__"
             },
             {
               "type": "null"
@@ -8095,6 +8321,41 @@
     "description": "Import sessions from one existing blob and return the queued job.",
     "inputSchema": {
       "$defs": {
+        "EvaluatorConfig": {
+          "additionalProperties": false,
+          "description": "Evaluator config.",
+          "properties": {
+            "evaluator": {
+              "description": "Evaluator name.",
+              "title": "Evaluator",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": true,
+              "description": "Parameters passed to the evaluator.",
+              "title": "Params",
+              "type": "object"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Evaluator version, an omitted value resolves to latest.",
+              "title": "Version"
+            }
+          },
+          "required": [
+            "evaluator"
+          ],
+          "title": "EvaluatorConfig",
+          "type": "object"
+        },
         "SessionImportRequest": {
           "additionalProperties": false,
           "description": "Import sessions from an existing payload blob.",
@@ -8103,6 +8364,13 @@
               "format": "uuid",
               "title": "Agent Version Id",
               "type": "string"
+            },
+            "evaluators": {
+              "items": {
+                "$ref": "#/$defs/EvaluatorConfig"
+              },
+              "title": "Evaluators",
+              "type": "array"
             },
             "idempotency_key": {
               "anyOf": [
@@ -8310,6 +8578,11 @@
               "title": "Idempotency",
               "type": "string"
             },
+            "import_id": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            },
             "importer_id": {
               "format": "uuid",
               "title": "Importer Id",
@@ -8337,6 +8610,7 @@
             "importer_version_id",
             "agent_id",
             "agent_version_id",
+            "import_id",
             "result"
           ],
           "title": "SessionImportReceipt",

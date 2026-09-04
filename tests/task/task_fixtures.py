@@ -92,6 +92,7 @@ async def build_task_app() -> AsyncGenerator[TaskAppFixture, None]:
         task_repository=services.tasks,
         agent_version_repository=services.agent_versions,
         replay_repository=FakeReplayRepository(),
+        import_repository=services.imports,
         payload_store=payload_store,
     )
     app = create_app(

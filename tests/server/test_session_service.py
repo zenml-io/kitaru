@@ -24,6 +24,7 @@ from conftest import (
     FakeAgentVersionRepository,
     FakeBlobDataStore,
     FakeBlobRepository,
+    FakeImportRepository,
     FakeReplayRepository,
     FakeSessionRepository,
     FakeTaskRepository,
@@ -31,6 +32,7 @@ from conftest import (
     create_agent,
     create_agent_task,
     create_agent_version,
+    create_import,
     create_import_task,
     create_replay,
     create_session,
@@ -57,6 +59,7 @@ from kitaru.server.domain.agent_version import (
     AgentVersionNotFound,
 )
 from kitaru.server.domain.blob import BlobStorageBackend
+from kitaru.server.domain.imports import Import, ImportNotFound
 from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.session import (
@@ -140,11 +143,18 @@ def replay_repository(repository: FakeSessionRepository) -> FakeReplayRepository
 
 
 @pytest.fixture
+def import_repository() -> FakeImportRepository:
+    """Provide a fake import repository."""
+    return FakeImportRepository()
+
+
+@pytest.fixture
 def service(
     repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
     agent_version_repository: FakeAgentVersionRepository,
     replay_repository: FakeReplayRepository,
+    import_repository: FakeImportRepository,
 ) -> SessionService:
     """Provide a session service backed by the fake repositories."""
     return SessionService(
@@ -152,6 +162,7 @@ def service(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=replay_repository,
+        import_repository=import_repository,
         payload_store=build_payload_store().store,
     )
 
@@ -173,6 +184,26 @@ async def _start(task_repository: FakeTaskRepository, task: Task) -> Task:
     task.claim(uuid.uuid4(), datetime.now(UTC))
     task.start(datetime.now(UTC))
     return await task_repository.update(task)
+
+
+async def _running_import_task(
+    task_repository: FakeTaskRepository,
+    import_repository: FakeImportRepository,
+    agent_id: uuid.UUID,
+    agent_version_id: uuid.UUID | None = None,
+) -> tuple[Task, Import]:
+    """Store an import and its task, claimed by a worker and running."""
+    import_ = await create_import(
+        import_repository,
+        ACTOR.account.id,
+        agent_id,
+        agent_version_id=agent_version_id,
+    )
+    task = await _start(
+        task_repository,
+        await create_import_task(task_repository, uuid.uuid4(), import_id=import_.id),
+    )
+    return task, import_
 
 
 async def _running_agent_task(
@@ -369,6 +400,37 @@ async def test_list_sessions_scoped_by_agent(service: SessionService) -> None:
     assert {session.id for session in sessions} == {first.id, second.id}
 
 
+async def test_list_sessions_filters_by_import_id(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    import_repository: FakeImportRepository,
+) -> None:
+    """The list narrows to the sessions one import created."""
+    agent_id = uuid.uuid4()
+    task, import_ = await _running_import_task(
+        task_repository, import_repository, agent_id
+    )
+    imported = await service.create_session(
+        SessionCreate(origin=SessionOrigin.IMPORTED),
+        actor=_task_principal(task.id),
+    )
+    await service.create_session(
+        SessionCreate(agent_id=agent_id, origin=SessionOrigin.RECORDED), actor=ACTOR
+    )
+
+    sessions, next_cursor = await service.list_sessions(
+        SessionFilter(
+            expression=FilterCondition(
+                field="import_id", op=FilterOp.EQ, value=import_.id
+            )
+        ),
+        include_payloads=False,
+        actor=ACTOR,
+    )
+    assert next_cursor is None
+    assert [session.id for session in sessions] == [imported.id]
+
+
 async def test_update_session_clears_outputs_with_explicit_null(
     service: SessionService,
 ) -> None:
@@ -538,6 +600,7 @@ async def test_update_session_transition_to_terminal_tracks_analytics_event(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=build_payload_store().store,
         analytics=analytics,
     )
@@ -590,6 +653,7 @@ async def test_update_session_non_status_update_tracks_nothing(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=build_payload_store().store,
         analytics=analytics,
     )
@@ -614,6 +678,7 @@ async def test_create_session_with_terminal_status_tracks_analytics_event(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=build_payload_store().store,
         analytics=analytics,
     )
@@ -650,6 +715,7 @@ async def test_create_session_in_progress_tracks_nothing(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=build_payload_store().store,
         analytics=analytics,
     )
@@ -871,11 +937,13 @@ async def test_create_session_rejects_a_second_link_to_an_agent_task(
 
 
 async def test_create_session_links_many_sessions_to_an_import_task(
-    service: SessionService, task_repository: FakeTaskRepository
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    import_repository: FakeImportRepository,
 ) -> None:
-    """An import task links every session it creates, not just one."""
-    task = await _start(
-        task_repository, await create_import_task(task_repository, uuid.uuid4())
+    """An import task links every session it creates to the task and the import."""
+    task, import_ = await _running_import_task(
+        task_repository, import_repository, uuid.uuid4()
     )
     actor = _task_principal(task.id)
     first = await service.create_session(
@@ -888,6 +956,8 @@ async def test_create_session_links_many_sessions_to_an_import_task(
     )
     assert first.task_id == task.id
     assert second.task_id == task.id
+    assert first.import_id == import_.id
+    assert second.import_id == import_.id
 
 
 async def test_create_session_infers_agent_and_version_from_an_agent_task(
@@ -1022,40 +1092,35 @@ async def test_create_session_requires_an_agent_without_a_task_or_version(
         )
 
 
-async def test_create_session_takes_an_import_tasks_agent_and_version(
+async def test_create_session_takes_the_imports_agent_and_version(
     service: SessionService,
     task_repository: FakeTaskRepository,
+    import_repository: FakeImportRepository,
     agent_repository: FakeAgentRepository,
     agent_version_repository: FakeAgentVersionRepository,
 ) -> None:
-    """An import task stamps its agent and version on every session it creates."""
+    """An import task stamps the import's agent and version on every session."""
     version = await _stored_agent_version(agent_repository, agent_version_repository)
-    task = await _start(
-        task_repository,
-        await create_import_task(
-            task_repository,
-            uuid.uuid4(),
-            agent_id=version.agent_id,
-            agent_version_id=version.id,
-        ),
+    task, import_ = await _running_import_task(
+        task_repository, import_repository, version.agent_id, version.id
     )
     session = await service.create_session(
         SessionCreate(origin=SessionOrigin.IMPORTED),
         actor=_task_principal(task.id),
     )
+    assert session.import_id == import_.id
     assert session.agent_id == version.agent_id
     assert session.agent_version_id == version.id
 
 
 async def test_create_session_leaves_the_version_empty_for_a_versionless_import(
-    service: SessionService, task_repository: FakeTaskRepository
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    import_repository: FakeImportRepository,
 ) -> None:
-    """An import task carrying no version creates sessions carrying none."""
+    """An import carrying no version creates sessions carrying none."""
     agent_id = uuid.uuid4()
-    task = await _start(
-        task_repository,
-        await create_import_task(task_repository, uuid.uuid4(), agent_id=agent_id),
-    )
+    task, _ = await _running_import_task(task_repository, import_repository, agent_id)
     session = await service.create_session(
         SessionCreate(origin=SessionOrigin.IMPORTED),
         actor=_task_principal(task.id),
@@ -1064,12 +1129,28 @@ async def test_create_session_leaves_the_version_empty_for_a_versionless_import(
     assert session.agent_version_id is None
 
 
-async def test_create_session_rejects_an_agent_the_import_task_does_not_use(
+async def test_create_session_rejects_a_missing_import(
     service: SessionService, task_repository: FakeTaskRepository
 ) -> None:
-    """A command naming another agent than its import task creates under fails."""
+    """An import task whose import row is gone cannot create sessions."""
     task = await _start(
         task_repository, await create_import_task(task_repository, uuid.uuid4())
+    )
+    with pytest.raises(ImportNotFound):
+        await service.create_session(
+            SessionCreate(origin=SessionOrigin.IMPORTED),
+            actor=_task_principal(task.id),
+        )
+
+
+async def test_create_session_rejects_an_agent_the_import_does_not_use(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    import_repository: FakeImportRepository,
+) -> None:
+    """A command naming another agent than its import creates under fails."""
+    task, _ = await _running_import_task(
+        task_repository, import_repository, uuid.uuid4()
     )
     with pytest.raises(SessionAgentMismatch):
         await service.create_session(
@@ -1232,6 +1313,7 @@ def _service_with_threshold(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=fakes.store,
     )
     return service, fakes.blob_repository, fakes.blob_data_store

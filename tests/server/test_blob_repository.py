@@ -33,6 +33,9 @@ from kitaru.server.adapters.db.repositories.account_repository import (
 )
 from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
 from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.import_repository import (
+    SQLImportRepository,
+)
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
@@ -53,6 +56,7 @@ from kitaru.server.domain.blob import (
     BlobNotFound,
     BlobStorageBackend,
 )
+from kitaru.server.domain.imports import Import
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.plugin import (
@@ -198,13 +202,13 @@ async def test_delete_in_use(setup: Setup) -> None:
         await repository.delete(blob.id)
 
 
-async def test_delete_leaves_task_with_payload() -> None:
-    """Deleting a blob leaves the import task that names it as payload."""
+async def test_delete_leaves_import_task() -> None:
+    """Deleting a blob leaves the import task, which names only its import."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session() as session:
         owner = await SQLAccountRepository(session).create(Account(name="owner"))
-        agent = await SQLAgentRepository(session).create(
+        await SQLAgentRepository(session).create(
             Agent(owner_id=owner.id, name="assistant")
         )
         blob_repository = SQLBlobRepository(session)
@@ -213,7 +217,7 @@ async def test_delete_leaves_task_with_payload() -> None:
         plugin = await plugin_repository.create(
             Plugin(owner_id=owner.id, kind=PluginKind.IMPORTER, name="importer")
         )
-        version = await plugin_repository.create_version(
+        await plugin_repository.create_version(
             plugin.id,
             PackagePluginSource(
                 requirement="kitaru-importer==1.0.0", entrypoint="pkg:run"
@@ -225,20 +229,51 @@ async def test_delete_leaves_task_with_payload() -> None:
             Job(owner_id=owner.id, kind=JobKind.IMPORT, status=JobStatus.PENDING)
         )
         task_repository = SQLTaskRepository(session)
+        import_id = uuid.uuid4()
         task = await task_repository.create(
-            ImportTask(
-                job_id=job.id,
-                plugin_version_id=version.id,
-                payload_blob_id=payload_blob.id,
-                agent_id=agent.id,
-            )
+            ImportTask(job_id=job.id, import_id=import_id)
         )
 
         await blob_repository.delete(payload_blob.id)
 
         stored = await task_repository.get(task.id)
         assert isinstance(stored, ImportTask)
-        assert stored.payload_blob_id == payload_blob.id
+        assert stored.import_id == import_id
+
+
+async def test_delete_in_use_by_import() -> None:
+    """Reject deleting a blob referenced by an import's payload."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(session).create(
+            Agent(owner_id=owner.id, name="assistant")
+        )
+        plugin_repository = SQLPluginRepository(session)
+        plugin = await plugin_repository.create(
+            Plugin(owner_id=owner.id, kind=PluginKind.IMPORTER, name="importer")
+        )
+        importer_version = await plugin_repository.create_version(
+            plugin.id,
+            PackagePluginSource(
+                requirement="kitaru-importer==1.0.0", entrypoint="pkg:run"
+            ),
+            display_version=None,
+        )
+        blob_repository = SQLBlobRepository(session)
+        blob, _ = await blob_repository.create(_blob(owner.id, b"payload"))
+        await SQLImportRepository(session).create(
+            Import(
+                owner_id=owner.id,
+                agent_id=agent.id,
+                importer_version_id=importer_version.id,
+                payload_blob_id=blob.id,
+            )
+        )
+
+        with pytest.raises(BlobInUse, match=f"Blob {blob.id} is in use"):
+            await blob_repository.delete(blob.id)
 
 
 async def test_delete_in_use_by_session() -> None:

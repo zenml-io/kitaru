@@ -11,7 +11,9 @@ from pydantic import Field
 from kitaru.api_models.v1.filter import Filter
 from kitaru.mcp.models.common import MCPModel, PageOptions
 
-ActivityKind = Literal["session", "replay", "evaluation", "experiment_run", "job"]
+ActivityKind = Literal[
+    "session", "replay", "import", "evaluation", "experiment_run", "job"
+]
 
 
 class ActivityListRequest(PageOptions):
