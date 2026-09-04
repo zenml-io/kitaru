@@ -180,10 +180,10 @@ async def test_create_insights_duplicate_category_labels(
     assert response.status_code == 422
 
 
-async def test_create_insights_non_contiguous_histogram_bins(
+async def test_create_insights_non_contiguous_bins(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Observe HTTP 422 when histogram bins are not contiguous."""
+    """Observe HTTP 422 when bins are not contiguous."""
     response = await client.post(
         "/api/v1/insights",
         json={
@@ -192,7 +192,7 @@ async def test_create_insights_non_contiguous_histogram_bins(
                 {
                     "title": "latency",
                     "data": {
-                        "type": "histogram",
+                        "type": "binned",
                         "bins": [
                             {"lower_bound": None, "upper_bound": 1.0, "count": 3},
                             {"lower_bound": 2.0, "upper_bound": None, "count": 1},

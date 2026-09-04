@@ -1930,7 +1930,7 @@ async def insight_create(
             ),
             ParameterSpec(
                 "--type",
-                "text|categorical|histogram",
+                "text|categorical|binned",
                 "option",
                 False,
                 "Only insights with this data type.",
@@ -1946,7 +1946,7 @@ async def insight_list(
     sort: str = "created:desc",
     filter: str | None = None,
     agent: str | None = None,
-    type: Literal["text", "categorical", "histogram"] | None = None,
+    type: Literal["text", "categorical", "binned"] | None = None,
 ) -> CommandResult:
     """List one server page of insights."""
     async with _open_asset_client() as client:

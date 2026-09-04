@@ -890,6 +890,85 @@
         "title": "BaselineEvaluationMode",
         "type": "string"
       },
+      "Bin": {
+        "additionalProperties": false,
+        "description": "Bin.",
+        "properties": {
+          "count": {
+            "description": "Observations in the bin.",
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "lower_bound": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inclusive lower bound, None on an open-ended first bin.",
+            "title": "Lower Bound"
+          },
+          "upper_bound": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exclusive upper bound, None on an open-ended last bin.",
+            "title": "Upper Bound"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "Bin",
+        "type": "object"
+      },
+      "BinnedInsightData": {
+        "additionalProperties": false,
+        "description": "Binned insight data.",
+        "properties": {
+          "bins": {
+            "description": "Bins, in ascending order.",
+            "items": {
+              "$ref": "#/components/schemas/Bin"
+            },
+            "minItems": 1,
+            "title": "Bins",
+            "type": "array"
+          },
+          "type": {
+            "const": "binned",
+            "default": "binned",
+            "title": "Type",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unit of the values.",
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "bins"
+        ],
+        "title": "BinnedInsightData",
+        "type": "object"
+      },
       "BlobResponse": {
         "description": "Blob response.",
         "properties": {
@@ -3253,85 +3332,6 @@
         "title": "FilterOp",
         "type": "string"
       },
-      "HistogramBin": {
-        "additionalProperties": false,
-        "description": "Histogram bin.",
-        "properties": {
-          "count": {
-            "description": "Observations in the bin.",
-            "minimum": 0.0,
-            "title": "Count",
-            "type": "integer"
-          },
-          "lower_bound": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Inclusive lower bound, None on an open-ended first bin.",
-            "title": "Lower Bound"
-          },
-          "upper_bound": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Exclusive upper bound, None on an open-ended last bin.",
-            "title": "Upper Bound"
-          }
-        },
-        "required": [
-          "count"
-        ],
-        "title": "HistogramBin",
-        "type": "object"
-      },
-      "HistogramInsightData": {
-        "additionalProperties": false,
-        "description": "Histogram insight data.",
-        "properties": {
-          "bins": {
-            "description": "Bins, in ascending order.",
-            "items": {
-              "$ref": "#/components/schemas/HistogramBin"
-            },
-            "minItems": 1,
-            "title": "Bins",
-            "type": "array"
-          },
-          "type": {
-            "const": "histogram",
-            "default": "histogram",
-            "title": "Type",
-            "type": "string"
-          },
-          "unit": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Unit of the values.",
-            "title": "Unit"
-          }
-        },
-        "required": [
-          "bins"
-        ],
-        "title": "HistogramInsightData",
-        "type": "object"
-      },
       "HistoryConfig": {
         "additionalProperties": false,
         "description": "History tool config.",
@@ -3874,8 +3874,8 @@
             "description": "Insight data.",
             "discriminator": {
               "mapping": {
+                "binned": "#/components/schemas/BinnedInsightData",
                 "categorical": "#/components/schemas/CategoricalInsightData",
-                "histogram": "#/components/schemas/HistogramInsightData",
                 "text": "#/components/schemas/TextInsightData"
               },
               "propertyName": "type"
@@ -3888,7 +3888,7 @@
                 "$ref": "#/components/schemas/CategoricalInsightData"
               },
               {
-                "$ref": "#/components/schemas/HistogramInsightData"
+                "$ref": "#/components/schemas/BinnedInsightData"
               }
             ],
             "title": "Data"
@@ -3943,8 +3943,8 @@
             "description": "Insight data.",
             "discriminator": {
               "mapping": {
+                "binned": "#/components/schemas/BinnedInsightData",
                 "categorical": "#/components/schemas/CategoricalInsightData",
-                "histogram": "#/components/schemas/HistogramInsightData",
                 "text": "#/components/schemas/TextInsightData"
               },
               "propertyName": "type"
@@ -3957,7 +3957,7 @@
                 "$ref": "#/components/schemas/CategoricalInsightData"
               },
               {
-                "$ref": "#/components/schemas/HistogramInsightData"
+                "$ref": "#/components/schemas/BinnedInsightData"
               }
             ],
             "title": "Data"

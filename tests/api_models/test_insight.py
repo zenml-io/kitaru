@@ -17,10 +17,10 @@ import pytest
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.insight import (
+    Bin,
+    BinnedInsightData,
     CategoricalInsightData,
     CategoryValue,
-    HistogramBin,
-    HistogramInsightData,
     InsightInput,
     TextInsightData,
 )
@@ -51,20 +51,20 @@ def test_unique_category_labels_accepted() -> None:
 def test_noncontiguous_bins_rejected() -> None:
     """Reject bins whose lower bound skips the previous bin's upper bound."""
     with pytest.raises(ValidationError):
-        HistogramInsightData(
+        BinnedInsightData(
             bins=[
-                HistogramBin(lower_bound=0, upper_bound=1, count=1),
-                HistogramBin(lower_bound=2, upper_bound=3, count=1),
+                Bin(lower_bound=0, upper_bound=1, count=1),
+                Bin(lower_bound=2, upper_bound=3, count=1),
             ]
         )
 
 
 def test_contiguous_bins_accepted() -> None:
     """Accept bins whose lower bound matches the previous bin's upper bound."""
-    data = HistogramInsightData(
+    data = BinnedInsightData(
         bins=[
-            HistogramBin(lower_bound=0, upper_bound=1, count=1),
-            HistogramBin(lower_bound=1, upper_bound=2, count=1),
+            Bin(lower_bound=0, upper_bound=1, count=1),
+            Bin(lower_bound=1, upper_bound=2, count=1),
         ]
     )
     assert len(data.bins) == 2
@@ -73,20 +73,20 @@ def test_contiguous_bins_accepted() -> None:
 def test_open_lower_bound_on_interior_bin_rejected() -> None:
     """Reject an open lower bound on a bin that is not first."""
     with pytest.raises(ValidationError):
-        HistogramInsightData(
+        BinnedInsightData(
             bins=[
-                HistogramBin(lower_bound=None, upper_bound=1, count=1),
-                HistogramBin(lower_bound=None, upper_bound=2, count=1),
+                Bin(lower_bound=None, upper_bound=1, count=1),
+                Bin(lower_bound=None, upper_bound=2, count=1),
             ]
         )
 
 
 def test_open_lower_bound_on_first_bin_accepted() -> None:
     """Accept an open lower bound on the first bin."""
-    data = HistogramInsightData(
+    data = BinnedInsightData(
         bins=[
-            HistogramBin(lower_bound=None, upper_bound=1, count=1),
-            HistogramBin(lower_bound=1, upper_bound=2, count=1),
+            Bin(lower_bound=None, upper_bound=1, count=1),
+            Bin(lower_bound=1, upper_bound=2, count=1),
         ]
     )
     assert data.bins[0].lower_bound is None
@@ -95,20 +95,20 @@ def test_open_lower_bound_on_first_bin_accepted() -> None:
 def test_open_upper_bound_on_interior_bin_rejected() -> None:
     """Reject an open upper bound on a bin that is not last."""
     with pytest.raises(ValidationError):
-        HistogramInsightData(
+        BinnedInsightData(
             bins=[
-                HistogramBin(lower_bound=0, upper_bound=None, count=1),
-                HistogramBin(lower_bound=0, upper_bound=2, count=1),
+                Bin(lower_bound=0, upper_bound=None, count=1),
+                Bin(lower_bound=0, upper_bound=2, count=1),
             ]
         )
 
 
 def test_open_upper_bound_on_last_bin_accepted() -> None:
     """Accept an open upper bound on the last bin."""
-    data = HistogramInsightData(
+    data = BinnedInsightData(
         bins=[
-            HistogramBin(lower_bound=0, upper_bound=1, count=1),
-            HistogramBin(lower_bound=1, upper_bound=None, count=1),
+            Bin(lower_bound=0, upper_bound=1, count=1),
+            Bin(lower_bound=1, upper_bound=None, count=1),
         ]
     )
     assert data.bins[-1].upper_bound is None
@@ -117,14 +117,12 @@ def test_open_upper_bound_on_last_bin_accepted() -> None:
 def test_lower_bound_not_less_than_upper_bound_rejected() -> None:
     """Reject a bin whose lower bound is not less than its upper bound."""
     with pytest.raises(ValidationError):
-        HistogramInsightData(bins=[HistogramBin(lower_bound=1, upper_bound=1, count=1)])
+        BinnedInsightData(bins=[Bin(lower_bound=1, upper_bound=1, count=1)])
 
 
 def test_lower_bound_less_than_upper_bound_accepted() -> None:
     """Accept a bin whose lower bound is less than its upper bound."""
-    data = HistogramInsightData(
-        bins=[HistogramBin(lower_bound=0, upper_bound=1, count=1)]
-    )
+    data = BinnedInsightData(bins=[Bin(lower_bound=0, upper_bound=1, count=1)])
     assert data.bins[0].lower_bound == 0
 
 
@@ -137,7 +135,7 @@ def test_lower_bound_less_than_upper_bound_accepted() -> None:
             "values": [{"label": "a", "value": 1}],
         },
         {
-            "type": "histogram",
+            "type": "binned",
             "bins": [{"lower_bound": 0, "upper_bound": 1, "count": 1}],
         },
     ],
@@ -170,16 +168,16 @@ def test_categorical_discriminator_resolves_type() -> None:
     assert insight.data.values[0].label == "a"
 
 
-def test_histogram_discriminator_resolves_type() -> None:
-    """Resolve the histogram variant from its discriminator."""
+def test_binned_discriminator_resolves_type() -> None:
+    """Resolve the binned variant from its discriminator."""
     insight = InsightInput.model_validate(
         {
             "title": "t",
             "data": {
-                "type": "histogram",
+                "type": "binned",
                 "bins": [{"lower_bound": 0, "upper_bound": 1, "count": 1}],
             },
         }
     )
-    assert isinstance(insight.data, HistogramInsightData)
+    assert isinstance(insight.data, BinnedInsightData)
     assert insight.data.bins[0].count == 1

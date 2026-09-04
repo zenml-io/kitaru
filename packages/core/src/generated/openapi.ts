@@ -4230,6 +4230,48 @@ export interface components {
          */
         BaselineEvaluationMode: "none" | "if_missing" | "force";
         /**
+         * Bin
+         * @description Bin.
+         */
+        Bin: {
+            /**
+             * Count
+             * @description Observations in the bin.
+             */
+            count: number;
+            /**
+             * Lower Bound
+             * @description Inclusive lower bound, None on an open-ended first bin.
+             */
+            lower_bound?: number | null;
+            /**
+             * Upper Bound
+             * @description Exclusive upper bound, None on an open-ended last bin.
+             */
+            upper_bound?: number | null;
+        };
+        /**
+         * BinnedInsightData
+         * @description Binned insight data.
+         */
+        BinnedInsightData: {
+            /**
+             * Bins
+             * @description Bins, in ascending order.
+             */
+            bins: components["schemas"]["Bin"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "binned";
+            /**
+             * Unit
+             * @description Unit of the values.
+             */
+            unit?: string | null;
+        };
+        /**
          * BlobResponse
          * @description Blob response.
          */
@@ -5530,48 +5572,6 @@ export interface components {
          */
         FilterOp: "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "in" | "is_null" | "startswith" | "endswith" | "contains";
         /**
-         * HistogramBin
-         * @description Histogram bin.
-         */
-        HistogramBin: {
-            /**
-             * Count
-             * @description Observations in the bin.
-             */
-            count: number;
-            /**
-             * Lower Bound
-             * @description Inclusive lower bound, None on an open-ended first bin.
-             */
-            lower_bound?: number | null;
-            /**
-             * Upper Bound
-             * @description Exclusive upper bound, None on an open-ended last bin.
-             */
-            upper_bound?: number | null;
-        };
-        /**
-         * HistogramInsightData
-         * @description Histogram insight data.
-         */
-        HistogramInsightData: {
-            /**
-             * Bins
-             * @description Bins, in ascending order.
-             */
-            bins: components["schemas"]["HistogramBin"][];
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "histogram";
-            /**
-             * Unit
-             * @description Unit of the values.
-             */
-            unit?: string | null;
-        };
-        /**
          * HistoryConfig
          * @description History tool config.
          */
@@ -5883,7 +5883,7 @@ export interface components {
              * Data
              * @description Insight data.
              */
-            data: components["schemas"]["TextInsightData"] | components["schemas"]["CategoricalInsightData"] | components["schemas"]["HistogramInsightData"];
+            data: components["schemas"]["TextInsightData"] | components["schemas"]["CategoricalInsightData"] | components["schemas"]["BinnedInsightData"];
             /**
              * Description
              * @description Insight description.
@@ -5923,7 +5923,7 @@ export interface components {
              * Data
              * @description Insight data.
              */
-            data: components["schemas"]["TextInsightData"] | components["schemas"]["CategoricalInsightData"] | components["schemas"]["HistogramInsightData"];
+            data: components["schemas"]["TextInsightData"] | components["schemas"]["CategoricalInsightData"] | components["schemas"]["BinnedInsightData"];
             /**
              * Description
              * @description Insight description.

@@ -69,8 +69,8 @@ class CategoricalInsightData(DiscriminatedRequestModel):
         return self
 
 
-class HistogramBin(RequestModel):
-    """Histogram bin."""
+class Bin(RequestModel):
+    """Bin."""
 
     lower_bound: FiniteFloat | None = Field(
         default=None,
@@ -83,14 +83,12 @@ class HistogramBin(RequestModel):
     count: int = Field(ge=0, description="Observations in the bin.")
 
 
-class HistogramInsightData(DiscriminatedRequestModel):
-    """Histogram insight data."""
+class BinnedInsightData(DiscriminatedRequestModel):
+    """Binned insight data."""
 
-    type: Literal["histogram"] = Field(default="histogram")
+    type: Literal["binned"] = Field(default="binned")
     unit: str | None = Field(default=None, description="Unit of the values.")
-    bins: list[HistogramBin] = Field(
-        min_length=1, description="Bins, in ascending order."
-    )
+    bins: list[Bin] = Field(min_length=1, description="Bins, in ascending order.")
 
     @model_validator(mode="after")
     def _check_bins(self) -> Self:
@@ -126,7 +124,7 @@ class HistogramInsightData(DiscriminatedRequestModel):
 
 
 InsightData = Annotated[
-    TextInsightData | CategoricalInsightData | HistogramInsightData,
+    TextInsightData | CategoricalInsightData | BinnedInsightData,
     Field(discriminator="type"),
 ]
 
