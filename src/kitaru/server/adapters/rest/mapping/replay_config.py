@@ -13,7 +13,6 @@
 #  permissions and limitations under the License.
 """Replay configuration DTO conversions, shared by experiments and replays."""
 
-from kitaru.api_models.v1.replay_config import EvaluatorConfig as WireEvaluatorConfig
 from kitaru.api_models.v1.replay_config import HistoryConfig as WireHistoryConfig
 from kitaru.api_models.v1.replay_config import LLMConfig as WireLLMConfig
 from kitaru.api_models.v1.replay_config import (
@@ -24,8 +23,6 @@ from kitaru.api_models.v1.replay_config import StaticCase as WireStaticCase
 from kitaru.api_models.v1.replay_config import StaticConfig as WireStaticConfig
 from kitaru.api_models.v1.replay_config import ToolConfig as WireToolConfig
 from kitaru.api_models.v1.replay_config import ToolPolicy as WireToolPolicy
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
-from kitaru.server.domain.replay_config import EvaluatorConfig as DomainEvaluatorConfig
 from kitaru.server.domain.replay_config import HistoryConfig as DomainHistoryConfig
 from kitaru.server.domain.replay_config import LLMConfig as DomainLLMConfig
 from kitaru.server.domain.replay_config import (
@@ -157,33 +154,4 @@ def tool_policy_to_wire(policy: DomainToolPolicy) -> WireToolPolicy:
         tools={
             name: tool_config_to_wire(config) for name, config in policy.tools.items()
         },
-    )
-
-
-def evaluator_config_to_wire(config: DomainEvaluatorConfig) -> WireEvaluatorConfig:
-    """Convert a resolved domain evaluator config to its wire value object.
-
-    Args:
-        config: Resolved domain evaluator config.
-
-    Returns:
-        Wire evaluator config, echoing the resolved name, version, and
-        params.
-    """
-    return WireEvaluatorConfig(
-        evaluator=config.evaluator, version=config.version, params=config.params
-    )
-
-
-def evaluator_config_input(config: WireEvaluatorConfig) -> EvaluatorConfigInput:
-    """Convert a wire evaluator config to its unresolved application input.
-
-    Args:
-        config: Wire evaluator config.
-
-    Returns:
-        Evaluator config awaiting resolution.
-    """
-    return EvaluatorConfigInput(
-        evaluator=config.evaluator, version=config.version, params=config.params
     )
