@@ -55,6 +55,9 @@ from kitaru.redaction import redact_data
 
 ANALYSIS_VERSION = "2026-09-04.1"
 MAX_LABEL_LENGTH = 120
+MAX_ROLE_LENGTH = 32
+MAX_SELECTOR_LENGTH = 1_024
+MAX_SELECTOR_SEGMENTS = 64
 
 _CORRECTION_PATTERN = re.compile(
     r"\b(?:that(?:'s| is) not|you (?:didn't|did not)|doesn't work|does not work|"
@@ -340,7 +343,7 @@ class _PayloadBudget:
     truncated: bool = False
     truncation_count: int = 0
 
-    def _record_truncation(self) -> None:
+    def record_truncation(self) -> None:
         """Record one rejected traversal step."""
         self.truncated = True
         self.truncation_count += 1
@@ -348,12 +351,12 @@ class _PayloadBudget:
     def consume(self, value: Any, *, depth: int) -> bool:
         """Account for one value, rejecting it before an over-budget traversal."""
         if depth > self.max_depth or self.items >= self.max_items:
-            self._record_truncation()
+            self.record_truncation()
             return False
         remaining = self.max_bytes - self.bytes
         size = _scalar_json_size(value, remaining)
         if size is None:
-            self._record_truncation()
+            self.record_truncation()
             return False
         self.items += 1
         self.bytes += size
@@ -362,7 +365,7 @@ class _PayloadBudget:
     def can_enter(self, size: int) -> bool:
         """Reject a container whose immediate children exceed the remaining budget."""
         if size > self.max_items - self.items:
-            self._record_truncation()
+            self.record_truncation()
             return False
         return True
 
@@ -554,6 +557,12 @@ def _resolve_pointer(
     """Resolve a valid RFC 6901 pointer without raising on source data."""
     if pointer is None:
         return False, None, 0
+    if not isinstance(pointer, str):
+        budget.record_truncation()
+        return False, None, 0
+    if len(pointer) > MAX_SELECTOR_LENGTH or pointer.count("/") > MAX_SELECTOR_SEGMENTS:
+        budget.record_truncation()
+        return False, None, 0
     if pointer == "":
         return True, document, 0
     if not pointer.startswith("/"):
@@ -623,14 +632,21 @@ def _user_messages(value: Any, budget: _PayloadBudget) -> list[str]:
             continue
         if not isinstance(current, dict):
             continue
-        if str(current.get("role", "")).lower() == "user":
+        role = current.get("role")
+        if isinstance(role, str):
+            if len(role) > MAX_ROLE_LENGTH:
+                budget.record_truncation()
+                continue
+            if not budget.consume(role, depth=depth + 1):
+                continue
+        if isinstance(role, str) and role.lower() == "user":
             for key in ("content", "parts", "text"):
                 if key in current:
                     messages.extend(
                         _text_parts(current[key], budget, start_depth=depth + 1)
                     )
             continue
-        keys = sorted(key for key in current if isinstance(key, str))
+        keys = sorted(key for key in current if isinstance(key, str) and key != "role")
         if budget.can_enter(len(keys)):
             stack.extend((current[key], depth + 1) for key in reversed(keys))
     return messages
