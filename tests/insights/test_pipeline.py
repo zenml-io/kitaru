@@ -436,7 +436,7 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
     )
     assert len(bounded.coverage.caveats) == 10
     assert "Existing caveat 9" in bounded.coverage.caveats[-1]
-    assert "Lower-priority cards were omitted" in bounded.coverage.caveats[-1]
+    assert "Cards were omitted" in bounded.coverage.caveats[-1]
     assert all(
         bounded.card_metadata(insight).coverage == bounded.coverage
         for insight in bounded.insights
@@ -448,6 +448,48 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
         )[0]
         finding = json.loads(finding_json)
         assert finding["overall_coverage"] == bounded.coverage.model_dump(mode="json")
+
+
+async def test_result_byte_bound_tries_lower_priority_individual_cards(
+    monkeypatch,
+) -> None:
+    sessions = [
+        _session(1, status=SessionStatus.FAILED),
+        _session(2, status=SessionStatus.COMPLETED),
+    ]
+    profiling = insight_pipeline.profile_sessions(sessions)
+    first_candidate = profiling.candidates[0].model_copy(
+        update={"investigation_prompt": "x" * 10_000}
+    )
+    second_candidate = profiling.candidates[0].model_copy(
+        update={
+            "id": "second-candidate",
+            "family": "second-family",
+            "rank": first_candidate.rank + 1,
+            "title": "A second deterministic pattern",
+        }
+    )
+    profiling = profiling.model_copy(
+        update={"candidates": [first_candidate, second_candidate]}
+    )
+    monkeypatch.setattr(
+        insight_pipeline,
+        "profile_sessions",
+        lambda sessions, config: profiling,
+    )
+
+    bounded = await generate_insights(
+        sessions,
+        context=_context(),
+        config=InsightGenerationConfig(max_result_bytes=8_000),
+    )
+
+    assert [insight.name for insight in bounded.insights] == [second_candidate.id]
+    assert any(
+        item.dimension == "serialized_result_bytes"
+        for item in bounded.coverage.truncations
+    )
+    assert "Cards were omitted" in bounded.coverage.caveats[-1]
 
 
 async def test_result_byte_bound_neutralizes_removed_recommendation(

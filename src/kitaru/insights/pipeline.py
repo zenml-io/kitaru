@@ -16,6 +16,7 @@
 import json
 import uuid
 from collections.abc import Sequence
+from itertools import combinations
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -369,78 +370,81 @@ def _get_oversize_result(
         analyzed=maximum,
     )
     candidates = {candidate.id: candidate for candidate in profiling.candidates}
+    coverage = result.coverage.model_copy(
+        update={
+            "truncations": [*result.coverage.truncations, truncation],
+            "caveats": _append_coverage_caveat(
+                result.coverage.caveats,
+                "Cards were omitted to fit the result byte limit.",
+            ),
+        }
+    )
     for retained_count in range(len(result.insights) - 1, 0, -1):
-        coverage = result.coverage.model_copy(
-            update={
-                "truncations": [*result.coverage.truncations, truncation],
-                "caveats": _append_coverage_caveat(
-                    result.coverage.caveats,
-                    "Lower-priority cards were omitted to fit the result byte limit.",
-                ),
-            }
-        )
-        retained = result.insights[:retained_count]
-        assert result.recommendation is not None
-        recommendation_id = result.recommendation.insight_name
-        recommendation = result.recommendation
-        if recommendation_id not in {insight.name for insight in retained}:
-            recommendation_id = retained[0].name
-            recommendation = PageRecommendation(
-                insight_name=recommendation_id,
-                title="Recommended next step",
-                description=(
-                    "Start here and use the copied prompt to define a focused cohort."
-                ),
-            )
-
-        bounded_insights: list[InsightInput] = []
-        prompts_fit = True
-        for insight in retained:
-            original_metadata = result.card_metadata(insight)
-            try:
-                investigation_prompt = _investigation_prompt(
-                    candidates[insight.name],
-                    context=result.context,
-                    coverage=coverage,
-                    contributing_session_ids=(
-                        original_metadata.contributing_session_ids
+        for retained_items in combinations(result.insights, retained_count):
+            retained = list(retained_items)
+            assert result.recommendation is not None
+            recommendation_id = result.recommendation.insight_name
+            recommendation = result.recommendation
+            if recommendation_id not in {insight.name for insight in retained}:
+                recommendation_id = retained[0].name
+                recommendation = PageRecommendation(
+                    insight_name=recommendation_id,
+                    title="Recommended next step",
+                    description=(
+                        "Start here and use the copied prompt to define a focused "
+                        "cohort."
                     ),
-                    evidence=original_metadata.evidence,
                 )
-            except _OutputBoundError:
-                prompts_fit = False
-                break
-            metadata = original_metadata.model_copy(
-                update={
-                    "coverage": coverage,
-                    "recommended": insight.name == recommendation_id,
-                    "investigation_prompt": investigation_prompt,
-                }
-            )
-            bounded_insights.append(
-                insight.model_copy(
+
+            bounded_insights: list[InsightInput] = []
+            prompts_fit = True
+            for position, insight in enumerate(retained):
+                original_metadata = result.card_metadata(insight)
+                try:
+                    investigation_prompt = _investigation_prompt(
+                        candidates[insight.name],
+                        context=result.context,
+                        coverage=coverage,
+                        contributing_session_ids=(
+                            original_metadata.contributing_session_ids
+                        ),
+                        evidence=original_metadata.evidence,
+                    )
+                except _OutputBoundError:
+                    prompts_fit = False
+                    break
+                metadata = original_metadata.model_copy(
                     update={
-                        "metadata": {
-                            INSIGHT_METADATA_KEY: metadata.model_dump(mode="json")
-                        }
+                        "coverage": coverage,
+                        "position": position,
+                        "recommended": insight.name == recommendation_id,
+                        "investigation_prompt": investigation_prompt,
                     }
                 )
+                bounded_insights.append(
+                    insight.model_copy(
+                        update={
+                            "metadata": {
+                                INSIGHT_METADATA_KEY: metadata.model_dump(mode="json")
+                            }
+                        }
+                    )
+                )
+
+            if not prompts_fit:
+                continue
+
+            bounded = InsightGenerationResult.model_validate(
+                result.model_copy(
+                    update={
+                        "coverage": coverage,
+                        "recommendation": recommendation,
+                        "insights": bounded_insights,
+                    }
+                ).model_dump()
             )
-
-        if not prompts_fit:
-            continue
-
-        bounded = InsightGenerationResult.model_validate(
-            result.model_copy(
-                update={
-                    "coverage": coverage,
-                    "recommendation": recommendation,
-                    "insights": bounded_insights,
-                }
-            ).model_dump()
-        )
-        if len(bounded.model_dump_json().encode("utf-8")) <= maximum:
-            return bounded
+            if len(bounded.model_dump_json().encode("utf-8")) <= maximum:
+                return bounded
 
     coverage = result.coverage.model_copy(
         update={

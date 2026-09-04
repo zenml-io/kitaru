@@ -273,6 +273,10 @@ def test_editor_validates_numbers_against_each_card_only(
         ("This pattern triggered retries.", "unsupported claim"),
         ("This pattern is responsible for retries.", "unsupported claim"),
         ("Retries are attributable to this pattern.", "unsupported claim"),
+        ("This pattern accounts for retries.", "unsupported claim"),
+        ("This pattern may account for retries.", "unsupported claim"),
+        ("This pattern accounted for retries.", "unsupported claim"),
+        ("This pattern is accounting for retries.", "unsupported claim"),
         ("This pattern contributes to retries.", "unsupported claim"),
         ("This pattern gives rise to retries.", "unsupported claim"),
         ("This pattern is giving rise to retries.", "unsupported claim"),
@@ -578,8 +582,9 @@ def test_causal_substrings_in_plain_prose_are_allowed(
                     eyebrow="Tool behavior",
                     description=(
                         "Causality, resultant metrics, leadership, driveways, "
-                        "producers, creatures, triggerfish, giveaways, and "
-                        "upbringings are worth inspecting."
+                        "producers, creatures, triggerfish, accountants, "
+                        "accountability, giveaways, and upbringings are worth "
+                        "inspecting."
                     ),
                 )
             ]
@@ -833,6 +838,74 @@ def test_session_outcomes_allows_observed_completion_synonyms(
                     id=candidate.id,
                     eyebrow="Session outcomes",
                     description=description,
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Sessions pass.",
+        "This session passes.",
+        "Sessions passed.",
+        "Sessions are passing.",
+    ],
+)
+def test_completed_sessions_do_not_authorize_successful_pass_wording(
+    profiling_result: ProfilingResult,
+    description: str,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "id": "session-outcomes",
+            "family": "outcome",
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="completed", value=1)]
+            ),
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Session outcomes",
+                    description=description,
+                )
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="unsupported outcome"):
+        validate_editorial_plan(copy, selection, [candidate])
+
+
+def test_pass_substrings_in_plain_prose_are_allowed(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description=(
+                        "Bypass routes, passengers, and passageways are worth "
+                        "investigating."
+                    ),
                 )
             ]
         }
