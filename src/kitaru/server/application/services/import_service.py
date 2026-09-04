@@ -30,6 +30,7 @@ from kitaru.server.application.models.imports import ImportCreate, ImportFilter
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
 from kitaru.server.application.services.plugin_resolution import (
+    get_plugin_task_labels,
     resolve_plugin,
     resolve_plugin_version,
 )
@@ -131,7 +132,13 @@ class ImportService:
         )
         # The job was just created in this call and cannot have settled yet, so
         # the task skips add_task's settled check.
-        await self._tasks.create(ImportTask(job_id=job.id, import_id=import_.id))
+        await self._tasks.create(
+            ImportTask(
+                job_id=job.id,
+                import_id=import_.id,
+                labels=get_plugin_task_labels(plugin.name),
+            )
+        )
         return import_
 
     async def get_import(self, import_id: uuid.UUID, actor: AuthContext) -> Import:

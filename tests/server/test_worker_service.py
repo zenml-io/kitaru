@@ -161,7 +161,7 @@ async def test_is_covered_matches_claim_cases(
         agent_version_id=uuid.uuid4(),
         agent_version_id_2=uuid.uuid4(),
         plugin_version_id=uuid.uuid4(),
-        payload_blob_id=uuid.uuid4(),
+        import_id=uuid.uuid4(),
         session_id=uuid.uuid4(),
     )
     await create_worker(repository, ACTOR.account.id, scope=case.scope(ids))
@@ -199,12 +199,7 @@ async def test_is_covered_requires_every_task(
     )
     job_id = uuid.uuid4()
     agent_task = AgentTask(job_id=job_id, agent_version_id=uuid.uuid4())
-    import_task = ImportTask(
-        job_id=job_id,
-        plugin_version_id=uuid.uuid4(),
-        payload_blob_id=uuid.uuid4(),
-        agent_id=uuid.uuid4(),
-    )
+    import_task = ImportTask(job_id=job_id, import_id=uuid.uuid4())
     assert await service.is_covered([agent_task]) is True
     assert await service.is_covered([agent_task, import_task]) is False
 
