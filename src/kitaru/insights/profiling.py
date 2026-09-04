@@ -433,8 +433,10 @@ def sanitize_label(value: str | None) -> str | None:
     """Return a bounded exact label, or omit it when it may contain a secret."""
     if value is None:
         return None
+    if len(value) > MAX_LABEL_LENGTH:
+        return None
     candidate = value.strip()
-    if not candidate or len(candidate) > MAX_LABEL_LENGTH:
+    if not candidate:
         return None
     try:
         candidate.encode("utf-8")
@@ -770,14 +772,19 @@ def _scan_session(
         state.model_counts.append(len(llm_calls))
         state.activity_counts.append(len(nodes))
 
-    if session.session.started_at is not None and session.session.ended_at is not None:
-        duration = (
-            session.session.ended_at - session.session.started_at
-        ).total_seconds()
-        if duration >= 0:
-            state.durations.append(duration)
-            state.duration_session_ids.add(session_id)
-            state.timing_available += 1
+    started_at = session.session.started_at
+    ended_at = session.session.ended_at
+    if started_at is not None and ended_at is not None:
+        started_aware = (
+            started_at.tzinfo is not None and started_at.utcoffset() is not None
+        )
+        ended_aware = ended_at.tzinfo is not None and ended_at.utcoffset() is not None
+        if started_aware == ended_aware:
+            duration = (ended_at - started_at).total_seconds()
+            if duration >= 0:
+                state.durations.append(duration)
+                state.duration_session_ids.add(session_id)
+                state.timing_available += 1
 
     for node in llm_calls:
         label = sanitize_label(node.model or node.requested_model)

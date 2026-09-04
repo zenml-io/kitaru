@@ -49,6 +49,14 @@ _MARKUP = re.compile(
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _UNSUPPORTED_CLAIM = re.compile(
     r"\b(?:causes?|caused|because|due to|results? in|leads? to|"
+    r"drives|drove|driven\s+by|(?:stems?|stemmed|stemming)\s+from|"
+    r"produces|produced|producing|creates|created|creating|"
+    r"triggers|triggered|triggering|responsible\s+for|attributable\s+to|"
+    r"(?:contributes?|contributed|contributing)\s+to|"
+    r"gives?\s+rise\s+to|gave\s+rise\s+to|"
+    r"brings?\s+about|brought\s+about|"
+    r"(?:arises?|arose|arisen|originates?|originated|originating)\s+from|"
+    r"explains?|explained|explaining|determines?|determined|determining|"
     r"more|most|less|fewer|higher|lower|increase[ds]?|decrease[ds]?|"
     r"slower|slowest|faster|fastest|better|best|worse|worst|"
     r"longer|longest|shorter|shortest|larger|largest|smaller|smallest|"
