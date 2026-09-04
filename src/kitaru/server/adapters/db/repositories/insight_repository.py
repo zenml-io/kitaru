@@ -33,6 +33,7 @@ from kitaru.server.domain.insight import Insight, InsightNotFound
 INSIGHT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": InsightORM.id,
     "agent_id": InsightORM.agent_id,
+    "name": InsightORM.name,
     "type": InsightORM.type,
 }
 

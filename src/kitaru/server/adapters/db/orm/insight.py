@@ -61,6 +61,7 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     owner_id: Mapped[uuid.UUID]
     agent_id: Mapped[uuid.UUID]
+    name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     title: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     description: Mapped[str | None] = mapped_column(Text)
     type: Mapped[str] = mapped_column(String(TYPE_LENGTH))
@@ -81,6 +82,7 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             id=insight.id,
             owner_id=insight.owner_id,
             agent_id=insight.agent_id,
+            name=insight.name,
             title=insight.title,
             description=insight.description,
             type=insight.data.type,
@@ -98,6 +100,7 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             id=self.id,
             owner_id=self.owner_id,
             agent_id=self.agent_id,
+            name=self.name,
             title=self.title,
             description=self.description,
             data=_INSIGHT_DATA_ADAPTER.validate_python(self.data),

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Added agent-scoped insights. Create a batch of insights for an agent with `client.insights.create(...)` or `POST /api/v1/insights`, each carrying a title, an optional description, and data of type `text`, `categorical`, or `binned`. Insights can be listed with filters on `agent_id` and `type`, fetched, updated in title and description, and deleted.
+- Added agent-scoped insights. Create a batch of insights for an agent with `client.insights.create(...)` or `POST /api/v1/insights`, each carrying a name, a title, an optional description, and data of type `text`, `categorical`, or `binned`. Insights can be listed with filters on `agent_id`, `name`, and `type`, fetched, updated in title and description, and deleted.
 
 ## [0.25.0] - 2026-09-03
 

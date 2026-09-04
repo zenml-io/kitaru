@@ -82,11 +82,12 @@ async def _make_agent(api_client: KitaruAPIClient) -> uuid.UUID:
 
 
 def _insight_input(
-    title: str = "insight", description: str | None = None
+    name: str = "insight", title: str = "insight", description: str | None = None
 ) -> InsightInput:
     """Build a minimal text insight input.
 
     Args:
+        name: Insight name.
         title: Insight title.
         description: Insight description.
 
@@ -94,6 +95,7 @@ def _insight_input(
         Insight input ready to pass to insights.create.
     """
     return InsightInput(
+        name=name,
         title=title,
         description=description,
         data=TextInsightData(content="root cause"),

@@ -5897,6 +5897,11 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
+             * Name
+             * @description Insight name.
+             */
+            name: string;
+            /**
              * Title
              * @description Insight title.
              */
@@ -5942,6 +5947,11 @@ export interface components {
             metadata: {
                 [key: string]: unknown;
             };
+            /**
+             * Name
+             * @description Insight name.
+             */
+            name: string;
             /**
              * Owner Id
              * Format: uuid

@@ -44,6 +44,7 @@ def insight_batch_create_to_command(
         agent_id=body.agent_id,
         insights=[
             InsightInput(
+                name=item.name,
                 title=item.title,
                 description=item.description,
                 data=item.data,
@@ -69,6 +70,7 @@ def insight_to_response(insight: Insight) -> InsightResponse:
         id=insight.id,
         owner_id=insight.owner_id,
         agent_id=insight.agent_id,
+        name=insight.name,
         title=insight.title,
         description=insight.description,
         data=insight.data,

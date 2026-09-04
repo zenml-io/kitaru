@@ -5977,6 +5977,11 @@
               "title": "Metadata",
               "type": "object"
             },
+            "name": {
+              "description": "Insight name.",
+              "title": "Name",
+              "type": "string"
+            },
             "owner_id": {
               "description": "Id of the owning account.",
               "format": "uuid",
@@ -6001,6 +6006,7 @@
             "owner_id",
             "id",
             "agent_id",
+            "name",
             "title",
             "description",
             "data",
@@ -8734,6 +8740,11 @@
               "title": "Metadata",
               "type": "object"
             },
+            "name": {
+              "description": "Insight name.",
+              "title": "Name",
+              "type": "string"
+            },
             "title": {
               "description": "Insight title.",
               "title": "Title",
@@ -8741,6 +8752,7 @@
             }
           },
           "required": [
+            "name",
             "title",
             "data"
           ],
@@ -9770,6 +9782,11 @@
               "title": "Metadata",
               "type": "object"
             },
+            "name": {
+              "description": "Insight name.",
+              "title": "Name",
+              "type": "string"
+            },
             "owner_id": {
               "description": "Id of the owning account.",
               "format": "uuid",
@@ -9794,6 +9811,7 @@
             "owner_id",
             "id",
             "agent_id",
+            "name",
             "title",
             "description",
             "data",

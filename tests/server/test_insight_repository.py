@@ -93,6 +93,7 @@ def _insight(owner_id: uuid.UUID, agent_id: uuid.UUID, **overrides: Any) -> Insi
     values: dict[str, Any] = {
         "owner_id": owner_id,
         "agent_id": agent_id,
+        "name": "insight",
         "title": "insight",
         "data": TextInsightData(content="root cause"),
     }
@@ -162,6 +163,19 @@ async def test_query_filters_by_agent_id(setup: Setup) -> None:
     insights, _ = await repository.query(
         InsightFilter(
             expression=FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
+        )
+    )
+    assert [insight.id for insight in insights] == [matching.id]
+
+
+async def test_query_filters_by_name(setup: Setup) -> None:
+    """Filter insights scoped to one exact name."""
+    repository, owner_id, agent_id, _ = setup
+    matching = await _create_insight(repository, owner_id, agent_id, name="first")
+    await _create_insight(repository, owner_id, agent_id, name="second")
+    insights, _ = await repository.query(
+        InsightFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="first")
         )
     )
     assert [insight.id for insight in insights] == [matching.id]

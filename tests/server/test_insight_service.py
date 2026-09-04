@@ -102,8 +102,11 @@ async def test_create_insights(service: InsightService, agent_id: uuid.UUID) -> 
         InsightCreate(
             agent_id=agent_id,
             insights=[
-                InsightInput(title="first", data=TextInsightData(content="a")),
                 InsightInput(
+                    name="first", title="first", data=TextInsightData(content="a")
+                ),
+                InsightInput(
+                    name="second",
                     title="second",
                     description="second description",
                     data=TextInsightData(content="b"),
@@ -128,7 +131,9 @@ async def test_create_insights_missing_agent(service: InsightService) -> None:
             InsightCreate(
                 agent_id=uuid.uuid4(),
                 insights=[
-                    InsightInput(title="first", data=TextInsightData(content="a"))
+                    InsightInput(
+                        name="first", title="first", data=TextInsightData(content="a")
+                    )
                 ],
             ),
             actor=ACTOR,
@@ -140,7 +145,11 @@ async def test_get_insight(service: InsightService, agent_id: uuid.UUID) -> None
     created = await service.create_insights(
         InsightCreate(
             agent_id=agent_id,
-            insights=[InsightInput(title="first", data=TextInsightData(content="a"))],
+            insights=[
+                InsightInput(
+                    name="first", title="first", data=TextInsightData(content="a")
+                )
+            ],
         ),
         actor=ACTOR,
     )
@@ -161,8 +170,11 @@ async def test_list_insights(service: InsightService, agent_id: uuid.UUID) -> No
         InsightCreate(
             agent_id=agent_id,
             insights=[
-                InsightInput(title="text", data=TextInsightData(content="a")),
                 InsightInput(
+                    name="text", title="text", data=TextInsightData(content="a")
+                ),
+                InsightInput(
+                    name="categorical",
                     title="categorical",
                     data=CategoricalInsightData(
                         values=[CategoryValue(label="x", value=1)]
@@ -193,7 +205,11 @@ async def test_list_insights_filters_by_agent_id(
     matching = await service.create_insights(
         InsightCreate(
             agent_id=agent_id,
-            insights=[InsightInput(title="first", data=TextInsightData(content="a"))],
+            insights=[
+                InsightInput(
+                    name="first", title="first", data=TextInsightData(content="a")
+                )
+            ],
         ),
         actor=ACTOR,
     )
@@ -201,7 +217,11 @@ async def test_list_insights_filters_by_agent_id(
     await service.create_insights(
         InsightCreate(
             agent_id=other_agent.id,
-            insights=[InsightInput(title="other", data=TextInsightData(content="b"))],
+            insights=[
+                InsightInput(
+                    name="other", title="other", data=TextInsightData(content="b")
+                )
+            ],
         ),
         actor=ACTOR,
     )
@@ -215,6 +235,42 @@ async def test_list_insights_filters_by_agent_id(
     assert [insight.id for insight in insights] == [matching[0].id]
 
 
+async def test_list_insights_filters_by_name(
+    service: InsightService, agent_id: uuid.UUID
+) -> None:
+    """Filter insights by exact name."""
+    matching = await service.create_insights(
+        InsightCreate(
+            agent_id=agent_id,
+            insights=[
+                InsightInput(
+                    name="first", title="first", data=TextInsightData(content="a")
+                )
+            ],
+        ),
+        actor=ACTOR,
+    )
+    await service.create_insights(
+        InsightCreate(
+            agent_id=agent_id,
+            insights=[
+                InsightInput(
+                    name="other", title="other", data=TextInsightData(content="b")
+                )
+            ],
+        ),
+        actor=ACTOR,
+    )
+
+    insights, _ = await service.list_insights(
+        InsightFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="first")
+        ),
+        actor=ACTOR,
+    )
+    assert [insight.id for insight in insights] == [matching[0].id]
+
+
 async def test_update_insight_title(
     service: InsightService, agent_id: uuid.UUID
 ) -> None:
@@ -222,7 +278,11 @@ async def test_update_insight_title(
     created = await service.create_insights(
         InsightCreate(
             agent_id=agent_id,
-            insights=[InsightInput(title="first", data=TextInsightData(content="a"))],
+            insights=[
+                InsightInput(
+                    name="first", title="first", data=TextInsightData(content="a")
+                )
+            ],
         ),
         actor=ACTOR,
     )
@@ -244,7 +304,10 @@ async def test_update_insight_description(
             agent_id=agent_id,
             insights=[
                 InsightInput(
-                    title="first", description="old", data=TextInsightData(content="a")
+                    name="first",
+                    title="first",
+                    description="old",
+                    data=TextInsightData(content="a"),
                 )
             ],
         ),
@@ -266,7 +329,10 @@ async def test_update_insight_description_cleared(
             agent_id=agent_id,
             insights=[
                 InsightInput(
-                    title="first", description="old", data=TextInsightData(content="a")
+                    name="first",
+                    title="first",
+                    description="old",
+                    data=TextInsightData(content="a"),
                 )
             ],
         ),
@@ -287,7 +353,10 @@ async def test_update_insight_omitted_fields_unchanged(
             agent_id=agent_id,
             insights=[
                 InsightInput(
-                    title="first", description="old", data=TextInsightData(content="a")
+                    name="first",
+                    title="first",
+                    description="old",
+                    data=TextInsightData(content="a"),
                 )
             ],
         ),
@@ -305,7 +374,11 @@ async def test_update_insight_cannot_clear_title(
     created = await service.create_insights(
         InsightCreate(
             agent_id=agent_id,
-            insights=[InsightInput(title="first", data=TextInsightData(content="a"))],
+            insights=[
+                InsightInput(
+                    name="first", title="first", data=TextInsightData(content="a")
+                )
+            ],
         ),
         actor=ACTOR,
     )
@@ -323,7 +396,11 @@ async def test_create_insights_empty_title(
         await service.create_insights(
             InsightCreate(
                 agent_id=agent_id,
-                insights=[InsightInput(title="", data=TextInsightData(content="a"))],
+                insights=[
+                    InsightInput(
+                        name="first", title="", data=TextInsightData(content="a")
+                    )
+                ],
             ),
             actor=ACTOR,
         )
@@ -336,7 +413,11 @@ async def test_update_insight_empty_title(
     created = await service.create_insights(
         InsightCreate(
             agent_id=agent_id,
-            insights=[InsightInput(title="first", data=TextInsightData(content="a"))],
+            insights=[
+                InsightInput(
+                    name="first", title="first", data=TextInsightData(content="a")
+                )
+            ],
         ),
         actor=ACTOR,
     )
@@ -359,7 +440,11 @@ async def test_delete_insight(service: InsightService, agent_id: uuid.UUID) -> N
     created = await service.create_insights(
         InsightCreate(
             agent_id=agent_id,
-            insights=[InsightInput(title="first", data=TextInsightData(content="a"))],
+            insights=[
+                InsightInput(
+                    name="first", title="first", data=TextInsightData(content="a")
+                )
+            ],
         ),
         actor=ACTOR,
     )
@@ -391,8 +476,11 @@ async def test_create_insights_tracks_insight_created(
         InsightCreate(
             agent_id=agent_id,
             insights=[
-                InsightInput(title="text", data=TextInsightData(content="a")),
                 InsightInput(
+                    name="text", title="text", data=TextInsightData(content="a")
+                ),
+                InsightInput(
+                    name="categorical",
                     title="categorical",
                     data=CategoricalInsightData(
                         values=[CategoryValue(label="x", value=1)]
@@ -420,7 +508,11 @@ async def test_create_insights_without_analytics_tracker(
     insights = await service.create_insights(
         InsightCreate(
             agent_id=agent_id,
-            insights=[InsightInput(title="first", data=TextInsightData(content="a"))],
+            insights=[
+                InsightInput(
+                    name="first", title="first", data=TextInsightData(content="a")
+                )
+            ],
         ),
         actor=ACTOR,
     )

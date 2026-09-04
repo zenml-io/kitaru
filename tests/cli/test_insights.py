@@ -60,6 +60,7 @@ class StubInsightClient:
             uuid.uuid4(),
             {
                 "agent_id": str(self.agent.id),
+                "name": "latency-regressed",
                 "title": "Latency regressed",
                 "description": "p95 latency doubled after the deploy",
                 "data": {
@@ -138,12 +139,14 @@ async def test_create_resolves_agent_and_parses_each_insight_json() -> None:
         insight=[
             json.dumps(
                 {
+                    "name": "latency-regressed",
                     "title": "Latency regressed",
                     "data": {"type": "text", "content": "It got slower."},
                 }
             ),
             json.dumps(
                 {
+                    "name": "error-mix",
                     "title": "Error mix",
                     "data": {
                         "type": "categorical",
@@ -159,12 +162,14 @@ async def test_create_resolves_agent_and_parses_each_insight_json() -> None:
     assert agent_id == client.agent.id
     assert [item.model_dump(mode="json") for item in insight_inputs] == [
         {
+            "name": "latency-regressed",
             "title": "Latency regressed",
             "description": None,
             "data": {"type": "text", "content": "It got slower."},
             "metadata": {},
         },
         {
+            "name": "error-mix",
             "title": "Error mix",
             "description": None,
             "data": {
@@ -211,7 +216,7 @@ async def test_create_rejects_malformed_insight_json(
 
 
 async def test_list_combines_agent_and_type_filters_with_the_generic_filter() -> None:
-    """List folds --agent, --type, and --filter into one AND expression."""
+    """List folds --agent, --name, --type, and --filter into one AND expression."""
     client = StubInsightClient()
 
     result = await insights.list_insights(
@@ -221,6 +226,7 @@ async def test_list_combines_agent_and_type_filters_with_the_generic_filter() ->
         sort="created:desc",
         filter=json.dumps({"field": "title", "op": "eq", "value": "Latency"}),
         agent="assistant",
+        name="latency-regressed",
         type="text",
     )
 
@@ -230,6 +236,7 @@ async def test_list_combines_agent_and_type_filters_with_the_generic_filter() ->
         "and": [
             {"field": "title", "op": "eq", "value": "Latency"},
             {"field": "agent_id", "op": "eq", "value": str(client.agent.id)},
+            {"field": "name", "op": "eq", "value": "latency-regressed"},
             {"field": "type", "op": "eq", "value": "text"},
         ]
     }
@@ -239,7 +246,7 @@ async def test_list_combines_agent_and_type_filters_with_the_generic_filter() ->
 
 
 async def test_list_without_shortcuts_uses_the_generic_filter_only() -> None:
-    """List without --agent or --type leaves the generic filter untouched."""
+    """List without --agent, --name, or --type leaves the generic filter untouched."""
     client = StubInsightClient()
 
     await insights.list_insights(
@@ -249,6 +256,7 @@ async def test_list_without_shortcuts_uses_the_generic_filter_only() -> None:
         sort="created:desc",
         filter=None,
         agent=None,
+        name=None,
         type=None,
     )
 
@@ -328,7 +336,11 @@ def test_public_argv_and_schema_cover_insight_lifecycle(
     client = argv_client
     insight_id = str(client.insight.id)
     payload = json.dumps(
-        {"title": "Latency regressed", "data": {"type": "text", "content": "c"}}
+        {
+            "name": "latency-regressed",
+            "title": "Latency regressed",
+            "data": {"type": "text", "content": "c"},
+        }
     )
 
     commands = [

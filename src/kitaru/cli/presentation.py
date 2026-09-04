@@ -117,6 +117,7 @@ _ANNOTATION_FIELDS = (
     _ID,
 )
 _INSIGHT_FIELDS = (
+    _NAME,
     HumanField("title", "Title"),
     HumanField("data.type", "Type"),
     _ID,
@@ -370,6 +371,7 @@ _VIEWS: dict[str, HumanView] = {
     "insight.list": _build_view(
         "Insights",
         (
+            _NAME,
             HumanField("title", "Title"),
             HumanField("data.type", "Type"),
             HumanField("agent_id", "Agent", 120),
@@ -380,6 +382,7 @@ _VIEWS: dict[str, HumanView] = {
     "insight.create": _build_view(
         "Insights",
         (
+            _NAME,
             HumanField("title", "Title"),
             HumanField("data.type", "Type"),
             _ID,

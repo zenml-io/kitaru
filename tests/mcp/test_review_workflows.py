@@ -369,6 +369,7 @@ async def test_review_insight_creates_and_updates_forward_typed_sdk_dtos() -> No
             agent_id=agent_id,
             insights=[
                 {
+                    "name": "latency-regressed",
                     "title": "Latency regressed",
                     "data": {"type": "text", "content": "It got slower."},
                 }
@@ -398,6 +399,7 @@ async def test_review_insight_creates_and_updates_forward_typed_sdk_dtos() -> No
     assert received_agent_id == agent_id
     assert [item.model_dump(mode="json") for item in cast(Any, insights)] == [
         {
+            "name": "latency-regressed",
             "title": "Latency regressed",
             "description": None,
             "data": {"type": "text", "content": "It got slower."},
@@ -419,6 +421,7 @@ def _insight(*, agent_id: uuid.UUID) -> InsightResponse:
         id=uuid.uuid4(),
         owner_id=uuid.uuid4(),
         agent_id=agent_id,
+        name="latency-regressed",
         title="Latency regressed",
         description=None,
         data={"type": "text", "content": "It got slower."},

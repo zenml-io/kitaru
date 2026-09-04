@@ -132,6 +132,7 @@ InsightData = Annotated[
 class InsightInput(RequestModel):
     """Insight input."""
 
+    name: str = Field(description="Insight name.")
     title: str = Field(description="Insight title.")
     description: str | None = Field(default=None, description="Insight description.")
     data: InsightData = Field(description="Insight data.")
@@ -169,6 +170,7 @@ class InsightResponse(OwnedResponseModel):
 
     id: uuid.UUID = Field(description="Insight id.")
     agent_id: uuid.UUID = Field(description="Agent the insight belongs to.")
+    name: str = Field(description="Insight name.")
     title: str = Field(description="Insight title.")
     description: str | None = Field(description="Insight description.")
     data: InsightData = Field(description="Insight data.")

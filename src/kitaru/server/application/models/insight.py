@@ -31,6 +31,7 @@ class InsightFilter(ListFilter):
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "name": FilterField(value_type=str, ops=EQUALITY_OPS),
         "type": FilterField(value_type=str, ops=EQUALITY_OPS),
     }
 
@@ -38,6 +39,7 @@ class InsightFilter(ListFilter):
 class InsightInput(FrozenModel):
     """Insight input."""
 
+    name: str
     title: str
     description: str | None = None
     data: InsightData

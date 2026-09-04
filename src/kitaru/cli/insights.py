@@ -69,6 +69,7 @@ async def list_insights(
     sort: str,
     filter: str | None,
     agent: str | None,
+    name: str | None,
     type: str | None,
 ) -> CommandResult:
     """List one server page of insights."""
@@ -84,6 +85,8 @@ async def list_insights(
                 field="agent_id", op=FilterOp.EQ, value=str(resolved_agent.id)
             )
         )
+    if name is not None:
+        conditions.append(FilterCondition(field="name", op=FilterOp.EQ, value=name))
     if type is not None:
         conditions.append(FilterCondition(field="type", op=FilterOp.EQ, value=type))
     if conditions:

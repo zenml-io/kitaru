@@ -46,10 +46,12 @@ async def _create_insights(
             "agent_id": agent_id,
             "insights": [
                 {
+                    "name": "first",
                     "title": "first",
                     "data": {"type": "text", "content": "Latency regressed."},
                 },
                 {
+                    "name": "second",
                     "title": "second",
                     "data": {"type": "text", "content": "Error rate dropped."},
                 },
@@ -129,7 +131,11 @@ async def test_create_insights_missing_agent(client: httpx.AsyncClient) -> None:
         json={
             "agent_id": "00000000-0000-0000-0000-000000000000",
             "insights": [
-                {"title": "insight", "data": {"type": "text", "content": "x"}}
+                {
+                    "name": "insight",
+                    "title": "insight",
+                    "data": {"type": "text", "content": "x"},
+                }
             ],
         },
     )

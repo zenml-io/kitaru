@@ -22,7 +22,7 @@ from pydantic import AfterValidator, Field
 from kitaru.api_models.v1.insight import InsightData
 from kitaru.server.domain.base import DomainModel, NotFoundError, ValidationError
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.names import MAX_NAME_LENGTH
+from kitaru.server.domain.names import MAX_NAME_LENGTH, Name
 
 
 class InsightNotFound(NotFoundError):
@@ -65,6 +65,7 @@ class Insight(DomainModel):
     id: uuid.UUID = Field(default_factory=uuid7)
     owner_id: uuid.UUID
     agent_id: uuid.UUID
+    name: Name
     title: Title
     description: str | None = None
     data: InsightData

@@ -1929,6 +1929,13 @@ async def insight_create(
                 "Only insights for this exact agent UUID or name.",
             ),
             ParameterSpec(
+                "--name",
+                "string",
+                "option",
+                False,
+                "Only insights with this exact name.",
+            ),
+            ParameterSpec(
                 "--type",
                 "text|categorical|binned",
                 "option",
@@ -1946,6 +1953,7 @@ async def insight_list(
     sort: str = "created:desc",
     filter: str | None = None,
     agent: str | None = None,
+    name: str | None = None,
     type: Literal["text", "categorical", "binned"] | None = None,
 ) -> CommandResult:
     """List one server page of insights."""
@@ -1957,6 +1965,7 @@ async def insight_list(
             sort=sort,
             filter=filter,
             agent=agent,
+            name=name,
             type=type,
         )
 

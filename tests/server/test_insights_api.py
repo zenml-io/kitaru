@@ -37,9 +37,10 @@ from kitaru.server.domain.account import Account
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 
-def _text_insight(title: str = "insight") -> dict[str, object]:
+def _text_insight(title: str = "insight", name: str = "insight") -> dict[str, object]:
     """Build a text insight input payload."""
     return {
+        "name": name,
         "title": title,
         "data": {"type": "text", "content": "Latency regressed."},
     }
@@ -136,7 +137,25 @@ async def test_create_insights_empty_title(
         "/api/v1/insights",
         json={
             "agent_id": agent_id,
-            "insights": [{"title": "", "data": {"type": "text", "content": "a"}}],
+            "insights": [
+                {"name": "n", "title": "", "data": {"type": "text", "content": "a"}}
+            ],
+        },
+    )
+    assert response.status_code == 422
+
+
+async def test_create_insights_empty_name(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Observe HTTP 422 for an insight with an empty name."""
+    response = await client.post(
+        "/api/v1/insights",
+        json={
+            "agent_id": agent_id,
+            "insights": [
+                {"name": "", "title": "t", "data": {"type": "text", "content": "a"}}
+            ],
         },
     )
     assert response.status_code == 422
@@ -165,6 +184,7 @@ async def test_create_insights_duplicate_category_labels(
             "agent_id": agent_id,
             "insights": [
                 {
+                    "name": "categories",
                     "title": "categories",
                     "data": {
                         "type": "categorical",
@@ -190,6 +210,7 @@ async def test_create_insights_non_contiguous_bins(
             "agent_id": agent_id,
             "insights": [
                 {
+                    "name": "latency",
                     "title": "latency",
                     "data": {
                         "type": "binned",
@@ -247,6 +268,28 @@ async def test_list_insights_filters_by_agent_id(
     assert body["items"][0]["agent_id"] == agent_id
 
 
+async def test_list_insights_filters_by_name(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Filter insights by exact name."""
+    await client.post(
+        "/api/v1/insights",
+        json={"agent_id": agent_id, "insights": [_text_insight(name="first")]},
+    )
+    await client.post(
+        "/api/v1/insights",
+        json={"agent_id": agent_id, "insights": [_text_insight(name="second")]},
+    )
+
+    filter_expression = {"field": "name", "op": "eq", "value": "first"}
+    response = await client.get(
+        "/api/v1/insights", params={"filter": json.dumps(filter_expression)}
+    )
+    body = response.json()
+    assert len(body["items"]) == 1
+    assert body["items"][0]["name"] == "first"
+
+
 async def test_list_insights_filters_by_type(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
@@ -261,6 +304,7 @@ async def test_list_insights_filters_by_type(
             "agent_id": agent_id,
             "insights": [
                 {
+                    "name": "categories",
                     "title": "categories",
                     "data": {
                         "type": "categorical",
@@ -368,6 +412,22 @@ async def test_update_insight_omitted_description_leaves_it_unchanged(
     body = response.json()
     assert body["title"] == "renamed"
     assert body["description"] == "old description"
+
+
+async def test_update_insight_rejects_name(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Observe HTTP 422 when the update body carries a name field."""
+    created = (
+        await client.post(
+            "/api/v1/insights",
+            json={"agent_id": agent_id, "insights": [_text_insight()]},
+        )
+    ).json()[0]
+    response = await client.patch(
+        f"/api/v1/insights/{created['id']}", json={"name": "renamed"}
+    )
+    assert response.status_code == 422
 
 
 async def test_update_insight_not_found(client: httpx.AsyncClient) -> None:

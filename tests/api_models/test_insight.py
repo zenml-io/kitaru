@@ -142,7 +142,7 @@ def test_lower_bound_less_than_upper_bound_accepted() -> None:
 )
 def test_discriminator_round_trip(data: dict[str, object]) -> None:
     """Round-trip every insight data variant through model_validate on a dict."""
-    insight = InsightInput.model_validate({"title": "t", "data": data})
+    insight = InsightInput.model_validate({"name": "n", "title": "t", "data": data})
     restored = InsightInput.model_validate(insight.model_dump())
     assert restored == insight
 
@@ -150,7 +150,7 @@ def test_discriminator_round_trip(data: dict[str, object]) -> None:
 def test_text_discriminator_resolves_type() -> None:
     """Resolve the text variant from its discriminator."""
     insight = InsightInput.model_validate(
-        {"title": "t", "data": {"type": "text", "content": "hello"}}
+        {"name": "n", "title": "t", "data": {"type": "text", "content": "hello"}}
     )
     assert isinstance(insight.data, TextInsightData)
     assert insight.data.content == "hello"
@@ -160,6 +160,7 @@ def test_categorical_discriminator_resolves_type() -> None:
     """Resolve the categorical variant from its discriminator."""
     insight = InsightInput.model_validate(
         {
+            "name": "n",
             "title": "t",
             "data": {"type": "categorical", "values": [{"label": "a", "value": 1}]},
         }
@@ -172,6 +173,7 @@ def test_binned_discriminator_resolves_type() -> None:
     """Resolve the binned variant from its discriminator."""
     insight = InsightInput.model_validate(
         {
+            "name": "n",
             "title": "t",
             "data": {
                 "type": "binned",

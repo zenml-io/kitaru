@@ -390,6 +390,7 @@ async def test_insight_missing_agent(setup: Setup) -> None:
     insight = Insight(
         owner_id=setup.owner_id,
         agent_id=uuid.uuid4(),
+        name="insight",
         title="insight",
         data=TextInsightData(content="root cause"),
     )

@@ -73,6 +73,7 @@ class InsightService:
             Insight(
                 owner_id=actor.account.id,
                 agent_id=command.agent_id,
+                name=item.name,
                 title=item.title,
                 description=item.description,
                 data=item.data,
