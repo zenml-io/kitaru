@@ -6,6 +6,7 @@
 import asyncio
 import subprocess
 import sys
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -144,6 +145,7 @@ async def test_langfuse_sync_exception_is_best_effort() -> None:
 
     observer = object.__new__(LangfuseGenerationObserver)
     observer._client = BrokenClient()
+    observer._sync_call_lock = threading.Lock()
 
     await observe_safely(
         observer,
@@ -154,6 +156,7 @@ async def test_langfuse_sync_exception_is_best_effort() -> None:
 def test_blocking_langfuse_call_does_not_delay_event_loop_shutdown() -> None:
     script = """
 import asyncio
+import threading
 import time
 from kitaru.insights.observability import (
     GenerationEvent,
@@ -167,6 +170,7 @@ class BlockingClient:
 
 observer = object.__new__(LangfuseGenerationObserver)
 observer._client = BlockingClient()
+observer._sync_call_lock = threading.Lock()
 asyncio.run(
     observe_safely(
         observer,
@@ -184,3 +188,43 @@ asyncio.run(
     )
 
     assert result.returncode == 0, result.stderr
+
+
+async def test_repeated_timeouts_keep_one_live_sync_call_per_observer() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class FakeObservation:
+        def end(self) -> None:
+            pass
+
+    class BlockingClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def start_observation(self, **kwargs):
+            self.calls += 1
+            started.set()
+            release.wait(timeout=2)
+            return FakeObservation()
+
+    client = BlockingClient()
+    observer = object.__new__(LangfuseGenerationObserver)
+    observer._client = client
+    observer._sync_call_lock = threading.Lock()
+    event = GenerationEvent(name="validation", run_id="run", metadata={})
+
+    await observe_safely(observer, event, timeout_seconds=0.001)
+    assert started.is_set()
+    for _ in range(20):
+        await observe_safely(observer, event, timeout_seconds=0.001)
+
+    assert client.calls == 1
+    assert observer._sync_call_lock.locked()
+
+    release.set()
+    for _ in range(20):
+        if not observer._sync_call_lock.locked():
+            break
+        await asyncio.sleep(0.001)
+    assert not observer._sync_call_lock.locked()

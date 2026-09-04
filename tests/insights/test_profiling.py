@@ -521,6 +521,10 @@ def test_sanitize_label_rejects_invalid_utf8_and_preserves_unicode() -> None:
     assert sanitize_label("invalid-\ud800-label") is None
 
 
+def test_sanitize_label_rejects_huge_whitespace_padding_before_strip() -> None:
+    assert sanitize_label(" " * 100_000 + "lookup_order") is None
+
+
 def test_invalid_utf8_tool_and_model_labels_cannot_break_serialization() -> None:
     invalid = "invalid-\ud800-label"
     tool_session = _calls(
@@ -1086,6 +1090,30 @@ def test_missing_payload_and_timing_fields_report_honest_coverage() -> None:
     assert "timing" in caveats
     assert "tool identity" in caveats
     assert "user text" in caveats
+
+
+@pytest.mark.parametrize(
+    ("started_at", "ended_at"),
+    [
+        (NOW.replace(tzinfo=None), NOW),
+        (NOW, NOW.replace(tzinfo=None)),
+    ],
+)
+def test_mixed_timezone_awareness_is_unavailable_timing(
+    started_at: datetime,
+    ended_at: datetime,
+) -> None:
+    result = profile_sessions(
+        [
+            _session(1, started_at=started_at, ended_at=ended_at),
+            _session(2, started_at=started_at, ended_at=ended_at),
+        ]
+    )
+
+    assert "recorded-duration-distribution" not in {
+        candidate.id for candidate in result.candidates
+    }
+    assert "timing coverage is incomplete" in " ".join(result.coverage.caveats).lower()
 
 
 def test_prompt_injection_source_text_is_never_exported() -> None:
