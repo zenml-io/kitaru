@@ -17,6 +17,7 @@ import logging
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
+from importlib.metadata import version
 from typing import Any
 
 import httpx
@@ -250,12 +251,14 @@ async def test_create_import_not_found_for_unknown_payload(
 
 
 async def test_create_import_starts_an_ephemeral_worker(
+    app: FastAPI,
     client: httpx.AsyncClient,
     services: JobAndTaskServices,
     ephemeral_workers: FakeEphemeralWorkers,
     auth_service: AuthService,
 ) -> None:
     """Register and start an ephemeral worker pinned to the job."""
+    app.state.server_id = uuid.uuid4()
     response = await client.post(
         "/api/v1/imports", json=await _create_import_inputs(services, builtin=True)
     )
@@ -269,6 +272,14 @@ async def test_create_import_starts_an_ephemeral_worker(
 
     worker = await services.workers.get(spec.worker_id)
     assert worker.name == f"job-{job_id}"
+    assert spec.name == worker.name
+    assert spec.tags == {
+        "kitaru/worker_id": str(worker.id),
+        "kitaru/job_id": str(job_id),
+        "kitaru/account_id": str(ACCOUNT.id),
+        "kitaru/server_version": version("kitaru"),
+        "kitaru/server_id": str(app.state.server_id),
+    }
     assert worker.scope == WorkerScope(
         claims=[
             WorkerClaim(kind=TaskKind.IMPORTER),

@@ -63,6 +63,8 @@ class ModalEphemeralWorkers:
         await modal.Sandbox.create.aio(
             *self._command,
             app=app,
+            name=spec.name,
+            tags=spec.tags,
             image=modal.Image.from_registry(self._image),
             env={
                 "KITARU_API_URL": spec.server_url,

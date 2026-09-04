@@ -124,11 +124,14 @@ def _settings(
 
 
 def _spec() -> EphemeralWorkerSpec:
+    job_id = uuid.uuid4()
     return EphemeralWorkerSpec(
         worker_id=uuid.uuid4(),
+        name=f"job-{job_id}",
         worker_token="worker-token",
         server_url="https://kitaru.example.com",
-        job_id=uuid.uuid4(),
+        job_id=job_id,
+        tags={"kitaru/job_id": str(job_id)},
     )
 
 
@@ -155,6 +158,8 @@ async def test_start_creates_sandbox_with_resource_limits(
     args, kwargs = fake_modal.sandbox_create.calls[0]
     assert args == ("python", "-m", "kitaru.worker")
     assert kwargs["app"] is fake_modal.app
+    assert kwargs["name"] == spec.name
+    assert kwargs["tags"] == spec.tags
     assert kwargs["image"] is fake_modal.image
     assert kwargs["env"] == {
         "KITARU_API_URL": spec.server_url,

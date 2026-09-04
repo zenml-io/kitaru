@@ -14,6 +14,8 @@
 """Ephemeral worker start scheduling."""
 
 import logging
+import uuid
+from importlib.metadata import version
 
 from fastapi import BackgroundTasks
 from pydantic import SecretStr
@@ -31,7 +33,8 @@ from kitaru.server.application.services.worker_service import (
     get_ephemeral_scope,
 )
 from kitaru.server.domain.job import Job
-from kitaru.server.domain.worker import scope_covers
+from kitaru.server.domain.names import RESERVED_LABEL_PREFIX
+from kitaru.server.domain.worker import Worker, scope_covers
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,7 @@ async def start_ephemeral_worker(
     auth_service: AuthService,
     ephemeral_workers: EphemeralWorkers,
     settings: APISettings,
+    server_id: uuid.UUID | None,
     background_tasks: BackgroundTasks,
     actor: AuthContext,
 ) -> None:
@@ -58,6 +62,7 @@ async def start_ephemeral_worker(
         auth_service: Authentication service for the current request.
         ephemeral_workers: Ephemeral worker backend.
         settings: API settings for this process.
+        server_id: Persisted server id, None before startup resolved it.
         background_tasks: Tasks run after the response is sent.
         actor: Caller context.
     """
@@ -79,13 +84,39 @@ async def start_ephemeral_worker(
     )
     spec = EphemeralWorkerSpec(
         worker_id=worker.id,
+        name=worker.name,
         worker_token=SecretStr(issued_token.token),
         server_url=settings.SERVER_URL,
         job_id=job.id,
+        tags=_get_tags(worker, actor, server_id),
     )
     # Background tasks run after the route commits, so the worker is persisted
     # in the DB by then.
     background_tasks.add_task(_start_worker, ephemeral_workers, spec)
+
+
+def _get_tags(
+    worker: Worker, actor: AuthContext, server_id: uuid.UUID | None
+) -> dict[str, str]:
+    """Build the tags the backend attaches to the worker's sandbox.
+
+    Args:
+        worker: Registered worker.
+        actor: Caller context.
+        server_id: Persisted server id, None before startup resolved it.
+
+    Returns:
+        Tags.
+    """
+    tags = {
+        f"{RESERVED_LABEL_PREFIX}worker_id": str(worker.id),
+        f"{RESERVED_LABEL_PREFIX}job_id": str(worker.scope.job_id),
+        f"{RESERVED_LABEL_PREFIX}account_id": str(actor.account.id),
+        f"{RESERVED_LABEL_PREFIX}server_version": version("kitaru"),
+    }
+    if server_id is not None:
+        tags[f"{RESERVED_LABEL_PREFIX}server_id"] = str(server_id)
+    return tags
 
 
 async def _start_worker(

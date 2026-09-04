@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Mapping
 from typing import ClassVar
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
@@ -39,6 +39,8 @@ class EphemeralWorkerSpec(FrozenModel):
     """Ephemeral worker spec."""
 
     worker_id: uuid.UUID
+    name: str
     worker_token: SecretStr
     server_url: str
     job_id: uuid.UUID
+    tags: dict[str, str] = Field(default_factory=dict)

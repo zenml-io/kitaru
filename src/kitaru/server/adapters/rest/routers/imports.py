@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Import routes."""
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, status
@@ -26,6 +27,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,
     get_ephemeral_workers,
     get_job_service,
+    get_server_id_state,
     get_worker_service,
 )
 from kitaru.server.adapters.rest.ephemeral_workers import start_ephemeral_worker
@@ -56,6 +58,7 @@ async def create_import(
     ephemeral_workers: Annotated[
         EphemeralWorkers | None, Depends(get_ephemeral_workers)
     ],
+    server_id: Annotated[uuid.UUID | None, Depends(get_server_id_state)],
     background_tasks: BackgroundTasks,
 ) -> JobResponse:
     """Import sessions from a payload blob, as a job holding one importer task.
@@ -71,6 +74,7 @@ async def create_import(
         actor: Caller context.
         settings: API settings for this process.
         ephemeral_workers: Ephemeral worker backend, None when none is configured.
+        server_id: Persisted server id, None before startup resolved it.
         background_tasks: Tasks run after the response is sent.
 
     Returns:
@@ -86,6 +90,7 @@ async def create_import(
             auth_service,
             ephemeral_workers,
             settings,
+            server_id,
             background_tasks,
             actor,
         )
