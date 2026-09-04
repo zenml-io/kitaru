@@ -516,12 +516,13 @@ def _tool_identity(
     node: SessionNodeResponse, budget: _PayloadBudget
 ) -> tuple[str, str] | None:
     """Return evaluator-compatible exact tool name and canonical inputs."""
-    if node.tool_name is None or node.inputs is None:
+    tool_name = sanitize_label(node.tool_name)
+    if tool_name is None or node.inputs is None:
         return None
     normalized, complete = _normalize_observed(node.inputs, budget)
     if not complete:
         return None
-    return node.tool_name, json.dumps(
+    return tool_name, json.dumps(
         normalized,
         sort_keys=True,
         separators=(",", ":"),
@@ -834,7 +835,9 @@ def _scan_session(
     for position, (first, second) in enumerate(pairwise(calls)):
         first_identity = identities[position]
         second_identity = identities[position + 1]
-        label = sanitize_label(first.tool_name) or "Unavailable tool"
+        first_tool_name = sanitize_label(first.tool_name)
+        second_tool_name = sanitize_label(second.tool_name)
+        label = first_tool_name or "Unavailable tool"
         if first_identity is not None and first_identity == second_identity:
             _record(
                 state,
@@ -854,8 +857,8 @@ def _scan_session(
         if (
             first.status is NodeStatus.FAILED
             and second.status is NodeStatus.FAILED
-            and first.tool_name is not None
-            and first.tool_name == second.tool_name
+            and first_tool_name is not None
+            and first_tool_name == second_tool_name
         ):
             _record(
                 state,

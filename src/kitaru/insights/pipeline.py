@@ -344,7 +344,9 @@ def _assemble_result(
 
 
 def _get_oversize_result(
-    result: InsightGenerationResult, maximum: int
+    result: InsightGenerationResult,
+    maximum: int,
+    profiling: ProfilingResult,
 ) -> InsightGenerationResult | None:
     """Retain the largest ordered card prefix that fits the result byte bound."""
     available = len(result.model_dump_json().encode("utf-8"))
@@ -356,6 +358,7 @@ def _get_oversize_result(
         available=available,
         analyzed=maximum,
     )
+    candidates = {candidate.id: candidate for candidate in profiling.candidates}
     for retained_count in range(len(result.insights) - 1, 0, -1):
         coverage = result.coverage.model_copy(
             update={
@@ -381,11 +384,27 @@ def _get_oversize_result(
             )
 
         bounded_insights: list[InsightInput] = []
+        prompts_fit = True
         for insight in retained:
-            metadata = result.card_metadata(insight).model_copy(
+            original_metadata = result.card_metadata(insight)
+            try:
+                investigation_prompt = _investigation_prompt(
+                    candidates[insight.name],
+                    context=result.context,
+                    coverage=coverage,
+                    contributing_session_ids=(
+                        original_metadata.contributing_session_ids
+                    ),
+                    evidence=original_metadata.evidence,
+                )
+            except _OutputBoundError:
+                prompts_fit = False
+                break
+            metadata = original_metadata.model_copy(
                 update={
                     "coverage": coverage,
                     "recommended": insight.name == recommendation_id,
+                    "investigation_prompt": investigation_prompt,
                 }
             )
             bounded_insights.append(
@@ -397,6 +416,9 @@ def _get_oversize_result(
                     }
                 )
             )
+
+        if not prompts_fit:
+            continue
 
         bounded = InsightGenerationResult.model_validate(
             result.model_copy(
@@ -465,12 +487,13 @@ def _validate_sessions(
 async def _finalize_result(
     result: InsightGenerationResult,
     *,
+    profiling: ProfilingResult,
     maximum: int,
     observer: GenerationObserver | None,
     run_id: str,
 ) -> InsightGenerationResult:
     """Apply the final byte bound and emit exactly one validation event."""
-    bounded = _get_oversize_result(result, maximum) or result
+    bounded = _get_oversize_result(result, maximum, profiling) or result
     result_bytes = len(bounded.model_dump_json().encode("utf-8"))
     if result_bytes > maximum:
         await observe_safely(
@@ -537,6 +560,7 @@ async def generate_insights(
                 mode=GenerationMode.DETERMINISTIC,
                 reason="no_eligible_candidates",
             ),
+            profiling=profiling,
             maximum=selected_config.max_result_bytes,
             observer=observer,
             run_id=run_id,
@@ -587,12 +611,14 @@ async def generate_insights(
                 diagnostics=plan.diagnostics,
                 reason="selected_candidate_exceeds_output_bounds",
             ),
+            profiling=profiling,
             maximum=selected_config.max_result_bytes,
             observer=observer,
             run_id=run_id,
         )
     return await _finalize_result(
         result,
+        profiling=profiling,
         maximum=selected_config.max_result_bytes,
         observer=observer,
         run_id=run_id,
