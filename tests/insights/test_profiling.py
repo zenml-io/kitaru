@@ -315,6 +315,37 @@ def test_profiles_literal_user_text_signals_without_retaining_text() -> None:
         assert "literal" in (candidate.caveat or "").lower()
 
 
+def test_repeated_user_turns_survive_mirrored_message_history() -> None:
+    messages = [
+        {"role": "user", "content": "WRONG"},
+        {"role": "assistant", "content": "Let me try again."},
+        {"role": "user", "content": "WRONG"},
+    ]
+    session_id = _id(101)
+    session = _session(
+        1,
+        [
+            _node(
+                0,
+                session_id=session_id,
+                node_type=NodeType.LLM_CALL,
+                tool_name=None,
+                model="gpt-5.4",
+                inputs={"messages": messages},
+                outputs="response",
+            )
+        ],
+        inputs={"messages": messages},
+    )
+
+    candidate = _candidate(profile_sessions([session]), "correction-language")
+
+    assert candidate.coverage.occurrences == 2
+    assert {fact.name: fact.value for fact in candidate.facts}["occurrences"] == 2
+    assert "appears 2 times" in candidate.fallback_description
+    assert len(candidate.evidence) == 2
+
+
 def test_non_user_text_and_close_language_matches_are_ignored() -> None:
     session = _session(
         1,

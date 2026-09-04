@@ -674,14 +674,19 @@ def _selected_user_texts(
     nodes: list[SessionNodeResponse],
 ) -> tuple[list[tuple[str, uuid.UUID | None]], bool]:
     """Select user text using explicit selectors before conservative recursion."""
-    deduplicated: dict[str, uuid.UUID | None] = {}
+    deduplicated: dict[tuple[str, int], uuid.UUID | None] = {}
     truncations_before = state.payload_budget.truncation_count
 
     def add_texts(texts: Sequence[str], node_id: uuid.UUID | None) -> None:
+        occurrences: Counter[str] = Counter()
         for text in texts:
             normalized = text.strip()
             if normalized:
-                deduplicated.setdefault(normalized, node_id)
+                occurrence = occurrences[normalized]
+                occurrences[normalized] += 1
+                # The ordinal preserves repeated turns within one representation;
+                # setdefault merges that same history when another payload mirrors it.
+                deduplicated.setdefault((normalized, occurrence), node_id)
 
     found, value, value_depth = _resolve_pointer(
         session.session.inputs,
@@ -706,9 +711,13 @@ def _selected_user_texts(
             else _user_messages(node.inputs, state.payload_budget)
         )
         add_texts(node_texts, node.id)
-    selected = sorted(
-        deduplicated.items(), key=lambda item: (item[0], str(item[1] or ""))
-    )
+    selected = [
+        (text, node_id)
+        for (text, _), node_id in sorted(
+            deduplicated.items(),
+            key=lambda item: (item[0][0], item[0][1], str(item[1] or "")),
+        )
+    ]
     return selected, state.payload_budget.truncation_count == truncations_before
 
 
