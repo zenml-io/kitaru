@@ -165,7 +165,13 @@ class OpenAIInsightGenerator:
 
 def _bounded_string(value: object) -> str | None:
     """Keep only bounded provider receipt strings."""
-    return value if isinstance(value, str) and 0 < len(value) <= 255 else None
+    if not isinstance(value, str) or not 0 < len(value) <= 255:
+        return None
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
+    return value
 
 
 def _timeout_error_types(module: Any) -> tuple[type[Exception], ...]:

@@ -55,6 +55,13 @@ class ExampleEnum(StrEnum):
     VALUE = "value"
 
 
+class ExplosiveRoleCollection(list[object]):
+    """Structured role collection that must never be coerced to text."""
+
+    def __str__(self) -> str:
+        raise AssertionError("structured roles must not be stringified")
+
+
 def _id(number: int) -> uuid.UUID:
     return uuid.UUID(f"01990000-0000-7000-8000-{number:012d}")
 
@@ -989,6 +996,59 @@ def test_payload_truncated_text_session_is_excluded_from_language_coverage(
         "Matching sessions": 1,
         "Other sessions": 0,
     }
+
+
+@pytest.mark.parametrize(
+    "role",
+    ["user" + " " * 100_000, ExplosiveRoleCollection([None] * 100_000)],
+    ids=["huge-string", "huge-collection"],
+)
+def test_unbounded_or_structured_roles_are_not_coerced(
+    role: object,
+) -> None:
+    partial = _session(
+        1,
+        inputs={"messages": [{"role": role, "content": "WRONG"}]},
+    )
+    complete = _session(
+        2,
+        inputs={"messages": [{"role": "user", "content": "WRONG"}]},
+    )
+
+    candidate = _candidate(
+        profile_sessions(
+            [partial, complete],
+            config=ProfilingConfig(max_payload_bytes=1_000),
+        ),
+        "correction-language",
+    )
+
+    assert candidate.contributing_session_ids == [complete.session.id]
+    assert candidate.coverage.sessions_analyzed == 1
+
+
+def test_oversized_text_selector_invalidates_session_language_coverage() -> None:
+    partial = _session(
+        1,
+        inputs={"messages": [{"role": "user", "content": "WRONG"}]},
+    )
+    partial.session.input_text_selector = "/" + "x" * 100_000
+    complete = _session(
+        2,
+        inputs={"messages": [{"role": "user", "content": "WRONG"}]},
+    )
+
+    candidate = _candidate(
+        profile_sessions([partial, complete]),
+        "correction-language",
+    )
+
+    assert candidate.contributing_session_ids == [complete.session.id]
+    assert candidate.coverage.sessions_analyzed == 1
+    assert (
+        "payload"
+        in " ".join(profile_sessions([partial, complete]).coverage.caveats).lower()
+    )
 
 
 def test_payload_byte_bound_counts_mapping_keys_and_container_syntax() -> None:

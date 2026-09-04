@@ -23,15 +23,23 @@ from kitaru.insights.openai_generator import (
 
 
 class FakeResponses:
-    def __init__(self, parsed: AnalystPlan) -> None:
+    def __init__(
+        self,
+        parsed: AnalystPlan,
+        *,
+        response_id: str = "resp_1",
+        response_model: str = "returned-model",
+    ) -> None:
         self.parsed = parsed
+        self.response_id = response_id
+        self.response_model = response_model
         self.kwargs: dict[str, object] | None = None
 
     async def parse(self, **kwargs):
         self.kwargs = kwargs
         return SimpleNamespace(
-            id="resp_1",
-            model="returned-model",
+            id=self.response_id,
+            model=self.response_model,
             usage=SimpleNamespace(input_tokens=10, output_tokens=5),
             output_parsed=self.parsed,
         )
@@ -105,6 +113,89 @@ async def test_openai_request_is_bounded_and_not_stored(monkeypatch) -> None:
     assert responses.kwargs["text_format"] is AnalystPlan
     assert "test-secret" not in repr(generator)
     assert result.receipt.request_id == "resp_1"
+
+
+@pytest.mark.parametrize(
+    ("response_id", "response_model", "expected_id", "expected_model"),
+    [
+        ("broken-\ud800-id", "valid-model", None, "valid-model"),
+        ("valid-id", "broken-\udfff-model", "valid-id", None),
+        ("broken-\ud800-id", "broken-\udfff-model", None, None),
+    ],
+)
+async def test_malformed_provider_receipt_strings_are_omitted(
+    monkeypatch,
+    response_id: str,
+    response_model: str,
+    expected_id: str | None,
+    expected_model: str | None,
+) -> None:
+    plan = AnalystPlan(
+        selected_candidate_ids=["candidate"],
+        recommended_candidate_id="candidate",
+        rationale="Useful.",
+    )
+    responses = FakeResponses(
+        plan,
+        response_id=response_id,
+        response_model=response_model,
+    )
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs) -> None:
+            self.responses = responses
+
+    monkeypatch.setattr(
+        "kitaru.insights.openai_generator.importlib.import_module",
+        lambda name: SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI),
+    )
+    generator = OpenAIInsightGenerator(api_key="test-secret")
+
+    result = await generator.analyze(
+        projection=_projection(),
+        config=ModelGenerationConfig(model="gpt-test"),
+        timeout_seconds=4.0,
+    )
+
+    assert result.value == plan
+    assert result.receipt.request_id == expected_id
+    assert result.receipt.model == expected_model
+    result.receipt.model_dump_json().encode("utf-8")
+
+
+async def test_valid_unicode_provider_receipt_strings_are_preserved(
+    monkeypatch,
+) -> None:
+    plan = AnalystPlan(
+        selected_candidate_ids=["candidate"],
+        recommended_candidate_id="candidate",
+        rationale="Useful.",
+    )
+    responses = FakeResponses(
+        plan,
+        response_id="résp-🤖",
+        response_model="modèle-λ",
+    )
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs) -> None:
+            self.responses = responses
+
+    monkeypatch.setattr(
+        "kitaru.insights.openai_generator.importlib.import_module",
+        lambda name: SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI),
+    )
+    generator = OpenAIInsightGenerator(api_key="test-secret")
+
+    result = await generator.analyze(
+        projection=_projection(),
+        config=ModelGenerationConfig(model="gpt-test"),
+        timeout_seconds=4.0,
+    )
+
+    assert result.receipt.request_id == "résp-🤖"
+    assert result.receipt.model == "modèle-λ"
+    result.receipt.model_dump_json().encode("utf-8")
 
 
 async def test_openai_sdk_timeout_remains_a_timeout(monkeypatch) -> None:
