@@ -674,10 +674,11 @@ def _selected_user_texts(
     nodes: list[SessionNodeResponse],
 ) -> tuple[list[tuple[str, uuid.UUID | None]], bool]:
     """Select user text using explicit selectors before conservative recursion."""
-    deduplicated: dict[tuple[str, int], uuid.UUID | None] = {}
+    mirrored: dict[tuple[str, int], uuid.UUID | None] = {}
+    selected_node_turns: dict[str, list[uuid.UUID]] = defaultdict(list)
     truncations_before = state.payload_budget.truncation_count
 
-    def add_texts(texts: Sequence[str], node_id: uuid.UUID | None) -> None:
+    def add_mirrored_texts(texts: Sequence[str], node_id: uuid.UUID | None) -> None:
         occurrences: Counter[str] = Counter()
         for text in texts:
             normalized = text.strip()
@@ -686,7 +687,13 @@ def _selected_user_texts(
                 occurrences[normalized] += 1
                 # The ordinal preserves repeated turns within one representation;
                 # setdefault merges that same history when another payload mirrors it.
-                deduplicated.setdefault((normalized, occurrence), node_id)
+                mirrored.setdefault((normalized, occurrence), node_id)
+
+    def add_selected_node_turns(texts: Sequence[str], node_id: uuid.UUID) -> None:
+        for text in texts:
+            normalized = text.strip()
+            if normalized:
+                selected_node_turns[normalized].append(node_id)
 
     found, value, value_depth = _resolve_pointer(
         session.session.inputs,
@@ -698,7 +705,7 @@ def _selected_user_texts(
         if found
         else _user_messages(session.session.inputs, state.payload_budget)
     )
-    add_texts(session_texts, None)
+    add_mirrored_texts(session_texts, None)
     for node in nodes:
         if node.node_type is not NodeType.LLM_CALL:
             continue
@@ -710,7 +717,17 @@ def _selected_user_texts(
             if found
             else _user_messages(node.inputs, state.payload_budget)
         )
-        add_texts(node_texts, node.id)
+        if found:
+            add_selected_node_turns(node_texts, node.id)
+        else:
+            add_mirrored_texts(node_texts, node.id)
+    deduplicated = dict(mirrored)
+    for text, node_ids in selected_node_turns.items():
+        for occurrence, node_id in enumerate(node_ids):
+            # A selector identifies the current turn for a particular model call.
+            # Overwriting the same ordinal from a mirrored history keeps that turn
+            # distinct without adding the history twice.
+            deduplicated[(text, occurrence)] = node_id
     selected = [
         (text, node_id)
         for (text, _), node_id in sorted(

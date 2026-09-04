@@ -57,6 +57,7 @@ _UNSUPPORTED_CLAIM = re.compile(
     r"(?:stems?|stemmed|stemming)\s+from|"
     r"produc(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|"
     r"trigger(?:s|ed|ing)?|responsible\s+for|attributable\s+to|"
+    r"(?:account|accounts|accounted|accounting)\s+for|"
     r"(?:contributes?|contributed|contributing)\s+to|"
     r"(?:give|gives|gave|given|giving)\s+rise\s+to|"
     r"(?:bring|brings|brought|bringing)\s+about|"
@@ -75,7 +76,8 @@ _UNSUPPORTED_CLAIM = re.compile(
 )
 _OUTCOME_TOKEN = re.compile(
     r"\b(?:fail(?:ed|ing|s)?|failures?|succeed(?:ed|ing|s)?|"
-    r"success|successes|successful|successfully|complete(?:d|s)?|"
+    r"success|successes|successful|successfully|pass(?:ed|es|ing)?|"
+    r"complete(?:d|s)?|"
     r"completion(?:s)?|completing|finish(?:ed|es|ing)?|done|"
     r"in[ -]progress|"
     r"timed?[ -]out|timeouts?|cancel(?:ed|led|ation|ations|ing|s)?|"
@@ -386,7 +388,7 @@ def _outcome_categories(value: str) -> set[str]:
         token = match.group(0).lower()
         if token.startswith("fail"):
             categories.add("failure")
-        elif token.startswith(("success", "succeed")):
+        elif token.startswith(("success", "succeed", "pass")):
             categories.add("success")
         elif (
             token.startswith(("complete", "completion", "completing", "finish"))
