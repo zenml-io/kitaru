@@ -24,6 +24,7 @@ from kitaru.server.application.interfaces.replay_repository import ReplayReposit
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.evaluation import Evaluation
+from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.task import EvaluationTask
 from kitaru.server.utils import hash_params
 
@@ -57,12 +58,16 @@ async def record_task_evaluations(
     job = await job_repository.get(task.job_id)
     results = task.result if isinstance(task.result, list) else []
     params_hash = hash_params(task.params)
+    # One id per call, shared by every result it produced, so the whole set
+    # can be adopted together instead of only the row a ranking query picks.
+    invocation_id = uuid7()
     evaluations = [
         Evaluation(
             owner_id=job.owner_id,
             evaluator_version_id=task.plugin_version_id,
             session_id=task.input_session_id,
             task_id=task.id,
+            invocation_id=invocation_id,
             name=result.name,
             data_type=result.data_type,
             score=result.score,
