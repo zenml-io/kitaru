@@ -12,6 +12,20 @@ The root `pyproject.toml` and `uv.lock` manage Kitaru. `plugins/pyproject.toml` 
 
 Registration stores package metadata. It does not upload wheel bytes. A worker resolves the exact requirement when it executes a plugin task.
 
+## Feature PRs and core dependencies
+
+Feature PRs change implementation, tests, and package `Unreleased` changelog entries. Leave existing plugin package versions and server default requirements/display versions unchanged. The release-preparation PR selects the package versions and updates all matching default-catalog metadata together. This also preserves the current inventory validator's requirement that package and default versions match.
+
+The plugin workspace already uses the local Kitaru checkout through `[tool.uv.sources]`. Preserve the published minimum dependency when the plugin still supports that core version.
+
+When a plugin needs unreleased core APIs, use an exact dependency on the current development version from the root manifest. For example, use `kitaru==0.25.0+dev` while core is `0.25.0+dev`. Record the required core commit or PR in `Release context`. If the development reset has not landed, resolve that first rather than changing core's version in a plugin feature PR.
+
+The release-preparation PR replaces this placeholder with the selected compatible release floor, for example `kitaru>=0.26.0`, and regenerates `plugins/uv.lock`. Preserve extras and compatible upper bounds. Verify the candidate wheel's `Requires-Dist` metadata before publication. Never publish a plugin with the development placeholder still present. A plugin-only release needs a published core that contains the required APIs.
+
+Do not use `>=0.25.0+dev`: ordered comparisons with a local version are invalid. Do not substitute `>=0.25.0.dev0`: that range also accepts the old stable `0.25.0`. The exact development pin marks pending compatibility work; it does not prove that every checkout with that version contains the needed API. See the [Python version specification](https://packaging.python.org/en/latest/specifications/version-specifiers/).
+
+New packages require initial manifest versions and inventory entries. Adding a server default remains an explicit release decision.
+
 ## Prepare the checkout
 
 1. Change to the repository root.
@@ -253,22 +267,22 @@ Use the package directory and distribution name from this table:
 
 | Package input | Distribution | Tag format |
 |---|---|---|
-| `braintrust-importer` | `kitaru-braintrust-importer` | `braintrust-importer-vX.Y.Z` |
-| `evaluator` | `kitaru-evaluator` | `evaluator-vX.Y.Z` |
-| `jsonl-importer` | `kitaru-jsonl-importer` | `jsonl-importer-vX.Y.Z` |
-| `langfuse-importer` | `kitaru-langfuse-importer` | `langfuse-importer-vX.Y.Z` |
-| `langgraph` | `kitaru-langgraph` | `langgraph-vX.Y.Z` |
-| `logfire-importer` | `kitaru-logfire-importer` | `logfire-importer-vX.Y.Z` |
+| `braintrust-importer` | `kitaru-braintrust-importer` | `python/kitaru-braintrust-importer/vX.Y.Z` |
+| `evaluator` | `kitaru-evaluator` | `python/kitaru-evaluator/vX.Y.Z` |
+| `jsonl-importer` | `kitaru-jsonl-importer` | `python/kitaru-jsonl-importer/vX.Y.Z` |
+| `langfuse-importer` | `kitaru-langfuse-importer` | `python/kitaru-langfuse-importer/vX.Y.Z` |
+| `langgraph` | `kitaru-langgraph` | `python/kitaru-langgraph/vX.Y.Z` |
+| `logfire-importer` | `kitaru-logfire-importer` | `python/kitaru-logfire-importer/vX.Y.Z` |
 | `phoenix-importer` | `kitaru-phoenix-importer` | `python/kitaru-phoenix-importer/vX.Y.Z` |
-| `langsmith-importer` | `kitaru-langsmith-importer` | `langsmith-importer-vX.Y.Z` |
-| `openai-agents` | `kitaru-openai-agents` | `openai-agents-vX.Y.Z` |
-| `pydantic-ai` | `kitaru-pydantic-ai` | `pydantic-ai-vX.Y.Z` |
+| `langsmith-importer` | `kitaru-langsmith-importer` | `python/kitaru-langsmith-importer/vX.Y.Z` |
+| `openai-agents` | `kitaru-openai-agents` | `python/kitaru-openai-agents/vX.Y.Z` |
+| `pydantic-ai` | `kitaru-pydantic-ai` | `python/kitaru-pydantic-ai/vX.Y.Z` |
 
 Release only the distribution that contains the change. A change to any built-in evaluator releases the shared `kitaru-evaluator` distribution.
 
 ## Prepare a release commit
 
-The examples below release `kitaru-langfuse-importer` as version `0.2.0`.
+Use a release-preparation PR after the implementation merges. The examples below release `kitaru-langfuse-importer` as version `0.2.0`. Select an unused version from the current registry and tags.
 
 1. Update the selected workspace package version and lockfile.
 
@@ -277,7 +291,7 @@ uv version --project plugins --package kitaru-langfuse-importer 0.2.0 --no-sync
 ```
 
 2. For an importer or evaluator in the default catalog, change the matching requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`. The release inventory derives the expected requirement from the package version. Skip this catalog step for an adapter distribution.
-3. Add or update focused tests.
+3. Resolve any core development dependency to the selected release floor and run `uv lock --project plugins`.
 4. Verify that no unrelated plugin package version changed.
 
 ```bash
@@ -301,7 +315,7 @@ just plugin-artifact-smoke
 ```
 
 6. Run the candidate server procedure when the change affects default definitions, package installation, registration, or task execution.
-7. Commit the version, server default definitions, plugin lockfile, implementation, and tests in the same pull request.
+7. Commit the selected version, changelog, core dependency, server default metadata, and plugin lockfile in the release-preparation PR. The implementation and its tests normally arrive through earlier feature PRs.
 
 ## Configure the first PyPI release
 
@@ -321,51 +335,52 @@ Create one GitHub environment named `pypi-<distribution>` for each distribution.
 
 ## Run a release dry-run
 
-The `Release plugin` workflow must exist on the repository default branch before GitHub accepts a manual dispatch. After that bootstrap merge, dispatch a dry-run from the feature branch:
+The `Release Kitaru plugins` workflow must exist on the repository default branch before GitHub accepts a manual dispatch. Rehearse the reviewed release commit after it is reachable from `develop` or the matching maintenance branch:
 
 ```bash
 PACKAGE=langfuse-importer
 VERSION=0.2.0
-BRANCH="$(git branch --show-current)"
+RELEASE_REF="<branch-or-tag-at-reviewed-commit>"
 
 gh workflow run release-plugins.yml \
   --repo zenml-io/kitaru \
-  --ref "$BRANCH" \
-  -f package="$PACKAGE" \
-  -f version="$VERSION"
+  --ref "$RELEASE_REF" \
+  -f package-tag="python/kitaru-$PACKAGE/v$VERSION"
 
 gh run list \
   --repo zenml-io/kitaru \
   --workflow release-plugins.yml \
-  --branch "$BRANCH" \
+  --event workflow_dispatch \
   --limit 5
 ```
 
-Select the new run ID and watch it:
+Verify the new run's `headSha` matches the reviewed commit. Select its run ID and watch it:
 
 ```bash
 gh run watch RUN_ID --repo zenml-io/kitaru --exit-status
 ```
 
-Every manual dispatch is a dry-run. It checks out the selected branch SHA, validates the requested version, tests default-definition integration, installs the selected wheel in a clean environment, and builds the distribution. It does not publish or create a tag.
+Every manual dispatch is a dry-run. It validates the selected source and package version, builds the wheel, and checks installation metadata. It does not publish or create a tag. Run behavioral and default-catalog tests through the preparation checks above.
 
 ## Publish a plugin
 
-Publish only after the release commit is contained in `main`. This requirement couples plugin publishing to the repository's `main` promotion cadence.
+Publish the reviewed release commit on `develop` or the unit's matching maintenance branch. For a coordinated release, first require the core `publish-python` job to succeed and verify the exact core version on PyPI. The other core jobs can continue while plugins publish. An independent plugin release uses an already-published compatible core.
 
 ```bash
-git fetch origin main --tags
+git fetch origin develop --tags
 
 PACKAGE=langfuse-importer
 VERSION=0.2.0
-TAG="$PACKAGE-v$VERSION"
-RELEASE_SHA="$(git rev-parse origin/main)"
+TAG="python/kitaru-$PACKAGE/v$VERSION"
+RELEASE_SHA="$(gh pr view <release-pr> --repo zenml-io/kitaru --json mergeCommit --jq '.mergeCommit.oid')"
+test -n "$RELEASE_SHA" && test "$RELEASE_SHA" != null
+git merge-base --is-ancestor "$RELEASE_SHA" origin/develop
 
 git tag -a "$TAG" "$RELEASE_SHA" -m "$TAG"
 git push origin "$TAG"
 ```
 
-The tag push starts the `Release Kitaru plugins` workflow. The workflow derives the plugin package and version from the tag. It rejects a tag whose commit is not contained in `origin/develop`. It then runs the tests, builds the selected distribution, publishes through PyPI Trusted Publishing, and creates a GitHub Release with the wheel, source distribution, and checksums.
+The tag push starts the `Release Kitaru plugins` workflow. The workflow resolves the package and version from the tag and accepts commits reachable from `develop` or the matching maintenance branch. It builds and verifies the distribution, publishes through PyPI Trusted Publishing, and creates a GitHub Release with the wheel, source distribution, and checksums. Stable publication then creates or advances the maintenance branch. For a maintenance release, use that branch and its exact reviewed merge commit in the commands above.
 
 If publication stops after PyPI accepts one or more files, rerun the failed jobs from the same workflow run. The rerun downloads the original build artifact, skips files that PyPI already accepted, finishes any remaining artifacts, and creates the GitHub Release if it does not exist. Do not move or recreate the release tag.
 
@@ -390,7 +405,7 @@ curl -fsS \
   https://pypi.org/pypi/kitaru-langfuse-importer/0.2.0/json \
   >/dev/null
 
-gh release view langfuse-importer-v0.2.0 \
+gh release view python/kitaru-langfuse-importer/v0.2.0 \
   --repo zenml-io/kitaru
 ```
 

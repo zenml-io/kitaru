@@ -49,7 +49,7 @@ Use the PostgreSQL-backed tests for transaction, locking, migration, or cross-re
 - Run `just plugin-artifact-smoke` after changing plugin package metadata, default definitions, requirement pins, or release installation paths.
 - The smoke builds Kitaru and every selected plugin as wheels, installs them into a clean environment, loads each configured package entrypoint, and verifies idempotent default registration.
 - CI runs plugin distributions as a package matrix. Keep the matrix aligned with `plugins/packages/` and the choices in `.github/workflows/release-plugins.yml`.
-- Plugin workflow dispatches are dry-runs. A package tag triggers publishing only when its commit is contained in `main`.
+- Plugin workflow dispatches are dry-runs. Package tags publish from reviewed commits reachable from `develop` or the unit's matching maintenance branch. Dependent plugins wait for core PyPI availability; other core jobs can continue.
 - Kitaru release dry-runs build plugin-owned candidate images from `plugins/candidate-wheels`; production release Dockerfiles continue to install exact versions from PyPI.
 - Commit `plugins/candidate.Dockerfile` and `plugins/docker-compose.candidate.yml`. Do not commit generated files under `plugins/candidate-wheels/`.
 - Keep production release Dockerfiles unchanged when a plugin change only needs local candidate-wheel testing.
@@ -101,9 +101,9 @@ Do not describe the inherited `llm-integration.yml` provider markers or absent `
 
 Use `.agents/skills/kitaru-release/SKILL.md` for the release interview, metadata edits, validation, and preparation PR. Keep this skill focused on selecting and running test surfaces.
 
-`.github/workflows/release-plugins.yml` publishes one Python distribution from an immutable namespaced tag. A core tag such as `python/kitaru/v0.22.0rc1` publishes Kitaru to PyPI and creates its GitHub Release. Plugin tags publish independently and do not gate the core release.
+`.github/workflows/release.yml` handles the core tag `python/kitaru/v<VERSION>`. It publishes Kitaru to PyPI, then publishes client, server, worker, and managed images plus Helm, and creates the GitHub Release. Python RC versions such as `0.22.0rc1` become deployable tags such as `0.22.0-rc.1`. There is no separate bundle tag.
 
-After a successful core Python workflow, `.github/workflows/release.yml` automatically publishes the matching client, server, worker, and managed images plus the Helm chart. It converts Python RC versions such as `0.22.0rc1` to deployable tags such as `0.22.0-rc.1`. No separate bundle tag is used. A manual dispatch with the existing core package tag is the recovery path.
+`.github/workflows/release-plugins.yml` handles one Python plugin distribution per namespaced tag. In a coordinated release, dependent plugin tags follow successful core PyPI publication. They can publish while core deployables and post-release jobs continue. Independent plugins use an already-published compatible core.
 
 `.github/workflows/release-typescript.yml` publishes `@zenml-io/kitaru`, `@zenml-io/kitaru-mastra`, and `@zenml-io/kitaru-vercel-ai` together from an immutable `typescript/kitaru/v<VERSION>` tag. Read `release/typescript.md` before preparing or recovering a TypeScript release. Manual dispatch is a non-publishing rehearsal; pushing the tag publishes the tested tarballs, waits for npm publish-time scanning, verifies a clean registry install, and creates the GitHub Release. The three packages use one lockstep stable or `-rc.N` version.
 
@@ -115,9 +115,9 @@ Before creating a core tag:
 4. Confirm no other release run is active.
 5. After changing the core version, run `uv run python scripts/generate_openapi.py` and commit the updated `openapi/openapi.json`.
 6. Run `just check`, the relevant base/CLI/MCP tests, `just mcp-schema-check`, `just cli-artifact-smoke`, `just plugin-artifact-smoke`, `just migration-check`, and `just build` as applicable. Run `just mcp-wheel-smoke` only after `just build`; it consumes the wheel under `dist/`.
-7. Dispatch `release-plugins.yml` with the proposed package tag when a non-publishing rehearsal is needed.
+7. Dispatch `release.yml` with the proposed core tag when a non-publishing rehearsal is needed. Use `release-plugins.yml` for a plugin rehearsal.
 
-The core Python workflow builds and verifies the wheel, publishes it to PyPI, and creates the GitHub Release. The deployables workflow then verifies the core package, tests the release images, publishes the images and Helm chart, and attaches the chart to the core GitHub Release. Stable releases also move the Docker `latest` aliases.
+Stable core releases move the public Docker `latest` aliases, advance the core maintenance branch, and create a draft development-reset PR. The release owner fast-forwards `main` to the immutable core tag before merging the reset into `develop`. Report PyPI publication, public deployables, managed-image warnings, installer smoke, maintenance state, and reset state separately. A reset failure can leave the workflow red after artifact publication succeeds.
 
 Do not use the removed `scripts/smoke-test.sh`, provider-area flags, remote-stack smoke, v1 adapters, or local ZenML flow runs as v2 release gates.
 
@@ -126,8 +126,8 @@ Do not use the removed `scripts/smoke-test.sh`, provider-area flags, remote-stac
 - Default branch is `develop`.
 - Pull requests normally target `develop`; v2 feature work may target its explicit integration branch until that migration lands.
 - `main` tracks the latest released version only; do not push directly.
-- Python releases are cut with namespaced tags handled by `.github/workflows/release-plugins.yml`.
+- Python core and plugin releases use namespaced tags handled by `release.yml` and `release-plugins.yml`, respectively.
 - TypeScript releases are cut with `typescript/kitaru/v<VERSION>` tags handled by `.github/workflows/release-typescript.yml`; rehearse the exact tag through manual dispatch before pushing it.
-- A successful core Python release automatically starts `.github/workflows/release.yml`; manual dispatch is reserved for recovery.
+- A core tag directly starts `.github/workflows/release.yml`. Manual dispatch rehearses without publishing; recover publication by inspecting and rerunning the original failed jobs with the same immutable artifacts.
 - Release preparation maintains the version in `pyproject.toml`; application code should use `importlib.metadata.version("kitaru")` rather than hardcoding it.
 - Update `CHANGELOG.md` under `[Unreleased]` for user-facing changes.

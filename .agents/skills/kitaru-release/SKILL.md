@@ -9,8 +9,10 @@ Use the current workflows as the source of truth:
 
 - Core: `.github/workflows/release.yml`
 - Plugins: `.github/workflows/release-plugins.yml`
-- Package inventory: `release/release-units.toml`
+- Python package inventory: `release/release-units.toml`
+- TypeScript release set: `release/typescript.md` and `.github/workflows/release-typescript.yml`
 - Frontend: `zenml-io/zenml-frontend-monorepo/.github/workflows/release-kitaru-ui.yml`
+- Follow-up skills release: [skills-release](https://github.com/zenml-io/kitaru-skills/blob/develop/.claude/skills/skills-release/SKILL.md)
 
 Read `AGENTS.md`. Read `plugins/AGENTS.md` and `plugins/DEVELOPMENT.md` for plugin changes. Read `FRONTEND-TESTING.md` for core or UI work.
 
@@ -63,6 +65,18 @@ Before editing, rerun the command with `--candidate <proposed-version>` and requ
 
 Propose explicit versions and changelog entries after discovery. Check PyPI versions and Git tags before proposing a version, and never reuse a published version. Get the user's acceptance before editing release metadata.
 
+## Separate implementation from release preparation
+
+Feature PRs leave existing plugin package versions and server default requirements/display versions unchanged. Put behavior changes in the package's `Unreleased` changelog section. The release-preparation PR selects package versions and updates all matching default-catalog metadata together. New packages require initial metadata, but becoming a server default remains an explicit release decision.
+
+Follow the development dependency policy in `plugins/DEVELOPMENT.md`. Plugins compatible with published core keep their supported minimum. A plugin requiring unreleased core uses an exact dependency on the current root development version, such as `kitaru==0.25.0+dev`, and records the needed core change in `Release context`.
+
+Before changing core to its selected release version, inspect every plugin's core dependency. Replace each resolved development pin with the selected compatible release floor, such as `kitaru>=0.26.0`, preserving extras and compatible upper bounds. Do not guess the future version in the feature PR. An unresolved development pin blocks release preparation; account for every affected plugin and its publication timing. A plugin-only release can replace the pin only when a published core contains the required change.
+
+Regenerate `plugins/uv.lock` after these conversions. Verify the selected wheels' `Requires-Dist` metadata contains no development placeholder or local checkout dependency before handing over publication commands.
+
+Inspect the TypeScript packages separately from the Python inventory. Include their lockstep release when their changes require publication. Inspect the Kitaru skills repository for a pending release and record its own version and compatibility requirements.
+
 ## Apply version rules
 
 - Use canonical PEP 440 for Python: `X.Y.Z` or `X.Y.ZrcN`.
@@ -81,7 +95,7 @@ Perform this section before the core preparation PR when the core needs a new UI
 
 1. Inspect `zenml-io/zenml-frontend-monorepo` and select an exact commit on `main`.
 2. Confirm its Kitaru UI checks pass.
-3. Select the frontend version input, such as `v0.2.0-rc.4`.
+3. Select a stable frontend version input, such as `v0.4.0`, for an official core release.
 4. Ask for explicit confirmation before dispatch because the workflow creates a tag and GitHub Release.
 5. Dispatch the workflow at the selected ref:
 
@@ -89,7 +103,7 @@ Perform this section before the core preparation PR when the core needs a new UI
 gh workflow run release-kitaru-ui.yml \
   --repo zenml-io/zenml-frontend-monorepo \
   --ref main \
-  -f version=v0.2.0-rc.4
+  -f version=v0.4.0
 ```
 
 6. Capture and monitor the exact run:
@@ -103,11 +117,11 @@ gh run view <run-id> --repo zenml-io/zenml-frontend-monorepo
 7. Verify the release tag and both assets:
 
 ```bash
-gh release view kitaru-ui-v0.2.0-rc.4 \
+gh release view kitaru-ui-v0.4.0 \
   --repo zenml-io/zenml-frontend-monorepo
 ```
 
-Require `kitaru-ui.tar.gz` and `kitaru-ui.tar.gz.sha256`. The frontend workflow builds with the selected version, creates both files, and publishes a prerelease.
+Require `kitaru-ui.tar.gz` and `kitaru-ui.tar.gz.sha256`. Verify the workflow ran at the reviewed commit and the release is stable. The frontend workflow derives its release channel from whether the selected commit is on `main`; official core releases require a stable bundle.
 
 If the user asks only for a preparation PR, do not dispatch the frontend workflow. The user can explicitly select an expected frontend tag before it exists. Mark asset verification as pending and do not create the core tag until both assets exist.
 
@@ -126,7 +140,7 @@ kitaru-version = "<python-version>"
 ui-tag = "<kitaru-ui-tag>"
 ```
 
-5. Run `uv lock`. Keep unrelated `exclude-newer` timestamp churn out of the diff.
+5. Resolve plugin development dependencies to the selected core version, then run `uv lock` and `uv lock --project plugins`. Keep unrelated `exclude-newer` timestamp churn out of the diff.
 6. Run `uv run python scripts/generate_openapi.py` and commit `openapi/openapi.json`.
 7. If a default plugin version changes, update every matching server catalog requirement and display version. The release inventory validates these values against the package manifest.
 
@@ -161,9 +175,9 @@ uv version --project plugins --package <distribution> <version> --no-sync
 4. Run `uv lock --project plugins`.
 5. Leave every unselected package unchanged.
 
-If the plugin becomes a new core default, publish the plugin before the core release. Then prepare a new core version with its exact pin.
+For a default-catalog plugin, update matching server requirements and display versions in this release-preparation PR. The current inventory validator requires them to match the selected package version. Feature PRs avoid that coupling by leaving both versions and default pins unchanged.
 
-For a coordinated API change, the release PR can contain future core and plugin versions together. Publish the core first, then publish plugins whose dependency requires that new core version. A default pin may reference the queued plugin version; do not tag core until the repository's pending-default behavior is available and verified.
+For a coordinated release, prepare core and plugin versions together. Tag core first. After the core `publish-python` job succeeds and the exact version is available on PyPI, tag dependent plugins. Core deployables and other jobs can continue while plugins publish. A default pin may reference a queued plugin version when the repository's pending-default behavior is available and verified. An independent plugin release uses an already-published compatible core.
 
 ## Patch an existing plugin release line
 
@@ -258,7 +272,7 @@ RELEASE_SHA="$(gh pr view <release-pr> \
   --jq '.mergeCommit.oid')"
 ```
 
-For a coordinated release, order the hand-off as frontend tag and bundle, core tag and publication, dependent plugin tags and publication, then linked skills, docs, website, examples, and other follow-ups. Do not execute these commands during preparation.
+Emit the complete runnable command handoff in the PR and final response, using [publication-handoff.md](references/publication-handoff.md). Group commands by repository and source branch. Include every selected Python plugin, the TypeScript release set when selected, any new frontend release, manual `main` promotion, and the Kitaru skills release handoff. Use accepted versions and exact reviewed commits; do not leave a selected plugin as “repeat for the other plugins.” Do not execute publication commands during preparation.
 
 Push every release tag in its own `git push origin <tag>` command. GitHub does not create push events when more than three tags are pushed at once, which leaves immutable tags without release workflow runs. Do not batch release tags into one push, even when several point to the same commit. After each push, confirm the matching workflow run exists before pushing the next tag.
 
@@ -269,18 +283,18 @@ Manual dispatch builds and validates without publishing.
 Core:
 
 ```bash
-gh workflow run release.yml --ref <release-sha-or-tag> \
+gh workflow run release.yml --repo zenml-io/kitaru --ref <reviewed-branch-or-tag> \
   -f package-tag=python/kitaru/v<python-version>
 ```
 
 Plugin:
 
 ```bash
-gh workflow run release-plugins.yml --ref <release-sha-or-tag> \
+gh workflow run release-plugins.yml --repo zenml-io/kitaru --ref <reviewed-branch-or-tag> \
   -f package-tag=python/<distribution>/v<python-version>
 ```
 
-Inspect the exact run and its artifacts. Confirm that no publishing job ran.
+Use an existing branch or tag that resolves to the reviewed eligible commit. Confirm the run's `headSha` matches that commit, inspect its artifacts, and confirm no publishing job ran.
 
 ## Publish a plugin
 
@@ -301,7 +315,7 @@ For a stable release, the workflow creates or fast-forwards the unit's maintenan
 
 ## Publish core and deployables
 
-Before tagging, verify the selected frontend release and required plugin versions exist.
+Before tagging, verify the selected stable frontend bundle exists and release metadata is complete. Coordinated plugin versions can remain queued when pending-default behavior has been verified.
 
 ```bash
 git fetch origin develop --tags
@@ -321,18 +335,20 @@ The tag starts `.github/workflows/release.yml`. The workflow:
 5. publishes the Helm chart
 6. moves public Docker `latest` aliases only for a stable release
 7. creates the immutable GitHub Release
-8. creates a draft post-release PR that restores `## [Unreleased]`, sets core to `<version>+dev`, and updates both lockfiles and the generated OpenAPI version
+8. creates or fast-forwards the stable maintenance branch
+9. creates a draft post-release PR that restores `## [Unreleased]`, sets core to `<version>+dev`, and updates both lockfiles and the generated OpenAPI version
+
+Dependent plugin tags can be pushed after step 3 succeeds and the exact core package is available on PyPI. They do not wait for the remaining jobs.
 
 For a stable release, fast-forward `main` to the tagged release commit before merging the generated development-reset PR. The reset PR must leave `main` at the clean release version and change only `pyproject.toml`, `uv.lock`, `plugins/uv.lock`, `openapi/openapi.json`, and `CHANGELOG.md` on `develop`.
-8. creates or fast-forwards the stable maintenance branch
 
 Approve required environments only after checking the candidate evidence. A managed-image failure is reported as a warning and does not block public deployables.
 
-Verify each published surface independently. Do not infer one surface from another.
+Verify each published surface independently. Report core PyPI availability, public artifacts, managed-image status, installer smoke, maintenance-branch state, and development-reset status separately. A reset-job failure can make the workflow red after successful artifact publication. Diagnose and report that follow-up failure without describing the already-published artifacts as unpublished.
 
 After the required core and plugin versions are available on PyPI, complete any pending quickstart dependency refresh through a reviewed follow-up PR and rerun its frozen end-to-end test. Report which branch contains that update: the public README links to `main`, and merging a follow-up into `develop` alone does not update the public example. The development-reset PR does not currently refresh the quickstart lockfile.
 
-The workflow does not update `main`. After the newest stable core release succeeds, tell the release owner to move `main` to the immutable core tag without creating a merge commit:
+The workflow does not update `main`. After the newest stable core's public artifacts and GitHub Release succeed, inspect any remaining workflow failure and tell the release owner to fast-forward `main` to the immutable core tag:
 
 ```bash
 git fetch origin main --tags
@@ -344,6 +360,8 @@ gh api --method PATCH repos/zenml-io/kitaru/git/refs/heads/main \
 ```
 
 The release owner runs this command manually. Do not execute it on their behalf. The fast-forward updates `main` to the tagged commit without a merge commit and triggers the existing docs workflow. Skip this step for prereleases and older maintenance-line core releases.
+
+After core and required plugins are available, hand off pending `zenml-io/kitaru-skills` changes to its [skills-release skill](https://github.com/zenml-io/kitaru-skills/blob/develop/.claude/skills/skills-release/SKILL.md). Read the current skill before emitting that repository's commands. It owns the independent skills version, `develop` release commit, tag, `main` promotion, and GitHub Release. Core publication does not itself authorize publishing skills.
 
 ## Curate GitHub Release Notes
 
@@ -387,13 +405,14 @@ Do not delete or move a release tag. Do not reuse a version for different bytes.
 
 1. Inspect the failed step and completed external writes.
 2. Confirm existing artifacts match the immutable tag.
-3. Fix workflow defects through a reviewed PR.
-4. Ask for explicit confirmation before retrying.
-5. Dispatch the matching workflow at the immutable tag:
+3. Determine whether retrying the original job can succeed. A workflow fix on a newer branch does not change the tagged source.
+4. Ask for explicit confirmation before retrying publication.
+5. Rerun the failed jobs of the original tag-triggered run to preserve its event and immutable artifacts:
 
 ```bash
-gh workflow run release.yml --ref <core-tag> -f package-tag=<core-tag>
-gh workflow run release-plugins.yml --ref <plugin-tag> -f package-tag=<plugin-tag>
+gh run rerun <original-run-id> --repo zenml-io/kitaru --failed
 ```
+
+Manual dispatch is a non-publishing rehearsal and cannot finish a failed publication. If recovery needs different package bytes, prepare a new version through a reviewed PR.
 
 Keep credentials, private endpoints, account IDs, and internal infrastructure names out of committed content and PR descriptions.
