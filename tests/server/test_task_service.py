@@ -35,6 +35,7 @@ from conftest import (
     create_agent,
     create_agent_task,
     create_agent_version,
+    create_analysis_task,
     create_blob,
     create_evaluation_task,
     create_import,
@@ -977,6 +978,36 @@ async def test_apply_status_evaluator_terminal_tracks_evaluation_completed() -> 
     assert tracked_properties["status"] == "completed"
     assert "plugin_version_id" not in tracked_properties
     assert "session_count" not in tracked_properties
+
+
+async def test_apply_status_analyzer_terminal_tracks_analysis_completed() -> None:
+    """Track an analysis_completed event when an analyzer task turns terminal."""
+    analytics = _RecordingAnalytics()
+    transitions, tasks, jobs, _ = _build_transitions(analytics)
+    job = await create_job(jobs, ACTOR.account.id)
+    task = await create_analysis_task(
+        tasks, job.id, input_session_ids=[uuid.uuid4(), uuid.uuid4()]
+    )
+    await create_agent_task(tasks, job.id)
+
+    result = [
+        {
+            "name": "summary",
+            "title": "Summary",
+            "data": {"type": "text", "content": "ok"},
+        }
+    ]
+    completed = await _complete_task(transitions, task, result=result)
+
+    assert completed.status is TaskStatus.COMPLETED
+    assert len(analytics.tracked) == 1
+    tracked_user_id, tracked_event, tracked_properties = analytics.tracked[0]
+    assert tracked_user_id == ACTOR.account.id
+    assert tracked_event == AnalyticsEvent.ANALYSIS_COMPLETED
+    assert tracked_properties["status"] == "completed"
+    assert "plugin_version_id" not in tracked_properties
+    assert tracked_properties["session_count"] == 2
+    assert tracked_properties["insight_count"] == 1
 
 
 async def test_apply_status_import_terminal_tracks_the_importer_plugin() -> None:

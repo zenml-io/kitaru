@@ -21,6 +21,7 @@ from kitaru.server.application.models.auth import GrantKind
 from kitaru.server.application.services.resource_access import build_task_grants
 from kitaru.server.domain.task import (
     AgentTaskDetails,
+    AnalysisTaskDetails,
     ApiImportSourceSpec,
     BlobImportSourceSpec,
     EvaluationTaskDetails,
@@ -117,3 +118,24 @@ def test_import_spec_with_api_source_grants_only_the_script_blob() -> None:
         ),
     )
     assert build_task_grants(spec) == {GrantKind.BLOB: frozenset({plugin_blob_id})}
+
+
+def test_analysis_spec_grants_every_input_session_and_script_blob() -> None:
+    """Grant an analyzer task every listed session and the blob holding its script."""
+    input_session_ids = [uuid.uuid4(), uuid.uuid4()]
+    blob_id = uuid.uuid4()
+    spec = TaskSpec(
+        task_id=uuid.uuid4(),
+        kind=TaskKind.ANALYZER,
+        timeout_seconds=60,
+        details=AnalysisTaskDetails(
+            analyzer_name="trends",
+            plugin=_script_plugin(blob_id),
+            agent_id=uuid.uuid4(),
+            input_session_ids=input_session_ids,
+        ),
+    )
+    assert build_task_grants(spec) == {
+        GrantKind.SESSION: frozenset(input_session_ids),
+        GrantKind.BLOB: frozenset({blob_id}),
+    }
