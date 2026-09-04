@@ -260,6 +260,7 @@ def test_editor_validates_numbers_against_each_card_only(
         ("This pattern may drive retries.", "unsupported claim"),
         ("This pattern is driving retries.", "unsupported claim"),
         ("Retries are driven by this pattern.", "unsupported claim"),
+        ("This pattern has driven retries.", "unsupported claim"),
         ("This pattern stems from retries.", "unsupported claim"),
         ("This pattern stemmed from retries.", "unsupported claim"),
         ("This pattern produces retries.", "unsupported claim"),
@@ -582,6 +583,7 @@ def test_causal_substrings_in_plain_prose_are_allowed(
                     eyebrow="Tool behavior",
                     description=(
                         "Causality, resultant metrics, leadership, driveways, "
+                        "undriven paths, "
                         "producers, creatures, triggerfish, accountants, "
                         "accountability, giveaways, and upbringings are worth "
                         "inspecting."
@@ -885,6 +887,81 @@ def test_completed_sessions_do_not_authorize_successful_pass_wording(
     )
     with pytest.raises(ValueError, match="unsupported outcome"):
         validate_editorial_plan(copy, selection, [candidate])
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "The agent works as expected.",
+        "The tool worked as expected.",
+        "The model is working as intended.",
+        "The system works correctly.",
+        "The agent worked properly.",
+        "The run is working normally.",
+    ],
+)
+def test_completed_sessions_do_not_authorize_working_success_claims(
+    profiling_result: ProfilingResult,
+    description: str,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "id": "session-outcomes",
+            "family": "outcome",
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="completed", value=1)]
+            ),
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Session outcomes",
+                    description=description,
+                )
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="unsupported outcome"):
+        validate_editorial_plan(copy, selection, [candidate])
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Work on this pattern next.",
+        "Coworkers and workflows are worth investigating.",
+    ],
+)
+def test_non_outcome_work_language_is_allowed(
+    profiling_result: ProfilingResult,
+    description: str,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description=description,
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
 
 
 def test_pass_substrings_in_plain_prose_are_allowed(
