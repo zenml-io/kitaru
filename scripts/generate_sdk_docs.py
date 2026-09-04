@@ -221,7 +221,9 @@ PUBLIC_API: dict[str, ModuleSpec] = {
     # ImportFailure / ImportStats / MAX_IMPORT_FAILURES stay published under
     # kitaru.task.importer (see its reexports entry).
     "kitaru.api_models.v1.imports": ModuleSpec(
-        symbols=frozenset({"ImportCreateRequest"}),
+        symbols=frozenset(
+            {"ImportCreateRequest", "ImportListParams", "ImportResponse"}
+        ),
     ),
     "kitaru.api_models.v1.agent": ModuleSpec(
         symbols=frozenset(

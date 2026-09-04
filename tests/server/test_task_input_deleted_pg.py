@@ -177,7 +177,7 @@ async def _import_job(
         },
     )
     assert response.status_code == 201, response.text
-    return response.json()["id"], payload_blob_id
+    return response.json()["job_id"], payload_blob_id
 
 
 async def _agent_run_job(client: httpx.AsyncClient, agent_id: str) -> tuple[str, str]:
@@ -281,6 +281,42 @@ async def _raw_evaluator_job(
         return str(job.id), str(task.id)
 
 
+async def _delete_agent_row(settings: APISettings, agent_id: str) -> None:
+    """Delete an agent row outright, cascading its imports.
+
+    The agent route soft-deletes and keeps the row, so the import cascade
+    only fires on a direct row delete.
+
+    Args:
+        settings: Settings naming the shared database.
+        agent_id: Id of the agent.
+    """
+    async with _raw_session(settings) as session:
+        await session.execute(
+            text("DELETE FROM agent WHERE id = :agent_id"), {"agent_id": agent_id}
+        )
+        await session.commit()
+
+
+async def _import_count(settings: APISettings, agent_id: str) -> int:
+    """Count the import rows targeting an agent.
+
+    Args:
+        settings: Settings naming the shared database.
+        agent_id: Id of the agent.
+
+    Returns:
+        Number of import rows.
+    """
+    async with _raw_session(settings) as session:
+        count = await session.scalar(
+            text("SELECT count(*) FROM import WHERE agent_id = :agent_id"),
+            {"agent_id": agent_id},
+        )
+    assert count is not None
+    return count
+
+
 async def _account_id(client: httpx.AsyncClient) -> uuid.UUID:
     response = await client.get("/api/v1/accounts/me")
     assert response.status_code == 200, response.text
@@ -314,6 +350,26 @@ async def _claim_cancels_everything(
     assert (await client.delete(f"/api/v1/jobs/{job_id}")).status_code == 204
 
 
+async def _claim_hands_out(client: httpx.AsyncClient, kind: str, task_id: str) -> None:
+    """Claim as a worker and expect the task, with its spec still servable.
+
+    Args:
+        client: HTTP client.
+        kind: Task kind the worker claims.
+        task_id: Id of the task whose input is intact.
+    """
+    _worker_id, token = await _register_worker(client, {"claims": [{"kind": kind}]})
+    entries = await _claim_all(client, token)
+    assert [entry["task"]["id"] for entry in entries] == [task_id], entries
+
+    task = (await client.get(f"/api/v1/tasks/{task_id}")).json()
+    assert task["status"] == "claimed", task
+    spec = await client.get(
+        f"/api/v1/tasks/{task_id}/spec", headers=_bearer(entries[0]["token"])
+    )
+    assert spec.status_code == 200, spec.text
+
+
 async def test_deleting_agent_version_leaves_its_task_for_the_claim() -> None:
     """Deleting an agent version keeps the task, which cancels when claimed."""
     settings = db_settings(DB_POOL_SIZE=20, DB_MAX_OVERFLOW=10)
@@ -330,8 +386,8 @@ async def test_deleting_agent_version_leaves_its_task_for_the_claim() -> None:
         await _claim_cancels_everything(client, "agent", task_id, job_id)
 
 
-async def test_deleting_payload_blob_leaves_its_task_for_the_claim() -> None:
-    """Deleting a payload blob keeps the task, which cancels when claimed."""
+async def test_deleting_payload_blob_of_a_pending_import_is_refused() -> None:
+    """Refuse deleting a pending import's payload blob, leaving the task claimable."""
     settings = db_settings(DB_POOL_SIZE=20, DB_MAX_OVERFLOW=10)
     async with lifespan_client(settings) as client:
         agent = await _agent(client, "assistant")
@@ -340,10 +396,13 @@ async def test_deleting_payload_blob_leaves_its_task_for_the_claim() -> None:
         task_id = await _job_task_id(client, job_id)
 
         response = await client.delete(f"/api/v1/blobs/{blob_id}")
-        assert response.status_code == 204, response.text
+        assert response.status_code == 409, response.text
 
-        assert (await client.get(f"/api/v1/tasks/{task_id}")).status_code == 200
-        await _claim_cancels_everything(client, "importer", task_id, job_id)
+        assert (await client.get(f"/api/v1/blobs/{blob_id}")).status_code == 200
+        assert (await client.get(f"/api/v1/tasks/{task_id}")).json()[
+            "status"
+        ] == "pending"
+        await _claim_hands_out(client, "importer", task_id)
 
 
 async def test_deleting_plugin_leaves_its_task_for_the_claim() -> None:
@@ -359,6 +418,23 @@ async def test_deleting_plugin_leaves_its_task_for_the_claim() -> None:
         assert response.status_code == 204, response.text
 
         assert (await client.get(f"/api/v1/tasks/{task_id}")).status_code == 200
+        await _claim_cancels_everything(client, "importer", task_id, job_id)
+
+
+async def test_deleting_agent_row_leaves_its_import_task_for_the_claim() -> None:
+    """Cascading the import row away keeps the task, which cancels when claimed."""
+    settings = db_settings(DB_POOL_SIZE=20, DB_MAX_OVERFLOW=10)
+    async with lifespan_client(settings) as client:
+        agent = await _agent(client, "assistant")
+        await _importer_plugin(client, "importer-1")
+        job_id, _blob_id = await _import_job(client, agent["id"], "importer-1")
+        task_id = await _job_task_id(client, job_id)
+
+        await _delete_agent_row(settings, agent["id"])
+        assert await _import_count(settings, agent["id"]) == 0
+
+        assert (await client.get(f"/api/v1/tasks/{task_id}")).status_code == 200
+        assert await _job_task_id(client, job_id) == task_id
         await _claim_cancels_everything(client, "importer", task_id, job_id)
 
 
@@ -402,7 +478,7 @@ async def test_worker_calls_after_input_deleted_mid_flight_never_5xx() -> None:
     settings = db_settings(DB_POOL_SIZE=20, DB_MAX_OVERFLOW=10)
     async with lifespan_client(settings) as client:
         agent = await _agent(client, "assistant")
-        await _importer_plugin(client, "importer-1")
+        plugin = await _importer_plugin(client, "importer-1")
         _job_id, blob_id = await _import_job(client, agent["id"], "importer-1")
 
         worker_id, worker_token = await _register_worker(
@@ -421,10 +497,18 @@ async def test_worker_calls_after_input_deleted_mid_flight_never_5xx() -> None:
         assert running_response.status_code == 200, running_response.text
         assert running_response.json()["status"] == "running"
 
-        # Delete the task's input while the worker believes it still owns a
-        # running task.
-        delete_response = await client.delete(f"/api/v1/blobs/{blob_id}")
-        assert delete_response.status_code == 204, delete_response.text
+        # The import row pins its payload blob, so that delete is refused
+        # while the worker runs the task. The importer delete goes through
+        # and nulls the import's importer version.
+        blob_response = await client.delete(f"/api/v1/blobs/{blob_id}")
+        assert blob_response.status_code == 409, blob_response.text
+        importer_response = await client.delete(
+            f"/api/v1/importers/{plugin['importer']['id']}"
+        )
+        assert importer_response.status_code == 204, importer_response.text
+        # Cascade the import row away while the worker believes it still owns
+        # a running task.
+        await _delete_agent_row(settings, agent["id"])
         # The worker keeps the task it is running. Only the input is gone.
         assert (await client.get(f"/api/v1/tasks/{task_id}")).status_code == 200
 
@@ -457,7 +541,7 @@ async def test_worker_calls_after_input_deleted_mid_flight_never_5xx() -> None:
 
         # Recorded, exact status per call. The task outlives its input, so the
         # worker still owns it and reports on it as usual. Only the spec, which
-        # has to resolve the deleted blob, cannot be served.
+        # has to resolve the vanished import, cannot be served.
         assert calls["heartbeat"].status_code == 200, calls["heartbeat"].text
         assert calls["heartbeat"].json()["cancel_task_ids"] == []
         # The task was already moved to running above, so that repeat is the
@@ -640,14 +724,16 @@ async def test_parallel_deletes_race_worker_claims_and_transitions_without_5xx()
     """Race double-deletes of many task inputs against live worker traffic."""
     settings = db_settings(DB_POOL_SIZE=80, DB_MAX_OVERFLOW=40)
     async with lifespan_client(settings) as client:
-        agent = await _agent(client, "assistant")
         await _importer_plugin(client, "importer-1")
 
+        agent_ids: list[str] = []
         blob_ids: list[str] = []
         for index in range(RACERS):
+            agent = await _agent(client, f"assistant-{index}")
             _job_id, blob_id = await _import_job(
                 client, agent["id"], "importer-1", payload=f"[{index}]".encode()
             )
+            agent_ids.append(agent["id"])
             blob_ids.append(blob_id)
 
         worker_id, worker_token = await _register_worker(
@@ -678,7 +764,14 @@ async def test_parallel_deletes_race_worker_claims_and_transitions_without_5xx()
                 )
             )
 
+        # Cascade the import rows away concurrently with the blob deletes, so
+        # each blob delete races the row that pins it.
+        row_deletes = [
+            asyncio.create_task(_delete_agent_row(settings, agent_id))
+            for agent_id in agent_ids
+        ]
         responses = list(await asyncio.gather(*calls))
+        await asyncio.gather(*row_deletes)
         assert_no_server_error(responses)
 
         delete_responses = responses[: 2 * RACERS]
@@ -687,11 +780,12 @@ async def test_parallel_deletes_race_worker_claims_and_transitions_without_5xx()
                 delete_responses[2 * index].status_code,
                 delete_responses[2 * index + 1].status_code,
             ]
-            # Whether a genuinely concurrent double-delete leaves exactly one
-            # winner is a separate, pre-existing question unrelated to task
-            # cascading, so only the absence of a server error is asserted
-            # here.
-            assert set(pair) <= {204, 404}, pair
+            # A blob delete is refused while its import row exists and
+            # succeeds once the cascade removed it. Whether a genuinely
+            # concurrent double-delete leaves exactly one winner is a
+            # separate, pre-existing question unrelated to task cascading, so
+            # only the absence of a server error is asserted here.
+            assert set(pair) <= {204, 404, 409}, pair
 
         heartbeat_response = responses[2 * RACERS]
         assert heartbeat_response.status_code == 200, heartbeat_response.text
@@ -724,7 +818,7 @@ async def test_sweeper_tolerates_a_stale_tasks_input_deleted_concurrently() -> N
     async with lifespan_client(settings) as client:
         agent = await _agent(client, "assistant")
         await _importer_plugin(client, "importer-1")
-        _job_id, blob_id = await _import_job(client, agent["id"], "importer-1")
+        _job_id, _blob_id = await _import_job(client, agent["id"], "importer-1")
 
         _worker_id, worker_token = await _register_worker(
             client, {"claims": [{"kind": "importer"}]}
@@ -733,11 +827,11 @@ async def test_sweeper_tolerates_a_stale_tasks_input_deleted_concurrently() -> N
         task_id = entries[0]["task"]["id"]
 
         # Never heartbeat again, so the task goes stale on the sweeper's own
-        # clock. Delete its input right as the heartbeat timeout elapses, to
-        # race the sweep's unlocked read of the row against the cascade.
+        # clock. Cascade its import row away right as the heartbeat timeout
+        # elapses, to race the sweep's unlocked read of the row against the
+        # cascade.
         await asyncio.sleep(1.2)
-        delete_response = await client.delete(f"/api/v1/blobs/{blob_id}")
-        assert delete_response.status_code == 204, delete_response.text
+        await _delete_agent_row(settings, agent["id"])
 
         # Give the sweeper several more ticks to run into the vanished row.
         await asyncio.sleep(2.5)

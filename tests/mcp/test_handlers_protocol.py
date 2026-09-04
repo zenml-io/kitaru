@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.cohort import CohortResponse
+from kitaru.api_models.v1.imports import ImportListParams, ImportResponse
 from kitaru.api_models.v1.investigation import InvestigationSessionResponse
 from kitaru.api_models.v1.session import SessionDetailResponse, TokenUsage
 from kitaru.api_models.v1.session_node import SessionNodeResponse
@@ -30,7 +31,7 @@ from kitaru.api_models.v1.worker import (
     WorkerScope,
 )
 from kitaru.mcp.lifecycle import MCPServerState
-from kitaru.mcp.models.activity import ActivityListRequest
+from kitaru.mcp.models.activity import ActivityGetRequest, ActivityListRequest
 from kitaru.mcp.models.common import PageData
 from kitaru.mcp.models.management import (
     CohortCreate,
@@ -111,6 +112,7 @@ class FakeClient:
         self.list_calls: list[object] = []
         self.get_calls: list[uuid.UUID] = []
         self.sessions = SimpleNamespace(list=self._list_sessions, get=self._get)
+        self.imports = SimpleNamespace(list=self._list_imports, get=self._get_import)
         self.agents = SimpleNamespace(list=self._list_agents)
         self.investigations = SimpleNamespace(
             list_sessions=self._list_investigation_sessions
@@ -123,6 +125,14 @@ class FakeClient:
     async def _get(self, _id: uuid.UUID) -> SessionDetailResponse:
         self.get_calls.append(_id)
         return _get_session(_id)
+
+    async def _list_imports(self, params: object) -> Page[ImportResponse]:
+        self.list_calls.append(params)
+        return Page(items=[_get_import()], next_cursor="opaque")
+
+    async def _get_import(self, _id: uuid.UUID) -> ImportResponse:
+        self.get_calls.append(_id)
+        return _get_import(_id)
 
     async def _list_agents(self, params: object) -> Page[AgentResponse]:
         self.list_calls.append(params)
@@ -261,6 +271,21 @@ def _get_tag() -> TagResponse:
     )
 
 
+def _get_import(import_id: uuid.UUID | None = None) -> ImportResponse:
+    now = datetime.now(UTC)
+    return ImportResponse(
+        id=import_id or uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        job_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        payload_blob_id=uuid.uuid4(),
+        params={},
+        evaluators=[],
+        created=now,
+        updated=now,
+    )
+
+
 def _get_worker() -> WorkerResponse:
     now = datetime.now(UTC)
     return WorkerResponse(
@@ -302,6 +327,38 @@ async def test_activity_returns_exactly_one_page_and_preserves_cursor() -> None:
     assert result.page.size == 3
     assert result.page.next_cursor == "opaque"
     assert result.page.has_more is True
+
+
+async def test_activity_import_get_and_list_use_the_imports_resource() -> None:
+    client = FakeClient()
+    state = _get_state(client)
+    import_id = uuid.uuid4()
+
+    request = ActivityListRequest(
+        operation="list",
+        kind="import",
+        cursor="before",
+        size=3,
+        filter={"field": "agent_id", "op": "eq", "value": str(import_id)},
+    )
+
+    item = await handle_activity_read(
+        state, ActivityGetRequest(operation="get", kind="import", id=import_id)
+    )
+    page = cast(PageData, await handle_activity_read(state, request))
+
+    assert isinstance(item, ImportResponse)
+    assert item.id == import_id
+    assert client.get_calls == [import_id]
+    assert len(client.list_calls) == 1
+    params = client.list_calls[0]
+    assert isinstance(params, ImportListParams)
+    assert params.cursor == "before"
+    assert params.size == 3
+    assert params.filter == request.filter
+    assert page.page.size == 3
+    assert page.page.next_cursor == "opaque"
+    assert page.page.has_more is True
 
 
 @pytest.mark.parametrize("kind", ["tag", "worker"])
@@ -411,6 +468,10 @@ async def test_public_sdk_serializes_non_empty_list_pages() -> None:
             {"request": {"operation": "list", "kind": "session", "size": 3}},
         ),
         (
+            "kitaru_activity_read",
+            {"request": {"operation": "list", "kind": "import", "size": 3}},
+        ),
+        (
             "kitaru_registry_read",
             {"request": {"operation": "list", "kind": "agent", "size": 3}},
         ),
@@ -455,6 +516,22 @@ async def test_public_sdk_call_has_canonical_structured_text_parity() -> None:
     assert result.structured_content is not None
     assert json.loads(result.content[0].text) == result.structured_content
     assert result.structured_content["data"]["id"] == str(item_id)
+
+
+async def test_public_import_get_returns_the_typed_import() -> None:
+    client = FakeClient()
+    server, context = _get_context(client)
+    import_id = uuid.uuid4()
+    result = await server.call_tool(
+        "kitaru_activity_read",
+        {"request": {"operation": "get", "kind": "import", "id": str(import_id)}},
+        context,
+    )
+    assert isinstance(result, CallToolResult)
+    assert result.is_error is False
+    assert result.structured_content is not None
+    assert result.structured_content["data"]["id"] == str(import_id)
+    assert result.structured_content["data"]["stats"] is None
 
 
 async def test_public_worker_get_has_canonical_structured_text_parity() -> None:

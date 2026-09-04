@@ -28,11 +28,10 @@ class CoverageIds(NamedTuple):
 
     job_id: uuid.UUID
     other_job_id: uuid.UUID
-    agent_id: uuid.UUID
     agent_version_id: uuid.UUID
     agent_version_id_2: uuid.UUID
     plugin_version_id: uuid.UUID
-    payload_blob_id: uuid.UUID
+    import_id: uuid.UUID
     session_id: uuid.UUID
 
 
@@ -56,12 +55,10 @@ def _agent_task(ids: CoverageIds, **overrides: Any) -> AgentTask:
 
 
 def _import_task(ids: CoverageIds, **overrides: Any) -> ImportTask:
-    """Build an import task pointed at the ids' plugin, payload, and agent."""
+    """Build an import task pointed at the ids' import."""
     values: dict[str, Any] = {
         "job_id": ids.job_id,
-        "plugin_version_id": ids.plugin_version_id,
-        "payload_blob_id": ids.payload_blob_id,
-        "agent_id": ids.agent_id,
+        "import_id": ids.import_id,
     }
     values.update(overrides)
     return ImportTask(**values)

@@ -20,8 +20,8 @@ from kitaru.api_models.v1.evaluation import (
     EvaluationResult,
 )
 from kitaru.api_models.v1.session import SessionEvaluationsRequest
+from kitaru.server.adapters.rest.mapping.evaluator_config import evaluator_config_input
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
-from kitaru.server.adapters.rest.mapping.replay_config import evaluator_config_input
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationWithEvaluator,
 )

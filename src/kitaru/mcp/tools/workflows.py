@@ -25,10 +25,13 @@ async def handle_session_import(
         agent_version_id=agent_version.id,
         payload_blob_id=blob.id,
         params=request.params,
+        evaluators=request.evaluators,
     )
-    job = await state.client.imports.create(
+    created_import = await state.client.imports.create(
         dto, idempotency_key=request.idempotency_key
     )
+    assert created_import.job_id is not None
+    job = await state.client.jobs.get(created_import.job_id)
     return {
         "operation": "session_import",
         "idempotency": "domain-deduplicated-only",
@@ -37,5 +40,6 @@ async def handle_session_import(
         "importer_version_id": str(importer_version.id),
         "agent_id": str(agent_version.agent_id),
         "agent_version_id": str(agent_version.id),
+        "import_id": str(created_import.id),
         "result": job.model_dump(mode="json"),
     }

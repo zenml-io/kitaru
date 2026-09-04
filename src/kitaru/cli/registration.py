@@ -42,6 +42,7 @@ from kitaru.api_models.v1.importer import (
     ImporterListParams,
     ImporterVersionCreateRequest,
 )
+from kitaru.api_models.v1.imports import ImportListParams
 from kitaru.api_models.v1.insight import InsightListParams
 from kitaru.api_models.v1.investigation import InvestigationListParams
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
@@ -683,6 +684,7 @@ def list_params(
         "evaluator",
         "experiment",
         "experiment_run",
+        "import",
         "importer",
         "insight",
         "investigation",
@@ -704,6 +706,7 @@ def list_params(
         "evaluator": EvaluatorListParams,
         "experiment": ExperimentListParams,
         "experiment_run": ExperimentRunListParams,
+        "import": ImportListParams,
         "importer": ImporterListParams,
         "insight": InsightListParams,
         "investigation": InvestigationListParams,

@@ -1813,24 +1813,71 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Imports
+         * @description List imports.
+         *
+         *     Clients observe HTTP 200 on success and 422 on invalid pagination
+         *     parameters.
+         *
+         *     Args:
+         *         service: Import service.
+         *         actor: Caller context.
+         *         params: Import list params.
+         *
+         *     Returns:
+         *         Page of imports.
+         */
+        get: operations["list_imports_api_v1_imports_get"];
         put?: never;
         /**
          * Create Import
          * @description Import sessions from a payload blob, as a job holding one importer task.
          *
-         *     Clients observe HTTP 201 on success and 404 when the importer, the
-         *     version, the payload blob, or the agent does not exist.
+         *     Clients observe HTTP 201 on success, 404 when the importer, the version,
+         *     the payload blob, the agent, the agent version, or an evaluator does not
+         *     exist, and 422 when the agent version belongs to another agent, an
+         *     evaluator is scoped to another agent, or an evaluator version repeats.
          *
          *     Args:
          *         body: Import create request.
-         *         service: Job service.
+         *         service: Import service.
          *         actor: Caller context.
          *
          *     Returns:
-         *         Created job.
+         *         Created import.
          */
         post: operations["create_import_api_v1_imports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/{import_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Import
+         * @description Get an import by id.
+         *
+         *     Clients observe HTTP 200 on success and 404 when no import has this id.
+         *
+         *     Args:
+         *         import_id: Id of the import.
+         *         service: Import service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Stored import.
+         */
+        get: operations["get_import_api_v1_imports__import_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5609,6 +5656,11 @@ export interface components {
              */
             agent_version_id?: string | null;
             /**
+             * Evaluators
+             * @description Evaluators run against every imported session.
+             */
+            evaluators?: components["schemas"]["EvaluatorConfig"][];
+            /**
              * Importer
              * @description Importer name.
              */
@@ -5631,6 +5683,129 @@ export interface components {
              * @description Importer version, an omitted value resolves to latest.
              */
             version?: number | null;
+        };
+        /**
+         * ImportFailure
+         * @description Import failure.
+         */
+        ImportFailure: {
+            /**
+             * Error
+             * @description Failure reason.
+             */
+            error: string;
+            /**
+             * External Id
+             * @description External id of the failed item.
+             */
+            external_id?: string | null;
+            /**
+             * Line
+             * @description Line the failure occurred at.
+             */
+            line: number;
+        };
+        /**
+         * ImportResponse
+         * @description Import response.
+         */
+        ImportResponse: {
+            /**
+             * Agent Id
+             * Format: uuid
+             * @description Agent imported sessions are created under.
+             */
+            agent_id: string;
+            /**
+             * Agent Version Id
+             * @description Agent version recorded on the imported sessions.
+             */
+            agent_version_id?: string | null;
+            /**
+             * Created
+             * Format: date-time
+             * @description Creation time.
+             */
+            created: string;
+            /**
+             * Error
+             * @description Error from a failed import.
+             */
+            error?: string | null;
+            /**
+             * Evaluators
+             * @description Evaluators run against every imported session.
+             */
+            evaluators: components["schemas"]["EvaluatorConfig"][];
+            /**
+             * Id
+             * Format: uuid
+             * @description Import id.
+             */
+            id: string;
+            /**
+             * Importer Version Id
+             * @description Importer version run.
+             */
+            importer_version_id?: string | null;
+            /**
+             * Job Id
+             * @description Job running the import.
+             */
+            job_id?: string | null;
+            /**
+             * Owner Id
+             * Format: uuid
+             * @description Id of the owning account.
+             */
+            owner_id: string;
+            /**
+             * Params
+             * @description Parameters passed to the importer.
+             */
+            params: {
+                [key: string]: unknown;
+            };
+            /**
+             * Payload Blob Id
+             * Format: uuid
+             * @description Blob holding the payload parsed.
+             */
+            payload_blob_id: string;
+            /** @description Stats from a completed import. */
+            stats?: components["schemas"]["ImportStats"] | null;
+            /**
+             * Updated
+             * Format: date-time
+             * @description Last modification time.
+             */
+            updated: string;
+        };
+        /**
+         * ImportStats
+         * @description Import stats.
+         */
+        ImportStats: {
+            /**
+             * Created
+             * @description Sessions created.
+             */
+            created: number;
+            /**
+             * Failed
+             * @description Items that failed to import.
+             */
+            failed: number;
+            /**
+             * Failures
+             * @description Sample of failures.
+             */
+            failures?: components["schemas"]["ImportFailure"][];
+            /**
+             * Skipped
+             * @description Sessions skipped as duplicates.
+             */
+            skipped: number;
         };
         /**
          * ImportTaskDetails
@@ -6620,6 +6795,19 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** Page[ImportResponse] */
+        Page_ImportResponse_: {
+            /**
+             * Items
+             * @description Items on this page.
+             */
+            items: components["schemas"]["ImportResponse"][];
+            /**
+             * Next Cursor
+             * @description Cursor for the next page, null on the last page.
+             */
+            next_cursor: string | null;
+        };
         /** Page[ImporterResponse] */
         Page_ImporterResponse_: {
             /**
@@ -7474,6 +7662,11 @@ export interface components {
              */
             id: string;
             /**
+             * Import Id
+             * @description Import the session was created by.
+             */
+            import_id?: string | null;
+            /**
              * Imported From
              * @description Source system the session was imported from.
              */
@@ -7952,6 +8145,11 @@ export interface components {
              */
             id: string;
             /**
+             * Import Id
+             * @description Import the session was created by.
+             */
+            import_id?: string | null;
+            /**
              * Imported From
              * @description Source system the session was imported from.
              */
@@ -8318,11 +8516,6 @@ export interface components {
          */
         TaskResponse: {
             /**
-             * Agent Id
-             * @description Agent an importer task creates sessions under.
-             */
-            agent_id?: string | null;
-            /**
              * Agent Version Id
              * @description Agent version run by an agent task.
              */
@@ -8370,6 +8563,11 @@ export interface components {
              */
             id: string;
             /**
+             * Import Id
+             * @description Import run by an importer task.
+             */
+            import_id?: string | null;
+            /**
              * Input Session Id
              * @description Input session for an evaluator task.
              */
@@ -8392,13 +8590,8 @@ export interface components {
             /** @description Effect of a hard failure on the job. */
             on_failure: components["schemas"]["TaskOnFailure"];
             /**
-             * Payload Blob Id
-             * @description Payload blob for an importer task.
-             */
-            payload_blob_id?: string | null;
-            /**
              * Plugin Version Id
-             * @description Plugin version run by an evaluator or importer task.
+             * @description Plugin version run by an evaluator task.
              */
             plugin_version_id?: string | null;
             /**
@@ -14572,6 +14765,71 @@ export interface operations {
             };
         };
     };
+    list_imports_api_v1_imports_get: {
+        parameters: {
+            query?: {
+                /** @description Cursor from the previous page. */
+                cursor?: string | null;
+                /** @description Items per page. */
+                size?: number;
+                /** @description Sort field and direction, as field:asc or field:desc. */
+                sort?: string;
+                /** @description Filter expression, JSON-encoded in the query string. */
+                filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ImportResponse_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     create_import_api_v1_imports_post: {
         parameters: {
             query?: never;
@@ -14593,7 +14851,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["JobResponse"];
+                    "application/json": components["schemas"]["ImportResponse"];
                 };
             };
             /** @description Bad Request */
@@ -14634,6 +14892,73 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_import_api_v1_imports__import_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

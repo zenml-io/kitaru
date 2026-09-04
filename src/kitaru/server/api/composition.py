@@ -26,6 +26,9 @@ from kitaru.server.adapters.db.repositories.experiment_repository import (
 from kitaru.server.adapters.db.repositories.experiment_run_repository import (
     SQLExperimentRunRepository,
 )
+from kitaru.server.adapters.db.repositories.import_repository import (
+    SQLImportRepository,
+)
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.replay_repository import (
     SQLReplayRepository,
@@ -49,12 +52,14 @@ from kitaru.server.application.interfaces.experiment_repository import (
 from kitaru.server.application.interfaces.experiment_run_repository import (
     ExperimentRunRepository,
 )
+from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.services import (
     evaluation_recording,
+    import_pipeline,
     replay_pipeline,
     run_finalization,
 )
@@ -70,6 +75,7 @@ def register_subscribers(
     experiment_run_repository: ExperimentRunRepository,
     evaluation_repository: EvaluationRepository,
     session_repository: SessionRepository,
+    import_repository: ImportRepository,
     analytics: ServerAnalytics | None = None,
 ) -> None:
     """Register every task-transition subscriber on a dispatcher.
@@ -87,6 +93,7 @@ def register_subscribers(
         experiment_run_repository: Experiment run repository.
         evaluation_repository: Evaluation repository.
         session_repository: Session repository.
+        import_repository: Import repository.
         analytics: Analytics tracker, None skips tracking.
     """
     dispatcher.register(
@@ -105,6 +112,15 @@ def register_subscribers(
             replay_pipeline.append_result_evaluations,
             replay_repository=replay_repository,
             experiment_repository=experiment_repository,
+            task_repository=task_repository,
+        ),
+    )
+    dispatcher.register(
+        TaskTerminal,
+        partial(
+            import_pipeline.record_import_outcome,
+            import_repository=import_repository,
+            session_repository=session_repository,
             task_repository=task_repository,
         ),
     )
@@ -156,6 +172,7 @@ def build_event_dispatcher(
         experiment_run_repository=SQLExperimentRunRepository(session),
         evaluation_repository=SQLEvaluationRepository(session),
         session_repository=SQLSessionRepository(session, engine),
+        import_repository=SQLImportRepository(session),
         analytics=analytics,
     )
     return dispatcher

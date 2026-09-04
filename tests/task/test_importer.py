@@ -32,6 +32,7 @@ from conftest import (
     create_agent_task,
     create_agent_version,
     create_blob,
+    create_import,
     create_import_task,
     create_job,
     imported_node,
@@ -397,14 +398,18 @@ async def _create_importer_task(
         provider="acme",
     )
     job = await create_job(task_app.services.jobs, task_app.agent.owner_id)
-    payload_blob = await create_blob(task_app.services.blobs, task_app.agent.owner_id)
+    payload = await create_blob(task_app.services.blobs, task_app.agent.owner_id)
+    import_ = await create_import(
+        task_app.services.imports,
+        task_app.agent.owner_id,
+        task_app.agent.id,
+        job_id=job.id,
+        importer_version_id=version.id,
+        payload_blob_id=payload.id,
+        params=params,
+    )
     task = await create_import_task(
-        task_app.services.tasks,
-        job.id,
-        plugin_version_id=version.id,
-        payload_blob_id=payload_blob.id,
-        agent_id=task_app.agent.id,
-        params=params or {},
+        task_app.services.tasks, job.id, import_id=import_.id
     )
     await start_task(task_app, task.id)
 

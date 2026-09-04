@@ -114,18 +114,13 @@ async def test_task_names_a_missing_input_session(setup: Setup) -> None:
     assert stored.input_session_id is not None
 
 
-async def test_task_names_a_missing_payload_blob(setup: Setup) -> None:
-    """Store an import task whose payload blob is already gone."""
+async def test_task_names_a_missing_import(setup: Setup) -> None:
+    """Store an import task whose import row is already gone."""
     stored = await SQLTaskRepository(setup.session).create(
-        ImportTask(
-            job_id=setup.job_id,
-            plugin_version_id=uuid.uuid4(),
-            payload_blob_id=uuid.uuid4(),
-            agent_id=setup.agent_id,
-        )
+        ImportTask(job_id=setup.job_id, import_id=uuid.uuid4())
     )
     assert isinstance(stored, ImportTask)
-    assert stored.payload_blob_id is not None
+    assert stored.import_id is not None
 
 
 async def test_create_many_names_missing_inputs(setup: Setup) -> None:

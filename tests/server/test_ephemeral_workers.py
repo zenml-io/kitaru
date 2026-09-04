@@ -38,7 +38,7 @@ from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.jwt import JWTToken
 from kitaru.server.adapters.rest.ephemeral_workers import start_ephemeral_worker
 from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
-from kitaru.server.application.models.job import ImportCreate
+from kitaru.server.application.models.imports import ImportCreate
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
@@ -101,10 +101,12 @@ async def _create_import(services: JobAndTaskServices, builtin: bool = False) ->
     )
     payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
     agent = await create_agent(services.agents, ACCOUNT.id)
-    return await services.job_service.create_import(
+    import_ = await services.import_service.create_import(
         ImportCreate(importer=name, agent_id=agent.id, payload_blob_id=payload.id),
         actor=ACTOR,
     )
+    assert import_.job_id is not None
+    return await services.jobs.get(import_.job_id)
 
 
 async def _start(
