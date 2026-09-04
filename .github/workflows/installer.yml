@@ -1,7 +1,8 @@
 ---
 name: Installer smoke
-# Runs install.sh on real GitHub-hosted runners the way a user would
-# (`curl ... | bash`), then checks the CLI, MCP server, skills, and PATH.
+# Runs install.sh on real GitHub-hosted runners, then checks the CLI, MCP
+# server, skills, and PATH. PRs install the local wheel so CI does not inflate
+# PyPI download counts. Releases fetch the published package as a user would.
 # No Docker on the runners, so login is skipped.
 # Triggers: PRs that touch the script (path-filtered, so this does not run on
 # ordinary PRs), manual dispatch, and the release workflow right after the
@@ -52,10 +53,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        if: github.event_name == 'pull_request'
+      - name: Build local Kitaru wheel
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          wheel_dir="$RUNNER_TEMP/kitaru-wheel"
+          uv build --wheel --out-dir "$wheel_dir"
+          wheel=$(find "$wheel_dir" -maxdepth 1 -name 'kitaru-*.whl' -print -quit)
+          wheel_uri=$(python -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve().as_uri())' "$wheel")
+          printf 'kitaru @ %s\n' "$wheel_uri" > "$RUNNER_TEMP/kitaru-constraint.txt"
+          printf 'KITARU_VERSION=%s\n' "$(uv version --short)" >> "$GITHUB_ENV"
+          printf 'UV_CONSTRAINT=%s\n' "$RUNNER_TEMP/kitaru-constraint.txt" >> "$GITHUB_ENV"
+      - name: Select published Kitaru version
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: printf 'KITARU_VERSION=%s\n' "$REQUESTED_VERSION" >> "$GITHUB_ENV"
       - name: Run the installer as a user would
         shell: bash
         env:
-          KITARU_VERSION: ${{ inputs.version }}
           SOURCE: ${{ inputs.source || 'file' }}
         # The default (non-verbose) path is the one users run, so that is the
         # path that has to pass. On failure, rerun once with --verbose purely to
@@ -79,15 +98,13 @@ jobs:
           exit 1
       - name: Verify
         shell: bash
-        env:
-          EXPECTED_VERSION: ${{ inputs.version }}
         run: |
           set -euxo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           uname -a
           kitaru --version
-          if [ -n "$EXPECTED_VERSION" ]; then
-            test "$(kitaru --version)" = "$EXPECTED_VERSION"
+          if [ -n "$KITARU_VERSION" ]; then
+            test "$(kitaru --version)" = "$KITARU_VERSION"
           fi
           kitaru-mcp --help >/dev/null
           ls "$HOME/.agents/skills"

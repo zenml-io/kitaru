@@ -161,12 +161,13 @@ jobs:
         run: >-
           uv run --no-sync python scripts/smoke_plugin_artifacts.py
           --candidate-dir plugins/candidate-wheels
-      - name: Sync quickstart example
+      - name: Sync quickstart dependencies
         working-directory: examples/python/pydantic_ai_ticket_resolver
-        run: uv sync --frozen
-      - name: Run frozen quickstart example end to end
-        working-directory: examples/python/pydantic_ai_ticket_resolver
-        run: uv run --frozen python scripts/run_ci_e2e.py
+        run: >-
+          uv sync --frozen
+          --no-install-package kitaru
+          --no-install-package kitaru-pydantic-ai
+          --no-install-package kitaru-langfuse-importer
       - name: Install current Kitaru artifacts into quickstart example
         run: |
           uv pip install \
