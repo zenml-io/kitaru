@@ -105,7 +105,7 @@ async def activity_read_tool(
 async def review_read_tool(
     request: ReviewReadRequest, context: Context
 ) -> ReviewReadResult:
-    """Read investigations, annotations, and ordered investigation sessions."""
+    """Read investigations, annotations, insights, and investigation sessions."""
     return cast(
         ReviewReadResult,
         await _invoke(context, request, ReviewReadResult, handle_review_read),
@@ -147,7 +147,7 @@ async def session_import_tool(
 async def review_manage_tool(
     request: ReviewManageRequest, context: Context
 ) -> ReviewManageResult:
-    """Create or update investigations, annotations, tags, and tag links."""
+    """Create or update investigations, annotations, insights, tags, and tag links."""
     return cast(
         ReviewManageResult,
         await _invoke(context, request, ReviewManageResult, handle_review_manage),

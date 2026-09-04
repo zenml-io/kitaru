@@ -1868,6 +1868,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Insights
+         * @description List insights.
+         *
+         *     Clients observe HTTP 200 on success and 422 on invalid pagination
+         *     parameters.
+         *
+         *     Args:
+         *         service: Insight service.
+         *         actor: Caller context.
+         *         params: Insight list params.
+         *
+         *     Returns:
+         *         Page of insights.
+         */
+        get: operations["list_insights_api_v1_insights_get"];
+        put?: never;
+        /**
+         * Create Insights
+         * @description Create a batch of insights for one agent in one shot.
+         *
+         *     Clients observe HTTP 201 on success, 404 when the agent does not exist,
+         *     and 422 on validation.
+         *
+         *     Args:
+         *         body: Insight batch create request.
+         *         service: Insight service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Created insights in input order.
+         */
+        post: operations["create_insights_api_v1_insights_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/insights/{insight_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Insight
+         * @description Get an insight by id.
+         *
+         *     Clients observe HTTP 200 on success and 404 when no insight has this id.
+         *
+         *     Args:
+         *         insight_id: Id of the insight.
+         *         service: Insight service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Stored insight.
+         */
+        get: operations["get_insight_api_v1_insights__insight_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Insight
+         * @description Delete an insight.
+         *
+         *     Clients observe HTTP 204 on success and 404 when no insight has this id.
+         *
+         *     Args:
+         *         insight_id: Id of the insight.
+         *         service: Insight service.
+         *         actor: Caller context.
+         */
+        delete: operations["delete_insight_api_v1_insights__insight_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Insight
+         * @description Update an insight's title and description.
+         *
+         *     Clients observe HTTP 200 on success, 404 when no insight has this id,
+         *     and 422 when the update clears the insight title.
+         *
+         *     Args:
+         *         insight_id: Id of the insight.
+         *         body: Insight update request.
+         *         service: Insight service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Updated insight.
+         */
+        patch: operations["update_insight_api_v1_insights__insight_id__patch"];
+        trace?: never;
+    };
     "/api/v1/investigations": {
         parameters: {
             query?: never;
@@ -4127,6 +4230,48 @@ export interface components {
          */
         BaselineEvaluationMode: "none" | "if_missing" | "force";
         /**
+         * Bin
+         * @description Bin.
+         */
+        Bin: {
+            /**
+             * Count
+             * @description Observations in the bin.
+             */
+            count: number;
+            /**
+             * Lower Bound
+             * @description Inclusive lower bound, None on an open-ended first bin.
+             */
+            lower_bound?: number | null;
+            /**
+             * Upper Bound
+             * @description Exclusive upper bound, None on an open-ended last bin.
+             */
+            upper_bound?: number | null;
+        };
+        /**
+         * BinnedInsightData
+         * @description Binned insight data.
+         */
+        BinnedInsightData: {
+            /**
+             * Bins
+             * @description Bins, in ascending order.
+             */
+            bins: components["schemas"]["Bin"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "binned";
+            /**
+             * Unit
+             * @description Unit of the values.
+             */
+            unit?: string | null;
+        };
+        /**
          * BlobResponse
          * @description Blob response.
          */
@@ -4187,6 +4332,43 @@ export interface components {
         Body_upload_blob_api_v1_blobs_post: {
             /** File */
             file: string;
+        };
+        /**
+         * CategoricalInsightData
+         * @description Categorical insight data.
+         */
+        CategoricalInsightData: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "categorical";
+            /**
+             * Unit
+             * @description Unit of the values.
+             */
+            unit?: string | null;
+            /**
+             * Values
+             * @description Values per category.
+             */
+            values: components["schemas"]["CategoryValue"][];
+        };
+        /**
+         * CategoryValue
+         * @description Category value.
+         */
+        CategoryValue: {
+            /**
+             * Label
+             * @description Category label.
+             */
+            label: string;
+            /**
+             * Value
+             * @description Measured value.
+             */
+            value: number;
         };
         /**
          * CohortCreateRequest
@@ -5676,6 +5858,135 @@ export interface components {
             display_version?: string | null;
         };
         /**
+         * InsightBatchCreateRequest
+         * @description Insight batch create request.
+         */
+        InsightBatchCreateRequest: {
+            /**
+             * Agent Id
+             * Format: uuid
+             * @description Agent the insights belong to.
+             */
+            agent_id: string;
+            /**
+             * Insights
+             * @description Insights to create, in input order.
+             */
+            insights: components["schemas"]["InsightInput"][];
+        };
+        /**
+         * InsightInput
+         * @description Insight input.
+         */
+        InsightInput: {
+            /**
+             * Data
+             * @description Insight data.
+             */
+            data: components["schemas"]["TextInsightData"] | components["schemas"]["CategoricalInsightData"] | components["schemas"]["BinnedInsightData"];
+            /**
+             * Description
+             * @description Insight description.
+             */
+            description?: string | null;
+            /**
+             * Metadata
+             * @description Arbitrary metadata.
+             */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Name
+             * @description Insight name.
+             */
+            name: string;
+            /**
+             * Title
+             * @description Insight title.
+             */
+            title: string;
+        };
+        /**
+         * InsightResponse
+         * @description Insight response.
+         */
+        InsightResponse: {
+            /**
+             * Agent Id
+             * Format: uuid
+             * @description Agent the insight belongs to.
+             */
+            agent_id: string;
+            /**
+             * Created
+             * Format: date-time
+             * @description Creation time.
+             */
+            created: string;
+            /**
+             * Data
+             * @description Insight data.
+             */
+            data: components["schemas"]["TextInsightData"] | components["schemas"]["CategoricalInsightData"] | components["schemas"]["BinnedInsightData"];
+            /**
+             * Description
+             * @description Insight description.
+             */
+            description: string | null;
+            /**
+             * Id
+             * Format: uuid
+             * @description Insight id.
+             */
+            id: string;
+            /**
+             * Metadata
+             * @description Arbitrary metadata.
+             */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Name
+             * @description Insight name.
+             */
+            name: string;
+            /**
+             * Owner Id
+             * Format: uuid
+             * @description Id of the owning account.
+             */
+            owner_id: string;
+            /**
+             * Title
+             * @description Insight title.
+             */
+            title: string;
+            /**
+             * Updated
+             * Format: date-time
+             * @description Last modification time.
+             */
+            updated: string;
+        };
+        /**
+         * InsightUpdateRequest
+         * @description Insight update request.
+         */
+        InsightUpdateRequest: {
+            /**
+             * Description
+             * @description New insight description.
+             */
+            description?: string | null;
+            /**
+             * Title
+             * @description New insight title.
+             */
+            title?: string | null;
+        };
+        /**
          * InvestigationAnswerCreateRequest
          * @description Investigation answer create request.
          */
@@ -6329,6 +6640,19 @@ export interface components {
              * @description Items on this page.
              */
             items: components["schemas"]["ImporterVersionResponse"][];
+            /**
+             * Next Cursor
+             * @description Cursor for the next page, null on the last page.
+             */
+            next_cursor: string | null;
+        };
+        /** Page[InsightResponse] */
+        Page_InsightResponse_: {
+            /**
+             * Items
+             * @description Items on this page.
+             */
+            items: components["schemas"]["InsightResponse"][];
             /**
              * Next Cursor
              * @description Cursor for the next page, null on the last page.
@@ -8229,6 +8553,22 @@ export interface components {
              * @enum {string}
              */
             type: "teardown_command";
+        };
+        /**
+         * TextInsightData
+         * @description Text insight data.
+         */
+        TextInsightData: {
+            /**
+             * Content
+             * @description Markdown content.
+             */
+            content: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "text";
         };
         /**
          * TokenErrorCode
@@ -14337,6 +14677,354 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerInfoResponse"];
+                };
+            };
+        };
+    };
+    list_insights_api_v1_insights_get: {
+        parameters: {
+            query?: {
+                /** @description Cursor from the previous page. */
+                cursor?: string | null;
+                /** @description Items per page. */
+                size?: number;
+                /** @description Sort field and direction, as field:asc or field:desc. */
+                sort?: string;
+                /** @description Filter expression, JSON-encoded in the query string. */
+                filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_InsightResponse_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_insights_api_v1_insights_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsightBatchCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightResponse"][];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_insight_api_v1_insights__insight_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                insight_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_insight_api_v1_insights__insight_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                insight_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_insight_api_v1_insights__insight_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                insight_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsightUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

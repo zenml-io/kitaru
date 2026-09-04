@@ -31,6 +31,7 @@ from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.experiment import ExperimentORM, ReplayConfigORM
 from kitaru.server.adapters.db.orm.experiment_run import ExperimentRunORM
 from kitaru.server.adapters.db.orm.idempotency_key import IdempotencyKeyORM
+from kitaru.server.adapters.db.orm.insight import InsightORM
 from kitaru.server.adapters.db.orm.investigation import InvestigationORM
 from kitaru.server.adapters.db.orm.investigation_session import (
     InvestigationSessionORM,
@@ -64,6 +65,7 @@ __all__ = [
     "ExperimentORM",
     "ExperimentRunORM",
     "IdempotencyKeyORM",
+    "InsightORM",
     "InvestigationORM",
     "InvestigationSessionORM",
     "JobORM",

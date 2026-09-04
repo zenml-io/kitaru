@@ -22,6 +22,7 @@ from kitaru.api_models.v1.evaluator import (
     EvaluatorVersionResponse,
 )
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
+from kitaru.api_models.v1.insight import InsightResponse
 from kitaru.api_models.v1.investigation import (
     InvestigationResponse,
     InvestigationSessionVerdict,
@@ -49,6 +50,8 @@ from kitaru.mcp.models.evaluators import (
 )
 from kitaru.mcp.models.review import (
     AnnotationUpdate,
+    InsightsCreate,
+    InsightUpdate,
     InvestigationAnswerCreate,
     InvestigationCreate,
     InvestigationUpdate,
@@ -180,12 +183,13 @@ async def test_review_sessions_read_is_one_ordered_sdk_page() -> None:
     assert result.page.next_cursor == "next"
 
 
-@pytest.mark.parametrize("kind", ["investigation", "annotation"])
+@pytest.mark.parametrize("kind", ["investigation", "annotation", "insight"])
 async def test_review_get_routes_to_the_selected_resource(kind: str) -> None:
     item_id = uuid.uuid4()
     calls: list[str] = []
     investigation = SimpleNamespace(id=item_id, kind="investigation")
     annotation = SimpleNamespace(id=item_id, kind="annotation")
+    insight = SimpleNamespace(id=item_id, kind="insight")
 
     async def get_investigation(received_id: uuid.UUID) -> object:
         assert received_id == item_id
@@ -197,15 +201,26 @@ async def test_review_get_routes_to_the_selected_resource(kind: str) -> None:
         calls.append("annotation")
         return annotation
 
+    async def get_insight(received_id: uuid.UUID) -> object:
+        assert received_id == item_id
+        calls.append("insight")
+        return insight
+
     client = SimpleNamespace(
         investigations=SimpleNamespace(get=get_investigation),
         annotations=SimpleNamespace(get=get_annotation),
+        insights=SimpleNamespace(get=get_insight),
     )
     result = await handle_review_read(
         _get_state(client),
         ReviewGet(operation="get", kind=cast(Any, kind), id=item_id),
     )
-    assert result is (investigation if kind == "investigation" else annotation)
+    expected = {
+        "investigation": investigation,
+        "annotation": annotation,
+        "insight": insight,
+    }[kind]
+    assert result is expected
     assert calls == [kind]
 
 
@@ -224,6 +239,27 @@ async def test_review_annotation_list_routes_to_annotations() -> None:
         await handle_review_read(
             _get_state(client),
             ReviewList(operation="list", kind="annotation", size=3),
+        ),
+    )
+    assert len(calls) == 1
+    assert result.page.size == 3
+
+
+async def test_review_insight_list_routes_to_insights() -> None:
+    calls: list[object] = []
+
+    async def list_insights(params: object) -> Page[Any]:
+        calls.append(params)
+        return Page(items=[], next_cursor=None)
+
+    client = SimpleNamespace(
+        insights=SimpleNamespace(list=list_insights),
+    )
+    result = cast(
+        PageData,
+        await handle_review_read(
+            _get_state(client),
+            ReviewList(operation="list", kind="insight", size=3),
         ),
     )
     assert len(calls) == 1
@@ -263,6 +299,136 @@ def test_review_management_rejects_noop_null_status_and_unknown_verdict() -> Non
                 "verdict": "pending",
             }
         )
+
+
+def test_insight_management_rejects_noop_null_title_and_conflicting_clear() -> None:
+    insight_id = uuid.uuid4()
+    with pytest.raises(ValidationError, match="change at least one"):
+        InsightUpdate(operation="update_insight", insight_id=insight_id)
+    with pytest.raises(ValidationError, match="title cannot be null"):
+        InsightUpdate(operation="update_insight", insight_id=insight_id, title=None)
+    with pytest.raises(
+        ValidationError, match="cannot be null without clear_description"
+    ):
+        InsightUpdate(
+            operation="update_insight", insight_id=insight_id, description=None
+        )
+    with pytest.raises(ValidationError, match="description and clear_description"):
+        InsightUpdate(
+            operation="update_insight",
+            insight_id=insight_id,
+            description="set",
+            clear_description=True,
+        )
+    InsightUpdate(
+        operation="update_insight",
+        insight_id=insight_id,
+        description=None,
+        clear_description=True,
+    )
+
+
+def test_insights_create_caps_batch_size() -> None:
+    with pytest.raises(ValidationError, match="at most 100"):
+        InsightsCreate(
+            operation="create_insights",
+            agent_id=uuid.uuid4(),
+            insights=[
+                {"title": f"insight-{index}", "data": {"type": "text", "content": "x"}}
+                for index in range(101)
+            ],
+        )
+
+
+async def test_review_insight_creates_and_updates_forward_typed_sdk_dtos() -> None:
+    create_calls: list[tuple[object, object, str | None]] = []
+    update_calls: list[tuple[uuid.UUID, object]] = []
+    agent_id = uuid.uuid4()
+    insight_id = uuid.uuid4()
+
+    async def create_insights(
+        received_agent_id: uuid.UUID,
+        insights: object,
+        idempotency_key: str | None = None,
+    ) -> list[object]:
+        create_calls.append((received_agent_id, insights, idempotency_key))
+        return [_insight(agent_id=received_agent_id)]
+
+    async def update_insight(received_id: uuid.UUID, request: object) -> object:
+        update_calls.append((received_id, request))
+        return _insight(agent_id=agent_id)
+
+    client = SimpleNamespace(
+        insights=SimpleNamespace(create=create_insights, update=update_insight)
+    )
+    state = _get_state(client)
+    await handle_review_manage(
+        state,
+        InsightsCreate(
+            operation="create_insights",
+            agent_id=agent_id,
+            insights=[
+                {
+                    "name": "latency-regressed",
+                    "title": "Latency regressed",
+                    "data": {"type": "text", "content": "It got slower."},
+                }
+            ],
+            idempotency_key="retry-insights-1",
+        ),
+    )
+    await handle_review_manage(
+        state,
+        InsightUpdate(
+            operation="update_insight",
+            insight_id=insight_id,
+            description=None,
+            clear_description=True,
+        ),
+    )
+    await handle_review_manage(
+        state,
+        InsightUpdate(
+            operation="update_insight",
+            insight_id=insight_id,
+            title="renamed",
+        ),
+    )
+
+    received_agent_id, insights, idempotency_key = create_calls[0]
+    assert received_agent_id == agent_id
+    assert [item.model_dump(mode="json") for item in cast(Any, insights)] == [
+        {
+            "name": "latency-regressed",
+            "title": "Latency regressed",
+            "description": None,
+            "data": {"type": "text", "content": "It got slower."},
+            "metadata": {},
+        }
+    ]
+    assert idempotency_key == "retry-insights-1"
+    assert cast(Any, update_calls[0][1]).model_dump(exclude_unset=True) == {
+        "description": None
+    }
+    assert cast(Any, update_calls[1][1]).model_dump(exclude_unset=True) == {
+        "title": "renamed"
+    }
+
+
+def _insight(*, agent_id: uuid.UUID) -> InsightResponse:
+    now = datetime.now(UTC)
+    return InsightResponse(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        agent_id=agent_id,
+        name="latency-regressed",
+        title="Latency regressed",
+        description=None,
+        data={"type": "text", "content": "It got slower."},
+        metadata={},
+        created=now,
+        updated=now,
+    )
 
 
 def test_investigation_create_preserves_empty_session_list() -> None:
@@ -1305,6 +1471,7 @@ async def test_script_evaluator_version_rejects_mismatched_blob() -> None:
         "cohort_version",
         "experiment",
         "experiment_run",
+        "insight",
         "investigation",
         "annotation",
         "evaluator",
@@ -1324,6 +1491,7 @@ async def test_existing_delete_payloads_keep_exact_resource_behavior(kind: str) 
         cohort_versions=SimpleNamespace(delete=delete_resource("cohort_version")),
         experiments=SimpleNamespace(delete=delete_resource("experiment")),
         experiment_runs=SimpleNamespace(delete=delete_resource("experiment_run")),
+        insights=SimpleNamespace(delete=delete_resource("insight")),
         investigations=SimpleNamespace(delete=delete_resource("investigation")),
         annotations=SimpleNamespace(delete=delete_resource("annotation")),
         evaluators=SimpleNamespace(delete=delete_resource("evaluator")),
