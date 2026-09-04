@@ -19,6 +19,7 @@ from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
+from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
@@ -39,6 +40,7 @@ from kitaru.server.application.services.resource_access import (
     check_task_session_write,
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.domain.imports import Import
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import (
     Session,
@@ -66,6 +68,7 @@ class SessionService:
         task_repository: TaskRepository,
         agent_version_repository: AgentVersionRepository,
         replay_repository: ReplayRepository,
+        import_repository: ImportRepository,
         payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
     ) -> None:
@@ -77,6 +80,8 @@ class SessionService:
             agent_version_repository: Agent version repository, for the agent
                 a version belongs to.
             replay_repository: Replay repository, for the baseline lookup.
+            import_repository: Import repository, for the agent and agent
+                version an import task creates sessions under.
             payload_store: Payload store, for inputs and outputs offload and
                 resolve.
             analytics: Analytics tracker, None skips tracking.
@@ -85,6 +90,7 @@ class SessionService:
         self._tasks = task_repository
         self._agent_versions = agent_version_repository
         self._replays = replay_repository
+        self._imports = import_repository
         self._payload_store = payload_store
         self._analytics = analytics
 
@@ -96,11 +102,12 @@ class SessionService:
         A task principal's session is linked to the principal's task, which
         must be running. An agent task links exactly one session, and its
         result session is found through that link. An import task links
-        every session it creates. A replay owning the agent task's job stores
-        the session as its result session. The task is the source of truth
-        for the agent and the agent version. The session takes the next
-        number of its agent, allocated outside the request transaction, so a
-        failed create leaves a gap.
+        every session it creates, and the session also links the import. A
+        replay owning the agent task's job stores the session as its result
+        session. The task, or the import it runs, is the source of truth for
+        the agent and the agent version. The session takes the next number of
+        its agent, allocated outside the request transaction, so a failed
+        create leaves a gap.
 
         Args:
             command: Fields for the new session.
@@ -113,6 +120,8 @@ class SessionService:
                 the task has moved past.
             TaskResultSessionAlreadyLinked: The principal's agent task already
                 links a session.
+            ImportNotFound: The principal's import task names an unknown
+                import.
             SessionAgentVersionMismatch: The command names a different agent
                 version than the task runs.
             SessionAgentMismatch: The command names a different agent than the
@@ -131,6 +140,7 @@ class SessionService:
         """
         task_id = None
         task = None
+        import_ = None
         if isinstance(actor.principal, TaskPrincipal):
             task_id = actor.principal.task_id
             task = await self._tasks.get(task_id, exclusive=True)
@@ -146,7 +156,9 @@ class SessionService:
                 is not None
             ):
                 raise TaskResultSessionAlreadyLinked(task.id)
-        agent_id, agent_version_id = await self._resolve_agent(command, task)
+            if isinstance(task, ImportTask):
+                import_ = await self._imports.get(task.import_id)
+        agent_id, agent_version_id = await self._resolve_agent(command, task, import_)
         number = await self._repository.allocate_session_number(agent_id)
         session = Session(
             owner_id=actor.account.id,
@@ -154,6 +166,7 @@ class SessionService:
             number=number,
             agent_version_id=agent_version_id,
             task_id=task_id,
+            import_id=import_.id if import_ is not None else None,
             origin=command.origin,
             status=command.status
             if command.status is not None
@@ -195,12 +208,13 @@ class SessionService:
         return stored
 
     async def _resolve_agent(
-        self, command: SessionCreate, task: Task | None
+        self, command: SessionCreate, task: Task | None, import_: Import | None
     ) -> tuple[uuid.UUID, uuid.UUID | None]:
         """Resolve the agent and agent version a new session records.
 
-        A session produced by an agent or import task takes both from that
-        task, and a command naming a different one is rejected. Without a
+        A session produced by an agent task takes the version from that task,
+        and one produced by an import task takes both from the import the
+        task runs. A command naming a different one is rejected. Without a
         task the command carries them, and the agent is inferred whenever a
         version is named.
 
@@ -208,6 +222,8 @@ class SessionService:
             command: Fields for the new session.
             task: Task the session was produced by, None when the caller
                 has none.
+            import_: Import the task runs, None unless the task is an import
+                task.
 
         Raises:
             SessionAgentVersionMismatch: The command names a different agent
@@ -225,7 +241,7 @@ class SessionService:
         """
         agent_id = command.agent_id
         agent_version_id = command.agent_version_id
-        if isinstance(task, AgentTask | ImportTask):
+        if isinstance(task, AgentTask):
             if (
                 agent_version_id is not None
                 and agent_version_id != task.agent_version_id
@@ -234,10 +250,19 @@ class SessionService:
                     task.id, agent_version_id, task.agent_version_id
                 )
             agent_version_id = task.agent_version_id
-            if isinstance(task, ImportTask):
-                if agent_id is not None and agent_id != task.agent_id:
-                    raise SessionAgentMismatch(task.id, agent_id, task.agent_id)
-                agent_id = task.agent_id
+        elif isinstance(task, ImportTask):
+            assert import_ is not None
+            if (
+                agent_version_id is not None
+                and agent_version_id != import_.agent_version_id
+            ):
+                raise SessionAgentVersionMismatch(
+                    task.id, agent_version_id, import_.agent_version_id
+                )
+            agent_version_id = import_.agent_version_id
+            if agent_id is not None and agent_id != import_.agent_id:
+                raise SessionAgentMismatch(task.id, agent_id, import_.agent_id)
+            agent_id = import_.agent_id
         if agent_version_id is not None:
             agent_id = await resolve_agent_id(
                 agent_version_id, agent_id, self._agent_versions

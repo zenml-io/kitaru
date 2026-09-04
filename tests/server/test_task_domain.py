@@ -100,9 +100,7 @@ def _task(status: TaskStatus = TaskStatus.PENDING, **overrides: Any) -> ImportTa
     """
     return ImportTask(
         job_id=uuid.uuid4(),
-        plugin_version_id=uuid.uuid4(),
-        payload_blob_id=uuid.uuid4(),
-        agent_id=uuid.uuid4(),
+        import_id=uuid.uuid4(),
         status=status,
         **overrides,
     )

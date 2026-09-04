@@ -6,6 +6,7 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 kitaru = { path = "..", editable = true }
+kitaru-claude-agent-sdk = { workspace = true }
 kitaru-braintrust-importer = { workspace = true }
 kitaru-langfuse-importer = { workspace = true }
 kitaru-langgraph = { workspace = true }
@@ -18,6 +19,7 @@ kitaru-pydantic-ai = { workspace = true }
 [dependency-groups]
 dev = [
     "kitaru[server]",
+    "kitaru-claude-agent-sdk",
     "kitaru-braintrust-importer[adapter]",
     "kitaru-langfuse-importer[adapter]",
     "kitaru-langgraph[deepagents]",
@@ -47,6 +49,7 @@ convention = "google"
 [tool.ruff.lint.isort]
 known-first-party = [
     "kitaru",
+    "kitaru_claude_agent_sdk",
     "kitaru_evaluator",
     "kitaru_braintrust_importer",
     "kitaru_jsonl_importer",
@@ -58,6 +61,11 @@ known-first-party = [
     "kitaru_phoenix_importer",
     "kitaru_pydantic_ai",
 ]
+# The repository root holds a tests/mcp directory, so ruff's source detection
+# classifies the `mcp` distribution as first-party when it runs from there and
+# third-party when it runs from this directory. Naming it keeps one import
+# order valid from both.
+known-third-party = ["mcp"]
 
 [tool.ty.src]
 include = ["packages/*/src/**/*.py", "tests/**/*.py"]

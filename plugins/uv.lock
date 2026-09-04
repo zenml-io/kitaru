@@ -11,12 +11,13 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-31T09:09:28.238793Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P3D"
 
 [manifest]
 members = [
     "kitaru-braintrust-importer",
+    "kitaru-claude-agent-sdk",
     "kitaru-evaluator",
     "kitaru-jsonl-importer",
     "kitaru-langfuse-importer",
@@ -33,6 +34,7 @@ dev = [
     { name = "hypothesis", specifier = ">=6.165" },
     { name = "kitaru", extras = ["server"], editable = "../" },
     { name = "kitaru-braintrust-importer", extras = ["adapter"], editable = "packages/braintrust-importer" },
+    { name = "kitaru-claude-agent-sdk", editable = "packages/claude-agent-sdk" },
     { name = "kitaru-langfuse-importer", extras = ["adapter"], editable = "packages/langfuse-importer" },
     { name = "kitaru-langgraph", extras = ["deepagents"], editable = "packages/langgraph" },
     { name = "kitaru-langsmith-importer", extras = ["adapter"], editable = "packages/langsmith-importer" },
@@ -482,6 +484,25 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/15/1f/ca74b65b19798895d63a6e92874162f44233467c9e7c1ed8afd19016ebe9/chevron-0.14.0.tar.gz", hash = "sha256:87613aafdf6d77b6a90ff073165a61ae5086e21ad49057aa0e53681601800ebf", size = 11440, upload-time = "2021-01-02T22:47:59.233Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/52/93/342cc62a70ab727e093ed98e02a725d85b746345f05d2b5e5034649f4ec8/chevron-0.14.0-py3-none-any.whl", hash = "sha256:fbf996a709f8da2e745ef763f482ce2d311aa817d287593a5b990d6d6e4f0443", size = 11595, upload-time = "2021-01-02T22:47:57.847Z" },
+]
+
+[[package]]
+name = "claude-agent-sdk"
+version = "0.2.149"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "jsonschema" },
+    { name = "mcp" },
+    { name = "sniffio" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ed/d7/97d98a46fd6fc0723431e0d27a6f85033c96848eca55ba84cc03267a2607/claude_agent_sdk-0.2.149.tar.gz", hash = "sha256:155a9240be13795f7d7cb491f1854b364821c6bc794184da59184a15d548bb14", size = 344717, upload-time = "2026-08-31T20:01:50.251Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ce/8a/e6118fb878360000694bbb7314e6c996a27df82df7d953682fd27456b056/claude_agent_sdk-0.2.149-py3-none-macosx_11_0_arm64.whl", hash = "sha256:88263bd2e75ceb793eae72e3ee7d96777a06425b45d193b92ccb944210e8e885", size = 83902406, upload-time = "2026-08-31T20:01:53.866Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/de/be9056efa75cf98cbd2a8dc0c868f7d44e17d36708bcb62495f25a276005/claude_agent_sdk-0.2.149-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:ea823e64132fd6a923902bc44603a1790edc1357ca12308ce6b6595247b91df6", size = 88329094, upload-time = "2026-08-31T20:01:57.435Z" },
+    { url = "https://files.pythonhosted.org/packages/25/67/928b61afe78b633122f27b05b0e7642604aa5f9915fbcea039e7412625ab/claude_agent_sdk-0.2.149-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:2a14e8fb05d1f6c268fa04210c6db5d5f1b9690272d00c2582ef52615c7c6259", size = 94047141, upload-time = "2026-08-31T20:02:01.471Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/29/c69780e1cb3acc5742979ca2761f3cd25240e06b592dad97624786fef0c1/claude_agent_sdk-0.2.149-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:be93d0c4ddc89dac1a225dc23d4d6cdda0e47b78efa8a0cacc9201a740a98851", size = 94240947, upload-time = "2026-08-31T20:02:05.641Z" },
+    { url = "https://files.pythonhosted.org/packages/48/9f/9066d7b03367e422aa9b4d8a902ff12cf1a75c7ccd08da1f8fecf144e0d0/claude_agent_sdk-0.2.149-py3-none-win_amd64.whl", hash = "sha256:27383a52d4e18399549ca446f9b4b151fe7d21175a2c995d3891ea2ecfc6e5a9", size = 96897333, upload-time = "2026-08-31T20:02:09.677Z" },
 ]
 
 [[package]]
@@ -1191,6 +1212,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27,<1" },
     { name = "langfuse", marker = "extra == 'examples'", specifier = ">=4.14,<5" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0,<3" },
+    { name = "modal", marker = "extra == 'modal'", specifier = ">=1.5,<2" },
     { name = "obstore", marker = "extra == 's3'", specifier = ">=0.11.1" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.44" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'otel'", specifier = ">=0.65b0" },
@@ -1212,7 +1234,7 @@ requires-dist = [
     { name = "uuid-utils", marker = "extra == 'server'", specifier = ">=0.10" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.51" },
 ]
-provides-extras = ["mcp", "cli", "examples", "server", "worker", "otel", "s3"]
+provides-extras = ["mcp", "cli", "examples", "server", "worker", "otel", "s3", "modal"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1251,6 +1273,21 @@ requires-dist = [
     { name = "kitaru", editable = "../" },
 ]
 provides-extras = ["adapter"]
+
+[[package]]
+name = "kitaru-claude-agent-sdk"
+version = "0.1.0rc0"
+source = { editable = "packages/claude-agent-sdk" }
+dependencies = [
+    { name = "claude-agent-sdk" },
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "claude-agent-sdk", specifier = ">=0.2.149,<0.3" },
+    { name = "kitaru", editable = "../" },
+]
 
 [[package]]
 name = "kitaru-evaluator"

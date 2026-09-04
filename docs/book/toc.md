@@ -55,6 +55,7 @@
 - [Pydantic AI](adapters/pydantic-ai.md)
 - [LangGraph](adapters/langgraph.md)
 - [OpenAI Agents SDK](adapters/openai-agents.md)
+- [Claude Agent SDK](adapters/claude-agent-sdk.md)
 - [Mastra](adapters/mastra.md)
 - [Vercel AI SDK](adapters/vercel-ai.md)
 - [Importer-backed adapters](adapters/importer-backed.md)

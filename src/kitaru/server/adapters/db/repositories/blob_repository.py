@@ -24,6 +24,7 @@ from kitaru.server.adapters.db.orm.blob import (
     BLOB_SHA256_MEDIA_TYPE_UNIQUE_CONSTRAINT,
     BlobORM,
 )
+from kitaru.server.adapters.db.orm.imports import IMPORT_PAYLOAD_BLOB_ID_FOREIGN_KEY
 from kitaru.server.adapters.db.orm.plugin import PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY
 from kitaru.server.adapters.db.orm.session import (
     SESSION_INPUTS_BLOB_ID_FOREIGN_KEY,
@@ -147,13 +148,14 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
 
         Raises:
             BlobNotFound: No blob has this id.
-            BlobInUse: The blob is referenced by a plugin version, a
-                session, or a session node.
+            BlobInUse: The blob is referenced by a plugin version, an
+                import, a session, or a session node.
         """
         await self._delete_row(
             blob_id,
             {
                 PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
+                IMPORT_PAYLOAD_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
                 SESSION_INPUTS_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
                 SESSION_OUTPUTS_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
                 SESSION_NODE_INPUTS_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),

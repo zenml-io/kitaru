@@ -14,6 +14,7 @@
 """Session import and inspection commands."""
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from pydantic import ValidationError
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.imports import ImportCreateRequest, ImportStats
 from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import (
     SessionListParams,
     SessionOrigin,
@@ -50,6 +52,7 @@ from kitaru.cli.registration import (
     list_params,
     page_result,
     parse_json_object,
+    resolve_evaluator_configs,
 )
 from kitaru.cli.session_selection import get_cohort_version
 from kitaru.client.exceptions import APIError
@@ -244,6 +247,8 @@ async def import_sessions(
     agent: str,
     params: str | None,
     tags: list[str] | None = None,
+    evaluators: Sequence[str] | None = None,
+    evaluator_params: Sequence[str] | None = None,
     media_type: str,
     wait: bool,
     interval: float | None,
@@ -253,6 +258,11 @@ async def import_sessions(
 ) -> CommandResult:
     """Upload a local payload and create one import job."""
     tags = _normalize_import_tags(tags, wait=wait)
+    if evaluator_params and not evaluators:
+        raise CLIError(
+            "invalid_arguments",
+            "--evaluator-params requires at least one --evaluator.",
+        )
     wait_settings = receipts.get_wait_settings(
         wait=wait, interval=interval, timeout=timeout
     )
@@ -286,6 +296,12 @@ async def import_sessions(
         client.importers, importer, "Importer"
     )
     agent_parent, agent_version = await get_agent_version(client, agent)
+    configs: list[EvaluatorConfig] = []
+    evaluator_identity: list[dict[str, Any]] = []
+    if evaluators:
+        configs, evaluator_identity, _ = await resolve_evaluator_configs(
+            client, evaluators, evaluator_params or []
+        )
 
     blob = await client.blobs.upload(content, media_type=media_type, filename=path.name)
     blob_identity = _blob_metadata(blob)
@@ -306,6 +322,8 @@ async def import_sessions(
     }
     if tags:
         identity["tags"] = tags
+    if evaluator_identity:
+        identity["evaluators"] = evaluator_identity
     request = ImportCreateRequest(
         importer=importer_parent.name,
         version=importer_version.version,
@@ -313,9 +331,12 @@ async def import_sessions(
         agent_version_id=agent_version.id,
         payload_blob_id=blob.id,
         params=parsed_params,
+        evaluators=configs,
     )
     try:
-        job = await client.imports.create(request, idempotency_key=idempotency_key)
+        created_import = await client.imports.create(
+            request, idempotency_key=idempotency_key
+        )
     except APIError as error:
         raise CLIError(
             "partial_failure",
@@ -344,6 +365,9 @@ async def import_sessions(
             hint=f"The uploaded blob {blob.id} was not deleted.",
         ) from error
 
+    identity["import_id"] = str(created_import.id)
+    assert created_import.job_id is not None
+    job = await client.jobs.get(created_import.job_id)
     created = receipts.created_job_result(
         "session_import",
         job,

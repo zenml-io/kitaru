@@ -13,19 +13,27 @@
 #  permissions and limitations under the License.
 """Import routes."""
 
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
-from kitaru.api_models.v1.imports import ImportCreateRequest
-from kitaru.api_models.v1.job import JobResponse
-from kitaru.server.adapters.rest.dependencies import authorize, get_job_service
-from kitaru.server.adapters.rest.mapping.imports import import_create_to_command
-from kitaru.server.adapters.rest.mapping.jobs import job_to_response
+from kitaru.api_models.v1.base import Page
+from kitaru.api_models.v1.imports import (
+    ImportCreateRequest,
+    ImportListParams,
+    ImportResponse,
+)
+from kitaru.server.adapters.rest.dependencies import authorize, get_import_service
+from kitaru.server.adapters.rest.mapping.imports import (
+    import_create_to_command,
+    import_list_params_to_filter,
+    import_to_response,
+)
 from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.services.job_service import JobService
+from kitaru.server.application.services.import_service import ImportService
 
 router = APIRouter(route_class=KitaruAPIRoute)
 
@@ -36,22 +44,73 @@ router = APIRouter(route_class=KitaruAPIRoute)
 @idempotent
 async def create_import(
     body: ImportCreateRequest,
-    service: Annotated[JobService, Depends(get_job_service)],
+    service: Annotated[ImportService, Depends(get_import_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-) -> JobResponse:
+) -> ImportResponse:
     """Import sessions from a payload blob, as a job holding one importer task.
 
-    Clients observe HTTP 201 on success and 404 when the importer, the
-    version, the payload blob, or the agent does not exist.
+    Clients observe HTTP 201 on success, 404 when the importer, the version,
+    the payload blob, the agent, the agent version, or an evaluator does not
+    exist, and 422 when the agent version belongs to another agent, an
+    evaluator is scoped to another agent, or an evaluator version repeats.
 
     Args:
         body: Import create request.
-        service: Job service.
+        service: Import service.
         actor: Caller context.
 
     Returns:
-        Created job.
+        Created import.
     """
     command = import_create_to_command(body)
-    job = await service.create_import(command, actor=actor)
-    return job_to_response(job)
+    import_ = await service.create_import(command, actor=actor)
+    return import_to_response(import_)
+
+
+@router.get("")
+async def list_imports(
+    service: Annotated[ImportService, Depends(get_import_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+    params: Annotated[ImportListParams, Query()],
+) -> Page[ImportResponse]:
+    """List imports.
+
+    Clients observe HTTP 200 on success and 422 on invalid pagination
+    parameters.
+
+    Args:
+        service: Import service.
+        actor: Caller context.
+        params: Import list params.
+
+    Returns:
+        Page of imports.
+    """
+    import_filter = import_list_params_to_filter(params)
+    imports, next_cursor = await service.list_imports(import_filter, actor=actor)
+    return Page[ImportResponse](
+        items=[import_to_response(import_) for import_ in imports],
+        next_cursor=next_cursor,
+    )
+
+
+@router.get("/{import_id}", responses=error_responses(404))
+async def get_import(
+    import_id: uuid.UUID,
+    service: Annotated[ImportService, Depends(get_import_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> ImportResponse:
+    """Get an import by id.
+
+    Clients observe HTTP 200 on success and 404 when no import has this id.
+
+    Args:
+        import_id: Id of the import.
+        service: Import service.
+        actor: Caller context.
+
+    Returns:
+        Stored import.
+    """
+    import_ = await service.get_import(import_id, actor=actor)
+    return import_to_response(import_)

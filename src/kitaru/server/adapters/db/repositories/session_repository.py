@@ -126,6 +126,7 @@ SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "agent_id": SessionORM.agent_id,
     "agent_version_id": SessionORM.agent_version_id,
     "task_id": SessionORM.task_id,
+    "import_id": SessionORM.import_id,
     "origin": SessionORM.origin,
     "status": SessionORM.status,
     "imported_from": SessionORM.imported_from,
