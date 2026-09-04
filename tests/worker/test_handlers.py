@@ -23,6 +23,7 @@ from fakes import (
     FakeKitaruAPIClient,
     as_client,
     make_agent_spec,
+    make_analyzer_spec,
     make_evaluator_spec,
     make_importer_spec,
 )
@@ -37,6 +38,7 @@ from kitaru.worker.blob_cache import BlobCache
 from kitaru.worker.context import ExecutionContext
 from kitaru.worker.handlers import HANDLERS
 from kitaru.worker.handlers.agent import MAX_INPUTS_ENV_BYTES, AgentHandler
+from kitaru.worker.handlers.analysis import AnalysisHandler
 from kitaru.worker.handlers.evaluation import EvaluationHandler
 from kitaru.worker.handlers.imports import ImportHandler
 
@@ -55,7 +57,12 @@ def _digest(content: bytes) -> str:
 
 def test_handlers_registry_covers_every_kind() -> None:
     """HANDLERS carries one entry per task kind."""
-    assert set(HANDLERS) == {TaskKind.AGENT, TaskKind.EVALUATOR, TaskKind.IMPORTER}
+    assert set(HANDLERS) == {
+        TaskKind.AGENT,
+        TaskKind.EVALUATOR,
+        TaskKind.IMPORTER,
+        TaskKind.ANALYZER,
+    }
 
 
 async def test_agent_handler_builds_command_and_working_dir(tmp_path: Path) -> None:
@@ -215,6 +222,91 @@ async def test_evaluation_handler_reuses_cached_plugin(tmp_path: Path) -> None:
     task_id = uuid.uuid4()
     spec = make_evaluator_spec(task_id, plugin=plugin)
     await EvaluationHandler().prepare(ctx, task_id, spec, "task-token")
+
+    assert client.blobs.download_calls == []
+
+
+async def test_analysis_handler_script_plugin_materializes_and_sets_path(
+    tmp_path: Path,
+) -> None:
+    """A script analyzer plugin is materialized and its path exported."""
+    content = b"# /// script\n# dependencies = ['numpy']\n# ///\n"
+    digest = _digest(content)
+    blob_id = uuid.uuid4()
+    plugin = ScriptPluginSpec(entrypoint="analyze", blob_id=blob_id, sha256=digest)
+    task_id = uuid.uuid4()
+    spec = make_analyzer_spec(task_id, plugin=plugin)
+
+    client = FakeKitaruAPIClient()
+    client.blobs.content[blob_id] = content
+    ctx = _ctx(tmp_path, client)
+
+    process = await AnalysisHandler().prepare(ctx, task_id, spec, "task-token")
+
+    plugin_path = Path(process.env["KITARU_TASK_PLUGIN_PATH"])
+    assert plugin_path.read_bytes() == content
+    assert client.blobs.download_calls == [blob_id]
+    assert process.working_dir is None
+    assert process.command == [
+        "uv",
+        "run",
+        "--no-project",
+        "--python",
+        sys.executable,
+        "--prerelease=allow",
+        "--with",
+        "numpy",
+        "python",
+        "-m",
+        "kitaru.task",
+        "analyze",
+    ]
+    assert process.env["KITARU_API_TOKEN"] == "task-token"
+
+
+async def test_analysis_handler_package_plugin_skips_materialization(
+    tmp_path: Path,
+) -> None:
+    """A package analyzer plugin needs no blob download."""
+    plugin = PackagePluginSpec(entrypoint="pkg.mod:analyze", requirement="pkg==1.0")
+    task_id = uuid.uuid4()
+    spec = make_analyzer_spec(task_id, plugin=plugin)
+    client = FakeKitaruAPIClient()
+    ctx = _ctx(tmp_path, client)
+
+    process = await AnalysisHandler().prepare(ctx, task_id, spec, "task-token")
+
+    assert "KITARU_TASK_PLUGIN_PATH" not in process.env
+    assert client.blobs.download_calls == []
+    assert process.command == [
+        "uv",
+        "run",
+        "--no-project",
+        "--python",
+        sys.executable,
+        "--prerelease=allow",
+        "--with",
+        "pkg==1.0",
+        "python",
+        "-m",
+        "kitaru.task",
+        "analyze",
+    ]
+
+
+async def test_analysis_handler_reuses_cached_plugin(tmp_path: Path) -> None:
+    """A cached plugin blob is not re-downloaded."""
+    content = b"def analyze(sessions, **params):\n    pass\n"
+    digest = _digest(content)
+    blob_id = uuid.uuid4()
+    plugin = ScriptPluginSpec(entrypoint="analyze", blob_id=blob_id, sha256=digest)
+    client = FakeKitaruAPIClient()
+    ctx = _ctx(tmp_path, client)
+    await ctx.blob_cache.put(digest, content)
+
+    task_id = uuid.uuid4()
+    spec = make_analyzer_spec(task_id, plugin=plugin)
+    await AnalysisHandler().prepare(ctx, task_id, spec, "task-token")
 
     assert client.blobs.download_calls == []
 
