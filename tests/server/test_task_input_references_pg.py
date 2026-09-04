@@ -41,7 +41,12 @@ from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.session import Session
-from kitaru.server.domain.task import AgentTask, EvaluationTask, ImportTask
+from kitaru.server.domain.task import (
+    AgentTask,
+    AnalysisTask,
+    EvaluationTask,
+    ImportTask,
+)
 
 
 @dataclass
@@ -121,6 +126,37 @@ async def test_task_names_a_missing_import(setup: Setup) -> None:
     )
     assert isinstance(stored, ImportTask)
     assert stored.import_id is not None
+
+
+async def test_analysis_task_names_missing_input_sessions(setup: Setup) -> None:
+    """Store an analysis task whose input sessions are already gone."""
+    stored = await SQLTaskRepository(setup.session).create(
+        AnalysisTask(
+            job_id=setup.job_id,
+            plugin_version_id=uuid.uuid4(),
+            agent_id=setup.agent_id,
+            input_session_ids=[uuid.uuid4(), uuid.uuid4()],
+        )
+    )
+    assert isinstance(stored, AnalysisTask)
+    assert len(stored.input_session_ids) == 2
+
+
+async def test_analysis_task_still_requires_its_agent(setup: Setup) -> None:
+    """Reject an analysis task naming an agent that does not exist.
+
+    Unlike the other input references, an analysis task's agent is a real
+    foreign key.
+    """
+    with pytest.raises(IntegrityError):
+        await SQLTaskRepository(setup.session).create(
+            AnalysisTask(
+                job_id=setup.job_id,
+                plugin_version_id=uuid.uuid4(),
+                agent_id=uuid.uuid4(),
+                input_session_ids=[uuid.uuid4()],
+            )
+        )
 
 
 async def test_create_many_names_missing_inputs(setup: Setup) -> None:

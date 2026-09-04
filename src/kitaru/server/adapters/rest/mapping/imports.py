@@ -22,6 +22,10 @@ from kitaru.api_models.v1.imports import (
     ImportResponse,
     ImportSource,
 )
+from kitaru.server.adapters.rest.mapping.analyzer_config import (
+    analyzer_config_input,
+    analyzer_config_to_wire,
+)
 from kitaru.server.adapters.rest.mapping.evaluator_config import (
     evaluator_config_input,
     evaluator_config_to_wire,
@@ -55,6 +59,7 @@ def import_create_to_command(body: ImportCreateRequest) -> ImportCreate:
         fetch_query=fetch_query,
         params=body.params,
         evaluators=[evaluator_config_input(config) for config in body.evaluators],
+        analyzers=[analyzer_config_input(config) for config in body.analyzers],
     )
 
 
@@ -87,6 +92,7 @@ def import_to_response(import_: Import) -> ImportResponse:
         evaluators=[
             evaluator_config_to_wire(evaluator) for evaluator in import_.evaluators
         ],
+        analyzers=[analyzer_config_to_wire(analyzer) for analyzer in import_.analyzers],
         stats=import_.stats,
         error=import_.error,
         created=import_.created,

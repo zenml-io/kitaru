@@ -78,10 +78,11 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("session_node", "reasoning_blob_id"): None,
     # A task names its inputs by id and carries no constraint to them, so
     # agent_version_id, import_id, input_session_id, and plugin_version_id are
-    # absent here. Only the job a task belongs to and the worker holding it
-    # stay constrained.
+    # absent here. The job a task belongs to, the worker holding it, and an
+    # analysis task's agent stay constrained.
     ("task", "job_id"): "CASCADE",
     ("task", "worker_id"): "SET NULL",
+    ("task", "agent_id"): "CASCADE",
     # evaluator_version_id carries no constraint, an evaluator-born row keeps
     # this id forever, even after the plugin version it references is deleted.
     ("evaluation", "owner_id"): None,
@@ -98,6 +99,8 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("annotation", "session_id"): "CASCADE",
     ("insight", "agent_id"): "CASCADE",
     ("insight", "owner_id"): None,
+    ("insight", "analyzer_version_id"): "SET NULL",
+    ("insight", "task_id"): "SET NULL",
     ("import", "agent_id"): "CASCADE",
     ("import", "agent_version_id"): "SET NULL",
     ("import", "importer_version_id"): "SET NULL",

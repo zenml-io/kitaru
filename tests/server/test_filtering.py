@@ -104,7 +104,11 @@ from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.experiment import ExperimentFilter
 from kitaru.server.application.models.experiment_run import ExperimentRunFilter
 from kitaru.server.application.models.job import JobFilter
-from kitaru.server.application.models.plugin import EvaluatorFilter, ImporterFilter
+from kitaru.server.application.models.plugin import (
+    AnalyzerFilter,
+    EvaluatorFilter,
+    ImporterFilter,
+)
 from kitaru.server.application.models.replay import ReplayFilter
 from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.models.session import SessionFilter
@@ -413,6 +417,7 @@ _EXACT_BINDING_PAIRS = [
 _SUBSET_BINDING_PAIRS = [
     pytest.param(EvaluatorFilter, PLUGIN_FILTER_BINDINGS, id="evaluator"),
     pytest.param(ImporterFilter, PLUGIN_FILTER_BINDINGS, id="importer"),
+    pytest.param(AnalyzerFilter, PLUGIN_FILTER_BINDINGS, id="analyzer"),
     pytest.param(JobTasksFilter, TASK_FILTER_BINDINGS, id="job_tasks"),
 ]
 

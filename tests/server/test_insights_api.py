@@ -23,16 +23,19 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeInsightRepository,
+    FakePluginRepository,
     create_agent,
     override_idempotency,
 )
-from kitaru.api_models.v1.insight import MAX_INSIGHT_BATCH_SIZE
+from kitaru.api_models.v1.insight import MAX_INSIGHT_BATCH_SIZE, TextInsightData
 from kitaru.server.adapters.rest.dependencies import authorize, get_insight_service
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.insight_service import InsightService
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.insight import Insight
+from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
@@ -53,9 +56,17 @@ def agent_repository() -> FakeAgentRepository:
 
 
 @pytest.fixture
-def insight_repository() -> FakeInsightRepository:
+def plugin_repository() -> FakePluginRepository:
+    """Provide the fake plugin repository backing analyzer resolution."""
+    return FakePluginRepository()
+
+
+@pytest.fixture
+def insight_repository(
+    plugin_repository: FakePluginRepository,
+) -> FakeInsightRepository:
     """Provide the fake insight repository backing the app."""
-    return FakeInsightRepository()
+    return FakeInsightRepository(plugin_repository=plugin_repository)
 
 
 @pytest.fixture
@@ -236,13 +247,54 @@ async def test_get_insight(client: httpx.AsyncClient, agent_id: str) -> None:
     ).json()[0]
     response = await client.get(f"/api/v1/insights/{created['id']}")
     assert response.status_code == 200
-    assert response.json() == created
+    body = response.json()
+    assert body == created
+    assert body["analyzer_name"] is None
+    assert body["analyzer_version"] is None
 
 
 async def test_get_insight_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing insight."""
     response = await client.get(f"/api/v1/insights/{uuid.uuid4()}")
     assert response.status_code == 404
+
+
+async def test_get_insight_carries_analyzer_info_for_a_task_born_insight(
+    client: httpx.AsyncClient,
+    insight_repository: FakeInsightRepository,
+    plugin_repository: FakePluginRepository,
+    agent_id: str,
+) -> None:
+    """Carry the analyzer name and version for an insight produced by a task."""
+    plugin = await plugin_repository.create(
+        Plugin(owner_id=ACCOUNT.id, kind=PluginKind.ANALYZER, name="trends")
+    )
+    version = await plugin_repository.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="analyze"),
+        display_version=None,
+    )
+    stored = await insight_repository.create_many(
+        [
+            Insight(
+                owner_id=ACCOUNT.id,
+                agent_id=uuid.UUID(agent_id),
+                name="insight",
+                title="insight",
+                data=TextInsightData(content="Latency regressed."),
+                analyzer_version_id=version.id,
+                analyzer_params={"window_days": 7},
+            )
+        ]
+    )
+
+    response = await client.get(f"/api/v1/insights/{stored[0].id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["analyzer_version_id"] == str(version.id)
+    assert body["analyzer_name"] == "trends"
+    assert body["analyzer_version"] == 1
+    assert body["analyzer_params"] == {"window_days": 7}
 
 
 async def test_list_insights_filters_by_agent_id(
