@@ -285,6 +285,7 @@ def _get_import(import_id: uuid.UUID | None = None) -> ImportResponse:
         source=BlobImportSource(blob_id=uuid.uuid4()),
         params={},
         evaluators=[],
+        analyzers=[],
         created=now,
         updated=now,
     )

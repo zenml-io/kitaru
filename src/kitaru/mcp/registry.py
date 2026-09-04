@@ -20,8 +20,10 @@ from kitaru.mcp.errors import (
 )
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.activity import ActivityReadRequest
+from kitaru.mcp.models.analyzers import AnalyzersManageRequest
 from kitaru.mcp.models.common import (
     ActivityReadResult,
+    AnalyzersManageResult,
     CohortsManageResult,
     DeleteResult,
     EvaluatorsManageResult,
@@ -48,6 +50,7 @@ from kitaru.mcp.models.workflows import (
 from kitaru.mcp.redaction import redact_data
 from kitaru.mcp.settings import CapabilityMode
 from kitaru.mcp.tools.activity import handle_activity_read
+from kitaru.mcp.tools.analyzers import handle_analyzers_manage
 from kitaru.mcp.tools.cohorts import handle_cohorts_manage
 from kitaru.mcp.tools.destructive import handle_delete, handle_workflow_cancel
 from kitaru.mcp.tools.evaluators import handle_evaluators_manage
@@ -176,6 +179,16 @@ async def evaluators_manage_tool(
     )
 
 
+async def analyzers_manage_tool(
+    request: AnalyzersManageRequest, context: Context
+) -> AnalyzersManageResult:
+    """Create or update analyzer parents and blob- or package-backed versions."""
+    return cast(
+        AnalyzersManageResult,
+        await _invoke(context, request, AnalyzersManageResult, handle_analyzers_manage),
+    )
+
+
 async def workflow_cancel_tool(
     request: WorkflowCancelRequest, context: Context
 ) -> WorkflowCancelResult:
@@ -286,6 +299,13 @@ TOOL_SPECS = (
         evaluators_manage_tool.__doc__ or "",
         _annotations(read_only=False, destructive=False, idempotent=False),
         evaluators_manage_tool,
+    ),
+    ToolSpec(
+        "kitaru_analyzers_manage",
+        CapabilityMode.STANDARD,
+        analyzers_manage_tool.__doc__ or "",
+        _annotations(read_only=False, destructive=False, idempotent=False),
+        analyzers_manage_tool,
     ),
     ToolSpec(
         "kitaru_workflow_cancel",

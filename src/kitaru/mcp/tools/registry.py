@@ -7,6 +7,7 @@ from typing import TypeVar
 
 from kitaru.api_models.v1.agent import AgentListParams
 from kitaru.api_models.v1.agent_version import AgentVersionListParams
+from kitaru.api_models.v1.analyzer import AnalyzerListParams
 from kitaru.api_models.v1.base import ListParams, Page, ResponseModel
 from kitaru.api_models.v1.cohort import CohortListParams
 from kitaru.api_models.v1.cohort_version import CohortVersionListParams
@@ -65,9 +66,13 @@ async def handle_registry_read(
             page = await client.importers.list(
                 build_list_params(ImporterListParams, request)
             )
-        else:
+        elif request.kind is ParentKind.EVALUATOR:
             page = await client.evaluators.list(
                 build_list_params(EvaluatorListParams, request)
+            )
+        else:
+            page = await client.analyzers.list(
+                build_list_params(AnalyzerListParams, request)
             )
         return build_page_data(page, request.size, PageData[RegistryItem])
     if isinstance(request, RegistryListVersionsRequest):
@@ -85,8 +90,12 @@ async def handle_registry_read(
             page = await client.importers.list_versions(
                 parent.id, build_list_params(ListParams, request, with_filter=False)
             )
-        else:
+        elif request.kind == "evaluator":
             page = await client.evaluators.list_versions(
+                parent.id, build_list_params(ListParams, request, with_filter=False)
+            )
+        else:
+            page = await client.analyzers.list_versions(
                 parent.id, build_list_params(ListParams, request, with_filter=False)
             )
         return build_page_data(page, request.size, PageData[RegistryItem])

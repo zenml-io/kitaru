@@ -56,6 +56,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
     roots = {item["name"] for item in describe_schema()}
     assert roots == {
         "agent",
+        "analyzer",
         "annotation",
         "cohort",
         "config",
@@ -82,6 +83,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
     }
     descriptions = {item["name"]: item["description"] for item in describe_schema()}
     assert descriptions["agent"] == "Register and inspect agents."
+    assert descriptions["analyzer"] == "Register and inspect analyzers."
     assert descriptions["annotation"] == "Create and manage session annotations."
     assert (
         descriptions["cohort"]
@@ -472,6 +474,7 @@ def test_idempotency_key_option_covers_only_single_create_commands() -> None:
         ("agent", "version", "register"),
         ("importer", "version", "register"),
         ("evaluator", "version", "register"),
+        ("analyzer", "version", "register"),
     )
     for path in covered_paths:
         [command] = describe_schema(path)
@@ -485,6 +488,7 @@ def test_idempotency_key_option_covers_only_single_create_commands() -> None:
         ("agent", "register"),
         ("importer", "register"),
         ("evaluator", "register"),
+        ("analyzer", "register"),
     )
     for path in uncovered_paths:
         [command] = describe_schema(path)

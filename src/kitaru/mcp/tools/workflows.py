@@ -36,6 +36,7 @@ async def handle_session_import(
         source=request.source,
         params=request.params,
         evaluators=request.evaluators,
+        analyzers=request.analyzers,
     )
     created_import = await state.client.imports.create(
         dto, idempotency_key=request.idempotency_key
