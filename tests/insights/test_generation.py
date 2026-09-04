@@ -257,6 +257,20 @@ def test_editor_validates_numbers_against_each_card_only(
         ("This result is best.", "unsupported claim"),
         ("This result is worse.", "unsupported claim"),
         ("This result is worst.", "unsupported claim"),
+        ("This run is longer.", "unsupported claim"),
+        ("This run is longest.", "unsupported claim"),
+        ("This run is shorter.", "unsupported claim"),
+        ("This run is shortest.", "unsupported claim"),
+        ("This group is larger.", "unsupported claim"),
+        ("This group is largest.", "unsupported claim"),
+        ("This group is smaller.", "unsupported claim"),
+        ("This group is smallest.", "unsupported claim"),
+        ("This value is greater.", "unsupported claim"),
+        ("This value is greatest.", "unsupported claim"),
+        ("This path is quicker.", "unsupported claim"),
+        ("This model is cheaper.", "unsupported claim"),
+        ("This signal is weaker.", "unsupported claim"),
+        ("This pattern appeared earlier.", "unsupported claim"),
         ("All sessions need attention.", "quantitative"),
         ("Every session needs attention.", "quantitative"),
         ("Each session needs attention.", "quantitative"),
@@ -468,6 +482,81 @@ def test_comparative_substrings_in_plain_prose_are_allowed(
                     ),
                 )
             ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+def test_extended_comparative_substrings_in_plain_prose_are_allowed(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description=("Enlargers and smallholders are worth investigating."),
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+def test_editor_rejects_non_utf8_page_and_card_copy(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    invalid_page = _editor([candidate.id]).model_copy(
+        update={"intro_title": "broken-\ud800-title"}
+    )
+    invalid_card = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                _editor([candidate.id])
+                .insights[0]
+                .model_copy(update={"description": "broken-\udfff-description"})
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="valid UTF-8"):
+        validate_editorial_plan(invalid_page, selection, [candidate])
+    with pytest.raises(ValueError, match="valid UTF-8"):
+        validate_editorial_plan(invalid_card, selection, [candidate])
+
+
+def test_editor_allows_valid_unicode_copy(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "intro_title": "Patterns worth investigating 日本語",
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description="Modèle à inspecter.",
+                )
+            ],
         }
     )
     assert validate_editorial_plan(copy, selection, [candidate]) == copy
@@ -955,6 +1044,34 @@ async def test_editor_failure_preserves_analyst_selection(
     assert generator.calls == ["analyst", "editor"]
     assert result.selection.selected_candidate_ids == [first]
     assert result.mode == GenerationMode.DETERMINISTIC_FALLBACK
+
+
+async def test_non_utf8_editor_copy_triggers_deterministic_fallback(
+    profiling_result: ProfilingResult,
+) -> None:
+    first = profiling_result.candidates[0].id
+    invalid_editor = _editor([first]).model_copy(
+        update={"intro_title": "broken-\ud800-title"}
+    )
+    generator = FakeGenerator(
+        AnalystPlan(
+            selected_candidate_ids=[first],
+            recommended_candidate_id=first,
+            rationale="Useful.",
+        ),
+        invalid_editor,
+    )
+
+    result = await generate_model_plan(
+        profiling_result,
+        generator=generator,
+        config=ModelGenerationConfig(model="test-model"),
+    )
+
+    assert generator.calls == ["analyst", "editor"]
+    assert result.mode == GenerationMode.DETERMINISTIC_FALLBACK
+    assert result.diagnostics.fallback_reason == "editor_failed"
+    assert "broken" not in result.model_dump_json()
 
 
 async def test_one_total_deadline_stops_before_editor(
