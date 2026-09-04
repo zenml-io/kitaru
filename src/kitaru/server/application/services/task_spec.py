@@ -31,6 +31,8 @@ from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
     AgentTaskDetails,
+    AnalysisTask,
+    AnalysisTaskDetails,
     EvaluationTask,
     EvaluationTaskDetails,
     ImportTask,
@@ -84,7 +86,7 @@ class TaskSpecBuilder:
             task: Task to build the spec for.
 
         Raises:
-            ValueError: The task is not one of the three known kinds.
+            ValueError: The task is not one of the known kinds.
 
         Returns:
             Execution spec.
@@ -95,6 +97,8 @@ class TaskSpecBuilder:
             return await self._evaluation_spec(task)
         if isinstance(task, ImportTask):
             return await self._import_spec(task)
+        if isinstance(task, AnalysisTask):
+            return await self._analysis_spec(task)
         raise ValueError(f"Task {task.id} has no spec builder")
 
     async def _agent_spec(self, task: AgentTask) -> TaskSpec:
@@ -205,6 +209,35 @@ class TaskSpecBuilder:
                 provider=plugin.provider,
                 agent_id=import_.agent_id,
                 params=import_.params,
+            ),
+        )
+
+    async def _analysis_spec(self, task: AnalysisTask) -> TaskSpec:
+        """Build the execution spec of an analyzer task.
+
+        Args:
+            task: Analysis task.
+
+        Raises:
+            PluginVersionIdNotFound: The task names an unknown plugin version.
+            BlobNotFound: The script plugin names an unknown blob.
+
+        Returns:
+            Execution spec.
+        """
+        plugin_version = await self._plugins.get_version_by_id(task.plugin_version_id)
+        plugin = await self._plugins.get(plugin_version.plugin_id)
+        return TaskSpec(
+            task_id=task.id,
+            kind=TaskKind.ANALYZER,
+            timeout_seconds=self._policy.analyzer_timeout_seconds,
+            env=task.env,
+            details=AnalysisTaskDetails(
+                analyzer_name=plugin.name,
+                params=task.params,
+                plugin=await self._plugin_spec(plugin_version),
+                agent_id=task.agent_id,
+                input_session_ids=task.input_session_ids,
             ),
         )
 
