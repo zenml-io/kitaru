@@ -25,6 +25,7 @@ from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
 from kitaru.server.domain.job import IllegalJobStatusTransition, Job
 from kitaru.server.domain.task import (
     AgentTask,
+    AnalysisTask,
     EvaluationTask,
     IllegalTaskStatusTransition,
     ImportTask,
@@ -114,8 +115,15 @@ def test_kinds() -> None:
         plugin_version_id=uuid.uuid4(),
         input_session_id=uuid.uuid4(),
     )
+    analyzer = AnalysisTask(
+        job_id=uuid.uuid4(),
+        plugin_version_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        input_session_ids=[uuid.uuid4()],
+    )
     assert agent.kind is TaskKind.AGENT
     assert evaluator.kind is TaskKind.EVALUATOR
+    assert analyzer.kind is TaskKind.ANALYZER
     assert _task().kind is TaskKind.IMPORTER
 
 
@@ -243,6 +251,63 @@ def test_evaluator_result_accepted() -> None:
         input_session_id=uuid.uuid4(),
         status=TaskStatus.RUNNING,
     )
+    task.complete(result, NOW)
+    assert task.status is TaskStatus.COMPLETED
+    assert task.result == result
+
+
+_INSIGHT = {"name": "trend", "title": "Trend", "data": {"type": "text", "content": "x"}}
+
+
+def _analysis_task(**overrides: Any) -> AnalysisTask:
+    """Build an analysis task in the running status.
+
+    Args:
+        overrides: Extra field values.
+
+    Returns:
+        Analysis task.
+    """
+    return AnalysisTask(
+        job_id=uuid.uuid4(),
+        plugin_version_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        input_session_ids=[uuid.uuid4()],
+        status=TaskStatus.RUNNING,
+        **overrides,
+    )
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        [],
+        "not-a-list",
+        [{"title": "Trend", "data": {"type": "text", "content": "x"}}],
+        [{"name": "trend", "data": {"type": "text", "content": "x"}}],
+        [_INSIGHT, _INSIGHT],
+    ],
+)
+def test_analyzer_result_validation(result: object) -> None:
+    """An analyzer result must be a non-empty list of uniquely named results."""
+    task = _analysis_task()
+    with pytest.raises(InvalidTaskResult):
+        task.complete(result, NOW)
+    assert task.status is TaskStatus.RUNNING
+
+
+def test_analyzer_result_accepted() -> None:
+    """A valid analyzer result completes the task and is stored."""
+    result = [
+        _INSIGHT,
+        {
+            "name": "outliers",
+            "title": "Outliers",
+            "data": {"type": "text", "content": "y"},
+        },
+    ]
+    task = _analysis_task()
     task.complete(result, NOW)
     assert task.status is TaskStatus.COMPLETED
     assert task.result == result

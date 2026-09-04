@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Evaluator config input model, shared by experiment and replay commands."""
+"""Evaluator and analyzer config input models."""
 
 from typing import Any
 
@@ -24,5 +24,13 @@ class EvaluatorConfigInput(FrozenModel):
     """Evaluator config awaiting resolution."""
 
     evaluator: str
+    version: int | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnalyzerConfigInput(FrozenModel):
+    """Analyzer config awaiting resolution."""
+
+    analyzer: str
     version: int | None = None
     params: dict[str, Any] = Field(default_factory=dict)

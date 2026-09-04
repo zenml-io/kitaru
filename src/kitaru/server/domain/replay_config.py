@@ -78,6 +78,15 @@ class EvaluatorConfig(FrozenModel):
     evaluator_version_id: uuid.UUID
 
 
+class AnalyzerConfig(FrozenModel):
+    """Analyzer config."""
+
+    analyzer: NamespacedName
+    version: int
+    params: dict[str, Any] = Field(default_factory=dict)
+    analyzer_version_id: uuid.UUID
+
+
 class StaticCase(FrozenModel):
     """Static tool call case."""
 
