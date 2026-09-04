@@ -19,6 +19,7 @@ from kitaru.api_models.v1.evaluator import EvaluatorResponse, EvaluatorVersionRe
 from kitaru.api_models.v1.experiment import ExperimentResponse
 from kitaru.api_models.v1.experiment_run import ExperimentRunResponse
 from kitaru.api_models.v1.importer import ImporterResponse, ImporterVersionResponse
+from kitaru.api_models.v1.imports import ImportResponse
 from kitaru.api_models.v1.insight import InsightResponse
 from kitaru.api_models.v1.investigation import (
     InvestigationResponse,
@@ -133,6 +134,7 @@ ActivityItem = (
     SessionDetailResponse
     | SessionResponse
     | ReplayResponse
+    | ImportResponse
     | EvaluationResponse
     | ExperimentRunResponse
     | SessionNodeResponse
