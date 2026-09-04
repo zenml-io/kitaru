@@ -127,6 +127,18 @@ class PluginVersionIdNotFound(NotFoundError):
         super().__init__(f"Plugin version {plugin_version_id} was not found")
 
 
+class PluginInUse(ConflictError):
+    """Raised when a plugin is referenced by an import."""
+
+    def __init__(self, plugin_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            plugin_id: Id of the plugin in use.
+        """
+        super().__init__(f"Plugin {plugin_id} is in use by an import")
+
+
 class InvalidPluginProvider(ValidationError):
     """Raised when an evaluator plugin carries a provider."""
 

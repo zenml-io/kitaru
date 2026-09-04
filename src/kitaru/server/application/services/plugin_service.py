@@ -161,6 +161,8 @@ class PluginService:
 
         Raises:
             PluginNotFound: No plugin has this id.
+            PluginInUse: One of the plugin's versions is referenced by an
+                import.
         """
         _ = actor
         await self._repository.delete(plugin_id)

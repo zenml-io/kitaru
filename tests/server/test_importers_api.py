@@ -23,6 +23,8 @@ import pytest
 from conftest import (
     FakeBlobRepository,
     FakePluginRepository,
+    db_settings,
+    lifespan_client,
     override_idempotency,
 )
 from kitaru.server.adapters.rest.dependencies import (
@@ -185,6 +187,50 @@ async def test_delete_importer_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown importer id."""
     response = await client.delete(f"/api/v1/importers/{uuid.uuid4()}")
     assert response.status_code == 404
+
+
+async def test_delete_importer_in_use() -> None:
+    """Observe HTTP 409 for an importer whose version an import references."""
+    async with lifespan_client(db_settings()) as client:
+        agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+        script = await client.post(
+            "/api/v1/blobs",
+            files={"file": ("run.py", b"def run(): pass", "text/plain")},
+        )
+        payload = await client.post(
+            "/api/v1/blobs", files={"file": ("payload.json", b"[]", "text/plain")}
+        )
+        importer = (
+            await client.post("/api/v1/importers", json={"name": "langfuse-import"})
+        ).json()
+        response = await client.post(
+            f"/api/v1/importers/{importer['id']}/versions",
+            json={
+                "source": {
+                    "type": "script",
+                    "blob_id": script.json()["id"],
+                    "entrypoint": "run",
+                }
+            },
+        )
+        assert response.status_code == 201, response.text
+        response = await client.post(
+            "/api/v1/imports",
+            json={
+                "importer": "langfuse-import",
+                "agent_id": agent["id"],
+                "payload_blob_id": payload.json()["id"],
+            },
+        )
+        assert response.status_code == 201, response.text
+
+        response = await client.delete(f"/api/v1/importers/{importer['id']}")
+        assert response.status_code == 409
+        assert response.json() == {
+            "detail": f"Plugin {importer['id']} is in use by an import"
+        }
+        response = await client.get(f"/api/v1/importers/{importer['id']}")
+        assert response.status_code == 200
 
 
 async def test_create_importer_version(client: httpx.AsyncClient) -> None:

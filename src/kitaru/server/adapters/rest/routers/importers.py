@@ -143,7 +143,7 @@ async def update_importer(
 @router.delete(
     "/{importer_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=error_responses(404),
+    responses=error_responses(404, 409),
 )
 async def delete_importer(
     importer_id: uuid.UUID,
@@ -152,8 +152,8 @@ async def delete_importer(
 ) -> None:
     """Delete an importer, cascading its versions.
 
-    Clients observe HTTP 204 on success and 404 when no importer has this
-    id.
+    Clients observe HTTP 204 on success, 404 when no importer has this id,
+    and 409 when one of its versions is referenced by an import.
 
     Args:
         importer_id: Id of the importer.
