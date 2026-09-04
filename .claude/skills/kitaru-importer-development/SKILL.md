@@ -33,6 +33,8 @@ An importer package for a provider with a live read API can also ship an importe
 
 ## Package, register, and version
 
+For feature PRs, follow the version and dependency ownership rules in `plugins/AGENTS.md`. Leave existing package versions and default pins unchanged. Record unreleased core requirements with the exact development dependency described in `plugins/DEVELOPMENT.md`; release prep selects and replaces release versions.
+
 An importer distribution lives under `plugins/packages/<slug>-importer/`, with its source, `pyproject.toml`, changelog, and focused tests under `plugins/tests/importers/`. Export `parse` through the package `__all__`. Add the package to `plugins/README.md`, `release/release-units.toml`, the exact inventory in `tests/scripts/test_release_units.py`, and `plugins/uv.lock`. A non-default package also declares `tool.kitaru.artifact.import-module` so artifact smoke can import it without a default-catalog entry.
 
 Use `kitaru importer scaffold` and `kitaru importer test` for bounded local scripts. Register an in-progress self-contained implementation with `kitaru importer register ... --script ... --entrypoint ...`. Use an exact package requirement when validation must cover wheel installation. Registration creates remote state, is not idempotent, and needs an explicit server plus a worker that can resolve the source. Do not run it without authorization. The package's PyPI version and Kitaru's server-assigned importer version are separate: use `kitaru importer version register` for each new immutable registered implementation, and never mutate the behavior behind an existing version.
