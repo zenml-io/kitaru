@@ -596,7 +596,9 @@ async def _handle_miss(
         return cast(dict[str, Any], await original(arguments))
     if on_miss is ToolPolicyOnMiss.ERROR_RESULT:
         return _create_error_result(policy_name, identity)
-    raise ToolPolicyMissError(f"No {policy_name} result for tool '{identity}'")
+    error = ToolPolicyMissError(f"No {policy_name} result for tool '{identity}'")
+    replay_abort.capture(error)
+    raise error
 
 
 def _wrap_tool_handler(
@@ -614,69 +616,71 @@ def _wrap_tool_handler(
     async def handler(arguments: Any) -> dict[str, Any]:
         try:
             normalized = _normalize_arguments(identity, arguments)
-            if replay is None:
-                await replay_abort.run_kitaru(
-                    recorder.record_tool_policy(
-                        tool_name=identity,
-                        arguments=normalized,
-                        policy="passthrough",
-                        live=True,
-                    )
+        except ToolPolicyError as error:
+            replay_abort.capture(error)
+            raise
+        if replay is None:
+            await replay_abort.run_kitaru(
+                recorder.record_tool_policy(
+                    tool_name=identity,
+                    arguments=normalized,
+                    policy="passthrough",
+                    live=True,
                 )
-                return cast(dict[str, Any], await original(normalized))
-            policy = _get_tool_policy(replay, identity)
-            if isinstance(policy, PassthroughConfig):
+            )
+            return cast(dict[str, Any], await original(normalized))
+        policy = _get_tool_policy(replay, identity)
+        if isinstance(policy, PassthroughConfig):
+            await replay_abort.run_kitaru(
+                recorder.record_tool_policy(
+                    tool_name=identity,
+                    arguments=normalized,
+                    policy=policy.type,
+                    live=True,
+                )
+            )
+            return cast(dict[str, Any], await original(normalized))
+        if isinstance(policy, StaticConfig):
+            matching = next(
+                (case for case in policy.cases if _case_matches(case, normalized)),
+                None,
+            )
+            if matching is not None:
                 await replay_abort.run_kitaru(
                     recorder.record_tool_policy(
                         tool_name=identity,
                         arguments=normalized,
                         policy=policy.type,
-                        live=True,
+                        live=False,
                     )
                 )
-                return cast(dict[str, Any], await original(normalized))
-            if isinstance(policy, StaticConfig):
-                matching = next(
-                    (case for case in policy.cases if _case_matches(case, normalized)),
-                    None,
-                )
-                if matching is not None:
-                    await replay_abort.run_kitaru(
-                        recorder.record_tool_policy(
-                            tool_name=identity,
-                            arguments=normalized,
-                            policy=policy.type,
-                            live=False,
-                        )
-                    )
-                    return normalize_tool_result(matching.result)
-                return await _handle_miss(
-                    policy_name=policy.type,
-                    on_miss=policy.on_miss,
-                    identity=identity,
-                    arguments=normalized,
-                    original=original,
-                    recorder=recorder,
-                    replay_abort=replay_abort,
-                )
-            if isinstance(policy, HistoryConfig):
-                return await _history_result(
-                    identity=identity,
-                    arguments=normalized,
-                    original=original,
-                    policy=policy,
-                    replay=replay,
-                    client=client,
-                    state=history,
-                    recorder=recorder,
-                    replay_abort=replay_abort,
-                )
-            raise ToolPolicyError(
-                f"Tool policy '{policy.type}' is not supported for '{identity}'"
+                return normalize_tool_result(matching.result)
+            return await _handle_miss(
+                policy_name=policy.type,
+                on_miss=policy.on_miss,
+                identity=identity,
+                arguments=normalized,
+                original=original,
+                recorder=recorder,
+                replay_abort=replay_abort,
             )
-        except ToolPolicyError as error:
-            replay_abort.capture(error)
-            raise
+        if isinstance(policy, HistoryConfig):
+            return await _history_result(
+                identity=identity,
+                arguments=normalized,
+                original=original,
+                policy=policy,
+                replay=replay,
+                client=client,
+                state=history,
+                recorder=recorder,
+                replay_abort=replay_abort,
+            )
+        error = ToolPolicyError(
+            f"Tool policy '{policy.type}' is not supported for '{identity}'"
+        )
+        replay_abort.capture(error)
+        raise error
 
     return handler
 
@@ -709,10 +713,12 @@ async def _history_result(
     if track_occurrence:
         async with state.lock:
             if cache_key in state.active_keys:
-                raise ToolPolicyError(
+                error = ToolPolicyError(
                     f"Concurrent identical history calls for tool '{identity}' are "
                     "ambiguous; use static replay or distinct identities or arguments"
                 )
+                replay_abort.capture(error)
+                raise error
             state.active_keys.add(cache_key)
             occurrence = state.occurrences.get(cache_key, 0)
     else:
@@ -729,10 +735,12 @@ async def _history_result(
             )
         )
         if "match" not in response.model_fields_set:
-            raise ToolPolicyError(
+            error = ToolPolicyError(
                 "Kitaru server tool lookup response does not include 'match'; "
                 "upgrade the server before using history replay"
             )
+            replay_abort.capture(error)
+            raise error
         match = response.match
         if match is None:
             return await _handle_miss(
@@ -745,10 +753,12 @@ async def _history_result(
                 replay_abort=replay_abort,
             )
         if match.status not in {NodeStatus.COMPLETED, NodeStatus.FAILED}:
-            raise ToolPolicyError(
+            error = ToolPolicyError(
                 f"History lookup for tool '{identity}' returned unexpected status "
                 f"'{match.status.value}'"
             )
+            replay_abort.capture(error)
+            raise error
         if track_occurrence:
             async with state.lock:
                 state.occurrences[cache_key] = cast(int, occurrence) + 1
@@ -761,9 +771,11 @@ async def _history_result(
             )
         )
         if match.status is NodeStatus.FAILED:
-            raise ToolPolicyError(
+            error = ToolPolicyError(
                 match.error or f"Recorded tool call '{identity}' failed"
             )
+            replay_abort.capture(error)
+            raise error
         return decode_tool_result(match.result)
     finally:
         if track_occurrence:

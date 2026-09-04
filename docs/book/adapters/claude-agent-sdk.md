@@ -64,7 +64,7 @@ When a worker runs the same program with a selected replay, the adapter can appl
 
 The adapter rejects `model_params`, `resume`, `continue_conversation`, `fork_session`, `resume_session_at`, and `resume_drops_turn` during replay because the public one-shot boundary cannot enforce those changes without combining the new run with hidden provider state. A mapped model override must contain the model set in `ClaudeAgentOptions`; otherwise the adapter stops before calling Claude.
 
-An agent version that runs this adapter keeps the default [runtime capabilities](../concepts/agents-and-sessions.md#runtime-capabilities), `overrides` and `tool_policies` both `true`, because the adapter intercepts model and tool calls inside the agent process. Those two booleans cannot say which override fields an adapter supports, so a `model_params` override is accepted when you create the replay and rejected by this adapter's own preflight when the run starts, before Claude is called. Do not declare `overrides: false` to express that: it also rejects the prompt, system-prompt, and model overrides this adapter does support.
+An agent version that runs this adapter keeps the default [runtime capabilities](../concepts/agents-and-sessions.md), `overrides` and `tool_policies` both `true`, because the adapter intercepts model and tool calls inside the agent process. Those two booleans cannot say which override fields an adapter supports, so a `model_params` override is accepted when you create the replay and rejected by this adapter's own preflight when the run starts, before Claude is called. Do not declare `overrides: false` to express that: it also rejects the prompt, system-prompt, and model overrides this adapter does support.
 
 ## Make an SDK MCP server replayable
 

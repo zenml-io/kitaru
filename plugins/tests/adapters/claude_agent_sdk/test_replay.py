@@ -1001,11 +1001,12 @@ async def test_real_sdk_server_propagates_swallowed_kitaru_failure(
     assert client.sessions.updated[-1][1].status.value == "failed"
 
 
+@pytest.mark.parametrize("error_type", [OSError, ToolPolicyError])
 async def test_real_sdk_server_leaves_passthrough_handler_failure_with_claude(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
 ) -> None:
     async def original(_: dict[str, Any]) -> dict[str, Any]:
-        raise OSError("tool failed")
+        raise error_type("tool failed")
 
     replay = _replay(_policy("mcp__support__lookup", PassthroughConfig()))
     client = FakeClient()

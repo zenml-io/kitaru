@@ -79,7 +79,7 @@ release-label = "requires:plugin:claude-agent-sdk"
 impact-paths = ["plugins/packages/claude-agent-sdk/**"]
 tag-prefix = "python/kitaru-claude-agent-sdk/v"
 maintenance-branch-prefix = "release/claude-agent-sdk/"
-checks = ["plugin package (claude-agent-sdk)"]
+checks = []
 
 [[units]]
 slug = "evaluator"

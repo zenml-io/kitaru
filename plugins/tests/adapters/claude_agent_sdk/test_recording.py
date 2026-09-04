@@ -421,6 +421,40 @@ async def test_split_turn_with_two_hooked_tools_keeps_every_parent_below_its_nod
     assert all(node.parent_index < node.index for node in latest.values() if node.index)
 
 
+async def test_hook_after_split_delivery_does_not_reserve_the_next_turn(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    await recorder.record_message(_split_delivery(ThinkingBlock("planning", "sig")))
+    await recorder.record_tool_hook(
+        {"tool_use_id": "tool-1", "tool_name": "lookup", "tool_input": {"q": 1}},
+        event="before",
+    )
+    await recorder.record_message(
+        _split_delivery(ToolUseBlock("tool-1", "lookup", {"q": 1}))
+    )
+    await recorder.record_message(
+        AssistantMessage(
+            content=[TextBlock("child result")],
+            model="claude-test",
+            message_id="message-2",
+            parent_tool_use_id="tool-1",
+        )
+    )
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    tool = next(
+        node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
+    )
+    child = next(
+        node
+        for node in latest.values()
+        if node.node_type is NodeType.LLM_CALL and node.external_id == "message-2"
+    )
+    assert child.parent_index == tool.index
+    assert tool.index < child.index
+
+
 async def test_split_turn_merges_reasoning_and_text_into_one_node(
     fake_client: FakeClient,
 ) -> None:
@@ -474,6 +508,27 @@ async def test_redelivered_identical_assistant_message_is_recorded_once(
     assert len(model_nodes) == 1
     assert model_nodes[0].outputs == {"text": ["done"]}
     assert model_nodes[0].reasoning == "planning"
+
+
+async def test_identical_blocks_in_one_delivery_are_preserved(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    await recorder.record_message(
+        _split_delivery(
+            TextBlock("echo"),
+            TextBlock("echo"),
+            ThinkingBlock("same", "sig-1"),
+            ThinkingBlock("same", "sig-2"),
+        )
+    )
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    model = next(
+        node for node in latest.values() if node.node_type is NodeType.LLM_CALL
+    )
+    assert model.outputs == {"text": ["echo", "echo"]}
+    assert model.reasoning == "same\nsame"
 
 
 async def test_replayable_tool_preserves_full_arguments_for_history_key(

@@ -276,16 +276,24 @@ class _AssistantTurn:
     stop_reason: str | None = None
     error: str | None = None
     usage: dict[str, Any] | None = None
-    _blocks_seen: set[tuple[str, str]] = field(default_factory=set, repr=False)
+    _deliveries_seen: set[tuple[tuple[str, str], ...]] = field(
+        default_factory=set, repr=False
+    )
 
     def merge(self, message: AssistantMessage, *, observed_at: datetime) -> None:
         """Fold one delivery into the turn without dropping earlier blocks."""
         self.ended_at = observed_at
-        for block in message.content:
-            if isinstance(block, TextBlock):
-                self._collect("text", block.text, self.texts)
-            elif isinstance(block, ThinkingBlock):
-                self._collect("thinking", block.thinking, self.thoughts)
+        delivery = tuple(
+            ("text", block.text)
+            if isinstance(block, TextBlock)
+            else ("thinking", block.thinking)
+            for block in message.content
+            if isinstance(block, TextBlock | ThinkingBlock)
+        )
+        if delivery and delivery not in self._deliveries_seen:
+            self._deliveries_seen.add(delivery)
+            for kind, text in delivery:
+                (self.texts if kind == "text" else self.thoughts).append(text)
         if message.model:
             self.model = message.model
         if message.session_id is not None:
@@ -296,18 +304,6 @@ class _AssistantTurn:
             self.error = message.error
         if message.usage:
             self.usage = dict(message.usage)
-
-    def _collect(self, kind: str, text: str, collected: list[str]) -> None:
-        """Keep each block once so a redelivered message cannot double it."""
-        # Keying on the content drops a genuine repetition of the same string
-        # inside one turn. The delivery's own identity would keep it, but the
-        # SDK does not document whether a redelivered AssistantMessage reuses
-        # its uuid, and doubling a whole turn is the worse failure.
-        if (kind, text) in self._blocks_seen:
-            return
-        self._blocks_seen.add((kind, text))
-        collected.append(text)
-
 
 @dataclass
 class InvocationRecorder:
@@ -749,7 +745,7 @@ class InvocationRecorder:
     async def _record_assistant(self, message: AssistantMessage) -> None:
         identity = message.message_id or message.uuid
         observed_at = datetime.now(UTC)
-        model_index = self._resolve_assistant_index(identity)
+        model_index = self._resolve_assistant_index(message, identity)
         turn = self._get_assistant_turn(identity, observed_at)
         turn.merge(message, observed_at=observed_at)
         model_node = SessionNodeCreateRequest(
@@ -780,10 +776,17 @@ class InvocationRecorder:
             elif isinstance(block, ToolResultBlock):
                 await self._record_tool_result(block)
 
-    def _resolve_assistant_index(self, identity: str | None) -> int:
+    def _resolve_assistant_index(
+        self, message: AssistantMessage, identity: str | None
+    ) -> int:
         """Return the index for one turn, reusing it on every later delivery."""
         cached = self._message_indexes.get(identity) if identity else None
         if cached is not None:
+            if any(isinstance(block, ToolUseBlock) for block in message.content):
+                # A hook may arrive after an earlier delivery already created
+                # this turn. Its reservation belongs to this cached turn and
+                # must not be handed to the next assistant message.
+                self._pending_turn_index = None
             return cached
         index = self._pending_turn_index
         if index is None:
