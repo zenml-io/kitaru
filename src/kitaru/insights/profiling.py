@@ -82,6 +82,11 @@ _CREDENTIAL_PATTERNS = (
         r"\s*[:=]\s*\S+",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"\b(?:password|passwd|pwd|credentials?|client[_-]?secret|private[_-]?key)"
+        r"\s*[:=]\s*\S+",
+        re.IGNORECASE,
+    ),
     re.compile(r"https?://[^\s/@:]+:[^\s/@]+@", re.IGNORECASE),
     re.compile(
         r"https?://[^\s?#]+[?&](?:api[_-]?key|access[_-]?token|token|secret)="
@@ -118,7 +123,11 @@ class ProfilingConfig(_ProfilingModel):
     max_payload_depth: int = Field(default=32, ge=1, le=100)
     max_evidence_per_candidate: int = Field(default=20, ge=1, le=20)
     max_candidates: int = Field(default=24, ge=1, le=100)
-    max_contributing_sessions: int = Field(default=1000, ge=1, le=10_000)
+    max_contributing_sessions: int = Field(
+        default=MAX_CONTRIBUTING_SESSIONS,
+        ge=1,
+        le=MAX_CONTRIBUTING_SESSIONS,
+    )
     max_projection_bytes: int = Field(default=512_000, ge=1_000, le=10_000_000)
 
 
@@ -489,8 +498,9 @@ def _user_messages(value: Any, budget: _PayloadBudget) -> list[str]:
                 if key in current:
                     messages.extend(_text_parts(current[key], budget))
             continue
-        if budget.can_enter(len(current)):
-            stack.extend((item, depth + 1) for item in reversed(current.values()))
+        keys = sorted(key for key in current if isinstance(key, str))
+        if budget.can_enter(len(keys)):
+            stack.extend((current[key], depth + 1) for key in reversed(keys))
     return messages
 
 

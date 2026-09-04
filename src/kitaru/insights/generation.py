@@ -31,6 +31,14 @@ from kitaru.insights.profiling import (
 )
 
 _NUMERIC_TOKEN = re.compile(r"\d+(?:[.,]\d+)*(?:%|[A-Za-z]+)?")
+_QUANTITY_TOKEN = re.compile(
+    r"\b(?:none|zero|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
+    r"nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
+    r"hundreds?|thousands?|millions?|billions?|trillions?|dozens?|"
+    r"once|twice|thrice)\b",
+    flags=re.IGNORECASE,
+)
 _LINK = re.compile(r"(?:https?://|www\.)", flags=re.IGNORECASE)
 _MARKUP = re.compile(
     r"(?:<[^>]+>|\[[^\]]+\]\([^\)]+\)|```|^\s{0,3}#{1,6}\s)", re.MULTILINE
@@ -264,17 +272,19 @@ def _validate_copy_safety(value: str) -> None:
         raise ValueError("editor copy contains an unsupported claim")
 
 
-def _digit_bearing_labels(candidate: CandidateFinding) -> set[str]:
-    """Return exact chart labels whose digits are part of their identity."""
+def _quantified_labels(candidate: CandidateFinding) -> set[str]:
+    """Return exact chart labels containing otherwise forbidden quantities."""
     if not isinstance(candidate.data, CategoricalInsightData):
         return set()
     return {
-        item.label for item in candidate.data.values if re.search(r"\d", item.label)
+        item.label
+        for item in candidate.data.values
+        if _NUMERIC_TOKEN.search(item.label) or _QUANTITY_TOKEN.search(item.label)
     }
 
 
 def _without_known_labels(value: str, labels: set[str]) -> str:
-    """Mask exact known labels so their identifying digits are not claims."""
+    """Mask exact known labels so identity tokens are not treated as claims."""
     for label in sorted(labels, key=len, reverse=True):
         value = re.sub(
             rf"(?<![A-Za-z0-9]){re.escape(label)}(?![A-Za-z0-9])",
@@ -311,8 +321,8 @@ def _outcome_categories(value: str) -> set[str]:
 def _validate_page_copy(value: str) -> None:
     """Validate friendly page framing separately from candidate facts."""
     _validate_copy_safety(value)
-    if _NUMERIC_TOKEN.search(value):
-        raise ValueError("editor page copy contains a numeric claim")
+    if _NUMERIC_TOKEN.search(value) or _QUANTITY_TOKEN.search(value):
+        raise ValueError("editor page copy contains a numeric or quantitative claim")
     if _OUTCOME_TOKEN.search(value):
         raise ValueError("editor page copy contains an unsupported outcome claim")
 
@@ -330,9 +340,9 @@ def _validate_card_copy(value: str, candidate: CandidateFinding) -> None:
         )
     )
     allowed_outcomes = _outcome_categories(factual_copy)
-    remaining = _without_known_labels(value, _digit_bearing_labels(candidate))
-    if _NUMERIC_TOKEN.search(remaining):
-        raise ValueError("editor card copy contains a numeric claim")
+    remaining = _without_known_labels(value, _quantified_labels(candidate))
+    if _NUMERIC_TOKEN.search(remaining) or _QUANTITY_TOKEN.search(remaining):
+        raise ValueError("editor card copy contains a numeric or quantitative claim")
     output_outcomes = _outcome_categories(value)
     if not output_outcomes.issubset(allowed_outcomes):
         raise ValueError("editor card copy contains an unsupported outcome claim")

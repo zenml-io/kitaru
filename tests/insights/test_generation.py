@@ -241,6 +241,8 @@ def test_editor_validates_numbers_against_each_card_only(
     ("description", "message"),
     [
         ("It takes 17 ms to respond.", "numeric"),
+        ("Two sessions need attention.", "quantitative"),
+        ("This happens twice as often.", "quantitative"),
         ("These sessions timed out.", "outcome"),
         ("Read https://example.com for details.", "link"),
         ("# Tool behavior", "markup"),
@@ -291,6 +293,51 @@ def test_editor_validates_page_copy_without_borrowing_card_facts(
     )
     with pytest.raises(ValueError, match=r"page copy.*numeric"):
         validate_editorial_plan(copy, selection, [candidate])
+
+
+def test_editor_rejects_word_quantity_in_page_copy(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={"recommendation_description": "Try this twice."}
+    )
+    with pytest.raises(ValueError, match="quantitative"):
+        validate_editorial_plan(copy, selection, [candidate])
+
+
+def test_editor_allows_exact_known_word_quantity_label(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="Model Two", value=1)]
+            )
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Model mix",
+                    description="Model Two is worth investigating.",
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
 
 
 def test_editor_allows_friendly_variant_of_grounded_outcome(

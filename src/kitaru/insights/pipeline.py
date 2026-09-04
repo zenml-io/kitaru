@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.insight import InsightInput
+from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from kitaru.insights.generation import (
     InsightModelGenerator,
@@ -318,6 +319,12 @@ def _validate_sessions(
         session = item.session
         if session.agent_id != context.agent_id:
             raise ValueError("every session must belong to the context agent")
+        if session.origin is not SessionOrigin.IMPORTED:
+            raise ValueError("every session must originate from an import")
+        if session.task_id != context.source_import.task_id:
+            raise ValueError(
+                "every session must belong to the context source import task"
+            )
         if session.id in session_ids:
             raise ValueError("session IDs must be unique")
         session_ids.add(session.id)

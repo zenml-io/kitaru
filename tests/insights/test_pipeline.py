@@ -57,6 +57,7 @@ def _session(number: int, *, status: SessionStatus) -> SessionWithNodesResponse:
             updated=NOW,
             agent_id=AGENT_ID,
             number=number,
+            task_id=IMPORT_TASK_ID,
             origin=SessionOrigin.IMPORTED,
             status=status,
             inputs={"message": "THAT IS WRONG!!!" if number == 1 else "please retry"},
@@ -178,7 +179,7 @@ class SuccessfulGenerator(InsightModelGenerator):
         return ModelStageResponse(
             value=EditorialPlan(
                 intro_eyebrow="Worth looking at first",
-                intro_title="One pattern deserves attention",
+                intro_title="A pattern deserves attention",
                 intro_description="Start with a focused investigation.",
                 recommendation_title="Recommended next step",
                 recommendation_description="Compare a focused cohort.",
@@ -371,6 +372,38 @@ async def test_rejects_sessions_from_another_agent() -> None:
         await generate_insights(
             [_session(1, status=SessionStatus.FAILED)], context=context
         )
+
+
+@pytest.mark.parametrize(
+    ("origin", "task_id", "message"),
+    [
+        (SessionOrigin.RECORDED, IMPORT_TASK_ID, "originate from an import"),
+        (SessionOrigin.REPLAY, IMPORT_TASK_ID, "originate from an import"),
+        (SessionOrigin.IMPORTED, None, "source import task"),
+        (SessionOrigin.IMPORTED, uuid.UUID(int=1), "source import task"),
+    ],
+)
+async def test_rejects_sessions_outside_the_source_import(
+    origin: SessionOrigin,
+    task_id: uuid.UUID | None,
+    message: str,
+) -> None:
+    session = _session(1, status=SessionStatus.FAILED)
+    session.session = session.session.model_copy(
+        update={"origin": origin, "task_id": task_id}
+    )
+
+    with pytest.raises(ValueError, match=message):
+        await generate_insights([session], context=_context())
+
+
+async def test_rejects_sessions_concatenated_from_multiple_imports() -> None:
+    first = _session(1, status=SessionStatus.FAILED)
+    second = _session(2, status=SessionStatus.COMPLETED)
+    second.session = second.session.model_copy(update={"task_id": uuid.uuid4()})
+
+    with pytest.raises(ValueError, match="source import task"):
+        await generate_insights([first, second], context=_context())
 
 
 @pytest.mark.parametrize("duplicate", ["session", "node_id", "node_index"])
