@@ -109,21 +109,30 @@ def build_worker_config(
 ) -> Any:
     """Merge explicit CLI values over ``KITARU_WORKER_*`` settings.
 
-    The optional job id refines the configured scope. It does not discard
-    configured claims or selectors.
+    The optional job id refines the configured scope without discarding
+    configured claims or selectors. A pre-registered worker id read from the
+    environment rejects all three scope flags.
     """
     _, config_type = load_worker_runtime()
     base = config_type()
-    scope = WorkerScope(
-        claims=_parse_claims(claims) if claims is not None else base.scope.claims,
-        selectors=(
-            _parse_selectors(selectors)
-            if selectors is not None
-            else base.scope.selectors
-        ),
-        job_id=job_id if job_id is not None else base.scope.job_id,
-    )
-    updates: dict[str, Any] = {"scope": scope}
+    if base.id is not None and (
+        claims is not None or selectors is not None or job_id is not None
+    ):
+        raise CLIError(
+            "invalid_arguments",
+            "--claim, --selector, and --job-id cannot be set with KITARU_WORKER_ID.",
+        )
+    updates: dict[str, Any] = {}
+    if base.id is None:
+        updates["scope"] = WorkerScope(
+            claims=_parse_claims(claims) if claims is not None else base.scope.claims,
+            selectors=(
+                _parse_selectors(selectors)
+                if selectors is not None
+                else base.scope.selectors
+            ),
+            job_id=job_id if job_id is not None else base.scope.job_id,
+        )
     explicit = {
         "name": name,
         "concurrency": concurrency,
@@ -138,7 +147,7 @@ def build_worker_config(
     updates.update({key: value for key, value in explicit.items() if value is not None})
     if metadata is not None:
         updates["metadata"] = {**base.metadata, **_parse_metadata(metadata)}
-    return config_type.model_validate({**base.model_dump(), **updates})
+    return config_type.model_validate({**base.model_dump(exclude={"scope"}), **updates})
 
 
 def _parse_selectors(values: list[str]) -> list[LabelSelector]:
@@ -352,18 +361,20 @@ async def start_worker(
 
 def _worker_summary(config: Any) -> dict[str, Any]:
     """Return a non-secret lifecycle projection of worker configuration."""
-    return {
-        "name": config.name,
-        "claims": [_claim_syntax(claim) for claim in config.scope.claims],
-        "selectors": (
+    summary: dict[str, Any] = {"name": config.name}
+    if config.id is not None:
+        summary["id"] = str(config.id)
+    else:
+        summary["claims"] = [_claim_syntax(claim) for claim in config.scope.claims]
+        summary["selectors"] = (
             [selector.model_dump(mode="json") for selector in config.scope.selectors]
             if config.scope.selectors is not None
             else None
-        ),
-        "job_id": str(config.scope.job_id) if config.scope.job_id else None,
-        "concurrency": config.concurrency,
-        "claim_batch_size": config.claim_batch_size,
-    }
+        )
+        summary["job_id"] = str(config.scope.job_id) if config.scope.job_id else None
+    summary["concurrency"] = config.concurrency
+    summary["claim_batch_size"] = config.claim_batch_size
+    return summary
 
 
 def _claim_syntax(claim: WorkerClaim) -> str:

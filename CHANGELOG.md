@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Added `kitaru setup`, which installs the agent skills from `zenml-io/kitaru-skills` into `~/.agents/skills` (plus `~/.claude/skills` and `~/.codex/skills` when those CLIs are present) and registers `kitaru-mcp` with every detected coding agent: Claude Code and Codex through their own `mcp add` commands, Cursor and Windsurf through their JSON configuration files. Inside a project it launches the server through `uv run --directory <project>` and uses Claude Code's project scope; a tool install points at the absolute `kitaru-mcp` path. Re-running replaces the previous entry, so it is safe to run again after installing a new editor. `--mode` and the global `--server` select the MCP capability mode and target; `--no-skills` and `--no-mcp` skip either half. The one-line installer now runs it instead of carrying its own client detection.
+- Added agent-scoped insights. Create a batch of insights for an agent with `client.insights.create(...)` or `POST /api/v1/insights`, each carrying a name, a title, an optional description, and data of type `text`, `categorical`, or `binned`. Insights can be listed with filters on `agent_id`, `name`, and `type`, fetched, updated in title and description, and deleted.
 
 ## [0.25.0] - 2026-09-03
 

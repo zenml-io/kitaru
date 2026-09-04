@@ -65,6 +65,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "experiment",
         "importer",
         "info",
+        "insight",
         "investigation",
         "job",
         "login",
@@ -91,6 +92,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         == "Configure experiments and manage asynchronous runs."
     )
     assert descriptions["importer"] == "Develop, register, and inspect importers."
+    assert descriptions["insight"] == "Create and inspect agent insights."
     assert descriptions["investigation"] == (
         "Create investigations and review their linked sessions."
     )
@@ -449,6 +451,7 @@ def test_idempotency_key_option_covers_only_single_create_commands() -> None:
     covered_paths = (
         ("cohort", "create"),
         ("cohort", "version", "create"),
+        ("insight", "create"),
         ("investigation", "create"),
         ("annotation", "create"),
         ("experiment", "create"),

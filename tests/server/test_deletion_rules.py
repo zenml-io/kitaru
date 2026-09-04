@@ -95,6 +95,8 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("annotation", "investigation_session_id"): "CASCADE",
     ("annotation", "owner_id"): None,
     ("annotation", "session_id"): "CASCADE",
+    ("insight", "agent_id"): "CASCADE",
+    ("insight", "owner_id"): None,
 }
 
 

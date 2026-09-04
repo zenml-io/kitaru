@@ -22,6 +22,7 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from kitaru.server.blob_storage_settings import BlobStorageSettings
+from kitaru.server.ephemeral_worker_settings import EphemeralWorkerSettings
 
 
 class DatabaseSSLMode(StrEnum):
@@ -60,6 +61,7 @@ class Settings(BaseSettings):
     WORKER_LIVENESS_TIMEOUT_SECONDS: int = 60
     MAX_BLOB_SIZE_BYTES: int = 100 * 1024 * 1024
     BLOB_STORAGE: BlobStorageSettings = BlobStorageSettings()
+    EPHEMERAL_WORKER: EphemeralWorkerSettings = EphemeralWorkerSettings()
     PAYLOAD_OFFLOAD_THRESHOLD_BYTES: int = 20 * 1024
 
     LIST_QUERY_TIMEOUT_SECONDS: int = 10

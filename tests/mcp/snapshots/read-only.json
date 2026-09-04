@@ -5290,7 +5290,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "Read investigations, annotations, and ordered investigation sessions.",
+    "description": "Read investigations, annotations, insights, and investigation sessions.",
     "inputSchema": {
       "$defs": {
         "AndFilter": {
@@ -5435,7 +5435,7 @@
         },
         "ReviewGet": {
           "additionalProperties": false,
-          "description": "Get one investigation or annotation by exact UUID.",
+          "description": "Get one investigation, annotation, or insight by exact UUID.",
           "properties": {
             "id": {
               "format": "uuid",
@@ -5445,7 +5445,8 @@
             "kind": {
               "enum": [
                 "investigation",
-                "annotation"
+                "annotation",
+                "insight"
               ],
               "title": "Kind",
               "type": "string"
@@ -5466,7 +5467,7 @@
         },
         "ReviewList": {
           "additionalProperties": false,
-          "description": "List one bounded page of investigations or annotations.",
+          "description": "List one bounded page of investigations, annotations, or insights.",
           "properties": {
             "cursor": {
               "anyOf": [
@@ -5504,7 +5505,8 @@
             "kind": {
               "enum": [
                 "investigation",
-                "annotation"
+                "annotation",
+                "insight"
               ],
               "title": "Kind",
               "type": "string"
@@ -5769,6 +5771,250 @@
           "title": "AnnotationSpan",
           "type": "object"
         },
+        "Bin": {
+          "additionalProperties": false,
+          "description": "Bin.",
+          "properties": {
+            "count": {
+              "description": "Observations in the bin.",
+              "minimum": 0,
+              "title": "Count",
+              "type": "integer"
+            },
+            "lower_bound": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Inclusive lower bound, None on an open-ended first bin.",
+              "title": "Lower Bound"
+            },
+            "upper_bound": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Exclusive upper bound, None on an open-ended last bin.",
+              "title": "Upper Bound"
+            }
+          },
+          "required": [
+            "count"
+          ],
+          "title": "Bin",
+          "type": "object"
+        },
+        "BinnedInsightData": {
+          "additionalProperties": false,
+          "description": "Binned insight data.",
+          "properties": {
+            "bins": {
+              "description": "Bins, in ascending order.",
+              "items": {
+                "$ref": "#/$defs/Bin"
+              },
+              "minItems": 1,
+              "title": "Bins",
+              "type": "array"
+            },
+            "type": {
+              "const": "binned",
+              "default": "binned",
+              "title": "Type",
+              "type": "string"
+            },
+            "unit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Unit of the values.",
+              "title": "Unit"
+            }
+          },
+          "required": [
+            "bins"
+          ],
+          "title": "BinnedInsightData",
+          "type": "object"
+        },
+        "CategoricalInsightData": {
+          "additionalProperties": false,
+          "description": "Categorical insight data.",
+          "properties": {
+            "type": {
+              "const": "categorical",
+              "default": "categorical",
+              "title": "Type",
+              "type": "string"
+            },
+            "unit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Unit of the values.",
+              "title": "Unit"
+            },
+            "values": {
+              "description": "Values per category.",
+              "items": {
+                "$ref": "#/$defs/CategoryValue"
+              },
+              "minItems": 1,
+              "title": "Values",
+              "type": "array"
+            }
+          },
+          "required": [
+            "values"
+          ],
+          "title": "CategoricalInsightData",
+          "type": "object"
+        },
+        "CategoryValue": {
+          "additionalProperties": false,
+          "description": "Category value.",
+          "properties": {
+            "label": {
+              "description": "Category label.",
+              "title": "Label",
+              "type": "string"
+            },
+            "value": {
+              "description": "Measured value.",
+              "minimum": 0,
+              "title": "Value",
+              "type": "number"
+            }
+          },
+          "required": [
+            "label",
+            "value"
+          ],
+          "title": "CategoryValue",
+          "type": "object"
+        },
+        "InsightResponse": {
+          "description": "Insight response.",
+          "properties": {
+            "agent_id": {
+              "description": "Agent the insight belongs to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "data": {
+              "description": "Insight data.",
+              "discriminator": {
+                "mapping": {
+                  "binned": "#/$defs/BinnedInsightData",
+                  "categorical": "#/$defs/CategoricalInsightData",
+                  "text": "#/$defs/TextInsightData"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/TextInsightData"
+                },
+                {
+                  "$ref": "#/$defs/CategoricalInsightData"
+                },
+                {
+                  "$ref": "#/$defs/BinnedInsightData"
+                }
+              ],
+              "title": "Data"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Insight description.",
+              "title": "Description"
+            },
+            "id": {
+              "description": "Insight id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "description": "Insight name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "title": {
+              "description": "Insight title.",
+              "title": "Title",
+              "type": "string"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "agent_id",
+            "name",
+            "title",
+            "description",
+            "data",
+            "metadata"
+          ],
+          "title": "InsightResponse",
+          "type": "object"
+        },
         "InvestigationResponse": {
           "description": "Investigation response.",
           "properties": {
@@ -6025,7 +6271,7 @@
           "title": "InvestigationStatus",
           "type": "string"
         },
-        "PageData_Union_InvestigationResponse__InvestigationSessionResponse__AnnotationResponse__": {
+        "PageData_Union_InvestigationResponse__InvestigationSessionResponse__AnnotationResponse__InsightResponse__": {
           "additionalProperties": false,
           "properties": {
             "items": {
@@ -6039,6 +6285,9 @@
                   },
                   {
                     "$ref": "#/$defs/AnnotationResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/InsightResponse"
                   }
                 ]
               },
@@ -6053,7 +6302,7 @@
             "items",
             "page"
           ],
-          "title": "PageData[Union[InvestigationResponse, InvestigationSessionResponse, AnnotationResponse]]",
+          "title": "PageData[Union[InvestigationResponse, InvestigationSessionResponse, AnnotationResponse, InsightResponse]]",
           "type": "object"
         },
         "PageMetadata": {
@@ -6086,6 +6335,28 @@
             "has_more"
           ],
           "title": "PageMetadata",
+          "type": "object"
+        },
+        "TextInsightData": {
+          "additionalProperties": false,
+          "description": "Text insight data.",
+          "properties": {
+            "content": {
+              "description": "Markdown content.",
+              "title": "Content",
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "default": "text",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "content"
+          ],
+          "title": "TextInsightData",
           "type": "object"
         },
         "ToolError": {
@@ -6140,7 +6411,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Typed investigation and annotation read result.",
+      "description": "Typed investigation, annotation, and insight read result.",
       "properties": {
         "data": {
           "anyOf": [
@@ -6154,7 +6425,10 @@
               "$ref": "#/$defs/AnnotationResponse"
             },
             {
-              "$ref": "#/$defs/PageData_Union_InvestigationResponse__InvestigationSessionResponse__AnnotationResponse__"
+              "$ref": "#/$defs/InsightResponse"
+            },
+            {
+              "$ref": "#/$defs/PageData_Union_InvestigationResponse__InvestigationSessionResponse__AnnotationResponse__InsightResponse__"
             },
             {
               "type": "null"

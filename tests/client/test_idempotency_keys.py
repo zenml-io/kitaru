@@ -55,6 +55,7 @@ MAPPING = {
     ("POST", "/api/v1/experiments"): ("experiments", "create"),
     ("POST", "/api/v1/experiments/{experiment_id}/runs"): ("experiments", "start_run"),
     ("POST", "/api/v1/annotations"): ("annotations", "create"),
+    ("POST", "/api/v1/insights"): ("insights", "create"),
     ("POST", "/api/v1/investigations"): ("investigations", "create"),
     ("POST", "/api/v1/api-keys"): ("api_keys", "create"),
     ("POST", "/api/v1/api-keys/{api_key_id}/rotate"): ("api_keys", "rotate"),

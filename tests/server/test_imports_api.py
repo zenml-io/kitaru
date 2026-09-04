@@ -109,6 +109,7 @@ async def test_create_import(
     assert isinstance(task, ImportTask)
     assert task.kind.value == "importer"
     assert task.plugin_version_id == version.id
+    assert task.labels == {}
     assert task.params == {
         "delimiter": ",",
         "join_on": "/metadata/customer~1case_id",
