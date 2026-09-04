@@ -214,33 +214,100 @@ def _assemble_result(
     """Assemble only deterministic facts and validated editorial fields."""
     by_id = {candidate.id: candidate for candidate in profiling.candidates}
     copy_by_id = {item.id: item for item in plan.editorial.insights}
-    coverage = _output_coverage(
+    base_coverage = _output_coverage(
         profiling,
         plan,
         maximum_contributions=config.max_contributing_sessions_per_insight,
     )
+    selected_ids = list(plan.selection.selected_candidate_ids)
+    retained_ids = list(selected_ids)
+    maximum_oversized_prompt = 0
+    prepared: dict[str, tuple[list[uuid.UUID], list[EvidenceLocator], str]] = {}
+
+    while retained_ids:
+        coverage = base_coverage
+        if len(retained_ids) < len(selected_ids):
+            coverage = base_coverage.model_copy(
+                update={
+                    "truncations": [
+                        *base_coverage.truncations,
+                        CoverageTruncation(
+                            dimension="investigation_prompt_chars",
+                            available=maximum_oversized_prompt,
+                            analyzed=MAX_INVESTIGATION_PROMPT_LENGTH,
+                        ),
+                    ],
+                    "caveats": [
+                        *base_coverage.caveats,
+                        (
+                            "Selected cards with oversized investigation prompts "
+                            "were omitted."
+                        ),
+                    ],
+                }
+            )
+
+        prepared = {}
+        oversized_ids: set[str] = set()
+        for candidate_id in retained_ids:
+            candidate = by_id[candidate_id]
+            contributing_ids, evidence = _bounded_references(
+                candidate,
+                maximum=config.max_contributing_sessions_per_insight,
+            )
+            try:
+                prompt = _investigation_prompt(
+                    candidate,
+                    context=context,
+                    coverage=coverage,
+                    contributing_session_ids=contributing_ids,
+                    evidence=evidence,
+                )
+            except _OutputBoundError as error:
+                maximum_oversized_prompt = max(
+                    maximum_oversized_prompt, error.available
+                )
+                oversized_ids.add(candidate_id)
+                continue
+            prepared[candidate_id] = (contributing_ids, evidence, prompt)
+
+        if not oversized_ids:
+            break
+        retained_ids = [
+            candidate_id
+            for candidate_id in retained_ids
+            if candidate_id not in oversized_ids
+        ]
+
+    if not retained_ids:
+        raise _OutputBoundError(
+            available=maximum_oversized_prompt,
+            maximum=MAX_INVESTIGATION_PROMPT_LENGTH,
+        )
+
+    recommendation_id = plan.selection.recommended_candidate_id
+    recommendation_title = plan.editorial.recommendation_title
+    recommendation_description = plan.editorial.recommendation_description
+    if recommendation_id not in retained_ids:
+        recommendation_id = retained_ids[0]
+        recommendation_title = "Recommended next step"
+        recommendation_description = (
+            "Start here and use the copied prompt to define a focused cohort."
+        )
+
     insights: list[InsightInput] = []
-    for position, candidate_id in enumerate(plan.selection.selected_candidate_ids):
+    for position, candidate_id in enumerate(retained_ids):
         candidate = by_id[candidate_id]
         copy = copy_by_id[candidate_id]
-        contributing_ids, evidence = _bounded_references(
-            candidate,
-            maximum=config.max_contributing_sessions_per_insight,
-        )
+        contributing_ids, evidence, investigation_prompt = prepared[candidate_id]
         metadata = InsightCardMetadata(
             eyebrow=copy.eyebrow,
             position=position,
-            recommended=candidate_id == plan.selection.recommended_candidate_id,
+            recommended=candidate_id == recommendation_id,
             contributing_session_ids=contributing_ids,
             evidence=evidence,
             coverage=coverage,
-            investigation_prompt=_investigation_prompt(
-                candidate,
-                context=context,
-                coverage=coverage,
-                contributing_session_ids=contributing_ids,
-                evidence=evidence,
-            ),
+            investigation_prompt=investigation_prompt,
             context=context,
             generation=GenerationVersions(
                 analysis=profiling.analysis_version,
@@ -267,9 +334,9 @@ def _assemble_result(
             description=plan.editorial.intro_description,
         ),
         recommendation=PageRecommendation(
-            insight_name=plan.selection.recommended_candidate_id,
-            title=plan.editorial.recommendation_title,
-            description=plan.editorial.recommendation_description,
+            insight_name=recommendation_id,
+            title=recommendation_title,
+            description=recommendation_description,
         ),
         diagnostics=plan.diagnostics,
         insights=insights,

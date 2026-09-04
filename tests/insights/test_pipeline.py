@@ -25,6 +25,7 @@ from kitaru.insights import (
     InsightGenerationContext,
     SourceImportContext,
 )
+from kitaru.insights import pipeline as insight_pipeline
 from kitaru.insights.generation import (
     AnalystPlan,
     EditorialCardCopy,
@@ -32,6 +33,7 @@ from kitaru.insights.generation import (
     InsightModelGenerator,
     ModelGenerationConfig,
     ModelStageResponse,
+    generate_deterministic_plan,
 )
 from kitaru.insights.models import GenerationMode, ProviderReceipt
 from kitaru.insights.observability import GenerationEvent
@@ -332,6 +334,116 @@ async def test_rejects_result_that_exceeds_serialized_bound() -> None:
     )
 
 
+async def test_oversized_prompt_omits_only_the_affected_card(monkeypatch) -> None:
+    sessions = [
+        _session(1, status=SessionStatus.FAILED),
+        _session(2, status=SessionStatus.COMPLETED),
+    ]
+    profiling = insight_pipeline.profile_sessions(sessions)
+    first_candidate = profiling.candidates[0]
+    profiling = profiling.model_copy(
+        update={
+            "candidates": [
+                first_candidate,
+                first_candidate.model_copy(
+                    update={
+                        "id": "second-candidate",
+                        "family": "second-family",
+                        "rank": first_candidate.rank + 1,
+                        "title": "A second deterministic pattern",
+                    }
+                ),
+            ]
+        }
+    )
+    plan = generate_deterministic_plan(profiling)
+    assert len(plan.selection.selected_candidate_ids) >= 2
+    oversized_id = plan.selection.selected_candidate_ids[-1]
+    modified = profiling.model_copy(
+        update={
+            "candidates": [
+                candidate.model_copy(update={"investigation_prompt": "x" * 16_001})
+                if candidate.id == oversized_id
+                else candidate
+                for candidate in profiling.candidates
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        insight_pipeline,
+        "profile_sessions",
+        lambda sessions, config: modified,
+    )
+
+    result = await generate_insights(sessions, context=_context())
+
+    assert result.insights
+    assert oversized_id not in {insight.name for insight in result.insights}
+    assert any(
+        item.dimension == "investigation_prompt_chars"
+        for item in result.coverage.truncations
+    )
+    assert all(
+        result.card_metadata(insight).coverage == result.coverage
+        for insight in result.insights
+    )
+
+
+async def test_oversized_recommendation_falls_back_to_first_retained_card(
+    monkeypatch,
+) -> None:
+    sessions = [
+        _session(1, status=SessionStatus.FAILED),
+        _session(2, status=SessionStatus.COMPLETED),
+    ]
+    profiling = insight_pipeline.profile_sessions(sessions)
+    first_candidate = profiling.candidates[0]
+    profiling = profiling.model_copy(
+        update={
+            "candidates": [
+                first_candidate,
+                first_candidate.model_copy(
+                    update={
+                        "id": "second-candidate",
+                        "family": "second-family",
+                        "rank": first_candidate.rank + 1,
+                        "title": "A second deterministic pattern",
+                    }
+                ),
+            ]
+        }
+    )
+    plan = generate_deterministic_plan(profiling)
+    assert len(plan.selection.selected_candidate_ids) >= 2
+    removed_recommendation = plan.selection.recommended_candidate_id
+    modified = profiling.model_copy(
+        update={
+            "candidates": [
+                candidate.model_copy(update={"investigation_prompt": "x" * 16_001})
+                if candidate.id == removed_recommendation
+                else candidate
+                for candidate in profiling.candidates
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        insight_pipeline,
+        "profile_sessions",
+        lambda sessions, config: modified,
+    )
+
+    result = await generate_insights(sessions, context=_context())
+
+    assert result.recommendation is not None
+    assert result.recommendation.insight_name == result.insights[0].name
+    assert result.recommendation.insight_name != removed_recommendation
+    assert result.recommendation.title == "Recommended next step"
+    assert result.recommendation.description == (
+        "Start here and use the copied prompt to define a focused cohort."
+    )
+    assert result.card_metadata(result.insights[0]).recommended is True
+
+
 async def test_raises_when_even_empty_result_exceeds_serialized_bound() -> None:
     context = _context().model_copy(
         update={
@@ -350,9 +462,27 @@ async def test_raises_when_even_empty_result_exceeds_serialized_bound() -> None:
         )
 
 
-async def test_reports_bounded_card_contribution_references() -> None:
+async def test_reports_bounded_card_contribution_references(monkeypatch) -> None:
+    sessions = [
+        _session(
+            number,
+            status=(SessionStatus.FAILED if number == 1 else SessionStatus.COMPLETED),
+        )
+        for number in range(1, 13)
+    ]
+    profiling = insight_pipeline.profile_sessions(sessions)
+    candidate = profiling.candidates[0].model_copy(
+        update={"contributing_session_ids": [item.session.id for item in sessions]}
+    )
+    modified = profiling.model_copy(update={"candidates": [candidate]})
+    monkeypatch.setattr(
+        insight_pipeline,
+        "profile_sessions",
+        lambda sessions, config: modified,
+    )
+
     result = await generate_insights(
-        [_session(number, status=SessionStatus.COMPLETED) for number in range(1, 13)],
+        sessions,
         context=_context(),
         config=InsightGenerationConfig(max_contributing_sessions_per_insight=3),
     )

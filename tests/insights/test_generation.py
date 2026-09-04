@@ -104,7 +104,7 @@ class FakeGenerator(InsightModelGenerator):
 def _editor(ids: Sequence[str]) -> EditorialPlan:
     return EditorialPlan(
         intro_eyebrow="Worth looking at first",
-        intro_title="A few patterns deserve attention",
+        intro_title="Patterns deserve attention",
         intro_description="These patterns can guide the first investigation.",
         recommendation_title="Recommended next step",
         recommendation_description="Start here and compare a focused cohort.",
@@ -266,6 +266,15 @@ def test_editor_validates_numbers_against_each_card_only(
         ("The rate is doubling.", "quantitative"),
         ("The rate tripled.", "quantitative"),
         ("The rate is tripling.", "quantitative"),
+        ("Several sessions need attention.", "quantitative"),
+        ("Many sessions need attention.", "quantitative"),
+        ("Few sessions need attention.", "quantitative"),
+        ("Multiple sessions need attention.", "quantitative"),
+        ("A couple of sessions need attention.", "quantitative"),
+        ("The majority need attention.", "quantitative"),
+        ("Minorities of sessions need attention.", "quantitative"),
+        ("Numerous sessions need attention.", "quantitative"),
+        ("A handful of sessions need attention.", "quantitative"),
     ],
 )
 def test_editor_rejects_fabricated_or_unsafe_card_copy(
@@ -312,8 +321,18 @@ def test_editor_validates_page_copy_without_borrowing_card_facts(
         validate_editorial_plan(copy, selection, [candidate])
 
 
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Try this twice.",
+        "Several patterns need attention.",
+        "A couple of patterns need attention.",
+        "The majority need attention.",
+    ],
+)
 def test_editor_rejects_word_quantity_in_page_copy(
     profiling_result: ProfilingResult,
+    description: str,
 ) -> None:
     candidate = profiling_result.candidates[0]
     selection = AnalystPlan(
@@ -322,7 +341,7 @@ def test_editor_rejects_word_quantity_in_page_copy(
         rationale="Useful.",
     )
     copy = _editor([candidate.id]).model_copy(
-        update={"recommendation_description": "Try this twice."}
+        update={"recommendation_description": description}
     )
     with pytest.raises(ValueError, match="quantitative"):
         validate_editorial_plan(copy, selection, [candidate])
@@ -364,6 +383,8 @@ def test_editor_allows_exact_known_word_quantity_label(
         ("100%", "100% is worth investigating."),
         ("Two", "Two is worth investigating."),
         ("All", "All are worth investigating."),
+        ("A couple", "A couple are worth investigating."),
+        ("The majority", "The majority are worth investigating."),
     ],
 )
 def test_quantity_only_label_cannot_mask_fabricated_quantity(
@@ -444,6 +465,58 @@ def test_comparative_substrings_in_plain_prose_are_allowed(
                     description=(
                         "Breakfast requests and bestseller paths are worth inspecting."
                     ),
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+def test_quantity_substrings_in_plain_prose_are_allowed(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description=("Couplets and multiplexers are worth investigating."),
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+def test_editor_allows_exact_known_indefinite_quantity_label(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="Model Many", value=1)]
+            )
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Model mix",
+                    description="Model Many is worth investigating.",
                 )
             ]
         }

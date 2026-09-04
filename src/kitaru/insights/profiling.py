@@ -1191,6 +1191,14 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
         affected_ids = failed_ids
         contributions = _contributions(state, affected_ids)
         contribution_ids = set(contributions)
+        completed_sessions = state.statuses.get(SessionStatus.COMPLETED.value, 0)
+        outcome_description = (
+            "Recorded session statuses show where to begin comparing failed and "
+            "completed runs."
+            if completed_sessions
+            else "Recorded session statuses show where to investigate failures and "
+            "define a useful comparison group."
+        )
         status_evidence = [
             EvidenceLocator(
                 session_id=session_id,
@@ -1211,10 +1219,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                     f"{_percent(state.statuses.get('failed', 0), analyzed_sessions)}% "
                     "of sessions are recorded failed"
                 ),
-                fallback_description=(
-                    "Recorded session statuses show where to begin comparing failed "
-                    "and completed runs."
-                ),
+                fallback_description=outcome_description,
                 caveat=(
                     "Recorded status describes the session boundary, not the cause of "
                     "the outcome."
@@ -1308,22 +1313,31 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             unit="seconds",
         ),
     )
-    # Generic distributions are eligible with two observations, even if all values
-    # land in one bin, because their chart is still a reproducible baseline.
     for spec in distribution_specs:
         if len(spec.values) < 2:
             continue
         contributing = _contributions(state, spec.session_ids)
         if not contributing:
             continue
+        uniform = len(set(spec.values)) == 1
+        title = (
+            f"All recorded observations have {spec.values[0]:g} {spec.unit}"
+            if uniform
+            else spec.title
+        )
+        description = (
+            "This uniform baseline can anchor comparisons after an agent change."
+            if uniform
+            else spec.description
+        )
         candidates.append(
             CandidateFinding(
                 id=spec.candidate_id,
                 family=spec.family,
                 rank=spec.rank,
                 eyebrow=spec.eyebrow,
-                title=spec.title,
-                fallback_description=spec.description,
+                title=title,
+                fallback_description=description,
                 caveat=(
                     "Recorded timestamps may omit uninstrumented work."
                     if spec.family == "timing"
@@ -1349,7 +1363,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 ),
                 contributing_session_ids=contributing,
                 evidence=[],
-                investigation_prompt=_prompt(spec.title.lower()),
+                investigation_prompt=_prompt(title.lower()),
             )
         )
 
