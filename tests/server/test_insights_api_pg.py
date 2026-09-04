@@ -14,12 +14,28 @@
 """End-to-end insight tests against PostgreSQL."""
 
 import json
+import uuid
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from conftest import db_settings, lifespan_client
+from kitaru.api_models.v1.insight import TextInsightData
+from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.insight_repository import (
+    SQLInsightRepository,
+)
+from kitaru.server.adapters.db.repositories.plugin_repository import (
+    SQLPluginRepository,
+)
+from kitaru.server.api.config import APISettings
+from kitaru.server.database.service import DatabaseService
+from kitaru.server.domain.blob import Blob, BlobStorageBackend
+from kitaru.server.domain.insight import Insight
+from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 
 
 @pytest.fixture
@@ -27,6 +43,30 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app running its full lifespan."""
     async with lifespan_client(db_settings()) as client:
         yield client
+
+
+@asynccontextmanager
+async def _raw_session(
+    settings: APISettings,
+) -> AsyncGenerator[AsyncSession, None]:
+    """Open a session bound to the same database a lifespan_client migrated.
+
+    Args:
+        settings: Settings naming the database, matching the ones passed to
+            lifespan_client.
+
+    Yields:
+        Session on the shared database.
+    """
+    engine = create_async_engine(DatabaseService.generate_database_uri(settings))
+    try:
+        session_factory = async_sessionmaker(
+            bind=engine, class_=AsyncSession, expire_on_commit=False
+        )
+        async with session_factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 @pytest.fixture
@@ -140,3 +180,53 @@ async def test_create_insights_missing_agent(client: httpx.AsyncClient) -> None:
         },
     )
     assert response.status_code == 404
+
+
+async def test_get_insight_carries_analyzer_info_for_a_task_born_insight() -> None:
+    """Carry the analyzer name and version for an insight produced by a task."""
+    settings = db_settings()
+    async with lifespan_client(settings) as client:
+        agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+
+        async with _raw_session(settings) as session:
+            owner_id = uuid.UUID(agent["owner_id"])
+            code_blob, _ = await SQLBlobRepository(session).create(
+                Blob(
+                    owner_id=owner_id,
+                    sha256="1" * 64,
+                    size=4,
+                    media_type="text/x-python",
+                    stored_in=BlobStorageBackend.DATABASE,
+                )
+            )
+            plugins = SQLPluginRepository(session)
+            plugin = await plugins.create(
+                Plugin(owner_id=owner_id, kind=PluginKind.ANALYZER, name="trends")
+            )
+            version = await plugins.create_version(
+                plugin.id,
+                ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
+                display_version=None,
+            )
+            stored = await SQLInsightRepository(session).create_many(
+                [
+                    Insight(
+                        owner_id=owner_id,
+                        agent_id=uuid.UUID(agent["id"]),
+                        name="insight",
+                        title="insight",
+                        data=TextInsightData(content="Latency regressed."),
+                        analyzer_version_id=version.id,
+                        analyzer_params={"window_days": 7},
+                    )
+                ]
+            )
+            await session.commit()
+
+        response = await client.get(f"/api/v1/insights/{stored[0].id}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["analyzer_version_id"] == str(version.id)
+        assert body["analyzer_name"] == "trends"
+        assert body["analyzer_version"] == 1
+        assert body["analyzer_params"] == {"window_days": 7}

@@ -22,6 +22,7 @@ instead of duplicating them.
 import uuid
 from typing import TypeVar
 
+from kitaru.api_models.v1.analyzer import AnalyzerCreateRequest, AnalyzerUpdateRequest
 from kitaru.api_models.v1.base import ListParams, Page, TimestampedResponseModel
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
@@ -53,16 +54,17 @@ PluginVersionResponseT = TypeVar(
 
 async def create_plugin(
     service: PluginService,
-    body: EvaluatorCreateRequest | ImporterCreateRequest,
+    body: EvaluatorCreateRequest | ImporterCreateRequest | AnalyzerCreateRequest,
     response_class: type[PluginResponseT],
     actor: AuthContext,
 ) -> PluginResponseT:
-    """Create a plugin from an evaluator or importer create request.
+    """Create a plugin from an evaluator, importer, or analyzer create request.
 
     Args:
         service: Plugin service bound to the resource's kind.
-        body: Evaluator or importer create request.
-        response_class: ``EvaluatorResponse`` or ``ImporterResponse``.
+        body: Evaluator, importer, or analyzer create request.
+        response_class: ``EvaluatorResponse``, ``ImporterResponse``, or
+            ``AnalyzerResponse``.
         actor: Caller context.
 
     Returns:
@@ -123,17 +125,18 @@ async def get_plugin(
 async def update_plugin(
     service: PluginService,
     plugin_id: uuid.UUID,
-    body: EvaluatorUpdateRequest | ImporterUpdateRequest,
+    body: EvaluatorUpdateRequest | ImporterUpdateRequest | AnalyzerUpdateRequest,
     response_class: type[PluginResponseT],
     actor: AuthContext,
 ) -> PluginResponseT:
-    """Update a plugin from an evaluator or importer update request.
+    """Update a plugin from an evaluator, importer, or analyzer update request.
 
     Args:
         service: Plugin service bound to the resource's kind.
         plugin_id: Id of the plugin.
-        body: Evaluator or importer update request.
-        response_class: ``EvaluatorResponse`` or ``ImporterResponse``.
+        body: Evaluator, importer, or analyzer update request.
+        response_class: ``EvaluatorResponse``, ``ImporterResponse``, or
+            ``AnalyzerResponse``.
         actor: Caller context.
 
     Returns:

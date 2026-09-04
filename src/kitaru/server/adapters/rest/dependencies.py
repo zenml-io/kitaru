@@ -546,6 +546,27 @@ def get_importer_service(
     )
 
 
+def get_analyzer_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
+) -> PluginService:
+    """Return a plugin service bound to the analyzer kind.
+
+    Args:
+        session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
+
+    Returns:
+        Plugin service bound to the SQL repositories.
+    """
+    return PluginService(
+        kind=PluginKind.ANALYZER,
+        repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+        analytics=analytics,
+    )
+
+
 def get_session_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
