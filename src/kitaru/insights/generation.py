@@ -37,7 +37,9 @@ _QUANTITY_TOKEN = re.compile(
     r"nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
     r"hundreds?|thousands?|millions?|billions?|trillions?|dozens?|"
     r"once|twice|thrice|all|every|each|both|half|halves|"
-    r"double|doubled|doubles|doubling|triple|tripled|triples|tripling)\b",
+    r"double|doubled|doubles|doubling|triple|tripled|triples|tripling|"
+    r"several|many|few|fewer|fewest|multiple|multiples|couple|couples|"
+    r"majority|majorities|minority|minorities|numerous|handful|handfuls)\b",
     flags=re.IGNORECASE,
 )
 _LINK = re.compile(r"(?:https?://|www\.)", flags=re.IGNORECASE)
@@ -65,6 +67,43 @@ _SESSION_STATUS_OUTCOMES = {
     "failed": "failure",
     "completed": "completion",
     "in_progress": "in_progress",
+}
+_NON_IDENTITY_LABEL_WORDS = {
+    "a",
+    "an",
+    "the",
+    "of",
+    "session",
+    "sessions",
+    "call",
+    "calls",
+    "request",
+    "requests",
+    "response",
+    "responses",
+    "result",
+    "results",
+    "occurrence",
+    "occurrences",
+    "percent",
+    "percentage",
+    "percentages",
+    "retry",
+    "retries",
+    "error",
+    "errors",
+    "failure",
+    "failures",
+    "completion",
+    "completions",
+    "item",
+    "items",
+    "run",
+    "runs",
+    "time",
+    "times",
+    "tool",
+    "tools",
 }
 
 
@@ -296,7 +335,10 @@ def _is_identity_bearing_quantified_label(label: str) -> bool:
         return False
     without_quantities = _QUANTITY_TOKEN.sub("", label)
     without_quantities = _NUMERIC_TOKEN.sub("", without_quantities)
-    return bool(re.search(r"[A-Za-z]", without_quantities))
+    remaining_words = {
+        word.lower() for word in re.findall(r"[A-Za-z]+", without_quantities)
+    }
+    return bool(remaining_words - _NON_IDENTITY_LABEL_WORDS)
 
 
 def _without_known_labels(value: str, labels: set[str]) -> str:

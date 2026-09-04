@@ -429,6 +429,45 @@ def test_session_outcomes_requires_at_least_one_failed_session() -> None:
     assert "session-outcomes" not in {candidate.id for candidate in result.candidates}
 
 
+def test_all_failed_outcome_copy_does_not_claim_completed_comparison() -> None:
+    candidate = _candidate(
+        profile_sessions(
+            [
+                _session(1, status=SessionStatus.FAILED),
+                _session(2, status=SessionStatus.FAILED),
+            ]
+        ),
+        "session-outcomes",
+    )
+
+    assert "completed" not in candidate.fallback_description.lower()
+    assert "comparison group" in candidate.fallback_description.lower()
+
+
+def test_uniform_distribution_copy_does_not_claim_spread_or_variation() -> None:
+    sessions = [
+        _session(1, ended_at=NOW + timedelta(seconds=5)),
+        _session(2, ended_at=NOW + timedelta(seconds=5)),
+    ]
+
+    candidates = {
+        candidate.id: candidate for candidate in profile_sessions(sessions).candidates
+    }
+
+    for candidate_id in (
+        "tool-call-distribution",
+        "model-call-distribution",
+        "total-activity-distribution",
+        "recorded-duration-distribution",
+    ):
+        candidate = candidates[candidate_id]
+        copy = f"{candidate.title} {candidate.fallback_description}".lower()
+        assert candidate.title.startswith("All recorded observations have")
+        assert "spread" not in copy
+        assert "varies" not in copy
+        assert "uniform baseline" in copy
+
+
 def test_tool_errors_use_safe_exact_names_and_hide_credentials() -> None:
     safe_name = "orders.lookup_v2"
     credential_name = "https://alice:secret@example.com/tool"
@@ -766,7 +805,17 @@ def test_node_distributions_exclude_sessions_with_truncated_node_lists() -> None
 
 
 def test_contribution_truncation_reports_actual_distribution_contributors() -> None:
-    sessions = [_session(number) for number in range(1, 4)]
+    sessions = [
+        _session(1),
+        _calls(2, [("a", {"id": 1}, NodeStatus.COMPLETED, "ok")]),
+        _calls(
+            3,
+            [
+                ("a", {"id": 1}, NodeStatus.COMPLETED, "ok"),
+                ("b", {"id": 2}, NodeStatus.COMPLETED, "ok"),
+            ],
+        ),
+    ]
 
     result = profile_sessions(
         sessions,
