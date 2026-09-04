@@ -477,10 +477,8 @@ def _validate_sessions(
             raise ValueError("every session must belong to the context agent")
         if session.origin is not SessionOrigin.IMPORTED:
             raise ValueError("every session must originate from an import")
-        if session.task_id != context.source_import.task_id:
-            raise ValueError(
-                "every session must belong to the context source import task"
-            )
+        if session.import_id != context.source_import.import_id:
+            raise ValueError("every session must belong to the context source import")
         if session.id in session_ids:
             raise ValueError("session IDs must be unique")
         session_ids.add(session.id)
