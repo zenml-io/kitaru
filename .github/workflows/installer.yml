@@ -64,8 +64,11 @@ jobs:
           wheel=$(find "$wheel_dir" -maxdepth 1 -name 'kitaru-*.whl' -print -quit)
           wheel_uri=$(python -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve().as_uri())' "$wheel")
           printf 'kitaru @ %s\n' "$wheel_uri" > "$RUNNER_TEMP/kitaru-constraint.txt"
-          printf 'KITARU_VERSION=%s\n' "$(uv version --short)" >> "$GITHUB_ENV"
-          printf 'UV_CONSTRAINT=%s\n' "$RUNNER_TEMP/kitaru-constraint.txt" >> "$GITHUB_ENV"
+          {
+            printf 'KITARU_VERSION=%s\n' "$(uv version --short)"
+            printf 'UV_CONSTRAINT=%s\n' "$RUNNER_TEMP/kitaru-constraint.txt"
+            printf 'UV_TOOL_BIN_DIR=%s\n' "$(env -u UV_TOOL_BIN_DIR uv tool dir --bin)"
+          } >> "$GITHUB_ENV"
       - name: Select published Kitaru version
         if: github.event_name != 'pull_request'
         shell: bash
