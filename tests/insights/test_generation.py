@@ -248,6 +248,26 @@ def test_editor_validates_numbers_against_each_card_only(
         ("# Tool behavior", "markup"),
         ("Inspect this\x00pattern.", "control"),
         ("This causes retries.", "unsupported claim"),
+        ("This pattern drives retries.", "unsupported claim"),
+        ("This pattern drove retries.", "unsupported claim"),
+        ("Retries are driven by this pattern.", "unsupported claim"),
+        ("This pattern stems from retries.", "unsupported claim"),
+        ("This pattern stemmed from retries.", "unsupported claim"),
+        ("This pattern produces retries.", "unsupported claim"),
+        ("This pattern produced retries.", "unsupported claim"),
+        ("This pattern creates retries.", "unsupported claim"),
+        ("This pattern created retries.", "unsupported claim"),
+        ("This pattern triggers retries.", "unsupported claim"),
+        ("This pattern triggered retries.", "unsupported claim"),
+        ("This pattern is responsible for retries.", "unsupported claim"),
+        ("Retries are attributable to this pattern.", "unsupported claim"),
+        ("This pattern contributes to retries.", "unsupported claim"),
+        ("This pattern gives rise to retries.", "unsupported claim"),
+        ("This pattern brought about retries.", "unsupported claim"),
+        ("Retries arise from this pattern.", "unsupported claim"),
+        ("Retries originated from this pattern.", "unsupported claim"),
+        ("This pattern explains retries.", "unsupported claim"),
+        ("This pattern determines retries.", "unsupported claim"),
         ("This has higher activity.", "unsupported claim"),
         ("This path is slower.", "unsupported claim"),
         ("This path is slowest.", "unsupported claim"),
@@ -503,6 +523,32 @@ def test_extended_comparative_substrings_in_plain_prose_are_allowed(
                     id=candidate.id,
                     eyebrow="Tool behavior",
                     description=("Enlargers and smallholders are worth investigating."),
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+def test_causal_substrings_in_plain_prose_are_allowed(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description=(
+                        "Drivers, stemware, triggerfish, and recreated paths are "
+                        "worth inspecting."
+                    ),
                 )
             ]
         }

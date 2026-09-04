@@ -119,6 +119,7 @@ class LangfuseGenerationObserver:
             secret_key=selected_secret_key,
             base_url=selected_host,
         )
+        self._sync_call_lock = threading.Lock()
 
     def __repr__(self) -> str:
         """Return a credential-free representation."""
@@ -126,8 +127,17 @@ class LangfuseGenerationObserver:
 
     async def record(self, event: GenerationEvent) -> None:
         """Record an event using the installed Langfuse client's event API."""
+        if not self._sync_call_lock.acquire(blocking=False):
+            return
         payload = event.model_dump(mode="json")
-        await _run_in_daemon_thread(lambda: self._record_sync(payload))
+
+        def record_and_release() -> None:
+            try:
+                self._record_sync(payload)
+            finally:
+                self._sync_call_lock.release()
+
+        await _run_in_daemon_thread(record_and_release)
 
     def _record_sync(self, payload: dict[str, object]) -> None:
         """Bridge the synchronous optional client without blocking generation."""
