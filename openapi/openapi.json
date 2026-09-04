@@ -3391,6 +3391,14 @@
             "description": "Agent version recorded on the imported sessions.",
             "title": "Agent Version Id"
           },
+          "evaluators": {
+            "description": "Evaluators run against every imported session.",
+            "items": {
+              "$ref": "#/components/schemas/EvaluatorConfig"
+            },
+            "title": "Evaluators",
+            "type": "array"
+          },
           "importer": {
             "description": "Importer name.",
             "title": "Importer",
@@ -3427,6 +3435,198 @@
           "payload_blob_id"
         ],
         "title": "ImportCreateRequest",
+        "type": "object"
+      },
+      "ImportFailure": {
+        "description": "Import failure.",
+        "properties": {
+          "error": {
+            "description": "Failure reason.",
+            "title": "Error",
+            "type": "string"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External id of the failed item.",
+            "title": "External Id"
+          },
+          "line": {
+            "description": "Line the failure occurred at.",
+            "title": "Line",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line",
+          "error"
+        ],
+        "title": "ImportFailure",
+        "type": "object"
+      },
+      "ImportResponse": {
+        "description": "Import response.",
+        "properties": {
+          "agent_id": {
+            "description": "Agent imported sessions are created under.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent version recorded on the imported sessions.",
+            "title": "Agent Version Id"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error from a failed import.",
+            "title": "Error"
+          },
+          "evaluators": {
+            "description": "Evaluators run against every imported session.",
+            "items": {
+              "$ref": "#/components/schemas/EvaluatorConfig"
+            },
+            "title": "Evaluators",
+            "type": "array"
+          },
+          "id": {
+            "description": "Import id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importer_version_id": {
+            "description": "Importer version run.",
+            "format": "uuid",
+            "title": "Importer Version Id",
+            "type": "string"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Job running the import.",
+            "title": "Job Id"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Parameters passed to the importer.",
+            "title": "Params",
+            "type": "object"
+          },
+          "payload_blob_id": {
+            "description": "Blob holding the payload parsed.",
+            "format": "uuid",
+            "title": "Payload Blob Id",
+            "type": "string"
+          },
+          "stats": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImportStats"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stats from a completed import."
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "owner_id",
+          "id",
+          "agent_id",
+          "importer_version_id",
+          "payload_blob_id",
+          "params",
+          "evaluators"
+        ],
+        "title": "ImportResponse",
+        "type": "object"
+      },
+      "ImportStats": {
+        "description": "Import stats.",
+        "properties": {
+          "created": {
+            "description": "Sessions created.",
+            "title": "Created",
+            "type": "integer"
+          },
+          "failed": {
+            "description": "Items that failed to import.",
+            "title": "Failed",
+            "type": "integer"
+          },
+          "failures": {
+            "description": "Sample of failures.",
+            "items": {
+              "$ref": "#/components/schemas/ImportFailure"
+            },
+            "maxItems": 20,
+            "title": "Failures",
+            "type": "array"
+          },
+          "skipped": {
+            "description": "Sessions skipped as duplicates.",
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "skipped",
+          "failed"
+        ],
+        "title": "ImportStats",
         "type": "object"
       },
       "ImportTaskDetails": {
@@ -5238,6 +5438,36 @@
         "title": "Page[ExperimentRunResponse]",
         "type": "object"
       },
+      "Page_ImportResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/ImportResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[ImportResponse]",
+        "type": "object"
+      },
       "Page_ImporterResponse_": {
         "properties": {
           "items": {
@@ -6884,6 +7114,19 @@
             "title": "Id",
             "type": "string"
           },
+          "import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Import the session was created by.",
+            "title": "Import Id"
+          },
           "imported_from": {
             "anyOf": [
               {
@@ -7831,6 +8074,19 @@
             "title": "Id",
             "type": "string"
           },
+          "import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Import the session was created by.",
+            "title": "Import Id"
+          },
           "imported_from": {
             "anyOf": [
               {
@@ -8433,19 +8689,6 @@
       "TaskResponse": {
         "description": "Task response.",
         "properties": {
-          "agent_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Agent an importer task creates sessions under.",
-            "title": "Agent Id"
-          },
           "agent_version_id": {
             "anyOf": [
               {
@@ -8540,6 +8783,19 @@
             "title": "Id",
             "type": "string"
           },
+          "import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Import run by an importer task.",
+            "title": "Import Id"
+          },
           "input_session_id": {
             "anyOf": [
               {
@@ -8575,19 +8831,6 @@
             "$ref": "#/components/schemas/TaskOnFailure",
             "description": "Effect of a hard failure on the job."
           },
-          "payload_blob_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Payload blob for an importer task.",
-            "title": "Payload Blob Id"
-          },
           "plugin_version_id": {
             "anyOf": [
               {
@@ -8598,7 +8841,7 @@
                 "type": "null"
               }
             ],
-            "description": "Plugin version run by an evaluator or importer task.",
+            "description": "Plugin version run by an evaluator task.",
             "title": "Plugin Version Id"
           },
           "result": {
@@ -17031,7 +17274,7 @@
     },
     "/api/v1/importers/{importer_id}": {
       "delete": {
-        "description": "Delete an importer, cascading its versions.\n\nClients observe HTTP 204 on success and 404 when no importer has this\nid.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Importer service.\n    actor: Caller context.",
+        "description": "Delete an importer, cascading its versions.\n\nClients observe HTTP 204 on success, 404 when no importer has this id,\nand 409 when one of its versions is referenced by an import.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Importer service.\n    actor: Caller context.",
         "operationId": "delete_importer_api_v1_importers__importer_id__delete",
         "parameters": [
           {
@@ -17078,6 +17321,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -17726,8 +17979,142 @@
       }
     },
     "/api/v1/imports": {
+      "get": {
+        "description": "List imports.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Import service.\n    actor: Caller context.\n    params: Import list params.\n\nReturns:\n    Page of imports.",
+        "operationId": "list_imports_api_v1_imports_get",
+        "parameters": [
+          {
+            "description": "Cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter expression, JSON-encoded in the query string.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ImportResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "List Imports",
+        "tags": [
+          "imports"
+        ]
+      },
       "post": {
-        "description": "Import sessions from a payload blob, as a job holding one importer task.\n\nClients observe HTTP 201 on success and 404 when the importer, the\nversion, the payload blob, or the agent does not exist.\n\nArgs:\n    body: Import create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
+        "description": "Import sessions from a payload blob, as a job holding one importer task.\n\nClients observe HTTP 201 on success, 404 when the importer, the version,\nthe payload blob, the agent, the agent version, or an evaluator does not\nexist, and 422 when the agent version belongs to another agent, an\nevaluator is scoped to another agent, or an evaluator version repeats.\n\nArgs:\n    body: Import create request.\n    service: Import service.\n    actor: Caller context.\n\nReturns:\n    Created import.",
         "operationId": "create_import_api_v1_imports_post",
         "parameters": [
           {
@@ -17762,7 +18149,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/JobResponse"
+                  "$ref": "#/components/schemas/ImportResponse"
                 }
               }
             },
@@ -17840,6 +18227,90 @@
           }
         },
         "summary": "Create Import",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/v1/imports/{import_id}": {
+      "get": {
+        "description": "Get an import by id.\n\nClients observe HTTP 200 on success and 404 when no import has this id.\n\nArgs:\n    import_id: Id of the import.\n    service: Import service.\n    actor: Caller context.\n\nReturns:\n    Stored import.",
+        "operationId": "get_import_api_v1_imports__import_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Import",
         "tags": [
           "imports"
         ]
