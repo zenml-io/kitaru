@@ -744,6 +744,8 @@ def test_editor_allows_friendly_variant_of_grounded_outcome(
     [
         "Completed sessions are worth investigating.",
         "In-progress sessions are worth investigating.",
+        "Sessions finished normally.",
+        "These sessions are done.",
     ],
 )
 def test_session_outcomes_rejects_unobserved_status_language(
@@ -777,6 +779,48 @@ def test_session_outcomes_rejects_unobserved_status_language(
     )
     with pytest.raises(ValueError, match="unsupported outcome"):
         validate_editorial_plan(copy, selection, [candidate])
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Sessions finish normally.",
+        "Sessions finished normally.",
+        "Sessions are finishing normally.",
+        "This session finishes normally.",
+        "These sessions are done.",
+    ],
+)
+def test_session_outcomes_allows_observed_completion_synonyms(
+    profiling_result: ProfilingResult,
+    description: str,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "id": "session-outcomes",
+            "family": "outcome",
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="completed", value=1)]
+            ),
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Session outcomes",
+                    description=description,
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
 
 
 @pytest.mark.parametrize(

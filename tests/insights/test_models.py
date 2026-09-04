@@ -108,6 +108,34 @@ def test_context_preserves_valid_unicode() -> None:
     assert restored == context
 
 
+@pytest.mark.parametrize("field", ["request_id", "model"])
+def test_provider_receipt_rejects_non_utf8_text(field: str) -> None:
+    """Reject malformed custom-provider receipt strings at the shared boundary."""
+    values = {
+        "stage": "analyst",
+        "latency_ms": 1,
+        "outcome": "succeeded",
+        field: "broken-\ud800-value",
+    }
+
+    with pytest.raises(ValidationError, match="valid UTF-8 text"):
+        ProviderReceipt.model_validate(values)
+
+
+def test_provider_receipt_preserves_valid_unicode() -> None:
+    """Preserve valid Unicode provider receipt identifiers."""
+    receipt = ProviderReceipt(
+        stage="analyst",
+        request_id="résp-🤖",
+        model="modèle-λ",
+        latency_ms=1,
+        outcome="succeeded",
+    )
+
+    restored = ProviderReceipt.model_validate_json(receipt.model_dump_json())
+    assert restored == receipt
+
+
 def _coverage() -> Coverage:
     return Coverage(
         sessions_available=3,

@@ -369,6 +369,13 @@ class _PayloadBudget:
             return False
         return True
 
+    def can_consume_container(self, size: int) -> bool:
+        """Reject a container before inspecting it when its children cannot fit."""
+        if size >= self.max_items - self.items:
+            self.record_truncation()
+            return False
+        return True
+
 
 @dataclass(frozen=True)
 class _DistributionSpec:
@@ -463,6 +470,10 @@ def _normalize_observed(
     """Normalize finite JSON-like values for exact tool-call identity."""
     while isinstance(value, Enum):
         value = value.value
+    if isinstance(value, (list, tuple, dict)) and not budget.can_consume_container(
+        len(value)
+    ):
+        return None, False
     if not budget.consume(value, depth=depth):
         return None, False
     if value is None or isinstance(value, (str, bool, int)):
@@ -606,7 +617,11 @@ def _text_parts(
             if budget.can_enter(len(current)):
                 stack.extend((item, depth + 1) for item in reversed(current))
         elif isinstance(current, dict):
-            if current.get("type") in {"text", "input_text"}:
+            discriminator = current.get("type")
+            if isinstance(discriminator, str) and discriminator in {
+                "text",
+                "input_text",
+            }:
                 content = current.get("content", current.get("text"))
                 if isinstance(content, str):
                     stack.append((content, depth + 1))
