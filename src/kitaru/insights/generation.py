@@ -63,6 +63,10 @@ _OUTCOME_TOKEN = re.compile(
     r"abandon(?:ed|ing|s)?|abandonments?|errors?|errored)\b",
     flags=re.IGNORECASE,
 )
+_NEGATION_TOKEN = re.compile(
+    r"\b(?:no|not|never|none|neither|nor|without|cannot|absent)\b|n['\u2019]t\b",
+    flags=re.IGNORECASE,
+)
 _SESSION_STATUS_OUTCOMES = {
     "failed": "failure",
     "completed": "completion",
@@ -400,42 +404,11 @@ def _trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
 
 
 def _has_negated_outcome(value: str) -> bool:
-    """Detect direct polarity reversals close to an outcome expression."""
-    for outcome in _OUTCOME_TOKEN.finditer(value):
-        clause_start = max(
-            value.rfind(separator, 0, outcome.start()) for separator in ".;!?\n"
-        )
-        following_boundaries = [
-            position
-            for separator in ".;!?\n"
-            if (position := value.find(separator, outcome.end())) != -1
-        ]
-        clause_end = min(following_boundaries, default=len(value))
-        before = re.findall(
-            r"[A-Za-z]+", value[clause_start + 1 : outcome.start()].lower()
-        )
-        after = re.findall(r"[A-Za-z]+", value[outcome.end() : clause_end].lower())
-        if {"no", "not", "never", "without", "none", "absent"}.intersection(
-            before[-3:]
-        ):
-            return True
-        if {"no", "none", "absent"}.intersection(after[:3]):
-            return True
-        if {"not", "never"}.intersection(after[:3]) and {
-            "appear",
-            "appeared",
-            "exist",
-            "existed",
-            "found",
-            "occur",
-            "occurred",
-            "observed",
-            "present",
-            "recorded",
-            "seen",
-        }.intersection(after[:5]):
-            return True
-    return False
+    """Reject grammatical negation in the same clause as an outcome term."""
+    return any(
+        _OUTCOME_TOKEN.search(clause) and _NEGATION_TOKEN.search(clause)
+        for clause in re.split(r"[.;!?\n]+", value)
+    )
 
 
 def _validate_page_copy(value: str) -> None:

@@ -602,8 +602,12 @@ def test_session_outcomes_rejects_unobserved_status_language(
     [
         "No sessions failed.",
         "Failures are not present.",
+        "Failures were not detected.",
+        "Failures weren't detected.",
+        "Failures weren\u2019t detected.",
         "Sessions never failed.",
         "Sessions completed without failures.",
+        "Failures should not be ignored.",
     ],
 )
 def test_session_outcomes_rejects_negated_observed_status(
@@ -662,7 +666,7 @@ def test_editor_allows_not_without_an_outcome_negation(
     assert validate_editorial_plan(copy, selection, [candidate]) == copy
 
 
-def test_editor_allows_not_that_does_not_reverse_an_outcome(
+def test_editor_allows_negation_in_a_separate_clause_from_an_outcome(
     profiling_result: ProfilingResult,
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
@@ -685,7 +689,10 @@ def test_editor_allows_not_that_does_not_reverse_an_outcome(
                 EditorialCardCopy(
                     id=candidate.id,
                     eyebrow="Session outcomes",
-                    description="Failures should not be ignored.",
+                    description=(
+                        "This pattern is not yet understood. "
+                        "Failures are worth investigating."
+                    ),
                 )
             ]
         }

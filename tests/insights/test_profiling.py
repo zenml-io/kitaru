@@ -935,6 +935,58 @@ def test_uninspected_language_signal_is_not_emitted() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("partial_input", "config"),
+    [
+        (
+            {
+                "a": {"role": "user", "content": "Looks fine"},
+                "z": {"nested": {"nested": {"role": "user", "content": "WRONG"}}},
+            },
+            ProfilingConfig(max_payload_depth=3),
+        ),
+        (
+            {
+                **{f"field-{index}": None for index in range(20)},
+                "marker": {"role": "user", "content": "WRONG"},
+            },
+            ProfilingConfig(max_payload_items=10),
+        ),
+        (
+            {
+                "x" * 200: None,
+                "marker": {"role": "user", "content": "WRONG"},
+            },
+            ProfilingConfig(max_payload_bytes=100),
+        ),
+    ],
+    ids=["depth", "items", "bytes"],
+)
+def test_payload_truncated_text_session_is_excluded_from_language_coverage(
+    partial_input: object,
+    config: ProfilingConfig,
+) -> None:
+    partial = _session(1, inputs=partial_input)
+    complete = _session(
+        2,
+        inputs={"messages": [{"role": "user", "content": "WRONG"}]},
+    )
+
+    candidate = _candidate(
+        profile_sessions([partial, complete], config=config),
+        "correction-language",
+    )
+
+    assert candidate.contributing_session_ids == [complete.session.id]
+    assert candidate.coverage.sessions_analyzed == 1
+    assert candidate.coverage.affected_sessions == 1
+    assert candidate.title.startswith("100%")
+    assert {value.label: value.value for value in candidate.data.values} == {
+        "Matching sessions": 1,
+        "Other sessions": 0,
+    }
+
+
 def test_payload_byte_bound_counts_mapping_keys_and_container_syntax() -> None:
     value = {"a": []}
     session = _calls(
