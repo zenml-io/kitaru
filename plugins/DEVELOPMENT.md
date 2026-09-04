@@ -366,18 +366,12 @@ Every manual dispatch is a dry-run. It validates the selected source and package
 
 Publish the reviewed release commit on `develop` or the unit's matching maintenance branch. For a coordinated release, first require the core `publish-python` job to succeed and verify the exact core version on PyPI. The other core jobs can continue while plugins publish. An independent plugin release uses an already-published compatible core.
 
+Verify that the local source branch points to the reviewed release commit and the tag is unused before running these commands. Update a behind branch with `git pull --ff-only origin develop` if that brings it to the release commit. If the branch has advanced past the release commit, replace `HEAD` with the literal reviewed SHA.
+
 ```bash
-git fetch origin develop --tags
-
-PACKAGE=langfuse-importer
-VERSION=0.2.0
-TAG="python/kitaru-$PACKAGE/v$VERSION"
-RELEASE_SHA="$(gh pr view <release-pr> --repo zenml-io/kitaru --json mergeCommit --jq '.mergeCommit.oid')"
-test -n "$RELEASE_SHA" && test "$RELEASE_SHA" != null
-git merge-base --is-ancestor "$RELEASE_SHA" origin/develop
-
-git tag -a "$TAG" "$RELEASE_SHA" -m "$TAG"
-git push origin "$TAG"
+git checkout develop
+git tag python/kitaru-langfuse-importer/v0.2.0 HEAD
+git push origin python/kitaru-langfuse-importer/v0.2.0
 ```
 
 The tag push starts the `Release Kitaru plugins` workflow. The workflow resolves the package and version from the tag and accepts commits reachable from `develop` or the matching maintenance branch. It builds and verifies the distribution, publishes through PyPI Trusted Publishing, and creates a GitHub Release with the wheel, source distribution, and checksums. Stable publication then creates or advances the maintenance branch. For a maintenance release, use that branch and its exact reviewed merge commit in the commands above.

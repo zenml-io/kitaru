@@ -96,15 +96,16 @@ Perform this section before the core preparation PR when the core needs a new UI
 1. Inspect `zenml-io/zenml-frontend-monorepo` and select an exact commit on `main`.
 2. Confirm its Kitaru UI checks pass.
 3. Select a stable frontend version input, such as `v0.4.0`, for an official core release.
-4. Ask for explicit confirmation before dispatch because the workflow creates a tag and GitHub Release.
-5. Dispatch the workflow at the selected ref:
+4. Ask for explicit confirmation before publishing.
+5. Emit minimal tag commands for the frontend repository, using [publication-handoff.md](references/publication-handoff.md). Use `HEAD` only when `main` points to the reviewed commit:
 
 ```bash
-gh workflow run release-kitaru-ui.yml \
-  --repo zenml-io/zenml-frontend-monorepo \
-  --ref main \
-  -f version=v0.4.0
+git checkout main
+git tag kitaru-ui-v0.4.0 HEAD
+git push origin kitaru-ui-v0.4.0
 ```
+
+The tag push starts `release-kitaru-ui.yml`.
 
 6. Capture and monitor the exact run:
 
@@ -123,7 +124,7 @@ gh release view kitaru-ui-v0.4.0 \
 
 Require `kitaru-ui.tar.gz` and `kitaru-ui.tar.gz.sha256`. Verify the workflow ran at the reviewed commit and the release is stable. The frontend workflow derives its release channel from whether the selected commit is on `main`; official core releases require a stable bundle.
 
-If the user asks only for a preparation PR, do not dispatch the frontend workflow. The user can explicitly select an expected frontend tag before it exists. Mark asset verification as pending and do not create the core tag until both assets exist.
+If the user asks only for a preparation PR, do not push the frontend tag or dispatch the frontend workflow. The user can explicitly select an expected frontend tag before it exists. Mark asset verification as pending and do not create the core tag until both assets exist.
 
 ## Prepare a core release PR
 
@@ -204,13 +205,11 @@ On the fix branch:
 
 After the maintenance PR merges, resolve its exact merge commit and prepare the namespaced tag command. Do not push the tag without explicit authorization:
 
+Use `HEAD` only when the maintenance branch points to that reviewed commit; otherwise use its literal SHA:
+
 ```bash
-PATCH_SHA="$(gh pr view <patch-pr> \
-  --repo zenml-io/kitaru \
-  --json mergeCommit \
-  --jq '.mergeCommit.oid')"
-git tag -a python/kitaru-langfuse-importer/v0.4.1 "$PATCH_SHA" \
-  -m python/kitaru-langfuse-importer/v0.4.1
+git checkout release/langfuse/0.4
+git tag python/kitaru-langfuse-importer/v0.4.1 HEAD
 git push origin python/kitaru-langfuse-importer/v0.4.1
 ```
 
@@ -263,22 +262,15 @@ Include:
 
 Stop after the PR unless the user explicitly asks to publish.
 
-After the PR merges, resolve its exact merge commit and write tag commands against that SHA:
+After the PR merges, verify its exact merge commit. Prefer `HEAD` in emitted tag commands when the selected branch points to that commit; otherwise fill in the literal reviewed SHA. Keep discovery commands out of the user-facing publication block.
 
-```bash
-RELEASE_SHA="$(gh pr view <release-pr> \
-  --repo zenml-io/kitaru \
-  --json mergeCommit \
-  --jq '.mergeCommit.oid')"
-```
-
-Emit the complete runnable command handoff in the PR and final response, using [publication-handoff.md](references/publication-handoff.md). Group commands by repository and source branch. Include every selected Python plugin, the TypeScript release set when selected, any new frontend release, manual `main` promotion, and the Kitaru skills release handoff. Use accepted versions and exact reviewed commits; do not leave a selected plugin as “repeat for the other plugins.” Do not execute publication commands during preparation.
+Emit the complete minimal, git-only publication command handoff in the PR and final response, using [publication-handoff.md](references/publication-handoff.md). Group commands by repository and source branch. Include every selected Python plugin, the TypeScript release set when selected, any new frontend release, manual `main` promotion, and the Kitaru skills release handoff. Use accepted versions and exact reviewed commits; do not leave a selected plugin as “repeat for the other plugins.” Do not execute publication commands during preparation.
 
 Push every release tag in its own `git push origin <tag>` command. GitHub does not create push events when more than three tags are pushed at once, which leaves immutable tags without release workflow runs. Do not batch release tags into one push, even when several point to the same commit. After each push, confirm the matching workflow run exists before pushing the next tag.
 
 ## Rehearse before publication
 
-Manual dispatch builds and validates without publishing.
+Manual dispatch builds and validates without publishing. These are agent-side rehearsal commands, not part of the user-facing tag handoff.
 
 Core:
 
@@ -300,13 +292,12 @@ Use an existing branch or tag that resolves to the reviewed eligible commit. Con
 
 After the preparation PR merges, select its exact reachable `develop` commit.
 
+Use the branch and commit checks in [publication-handoff.md](references/publication-handoff.md) before emitting:
+
 ```bash
-git fetch origin develop --tags
-TAG="python/<distribution>/v<python-version>"
-RELEASE_SHA="<reviewed-develop-sha>"
-git merge-base --is-ancestor "$RELEASE_SHA" origin/develop
-git tag -a "$TAG" "$RELEASE_SHA" -m "$TAG"
-git push origin "$TAG"
+git checkout develop
+git tag python/<distribution>/v<python-version> HEAD
+git push origin python/<distribution>/v<python-version>
 ```
 
 Approve the package's PyPI environment when required. Verify the wheel, source distribution, hashes, and immutable GitHub Release.
@@ -317,13 +308,12 @@ For a stable release, the workflow creates or fast-forwards the unit's maintenan
 
 Before tagging, verify the selected stable frontend bundle exists and release metadata is complete. Coordinated plugin versions can remain queued when pending-default behavior has been verified.
 
+Use the branch and commit checks in [publication-handoff.md](references/publication-handoff.md) before emitting:
+
 ```bash
-git fetch origin develop --tags
-TAG="python/kitaru/v<python-version>"
-RELEASE_SHA="<reviewed-develop-sha>"
-git merge-base --is-ancestor "$RELEASE_SHA" origin/develop
-git tag -a "$TAG" "$RELEASE_SHA" -m "$TAG"
-git push origin "$TAG"
+git checkout develop
+git tag python/kitaru/v<python-version> HEAD
+git push origin python/kitaru/v<python-version>
 ```
 
 The tag starts `.github/workflows/release.yml`. The workflow:
@@ -350,16 +340,15 @@ After the required core and plugin versions are available on PyPI, complete any 
 
 The workflow does not update `main`. After the newest stable core's public artifacts and GitHub Release succeed, inspect any remaining workflow failure and tell the release owner to fast-forward `main` to the immutable core tag:
 
+Verify the local and remote `main` branches can fast-forward to the tag before emitting:
+
 ```bash
-git fetch origin main --tags
-TAG="python/kitaru/v<python-version>"
-RELEASE_SHA="$(git rev-list -n 1 "$TAG")"
-git merge-base --is-ancestor origin/main "$RELEASE_SHA"
-gh api --method PATCH repos/zenml-io/kitaru/git/refs/heads/main \
-  -f sha="$RELEASE_SHA" -F force=false
+git checkout main
+git merge --ff-only python/kitaru/v<python-version>
+git push origin main
 ```
 
-The release owner runs this command manually. Do not execute it on their behalf. The fast-forward updates `main` to the tagged commit without a merge commit and triggers the existing docs workflow. Skip this step for prereleases and older maintenance-line core releases.
+The release owner runs these commands manually. Do not execute it on their behalf. The fast-forward updates `main` to the tagged commit without a merge commit and triggers the existing docs workflow. Skip this step for prereleases and older maintenance-line core releases.
 
 After core and required plugins are available, hand off pending `zenml-io/kitaru-skills` changes to its [skills-release skill](https://github.com/zenml-io/kitaru-skills/blob/develop/.claude/skills/skills-release/SKILL.md). Read the current skill before emitting that repository's commands. It owns the independent skills version, `develop` release commit, tag, `main` promotion, and GitHub Release. Core publication does not itself authorize publishing skills.
 
