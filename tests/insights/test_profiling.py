@@ -997,6 +997,36 @@ def test_language_signal_uses_only_sessions_with_inspected_text() -> None:
     }
 
 
+def test_partial_later_match_does_not_discard_complete_language_signal() -> None:
+    complete = _session(
+        1,
+        inputs={"messages": [{"role": "user", "content": "WRONG"}]},
+    )
+    partial = _session(
+        2,
+        inputs={
+            "messages": [{"role": "user", "content": "WRONG!!! This is still broken"}]
+        },
+    )
+
+    candidate = _candidate(
+        profile_sessions(
+            [complete, partial],
+            config=ProfilingConfig(max_text_bytes=10),
+        ),
+        "correction-language",
+    )
+
+    assert candidate.contributing_session_ids == [complete.session.id]
+    assert candidate.coverage.sessions_analyzed == 1
+    assert candidate.coverage.affected_sessions == 1
+    assert candidate.title.startswith("100%")
+    assert {value.label: value.value for value in candidate.data.values} == {
+        "Matching sessions": 1,
+        "Other sessions": 0,
+    }
+
+
 def test_uninspected_language_signal_is_not_emitted() -> None:
     inspected = _session(
         1,

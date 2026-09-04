@@ -903,6 +903,7 @@ def _scan_session(
         len(message.encode("utf-8")) for message, _ in messages
     )
     fully_inspected = bool(messages)
+    language_matches: list[tuple[str, str, uuid.UUID | None]] = []
     for message, node_id in messages:
         encoded = message.encode("utf-8")
         remaining = state.config.max_text_bytes - state.inspected_text_bytes
@@ -916,41 +917,49 @@ def _scan_session(
             state.text_truncated = True
             fully_inspected = False
         if _CORRECTION_PATTERN.search(inspected):
-            _record(
-                state,
-                "correction-language",
-                session_id,
-                category="Literal correction marker",
-                node_id=node_id,
+            language_matches.append(
+                (
+                    "correction-language",
+                    "Literal correction marker",
+                    node_id,
+                )
             )
         if _PUNCTUATION_PATTERN.search(inspected):
-            _record(
-                state,
-                "repeated-punctuation",
-                session_id,
-                category="Repeated punctuation",
-                node_id=node_id,
+            language_matches.append(
+                (
+                    "repeated-punctuation",
+                    "Repeated punctuation",
+                    node_id,
+                )
             )
         if _mostly_uppercase(inspected):
-            _record(
-                state,
-                "mostly-uppercase-messages",
-                session_id,
-                category="Mostly uppercase",
-                node_id=node_id,
+            language_matches.append(
+                (
+                    "mostly-uppercase-messages",
+                    "Mostly uppercase",
+                    node_id,
+                )
             )
         if _PROFANITY_PATTERN.search(inspected):
-            _record(
-                state,
-                "possible-profanity",
-                session_id,
-                category="Literal profanity marker",
-                node_id=node_id,
+            language_matches.append(
+                (
+                    "possible-profanity",
+                    "Literal profanity marker",
+                    node_id,
+                )
             )
         if len(encoded) > remaining:
             break
     if fully_inspected:
         state.text_inspected_session_ids.add(session_id)
+        for signal, category, node_id in language_matches:
+            _record(
+                state,
+                signal,
+                session_id,
+                category=category,
+                node_id=node_id,
+            )
 
 
 def _percent(numerator: int, denominator: int) -> int | float:
