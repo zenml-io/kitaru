@@ -20,7 +20,10 @@ from typing import Any, ClassVar
 from pydantic import Field
 
 from kitaru.base import FrozenModel
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.replay_config import (
+    AnalyzerConfigInput,
+    EvaluatorConfigInput,
+)
 from kitaru.server.base import ListFilter
 from kitaru.server.filtering import EQUALITY_OPS, FilterField
 
@@ -45,3 +48,4 @@ class ImportCreate(FrozenModel):
     payload_blob_id: uuid.UUID
     params: dict[str, Any] = Field(default_factory=dict)
     evaluators: list[EvaluatorConfigInput] = Field(default_factory=list)
+    analyzers: list[AnalyzerConfigInput] = Field(default_factory=list)

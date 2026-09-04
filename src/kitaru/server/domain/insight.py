@@ -65,11 +65,15 @@ class Insight(DomainModel):
     id: uuid.UUID = Field(default_factory=uuid7)
     owner_id: uuid.UUID
     agent_id: uuid.UUID
+    analyzer_version_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
     name: Name
     title: Title
     description: str | None = None
     data: InsightData
     metadata: dict[str, Any] = Field(default_factory=dict)
+    analyzer_params: dict[str, Any] | None = None
+    params_hash: str | None = None
     created: datetime | None = None
     updated: datetime | None = None
 

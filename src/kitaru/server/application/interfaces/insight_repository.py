@@ -14,10 +14,18 @@
 """Insight repository interface."""
 
 import uuid
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 from kitaru.server.application.models.insight import InsightFilter
 from kitaru.server.domain.insight import Insight
+
+
+class InsightWithAnalyzer(NamedTuple):
+    """Insight paired with its denormalized analyzer name and version."""
+
+    insight: Insight
+    analyzer_name: str | None
+    analyzer_version: int | None
 
 
 class InsightRepository(Protocol):
@@ -37,8 +45,8 @@ class InsightRepository(Protocol):
         """
         ...
 
-    async def get(self, insight_id: uuid.UUID) -> Insight:
-        """Load an insight by id.
+    async def get(self, insight_id: uuid.UUID) -> InsightWithAnalyzer:
+        """Load an insight by id, joined with its analyzer name and version.
 
         Args:
             insight_id: Id of the insight.
@@ -47,20 +55,22 @@ class InsightRepository(Protocol):
             InsightNotFound: No insight has this id.
 
         Returns:
-            Stored insight.
+            Stored insight paired with its analyzer name and version, both
+            ``None`` on a manual insight.
         """
         ...
 
     async def query(
         self, insight_filter: InsightFilter
-    ) -> tuple[list[Insight], str | None]:
+    ) -> tuple[list[InsightWithAnalyzer], str | None]:
         """Query insights matching a filter.
 
         Args:
             insight_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching insights and the next cursor.
+            Page of matching insights, each paired with its analyzer name and
+            version, and the next cursor.
         """
         ...
 

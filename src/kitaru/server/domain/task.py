@@ -21,6 +21,7 @@ import pydantic
 from pydantic import Field, field_validator
 
 from kitaru.api_models.v1.evaluation import EvaluationResult
+from kitaru.api_models.v1.insight import InsightInput
 from kitaru.api_models.v1.task import (
     TaskKind,
     TaskOnFailure,
@@ -41,6 +42,8 @@ from kitaru.server.domain.ids import uuid7
 __all__ = [
     "AgentTask",
     "AgentTaskDetails",
+    "AnalysisTask",
+    "AnalysisTaskDetails",
     "DuplicateEvaluationTask",
     "EvaluationTask",
     "EvaluationTaskDetails",
@@ -666,6 +669,53 @@ class ImportTask(Task):
             raise InvalidTaskResult(f"Task {self.id} requires a result")
 
 
+class AnalysisTask(Task):
+    """Analysis task."""
+
+    plugin_version_id: uuid.UUID
+    agent_id: uuid.UUID
+    input_session_ids: list[uuid.UUID]
+    params: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def kind(self) -> TaskKind:
+        """Kind of work the task runs.
+
+        Returns:
+            Analyzer kind.
+        """
+        return TaskKind.ANALYZER
+
+    def check_result(self, result: Any) -> None:
+        """Require a non-empty list of insight results with unique names.
+
+        Args:
+            result: Result the completion carries.
+
+        Raises:
+            InvalidTaskResult: The result is not a non-empty list of valid
+                insight results, or two results share a name.
+        """
+        if not isinstance(result, list) or not result:
+            raise InvalidTaskResult(
+                f"Task {self.id} requires a non-empty list of insight results"
+            )
+        names: set[str] = set()
+        for entry in result:
+            try:
+                parsed = InsightInput.model_validate(entry)
+            except pydantic.ValidationError as exc:
+                raise InvalidTaskResult(
+                    f"Task {self.id} carries an invalid insight result: {exc}"
+                ) from exc
+            if parsed.name in names:
+                raise InvalidTaskResult(
+                    f"Task {self.id} carries the insight name '{parsed.name}' more "
+                    "than once"
+                )
+            names.add(parsed.name)
+
+
 class TaskRunSpec(FrozenModel):
     """Task run spec."""
 
@@ -732,8 +782,19 @@ class ImportTaskDetails(FrozenModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class AnalysisTaskDetails(FrozenModel):
+    """Analysis task details."""
+
+    kind: Literal[TaskKind.ANALYZER] = TaskKind.ANALYZER
+    analyzer_name: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    plugin: PluginSpec
+    agent_id: uuid.UUID
+    input_session_ids: list[uuid.UUID]
+
+
 TaskDetails = Annotated[
-    AgentTaskDetails | EvaluationTaskDetails | ImportTaskDetails,
+    AgentTaskDetails | EvaluationTaskDetails | ImportTaskDetails | AnalysisTaskDetails,
     Field(discriminator="kind"),
 ]
 

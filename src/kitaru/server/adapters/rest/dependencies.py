@@ -589,6 +589,7 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
         sweep_batch_limit=settings.TASK_SWEEP_BATCH_LIMIT,
         evaluator_timeout_seconds=settings.EVALUATOR_TASK_TIMEOUT_SECONDS,
         importer_timeout_seconds=settings.IMPORTER_TASK_TIMEOUT_SECONDS,
+        analyzer_timeout_seconds=settings.ANALYZER_TASK_TIMEOUT_SECONDS,
         max_result_bytes=settings.MAX_TASK_RESULT_BYTES,
         evaluation_pair_limit=settings.EVALUATION_PAIR_LIMIT,
     )

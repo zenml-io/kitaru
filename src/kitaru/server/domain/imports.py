@@ -22,7 +22,7 @@ from pydantic import Field
 from kitaru.api_models.v1.imports import ImportStats
 from kitaru.server.domain.base import DomainModel, NotFoundError
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.replay_config import EvaluatorConfig
+from kitaru.server.domain.replay_config import AnalyzerConfig, EvaluatorConfig
 
 
 class ImportNotFound(NotFoundError):
@@ -61,6 +61,7 @@ class Import(DomainModel):
     payload_blob_id: uuid.UUID
     params: dict[str, Any] = Field(default_factory=dict)
     evaluators: list[EvaluatorConfig] = Field(default_factory=list)
+    analyzers: list[AnalyzerConfig] = Field(default_factory=list)
     stats: ImportStats | None = None
     error: str | None = None
     created: datetime | None = None

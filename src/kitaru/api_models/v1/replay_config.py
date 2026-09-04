@@ -75,6 +75,19 @@ class EvaluatorConfig(RequestModel):
     )
 
 
+class AnalyzerConfig(RequestModel):
+    """Analyzer config."""
+
+    analyzer: PlainStr = Field(description="Analyzer name.")
+    version: int | None = Field(
+        default=None,
+        description="Analyzer version, an omitted value resolves to latest.",
+    )
+    params: dict[str, JsonValue] = Field(
+        default_factory=dict, description="Parameters passed to the analyzer."
+    )
+
+
 class StaticCase(RequestModel):
     """Static tool call case."""
 

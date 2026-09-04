@@ -170,6 +170,18 @@ class InsightResponse(OwnedResponseModel):
 
     id: uuid.UUID = Field(description="Insight id.")
     agent_id: uuid.UUID = Field(description="Agent the insight belongs to.")
+    analyzer_version_id: uuid.UUID | None = Field(
+        default=None, description="Analyzer version that produced the insight."
+    )
+    analyzer_name: str | None = Field(
+        default=None, description="Name of the analyzer that produced the insight."
+    )
+    analyzer_version: int | None = Field(
+        default=None, description="Version of the analyzer that produced the insight."
+    )
+    analyzer_params: dict[str, JsonValue] | None = Field(
+        default=None, description="Params the analyzer ran with."
+    )
     name: str = Field(description="Insight name.")
     title: str = Field(description="Insight title.")
     description: str | None = Field(description="Insight description.")
