@@ -105,3 +105,34 @@ async def test_openai_request_is_bounded_and_not_stored(monkeypatch) -> None:
     assert responses.kwargs["text_format"] is AnalystPlan
     assert "test-secret" not in repr(generator)
     assert result.receipt.request_id == "resp_1"
+
+
+async def test_openai_sdk_timeout_remains_a_timeout(monkeypatch) -> None:
+    class FakeAPITimeoutError(Exception):
+        pass
+
+    class TimeoutResponses:
+        async def parse(self, **kwargs):
+            raise FakeAPITimeoutError("provider detail")
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs) -> None:
+            self.responses = TimeoutResponses()
+
+    monkeypatch.setattr(
+        "kitaru.insights.openai_generator.importlib.import_module",
+        lambda name: SimpleNamespace(
+            APITimeoutError=FakeAPITimeoutError,
+            AsyncOpenAI=FakeAsyncOpenAI,
+        ),
+    )
+    generator = OpenAIInsightGenerator(api_key="test-secret")
+
+    with pytest.raises(TimeoutError, match="analyst request timed out") as captured:
+        await generator.analyze(
+            projection=_projection(),
+            config=ModelGenerationConfig(model="gpt-test"),
+            timeout_seconds=4.0,
+        )
+
+    assert "provider detail" not in str(captured.value)

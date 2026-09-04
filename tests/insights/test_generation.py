@@ -499,6 +499,25 @@ async def test_analyst_failure_skips_editor(profiling_result: ProfilingResult) -
     assert "secret" not in result.diagnostics.model_dump_json()
 
 
+async def test_provider_timeout_gets_timeout_receipt_and_fallback(
+    profiling_result: ProfilingResult,
+) -> None:
+    generator = FakeGenerator(
+        TimeoutError("provider detail"),
+        _editor([profiling_result.candidates[0].id]),
+    )
+    result = await generate_model_plan(
+        profiling_result,
+        generator=generator,
+        config=ModelGenerationConfig(model="test-model"),
+    )
+
+    assert generator.calls == ["analyst"]
+    assert result.diagnostics.fallback_reason == "analyst_timed_out"
+    assert result.diagnostics.provider_receipts[0].outcome == "timed_out"
+    assert "provider detail" not in result.diagnostics.model_dump_json()
+
+
 async def test_invalid_analyst_output_skips_editor(
     profiling_result: ProfilingResult,
 ) -> None:
