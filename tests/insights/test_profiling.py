@@ -731,6 +731,28 @@ def test_mapping_width_is_rejected_before_key_inspection() -> None:
     assert "payload" in " ".join(result.coverage.caveats).lower()
 
 
+def test_user_message_mapping_width_is_rejected_before_key_inspection() -> None:
+    session = _session(
+        1,
+        inputs=ExplosiveMapping(
+            {
+                "first": {"role": "user", "content": "WRONG"},
+                "second": {"role": "user", "content": "WRONG"},
+            }
+        ),
+    )
+
+    result = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_items=1),
+    )
+
+    assert "correction-language" not in {
+        candidate.id for candidate in result.candidates
+    }
+    assert "payload" in " ".join(result.coverage.caveats).lower()
+
+
 @pytest.mark.parametrize(
     "large_value",
     [10**10_000, Decimal("1e10000")],
@@ -981,20 +1003,20 @@ def test_language_signal_uses_only_sessions_with_inspected_text() -> None:
         inputs={"messages": [{"role": "user", "content": "Looks fine"}]},
     )
 
-    candidate = _candidate(
-        profile_sessions(
-            [inspected, uninspected],
-            config=ProfilingConfig(max_text_bytes=5),
-        ),
-        "correction-language",
+    result = profile_sessions(
+        [inspected, uninspected],
+        config=ProfilingConfig(max_text_bytes=5),
     )
+    candidate = _candidate(result, "correction-language")
 
-    assert candidate.title.startswith("100%")
+    assert candidate.title.startswith("100% of sessions with fully inspected user text")
     assert candidate.coverage.sessions_analyzed == 1
     assert {value.label: value.value for value in candidate.data.values} == {
         "Matching sessions": 1,
         "Other sessions": 0,
     }
+    assert "1 analyzed session was excluded" in candidate.caveat
+    assert "excluded 1 analyzed session" in " ".join(result.coverage.caveats)
 
 
 def test_partial_later_match_does_not_discard_complete_language_signal() -> None:

@@ -353,6 +353,10 @@ class _PayloadBudget:
         if depth > self.max_depth or self.items >= self.max_items:
             self.record_truncation()
             return False
+        if isinstance(value, (list, tuple, dict)) and not self.can_consume_container(
+            len(value)
+        ):
+            return False
         remaining = self.max_bytes - self.bytes
         size = _scalar_json_size(value, remaining)
         if size is None:
@@ -470,10 +474,6 @@ def _normalize_observed(
     """Normalize finite JSON-like values for exact tool-call identity."""
     while isinstance(value, Enum):
         value = value.value
-    if isinstance(value, (list, tuple, dict)) and not budget.can_consume_container(
-        len(value)
-    ):
-        return None, False
     if not budget.consume(value, depth=depth):
         return None, False
     if value is None or isinstance(value, (str, bool, int)):
@@ -1071,6 +1071,14 @@ def _signal_candidate(
     top = sorted(aggregate.categories.items(), key=lambda item: (-item[1], item[0]))[0][
         0
     ]
+    candidate_caveat = caveat
+    excluded_sessions = len(state.analyzed_session_ids - eligible_session_ids)
+    if family == "language" and excluded_sessions:
+        noun = "session was" if excluded_sessions == 1 else "sessions were"
+        candidate_caveat = (
+            f"{caveat} {excluded_sessions} analyzed {noun} excluded because user "
+            "text was missing or not fully inspected."
+        )
     return CandidateFinding(
         id=candidate_id,
         family=family,
@@ -1082,7 +1090,7 @@ def _signal_candidate(
             affected=len(aggregate.sessions),
             top=top,
         ),
-        caveat=caveat,
+        caveat=candidate_caveat,
         data=_categorical(values, unit=unit),
         facts=[
             DeterministicFact(name="occurrences", value=aggregate.count),
@@ -1185,7 +1193,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             "language",
             60,
             "USERS CORRECTING THE AGENT",
-            "{share}% of sessions include explicit correction language",
+            "{share}% of sessions with fully inspected user text include explicit "
+            "correction language",
             "A literal correction marker appears {count} times across {affected} "
             "sessions.",
             "user messages containing literal correction phrases",
@@ -1209,7 +1218,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             "language",
             90,
             "REPEATED PUNCTUATION",
-            "{share}% of sessions include repeated exclamation or question marks",
+            "{share}% of sessions with fully inspected user text include repeated "
+            "exclamation or question marks",
             "The literal punctuation marker appears {count} times across {affected} "
             "sessions.",
             "user messages containing three or more consecutive exclamation or "
@@ -1222,7 +1232,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             "language",
             100,
             "MOSTLY-UPPERCASE MESSAGES",
-            "{share}% of sessions include a mostly-uppercase user message",
+            "{share}% of sessions with fully inspected user text include a "
+            "mostly-uppercase user message",
             "The literal capitalization marker appears {count} times across "
             "{affected} sessions.",
             "substantial user messages written mostly in uppercase",
@@ -1234,7 +1245,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             "language",
             110,
             "POSSIBLE PROFANITY",
-            "{share}% of sessions match the literal profanity monitor",
+            "{share}% of sessions with fully inspected user text match the literal "
+            "profanity monitor",
             "A small literal word list matched {count} messages across {affected} "
             "sessions.",
             "user messages matched by the literal profanity monitor",
@@ -1611,6 +1623,15 @@ def profile_sessions(
         caveats.append(
             "User text coverage is unavailable because no explicit user-authored "
             "input was found."
+        )
+    excluded_text_sessions = len(
+        state.analyzed_session_ids - state.text_inspected_session_ids
+    )
+    if excluded_text_sessions:
+        noun = "session" if excluded_text_sessions == 1 else "sessions"
+        caveats.append(
+            f"Language-signal profiling excluded {excluded_text_sessions} analyzed "
+            f"{noun} because user text was missing or not fully inspected."
         )
     if state.text_truncated:
         caveats.append("User text inspection stopped at the configured byte limit.")
