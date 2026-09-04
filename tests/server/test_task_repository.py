@@ -279,19 +279,12 @@ async def test_evaluator_pair_uniqueness(setup: Setup) -> None:
 
 
 async def test_import_task_round_trips_its_fields(setup: Setup) -> None:
-    """An importer task round-trips its plugin, payload, and agent references."""
-    task = ImportTask(
-        job_id=setup.job_id,
-        plugin_version_id=setup.plugin_version_id,
-        payload_blob_id=setup.payload_blob_id,
-        agent_id=setup.agent_id,
-        params={"delimiter": ","},
-    )
+    """An importer task round-trips its import reference."""
+    import_id = uuid.uuid4()
+    task = ImportTask(job_id=setup.job_id, import_id=import_id)
     created = await setup.tasks.create(task)
     assert isinstance(created, ImportTask)
-    assert created.plugin_version_id == setup.plugin_version_id
-    assert created.payload_blob_id == setup.payload_blob_id
-    assert created.params == {"delimiter": ","}
+    assert created.import_id == import_id
 
 
 async def test_list_by_job_orders_by_id(setup: Setup) -> None:
@@ -401,12 +394,7 @@ async def test_claim_pending_kind_filter(setup: Setup) -> None:
     """Claim respects a kind-scoped worker."""
     agent_task = await setup.tasks.create(_agent_task(setup))
     import_task = await setup.tasks.create(
-        ImportTask(
-            job_id=setup.job_id,
-            plugin_version_id=setup.plugin_version_id,
-            payload_blob_id=setup.payload_blob_id,
-            agent_id=setup.agent_id,
-        )
+        ImportTask(job_id=setup.job_id, import_id=uuid.uuid4())
     )
     claimed = await setup.tasks.claim_pending(
         WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)]),
@@ -576,14 +564,7 @@ async def test_claim_pending_kind_isolation_across_claims(setup: Setup) -> None:
             input_session_id=setup.session_id,
         )
     )
-    await setup.tasks.create(
-        ImportTask(
-            job_id=setup.job_id,
-            plugin_version_id=setup.plugin_version_id,
-            payload_blob_id=setup.payload_blob_id,
-            agent_id=setup.agent_id,
-        )
-    )
+    await setup.tasks.create(ImportTask(job_id=setup.job_id, import_id=uuid.uuid4()))
 
     claimed_by_agent_scope = await setup.tasks.claim_pending(
         WorkerScope(

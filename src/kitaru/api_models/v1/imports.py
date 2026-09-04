@@ -19,10 +19,13 @@ from pydantic import Field
 
 from kitaru.api_models.v1.base import (
     JsonValue,
+    OwnedResponseModel,
     PlainStr,
     RequestModel,
     ResponseModel,
 )
+from kitaru.api_models.v1.filter import FilterableListParams
+from kitaru.api_models.v1.replay_config import EvaluatorConfig
 
 MAX_IMPORT_FAILURES = 20
 
@@ -46,6 +49,14 @@ class ImportCreateRequest(RequestModel):
     params: dict[str, JsonValue] = Field(
         default_factory=dict, description="Parameters passed to the importer."
     )
+    evaluators: list[EvaluatorConfig] = Field(
+        default_factory=list,
+        description="Evaluators run against every imported session.",
+    )
+
+
+class ImportListParams(FilterableListParams):
+    """Import list params."""
 
 
 class ImportFailure(ResponseModel):
@@ -69,3 +80,31 @@ class ImportStats(ResponseModel):
         max_length=MAX_IMPORT_FAILURES,
         description="Sample of failures.",
     )
+
+
+class ImportResponse(OwnedResponseModel):
+    """Import response."""
+
+    id: uuid.UUID = Field(description="Import id.")
+    job_id: uuid.UUID | None = Field(
+        default=None, description="Job running the import."
+    )
+    agent_id: uuid.UUID = Field(
+        description="Agent imported sessions are created under."
+    )
+    agent_version_id: uuid.UUID | None = Field(
+        default=None,
+        description="Agent version recorded on the imported sessions.",
+    )
+    importer_version_id: uuid.UUID = Field(description="Importer version run.")
+    payload_blob_id: uuid.UUID = Field(description="Blob holding the payload parsed.")
+    params: dict[str, JsonValue] = Field(
+        description="Parameters passed to the importer."
+    )
+    evaluators: list[EvaluatorConfig] = Field(
+        description="Evaluators run against every imported session."
+    )
+    stats: ImportStats | None = Field(
+        default=None, description="Stats from a completed import."
+    )
+    error: str | None = Field(default=None, description="Error from a failed import.")

@@ -148,16 +148,8 @@ async def _claimable_import_task(
         update={"source": ScriptPluginSource(blob_id=code_blob.id, entrypoint="run")}
     )
     await services.plugins.update_version(version)
-    payload = await create_blob(
-        services.blobs, ACTOR.account.id, content=uuid.uuid4().bytes
-    )
-    return await create_import_task(
-        services.tasks,
-        job_id,
-        plugin_version_id=version.id,
-        payload_blob_id=payload.id,
-        **overrides,
-    )
+    await create_blob(services.blobs, ACTOR.account.id, content=uuid.uuid4().bytes)
+    return await create_import_task(services.tasks, job_id, **overrides)
 
 
 async def test_claim_tasks_not_found(services: JobAndTaskServices) -> None:
@@ -900,9 +892,7 @@ async def test_import_spec_carries_the_payload_sha256_and_provider(
     )
 
     job_id = await _pending_job(services)
-    task = await create_import_task(
-        services.tasks, job_id, plugin_version_id=version.id, payload_blob_id=payload.id
-    )
+    task = await create_import_task(services.tasks, job_id)
     spec = await services.task_service.get_spec(task.id, actor=ACTOR)
     assert (
         spec.timeout_seconds == services.task_service._policy.importer_timeout_seconds
@@ -1020,14 +1010,14 @@ async def test_apply_status_import_terminal_tracks_the_importer_plugin() -> None
             provider="langfuse",
         )
     )
-    version = await plugins.create_version(
+    await plugins.create_version(
         plugin.id,
         ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="parse"),
         display_version=None,
     )
     transitions, tasks, jobs = _build_transitions(analytics, plugins)
     job = await create_job(jobs, ACTOR.account.id)
-    task = await create_import_task(tasks, job.id, plugin_version_id=version.id)
+    task = await create_import_task(tasks, job.id)
     await create_agent_task(tasks, job.id)
 
     await _complete_task(transitions, task, result={"created": 1})

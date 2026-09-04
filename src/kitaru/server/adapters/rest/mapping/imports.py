@@ -14,7 +14,7 @@
 """Import DTO conversions."""
 
 from kitaru.api_models.v1.imports import ImportCreateRequest
-from kitaru.server.application.models.job import ImportCreate
+from kitaru.server.application.models.imports import ImportCreate
 
 
 def import_create_to_command(body: ImportCreateRequest) -> ImportCreate:

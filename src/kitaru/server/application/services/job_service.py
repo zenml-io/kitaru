@@ -27,9 +27,9 @@ from kitaru.server.application.interfaces.plugin_repository import PluginReposit
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.imports import ImportCreate
 from kitaru.server.application.models.job import (
     EvaluationBatchCreate,
-    ImportCreate,
     JobFilter,
     SessionRunCreate,
 )

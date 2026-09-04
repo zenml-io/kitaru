@@ -76,9 +76,9 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("session_node", "attributes_blob_id"): None,
     ("session_node", "reasoning_blob_id"): None,
     # A task names its inputs by id and carries no constraint to them, so
-    # agent_id, agent_version_id, input_session_id, payload_blob_id, and
-    # plugin_version_id are absent here. Only the job a task belongs to and the
-    # worker holding it stay constrained.
+    # agent_version_id, import_id, input_session_id, and plugin_version_id are
+    # absent here. Only the job a task belongs to and the worker holding it
+    # stay constrained.
     ("task", "job_id"): "CASCADE",
     ("task", "worker_id"): "SET NULL",
     # evaluator_version_id carries no constraint, an evaluator-born row keeps

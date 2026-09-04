@@ -88,15 +88,12 @@ def task_to_response(task: Task) -> TaskResponse:
             task.agent_version_id if isinstance(task, AgentTask) else None
         ),
         plugin_version_id=(
-            task.plugin_version_id
-            if isinstance(task, EvaluationTask | ImportTask)
-            else None
+            task.plugin_version_id if isinstance(task, EvaluationTask) else None
         ),
-        payload_blob_id=task.payload_blob_id if isinstance(task, ImportTask) else None,
         input_session_id=(
             task.input_session_id if isinstance(task, EvaluationTask) else None
         ),
-        agent_id=task.agent_id if isinstance(task, ImportTask) else None,
+        import_id=task.import_id if isinstance(task, ImportTask) else None,
         worker_id=task.worker_id,
         claimed_at=task.claimed_at,
         heartbeat_at=task.heartbeat_at,

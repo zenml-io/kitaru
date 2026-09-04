@@ -78,16 +78,13 @@ class TaskResponse(TimestampedResponseModel):
         default=None, description="Agent version run by an agent task."
     )
     plugin_version_id: uuid.UUID | None = Field(
-        default=None, description="Plugin version run by an evaluator or importer task."
-    )
-    payload_blob_id: uuid.UUID | None = Field(
-        default=None, description="Payload blob for an importer task."
+        default=None, description="Plugin version run by an evaluator task."
     )
     input_session_id: uuid.UUID | None = Field(
         default=None, description="Input session for an evaluator task."
     )
-    agent_id: uuid.UUID | None = Field(
-        default=None, description="Agent an importer task creates sessions under."
+    import_id: uuid.UUID | None = Field(
+        default=None, description="Import run by an importer task."
     )
     worker_id: uuid.UUID | None = Field(
         default=None, description="Worker that claimed the task."

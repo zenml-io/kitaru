@@ -40,9 +40,9 @@ from kitaru.server.application.events import Event, TaskTerminal
 from kitaru.server.application.models.auth import (
     AuthContext,
 )
+from kitaru.server.application.models.imports import ImportCreate
 from kitaru.server.application.models.job import (
     EvaluationBatchCreate,
-    ImportCreate,
     JobFilter,
     SessionRunCreate,
 )

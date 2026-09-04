@@ -389,7 +389,7 @@ async def _create_importer_task(
     Returns:
         Id of the running import task and the path of its plugin file.
     """
-    version = await create_script_plugin_version(
+    await create_script_plugin_version(
         task_app,
         PluginKind.IMPORTER,
         entrypoint="parse",
@@ -397,15 +397,8 @@ async def _create_importer_task(
         provider="acme",
     )
     job = await create_job(task_app.services.jobs, task_app.agent.owner_id)
-    payload_blob = await create_blob(task_app.services.blobs, task_app.agent.owner_id)
-    task = await create_import_task(
-        task_app.services.tasks,
-        job.id,
-        plugin_version_id=version.id,
-        payload_blob_id=payload_blob.id,
-        agent_id=task_app.agent.id,
-        params=params or {},
-    )
+    await create_blob(task_app.services.blobs, task_app.agent.owner_id)
+    task = await create_import_task(task_app.services.tasks, job.id)
     await start_task(task_app, task.id)
 
     plugin_path = tmp_path / "importer.py"

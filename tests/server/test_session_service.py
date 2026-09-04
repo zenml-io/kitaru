@@ -1032,12 +1032,7 @@ async def test_create_session_takes_an_import_tasks_agent_and_version(
     version = await _stored_agent_version(agent_repository, agent_version_repository)
     task = await _start(
         task_repository,
-        await create_import_task(
-            task_repository,
-            uuid.uuid4(),
-            agent_id=version.agent_id,
-            agent_version_id=version.id,
-        ),
+        await create_import_task(task_repository, uuid.uuid4()),
     )
     session = await service.create_session(
         SessionCreate(origin=SessionOrigin.IMPORTED),
@@ -1054,7 +1049,7 @@ async def test_create_session_leaves_the_version_empty_for_a_versionless_import(
     agent_id = uuid.uuid4()
     task = await _start(
         task_repository,
-        await create_import_task(task_repository, uuid.uuid4(), agent_id=agent_id),
+        await create_import_task(task_repository, uuid.uuid4()),
     )
     session = await service.create_session(
         SessionCreate(origin=SessionOrigin.IMPORTED),

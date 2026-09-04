@@ -101,6 +101,7 @@ from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.experiment import ExperimentFilter
 from kitaru.server.application.models.experiment_run import ExperimentRunFilter
+from kitaru.server.application.models.imports import ImportFilter
 from kitaru.server.application.models.insight import InsightFilter
 from kitaru.server.application.models.investigation import (
     InvestigationFilter,
@@ -196,6 +197,7 @@ from kitaru.server.domain.idempotency_key import (
     IdempotencyKeyAlreadyExists,
     IdempotencyKeyResponseUndecryptable,
 )
+from kitaru.server.domain.imports import Import, ImportNotFound
 from kitaru.server.domain.insight import Insight, InsightNotFound
 from kitaru.server.domain.investigation import (
     Investigation,
@@ -225,6 +227,7 @@ from kitaru.server.domain.replay import (
     ReplayNotFound,
 )
 from kitaru.server.domain.replay_config import (
+    EvaluatorConfig,
     ReplayConfig,
     ReplayConfigInUse,
     ReplayConfigNotFound,
@@ -5062,6 +5065,145 @@ def get_replay_job_id(replay: Replay) -> uuid.UUID:
     return replay.job_id
 
 
+class FakeImportRepository:
+    """In-memory import repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._imports: dict[uuid.UUID, Import] = {}
+
+    async def create(self, import_: Import) -> Import:
+        """Persist a new import.
+
+        Args:
+            import_: Import to store.
+
+        Returns:
+            Stored import with timestamps set.
+        """
+        now = datetime.now(UTC)
+        stored = import_.model_copy(update={"created": now, "updated": now})
+        self._imports[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, import_id: uuid.UUID) -> Import:
+        """Load an import by id.
+
+        Args:
+            import_id: Id of the import.
+
+        Raises:
+            ImportNotFound: No import has this id.
+
+        Returns:
+            Stored import.
+        """
+        import_ = self._imports.get(import_id)
+        if import_ is None:
+            raise ImportNotFound(import_id)
+        return import_.model_copy()
+
+    async def get_by_job_id(self, job_id: uuid.UUID) -> Import | None:
+        """Load the import owning a job, if any.
+
+        Args:
+            job_id: Id of the job.
+
+        Returns:
+            Stored import, or ``None`` when the job holds no import.
+        """
+        for import_ in self._imports.values():
+            if import_.job_id == job_id:
+                return import_.model_copy()
+        return None
+
+    async def query(
+        self, import_filter: ImportFilter
+    ) -> tuple[list[Import], str | None]:
+        """Query imports matching a filter.
+
+        Args:
+            import_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching imports and the next cursor.
+        """
+        imports = list(self._imports.values())
+        if import_filter.expression is not None:
+            imports = [
+                i
+                for i in imports
+                if _evaluate_filter_expression(i, import_filter.expression)
+            ]
+        page, next_cursor = _paginate_fake(imports, import_filter)
+        return [i.model_copy() for i in page], next_cursor
+
+    async def update(self, import_: Import) -> Import:
+        """Persist changes to an existing import.
+
+        Args:
+            import_: Import with modified fields.
+
+        Raises:
+            ImportNotFound: No import has this id.
+
+        Returns:
+            Stored import with the updated timestamp renewed.
+        """
+        stored = self._imports.get(import_.id)
+        if stored is None:
+            raise ImportNotFound(import_.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = import_.model_copy(update={"created": stored.created, "updated": now})
+        self._imports[import_.id] = updated
+        return updated.model_copy()
+
+
+async def create_import(
+    repository: FakeImportRepository,
+    owner_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    job_id: uuid.UUID | None = None,
+    agent_version_id: uuid.UUID | None = None,
+    importer_version_id: uuid.UUID | None = None,
+    payload_blob_id: uuid.UUID | None = None,
+    params: dict[str, Any] | None = None,
+    evaluators: list[EvaluatorConfig] | None = None,
+) -> Import:
+    """Store an import in the fake repository.
+
+    Args:
+        repository: Fake import repository.
+        owner_id: Id of the owning account.
+        agent_id: Agent imported sessions are created under.
+        job_id: Id of the job running the import.
+        agent_version_id: Agent version recorded on the imported sessions.
+        importer_version_id: Importer version the import runs.
+        payload_blob_id: Blob holding the payload.
+        params: Parameters passed to the importer.
+        evaluators: Evaluators run against every imported session.
+
+    Returns:
+        Stored import.
+    """
+    return await repository.create(
+        Import(
+            owner_id=owner_id,
+            job_id=job_id,
+            agent_id=agent_id,
+            agent_version_id=agent_version_id,
+            importer_version_id=(
+                importer_version_id if importer_version_id is not None else uuid.uuid4()
+            ),
+            payload_blob_id=(
+                payload_blob_id if payload_blob_id is not None else uuid.uuid4()
+            ),
+            params=params if params is not None else {},
+            evaluators=evaluators if evaluators is not None else [],
+        )
+    )
+
+
 class FakeExperimentRunRepository:
     """In-memory experiment run repository."""
 
@@ -6347,11 +6489,7 @@ async def create_evaluation_task(
 async def create_import_task(
     repository: FakeTaskRepository,
     job_id: uuid.UUID,
-    plugin_version_id: uuid.UUID | None = None,
-    payload_blob_id: uuid.UUID | None = None,
-    agent_id: uuid.UUID | None = None,
-    agent_version_id: uuid.UUID | None = None,
-    params: dict[str, Any] | None = None,
+    import_id: uuid.UUID | None = None,
     on_failure: TaskOnFailure = TaskOnFailure.ABORT,
 ) -> ImportTask:
     """Store an importer task in the fake repository.
@@ -6359,11 +6497,7 @@ async def create_import_task(
     Args:
         repository: Fake task repository.
         job_id: Id of the owning job.
-        plugin_version_id: Importer version the task runs.
-        payload_blob_id: Blob holding the payload.
-        agent_id: Agent imported sessions are created under.
-        agent_version_id: Agent version recorded on the imported sessions.
-        params: Parameters passed to the importer.
+        import_id: Id of the import the task runs.
         on_failure: Effect of a hard failure on the job.
 
     Returns:
@@ -6371,15 +6505,7 @@ async def create_import_task(
     """
     task = ImportTask(
         job_id=job_id,
-        plugin_version_id=(
-            plugin_version_id if plugin_version_id is not None else uuid.uuid4()
-        ),
-        payload_blob_id=(
-            payload_blob_id if payload_blob_id is not None else uuid.uuid4()
-        ),
-        agent_id=agent_id if agent_id is not None else uuid.uuid4(),
-        agent_version_id=agent_version_id,
-        params=params if params is not None else {},
+        import_id=import_id if import_id is not None else uuid.uuid4(),
         on_failure=on_failure,
     )
     stored = await repository.create(task)

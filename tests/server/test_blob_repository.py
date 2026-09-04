@@ -204,7 +204,7 @@ async def test_delete_leaves_task_with_payload() -> None:
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session() as session:
         owner = await SQLAccountRepository(session).create(Account(name="owner"))
-        agent = await SQLAgentRepository(session).create(
+        await SQLAgentRepository(session).create(
             Agent(owner_id=owner.id, name="assistant")
         )
         blob_repository = SQLBlobRepository(session)
@@ -213,7 +213,7 @@ async def test_delete_leaves_task_with_payload() -> None:
         plugin = await plugin_repository.create(
             Plugin(owner_id=owner.id, kind=PluginKind.IMPORTER, name="importer")
         )
-        version = await plugin_repository.create_version(
+        await plugin_repository.create_version(
             plugin.id,
             PackagePluginSource(
                 requirement="kitaru-importer==1.0.0", entrypoint="pkg:run"
@@ -225,20 +225,16 @@ async def test_delete_leaves_task_with_payload() -> None:
             Job(owner_id=owner.id, kind=JobKind.IMPORT, status=JobStatus.PENDING)
         )
         task_repository = SQLTaskRepository(session)
+        import_id = uuid.uuid4()
         task = await task_repository.create(
-            ImportTask(
-                job_id=job.id,
-                plugin_version_id=version.id,
-                payload_blob_id=payload_blob.id,
-                agent_id=agent.id,
-            )
+            ImportTask(job_id=job.id, import_id=import_id)
         )
 
         await blob_repository.delete(payload_blob.id)
 
         stored = await task_repository.get(task.id)
         assert isinstance(stored, ImportTask)
-        assert stored.payload_blob_id == payload_blob.id
+        assert stored.import_id == import_id
 
 
 async def test_delete_in_use_by_session() -> None:
