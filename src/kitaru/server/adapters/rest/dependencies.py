@@ -70,6 +70,9 @@ from kitaru.server.adapters.db.repositories.experiment_run_repository import (
 from kitaru.server.adapters.db.repositories.idempotency_key_repository import (
     SQLIdempotencyKeyRepository,
 )
+from kitaru.server.adapters.db.repositories.insight_repository import (
+    SQLInsightRepository,
+)
 from kitaru.server.adapters.db.repositories.investigation_repository import (
     SQLInvestigationRepository,
 )
@@ -106,6 +109,7 @@ from kitaru.server.application.interfaces.blob_data_store import (
     BlobDataStore,
     BlobDataStores,
 )
+from kitaru.server.application.interfaces.ephemeral_workers import EphemeralWorkers
 from kitaru.server.application.interfaces.idempotency_key_repository import (
     IdempotencyKeyRepository,
 )
@@ -137,6 +141,7 @@ from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
 from kitaru.server.application.services.experiment_service import ExperimentService
+from kitaru.server.application.services.insight_service import InsightService
 from kitaru.server.application.services.investigation_service import (
     InvestigationService,
 )
@@ -436,6 +441,19 @@ def get_blob_data_stores(
     if s3_store is not None:
         stores[BlobStorageBackend.S3] = s3_store
     return BlobDataStores(stores, settings.BLOB_STORAGE.backend)
+
+
+def get_ephemeral_workers(request: Request) -> EphemeralWorkers | None:
+    """Return the ephemeral worker backend attached to the application state.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        Ephemeral worker backend for this process, or None when none is configured.
+    """
+    ephemeral_workers: EphemeralWorkers | None = request.app.state.ephemeral_workers
+    return ephemeral_workers
 
 
 def get_blob_service(
@@ -838,6 +856,26 @@ def get_evaluation_service(
     return EvaluationService(
         repository=SQLEvaluationRepository(session),
         session_repository=SQLSessionRepository(session, engine),
+    )
+
+
+def get_insight_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
+) -> InsightService:
+    """Return an insight service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
+
+    Returns:
+        Insight service bound to the SQL repositories.
+    """
+    return InsightService(
+        repository=SQLInsightRepository(session),
+        agent_repository=SQLAgentRepository(session),
+        analytics=analytics,
     )
 
 

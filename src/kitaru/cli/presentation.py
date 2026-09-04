@@ -116,6 +116,12 @@ _ANNOTATION_FIELDS = (
     HumanField("value", "Value"),
     _ID,
 )
+_INSIGHT_FIELDS = (
+    _NAME,
+    HumanField("title", "Title"),
+    HumanField("data.type", "Type"),
+    _ID,
+)
 
 _ASSET_FIELDS = (
     _NAME,
@@ -362,6 +368,28 @@ _VIEWS: dict[str, HumanView] = {
     "cohort.version.update": _build_view(
         "Cohort version", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
+    "insight.list": _build_view(
+        "Insights",
+        (
+            _NAME,
+            HumanField("title", "Title"),
+            HumanField("data.type", "Type"),
+            HumanField("agent_id", "Agent", 120),
+            _ID,
+            _CREATED,
+        ),
+    ),
+    "insight.create": _build_view(
+        "Insights",
+        (
+            _NAME,
+            HumanField("title", "Title"),
+            HumanField("data.type", "Type"),
+            _ID,
+        ),
+    ),
+    "insight.get": _build_view("Insight", _INSIGHT_FIELDS),
+    "insight.update": _build_view("Insight", _INSIGHT_FIELDS),
     "investigation.list": _build_view(
         "Investigations",
         (

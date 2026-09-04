@@ -121,7 +121,10 @@ async def test_create_session_run_creates_a_pending_job_with_one_agent_task(
     task = tasks[0]
     assert isinstance(task, AgentTask)
     assert task.agent_version_id == version_id
-    assert task.labels == {"agent_version": str(version_id)}
+    assert task.labels == {
+        "kitaru/agent_version": str(version_id),
+        "agent_version": str(version_id),
+    }
     assert task.env == {"KITARU_SESSION_NAME": "run-1"}
 
 
@@ -197,6 +200,7 @@ async def test_create_import_resolves_latest_version_by_default(
     assert isinstance(task, ImportTask)
     assert task.plugin_version_id == v2.id
     assert task.plugin_version_id != v1.id
+    assert task.labels == {}
 
 
 async def test_create_import_stamps_the_job_kind_import(

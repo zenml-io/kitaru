@@ -14,16 +14,24 @@
 """Authentication orchestration and credential persistence behavior."""
 
 import io
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import pytest
 
-from kitaru.api_models.v1.auth import TokenResponse
+from kitaru.api_models.v1.auth import DeviceAuthorizationResponse, TokenResponse
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.cli import auth
 from kitaru.cli.output import CLIError
-from kitaru.client.config import get_server_url
+from kitaru.client.config import get_server_url, set_server_url
+from kitaru.client.control_plane import (
+    MANAGED_CLOUD_API_URL,
+    ControlPlaneSession,
+    ControlPlaneToken,
+    ControlPlaneWorkspace,
+)
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken
 from kitaru.client.exceptions import AuthenticationError, NotFoundError
@@ -35,6 +43,7 @@ class FakeAuthResource:
 
     error: Exception | None = None
     exchanged: str | None = None
+    control_plane_exchanged: str | None = None
 
     async def exchange_api_key(self, api_key: str) -> TokenResponse:
         """Validate one API key or raise the configured error."""
@@ -43,6 +52,15 @@ class FakeAuthResource:
             raise self.error
         return TokenResponse(
             access_token="session-token", token_type="bearer", expires_in=3600
+        )
+
+    async def exchange_control_plane_credential(self, credential: str) -> TokenResponse:
+        """Exchange one control plane bearer token."""
+        self.control_plane_exchanged = credential
+        if self.error:
+            raise self.error
+        return TokenResponse(
+            access_token="server-session", token_type="bearer", expires_in=3600
         )
 
 
@@ -54,11 +72,18 @@ class FakeClient:
         scheme: AuthScheme,
         error: Exception | None = None,
         info_error: Exception | None = None,
+        server_id: uuid.UUID | None = None,
+        control_plane_api_url: str | None = None,
     ) -> None:
         """Initialize the fake client."""
         self.auth = FakeAuthResource(error)
         self.closed = False
-        info = ServerInfoResponse(version="0.21.0", auth_scheme=scheme)
+        info = ServerInfoResponse(
+            id=server_id,
+            version="0.21.0",
+            auth_scheme=scheme,
+            control_plane_api_url=control_plane_api_url,
+        )
 
         class InfoResource:
             async def get(self) -> ServerInfoResponse:
@@ -71,6 +96,289 @@ class FakeClient:
     async def close(self) -> None:
         """Record client closure."""
         self.closed = True
+
+
+WORKSPACE_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+
+
+def test_device_prompt_uses_the_complete_verification_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct people to the verification page without a redundant code prompt."""
+    messages: list[str] = []
+    monkeypatch.setattr(auth, "write_interaction", messages.append)
+
+    auth._show_device_prompt(
+        DeviceAuthorizationResponse(
+            device_id=WORKSPACE_ID,
+            device_code="device-code",
+            user_code="ABCD-EFGH",
+            verification_uri="https://cloud.example.com/devices/verify",
+            verification_uri_complete=(
+                "https://cloud.example.com/devices/verify?user_code=ABCD-EFGH"
+            ),
+            expires_in=300,
+            interval=5,
+        )
+    )
+
+    assert messages == [
+        "Open https://cloud.example.com/devices/verify?user_code=ABCD-EFGH to continue."
+    ]
+
+
+def managed_workspace(
+    *, status: str = "available", server_url: str | None = "https://managed.example.com"
+) -> ControlPlaneWorkspace:
+    """Build the minimal managed workspace response used by login tests."""
+    return ControlPlaneWorkspace.model_validate(
+        {
+            "id": str(WORKSPACE_ID),
+            "name": "my-kitaru",
+            "workspace_type": "kitaru",
+            "status": status,
+            "kitaru_service": {"status": {"server_url": server_url}},
+        }
+    )
+
+
+async def test_bare_login_connects_to_the_browser_selected_managed_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Resolve and select the Kitaru workspace chosen in the device flow."""
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+    client = FakeClient(
+        AuthScheme.CONTROL_PLANE,
+        server_id=WORKSPACE_ID,
+        control_plane_api_url=MANAGED_CLOUD_API_URL,
+    )
+    calls: list[object] = []
+
+    class FakeManagedCloudSession:
+        def __init__(
+            self, api_url: str, store: CredentialStore, timeout: float
+        ) -> None:
+            calls.append((api_url, store, timeout))
+
+        async def device_login_with_metadata(
+            self, *, open_browser: bool, prompt: object
+        ) -> ControlPlaneToken:
+            calls.append(("device", open_browser, prompt))
+            return ControlPlaneToken(
+                access_token="control-plane-token",
+                expires_in=3600,
+                device_metadata={"tenant_id": str(WORKSPACE_ID)},
+            )
+
+        async def get_workspace(
+            self, workspace_id: uuid.UUID, access_token: str
+        ) -> ControlPlaneWorkspace:
+            calls.append(("workspace", workspace_id, access_token))
+            return managed_workspace()
+
+        async def close(self) -> None:
+            calls.append("closed")
+
+    monkeypatch.setattr(auth, "ControlPlaneSession", FakeManagedCloudSession)
+    monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
+
+    result = await auth.login(
+        server=None,
+        local=False,
+        username=None,
+        password_stdin=False,
+        api_key_stdin=False,
+        credential_store=credential_store,
+        timeout=30,
+        non_interactive=False,
+        no_browser=True,
+        stdin=io.StringIO(),
+    )
+
+    assert calls[0] == (MANAGED_CLOUD_API_URL, credential_store, 30)
+    assert calls[1] == ("device", False, auth._show_device_prompt)
+    assert calls[2] == ("workspace", WORKSPACE_ID, "control-plane-token")
+    assert calls[3] == "closed"
+    assert client.auth.control_plane_exchanged == "control-plane-token"
+    assert get_server_url() == "https://managed.example.com"
+    assert result.item == {
+        "server_url": "https://managed.example.com",
+        "workspace_id": str(WORKSPACE_ID),
+        "workspace_name": "my-kitaru",
+        "auth_scheme": "control_plane",
+        "authentication": "authenticated",
+        "credential_kind": "device",
+        "credential_stored": True,
+    }
+    stored = credential_store.get("https://managed.example.com")
+    assert stored is not None
+    assert stored.control_plane_api_url == MANAGED_CLOUD_API_URL
+
+
+async def test_bare_login_rejects_non_interactive_use_before_connecting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Do not start browser authorization for a non-interactive invocation."""
+    monkeypatch.setattr(
+        auth,
+        "ControlPlaneSession",
+        lambda *_args, **_kwargs: pytest.fail("control plane should not be contacted"),
+    )
+
+    with pytest.raises(CLIError) as raised:
+        await auth.login(
+            server=None,
+            local=False,
+            username=None,
+            password_stdin=False,
+            api_key_stdin=False,
+            credential_store=CredentialStore(tmp_path / "credentials.json"),
+            timeout=30,
+            non_interactive=True,
+            no_browser=True,
+            stdin=io.StringIO(),
+        )
+
+    assert raised.value.kind == "interaction_required"
+    assert "interactive terminal" in str(raised.value.hint)
+
+
+async def test_bare_login_rejects_a_mismatched_workspace_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep the current server when discovery resolves an inconsistent server."""
+
+    class FakeManagedCloudSession:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def device_login_with_metadata(self, **_kwargs) -> ControlPlaneToken:
+            return ControlPlaneToken(
+                access_token="control-plane-token",
+                expires_in=3600,
+                device_metadata={"tenant_id": str(WORKSPACE_ID)},
+            )
+
+        async def close(self) -> None:
+            pass
+
+    async def return_workspace(*_args, **_kwargs) -> ControlPlaneWorkspace:
+        return managed_workspace()
+
+    async def reject_exchange(*_args, **_kwargs) -> None:
+        pytest.fail("credentials should not be exchanged")
+
+    monkeypatch.setattr(auth, "ControlPlaneSession", FakeManagedCloudSession)
+    monkeypatch.setattr(auth, "_wait_for_managed_workspace", return_workspace)
+    monkeypatch.setattr(
+        auth,
+        "KitaruAPIClient",
+        lambda **_: FakeClient(AuthScheme.CONTROL_PLANE, server_id=uuid.uuid4()),
+    )
+    monkeypatch.setattr(auth, "exchange_control_plane_credential", reject_exchange)
+    set_server_url("https://existing.example.com")
+
+    with pytest.raises(CLIError) as raised:
+        await auth.login(
+            server=None,
+            local=False,
+            username=None,
+            password_stdin=False,
+            api_key_stdin=False,
+            credential_store=CredentialStore(tmp_path / "credentials.json"),
+            timeout=30,
+            non_interactive=False,
+            no_browser=True,
+            stdin=io.StringIO(),
+        )
+
+    assert raised.value.kind == "invalid_configuration"
+    assert "inconsistent Kitaru connection details" in raised.value.message
+    assert get_server_url() == "https://existing.example.com"
+
+
+async def test_bare_login_requires_the_browser_to_select_a_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Explain a successful device grant that carries no workspace selection."""
+
+    class FakeManagedCloudSession:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def device_login_with_metadata(self, **_kwargs) -> ControlPlaneToken:
+            return ControlPlaneToken(
+                access_token="control-plane-token",
+                expires_in=3600,
+                device_metadata={},
+            )
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(auth, "ControlPlaneSession", FakeManagedCloudSession)
+    set_server_url("https://existing.example.com")
+
+    with pytest.raises(CLIError) as raised:
+        await auth.login(
+            server=None,
+            local=False,
+            username=None,
+            password_stdin=False,
+            api_key_stdin=False,
+            credential_store=CredentialStore(tmp_path / "credentials.json"),
+            timeout=30,
+            non_interactive=False,
+            no_browser=True,
+            stdin=io.StringIO(),
+        )
+
+    assert raised.value.kind == "invalid_configuration"
+    assert "without a selected Kitaru workspace" in raised.value.message
+    assert get_server_url() == "https://existing.example.com"
+
+
+async def test_bare_login_waits_for_a_pending_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Poll a newly created workspace until its Kitaru service is available."""
+    responses = [
+        managed_workspace(status="pending"),
+        managed_workspace(server_url=None),
+        managed_workspace(),
+    ]
+    delays: list[float] = []
+
+    class FakeManagedCloudSession:
+        async def get_workspace(
+            self, workspace_id: uuid.UUID, access_token: str
+        ) -> ControlPlaneWorkspace:
+            assert workspace_id == WORKSPACE_ID
+            assert access_token == "control-plane-token"
+            return responses.pop(0)
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(auth.asyncio, "sleep", record_sleep)
+    monkeypatch.setattr(auth, "write_interaction", lambda _message: None)
+    workspace = await auth._wait_for_managed_workspace(
+        cast(ControlPlaneSession, FakeManagedCloudSession()),
+        WORKSPACE_ID,
+        "control-plane-token",
+    )
+
+    assert workspace.status == "available"
+    assert delays == [auth._WORKSPACE_POLL_INTERVAL_SECONDS] * 2
+
+
+def test_managed_workspace_server_url_requires_https() -> None:
+    """Do not forward a control-plane bearer token over plaintext HTTP."""
+    with pytest.raises(CLIError) as raised:
+        auth._validate_managed_server_url("http://managed.example.com")
+
+    assert raised.value.kind == "invalid_configuration"
+    assert "must use HTTPS" in raised.value.message
 
 
 async def test_login_explains_when_kitaru_is_not_available(

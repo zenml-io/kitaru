@@ -9,6 +9,11 @@
 //   kitaru.ai/docs/changelog           -> docs.zenml.io/changelog
 //   kitaru.ai/docs/<anything else>     -> docs.zenml.io/kitaru/<anything else>
 //   kitaru.ai/ , /pricing, /blog/* ... -> www.zenml.io (marketing)
+//
+// Two exceptions serve content from the repository's main branch: /install
+// (and /install.sh) is install.sh, so `curl -fsSL https://kitaru.ai/install |
+// bash` works without a redirect hop, and /install.md is the installation
+// docs page as Markdown for coding agents.
 import {
   DOCS_PREFIX,
   LEGACY_MARKETING_PREFIX_REDIRECTS,
@@ -20,6 +25,21 @@ import {
 const GITBOOK_BASE = "https://docs.zenml.io/kitaru";
 const SDKDOCS_BASE = "https://sdkdocs.kitaru.ai";
 const CHANGELOG_URL = "https://docs.zenml.io/changelog";
+const RAW_MAIN = "https://raw.githubusercontent.com/zenml-io/kitaru/main";
+// kitaru.ai/install serves the installer script; kitaru.ai/install.md serves
+// the installation page as plain Markdown so a coding agent can be told to
+// "follow https://kitaru.ai/install.md" without hitting GitBook's HTML.
+const INSTALL_FILES = new Map([
+  ["/install", { url: `${RAW_MAIN}/install.sh`, type: "text/plain" }],
+  ["/install.sh", { url: `${RAW_MAIN}/install.sh`, type: "text/plain" }],
+  [
+    "/install.md",
+    {
+      url: `${RAW_MAIN}/docs/book/getting-started/installation.md`,
+      type: "text/markdown",
+    },
+  ],
+]);
 
 const retiredDocsRedirects = new Map(RETIRED_DOCS_REDIRECTS);
 const marketingRedirects = new Map(LEGACY_MARKETING_REDIRECTS);
@@ -63,10 +83,50 @@ function marketingRedirectTarget(pathname) {
   return prefix ? `${ZENML_BASE_URL}${norm}` : null;
 }
 
+/**
+ * Serve one file from GitHub main, cached at the edge for five minutes so a
+ * release lands quickly without hammering GitHub.
+ */
+export async function serveInstallFile(request, { url, type }) {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+  const unavailable = () =>
+    new Response(
+      "This file is temporarily unavailable. See https://docs.zenml.io/kitaru/getting-started/installation\n",
+      { status: 502, headers: { "content-type": "text/plain; charset=utf-8" } },
+    );
+  let upstream;
+  try {
+    upstream = await fetch(url, {
+      cf: { cacheTtl: 300, cacheEverything: true },
+    });
+  } catch {
+    // DNS, connection, and timeout failures reject rather than resolve.
+    return unavailable();
+  }
+  if (!upstream.ok) {
+    return unavailable();
+  }
+  return new Response(request.method === "HEAD" ? null : upstream.body, {
+    status: 200,
+    headers: {
+      "content-type": `${type}; charset=utf-8`,
+      "cache-control": "public, max-age=300",
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
     const { pathname } = url;
+
+    const installFile = INSTALL_FILES.get(normalizePath(pathname));
+    if (installFile) {
+      return serveInstallFile(request, installFile);
+    }
 
     if (
       pathname === DOCS_PREFIX ||

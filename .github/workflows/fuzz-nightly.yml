@@ -25,6 +25,9 @@ jobs:
           - name: mcp
             sync-command: uv sync --frozen --extra server --extra mcp
             recipe: fuzz-mcp
+          - name: filters
+            sync-command: uv sync --frozen --extra server
+            recipe: fuzz-filters
           - name: api
             sync-command: uv sync --frozen --extra server --group fuzz
             recipe: fuzz-api
@@ -78,7 +81,8 @@ jobs:
         with:
           name: hypothesis-examples-${{ matrix.name }}
           path: .hypothesis/examples
-          if-no-files-found: ignore
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Open issue on scheduled failure
         if: failure() && github.event_name == 'schedule'
         env:

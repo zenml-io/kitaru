@@ -75,6 +75,34 @@ blob_storage__s3__access_key_id: {{ .accessKeyID | quote }}
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{- if eq .Kitaru.ephemeralWorker.backend "modal" }}
+ephemeral_worker__backend: {{ .Kitaru.ephemeralWorker.backend | quote }}
+{{- if .Kitaru.ephemeralWorker.image }}
+ephemeral_worker__image: {{ .Kitaru.ephemeralWorker.image | quote }}
+{{- end }}
+{{- if .Kitaru.ephemeralWorker.command }}
+ephemeral_worker__command: {{ .Kitaru.ephemeralWorker.command | quote }}
+{{- end }}
+{{- if .Kitaru.ephemeralWorker.timeoutSeconds }}
+ephemeral_worker__timeout_seconds: {{ .Kitaru.ephemeralWorker.timeoutSeconds | quote }}
+{{- end }}
+{{- with .Kitaru.ephemeralWorker.modal }}
+{{- if .tokenID }}
+ephemeral_worker__modal__token_id: {{ .tokenID | quote }}
+{{- end }}
+{{- if .appName }}
+ephemeral_worker__modal__app_name: {{ .appName | quote }}
+{{- end }}
+{{- if .cpu }}
+ephemeral_worker__modal__cpu: {{ .cpu | quote }}
+{{- end }}
+{{- if .memoryMB }}
+ephemeral_worker__modal__memory_mb: {{ .memoryMB | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{- if .Kitaru.payloadOffloadThresholdBytes }}
 payload_offload_threshold_bytes: {{ .Kitaru.payloadOffloadThresholdBytes | quote }}
 {{- end }}
@@ -216,6 +244,9 @@ default_account_password: {{ .Kitaru.auth.defaultAccount.password | quote }}
 {{- end }}
 {{- if and (eq .Kitaru.blobStorage.backend "s3") .Kitaru.blobStorage.s3.secretAccessKey }}
 blob_storage__s3__secret_access_key: {{ .Kitaru.blobStorage.s3.secretAccessKey | quote }}
+{{- end }}
+{{- if and (eq .Kitaru.ephemeralWorker.backend "modal") .Kitaru.ephemeralWorker.modal.tokenSecret }}
+ephemeral_worker__modal__token_secret: {{ .Kitaru.ephemeralWorker.modal.tokenSecret | quote }}
 {{- end }}
 {{- end }}
 

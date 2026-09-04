@@ -67,6 +67,7 @@ from kitaru.server.adapters.rest.routers import (
     importers,
     imports,
     info,
+    insights,
     investigations,
     jobs,
     replays,
@@ -107,6 +108,7 @@ from kitaru.server.domain.base import (
     UpgradeRequiredError,
     ValidationError,
 )
+from kitaru.server.ephemeral_worker_settings import EphemeralWorkerBackend
 
 _COMMON_ERROR_RESPONSES = error_responses(401, 403, 503) | {
     422: {"model": ValidationErrorBody, "description": "Validation Error"}
@@ -299,6 +301,14 @@ def create_app(settings: APISettings) -> FastAPI:
             from kitaru.server.adapters.blobstore.s3 import S3BlobDataStore
 
             app.state.s3_blob_data_store = S3BlobDataStore(settings.BLOB_STORAGE.s3)
+        if settings.EPHEMERAL_WORKER.backend is EphemeralWorkerBackend.MODAL:
+            from kitaru.server.adapters.ephemeral_workers.modal import (
+                ModalEphemeralWorkers,
+            )
+
+            app.state.ephemeral_workers = ModalEphemeralWorkers(
+                settings.EPHEMERAL_WORKER
+            )
         async for session in database.get_async_session():
             server_id = await ensure_server_id(
                 SQLServerSettingsRepository(session), settings.SERVER_ID
@@ -363,6 +373,9 @@ def create_app(settings: APISettings) -> FastAPI:
     app.state.server_id = None
     # Replaced with a live store at startup when S3 blob storage is configured.
     app.state.s3_blob_data_store = None
+    # Replaced with a live backend at startup when an ephemeral worker backend
+    # is configured.
+    app.state.ephemeral_workers = None
     _register_domain_exception_handlers(app)
     _register_database_exception_handler(app)
     _register_pool_timeout_exception_handler(app)
@@ -463,6 +476,12 @@ def create_app(settings: APISettings) -> FastAPI:
         imports.router,
         prefix="/api/v1/imports",
         tags=["imports"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        insights.router,
+        prefix="/api/v1/insights",
+        tags=["insights"],
         responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(

@@ -1,12 +1,5 @@
 [tool.uv]
 exclude-newer = "3 days"
-# kitaru-claude-agent-sdk requires claude-agent-sdk>=0.2.149, published
-# 2026-08-31T20:01Z, which the three-day quarantine above still excludes, so the
-# workspace does not resolve without this line. Delete it and re-lock once the
-# quarantine has moved past that publish time. Left in place it is narrower than
-# the default and caps this one package at 2026-09-01 forever, so a later fix is
-# never picked up and `uv lock --check` keeps passing while that happens.
-exclude-newer-package = { claude-agent-sdk = "2026-09-01" }
 
 [tool.uv.workspace]
 members = ["packages/*"]

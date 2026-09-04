@@ -18,7 +18,7 @@ Two schemes, set by `KITARU_SERVER_AUTH_SCHEME`:
 kitaru login https://kitaru.internal.example.com
 ```
 
-Interactive login uses a device flow (the CLI shows a short `XXXX-XXXX` code and opens your browser) or a password prompt. Credentials are stored separately for each server. Logging in selects that server for later commands; you can override it with `--server` or `KITARU_API_URL`. Non-interactive variants:
+Interactive login uses a device flow (the CLI opens your browser to complete the login, or prints a verification link when browser opening is disabled) or a password prompt. Credentials are stored separately for each server. Logging in selects that server for later commands; you can override it with `--server` or `KITARU_API_URL`. Non-interactive variants:
 
 ```bash
 kitaru login https://... --username you --password-stdin

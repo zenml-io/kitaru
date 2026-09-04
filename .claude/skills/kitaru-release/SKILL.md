@@ -39,13 +39,13 @@ uv run --no-project --with packaging==26.2 \
   python scripts/release_units.py list --format json
 ```
 
-For every selected unit, resolve its latest published tag. Compare that tag with `origin/develop` and inspect merged PRs in the range with `git log`, `git diff`, and `gh pr view`. Derive directly changed core and plugin units from `impact-paths` in `release/release-units.toml`. Read `requires:*` labels as indirect follow-ups, together with `Release context`, linked work, and existing changelog entries. A directly changed unit does not need a matching label.
+For every selected unit, resolve its latest published tag. Compare that tag with `origin/develop` and inspect merged PRs in the range with `git log`, `git diff`, and `gh pr view`. Derive directly changed core and plugin units from `impact-paths` in `release/release-units.toml`. Read `requires:*` labels as release follow-up metadata, together with `Release context`, linked work, and existing changelog entries. A directly changed unit does not need a matching label when it will be published in the next applicable release. If its publication is intentionally deferred past that release, attach its exact `release-label` and record the intended timing in `Release context`.
 
 For one plugin, start at that plugin's previous tag. For all plugins, calculate a separate range for every plugin release unit. `requires:plugins` means every unit is expected; report a unit with no implementation change as a red flag and require an explanation in the release PR.
 
 For core, collect requirements for frontend, plugins, skills, ZenML docs, website, examples, and additional context from source PRs. Read linked repositories with `gh` or existing local checkouts. Do not write to them.
 
-Compare declared follow-ups with the actual diff and PR context. Report unknown, conflicting, or stale signals. The diff identifies direct units; labels record work that the Kitaru diff cannot show. Repository state decides what can be released.
+Compare declared follow-ups with the actual diff and PR context. Report unknown, conflicting, or stale signals. The diff identifies direct units; labels record deferred publication or other work that the Kitaru diff cannot show. Repository state decides what can be released.
 
 For core, collect every merged PR label in the range and use the latest published stable core version as the input to the deterministic version rule:
 
@@ -131,6 +131,18 @@ ui-tag = "<kitaru-ui-tag>"
 7. If a default plugin version changes, update every matching server catalog requirement and display version. The release inventory validates these values against the package manifest.
 
 Read default membership from `release/release-units.toml`. Do not copy a fixed plugin count or a retired plugin name into the skill.
+
+Check the standalone quickstart dependency floor and lockfile under `examples/python/pydantic_ai_ticket_resolver/`. Its README uses `uv sync --frozen`, so changing only the dependency floor does not update the installed version. Refresh both files to a published compatible core version, retaining unrelated dependency pins:
+
+```bash
+uv add --project examples/python/pydantic_ai_ticket_resolver --no-sync \
+  --upgrade-package "kitaru==<published-version>" \
+  "kitaru[cli,mcp,server,worker]>=<published-version>"
+```
+
+With the local test PostgreSQL available, run `uv sync --frozen` and `uv run --frozen python scripts/run_ci_e2e.py` from the example directory before installing candidate wheels. The published-dependency run and the candidate-wheel run verify different installation paths. Preserve the existing lockfile cutoff when no unrelated dependency update is needed.
+
+Do not put an unpublished version or a local wheel path into the public quickstart lockfile. If the example requires the upcoming release, record its dependency refresh and frozen end-to-end check as a post-publication follow-up; candidate-wheel success alone does not complete it.
 
 The frontend declaration contains only the schema version, Kitaru version, and trusted frontend tag. The workflow downloads and verifies the published checksum.
 
@@ -318,6 +330,8 @@ Approve required environments only after checking the candidate evidence. A mana
 
 Verify each published surface independently. Do not infer one surface from another.
 
+After the required core and plugin versions are available on PyPI, complete any pending quickstart dependency refresh through a reviewed follow-up PR and rerun its frozen end-to-end test. Report which branch contains that update: the public README links to `main`, and merging a follow-up into `develop` alone does not update the public example. The development-reset PR does not currently refresh the quickstart lockfile.
+
 The workflow does not update `main`. After the newest stable core release succeeds, tell the release owner to move `main` to the immutable core tag without creating a merge commit:
 
 ```bash
@@ -330,6 +344,42 @@ gh api --method PATCH repos/zenml-io/kitaru/git/refs/heads/main \
 ```
 
 The release owner runs this command manually. Do not execute it on their behalf. The fast-forward updates `main` to the tagged commit without a merge commit and triggers the existing docs workflow. Skip this step for prereleases and older maintenance-line core releases.
+
+## Curate GitHub Release Notes
+
+After every selected release workflow has succeeded and its published artifacts have been verified, curate the GitHub Release body for every release created in this release flow. This is a post-publication metadata step, not a replacement for the publication workflows: their autogenerated notes remain the fallback until curation is complete.
+
+Tags, versions, uploaded assets, registry artifacts, release targets, and prerelease/latest state are immutable. A release body may be deliberately updated after publication only with explicit user confirmation. Do not curate releases that are outside the selected release set, and do not rewrite an older UI release merely because a core release references it.
+
+Build the exact release set before drafting. It can include:
+
+- the core tag `python/kitaru/v<version>`;
+- each selected Python plugin tag from `release/release-units.toml`;
+- the TypeScript release-set tag `typescript/kitaru/v<version>`, which covers `@zenml-io/kitaru`, `@zenml-io/kitaru-mastra`, and `@zenml-io/kitaru-vercel-ai` together;
+- a new `kitaru-ui-v<version>` release in `zenml-io/zenml-frontend-monorepo` only when this release flow published that UI release.
+
+For every selected release, first capture its current state with `gh release view <tag> --repo <repo> --json name,tagName,targetCommitish,isPrerelease,assets,body` and record its latest state separately with `gh release list --repo <repo> --json tagName,isLatest`. Resolve the previous tag from the same tag family, never from GitHub's repository-wide previous-release selection. The comparison families are `python/kitaru/v*` for core, the selected unit's `tag-prefix` for a Python plugin, `typescript/kitaru/v*` for TypeScript, and `kitaru-ui-v*` for the UI. A stable release compares with the previous stable tag in its family, never its last release candidate. A prerelease compares with the nearest preceding prerelease in its release line, falling back to the latest stable tag in its family. For a maintenance-line plugin patch, choose a predecessor from the same `<major>.<minor>` release line whose tag is an ancestor of the current tag, and verify that ancestry with `git merge-base --is-ancestor <previous-tag> <tag>`. If no eligible predecessor exists, mark it as the first release in that comparison family rather than inventing one. This avoids cross-package and cross-maintenance-line comparison links.
+
+Use reviewed release evidence, not PR titles alone:
+
+- Core: the released `CHANGELOG.md`, merged PR context, and the core-tag-to-core-tag diff.
+- Python plugin: that distribution's changelog, its `impact-paths`, and the package-tag-to-package-tag diff.
+- TypeScript: `release/typescript.md`, the three package manifests and changelog or PR context, distinguishing client, Mastra, and Vercel AI changes when they differ.
+- UI: the path-scoped source and existing note-generation contract in `zenml-frontend-monorepo`, plus the UI-tag-to-UI-tag diff.
+
+Replace the autogenerated PR list with a proportionate reader-facing body. Start with `## Highlights`: one to three short paragraphs explaining observable effects relative to the previous release, or introduce the initial capability for a first release. A patch release can say that it is focused maintenance; a minor release should foreground the most consequential capability. Follow with nonempty `## Added`, `## Changed`, `## Fixed`, or `## Infrastructure` sections when they make the release clearer. For TypeScript, identify which of the three published packages each meaningful item affects. Use code formatting for identifiers, include the same-family `Full Changelog` comparison link only when an eligible predecessor exists, and omit empty sections.
+
+Do not include site-only work, Dependabot-only bumps, internal refactors without an observable effect, reverted or no-op change pairs, unverified claims, or private operational details. Do not use `--generate-notes` for the curated body. Keep each paragraph and list item on one physical line, and do not use em dashes or en dashes.
+
+Show every complete draft and its tag-to-previous-tag mapping to the user before editing GitHub. If four or more independent releases need curation, the release coordinator may delegate evidence gathering and drafts in small batches. The coordinator owns the exact release set, checks every draft against its source evidence, collects one approval, and performs all GitHub edits and verification. Delegates do not edit GitHub Releases.
+
+Only after explicit approval, write each approved body to a temporary file and update only the body:
+
+```bash
+gh release edit <tag> --repo <repo> --notes-file <notes-file>
+```
+
+Do not pass title, asset, target, prerelease, or latest flags. Re-fetch each release with the same JSON fields, record its latest state again with `gh release list --repo <repo> --json tagName,isLatest`, and verify that its tag, target, assets, prerelease/latest state are unchanged and its body exactly matches the approved draft. Report every curated release and any release that remains pending or was intentionally excluded.
 
 ## Recover a failed release
 

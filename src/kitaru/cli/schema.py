@@ -80,6 +80,7 @@ GROUP_DESCRIPTIONS = {
     "evaluator": "Develop, register, and inspect evaluators.",
     "experiment": "Configure experiments and manage asynchronous runs.",
     "importer": "Develop, register, and inspect importers.",
+    "insight": "Create and inspect agent insights.",
     "investigation": "Create investigations and review their linked sessions.",
     "replay": "Create and inspect standalone replays.",
     "session": "Import and inspect sessions and their nodes.",

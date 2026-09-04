@@ -65,13 +65,15 @@ The `kitaru` console script is defined in `pyproject.toml` under `[project.scrip
 
 Register new leaf commands through the `_spec(...)` and `_register(...)` metadata in `src/kitaru/cli/app.py`. Tests should call `main([...])` with an explicit argument list and assert the returned integer exit code.
 
+When changing evaluation, replay, or experiment commands or contracts, read [Evaluation contracts](references/evaluation-contracts.md).
+
 ## Structured Output Contract
 
 Agent-facing commands use the version-1 structured contract. Success documents include `schema_version`, `command`, `ok`, `warnings`, `links`, and `next_actions`, plus `item` for one result or `items`, `count`, and `page` for a list. Streaming commands emit JSONL events. Structured errors are one JSON object on stderr with a stable error kind and exit code.
 
 For agent-facing use, prefer `--output json --machine --non-interactive --no-browser`. A deliberate dashboard or device-login handoff is the exception.
 
-Document login consistently: `kitaru login SERVER` targets the full managed or self-hosted instance URL, while `kitaru login --local` provisions or reuses the CLI-owned Docker Compose deployment. It defaults to `http://localhost:8000`; `--port` takes precedence over `KITARU_LOCAL_PORT`, and the selected port persists with the deployment. `kitaru logout` stops that deployment when it is selected, and `kitaru logout --volumes` also deletes its PostgreSQL data.
+Document login consistently: `kitaru login` starts the interactive managed-cloud device flow and connects to the Kitaru workspace selected or created in the browser. `kitaru login SERVER` targets the full managed or self-hosted instance URL, while `kitaru login --local` provisions or reuses the CLI-owned Docker Compose deployment. The local deployment defaults to `http://localhost:8000`; `--port` takes precedence over `KITARU_LOCAL_PORT`, and the selected port persists with the deployment. `kitaru logout` stops that deployment when it is selected, and `kitaru logout --volumes` also deletes its PostgreSQL data.
 
 `kitaru status` shows the selected server, provenance, credential state, compatibility, and live-worker count. `kitaru info` adds local package, Python, platform, and server details. `kitaru doctor` runs independent local, server, authentication, and tooling checks without stopping after the first failure. These commands never print secret values.
 

@@ -170,3 +170,54 @@ def test_declared_error_statuses() -> None:
     assert_declared("/api/v1/login", "post", "503")
     assert_declared("/api/v1/agents", "post", "400")
     assert_declared("/health", "get", "503")
+
+
+def test_response_schemas_declare_no_write_only_fields() -> None:
+    """Keep write-only secret markers out of every schema a response can carry."""
+    app = create_app(
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
+    )
+    schema = app.openapi()
+    schemas = schema["components"]["schemas"]
+    response_schema_names: set[str] = set()
+
+    def collect_refs(value: Any) -> None:
+        if isinstance(value, dict):
+            ref = value.get("$ref")
+            if isinstance(ref, str):
+                name = ref.rsplit("/", 1)[1]
+                if name not in response_schema_names:
+                    response_schema_names.add(name)
+                    collect_refs(schemas[name])
+            for item in value.values():
+                collect_refs(item)
+        elif isinstance(value, list):
+            for item in value:
+                collect_refs(item)
+
+    for path_item in schema["paths"].values():
+        for operation in path_item.values():
+            for response in operation["responses"].values():
+                collect_refs(response.get("content", {}).get("application/json"))
+
+    assert "WorkerTokenResponse" in response_schema_names
+    assert "SecretWithValuesResponse" in response_schema_names
+    assert "TaskWithSpec" in response_schema_names
+    for name in response_schema_names:
+        for field_name, field_schema in schemas[name].get("properties", {}).items():
+            assert "writeOnly" not in field_schema, f"{name}.{field_name}"
+    assert schemas["WorkerTokenResponse"]["properties"]["token"] == {
+        "description": "Bearer token scoped to this worker.",
+        "title": "Token",
+        "type": "string",
+    }
+    assert schemas["SecretWithValuesResponse"]["properties"]["values"][
+        "additionalProperties"
+    ] == {"type": "string"}
+    assert schemas["SecretCreateRequest"]["properties"]["values"][
+        "additionalProperties"
+    ] == {"format": "password", "type": "string", "writeOnly": True}

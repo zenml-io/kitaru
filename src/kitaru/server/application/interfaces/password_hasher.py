@@ -34,6 +34,9 @@ class PasswordHasher(Protocol):
         Args:
             password: Plaintext password.
 
+        Raises:
+            ValidationError: The password is not supported by the scheme.
+
         Returns:
             Password hash.
         """

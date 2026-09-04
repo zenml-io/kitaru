@@ -15,6 +15,12 @@ The importer accepts LangSmith JSON and JSONL export shapes, reconstructs run hi
 
 See the [LangSmith import guide](https://docs.zenml.io/kitaru/guides/import-langsmith-traces) for accepted formats, grouping parameters, deduplication behavior, and fidelity limits.
 
+## Validation limits
+
+Nested node trees support at most 64 nodes along a parent path, counting the root as level 1. Tool-activity scans have a separate limit of 64 container or embedded-JSON decoding steps. Costs must be finite and nonnegative, token counts must be nonnegative, and returned sessions must serialize as JSON.
+
+Duplicate run IDs reject the complete LangSmith trace before grouping, including identical repeated records. Reusing a run ID in another trace remains valid; a self-parent link is treated as a root. A failure discovered before grouping leaves other traces available, even when they share a session key. Invalid fields or serialization failures found after grouping reject that grouped session; unrelated sessions still import.
+
 ## Adapter
 
 Install the package with the `adapter` extra to use the adapter, which adds the provider SDK it needs:

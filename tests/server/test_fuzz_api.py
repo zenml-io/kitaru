@@ -33,7 +33,7 @@ while "did the server crash?" stays well-posed. Schemathesis's
 import os
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -45,6 +45,7 @@ import schemathesis
 from fuzz_server import FuzzServer
 from hypothesis import HealthCheck, settings
 from schemathesis.checks import not_a_server_error
+from schemathesis.core.failures import Failure, FailureGroup, ServerError
 from schemathesis.generation import GenerationMode
 from schemathesis.specs.openapi.checks import response_schema_conformance
 
@@ -108,6 +109,85 @@ def _run(case: schemathesis.Case, server: FuzzServer, checks: list[Any]) -> None
         if captured:
             pytest.fail(f"{case.method.upper()} {case.path}\n{captured}", pytrace=False)
         raise
+    except FailureGroup as exc:
+        if any(isinstance(failure, ServerError) for failure in exc.exceptions):
+            captured = server.capture.describe(case.method.upper(), case.path)
+            if captured:
+                pytest.fail(
+                    f"{case.method.upper()} {case.path}\n{captured}", pytrace=False
+                )
+        raise
+
+
+def test_run_reports_captured_grouped_failure() -> None:
+    """Include the server exception when Schemathesis groups check failures."""
+
+    class FailingCase:
+        method = "POST"
+        path = "/api/v1/users"
+
+        def call_and_validate(self, **kwargs: Any) -> None:
+            _ = kwargs
+            raise FailureGroup(
+                [ServerError(operation="POST /api/v1/users", status_code=500)]
+            )
+
+    class Capture:
+        def describe(self, method: str, path: str) -> str:
+            assert (method, path) == ("POST", "/api/v1/users")
+            return "ValueError: password cannot be longer than 72 bytes"
+
+    class Server:
+        def __init__(self) -> None:
+            self.base_url = "http://test"
+            self.auth_headers: dict[str, str] = {}
+            self.capture = Capture()
+
+    with pytest.raises(
+        pytest.fail.Exception, match="password cannot be longer than 72 bytes"
+    ):
+        _run(
+            cast(schemathesis.Case, FailingCase()),
+            cast(FuzzServer, Server()),
+            [],
+        )
+
+
+def test_run_preserves_group_without_server_error() -> None:
+    """Do not replace a non-server failure with stale captured details."""
+
+    class FailingCase:
+        method = "POST"
+        path = "/api/v1/workers"
+
+        def call_and_validate(self, **kwargs: Any) -> None:
+            _ = kwargs
+            raise FailureGroup(
+                [
+                    Failure(
+                        operation="POST /api/v1/workers",
+                        title="Schema mismatch",
+                        message="Response violates the schema",
+                    )
+                ]
+            )
+
+    class Capture:
+        def describe(self, method: str, path: str) -> str:
+            raise AssertionError(f"unexpected capture lookup for {method} {path}")
+
+    class Server:
+        def __init__(self) -> None:
+            self.base_url = "http://test"
+            self.auth_headers: dict[str, str] = {}
+            self.capture = Capture()
+
+    with pytest.raises(FailureGroup):
+        _run(
+            cast(schemathesis.Case, FailingCase()),
+            cast(FuzzServer, Server()),
+            [],
+        )
 
 
 @schema_hunt.parametrize()

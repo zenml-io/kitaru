@@ -39,6 +39,7 @@ class AnalyticsEvent(StrEnum):
     SAMPLE_DATA_LOADED = "Sample Data Loaded"
     ACCOUNT_CREATED = "Account Created"
     USER_ENRICHED = "User Enriched"
+    INSIGHT_CREATED = "Insight Created"
 
 
 class AccountOrigin(StrEnum):

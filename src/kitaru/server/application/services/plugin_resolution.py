@@ -14,7 +14,9 @@
 """Generic plugin and plugin version resolution."""
 
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
+from kitaru.server.domain.names import get_namespace
 from kitaru.server.domain.plugin import Plugin, PluginKind, PluginVersion
+from kitaru.server.domain.task import RESERVED_LABEL_PREFIX
 
 
 async def resolve_plugin(
@@ -57,3 +59,21 @@ async def resolve_plugin_version(
     """
     number = version if version is not None else plugin.latest_version
     return await repository.get_version(plugin.id, number)
+
+
+PLUGIN_NAMESPACE_LABEL = f"{RESERVED_LABEL_PREFIX}plugin_namespace"
+
+
+def get_plugin_task_labels(name: str) -> dict[str, str]:
+    """Build the labels stamped on a task running a plugin.
+
+    Args:
+        name: Plugin name.
+
+    Returns:
+        Labels, empty for a plugin without a namespace.
+    """
+    namespace = get_namespace(name)
+    if namespace is None:
+        return {}
+    return {PLUGIN_NAMESPACE_LABEL: namespace}

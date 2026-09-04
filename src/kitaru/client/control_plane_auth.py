@@ -75,7 +75,7 @@ async def control_plane_login(
     try:
         if api_key is not None:
             credential = (await session.login_with_api_key(api_key)).access_token
-            token = await _exchange_credential(
+            token = await exchange_control_plane_credential(
                 api_client, base_url, store, control_plane_api_url, credential
             )
             return token, "api_key"
@@ -88,7 +88,7 @@ async def control_plane_login(
                 credential = None
             if credential is not None:
                 try:
-                    token = await _exchange_credential(
+                    token = await exchange_control_plane_credential(
                         api_client, base_url, store, control_plane_api_url, credential
                     )
                     return token, "stored"
@@ -101,7 +101,7 @@ async def control_plane_login(
                 workspace_id=str(info.id) if info.id else None,
             )
         ).access_token
-        token = await _exchange_credential(
+        token = await exchange_control_plane_credential(
             api_client, base_url, store, control_plane_api_url, credential
         )
         return token, "device"
@@ -109,7 +109,7 @@ async def control_plane_login(
         await session.close()
 
 
-async def _exchange_credential(
+async def exchange_control_plane_credential(
     api_client: KitaruAPIClient,
     base_url: str,
     store: CredentialStore,

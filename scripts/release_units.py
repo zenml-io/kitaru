@@ -7,7 +7,7 @@ import re
 import sys
 import tomllib
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,7 @@ REQUIRED_PLUGIN_PROJECT_URLS = frozenset(
     {"Homepage", "Documentation", "Repository", "Issues", "Changelog"}
 )
 BREAKING_CHANGE_LABEL = "Breaking Change"
+PLUGIN_CI_SHARD_COUNT = 3
 
 
 class ReleaseInventoryError(ValueError):
@@ -643,10 +644,22 @@ def load_inventory(
         raise ReleaseInventoryError("inventory must contain one root kitaru unit")
     _validate_plugin_coverage(root, resolved_units)
     _validate_default_catalog(root, resolved_units)
-    return ReleaseInventory(
+    inventory = ReleaseInventory(
         schema_version=schema_version,
         common_checks=common_checks,
         units=resolved_units,
+    )
+    plugin_checks = build_plugin_checks(inventory)
+    return replace(
+        inventory,
+        units=tuple(
+            replace(
+                unit,
+                required_checks=unit.required_checks
+                | plugin_checks.get(unit.slug, frozenset()),
+            )
+            for unit in inventory.units
+        ),
     )
 
 
@@ -678,18 +691,51 @@ def parse_package_tag(tag: str, inventory: ReleaseInventory) -> ReleaseUnit:
     return unit
 
 
+def _build_plugin_shards(
+    plugin_units: tuple[ReleaseUnit, ...],
+) -> tuple[tuple[ReleaseUnit, ...], ...]:
+    """Split plugin units into nonempty balanced CI shards."""
+    if not plugin_units:
+        return ()
+
+    shard_count = min(PLUGIN_CI_SHARD_COUNT, len(plugin_units))
+    base_size, extra_units = divmod(len(plugin_units), shard_count)
+    start = 0
+    shards: list[tuple[ReleaseUnit, ...]] = []
+    for index in range(shard_count):
+        size = base_size + (index < extra_units)
+        shard = plugin_units[start : start + size]
+        start += size
+        shards.append(shard)
+    return tuple(shards)
+
+
+def build_plugin_checks(inventory: ReleaseInventory) -> dict[str, frozenset[str]]:
+    """Map every plugin release unit to its generated CI artifact check."""
+    shards = _build_plugin_shards(inventory.plugin_units)
+    shard_count = len(shards)
+    checks: dict[str, frozenset[str]] = {}
+    for index, shard in enumerate(shards):
+        check = f"plugin packages ({index + 1}/{shard_count})"
+        for unit in shard:
+            checks[unit.slug] = frozenset({check})
+    return checks
+
+
 def build_plugin_matrix(
     inventory: ReleaseInventory,
 ) -> dict[str, list[dict[str, str]]]:
-    """Build the GitHub Actions matrix for independently packaged plugins."""
+    """Build balanced GitHub Actions shards for plugin artifact checks."""
+    shards = _build_plugin_shards(inventory.plugin_units)
+    shard_count = len(shards)
     return {
         "include": [
             {
-                "package": unit.slug,
-                "path": unit.path,
+                "shard": f"{index + 1}/{shard_count}",
+                "package_paths": "\n".join(unit.path for unit in shard),
             }
-            for unit in inventory.plugin_units
-        ]
+            for index, shard in enumerate(shards)
+        ],
     }
 
 
