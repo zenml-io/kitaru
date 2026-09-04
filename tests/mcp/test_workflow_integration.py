@@ -177,7 +177,13 @@ async def test_api_query_import_skips_blob_lookup() -> None:
         ),
     )
 
-    assert client.calls == ["importer_version", "importer", "agent_version", "create"]
+    assert client.calls == [
+        "importer_version",
+        "importer",
+        "agent_version",
+        "create",
+        "job",
+    ]
     assert result["query"] == query
     assert "blob_id" not in result
 
