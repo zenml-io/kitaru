@@ -1001,6 +1001,61 @@ async def test_real_sdk_server_propagates_swallowed_kitaru_failure(
     assert client.sessions.updated[-1][1].status.value == "failed"
 
 
+async def test_real_sdk_server_propagates_swallowed_history_decode_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def original(_: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("live handler must not run")
+
+    replay = _replay(
+        _policy(
+            "mcp__support__lookup",
+            HistoryConfig(
+                scope=HistoryScope.BASELINE,
+                on_miss=ToolPolicyOnMiss.FAIL,
+            ),
+        )
+    )
+    client = FakeClient()
+    client.replay = replay
+    client.tool_lookup_responses.append(
+        ToolLookupResponse(
+            match=ToolLookupMatch(
+                result={"schema": "future", "replayable": True, "payload": {}},
+                status=NodeStatus.COMPLETED,
+                error=None,
+            )
+        )
+    )
+    monkeypatch.setattr(
+        runner_module.recording_module, "KitaruAPIClient", lambda: client
+    )
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(replay.id))
+
+    async def query(**kwargs: Any) -> AsyncIterator[ResultMessage]:
+        instance = kwargs["options"].mcp_servers["support"]["instance"]
+        request = mcp_types.CallToolRequest(
+            params=mcp_types.CallToolRequestParams(
+                name="lookup", arguments={"query": "refund"}
+            )
+        )
+        result = await instance.request_handlers[mcp_types.CallToolRequest](request)
+        assert result.root.isError is True
+        yield _terminal()
+
+    monkeypatch.setattr(runner_module, "sdk_query", query)
+
+    with pytest.raises(ToolPolicyError, match="unknown envelope"):
+        async for _ in KitaruClaudeRunner(agent_id=uuid.uuid4()).query(
+            prompt="hello",
+            options=ClaudeAgentOptions(tools=[]),
+            replayable_servers=[_server("support", original)],
+        ):
+            pass
+
+    assert client.sessions.updated[-1][1].status.value == "failed"
+
+
 @pytest.mark.parametrize("error_type", [OSError, ToolPolicyError])
 async def test_real_sdk_server_leaves_passthrough_handler_failure_with_claude(
     monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]

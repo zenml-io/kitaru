@@ -776,7 +776,11 @@ async def _history_result(
             )
             replay_abort.capture(error)
             raise error
-        return decode_tool_result(match.result)
+        try:
+            return decode_tool_result(match.result)
+        except ToolPolicyError as error:
+            replay_abort.capture(error)
+            raise
     finally:
         if track_occurrence:
             async with state.lock:
