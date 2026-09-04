@@ -28,7 +28,8 @@ from kitaru.api_models.v1.hook import (
     TeardownCommandHook,
 )
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
-from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.task import AnalysisTaskDetails, TaskKind
+from kitaru.api_models.v1.task import ScriptPluginSpec as WireScriptPluginSpec
 from kitaru.server.adapters.rest.mapping.agent_versions import (
     agent_version_to_response,
     agent_version_update_to_command,
@@ -60,6 +61,12 @@ from kitaru.server.domain.plugin import (
 from kitaru.server.domain.plugin import ScriptPluginSource as DomainScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTaskDetails as DomainAgentTaskDetails,
+)
+from kitaru.server.domain.task import (
+    AnalysisTaskDetails as DomainAnalysisTaskDetails,
+)
+from kitaru.server.domain.task import (
+    ScriptPluginSpec as DomainScriptPluginSpec,
 )
 from kitaru.server.domain.task import TaskSpec as DomainTaskSpec
 
@@ -198,6 +205,39 @@ def test_task_spec_response_carries_hooks() -> None:
         SetupCommandHook(command="setup.sh"),
         TeardownCommandHook(command="teardown.sh", on="always"),
     ]
+
+
+def test_task_spec_response_carries_analysis_details() -> None:
+    """Convert an analysis task spec's details to their wire DTO."""
+    blob_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    input_session_ids = [uuid.uuid4(), uuid.uuid4()]
+    spec = DomainTaskSpec(
+        task_id=uuid.uuid4(),
+        kind=TaskKind.ANALYZER,
+        timeout_seconds=60,
+        details=DomainAnalysisTaskDetails(
+            analyzer_name="trends",
+            params={"window_days": 7},
+            plugin=DomainScriptPluginSpec(
+                entrypoint="analyze", blob_id=blob_id, sha256="a" * 64
+            ),
+            agent_id=agent_id,
+            input_session_ids=input_session_ids,
+        ),
+    )
+
+    response = spec_to_response(spec)
+
+    assert response.details == AnalysisTaskDetails(
+        analyzer_name="trends",
+        params={"window_days": 7},
+        plugin=WireScriptPluginSpec(
+            entrypoint="analyze", blob_id=blob_id, sha256="a" * 64
+        ),
+        agent_id=agent_id,
+        input_session_ids=input_session_ids,
+    )
 
 
 def test_plugin_sources_convert_to_domain_variants() -> None:

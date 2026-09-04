@@ -17,6 +17,7 @@ import uuid
 
 from kitaru.api_models.v1.task import (
     AgentTaskDetails,
+    AnalysisTaskDetails,
     EvaluationTaskDetails,
     ImportTaskDetails,
     PackagePluginSpec,
@@ -37,6 +38,7 @@ from kitaru.server.adapters.rest.mapping.hooks import hook_to_response
 from kitaru.server.application.models.task import ClaimedTask, TaskFilter, TaskUpdate
 from kitaru.server.domain.task import (
     AgentTask,
+    AnalysisTask,
     EvaluationTask,
     ImportTask,
     Task,
@@ -44,6 +46,9 @@ from kitaru.server.domain.task import (
 )
 from kitaru.server.domain.task import (
     AgentTaskDetails as DomainAgentTaskDetails,
+)
+from kitaru.server.domain.task import (
+    AnalysisTaskDetails as DomainAnalysisTaskDetails,
 )
 from kitaru.server.domain.task import (
     EvaluationTaskDetails as DomainEvaluationTaskDetails,
@@ -94,6 +99,10 @@ def task_to_response(task: Task) -> TaskResponse:
             task.input_session_id if isinstance(task, EvaluationTask) else None
         ),
         import_id=task.import_id if isinstance(task, ImportTask) else None,
+        agent_id=task.agent_id if isinstance(task, AnalysisTask) else None,
+        input_session_ids=(
+            task.input_session_ids if isinstance(task, AnalysisTask) else None
+        ),
         worker_id=task.worker_id,
         claimed_at=task.claimed_at,
         heartbeat_at=task.heartbeat_at,
@@ -158,7 +167,7 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
         spec: Execution spec.
 
     Raises:
-        ValueError: The details are not one of the three known kinds.
+        ValueError: The details are not one of the four known kinds.
 
     Returns:
         Task details DTO.
@@ -180,6 +189,14 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
             provider=details.provider,
             agent_id=details.agent_id,
             params=details.params,
+        )
+    if isinstance(details, DomainAnalysisTaskDetails):
+        return AnalysisTaskDetails(
+            analyzer_name=details.analyzer_name,
+            params=details.params,
+            plugin=_plugin_spec_to_response(details.plugin),
+            agent_id=details.agent_id,
+            input_session_ids=details.input_session_ids,
         )
     raise ValueError(f"Task {spec.task_id} details have no response mapping")
 

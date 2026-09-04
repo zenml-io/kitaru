@@ -103,6 +103,18 @@ async def _evaluator_version(
     )
 
 
+async def _analyzer_version(services: JobAndTaskServices, name: str) -> PluginVersion:
+    """Register an analyzer with one version."""
+    plugin = await create_plugin(
+        services.plugins, ACCOUNT.id, PluginKind.ANALYZER, name=name
+    )
+    return await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="analyze"),
+        display_version=None,
+    )
+
+
 async def _import_request(
     services: JobAndTaskServices, agent: Agent | None = None, **overrides: Any
 ) -> dict[str, Any]:
@@ -140,6 +152,7 @@ async def test_create_import(
     assert created["payload_blob_id"] == body["payload_blob_id"]
     assert created["params"] == body["params"]
     assert created["evaluators"] == []
+    assert created["analyzers"] == []
     assert created["stats"] is None
     assert created["error"] is None
 
@@ -209,6 +222,53 @@ async def test_create_import_rejects_duplicate_evaluator_versions(
         evaluators=[
             {"evaluator": "accuracy"},
             {"evaluator": "accuracy", "version": 1},
+        ],
+    )
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_import_with_analyzers(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Create an import carrying resolved analyzers and no outcome yet."""
+    await _importer_version(services)
+    await _analyzer_version(services, "trends")
+    body = await _import_request(
+        services, analyzers=[{"analyzer": "trends", "params": {"k": 1}}]
+    )
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["analyzers"] == [
+        {"analyzer": "trends", "version": 1, "params": {"k": 1}}
+    ]
+    assert created["stats"] is None
+    assert created["error"] is None
+
+
+async def test_create_import_not_found_for_unknown_analyzer(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 404 for an analyzer that does not exist."""
+    await _importer_version(services)
+    body = await _import_request(services, analyzers=[{"analyzer": "does-not-exist"}])
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 404
+
+
+async def test_create_import_rejects_duplicate_analyzer_versions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 422 when two analyzer configs resolve to one version."""
+    await _importer_version(services)
+    await _analyzer_version(services, "trends")
+    body = await _import_request(
+        services,
+        analyzers=[
+            {"analyzer": "trends"},
+            {"analyzer": "trends", "version": 1},
         ],
     )
     response = await client.post("/api/v1/imports", json=body)

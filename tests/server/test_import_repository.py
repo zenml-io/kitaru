@@ -58,7 +58,7 @@ from kitaru.server.domain.blob import Blob, BlobStorageBackend
 from kitaru.server.domain.imports import Import, ImportNotFound
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import PackagePluginSource, Plugin, PluginKind
-from kitaru.server.domain.replay_config import EvaluatorConfig
+from kitaru.server.domain.replay_config import AnalyzerConfig, EvaluatorConfig
 from kitaru.server.domain.session import Session
 from kitaru.server.filtering import FilterCondition
 
@@ -164,6 +164,15 @@ def _evaluator() -> EvaluatorConfig:
     )
 
 
+def _analyzer() -> AnalyzerConfig:
+    return AnalyzerConfig(
+        analyzer="trends",
+        version=1,
+        params={"window_days": 7},
+        analyzer_version_id=uuid.uuid4(),
+    )
+
+
 def _stats() -> ImportStats:
     return ImportStats(
         created=2,
@@ -185,12 +194,13 @@ async def _create_import(setup: Setup, job_id: uuid.UUID | None = None) -> Impor
             payload_blob_id=setup.payload_blob_id,
             params={"delimiter": ","},
             evaluators=[_evaluator()],
+            analyzers=[_analyzer()],
         )
     )
 
 
 async def test_create_and_get(setup: Setup) -> None:
-    """Store an import and load it back with timestamps and evaluators set."""
+    """Store an import and load it back with timestamps, evaluators, analyzers set."""
     created = await _create_import(setup)
     assert created.created is not None
     assert created.updated is not None
@@ -200,6 +210,7 @@ async def test_create_and_get(setup: Setup) -> None:
     assert loaded == created
     assert loaded.params == {"delimiter": ","}
     assert loaded.evaluators[0].params == {"threshold": 0.5}
+    assert loaded.analyzers[0].params == {"window_days": 7}
 
 
 async def test_get_not_found(setup: Setup) -> None:
