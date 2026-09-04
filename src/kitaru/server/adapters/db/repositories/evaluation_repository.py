@@ -324,18 +324,21 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
 
     async def get_latest_evaluation_ids_by_identity(
         self, session_ids: Sequence[uuid.UUID]
-    ) -> dict[EvaluationIdentity, uuid.UUID]:
-        """Read the latest evaluation id per (session, evaluator version, params hash).
+    ) -> dict[EvaluationIdentity, list[uuid.UUID]]:
+        """Read the latest invocation's evaluation ids per identity.
 
-        Only rows carrying both an evaluator version id and a params hash
-        are considered.
+        An identity is (session, evaluator version, params hash). Only rows
+        carrying an evaluator version id, a params hash, and an invocation
+        id are considered, and every row sharing the latest invocation id
+        for an identity is returned, not just one.
 
         Args:
             session_ids: Ids of the candidate sessions.
 
         Returns:
-            Latest evaluation id keyed by (session_id, evaluator_version_id,
-            params_hash), identities without a match omitted.
+            Evaluation ids of the latest invocation keyed by (session_id,
+            evaluator_version_id, params_hash), identities without a match
+            omitted.
         """
         if not session_ids:
             return {}
@@ -344,8 +347,9 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
                 EvaluationORM.session_id,
                 EvaluationORM.evaluator_version_id,
                 EvaluationORM.params_hash,
+                EvaluationORM.invocation_id,
                 EvaluationORM.id,
-                func.row_number()
+                func.first_value(EvaluationORM.invocation_id)
                 .over(
                     partition_by=(
                         EvaluationORM.session_id,
@@ -354,26 +358,37 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
                     ),
                     order_by=(EvaluationORM.created.desc(), EvaluationORM.id.desc()),
                 )
-                .label("rank"),
+                .label("latest_invocation_id"),
             )
             .where(
                 EvaluationORM.session_id.in_(session_ids),
                 EvaluationORM.evaluator_version_id.is_not(None),
                 EvaluationORM.params_hash.is_not(None),
+                EvaluationORM.invocation_id.is_not(None),
             )
             .subquery()
         )
-        statement = select(
-            ranked.c.session_id,
-            ranked.c.evaluator_version_id,
-            ranked.c.params_hash,
-            ranked.c.id,
-        ).where(ranked.c.rank == 1)
+        statement = (
+            select(
+                ranked.c.session_id,
+                ranked.c.evaluator_version_id,
+                ranked.c.params_hash,
+                ranked.c.id,
+            )
+            .where(ranked.c.invocation_id == ranked.c.latest_invocation_id)
+            .order_by(
+                ranked.c.session_id,
+                ranked.c.evaluator_version_id,
+                ranked.c.params_hash,
+                ranked.c.id,
+            )
+        )
         rows = (await self._session.execute(statement)).all()
-        return {
-            (session_id, evaluator_version_id, params_hash): evaluation_id
-            for session_id, evaluator_version_id, params_hash, evaluation_id in rows
-        }
+        result: dict[EvaluationIdentity, list[uuid.UUID]] = {}
+        for session_id, evaluator_version_id, params_hash, evaluation_id in rows:
+            identity = (session_id, evaluator_version_id, params_hash)
+            result.setdefault(identity, []).append(evaluation_id)
+        return result
 
     async def add_replay_links(
         self, links: Sequence[tuple[uuid.UUID, uuid.UUID]]

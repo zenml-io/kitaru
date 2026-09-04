@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - `POST /api/v1/imports` now returns the import instead of the job, with the job in its `job_id`. Import task responses carry `import_id` instead of `payload_blob_id` and `agent_id`.
 
+### Fixed
+
+- `if_missing` baseline scoring now adopts every evaluation an evaluator call produced instead of only one of them, so a rerun's baseline aggregates no longer lose metrics from an evaluator that returns multiple results.
+
 ## [0.25.0] - 2026-09-03
 
 ### Added

@@ -106,18 +106,21 @@ class EvaluationRepository(Protocol):
 
     async def get_latest_evaluation_ids_by_identity(
         self, session_ids: Sequence[uuid.UUID]
-    ) -> dict[EvaluationIdentity, uuid.UUID]:
-        """Read the latest evaluation id per (session, evaluator version, params hash).
+    ) -> dict[EvaluationIdentity, list[uuid.UUID]]:
+        """Read the latest invocation's evaluation ids per identity.
 
-        Only rows carrying both an evaluator version id and a params hash
-        are considered.
+        An identity is (session, evaluator version, params hash). Only rows
+        carrying an evaluator version id, a params hash, and an invocation
+        id are considered, and every row sharing the latest invocation id
+        for an identity is returned, not just one.
 
         Args:
             session_ids: Ids of the candidate sessions.
 
         Returns:
-            Latest evaluation id keyed by (session_id, evaluator_version_id,
-            params_hash), identities without a match omitted.
+            Evaluation ids of the latest invocation keyed by (session_id,
+            evaluator_version_id, params_hash), identities without a match
+            omitted.
         """
         ...
 
