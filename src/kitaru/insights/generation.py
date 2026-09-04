@@ -61,6 +61,11 @@ _OUTCOME_TOKEN = re.compile(
     r"abandon(?:ed|ing|s)?|abandonments?|errors?|errored)\b",
     flags=re.IGNORECASE,
 )
+_SESSION_STATUS_OUTCOMES = {
+    "failed": "failure",
+    "completed": "completion",
+    "in_progress": "in_progress",
+}
 
 
 class _GenerationModel(BaseModel):
@@ -331,6 +336,17 @@ def _outcome_categories(value: str) -> set[str]:
 
 def _trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
     """Derive permitted outcome language from profiler-controlled semantics."""
+    if (
+        candidate.id == "session-outcomes"
+        and candidate.family == "outcome"
+        and isinstance(candidate.data, CategoricalInsightData)
+    ):
+        return {
+            outcome
+            for item in candidate.data.values
+            if item.value > 0
+            and (outcome := _SESSION_STATUS_OUTCOMES.get(item.label)) is not None
+        }
     semantic_names = " ".join(
         (
             candidate.id.replace("_", " "),
@@ -338,10 +354,7 @@ def _trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
             *(fact.name.replace("_", " ") for fact in candidate.facts),
         )
     )
-    categories = _outcome_categories(semantic_names)
-    if candidate.family == "outcome":
-        categories.update({"failure", "completion", "in_progress"})
-    return categories
+    return _outcome_categories(semantic_names)
 
 
 def _validate_page_copy(value: str) -> None:

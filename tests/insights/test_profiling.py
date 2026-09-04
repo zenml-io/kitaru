@@ -800,6 +800,105 @@ def test_text_truncation_reports_the_actual_available_bytes() -> None:
     )
     assert truncation.available == len(message.strip().encode("utf-8"))
     assert truncation.analyzed == 12
+    assert "correction-language" not in {
+        candidate.id for candidate in result.candidates
+    }
+
+
+def test_language_signal_uses_only_sessions_with_inspected_text() -> None:
+    inspected = _session(
+        1,
+        inputs={"messages": [{"role": "user", "content": "WRONG"}]},
+    )
+    uninspected = _session(
+        2,
+        inputs={"messages": [{"role": "user", "content": "Looks fine"}]},
+    )
+
+    candidate = _candidate(
+        profile_sessions(
+            [inspected, uninspected],
+            config=ProfilingConfig(max_text_bytes=5),
+        ),
+        "correction-language",
+    )
+
+    assert candidate.title.startswith("100%")
+    assert candidate.coverage.sessions_analyzed == 1
+    assert {value.label: value.value for value in candidate.data.values} == {
+        "Matching sessions": 1,
+        "Other sessions": 0,
+    }
+
+
+def test_uninspected_language_signal_is_not_emitted() -> None:
+    inspected = _session(
+        1,
+        inputs={"messages": [{"role": "user", "content": "Fine"}]},
+    )
+    uninspected = _session(
+        2,
+        inputs={"messages": [{"role": "user", "content": "WRONG"}]},
+    )
+
+    result = profile_sessions(
+        [inspected, uninspected],
+        config=ProfilingConfig(max_text_bytes=4),
+    )
+
+    assert "correction-language" not in {
+        candidate.id for candidate in result.candidates
+    }
+
+
+def test_payload_byte_bound_counts_mapping_keys_and_container_syntax() -> None:
+    value = {"a": []}
+    session = _calls(
+        1,
+        [
+            ("lookup", value, NodeStatus.COMPLETED, "ok"),
+            ("lookup", value, NodeStatus.COMPLETED, "ok"),
+        ],
+    )
+    encoded_size = 8
+
+    exact = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_bytes=encoded_size * 2),
+    )
+    short = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_bytes=encoded_size * 2 - 1),
+    )
+
+    assert "adjacent-identical-calls" in {
+        candidate.id for candidate in exact.candidates
+    }
+    assert "adjacent-identical-calls" not in {
+        candidate.id for candidate in short.candidates
+    }
+    assert "payload" in " ".join(short.coverage.caveats).lower()
+
+
+def test_payload_byte_bound_rejects_wide_empty_containers() -> None:
+    value = {f"field-{index}": [] for index in range(1_000)}
+    session = _calls(
+        1,
+        [
+            ("lookup", value, NodeStatus.COMPLETED, "ok"),
+            ("lookup", value, NodeStatus.COMPLETED, "ok"),
+        ],
+    )
+
+    result = profile_sessions(
+        [session],
+        config=ProfilingConfig(max_payload_bytes=100),
+    )
+
+    assert "adjacent-identical-calls" not in {
+        candidate.id for candidate in result.candidates
+    }
+    assert "payload" in " ".join(result.coverage.caveats).lower()
 
 
 def test_projection_byte_bound_drops_lower_ranked_candidates() -> None:
