@@ -66,9 +66,9 @@ async def create_replay_pipelines(
     Each agent task carries its baseline session's inputs and the agent
     version as a label. With ``baseline_evaluation_mode`` other than
     ``NONE``, one baseline evaluator task is appended per evaluator, unless
-    ``IF_MISSING`` finds a prior evaluation of the same identity (baseline
+    ``IF_MISSING`` finds prior evaluations of the same identity (baseline
     session, evaluator version, params) to adopt instead, linking the
-    baseline's replay to it.
+    baseline's replay to every one of them.
 
     Args:
         baselines: Sessions being replayed.
@@ -113,7 +113,7 @@ async def create_replay_pipelines(
         )
         for job, baseline in zip(jobs, baselines, strict=True)
     ]
-    adoptable: dict[tuple[uuid.UUID, uuid.UUID, str], uuid.UUID] = {}
+    adoptable: dict[tuple[uuid.UUID, uuid.UUID, str], list[uuid.UUID]] = {}
     if baseline_evaluation_mode is BaselineEvaluationMode.IF_MISSING:
         adoptable = await evaluation_repository.get_latest_evaluation_ids_by_identity(
             [baseline.id for baseline in baselines]
@@ -143,9 +143,11 @@ async def create_replay_pipelines(
                     evaluator.evaluator_version_id,
                     evaluator_hashes[evaluator.evaluator_version_id],
                 )
-                evaluation_id = adoptable.get(identity)
-                if evaluation_id is not None:
-                    adopted_links.append((replay.id, evaluation_id))
+                evaluation_ids = adoptable.get(identity)
+                if evaluation_ids is not None:
+                    adopted_links.extend(
+                        (replay.id, evaluation_id) for evaluation_id in evaluation_ids
+                    )
                     continue
             tasks.append(
                 EvaluationTask(

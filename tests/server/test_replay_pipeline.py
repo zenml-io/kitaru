@@ -348,6 +348,77 @@ async def test_if_missing_skips_already_scored_pairs(
     assert baseline_tasks[0].on_failure is TaskOnFailure.ABORT
 
 
+async def test_if_missing_adopts_every_result_of_one_invocation(
+    services: ReplayServices,
+) -> None:
+    """IF_MISSING links every result of a multi-result evaluator call, not just one."""
+    agent_version = await _agent_version_with_run_spec(services)
+    evaluator_a = await _evaluator_version(services, "accuracy")
+    evaluator_b = await _evaluator_version(services, "tone")
+    baseline = await _baseline_session(services, agent_version)
+
+    prior_job = await create_job(services.jobs, ACTOR.account.id)
+    prior_task = await create_evaluation_task(
+        services.tasks,
+        prior_job.id,
+        plugin_version_id=evaluator_a.id,
+        input_session_id=baseline.id,
+        on_failure=TaskOnFailure.CONTINUE,
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    await services.task_service.update_task(
+        prior_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
+    )
+    await services.task_service.update_task(
+        prior_task.id,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            result=[
+                {"name": "accuracy", "score": 1.0},
+                {"name": "accuracy_detail", "score": 0.5},
+            ],
+        ),
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
+    )
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[
+                EvaluatorConfigInput(evaluator="accuracy"),
+                EvaluatorConfigInput(evaluator="tone"),
+            ],
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    baseline_tasks = [
+        task
+        for task in tasks
+        if isinstance(task, EvaluationTask) and task.input_session_id == baseline.id
+    ]
+    assert len(baseline_tasks) == 1
+    assert baseline_tasks[0].plugin_version_id == evaluator_b.id
+
+    linked = await services.evaluations.list_replay_evaluations([bundle.replay.id])
+    assert {evaluation.evaluation.name for _, evaluation in linked} == {
+        "accuracy",
+        "accuracy_detail",
+    }
+    assert all(
+        evaluation.evaluation.evaluator_version_id == evaluator_a.id
+        for _, evaluation in linked
+    )
+
+
 async def test_if_missing_with_different_params_does_not_adopt(
     services: ReplayServices,
 ) -> None:

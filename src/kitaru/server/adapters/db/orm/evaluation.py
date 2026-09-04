@@ -171,6 +171,9 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     evaluator_version_id: Mapped[uuid.UUID | None]
     session_id: Mapped[uuid.UUID]
     task_id: Mapped[uuid.UUID | None]
+    # No foreign key, identifies the evaluator invocation that produced this row
+    # alongside its siblings.
+    invocation_id: Mapped[uuid.UUID | None]
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     data_type: Mapped[str] = mapped_column(String(DATA_TYPE_LENGTH))
     numerical_value: Mapped[float | None] = mapped_column(Double)
@@ -204,6 +207,7 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "evaluator_version_id": evaluation.evaluator_version_id,
             "session_id": evaluation.session_id,
             "task_id": evaluation.task_id,
+            "invocation_id": evaluation.invocation_id,
             "name": evaluation.name,
             "data_type": evaluation.data_type.value,
             "numerical_value": numerical_value,
@@ -230,6 +234,7 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             evaluator_version_id=self.evaluator_version_id,
             session_id=self.session_id,
             task_id=self.task_id,
+            invocation_id=self.invocation_id,
             name=self.name,
             data_type=data_type,
             score=_score_from_row(data_type, self.numerical_value),

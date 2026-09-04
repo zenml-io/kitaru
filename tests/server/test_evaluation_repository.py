@@ -973,7 +973,7 @@ async def test_fake_refuses_replay_id_filter() -> None:
 async def test_get_latest_evaluation_ids_by_identity_picks_the_latest(
     plugin_setup: PluginSetup,
 ) -> None:
-    """The identity lookup returns the most recently created matching row."""
+    """The identity lookup returns the most recent invocation's evaluation id."""
     plugin_repository, evaluation_repository, owner_id, session_id = plugin_setup
     plugin = await plugin_repository.create(
         Plugin(owner_id=owner_id, kind=PluginKind.EVALUATOR, name="accuracy-scorer")
@@ -983,7 +983,7 @@ async def test_get_latest_evaluation_ids_by_identity_picks_the_latest(
     )
     params_hash = hash_params({"threshold": 0.5})
 
-    def _scored(score: float) -> Evaluation:
+    def _scored(score: float, invocation_id: uuid.UUID | None) -> Evaluation:
         return _evaluation(
             owner_id,
             session_id,
@@ -994,18 +994,75 @@ async def test_get_latest_evaluation_ids_by_identity_picks_the_latest(
             update={
                 "evaluator_params": {"threshold": 0.5},
                 "params_hash": params_hash,
+                "invocation_id": invocation_id,
             }
         )
 
-    await evaluation_repository.create_task_evaluations([_scored(0.8)], replay_id=None)
+    await evaluation_repository.create_task_evaluations(
+        [_scored(0.8, uuid.uuid4())], replay_id=None
+    )
     [second] = await evaluation_repository.create_task_evaluations(
-        [_scored(0.9)], replay_id=None
+        [_scored(0.9, uuid.uuid4())], replay_id=None
     )
 
     identity_map = await evaluation_repository.get_latest_evaluation_ids_by_identity(
         [session_id]
     )
-    assert identity_map[(session_id, version.id, params_hash)] == second.id
+    assert identity_map[(session_id, version.id, params_hash)] == [second.id]
+
+
+async def test_get_latest_evaluation_ids_by_identity_returns_whole_invocation(
+    plugin_setup: PluginSetup,
+) -> None:
+    """A multi-result invocation is returned whole, without an older one mixed in."""
+    plugin_repository, evaluation_repository, owner_id, session_id = plugin_setup
+    plugin = await plugin_repository.create(
+        Plugin(owner_id=owner_id, kind=PluginKind.EVALUATOR, name="accuracy-scorer")
+    )
+    version = await plugin_repository.create_version(
+        plugin.id, SOURCE, display_version="v1"
+    )
+    params_hash = hash_params({"threshold": 0.5})
+
+    def _scored(name: str, score: float, invocation_id: uuid.UUID | None) -> Evaluation:
+        return _evaluation(
+            owner_id,
+            session_id,
+            name,
+            score=score,
+            evaluator_version_id=version.id,
+        ).model_copy(
+            update={
+                "evaluator_params": {"threshold": 0.5},
+                "params_hash": params_hash,
+                "invocation_id": invocation_id,
+            }
+        )
+
+    older_invocation = uuid.uuid4()
+    await evaluation_repository.create_task_evaluations(
+        [_scored("accuracy", 0.5, older_invocation)], replay_id=None
+    )
+    latest_invocation = uuid.uuid4()
+    latest_rows = await evaluation_repository.create_task_evaluations(
+        [
+            _scored("accuracy", 0.9, latest_invocation),
+            _scored("tone", 0.7, latest_invocation),
+        ],
+        replay_id=None,
+    )
+    # A row with no invocation id, such as one written before this column
+    # existed and never backfilled, is never adoptable.
+    await evaluation_repository.create_task_evaluations(
+        [_scored("legacy", 0.4, None)], replay_id=None
+    )
+
+    identity_map = await evaluation_repository.get_latest_evaluation_ids_by_identity(
+        [session_id]
+    )
+    assert set(identity_map[(session_id, version.id, params_hash)]) == {
+        row.id for row in latest_rows
+    }
 
 
 async def test_create_task_evaluations_links_the_replay() -> None:
