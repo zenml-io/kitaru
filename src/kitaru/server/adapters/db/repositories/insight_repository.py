@@ -25,18 +25,14 @@ from kitaru.server.adapters.db.orm.insight import (
     INSIGHT_TASK_ID_FOREIGN_KEY,
     InsightORM,
 )
-from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
-from kitaru.server.application.interfaces.insight_repository import InsightWithAnalyzer
 from kitaru.server.application.models.insight import InsightFilter
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.insight import Insight, InsightNotFound
 from kitaru.server.domain.plugin import PluginVersionIdNotFound
 from kitaru.server.domain.task import TaskNotFound
-
-AnalyzerInfo = tuple[str, int]
 
 INSIGHT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": InsightORM.id,
@@ -62,28 +58,6 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
         """
         return InsightNotFound(entity_id)
 
-    async def _load_analyzers(
-        self, version_ids: set[uuid.UUID]
-    ) -> dict[uuid.UUID, AnalyzerInfo]:
-        """Bulk-load analyzer name and version for a set of plugin version ids.
-
-        Args:
-            version_ids: Ids of the referenced plugin versions.
-
-        Returns:
-            Analyzer (name, version) pairs keyed by plugin version id, missing
-            ids omitted.
-        """
-        if not version_ids:
-            return {}
-        statement = (
-            select(PluginVersionORM.id, PluginORM.name, PluginVersionORM.version)
-            .join(PluginORM, PluginORM.id == PluginVersionORM.plugin_id)
-            .where(PluginVersionORM.id.in_(version_ids))
-        )
-        rows = (await self._session.execute(statement)).all()
-        return {row.id: (row.name, row.version) for row in rows}
-
     async def create_many(self, insights: list[Insight]) -> list[Insight]:
         """Persist a batch of new insights in one transaction.
 
@@ -93,10 +67,8 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
         Raises:
             AgentNotFound: No agent has the insights' agent id.
             PluginVersionIdNotFound: No plugin version has the analyzer
-                version id, including one deleted concurrently with the task
-                it analyzed.
-            TaskNotFound: No task has the task id, including one deleted
-                concurrently with its recording.
+                version id.
+            TaskNotFound: No task has the task id.
 
         Returns:
             Stored insights in input order, with timestamps set.
@@ -127,11 +99,8 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
         )
         return [row.to_domain() for row in rows]
 
-    async def get(self, insight_id: uuid.UUID) -> InsightWithAnalyzer:
-        """Load an insight by id, joined with its analyzer name and version.
-
-        One statement carries both, unlike the bulk lookup ``query()`` uses,
-        since there is exactly one row to join here.
+    async def get(self, insight_id: uuid.UUID) -> Insight:
+        """Load an insight by id.
 
         Args:
             insight_id: Id of the insight.
@@ -140,37 +109,21 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
             InsightNotFound: No insight has this id.
 
         Returns:
-            Stored insight paired with its analyzer name and version, both
-            ``None`` on a manual insight.
+            Stored insight.
         """
-        statement = (
-            select(InsightORM, PluginORM.name, PluginVersionORM.version)
-            .outerjoin(
-                PluginVersionORM,
-                PluginVersionORM.id == InsightORM.analyzer_version_id,
-            )
-            .outerjoin(PluginORM, PluginORM.id == PluginVersionORM.plugin_id)
-            .where(InsightORM.id == insight_id)
-        )
-        row = (await self._session.execute(statement)).one_or_none()
-        if row is None:
-            raise InsightNotFound(insight_id)
-        insight_row, analyzer_name, analyzer_version = row
-        return InsightWithAnalyzer(
-            insight_row.to_domain(), analyzer_name, analyzer_version
-        )
+        row = await self._get_row(insight_id)
+        return row.to_domain()
 
     async def query(
         self, insight_filter: InsightFilter
-    ) -> tuple[list[InsightWithAnalyzer], str | None]:
+    ) -> tuple[list[Insight], str | None]:
         """Query insights matching a filter.
 
         Args:
             insight_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching insights, each paired with its analyzer name and
-            version, and the next cursor.
+            Page of matching insights and the next cursor.
         """
         statement = select(InsightORM)
         if insight_filter.expression is not None:
@@ -182,19 +135,7 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
         rows, next_cursor = await paginate(
             self._session, statement, insight_filter, id_column=InsightORM.id
         )
-        version_ids = {
-            row.analyzer_version_id
-            for row in rows
-            if row.analyzer_version_id is not None
-        }
-        analyzers = await self._load_analyzers(version_ids)
-        items = [
-            InsightWithAnalyzer(
-                row.to_domain(), *analyzers.get(row.analyzer_version_id, (None, None))
-            )
-            for row in rows
-        ]
-        return items, next_cursor
+        return [row.to_domain() for row in rows], next_cursor
 
     async def update(self, insight: Insight) -> Insight:
         """Persist changes to an existing insight.

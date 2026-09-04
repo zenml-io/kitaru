@@ -173,12 +173,6 @@ class InsightResponse(OwnedResponseModel):
     analyzer_version_id: uuid.UUID | None = Field(
         default=None, description="Analyzer version that produced the insight."
     )
-    analyzer_name: str | None = Field(
-        default=None, description="Name of the analyzer that produced the insight."
-    )
-    analyzer_version: int | None = Field(
-        default=None, description="Version of the analyzer that produced the insight."
-    )
     analyzer_params: dict[str, JsonValue] | None = Field(
         default=None, description="Params the analyzer ran with."
     )

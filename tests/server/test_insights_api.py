@@ -249,8 +249,8 @@ async def test_get_insight(client: httpx.AsyncClient, agent_id: str) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body == created
-    assert body["analyzer_name"] is None
-    assert body["analyzer_version"] is None
+    assert body["analyzer_version_id"] is None
+    assert body["analyzer_params"] is None
 
 
 async def test_get_insight_not_found(client: httpx.AsyncClient) -> None:
@@ -259,13 +259,13 @@ async def test_get_insight_not_found(client: httpx.AsyncClient) -> None:
     assert response.status_code == 404
 
 
-async def test_get_insight_carries_analyzer_info_for_a_task_born_insight(
+async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight(
     client: httpx.AsyncClient,
     insight_repository: FakeInsightRepository,
     plugin_repository: FakePluginRepository,
     agent_id: str,
 ) -> None:
-    """Carry the analyzer name and version for an insight produced by a task."""
+    """Carry the analyzer version and params for an insight produced by a task."""
     plugin = await plugin_repository.create(
         Plugin(owner_id=ACCOUNT.id, kind=PluginKind.ANALYZER, name="trends")
     )
@@ -292,8 +292,6 @@ async def test_get_insight_carries_analyzer_info_for_a_task_born_insight(
     assert response.status_code == 200
     body = response.json()
     assert body["analyzer_version_id"] == str(version.id)
-    assert body["analyzer_name"] == "trends"
-    assert body["analyzer_version"] == 1
     assert body["analyzer_params"] == {"window_days": 7}
 
 

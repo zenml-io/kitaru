@@ -83,9 +83,6 @@ from kitaru.server.application.interfaces.blob_data_store import BlobDataStores
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationWithEvaluator,
 )
-from kitaru.server.application.interfaces.insight_repository import (
-    InsightWithAnalyzer,
-)
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.application.models.agent_version import AgentVersionFilter
@@ -6584,32 +6581,11 @@ class FakeInsightRepository:
         """Initialize the repository.
 
         Args:
-            plugin_repository: Fake plugin repository, consulted to
-                denormalize the analyzer name and version.
+            plugin_repository: Fake plugin repository, consulted to mirror
+                the analyzer version foreign key.
         """
         self._insights: dict[uuid.UUID, Insight] = {}
         self._plugin_repository = plugin_repository
-
-    def _analyzer_info(
-        self, analyzer_version_id: uuid.UUID | None
-    ) -> tuple[str | None, int | None]:
-        """Resolve the analyzer name and version for a plugin version id.
-
-        Args:
-            analyzer_version_id: Id of the referenced plugin version.
-
-        Returns:
-            Analyzer name and version, both ``None`` when unresolved.
-        """
-        if analyzer_version_id is None or self._plugin_repository is None:
-            return None, None
-        version = self._plugin_repository._versions.get(analyzer_version_id)
-        if version is None:
-            return None, None
-        plugin = self._plugin_repository._plugins.get(version.plugin_id)
-        if plugin is None:
-            return None, None
-        return plugin.name, version.version
 
     async def create_many(self, insights: list[Insight]) -> list[Insight]:
         """Persist a batch of new insights in one transaction.
@@ -6642,8 +6618,8 @@ class FakeInsightRepository:
             self._insights[insight.id] = insight
         return [insight.model_copy() for insight in stored]
 
-    async def get(self, insight_id: uuid.UUID) -> InsightWithAnalyzer:
-        """Load an insight by id, joined with its analyzer name and version.
+    async def get(self, insight_id: uuid.UUID) -> Insight:
+        """Load an insight by id.
 
         Args:
             insight_id: Id of the insight.
@@ -6652,13 +6628,12 @@ class FakeInsightRepository:
             InsightNotFound: No insight has this id.
 
         Returns:
-            Stored insight paired with its analyzer name and version.
+            Stored insight.
         """
         stored = self._insights.get(insight_id)
         if stored is None:
             raise InsightNotFound(insight_id)
-        name, version = self._analyzer_info(stored.analyzer_version_id)
-        return InsightWithAnalyzer(stored.model_copy(), name, version)
+        return stored.model_copy()
 
     def _evaluate_type_condition(
         self, insight: Insight, condition: FilterCondition
@@ -6676,7 +6651,7 @@ class FakeInsightRepository:
 
     async def query(
         self, insight_filter: InsightFilter
-    ) -> tuple[list[InsightWithAnalyzer], str | None]:
+    ) -> tuple[list[Insight], str | None]:
         """Query insights matching a filter.
 
         Args:
@@ -6696,13 +6671,7 @@ class FakeInsightRepository:
                 )
             ]
         page, next_cursor = _paginate_fake(insights, insight_filter)
-        items = [
-            InsightWithAnalyzer(
-                insight.model_copy(), *self._analyzer_info(insight.analyzer_version_id)
-            )
-            for insight in page
-        ]
-        return items, next_cursor
+        return [insight.model_copy() for insight in page], next_cursor
 
     async def update(self, insight: Insight) -> Insight:
         """Persist changes to an existing insight.

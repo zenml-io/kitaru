@@ -294,21 +294,21 @@ async def test_crud_commands_map_to_sdk() -> None:
 
 
 async def test_get_and_list_pass_through_analyzer_provenance() -> None:
-    """Get and list surface the analyzer name and version stamped by a task."""
+    """Get and list surface the analyzer version and params stamped by a task."""
     client = StubInsightClient()
+    analyzer_version_id = str(uuid.uuid4())
     client.insight = StubModel(
         client.insight.id,
         {
             **client.insight.values,
-            "analyzer_version_id": str(uuid.uuid4()),
-            "analyzer_name": "clustering",
-            "analyzer_version": 2,
+            "analyzer_version_id": analyzer_version_id,
+            "analyzer_params": {"window_days": 7},
         },
     )
 
     fetched = await insights.get_insight(client, client.insight.id)
-    assert fetched.item["analyzer_name"] == "clustering"
-    assert fetched.item["analyzer_version"] == 2
+    assert fetched.item["analyzer_version_id"] == analyzer_version_id
+    assert fetched.item["analyzer_params"] == {"window_days": 7}
 
     listed = await insights.list_insights(
         client,
@@ -321,7 +321,7 @@ async def test_get_and_list_pass_through_analyzer_provenance() -> None:
         type=None,
     )
     assert listed.items is not None
-    assert listed.items[0]["analyzer_name"] == "clustering"
+    assert listed.items[0]["analyzer_version_id"] == analyzer_version_id
 
 
 async def test_sparse_update_rejects_conflicts_and_empty_changes() -> None:
