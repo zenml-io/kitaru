@@ -214,6 +214,105 @@ class _Aggregate:
     evidence: list[EvidenceLocator] = field(default_factory=list)
 
 
+def _json_string_size(value: str, limit: int) -> int | None:
+    """Return exact UTF-8 JSON string size, stopping once it exceeds a limit."""
+    size = 2  # Opening and closing quotes.
+    short_escapes = {"\b", "\t", "\n", "\f", "\r", '"', "\\"}
+    for character in value:
+        codepoint = ord(character)
+        if character in short_escapes:
+            size += 2
+        elif codepoint < 0x20:
+            size += 6
+        elif codepoint < 0x80:
+            size += 1
+        elif codepoint < 0x800:
+            size += 2
+        elif codepoint < 0x10000:
+            if 0xD800 <= codepoint <= 0xDFFF:
+                return None
+            size += 3
+        else:
+            size += 4
+        if size > limit:
+            return None
+    return size if size <= limit else None
+
+
+def _bounded_decimal_text(value: Decimal, limit: int) -> str | None:
+    """Format a finite Decimal only when its canonical fixed form fits."""
+    if not value.is_finite():
+        return None
+    sign, digits, exponent = value.as_tuple()
+    if not value:
+        text = "-0" if sign else "0"
+        return text if len(text) + 2 <= limit else None
+    decimal_exponent = int(exponent)
+    digit_count = len(digits)
+    while decimal_exponent < 0 and digit_count > 1 and digits[digit_count - 1] == 0:
+        digit_count -= 1
+        decimal_exponent += 1
+    if decimal_exponent >= 0:
+        text_length = digit_count + decimal_exponent
+    elif digit_count + decimal_exponent > 0:
+        text_length = digit_count + 1
+    else:
+        text_length = 2 - decimal_exponent
+    text_length += sign
+    if text_length + 2 > limit:
+        return None
+    formatted = format(value, "f")
+    if "." in formatted:
+        formatted = formatted.rstrip("0").rstrip(".")
+    return formatted or "0"
+
+
+def _scalar_json_size(value: Any, limit: int) -> int | None:
+    """Return the bounded encoded size of a supported scalar."""
+    if value is None:
+        return 4 if limit >= 4 else None
+    if isinstance(value, bool):
+        size = 4 if value else 5
+        return size if size <= limit else None
+    if isinstance(value, str):
+        return _json_string_size(value, limit)
+    if isinstance(value, int):
+        if value:
+            estimated_digits = int((abs(value).bit_length() - 1) * math.log10(2)) + 1
+        else:
+            estimated_digits = 1
+        estimated_size = estimated_digits + (value < 0)
+        if estimated_size > limit:
+            return None
+        try:
+            encoded = str(value)
+        except ValueError:
+            return None
+        return len(encoded) if len(encoded) <= limit else None
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return 0
+        size = len(repr(value))
+        return size if size <= limit else None
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            return 0
+        text = _bounded_decimal_text(value, limit)
+        return None if text is None else _json_string_size(text, limit)
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            return 0
+        text = (
+            value.astimezone(UTC)
+            .isoformat(timespec="microseconds")
+            .replace("+00:00", "Z")
+        )
+        return _json_string_size(text, limit)
+    if isinstance(value, uuid.UUID):
+        return 38 if limit >= 38 else None
+    return 0
+
+
 @dataclass
 class _PayloadBudget:
     """Global bound for inspecting caller-controlled payload structures."""
@@ -230,8 +329,9 @@ class _PayloadBudget:
         if depth > self.max_depth or self.items >= self.max_items:
             self.truncated = True
             return False
-        size = len(value.encode("utf-8")) if isinstance(value, str) else 0
-        if self.bytes + size > self.max_bytes:
+        remaining = self.max_bytes - self.bytes
+        size = _scalar_json_size(value, remaining)
+        if size is None:
             self.truncated = True
             return False
         self.items += 1
@@ -329,6 +429,8 @@ def _normalize_observed(
     value: Any, budget: _PayloadBudget, *, depth: int = 0
 ) -> tuple[Any, bool]:
     """Normalize finite JSON-like values for exact tool-call identity."""
+    while isinstance(value, Enum):
+        value = value.value
     if not budget.consume(value, depth=depth):
         return None, False
     if value is None or isinstance(value, (str, bool, int)):
@@ -338,10 +440,8 @@ def _normalize_observed(
     if isinstance(value, Decimal):
         if not value.is_finite():
             return None, False
-        formatted = format(value, "f")
-        if "." in formatted:
-            formatted = formatted.rstrip("0").rstrip(".")
-        return formatted or "0", True
+        formatted = _bounded_decimal_text(value, budget.max_bytes)
+        return (formatted, True) if formatted is not None else (None, False)
     if isinstance(value, datetime):
         if value.tzinfo is None or value.utcoffset() is None:
             return None, False
@@ -353,8 +453,6 @@ def _normalize_observed(
         )
     if isinstance(value, uuid.UUID):
         return str(value), True
-    if isinstance(value, Enum):
-        return _normalize_observed(value.value, budget, depth=depth + 1)
     if isinstance(value, (list, tuple)):
         if not budget.can_enter(len(value)):
             return None, False
