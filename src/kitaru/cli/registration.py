@@ -653,7 +653,7 @@ async def register_plugin(
     display_version: str | None,
 ) -> CommandResult:
     """Create a plugin parent, upload if needed, then create a version."""
-    resource = _plugin_resource(client, kind)
+    resource = get_plugin_resource(client, kind)
     parent = await resource.create(parent_request)
     blob = None
     try:
@@ -687,7 +687,7 @@ async def register_plugin_version(
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Resolve a plugin parent, upload if needed, and create a version."""
-    resource = _plugin_resource(client, kind)
+    resource = get_plugin_resource(client, kind)
     parent = await resolve_asset(resource, reference, kind.title())
     plugin_source, blob = await upload_plugin_source(client, source)
     request_type = _plugin_version_request_type(kind)
@@ -897,7 +897,7 @@ def _top_level_names(tree: ast.Module) -> set[str]:
     return names
 
 
-def _plugin_resource(client: Any, kind: str) -> Any:
+def get_plugin_resource(client: Any, kind: str) -> Any:
     """Return the SDK resource for one plugin kind."""
     if kind == "importer":
         return client.importers

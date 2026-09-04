@@ -3205,15 +3205,6 @@ async def _register_plugin_version_command(
         )
 
 
-def _plugin_resource(client: Any, kind: str) -> Any:
-    """Return the SDK resource for one plugin kind."""
-    if kind == "importer":
-        return client.importers
-    if kind == "analyzer":
-        return client.analyzers
-    return client.evaluators
-
-
 async def _list_plugin_command(
     kind: Literal["importer", "evaluator", "analyzer"],
     *,
@@ -3227,14 +3218,14 @@ async def _list_plugin_command(
         kind, size=size, cursor=cursor, sort=sort, filter=filter
     )
     async with _open_asset_client() as client:
-        resource = _plugin_resource(client, kind)
+        resource = registration.get_plugin_resource(client, kind)
         return registration.page_result(await resource.list(params), size=size)
 
 
 async def _get_plugin_command(kind: str, reference: str) -> CommandResult:
     """Get one exact importer, evaluator, or analyzer."""
     async with _open_asset_client() as client:
-        resource = _plugin_resource(client, kind)
+        resource = registration.get_plugin_resource(client, kind)
         item = await registration.resolve_asset(resource, reference, kind.title())
         return CommandResult(item=item.model_dump(mode="json"))
 
@@ -3250,7 +3241,7 @@ async def _list_plugin_versions_command(
     """List one server page of importer, evaluator, or analyzer versions."""
     params = registration.version_list_params(size=size, cursor=cursor, sort=sort)
     async with _open_asset_client() as client:
-        resource = _plugin_resource(client, kind)
+        resource = registration.get_plugin_resource(client, kind)
         parent = await registration.resolve_asset(resource, reference, kind.title())
         return registration.page_result(
             await resource.list_versions(parent.id, params), size=size
@@ -3260,7 +3251,7 @@ async def _list_plugin_versions_command(
 async def _get_plugin_version_command(kind: str, reference: str) -> CommandResult:
     """Get one exact importer, evaluator, or analyzer version."""
     async with _open_asset_client() as client:
-        resource = _plugin_resource(client, kind)
+        resource = registration.get_plugin_resource(client, kind)
         _, item = await registration.get_plugin_version(
             resource, reference, kind.title()
         )
