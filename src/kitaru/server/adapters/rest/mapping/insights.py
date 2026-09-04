@@ -20,7 +20,6 @@ from kitaru.api_models.v1.insight import (
     InsightUpdateRequest,
 )
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
-from kitaru.server.application.interfaces.insight_repository import InsightWithAnalyzer
 from kitaru.server.application.models.insight import (
     InsightCreate,
     InsightFilter,
@@ -56,16 +55,15 @@ def insight_batch_create_to_command(
     )
 
 
-def insight_to_response(item: InsightWithAnalyzer) -> InsightResponse:
-    """Convert an insight paired with its analyzer info to its response DTO.
+def insight_to_response(insight: Insight) -> InsightResponse:
+    """Convert an insight entity to its response DTO.
 
     Args:
-        item: Stored insight paired with its analyzer name and version.
+        insight: Stored insight.
 
     Returns:
         Insight response.
     """
-    insight = item.insight
     assert insight.created is not None
     assert insight.updated is not None
     return InsightResponse(
@@ -73,8 +71,6 @@ def insight_to_response(item: InsightWithAnalyzer) -> InsightResponse:
         owner_id=insight.owner_id,
         agent_id=insight.agent_id,
         analyzer_version_id=insight.analyzer_version_id,
-        analyzer_name=item.analyzer_name,
-        analyzer_version=item.analyzer_version,
         analyzer_params=insight.analyzer_params,
         name=insight.name,
         title=insight.title,
@@ -84,21 +80,6 @@ def insight_to_response(item: InsightWithAnalyzer) -> InsightResponse:
         created=insight.created,
         updated=insight.updated,
     )
-
-
-def created_insight_to_response(insight: Insight) -> InsightResponse:
-    """Convert a manually created insight to its response DTO.
-
-    A manual insight carries no analyzer, so this skips the join
-    ``insight_to_response`` performs for stored rows.
-
-    Args:
-        insight: Stored manual insight.
-
-    Returns:
-        Insight response.
-    """
-    return insight_to_response(InsightWithAnalyzer(insight, None, None))
 
 
 def insight_list_params_to_filter(params: InsightListParams) -> InsightFilter:

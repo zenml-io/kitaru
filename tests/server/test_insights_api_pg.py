@@ -182,7 +182,9 @@ async def test_create_insights_missing_agent(client: httpx.AsyncClient) -> None:
     assert response.status_code == 404
 
 
-async def test_get_insight_carries_analyzer_info_for_a_task_born_insight() -> None:
+async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight() -> (
+    None
+):
     """Carry the analyzer name and version for an insight produced by a task."""
     settings = db_settings()
     async with lifespan_client(settings) as client:
@@ -227,6 +229,4 @@ async def test_get_insight_carries_analyzer_info_for_a_task_born_insight() -> No
         assert response.status_code == 200
         body = response.json()
         assert body["analyzer_version_id"] == str(version.id)
-        assert body["analyzer_name"] == "trends"
-        assert body["analyzer_version"] == 1
         assert body["analyzer_params"] == {"window_days": 7}

@@ -27,7 +27,6 @@ from kitaru.api_models.v1.insight import (
 )
 from kitaru.server.adapters.rest.dependencies import authorize, get_insight_service
 from kitaru.server.adapters.rest.mapping.insights import (
-    created_insight_to_response,
     insight_batch_create_to_command,
     insight_list_params_to_filter,
     insight_to_response,
@@ -65,7 +64,7 @@ async def create_insights(
     """
     command = insight_batch_create_to_command(body)
     insights = await service.create_insights(command, actor=actor)
-    return [created_insight_to_response(insight) for insight in insights]
+    return [insight_to_response(insight) for insight in insights]
 
 
 @router.get("")
