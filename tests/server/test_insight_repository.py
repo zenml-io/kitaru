@@ -117,7 +117,7 @@ async def _create_insight(
     Returns:
         Stored insight.
     """
-    created = await repository.create([_insight(owner_id, agent_id, **overrides)])
+    created = await repository.create_many([_insight(owner_id, agent_id, **overrides)])
     return created[0]
 
 
@@ -129,7 +129,7 @@ async def test_create_sets_timestamps_and_order(setup: Setup) -> None:
         _insight(owner_id, agent_id, title="second"),
         _insight(owner_id, agent_id, title="third"),
     ]
-    created = await repository.create(insights)
+    created = await repository.create_many(insights)
     assert [insight.title for insight in created] == ["first", "second", "third"]
     for insight in created:
         assert insight.owner_id == owner_id

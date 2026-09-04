@@ -53,7 +53,7 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
         """
         return InsightNotFound(entity_id)
 
-    async def create(self, insights: list[Insight]) -> list[Insight]:
+    async def create_many(self, insights: list[Insight]) -> list[Insight]:
         """Persist a batch of new insights in one transaction.
 
         Args:

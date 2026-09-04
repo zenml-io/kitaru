@@ -128,6 +128,20 @@ async def test_create_insights_empty_batch(
     assert response.status_code == 422
 
 
+async def test_create_insights_empty_title(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Observe HTTP 422 for an insight with an empty title."""
+    response = await client.post(
+        "/api/v1/insights",
+        json={
+            "agent_id": agent_id,
+            "insights": [{"title": "", "data": {"type": "text", "content": "a"}}],
+        },
+    )
+    assert response.status_code == 422
+
+
 async def test_create_insights_over_batch_limit(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:

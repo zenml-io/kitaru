@@ -7145,7 +7145,7 @@ class FakeInsightRepository:
         """Initialize the repository."""
         self._insights: dict[uuid.UUID, Insight] = {}
 
-    async def create(self, insights: list[Insight]) -> list[Insight]:
+    async def create_many(self, insights: list[Insight]) -> list[Insight]:
         """Persist a batch of new insights in one transaction.
 
         Args:

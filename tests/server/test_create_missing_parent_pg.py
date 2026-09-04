@@ -394,4 +394,4 @@ async def test_insight_missing_agent(setup: Setup) -> None:
         data=TextInsightData(content="root cause"),
     )
     with pytest.raises(AgentNotFound):
-        await SQLInsightRepository(setup.session).create([insight])
+        await SQLInsightRepository(setup.session).create_many([insight])

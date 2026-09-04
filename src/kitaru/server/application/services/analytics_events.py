@@ -334,19 +334,16 @@ def build_investigation_created_properties(
     return {"session_count": investigation.total_sessions}
 
 
-def build_insight_created_properties(insights: list[Insight]) -> dict[str, Any]:
-    """Build the properties of an insight batch creation.
+def build_insight_created_properties(insight: Insight) -> dict[str, Any]:
+    """Build the properties of an insight creation.
 
     Args:
-        insights: Created insights.
+        insight: Created insight.
 
     Returns:
         Event properties.
     """
-    return {
-        "insight_count": len(insights),
-        "insight_types": sorted({insight.data.type for insight in insights}),
-    }
+    return {"insight_type": insight.data.type}
 
 
 def build_annotation_created_properties(annotation: Annotation) -> dict[str, Any]:

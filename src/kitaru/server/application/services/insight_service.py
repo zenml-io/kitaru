@@ -80,13 +80,14 @@ class InsightService:
             )
             for item in command.insights
         ]
-        insights = await self._repository.create(insights)
+        insights = await self._repository.create_many(insights)
         if self._analytics is not None:
-            self._analytics.track(
-                actor.account.id,
-                AnalyticsEvent.INSIGHT_CREATED,
-                build_insight_created_properties(insights),
-            )
+            for insight in insights:
+                self._analytics.track(
+                    actor.account.id,
+                    AnalyticsEvent.INSIGHT_CREATED,
+                    build_insight_created_properties(insight),
+                )
         return insights
 
     async def get_insight(self, insight_id: uuid.UUID, actor: AuthContext) -> Insight:

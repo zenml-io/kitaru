@@ -315,6 +315,37 @@ async def test_update_insight_cannot_clear_title(
         )
 
 
+async def test_create_insights_empty_title(
+    service: InsightService, agent_id: uuid.UUID
+) -> None:
+    """Reject an insight with an empty title."""
+    with pytest.raises(ValidationError, match="Insight title must not be empty"):
+        await service.create_insights(
+            InsightCreate(
+                agent_id=agent_id,
+                insights=[InsightInput(title="", data=TextInsightData(content="a"))],
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_update_insight_empty_title(
+    service: InsightService, agent_id: uuid.UUID
+) -> None:
+    """Reject updating the insight title to an empty string."""
+    created = await service.create_insights(
+        InsightCreate(
+            agent_id=agent_id,
+            insights=[InsightInput(title="first", data=TextInsightData(content="a"))],
+        ),
+        actor=ACTOR,
+    )
+    with pytest.raises(ValidationError, match="Insight title must not be empty"):
+        await service.update_insight(
+            created[0].id, InsightUpdate(title=""), actor=ACTOR
+        )
+
+
 async def test_update_insight_not_found(service: InsightService) -> None:
     """Raise for an unknown insight id."""
     with pytest.raises(InsightNotFound):
@@ -348,7 +379,7 @@ async def test_create_insights_tracks_insight_created(
     agent_repository: FakeAgentRepository,
     agent_id: uuid.UUID,
 ) -> None:
-    """Fire INSIGHT_CREATED with the insight count and data types."""
+    """Fire INSIGHT_CREATED once per insight with its data type."""
     analytics = _RecordingAnalytics()
     service = InsightService(
         repository=insight_repository,
@@ -372,14 +403,14 @@ async def test_create_insights_tracks_insight_created(
         actor=ACTOR,
     )
 
-    assert len(analytics.tracked) == 1
-    user_id, event, properties = analytics.tracked[0]
-    assert user_id == ACTOR.account.id
-    assert event == AnalyticsEvent.INSIGHT_CREATED
-    assert properties == {
-        "insight_count": 2,
-        "insight_types": ["categorical", "text"],
-    }
+    assert len(analytics.tracked) == 2
+    for user_id, event, _ in analytics.tracked:
+        assert user_id == ACTOR.account.id
+        assert event == AnalyticsEvent.INSIGHT_CREATED
+    assert [properties for _, _, properties in analytics.tracked] == [
+        {"insight_type": "text"},
+        {"insight_type": "categorical"},
+    ]
 
 
 async def test_create_insights_without_analytics_tracker(

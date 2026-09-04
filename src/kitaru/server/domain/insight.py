@@ -15,12 +15,12 @@
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import Field
+from pydantic import AfterValidator, Field
 
 from kitaru.api_models.v1.insight import InsightData
-from kitaru.server.domain.base import DomainModel, NotFoundError
+from kitaru.server.domain.base import DomainModel, NotFoundError, ValidationError
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import MAX_NAME_LENGTH
 
@@ -37,13 +37,35 @@ class InsightNotFound(NotFoundError):
         super().__init__(f"Insight {insight_id} was not found")
 
 
+def validate_title(value: str) -> str:
+    """Validate an insight title.
+
+    Args:
+        value: Title to validate.
+
+    Raises:
+        ValidationError: ``value`` is empty or exceeds the maximum length.
+
+    Returns:
+        Validated title.
+    """
+    if not value:
+        raise ValidationError("Insight title must not be empty")
+    if len(value) > MAX_NAME_LENGTH:
+        raise ValidationError(f"Insight title exceeds {MAX_NAME_LENGTH} characters")
+    return value
+
+
+Title = Annotated[str, AfterValidator(validate_title)]
+
+
 class Insight(DomainModel):
     """Insight."""
 
     id: uuid.UUID = Field(default_factory=uuid7)
     owner_id: uuid.UUID
     agent_id: uuid.UUID
-    title: str = Field(max_length=MAX_NAME_LENGTH)
+    title: Title
     description: str | None = None
     data: InsightData
     metadata: dict[str, Any] = Field(default_factory=dict)
