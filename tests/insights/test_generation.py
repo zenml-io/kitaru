@@ -309,6 +309,17 @@ def test_editor_validates_numbers_against_each_card_only(
         ("Minorities of sessions need attention.", "quantitative"),
         ("Numerous sessions need attention.", "quantitative"),
         ("A handful of sessions need attention.", "quantitative"),
+        ("A quarter of sessions need attention.", "quantitative"),
+        ("Two thirds of sessions need attention.", "quantitative"),
+        ("A fourth of sessions need attention.", "quantitative"),
+        ("A fifth of sessions need attention.", "quantitative"),
+        ("A sixth of sessions need attention.", "quantitative"),
+        ("A seventh of sessions need attention.", "quantitative"),
+        ("An eighth of sessions need attention.", "quantitative"),
+        ("A ninth of sessions need attention.", "quantitative"),
+        ("A tenth of sessions need attention.", "quantitative"),
+        ("A fraction of sessions need attention.", "quantitative"),
+        ("A proportion of sessions need attention.", "quantitative"),
         ("No retries need attention.", "quantitative"),
     ],
 )
@@ -363,6 +374,8 @@ def test_editor_validates_page_copy_without_borrowing_card_facts(
         "Several patterns need attention.",
         "A couple of patterns need attention.",
         "The majority need attention.",
+        "A quarter of patterns need attention.",
+        "A proportion of patterns need attention.",
     ],
 )
 def test_editor_rejects_word_quantity_in_page_copy(
@@ -420,6 +433,8 @@ def test_editor_allows_exact_known_word_quantity_label(
         ("All", "All are worth investigating."),
         ("A couple", "A couple are worth investigating."),
         ("The majority", "The majority are worth investigating."),
+        ("Quarter", "Quarter is worth investigating."),
+        ("Proportion", "Proportion is worth investigating."),
     ],
 )
 def test_quantity_only_label_cannot_mask_fabricated_quantity(
@@ -623,7 +638,10 @@ def test_quantity_substrings_in_plain_prose_are_allowed(
                 EditorialCardCopy(
                     id=candidate.id,
                     eyebrow="Tool behavior",
-                    description=("Couplets and multiplexers are worth investigating."),
+                    description=(
+                        "Couplets, multiplexers, quartermasters, fractionalizers, "
+                        "and proportionalists are worth investigating."
+                    ),
                 )
             ]
         }
@@ -653,6 +671,35 @@ def test_editor_allows_exact_known_indefinite_quantity_label(
                     id=candidate.id,
                     eyebrow="Model mix",
                     description="Model Many is worth investigating.",
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+def test_editor_allows_exact_known_fractional_quantity_label(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="Model Quarter", value=1)]
+            )
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Model mix",
+                    description="Model Quarter is worth investigating.",
                 )
             ]
         }

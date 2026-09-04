@@ -562,6 +562,31 @@ def test_invalid_utf8_tool_and_model_labels_cannot_break_serialization() -> None
     result.model_dump_json()
 
 
+def test_oversized_tool_names_do_not_form_retry_or_cycle_identities() -> None:
+    oversized_name = "tool_" + "x" * 100_000
+    session = _calls(
+        1,
+        [(oversized_name, {"id": 1}, NodeStatus.FAILED, "error") for _ in range(6)],
+    )
+
+    result = profile_sessions([session])
+    candidate_ids = {candidate.id for candidate in result.candidates}
+
+    assert candidate_ids.isdisjoint(
+        {
+            "adjacent-identical-calls",
+            "failed-identical-retries",
+            "adjacent-same-tool-failures",
+            "short-tool-cycles",
+        }
+    )
+    assert "tool-error-mix" in candidate_ids
+    assert (
+        "tool identity coverage is incomplete"
+        in " ".join(result.coverage.caveats).lower()
+    )
+
+
 def test_contributing_session_limit_matches_candidate_contract() -> None:
     with pytest.raises(ValidationError):
         ProfilingConfig(max_contributing_sessions=1_001)

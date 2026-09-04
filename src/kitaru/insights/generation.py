@@ -39,7 +39,9 @@ _QUANTITY_TOKEN = re.compile(
     r"once|twice|thrice|all|every|each|both|half|halves|"
     r"double|doubled|doubles|doubling|triple|tripled|triples|tripling|"
     r"several|many|few|fewer|fewest|multiple|multiples|couple|couples|"
-    r"majority|majorities|minority|minorities|numerous|handful|handfuls)\b",
+    r"majority|majorities|minority|minorities|numerous|handful|handfuls|"
+    r"quarters?|thirds?|fourths?|fifths?|sixths?|sevenths?|eighths?|ninths?|"
+    r"tenths?|fractions?|proportions?)\b",
     flags=re.IGNORECASE,
 )
 _LINK = re.compile(r"(?:https?://|www\.)", flags=re.IGNORECASE)
