@@ -746,6 +746,55 @@ def test_chart_label_cannot_authorize_outcome_claim(
         validate_editorial_plan(copy, selection, [candidate])
 
 
+@pytest.mark.parametrize(
+    ("candidate_id", "description"),
+    [
+        ("tool-error-mix", "Sessions failed."),
+        ("tool-error-mix", "Tool calls failed."),
+        ("tool-error-mix", "Session errors are worth investigating."),
+        ("adjacent-same-tool-failures", "Tool calls failed."),
+        ("failed-identical-retries", "Tool calls failed."),
+    ],
+)
+def test_completed_session_tool_failure_cannot_authorize_outcome_copy(
+    profiling_result: ProfilingResult,
+    candidate_id: str,
+    description: str,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "id": candidate_id,
+            "family": "tool_health",
+            "title": "A recorded tool call failed in a completed session",
+            "fallback_description": (
+                "The recorded tool failure may have been recovered later."
+            ),
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="lookup_order", value=1)]
+            ),
+            "facts": [DeterministicFact(name="occurrences", value=1)],
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description=description,
+                )
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="unsupported outcome"):
+        validate_editorial_plan(copy, selection, [candidate])
+
+
 def test_deterministic_plan_makes_no_model_call(
     profiling_result: ProfilingResult,
 ) -> None:

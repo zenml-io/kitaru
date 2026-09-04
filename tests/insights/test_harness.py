@@ -10,6 +10,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from pydantic import ValidationError
 
 from kitaru.insights.models import InsightGenerationResult
 
@@ -62,6 +63,33 @@ async def test_harness_runs_deterministically_without_credentials(
     assert exit_code == 0
     result = InsightGenerationResult.model_validate_json(output_path.read_text())
     assert result.empty_reason == "no_eligible_candidates"
+
+
+async def test_harness_rejects_unpaired_surrogate_before_empty_serialization(
+    tmp_path: Path,
+) -> None:
+    harness = _load_harness()
+    sessions_path = tmp_path / "sessions.json"
+    context_path = tmp_path / "context.json"
+    output_path = tmp_path / "result.json"
+    sessions_path.write_text("[]")
+    context = _context()
+    context["agent_name"] = "broken-\ud800-name"
+    context_path.write_text(json.dumps(context))
+
+    with pytest.raises(ValidationError, match="valid UTF-8 text"):
+        await harness.run(
+            [
+                "--sessions",
+                str(sessions_path),
+                "--context",
+                str(context_path),
+                "--output",
+                str(output_path),
+            ]
+        )
+
+    assert not output_path.exists()
 
 
 def test_production_output_must_be_outside_or_ignored(tmp_path: Path) -> None:
