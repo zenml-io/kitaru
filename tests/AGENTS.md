@@ -1,9 +1,10 @@
 # Test rules
 
-Async tests and fixtures are plain `async def`. pytest-asyncio runs in auto
-mode, so no decorators and no `asyncio.run` wrappers.
+Ordinary async tests and fixtures are plain `async def`. pytest-asyncio runs in auto mode, so they need no decorators or `asyncio.run` wrappers. Synchronous Hypothesis `@given` tests are the exception: call async code with `asyncio.run` inside the test body.
 
 ## Test surfaces per server resource
+
+Cover all four surfaces below for a new persistent public API resource. For changes to an existing resource, select the surfaces that prove the affected behavior. Transaction, locking, migration, and cross-request changes need PostgreSQL coverage; an in-memory fake cannot prove those contracts.
 
 1. Service tests against the in-memory fake repository
    (`tests/server/test_<x>_service.py`).

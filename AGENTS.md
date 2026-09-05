@@ -24,6 +24,16 @@ matching Kitaru repo skill under `.agents/skills/`. Keep each logical repo skill
 available under the same name in `.claude/skills/`; share host-neutral guidance
 and diverge only for a documented host-specific reason.
 
+Before editing a subtree, read the `AGENTS.md` files along its path that have not already been loaded. If a directory has no `AGENTS.md` but has a `CLAUDE.md`, read that guidance too.
+
+## Task scope and follow-through
+
+Complete the work authorized by the user's request, including relevant verification and final review. Make reasonable assumptions for routine choices and continue independent authorized work while a material decision is pending. Task skills guide execution; they do not independently authorize commits, publication, or release actions. Do not ask again for an action already authorized in the conversation.
+
+If a skill or instruction blocks completion, name and link to its file, quote the relevant clause, and explain the specific unresolved action. Distinguish an explicit requirement from your interpretation. Preserve the repository's human-review and release controls.
+
+For substantial work with independent questions or modules, use subagents when parallel work would save time or improve quality. Assign concrete tasks and distinct file responsibilities for edits; the coordinator integrates and verifies the result. Keep small or tightly coupled work local.
+
 ## Core Commands
 
 Use `uv` for Python dependency management and `just` for the normal command
@@ -32,19 +42,22 @@ stack.
 - `uv sync`: install and sync dependencies
 - `uv sync --extra server`: include server components
 - `just fix`: auto-fix formatting, lint, and YAML issues
-- `just check`: run format, lint, typecheck, typos, YAML, actions lint, and links
+- `just check`: run format, lint, OpenAPI freshness, typecheck, typos, YAML, actions lint, and links
 - `just test`: run the full pytest suite
 - `just test tests/test_file.py::test_name`: run one targeted test
 - `just build`: build wheel and sdist locally
 
-Typical loop: write code -> `just fix` -> `just check` -> `just test`.
+During iteration, format changed files and run tests for the changed behavior. `just fix` rewrites Python files and workflow YAML across the checkout; prefer file-scoped formatters for narrow changes and review incidental edits after a full fix.
 
-When running the full suite through output that may truncate, preserve the
-failure names:
+Before handing off a code PR, run `just check` and the relevant test suites. Run the full core suite for shared core behavior or changes spanning several core modules; plugin changes follow `plugins/AGENTS.md`. Documentation-only changes need relevant documentation checks, not the product test suite. Repeat successful checks only when subsequent edits affect them, failures occur, or unresolved evidence warrants it.
+
+When test output may truncate, save the full log and preserve the test command's exit status. Run this in Bash as a separate command, then inspect the saved log:
 
 ```bash
-just test 2>&1 | grep -E "FAILED|ERROR|passed|failed" | tail -20
+bash -o pipefail -c 'just test 2>&1 | tee /tmp/kitaru-tests-yourtask.log'
 ```
+
+Replace `yourtask` with a unique task identifier. The pipeline reports failure if either the tests or log capture fails; a filtered summary alone is not evidence that tests passed.
 
 ## Coding Style
 
