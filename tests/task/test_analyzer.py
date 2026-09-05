@@ -81,7 +81,7 @@ def _session_views(count: int = 1) -> list[SessionView]:
     return views
 
 
-def test_call_analyzer_single_result() -> None:
+async def test_call_analyzer_single_result() -> None:
     """Normalize a single InsightInput into a one-element list."""
     views = _session_views()
 
@@ -91,11 +91,11 @@ def test_call_analyzer_single_result() -> None:
             name="summary", title="Summary", data=TextInsightData(content="ok")
         )
 
-    results = call_analyzer("summary-check", analyze, views, {})
+    results = await call_analyzer("summary-check", analyze, views, {})
     assert [item.name for item in results] == ["summary"]
 
 
-def test_call_analyzer_list_result() -> None:
+async def test_call_analyzer_list_result() -> None:
     """Pass a list of results through unchanged."""
     views = _session_views()
 
@@ -105,11 +105,11 @@ def test_call_analyzer_list_result() -> None:
             InsightInput(name="b", title="B", data=TextInsightData(content="2")),
         ]
 
-    results = call_analyzer("multi", analyze, views, {})
+    results = await call_analyzer("multi", analyze, views, {})
     assert [item.name for item in results] == ["a", "b"]
 
 
-def test_call_analyzer_empty_list_raises() -> None:
+async def test_call_analyzer_empty_list_raises() -> None:
     """Raise AnalysisError when the analyzer returns no results."""
     views = _session_views()
 
@@ -117,10 +117,10 @@ def test_call_analyzer_empty_list_raises() -> None:
         return []
 
     with pytest.raises(AnalysisError, match="summary-check"):
-        call_analyzer("summary-check", analyze, views, {})
+        await call_analyzer("summary-check", analyze, views, {})
 
 
-def test_call_analyzer_duplicate_names_raise() -> None:
+async def test_call_analyzer_duplicate_names_raise() -> None:
     """Raise AnalysisError when two results share a name."""
     views = _session_views()
 
@@ -131,10 +131,10 @@ def test_call_analyzer_duplicate_names_raise() -> None:
         ]
 
     with pytest.raises(AnalysisError, match="duplicate"):
-        call_analyzer("dup", analyze, views, {})
+        await call_analyzer("dup", analyze, views, {})
 
 
-def test_call_analyzer_non_insight_input_raises() -> None:
+async def test_call_analyzer_non_insight_input_raises() -> None:
     """Raise AnalysisError when the analyzer returns a non-InsightInput value."""
     views = _session_views()
 
@@ -142,10 +142,10 @@ def test_call_analyzer_non_insight_input_raises() -> None:
         return [{"name": "a"}]
 
     with pytest.raises(AnalysisError, match="non-InsightInput"):
-        call_analyzer("summary-check", analyze, views, {})
+        await call_analyzer("summary-check", analyze, views, {})
 
 
-def test_call_analyzer_raising_analyzer_wrapped() -> None:
+async def test_call_analyzer_raising_analyzer_wrapped() -> None:
     """Wrap an analyzer's exception in AnalysisError."""
     views = _session_views()
 
@@ -153,10 +153,10 @@ def test_call_analyzer_raising_analyzer_wrapped() -> None:
         raise ValueError("boom")
 
     with pytest.raises(AnalysisError, match="raised an error"):
-        call_analyzer("broken", analyze, views, {})
+        await call_analyzer("broken", analyze, views, {})
 
 
-def test_call_analyzer_passes_params() -> None:
+async def test_call_analyzer_passes_params() -> None:
     """Pass the params dict through as keyword arguments."""
     views = _session_views()
     received = {}
@@ -165,8 +165,33 @@ def test_call_analyzer_passes_params() -> None:
         received["threshold"] = threshold
         return InsightInput(name="a", title="A", data=TextInsightData(content="ok"))
 
-    call_analyzer("with-params", analyze, views, {"threshold": 0.5})
+    await call_analyzer("with-params", analyze, views, {"threshold": 0.5})
     assert received["threshold"] == 0.5
+
+
+async def test_call_analyzer_awaits_an_async_analyzer() -> None:
+    """Await the result of an async analyzer."""
+    views = _session_views()
+
+    async def analyze(sessions: list[SessionView], **params: object) -> InsightInput:
+        assert sessions is views
+        return InsightInput(
+            name="summary", title="Summary", data=TextInsightData(content="ok")
+        )
+
+    results = await call_analyzer("summary-check", analyze, views, {})
+    assert [item.name for item in results] == ["summary"]
+
+
+async def test_call_analyzer_raising_async_analyzer_wrapped() -> None:
+    """Wrap an async analyzer's exception in AnalysisError."""
+    views = _session_views()
+
+    async def analyze(sessions: list[SessionView], **params: object) -> InsightInput:
+        raise ValueError("boom")
+
+    with pytest.raises(AnalysisError, match="raised an error"):
+        await call_analyzer("broken", analyze, views, {})
 
 
 async def test_run_loads_from_a_source_ref_and_fetches_sessions_in_order(
