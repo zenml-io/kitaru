@@ -38,7 +38,7 @@ def analyzer(sessions: list[SessionView], **params) -> InsightInput:
     )
 ```
 
-`SessionView` is the same type an evaluator receives, one per session in the set: `session.session` is the [session](../concepts/agents-and-sessions.md) with its inputs, outputs, and rollups, and `session.nodes` is every model call and tool call with payloads. Return one `InsightInput` or a list. Each becomes one stored insight. `params` are per-run knobs, passed when you name the analyzer on an import.
+`SessionView` is the same type an evaluator receives, one per session in the set: `session.session` is the [session](../concepts/agents-and-sessions.md) with its inputs, outputs, and rollups, and `session.nodes` is every model call and tool call with payloads. Return one `InsightInput` or a list. Each becomes one stored insight. `analyzer` can also be `async def`, for example to call a model client asynchronously, and the task process awaits it. `params` are per-run knobs, passed when you name the analyzer on an import.
 
 This example needs no provider credentials, since it only reads session status off the set it is handed. An analyzer that judges the set instead of just counting it, for example one that reads every node and summarizes what went wrong across the batch, calls a model inside `analyzer` the same way an [LLM judge](write-an-evaluator.md) does inside `evaluate`.
 
