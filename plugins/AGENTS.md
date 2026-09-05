@@ -20,10 +20,12 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 - New packages need initial metadata. Adding a server default requires an explicit release decision.
 - Keep adapter distributions out of the server catalog.
 - Run plugin workspace commands with `--project plugins`; the root workspace contains only Kitaru.
-- Commit the resulting `plugins/uv.lock` change.
+- Include relevant `plugins/uv.lock` changes in the patch and in any requested commit.
 - Keep `.github/workflows/ci.yml`, `.github/workflows/release-plugins.yml`, and `plugins/packages/` aligned when you add or remove a distribution.
 
 ## Required tests
+
+During iteration, run the focused tests and file-scoped checks for the changed behavior. Before handing off a plugin implementation PR, run the workspace format, lint, typecheck, and full test commands below. Metadata, pin, default-definition, and release-path changes also require the artifact smoke check. Documentation-only changes need relevant documentation checks, not the plugin test suite.
 
 - Run the focused plugin tests for changed behavior.
 - Run `uv run --project plugins ruff format --config plugins/pyproject.toml --check plugins` and `uv run --project plugins ruff check --config plugins/pyproject.toml plugins`.
@@ -31,7 +33,7 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 - Run `uv run --project plugins pytest -q -c plugins/pyproject.toml plugins/tests tests/server/test_default_plugins.py`.
 - Run `just plugin-artifact-smoke` for default definitions, package metadata, pins, or release-path changes.
 - Use `plugins/docker-compose.candidate.yml` when a change needs a candidate-image rehearsal.
-- Commit the candidate Dockerfile and Compose configuration. Do not commit generated candidate wheels.
+- Include relevant candidate Dockerfile and Compose configuration changes in the patch and in any requested commit. Do not commit generated candidate wheels.
 - Do not change production release Dockerfiles to support local plugin wheels.
 
 ## Development registration

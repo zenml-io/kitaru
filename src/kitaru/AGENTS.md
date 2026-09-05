@@ -21,10 +21,9 @@ Module naming: modules that define per-entity types are singular
 URL segment they serve (`/api/v1/orders` → `orders.py`), and mapping modules
 follow their router.
 
-## New resource checklist
+## New persistent public API resource checklist
 
-Adding a resource named `Order` touches these places. Skipping one produces a
-half-wired resource that still imports cleanly, so walk the whole list.
+Adding a new persistent public API resource named `Order` touches these places. Walk the whole list so the resource works through persistence, REST, and the SDK. Changes to existing resources apply only the relevant steps. For UI-only read responses, follow the `kitaru-ui-api-development` skill; do not add storage or SDK, CLI, or MCP parity solely to satisfy this checklist.
 
 1. `server/domain/order.py`: entity plus domain errors.
 2. `server/application/interfaces/order_repository.py`: repository Protocol.
