@@ -5635,35 +5635,46 @@ class FakeEvaluationRepository:
 
     async def get_latest_evaluation_ids_by_identity(
         self, session_ids: Sequence[uuid.UUID]
-    ) -> dict[tuple[uuid.UUID, uuid.UUID, str], uuid.UUID]:
-        """Read the latest evaluation id per (session, evaluator version, params hash).
+    ) -> dict[tuple[uuid.UUID, uuid.UUID, str], list[uuid.UUID]]:
+        """Read the latest invocation's evaluation ids per identity.
 
         Args:
             session_ids: Ids of the candidate sessions.
 
         Returns:
-            Latest evaluation id keyed by (session_id, evaluator_version_id,
-            params_hash), identities without a match omitted.
+            Evaluation ids of the latest invocation keyed by (session_id,
+            evaluator_version_id, params_hash), identities without a match
+            omitted.
         """
         session_id_set = set(session_ids)
-        candidates = [
-            evaluation
-            for evaluation in self._evaluations.values()
-            if evaluation.session_id in session_id_set
-            and evaluation.evaluator_version_id is not None
-            and evaluation.params_hash is not None
-        ]
-        candidates.sort(key=lambda evaluation: (evaluation.created, evaluation.id))
-        latest: dict[tuple[uuid.UUID, uuid.UUID, str], uuid.UUID] = {}
-        for evaluation in candidates:
-            assert evaluation.evaluator_version_id is not None
-            assert evaluation.params_hash is not None
+        rows: list[tuple[tuple[uuid.UUID, uuid.UUID, str], uuid.UUID, uuid.UUID]] = []
+        for evaluation in self._evaluations.values():
+            if (
+                evaluation.session_id not in session_id_set
+                or evaluation.evaluator_version_id is None
+                or evaluation.params_hash is None
+                or evaluation.invocation_id is None
+            ):
+                continue
             identity = (
                 evaluation.session_id,
                 evaluation.evaluator_version_id,
                 evaluation.params_hash,
             )
-            latest[identity] = evaluation.id
+            rows.append((identity, evaluation.invocation_id, evaluation.id))
+        rows.sort(
+            key=lambda row: (
+                self._evaluations[row[2]].created,
+                self._evaluations[row[2]].id,
+            )
+        )
+        latest_invocation: dict[tuple[uuid.UUID, uuid.UUID, str], uuid.UUID] = {}
+        for identity, invocation_id, _ in rows:
+            latest_invocation[identity] = invocation_id
+        latest: dict[tuple[uuid.UUID, uuid.UUID, str], list[uuid.UUID]] = {}
+        for identity, invocation_id, evaluation_id in rows:
+            if invocation_id == latest_invocation[identity]:
+                latest.setdefault(identity, []).append(evaluation_id)
         return latest
 
     async def add_replay_links(

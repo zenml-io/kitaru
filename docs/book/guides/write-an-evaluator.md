@@ -43,7 +43,7 @@ def evaluate(session: SessionView, **params) -> list[EvaluationResult]:
     ]
 ```
 
-`SessionView` is the whole recording: `session.session` is the [session](../concepts/agents-and-sessions.md) with its inputs, outputs, and rollups; `session.nodes` is every model call and tool call with payloads. Return one result or a list; each becomes one stored evaluation. Pick the type by how you will read a thousand of them: **numbers average, booleans count, labels diff as transitions, free text gets read.** Use `passed` for the verdict and `explanation` for the sentence you will want when a gate goes red.
+`SessionView` is the whole recording: `session.session` is the [session](../concepts/agents-and-sessions.md) with its inputs, outputs, and rollups; `session.nodes` is every model call and tool call with payloads. Return one result or a list; each becomes one stored evaluation. `evaluate` can also be `async def`, for example to call a model client asynchronously, and the task process awaits it. Pick the type by how you will read a thousand of them: **numbers average, booleans count, labels diff as transitions, free text gets read.** Use `passed` for the verdict and `explanation` for the sentence you will want when a gate goes red.
 
 ## An LLM judge is an evaluator
 

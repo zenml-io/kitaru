@@ -13,22 +13,32 @@
 #  limitations under the License.
 """Tests for the post-import analyzer entrypoint."""
 
+import json
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from kitaru.api_models.v1.insight import InsightInput
 from kitaru.api_models.v1.session import (
     SessionDetailResponse,
     SessionOrigin,
     SessionStatus,
 )
-from kitaru.api_models.v1.session_node import NodeStatus, NodeType, SessionNodeResponse
+from kitaru.api_models.v1.session_node import (
+    NodeStatus,
+    NodeType,
+    SessionNodeResponse,
+    SessionWithNodesResponse,
+)
+from kitaru.api_models.v1.task import AnalysisTaskDetails, PackagePluginSpec
 from kitaru.insights import InsightGenerationResult
 from kitaru.insights import analyzer as analyzer_module
 from kitaru.insights.analyzer import analyze_post_import_sessions
+from kitaru.task import analyzer as task_analyzer
 from kitaru.task.analyzer import SessionView
 
 NOW = datetime(2026, 9, 4, tzinfo=UTC)
@@ -178,3 +188,60 @@ async def test_analyzer_requires_an_import_identity() -> None:
 
     with pytest.raises(ValueError, match="import ID"):
         await analyze_post_import_sessions([view])
+
+
+async def test_task_runner_loads_analyzer_and_writes_cards(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Exercise plugin loading, async invocation, and the JSON task receipt."""
+    views = [_view(1, failed_tool=True), _view(2)]
+    task_id = uuid.uuid4()
+    details = AnalysisTaskDetails(
+        analyzer_name="post-import-insights",
+        params={"agent_name": "returns-agent"},
+        plugin=PackagePluginSpec(
+            entrypoint="kitaru.insights.analyzer:analyze_post_import_sessions",
+            requirement="kitaru",
+        ),
+        agent_id=AGENT_ID,
+        input_session_ids=[view.session.id for view in views],
+    )
+    fetched: list[uuid.UUID] = []
+
+    class Tasks:
+        async def get_spec(self, requested_id: uuid.UUID) -> Any:
+            assert requested_id == task_id
+            return SimpleNamespace(details=details)
+
+    class Sessions:
+        async def get_with_nodes(
+            self, requested_id: uuid.UUID
+        ) -> SessionWithNodesResponse:
+            fetched.append(requested_id)
+            view = next(view for view in views if view.session.id == requested_id)
+            return SessionWithNodesResponse(session=view.session, nodes=view.nodes)
+
+    result_path = tmp_path / "result.json"
+    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
+    client: Any = SimpleNamespace(tasks=Tasks(), sessions=Sessions())
+
+    await task_analyzer.run(client, str(task_id))
+
+    cards = [
+        InsightInput.model_validate(item)
+        for item in json.loads(result_path.read_text())
+    ]
+    assert fetched == details.input_session_ids
+    assert cards
+    metadata = [InsightGenerationResult.card_metadata(card) for card in cards]
+    assert all(item.context.source_import.import_id == IMPORT_ID for item in metadata)
+    assert all(item.context.agent_name == "returns-agent" for item in metadata)
+    assert any(evidence.node_id for item in metadata for evidence in item.evidence)
+
+
+async def test_task_runner_still_rejects_no_eligible_findings() -> None:
+    """Document the remaining upstream empty-result incompatibility."""
+    with pytest.raises(task_analyzer.AnalysisError, match="returned no results"):
+        await task_analyzer.call_analyzer(
+            "post-import-insights", analyze_post_import_sessions, [_view(2)], {}
+        )
