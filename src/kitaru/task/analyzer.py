@@ -13,8 +13,9 @@
 #  permissions and limitations under the License.
 """Analyzer plugin contract and the analysis flow."""
 
+import inspect
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -44,9 +45,9 @@ class AnalysisError(Exception):
 AnalyzerReturn = InsightInput | list[InsightInput]
 
 
-def call_analyzer(
+async def call_analyzer(
     name: str,
-    analyzer: Callable[..., AnalyzerReturn],
+    analyzer: Callable[..., AnalyzerReturn | Awaitable[AnalyzerReturn]],
     sessions: list[SessionView],
     params: dict[str, Any],
 ) -> list[InsightInput]:
@@ -54,7 +55,7 @@ def call_analyzer(
 
     Args:
         name: Analyzer name, named in error messages.
-        analyzer: Analyzer callable.
+        analyzer: Analyzer callable, sync or returning an awaitable.
         sessions: Session views passed to the analyzer.
         params: Parameters passed to the analyzer.
 
@@ -67,6 +68,8 @@ def call_analyzer(
     """
     try:
         result = analyzer(sessions, **params)
+        if inspect.isawaitable(result):
+            result = await result
     except Exception as exc:
         raise AnalysisError(f"Analyzer '{name}' raised an error: {exc}") from exc
     results = result if isinstance(result, list) else [result]
@@ -80,7 +83,9 @@ def call_analyzer(
     return results
 
 
-def _resolve_analyzer(details: AnalysisTaskDetails) -> Callable[..., AnalyzerReturn]:
+def _resolve_analyzer(
+    details: AnalysisTaskDetails,
+) -> Callable[..., AnalyzerReturn | Awaitable[AnalyzerReturn]]:
     """Load the analyzer callable named by a task's plugin spec.
 
     Args:
@@ -123,5 +128,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
     for session_id in details.input_session_ids:
         full = await client.sessions.get_with_nodes(session_id)
         views.append(SessionView(session=full.session, nodes=full.nodes))
-    results = call_analyzer(details.analyzer_name, analyzer, views, details.params)
+    results = await call_analyzer(
+        details.analyzer_name, analyzer, views, details.params
+    )
     write_task_result(results)

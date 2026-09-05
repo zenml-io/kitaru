@@ -13,8 +13,9 @@
 #  permissions and limitations under the License.
 """Evaluator plugin contract and the evaluation flow."""
 
+import inspect
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -54,9 +55,9 @@ class SessionView(BaseModel):
 EvaluatorReturn = EvaluationResult | list[EvaluationResult]
 
 
-def call_evaluator(
+async def call_evaluator(
     name: str,
-    evaluator: Callable[..., EvaluatorReturn],
+    evaluator: Callable[..., EvaluatorReturn | Awaitable[EvaluatorReturn]],
     session: SessionView,
     params: dict[str, Any],
 ) -> list[EvaluationResult]:
@@ -64,7 +65,7 @@ def call_evaluator(
 
     Args:
         name: Evaluator name, named in error messages.
-        evaluator: Evaluator callable.
+        evaluator: Evaluator callable, sync or returning an awaitable.
         session: Session view passed to the evaluator.
         params: Parameters passed to the evaluator.
 
@@ -77,6 +78,8 @@ def call_evaluator(
     """
     try:
         result = evaluator(session, **params)
+        if inspect.isawaitable(result):
+            result = await result
     except Exception as exc:
         raise EvaluationError(f"Evaluator '{name}' raised an error: {exc}") from exc
     results = result if isinstance(result, list) else [result]
@@ -94,7 +97,7 @@ def call_evaluator(
 
 def _resolve_evaluator(
     details: EvaluationTaskDetails,
-) -> Callable[..., EvaluatorReturn]:
+) -> Callable[..., EvaluatorReturn | Awaitable[EvaluatorReturn]]:
     """Load the evaluator callable named by a task's plugin spec.
 
     Args:
@@ -135,5 +138,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
 
     full = await client.sessions.get_with_nodes(details.input_session_id)
     view = SessionView(session=full.session, nodes=full.nodes)
-    results = call_evaluator(details.evaluator_name, evaluator, view, details.params)
+    results = await call_evaluator(
+        details.evaluator_name, evaluator, view, details.params
+    )
     write_task_result(results)
