@@ -85,7 +85,7 @@ def _session_view() -> SessionView:
     return SessionView(session=session, nodes=[])
 
 
-def test_call_evaluator_single_result() -> None:
+async def test_call_evaluator_single_result() -> None:
     """Normalize a single EvaluationResult into a one-element list."""
     view = _session_view()
 
@@ -93,11 +93,11 @@ def test_call_evaluator_single_result() -> None:
         assert session is view
         return EvaluationResult(name="quality", score=0.9)
 
-    results = call_evaluator("quality-check", evaluate, view, {})
+    results = await call_evaluator("quality-check", evaluate, view, {})
     assert [item.name for item in results] == ["quality"]
 
 
-def test_call_evaluator_list_result() -> None:
+async def test_call_evaluator_list_result() -> None:
     """Pass a list of results through unchanged."""
     view = _session_view()
 
@@ -107,11 +107,11 @@ def test_call_evaluator_list_result() -> None:
             EvaluationResult(name="b", score=2.0),
         ]
 
-    results = call_evaluator("multi", evaluate, view, {})
+    results = await call_evaluator("multi", evaluate, view, {})
     assert [item.name for item in results] == ["a", "b"]
 
 
-def test_call_evaluator_empty_list_raises() -> None:
+async def test_call_evaluator_empty_list_raises() -> None:
     """Raise EvaluationError when the evaluator returns no results."""
     view = _session_view()
 
@@ -119,10 +119,10 @@ def test_call_evaluator_empty_list_raises() -> None:
         return []
 
     with pytest.raises(EvaluationError, match="quality-check"):
-        call_evaluator("quality-check", evaluate, view, {})
+        await call_evaluator("quality-check", evaluate, view, {})
 
 
-def test_call_evaluator_duplicate_names_raise() -> None:
+async def test_call_evaluator_duplicate_names_raise() -> None:
     """Raise EvaluationError when two results share a name."""
     view = _session_view()
 
@@ -133,10 +133,10 @@ def test_call_evaluator_duplicate_names_raise() -> None:
         ]
 
     with pytest.raises(EvaluationError, match="duplicate"):
-        call_evaluator("dup", evaluate, view, {})
+        await call_evaluator("dup", evaluate, view, {})
 
 
-def test_call_evaluator_non_evaluation_result_raises() -> None:
+async def test_call_evaluator_non_evaluation_result_raises() -> None:
     """Raise EvaluationError when the evaluator returns a non-EvaluationResult value."""
     view = _session_view()
 
@@ -144,10 +144,10 @@ def test_call_evaluator_non_evaluation_result_raises() -> None:
         return [{"name": "a", "score": 1.0}]
 
     with pytest.raises(EvaluationError, match="non-EvaluationResult"):
-        call_evaluator("quality-check", evaluate, view, {})
+        await call_evaluator("quality-check", evaluate, view, {})
 
 
-def test_call_evaluator_raising_evaluator_wrapped() -> None:
+async def test_call_evaluator_raising_evaluator_wrapped() -> None:
     """Wrap an evaluator's exception in EvaluationError."""
     view = _session_view()
 
@@ -155,10 +155,10 @@ def test_call_evaluator_raising_evaluator_wrapped() -> None:
         raise ValueError("boom")
 
     with pytest.raises(EvaluationError, match="raised an error"):
-        call_evaluator("broken", evaluate, view, {})
+        await call_evaluator("broken", evaluate, view, {})
 
 
-def test_call_evaluator_passes_params() -> None:
+async def test_call_evaluator_passes_params() -> None:
     """Pass the params dict through as keyword arguments."""
     view = _session_view()
     received = {}
@@ -167,8 +167,31 @@ def test_call_evaluator_passes_params() -> None:
         received["threshold"] = threshold
         return EvaluationResult(name="a", score=1.0)
 
-    call_evaluator("with-params", evaluate, view, {"threshold": 0.5})
+    await call_evaluator("with-params", evaluate, view, {"threshold": 0.5})
     assert received["threshold"] == 0.5
+
+
+async def test_call_evaluator_awaits_an_async_evaluator() -> None:
+    """Await the result of an async evaluator."""
+    view = _session_view()
+
+    async def evaluate(session: SessionView, **params: object) -> EvaluationResult:
+        assert session is view
+        return EvaluationResult(name="quality", score=0.9)
+
+    results = await call_evaluator("quality-check", evaluate, view, {})
+    assert [item.name for item in results] == ["quality"]
+
+
+async def test_call_evaluator_raising_async_evaluator_wrapped() -> None:
+    """Wrap an async evaluator's exception in EvaluationError."""
+    view = _session_view()
+
+    async def evaluate(session: SessionView, **params: object) -> EvaluationResult:
+        raise ValueError("boom")
+
+    with pytest.raises(EvaluationError, match="raised an error"):
+        await call_evaluator("broken", evaluate, view, {})
 
 
 async def test_run_fetches_the_session_and_its_nodes_in_one_call(

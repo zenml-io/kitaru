@@ -302,6 +302,208 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/analyzers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Analyzers
+         * @description List analyzers.
+         *
+         *     Clients observe HTTP 200 on success and 422 on invalid pagination
+         *     parameters.
+         *
+         *     Args:
+         *         service: Analyzer service.
+         *         actor: Caller context.
+         *         params: Analyzer list params.
+         *
+         *     Returns:
+         *         Page of analyzers.
+         */
+        get: operations["list_analyzers_api_v1_analyzers_get"];
+        put?: never;
+        /**
+         * Create Analyzer
+         * @description Create an analyzer.
+         *
+         *     Clients observe HTTP 201 on success, 409 when the name is already
+         *     registered, and 422 on invalid input.
+         *
+         *     Args:
+         *         body: Analyzer create request.
+         *         service: Analyzer service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Created analyzer.
+         */
+        post: operations["create_analyzer_api_v1_analyzers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analyzers/{analyzer_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Analyzer
+         * @description Get an analyzer by id.
+         *
+         *     Clients observe HTTP 200 on success and 404 when no analyzer has this
+         *     id.
+         *
+         *     Args:
+         *         analyzer_id: Id of the analyzer.
+         *         service: Analyzer service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Stored analyzer.
+         */
+        get: operations["get_analyzer_api_v1_analyzers__analyzer_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Analyzer
+         * @description Delete an analyzer, cascading its versions.
+         *
+         *     Clients observe HTTP 204 on success and 404 when no analyzer has this
+         *     id.
+         *
+         *     Args:
+         *         analyzer_id: Id of the analyzer.
+         *         service: Analyzer service.
+         *         actor: Caller context.
+         */
+        delete: operations["delete_analyzer_api_v1_analyzers__analyzer_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Analyzer
+         * @description Update an analyzer.
+         *
+         *     Clients observe HTTP 200 on success, 404 when no analyzer has this id,
+         *     and 422 on invalid input.
+         *
+         *     Args:
+         *         analyzer_id: Id of the analyzer.
+         *         body: Analyzer update request.
+         *         service: Analyzer service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Updated analyzer.
+         */
+        patch: operations["update_analyzer_api_v1_analyzers__analyzer_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/analyzers/{analyzer_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Analyzer Versions
+         * @description List an analyzer's versions.
+         *
+         *     Clients observe HTTP 200 on success and 422 on invalid pagination
+         *     parameters.
+         *
+         *     Args:
+         *         analyzer_id: Id of the analyzer.
+         *         service: Analyzer service.
+         *         actor: Caller context.
+         *         params: List params.
+         *
+         *     Returns:
+         *         Page of analyzer versions.
+         */
+        get: operations["list_analyzer_versions_api_v1_analyzers__analyzer_id__versions_get"];
+        put?: never;
+        /**
+         * Create Analyzer Version
+         * @description Create an analyzer version.
+         *
+         *     Clients observe HTTP 201 on success, 404 when no analyzer has this id
+         *     or a script source names an unknown blob, and 422 on invalid input.
+         *
+         *     Args:
+         *         analyzer_id: Id of the analyzer.
+         *         body: Analyzer version create request.
+         *         service: Analyzer service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Created analyzer version.
+         */
+        post: operations["create_analyzer_version_api_v1_analyzers__analyzer_id__versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analyzers/{analyzer_id}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Analyzer Version
+         * @description Get an analyzer version by version number.
+         *
+         *     Clients observe HTTP 200 on success and 404 when no version with this
+         *     number exists for this analyzer.
+         *
+         *     Args:
+         *         analyzer_id: Id of the analyzer.
+         *         version: Version number.
+         *         service: Analyzer service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Stored analyzer version.
+         */
+        get: operations["get_analyzer_version_api_v1_analyzers__analyzer_id__versions__version__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Analyzer Version
+         * @description Update an analyzer version's display version.
+         *
+         *     Clients observe HTTP 200 on success and 404 when no version with this
+         *     number exists for this analyzer.
+         *
+         *     Args:
+         *         analyzer_id: Id of the analyzer.
+         *         version: Version number.
+         *         body: Analyzer version update request.
+         *         service: Analyzer service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Updated analyzer version.
+         */
+        patch: operations["update_analyzer_version_api_v1_analyzers__analyzer_id__versions__version__patch"];
+        trace?: never;
+    };
     "/api/v1/annotations": {
         parameters: {
             query?: never;
@@ -4017,6 +4219,247 @@ export interface components {
             run_spec?: components["schemas"]["RunSpec"] | null;
         };
         /**
+         * AnalysisTaskDetails
+         * @description Analysis task details.
+         */
+        AnalysisTaskDetails: {
+            /**
+             * Agent Id
+             * Format: uuid
+             * @description Agent the insights belong to.
+             */
+            agent_id: string;
+            /**
+             * Analyzer Name
+             * @description Name the analyzer emits insights under.
+             */
+            analyzer_name: string;
+            /**
+             * Input Session Ids
+             * @description Sessions being analyzed.
+             */
+            input_session_ids: string[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "analyzer";
+            /**
+             * Params
+             * @description Parameters passed to the analyzer.
+             */
+            params: {
+                [key: string]: unknown;
+            };
+            /**
+             * Plugin
+             * @description Analyzer plugin to load.
+             */
+            plugin: components["schemas"]["ScriptPluginSpec"] | components["schemas"]["PackagePluginSpec"];
+        };
+        /**
+         * AnalyzerConfig
+         * @description Analyzer config.
+         */
+        AnalyzerConfig: {
+            /**
+             * Analyzer
+             * @description Analyzer name.
+             */
+            analyzer: string;
+            /**
+             * Params
+             * @description Parameters passed to the analyzer.
+             */
+            params?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Version
+             * @description Analyzer version, an omitted value resolves to latest.
+             */
+            version?: number | null;
+        };
+        /**
+         * AnalyzerCreateRequest
+         * @description Analyzer create request.
+         */
+        AnalyzerCreateRequest: {
+            /**
+             * Description
+             * @description Analyzer description.
+             */
+            description?: string | null;
+            /**
+             * Logo Url
+             * @description Analyzer logo URL.
+             */
+            logo_url?: string | null;
+            /**
+             * Metadata
+             * @description Arbitrary metadata.
+             */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Name
+             * @description Analyzer name.
+             */
+            name: string;
+        };
+        /**
+         * AnalyzerResponse
+         * @description Analyzer response.
+         */
+        AnalyzerResponse: {
+            /**
+             * Created
+             * Format: date-time
+             * @description Creation time.
+             */
+            created: string;
+            /**
+             * Description
+             * @description Analyzer description.
+             */
+            description: string | null;
+            /**
+             * Id
+             * Format: uuid
+             * @description Analyzer id.
+             */
+            id: string;
+            /**
+             * Latest Version
+             * @description Highest version number created for this analyzer.
+             */
+            latest_version: number;
+            /**
+             * Logo Url
+             * @description Analyzer logo URL.
+             */
+            logo_url: string | null;
+            /**
+             * Metadata
+             * @description Arbitrary metadata.
+             */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Name
+             * @description Analyzer name.
+             */
+            name: string;
+            /**
+             * Owner Id
+             * @description Id of the owning account, null for a default plugin.
+             */
+            owner_id: string | null;
+            /**
+             * Updated
+             * Format: date-time
+             * @description Last modification time.
+             */
+            updated: string;
+        };
+        /**
+         * AnalyzerUpdateRequest
+         * @description Analyzer update request.
+         */
+        AnalyzerUpdateRequest: {
+            /**
+             * Description
+             * @description New analyzer description.
+             */
+            description?: string | null;
+            /**
+             * Logo Url
+             * @description New logo URL.
+             */
+            logo_url?: string | null;
+            /**
+             * Metadata
+             * @description New metadata.
+             */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * AnalyzerVersionCreateRequest
+         * @description Analyzer version create request.
+         */
+        AnalyzerVersionCreateRequest: {
+            /**
+             * Display Version
+             * @description Human-readable designator.
+             */
+            display_version?: string | null;
+            /**
+             * Source
+             * @description Analyzer code to load.
+             */
+            source: components["schemas"]["ScriptPluginSource"] | components["schemas"]["PackagePluginSource"];
+        };
+        /**
+         * AnalyzerVersionResponse
+         * @description Analyzer version response.
+         */
+        AnalyzerVersionResponse: {
+            /**
+             * Analyzer Id
+             * Format: uuid
+             * @description Analyzer this version belongs to.
+             */
+            analyzer_id: string;
+            /**
+             * Created
+             * Format: date-time
+             * @description Creation time.
+             */
+            created: string;
+            /**
+             * Display Version
+             * @description Human-readable designator.
+             */
+            display_version: string | null;
+            /**
+             * Id
+             * Format: uuid
+             * @description Analyzer version id.
+             */
+            id: string;
+            /**
+             * Source
+             * @description Analyzer code to load.
+             */
+            source: components["schemas"]["ScriptPluginSource"] | components["schemas"]["PackagePluginSource"];
+            /**
+             * Updated
+             * Format: date-time
+             * @description Last modification time.
+             */
+            updated: string;
+            /**
+             * Version
+             * @description Server-assigned version number.
+             */
+            version: number;
+        };
+        /**
+         * AnalyzerVersionUpdateRequest
+         * @description Analyzer version update request.
+         */
+        AnalyzerVersionUpdateRequest: {
+            /**
+             * Display Version
+             * @description New human-readable designator.
+             */
+            display_version?: string | null;
+        };
+        /**
          * AndFilter
          * @description And filter.
          */
@@ -5656,6 +6099,11 @@ export interface components {
              */
             agent_version_id?: string | null;
             /**
+             * Analyzers
+             * @description Analyzers run against every imported session.
+             */
+            analyzers?: components["schemas"]["AnalyzerConfig"][];
+            /**
              * Evaluators
              * @description Evaluators run against every imported session.
              */
@@ -5721,6 +6169,11 @@ export interface components {
              * @description Agent version recorded on the imported sessions.
              */
             agent_version_id?: string | null;
+            /**
+             * Analyzers
+             * @description Analyzers run against every imported session.
+             */
+            analyzers: components["schemas"]["AnalyzerConfig"][];
             /**
              * Created
              * Format: date-time
@@ -6093,6 +6546,18 @@ export interface components {
              * @description Agent the insight belongs to.
              */
             agent_id: string;
+            /**
+             * Analyzer Params
+             * @description Params the analyzer ran with.
+             */
+            analyzer_params?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Analyzer Version Id
+             * @description Analyzer version that produced the insight.
+             */
+            analyzer_version_id?: string | null;
             /**
              * Created
              * Format: date-time
@@ -6659,6 +7124,32 @@ export interface components {
              * @description Items on this page.
              */
             items: components["schemas"]["AgentVersionResponse"][];
+            /**
+             * Next Cursor
+             * @description Cursor for the next page, null on the last page.
+             */
+            next_cursor: string | null;
+        };
+        /** Page[AnalyzerResponse] */
+        Page_AnalyzerResponse_: {
+            /**
+             * Items
+             * @description Items on this page.
+             */
+            items: components["schemas"]["AnalyzerResponse"][];
+            /**
+             * Next Cursor
+             * @description Cursor for the next page, null on the last page.
+             */
+            next_cursor: string | null;
+        };
+        /** Page[AnalyzerVersionResponse] */
+        Page_AnalyzerVersionResponse_: {
+            /**
+             * Items
+             * @description Items on this page.
+             */
+            items: components["schemas"]["AnalyzerVersionResponse"][];
             /**
              * Next Cursor
              * @description Cursor for the next page, null on the last page.
@@ -8503,7 +8994,7 @@ export interface components {
          * @description Kind of work a task runs.
          * @enum {string}
          */
-        TaskKind: "agent" | "evaluator" | "importer";
+        TaskKind: "agent" | "evaluator" | "importer" | "analyzer";
         /**
          * TaskOnFailure
          * @description What a task's hard failure does to the rest of its job.
@@ -8515,6 +9006,11 @@ export interface components {
          * @description Task response.
          */
         TaskResponse: {
+            /**
+             * Agent Id
+             * @description Agent for an analysis task.
+             */
+            agent_id?: string | null;
             /**
              * Agent Version Id
              * @description Agent version run by an agent task.
@@ -8572,6 +9068,11 @@ export interface components {
              * @description Input session for an evaluator task.
              */
             input_session_id?: string | null;
+            /**
+             * Input Session Ids
+             * @description Input sessions for an analysis task.
+             */
+            input_session_ids?: string[] | null;
             /**
              * Job Id
              * Format: uuid
@@ -8649,7 +9150,7 @@ export interface components {
              * Details
              * @description Kind-specific task details.
              */
-            details: components["schemas"]["AgentTaskDetails"] | components["schemas"]["EvaluationTaskDetails"] | components["schemas"]["ImportTaskDetails"];
+            details: components["schemas"]["AgentTaskDetails"] | components["schemas"]["EvaluationTaskDetails"] | components["schemas"]["ImportTaskDetails"] | components["schemas"]["AnalysisTaskDetails"];
             /**
              * Env
              * @description Creator-set process environment extras.
@@ -8664,7 +9165,7 @@ export interface components {
             hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["SetupCommandHook"] | components["schemas"]["TeardownCommandHook"])[];
             /** @description Kind of work the task runs. */
             kind: components["schemas"]["TaskKind"];
-            /** @description Command to run, unset for evaluator and importer tasks. */
+            /** @description Command to run, unset for evaluator, importer, and analyzer tasks. */
             run?: components["schemas"]["TaskRunSpec"] | null;
             /**
              * Secret Env
@@ -10195,6 +10696,659 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_analyzers_api_v1_analyzers_get: {
+        parameters: {
+            query?: {
+                /** @description Cursor from the previous page. */
+                cursor?: string | null;
+                /** @description Items per page. */
+                size?: number;
+                /** @description Sort field and direction, as field:asc or field:desc. */
+                sort?: string;
+                /** @description Filter expression, JSON-encoded in the query string. */
+                filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_AnalyzerResponse_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_analyzer_api_v1_analyzers_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalyzerCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzerResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_analyzer_api_v1_analyzers__analyzer_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analyzer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzerResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_analyzer_api_v1_analyzers__analyzer_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analyzer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_analyzer_api_v1_analyzers__analyzer_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analyzer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalyzerUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzerResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_analyzer_versions_api_v1_analyzers__analyzer_id__versions_get: {
+        parameters: {
+            query?: {
+                /** @description Cursor from the previous page. */
+                cursor?: string | null;
+                /** @description Items per page. */
+                size?: number;
+                /** @description Sort field and direction, as field:asc or field:desc. */
+                sort?: string;
+            };
+            header?: never;
+            path: {
+                analyzer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_AnalyzerVersionResponse_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_analyzer_version_api_v1_analyzers__analyzer_id__versions_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                analyzer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalyzerVersionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzerVersionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_analyzer_version_api_v1_analyzers__analyzer_id__versions__version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analyzer_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzerVersionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_analyzer_version_api_v1_analyzers__analyzer_id__versions__version__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analyzer_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalyzerVersionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzerVersionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

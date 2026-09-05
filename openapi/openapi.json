@@ -462,6 +462,423 @@
         "title": "AgentVersionUpdateRequest",
         "type": "object"
       },
+      "AnalysisTaskDetails": {
+        "description": "Analysis task details.",
+        "properties": {
+          "agent_id": {
+            "description": "Agent the insights belong to.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "analyzer_name": {
+            "description": "Name the analyzer emits insights under.",
+            "title": "Analyzer Name",
+            "type": "string"
+          },
+          "input_session_ids": {
+            "description": "Sessions being analyzed.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Input Session Ids",
+            "type": "array"
+          },
+          "kind": {
+            "const": "analyzer",
+            "default": "analyzer",
+            "title": "Kind",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Parameters passed to the analyzer.",
+            "title": "Params",
+            "type": "object"
+          },
+          "plugin": {
+            "description": "Analyzer plugin to load.",
+            "discriminator": {
+              "mapping": {
+                "package": "#/components/schemas/PackagePluginSpec",
+                "script": "#/components/schemas/ScriptPluginSpec"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScriptPluginSpec"
+              },
+              {
+                "$ref": "#/components/schemas/PackagePluginSpec"
+              }
+            ],
+            "title": "Plugin"
+          }
+        },
+        "required": [
+          "analyzer_name",
+          "params",
+          "plugin",
+          "agent_id",
+          "input_session_ids"
+        ],
+        "title": "AnalysisTaskDetails",
+        "type": "object"
+      },
+      "AnalyzerConfig": {
+        "additionalProperties": false,
+        "description": "Analyzer config.",
+        "properties": {
+          "analyzer": {
+            "description": "Analyzer name.",
+            "title": "Analyzer",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Parameters passed to the analyzer.",
+            "title": "Params",
+            "type": "object"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer version, an omitted value resolves to latest.",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "analyzer"
+        ],
+        "title": "AnalyzerConfig",
+        "type": "object"
+      },
+      "AnalyzerCreateRequest": {
+        "additionalProperties": false,
+        "description": "Analyzer create request.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer description.",
+            "title": "Description"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer logo URL.",
+            "title": "Logo Url"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "Analyzer name.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AnalyzerCreateRequest",
+        "type": "object"
+      },
+      "AnalyzerResponse": {
+        "description": "Analyzer response.",
+        "properties": {
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer description.",
+            "title": "Description"
+          },
+          "id": {
+            "description": "Analyzer id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latest_version": {
+            "description": "Highest version number created for this analyzer.",
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer logo URL.",
+            "title": "Logo Url"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "Analyzer name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the owning account, null for a default plugin.",
+            "title": "Owner Id"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "owner_id",
+          "id",
+          "name",
+          "description",
+          "logo_url",
+          "metadata",
+          "latest_version"
+        ],
+        "title": "AnalyzerResponse",
+        "type": "object"
+      },
+      "AnalyzerUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Analyzer update request.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New analyzer description.",
+            "title": "Description"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New logo URL.",
+            "title": "Logo Url"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New metadata.",
+            "title": "Metadata"
+          }
+        },
+        "title": "AnalyzerUpdateRequest",
+        "type": "object"
+      },
+      "AnalyzerVersionCreateRequest": {
+        "additionalProperties": false,
+        "description": "Analyzer version create request.",
+        "properties": {
+          "display_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable designator.",
+            "title": "Display Version"
+          },
+          "source": {
+            "description": "Analyzer code to load.",
+            "discriminator": {
+              "mapping": {
+                "package": "#/components/schemas/PackagePluginSource",
+                "script": "#/components/schemas/ScriptPluginSource"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScriptPluginSource"
+              },
+              {
+                "$ref": "#/components/schemas/PackagePluginSource"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "AnalyzerVersionCreateRequest",
+        "type": "object"
+      },
+      "AnalyzerVersionResponse": {
+        "description": "Analyzer version response.",
+        "properties": {
+          "analyzer_id": {
+            "description": "Analyzer this version belongs to.",
+            "format": "uuid",
+            "title": "Analyzer Id",
+            "type": "string"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "display_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable designator.",
+            "title": "Display Version"
+          },
+          "id": {
+            "description": "Analyzer version id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "source": {
+            "description": "Analyzer code to load.",
+            "discriminator": {
+              "mapping": {
+                "package": "#/components/schemas/PackagePluginSource",
+                "script": "#/components/schemas/ScriptPluginSource"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScriptPluginSource"
+              },
+              {
+                "$ref": "#/components/schemas/PackagePluginSource"
+              }
+            ],
+            "title": "Source"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          },
+          "version": {
+            "description": "Server-assigned version number.",
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "id",
+          "analyzer_id",
+          "version",
+          "display_version",
+          "source"
+        ],
+        "title": "AnalyzerVersionResponse",
+        "type": "object"
+      },
+      "AnalyzerVersionUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Analyzer version update request.",
+        "properties": {
+          "display_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New human-readable designator.",
+            "title": "Display Version"
+          }
+        },
+        "title": "AnalyzerVersionUpdateRequest",
+        "type": "object"
+      },
       "AndFilter": {
         "additionalProperties": false,
         "description": "And filter.",
@@ -3391,6 +3808,14 @@
             "description": "Agent version recorded on the imported sessions.",
             "title": "Agent Version Id"
           },
+          "analyzers": {
+            "description": "Analyzers run against every imported session.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyzerConfig"
+            },
+            "title": "Analyzers",
+            "type": "array"
+          },
           "evaluators": {
             "description": "Evaluators run against every imported session.",
             "items": {
@@ -3491,6 +3916,14 @@
             ],
             "description": "Agent version recorded on the imported sessions.",
             "title": "Agent Version Id"
+          },
+          "analyzers": {
+            "description": "Analyzers run against every imported session.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyzerConfig"
+            },
+            "title": "Analyzers",
+            "type": "array"
           },
           "created": {
             "description": "Creation time.",
@@ -3594,7 +4027,8 @@
           "agent_id",
           "payload_blob_id",
           "params",
-          "evaluators"
+          "evaluators",
+          "analyzers"
         ],
         "title": "ImportResponse",
         "type": "object"
@@ -4144,6 +4578,32 @@
             "format": "uuid",
             "title": "Agent Id",
             "type": "string"
+          },
+          "analyzer_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Params the analyzer ran with.",
+            "title": "Analyzer Params"
+          },
+          "analyzer_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer version that produced the insight.",
+            "title": "Analyzer Version Id"
           },
           "created": {
             "description": "Creation time.",
@@ -5142,6 +5602,66 @@
           "next_cursor"
         ],
         "title": "Page[AgentVersionResponse]",
+        "type": "object"
+      },
+      "Page_AnalyzerResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyzerResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[AnalyzerResponse]",
+        "type": "object"
+      },
+      "Page_AnalyzerVersionResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyzerVersionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[AnalyzerVersionResponse]",
         "type": "object"
       },
       "Page_AnnotationResponse_": {
@@ -8677,7 +9197,8 @@
         "enum": [
           "agent",
           "evaluator",
-          "importer"
+          "importer",
+          "analyzer"
         ],
         "title": "TaskKind",
         "type": "string"
@@ -8695,6 +9216,19 @@
       "TaskResponse": {
         "description": "Task response.",
         "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent for an analysis task.",
+            "title": "Agent Id"
+          },
           "agent_version_id": {
             "anyOf": [
               {
@@ -8814,6 +9348,22 @@
             ],
             "description": "Input session for an evaluator task.",
             "title": "Input Session Id"
+          },
+          "input_session_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Input sessions for an analysis task.",
+            "title": "Input Session Ids"
           },
           "job_id": {
             "description": "Owning job.",
@@ -8949,6 +9499,7 @@
             "discriminator": {
               "mapping": {
                 "agent": "#/components/schemas/AgentTaskDetails",
+                "analyzer": "#/components/schemas/AnalysisTaskDetails",
                 "evaluator": "#/components/schemas/EvaluationTaskDetails",
                 "importer": "#/components/schemas/ImportTaskDetails"
               },
@@ -8963,6 +9514,9 @@
               },
               {
                 "$ref": "#/components/schemas/ImportTaskDetails"
+              },
+              {
+                "$ref": "#/components/schemas/AnalysisTaskDetails"
               }
             ],
             "title": "Details"
@@ -9014,7 +9568,7 @@
                 "type": "null"
               }
             ],
-            "description": "Command to run, unset for evaluator and importer tasks."
+            "description": "Command to run, unset for evaluator, importer, and analyzer tasks."
           },
           "secret_env": {
             "additionalProperties": {
@@ -11454,6 +12008,956 @@
         "summary": "Create Agent Version",
         "tags": [
           "agents"
+        ]
+      }
+    },
+    "/api/v1/analyzers": {
+      "get": {
+        "description": "List analyzers.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Analyzer service.\n    actor: Caller context.\n    params: Analyzer list params.\n\nReturns:\n    Page of analyzers.",
+        "operationId": "list_analyzers_api_v1_analyzers_get",
+        "parameters": [
+          {
+            "description": "Cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter expression, JSON-encoded in the query string.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_AnalyzerResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "List Analyzers",
+        "tags": [
+          "analyzers"
+        ]
+      },
+      "post": {
+        "description": "Create an analyzer.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Analyzer create request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Created analyzer.",
+        "operationId": "create_analyzer_api_v1_analyzers_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzerCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Create Analyzer",
+        "tags": [
+          "analyzers"
+        ]
+      }
+    },
+    "/api/v1/analyzers/{analyzer_id}": {
+      "delete": {
+        "description": "Delete an analyzer, cascading its versions.\n\nClients observe HTTP 204 on success and 404 when no analyzer has this\nid.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    service: Analyzer service.\n    actor: Caller context.",
+        "operationId": "delete_analyzer_api_v1_analyzers__analyzer_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Delete Analyzer",
+        "tags": [
+          "analyzers"
+        ]
+      },
+      "get": {
+        "description": "Get an analyzer by id.\n\nClients observe HTTP 200 on success and 404 when no analyzer has this\nid.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Stored analyzer.",
+        "operationId": "get_analyzer_api_v1_analyzers__analyzer_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Analyzer",
+        "tags": [
+          "analyzers"
+        ]
+      },
+      "patch": {
+        "description": "Update an analyzer.\n\nClients observe HTTP 200 on success, 404 when no analyzer has this id,\nand 422 on invalid input.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    body: Analyzer update request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Updated analyzer.",
+        "operationId": "update_analyzer_api_v1_analyzers__analyzer_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzerUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Update Analyzer",
+        "tags": [
+          "analyzers"
+        ]
+      }
+    },
+    "/api/v1/analyzers/{analyzer_id}/versions": {
+      "get": {
+        "description": "List an analyzer's versions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    service: Analyzer service.\n    actor: Caller context.\n    params: List params.\n\nReturns:\n    Page of analyzer versions.",
+        "operationId": "list_analyzer_versions_api_v1_analyzers__analyzer_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_AnalyzerVersionResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "List Analyzer Versions",
+        "tags": [
+          "analyzers"
+        ]
+      },
+      "post": {
+        "description": "Create an analyzer version.\n\nClients observe HTTP 201 on success, 404 when no analyzer has this id\nor a script source names an unknown blob, and 422 on invalid input.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    body: Analyzer version create request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Created analyzer version.",
+        "operationId": "create_analyzer_version_api_v1_analyzers__analyzer_id__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzerVersionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Create Analyzer Version",
+        "tags": [
+          "analyzers"
+        ]
+      }
+    },
+    "/api/v1/analyzers/{analyzer_id}/versions/{version}": {
+      "get": {
+        "description": "Get an analyzer version by version number.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this analyzer.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    version: Version number.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Stored analyzer version.",
+        "operationId": "get_analyzer_version_api_v1_analyzers__analyzer_id__versions__version__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Analyzer Version",
+        "tags": [
+          "analyzers"
+        ]
+      },
+      "patch": {
+        "description": "Update an analyzer version's display version.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this analyzer.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    version: Version number.\n    body: Analyzer version update request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Updated analyzer version.",
+        "operationId": "update_analyzer_version_api_v1_analyzers__analyzer_id__versions__version__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzerVersionUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Update Analyzer Version",
+        "tags": [
+          "analyzers"
         ]
       }
     },

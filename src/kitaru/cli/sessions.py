@@ -24,7 +24,7 @@ from pydantic import ValidationError
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.imports import ImportCreateRequest, ImportStats
 from kitaru.api_models.v1.job import JobResponse, JobStatus
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
 from kitaru.api_models.v1.session import (
     SessionListParams,
     SessionOrigin,
@@ -52,6 +52,7 @@ from kitaru.cli.registration import (
     list_params,
     page_result,
     parse_json_object,
+    resolve_analyzer_configs,
     resolve_evaluator_configs,
 )
 from kitaru.cli.session_selection import get_cohort_version
@@ -249,6 +250,8 @@ async def import_sessions(
     tags: list[str] | None = None,
     evaluators: Sequence[str] | None = None,
     evaluator_params: Sequence[str] | None = None,
+    analyzers: Sequence[str] | None = None,
+    analyzer_params: Sequence[str] | None = None,
     media_type: str,
     wait: bool,
     interval: float | None,
@@ -262,6 +265,11 @@ async def import_sessions(
         raise CLIError(
             "invalid_arguments",
             "--evaluator-params requires at least one --evaluator.",
+        )
+    if analyzer_params and not analyzers:
+        raise CLIError(
+            "invalid_arguments",
+            "--analyzer-params requires at least one --analyzer.",
         )
     wait_settings = receipts.get_wait_settings(
         wait=wait, interval=interval, timeout=timeout
@@ -302,6 +310,12 @@ async def import_sessions(
         configs, evaluator_identity, _ = await resolve_evaluator_configs(
             client, evaluators, evaluator_params or []
         )
+    analyzer_configs: list[AnalyzerConfig] = []
+    analyzer_identity: list[dict[str, Any]] = []
+    if analyzers:
+        analyzer_configs, analyzer_identity, _ = await resolve_analyzer_configs(
+            client, analyzers, analyzer_params or []
+        )
 
     blob = await client.blobs.upload(content, media_type=media_type, filename=path.name)
     blob_identity = _blob_metadata(blob)
@@ -324,6 +338,8 @@ async def import_sessions(
         identity["tags"] = tags
     if evaluator_identity:
         identity["evaluators"] = evaluator_identity
+    if analyzer_identity:
+        identity["analyzers"] = analyzer_identity
     request = ImportCreateRequest(
         importer=importer_parent.name,
         version=importer_version.version,
@@ -332,6 +348,7 @@ async def import_sessions(
         payload_blob_id=blob.id,
         params=parsed_params,
         evaluators=configs,
+        analyzers=analyzer_configs,
     )
     try:
         created_import = await client.imports.create(

@@ -24,6 +24,7 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.domain.blob import BlobAccessDenied
 from kitaru.server.domain.session import SessionAccessDenied
 from kitaru.server.domain.task import (
+    AnalysisTaskDetails,
     EvaluationTaskDetails,
     ImportTaskDetails,
     ScriptPluginSpec,
@@ -69,9 +70,11 @@ def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
     details = spec.details
     if isinstance(details, EvaluationTaskDetails):
         sessions.add(details.input_session_id)
-    if isinstance(details, (EvaluationTaskDetails, ImportTaskDetails)) and isinstance(
-        details.plugin, ScriptPluginSpec
-    ):
+    if isinstance(details, AnalysisTaskDetails):
+        sessions.update(details.input_session_ids)
+    if isinstance(
+        details, (EvaluationTaskDetails, ImportTaskDetails, AnalysisTaskDetails)
+    ) and isinstance(details.plugin, ScriptPluginSpec):
         blobs.add(details.plugin.blob_id)
     if isinstance(details, ImportTaskDetails):
         blobs.add(details.payload.blob_id)

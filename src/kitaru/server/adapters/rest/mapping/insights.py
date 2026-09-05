@@ -70,6 +70,8 @@ def insight_to_response(insight: Insight) -> InsightResponse:
         id=insight.id,
         owner_id=insight.owner_id,
         agent_id=insight.agent_id,
+        analyzer_version_id=insight.analyzer_version_id,
+        analyzer_params=insight.analyzer_params,
         name=insight.name,
         title=insight.title,
         description=insight.description,

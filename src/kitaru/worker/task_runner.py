@@ -53,6 +53,7 @@ _LABELS: dict[TaskKind, str] = {
     TaskKind.AGENT: "Agent",
     TaskKind.EVALUATOR: "Evaluator",
     TaskKind.IMPORTER: "Importer",
+    TaskKind.ANALYZER: "Analyzer",
 }
 
 # A task token rejected with one of these means the attempt is dead, either

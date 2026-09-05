@@ -546,6 +546,27 @@ def get_importer_service(
     )
 
 
+def get_analyzer_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
+) -> PluginService:
+    """Return a plugin service bound to the analyzer kind.
+
+    Args:
+        session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
+
+    Returns:
+        Plugin service bound to the SQL repositories.
+    """
+    return PluginService(
+        kind=PluginKind.ANALYZER,
+        repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+        analytics=analytics,
+    )
+
+
 def get_session_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
@@ -589,6 +610,7 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
         sweep_batch_limit=settings.TASK_SWEEP_BATCH_LIMIT,
         evaluator_timeout_seconds=settings.EVALUATOR_TASK_TIMEOUT_SECONDS,
         importer_timeout_seconds=settings.IMPORTER_TASK_TIMEOUT_SECONDS,
+        analyzer_timeout_seconds=settings.ANALYZER_TASK_TIMEOUT_SECONDS,
         max_result_bytes=settings.MAX_TASK_RESULT_BYTES,
         evaluation_pair_limit=settings.EVALUATION_PAIR_LIMIT,
     )

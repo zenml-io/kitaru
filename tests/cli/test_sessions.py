@@ -119,6 +119,12 @@ class StubImportClient:
         self.evaluator_version = SimpleNamespace(
             id=uuid.uuid4(), evaluator_id=self.evaluator.id, version=3
         )
+        self.analyzer = SimpleNamespace(
+            id=uuid.uuid4(), name="clustering", latest_version=2
+        )
+        self.analyzer_version = SimpleNamespace(
+            id=uuid.uuid4(), analyzer_id=self.analyzer.id, version=2
+        )
         self.blob = SimpleNamespace(
             id=uuid.uuid4(), sha256="a" * 64, size=7, media_type="application/jsonl"
         )
@@ -134,6 +140,7 @@ class StubImportClient:
             payload_blob_id=self.blob.id,
             params={},
             evaluators=[],
+            analyzers=[],
             created=now,
             updated=now,
         )
@@ -146,6 +153,7 @@ class StubImportClient:
         self.importers = self._Importers(self)
         self.agents = self._Agents(self)
         self.evaluators = self._Evaluators(self)
+        self.analyzers = self._Analyzers(self)
         self.blobs = self._Blobs(self)
         self.imports = self._Imports(self)
         self.jobs = self._Jobs(self)
@@ -197,6 +205,19 @@ class StubImportClient:
             assert parent_id == self.owner.evaluator.id
             assert version == self.owner.evaluator_version.version
             return self.owner.evaluator_version
+
+    class _Analyzers:
+        def __init__(self, owner: "StubImportClient") -> None:
+            self.owner = owner
+
+        async def list(self, params: Any) -> Any:
+            self.owner.lookup_calls.append("analyzer")
+            return SimpleNamespace(items=[self.owner.analyzer], next_cursor=None)
+
+        async def get_version(self, parent_id: uuid.UUID, version: int) -> Any:
+            assert parent_id == self.owner.analyzer.id
+            assert version == self.owner.analyzer_version.version
+            return self.owner.analyzer_version
 
     class _Blobs:
         def __init__(self, owner: "StubImportClient") -> None:
@@ -528,6 +549,7 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
             "join_on": "/metadata/conversation~1id",
         },
         "evaluators": [],
+        "analyzers": [],
     }
     assert client.job_get_calls == [client.job.id]
     assert result.event == "created"
@@ -536,6 +558,7 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
     assert result.item["import_id"] == str(client.import_response.id)
     assert result.item["job"]["id"] == str(client.job.id)
     assert "evaluators" not in result.item
+    assert "analyzers" not in result.item
     assert result.item["importer"] == {
         "id": str(client.importer.id),
         "name": "jsonl",
@@ -588,6 +611,40 @@ async def test_session_import_forwards_evaluators(tmp_path: Path) -> None:
     ]
 
 
+async def test_session_import_forwards_analyzers(tmp_path: Path) -> None:
+    """Import resolves exact analyzer versions and sends their configs."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    result = await sessions.import_sessions(
+        client,
+        payload,
+        importer="jsonl@2",
+        agent="assistant@3",
+        params=None,
+        analyzers=["clustering@2"],
+        analyzer_params=['clustering@2={"min_size": 5}'],
+        media_type="application/jsonl",
+        wait=False,
+        interval=None,
+        timeout=None,
+    )
+
+    [request] = client.requests
+    assert request.model_dump(mode="json")["analyzers"] == [
+        {"analyzer": "clustering", "version": 2, "params": {"min_size": 5}}
+    ]
+    assert result.item["analyzers"] == [
+        {
+            "id": str(client.analyzer.id),
+            "name": "clustering",
+            "version_id": str(client.analyzer_version.id),
+            "version": 2,
+        }
+    ]
+
+
 async def test_session_import_rejects_evaluator_params_without_evaluator(
     tmp_path: Path,
 ) -> None:
@@ -604,6 +661,32 @@ async def test_session_import_rejects_evaluator_params_without_evaluator(
             agent="assistant@3",
             params=None,
             evaluator_params=['quality@3={"threshold": 0.8}'],
+            media_type="application/jsonl",
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.uploads == []
+
+
+async def test_session_import_rejects_analyzer_params_without_analyzer(
+    tmp_path: Path,
+) -> None:
+    """Analyzer parameters without a selected analyzer fail before upload."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            analyzer_params=['clustering@2={"min_size": 5}'],
             media_type="application/jsonl",
             wait=False,
             interval=None,
@@ -979,6 +1062,8 @@ def test_session_import_argv_registers_streaming_created_receipt(
                 "/metadata/customer~1case_id",
                 "--evaluator",
                 "quality@3",
+                "--analyzer",
+                "clustering@2",
                 "--media-type",
                 "application/jsonl",
             ]
@@ -995,6 +1080,9 @@ def test_session_import_argv_registers_streaming_created_receipt(
     assert client.uploads == [(b'{"x":1}', "application/jsonl", "payload.jsonl")]
     assert client.requests[0].params == {"join_on": "/metadata/customer~1case_id"}
     assert [config.evaluator for config in client.requests[0].evaluators] == ["quality"]
+    assert [config.analyzer for config in client.requests[0].analyzers] == [
+        "clustering"
+    ]
 
 
 @pytest.mark.parametrize("join_on", ["metadata.case_id", "/metadata/case~2id"])
