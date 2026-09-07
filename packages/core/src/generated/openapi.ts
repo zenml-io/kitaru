@@ -2921,7 +2921,7 @@ export interface paths {
          * @description List the nodes of a session, ordered by index ascending.
          *
          *     Clients observe HTTP 200 on success, 403 when a task token neither owns
-         *     nor reads this session, and 422 on invalid pagination parameters.
+         *     nor reads this session, and 422 on invalid filters or pagination parameters.
          *
          *     Args:
          *         session_id: Id of the session.
@@ -17796,8 +17796,10 @@ export interface operations {
                 cursor?: string | null;
                 /** @description Items per page. */
                 size?: number;
-                /** @description Match any selected type; omitted or empty matches all nodes. */
-                node_type?: components["schemas"]["NodeType"][];
+                /** @description Nodes are ordered by ascending index. */
+                sort?: "index:asc";
+                /** @description Filter expression, JSON-encoded in the query string. */
+                filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
                 /** @description Include reasoning, inputs, outputs, and attributes. */
                 include_payloads?: boolean;
             };

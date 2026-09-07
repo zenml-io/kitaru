@@ -17,16 +17,16 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import AwareDatetime, Field, model_validator
 
 from kitaru.api_models.v1.base import (
-    CursorParams,
     JsonValue,
     RequestModel,
     ResponseModel,
 )
+from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.session import SessionDetailResponse, TokenUsage
 
 
@@ -110,12 +110,12 @@ class SessionNodeCreateRequest(RequestModel):
     )
 
 
-class SessionNodeListParams(CursorParams):
+class SessionNodeListParams(FilterableListParams):
     """Session node list params."""
 
-    node_type: list[NodeType] = Field(
-        default_factory=list,
-        description="Match any selected type; omitted or empty matches all nodes.",
+    sort: Literal["index:asc"] = Field(
+        default="index:asc",
+        description="Nodes are ordered by ascending index.",
     )
     include_payloads: bool = Field(
         default=False,

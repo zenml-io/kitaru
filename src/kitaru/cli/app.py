@@ -37,7 +37,6 @@ from kitaru.api_models.v1.investigation import (
 )
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
-from kitaru.api_models.v1.session_node import NodeType
 from kitaru.cli import (
     annotations,
     cohorts,
@@ -3948,11 +3947,11 @@ async def session_get(session: uuid.UUID, /) -> CommandResult:
             ParameterSpec("--size", "integer", "option", False, "Items per page."),
             ParameterSpec("--cursor", "string", "option", False, "Page cursor."),
             ParameterSpec(
-                "--node-type",
-                "llm_call|tool_call|subagent_call|span[]",
+                "--filter",
+                "JSON",
                 "option",
                 False,
-                "Match any selected node type; repeat to select multiple types.",
+                "Filter expression as a JSON object.",
             ),
             ParameterSpec(
                 "--include-payloads",
@@ -3972,7 +3971,7 @@ async def session_nodes(
     size: int = 20,
     cursor: str | None = None,
     include_payloads: bool = False,
-    node_type: list[NodeType] | None = None,
+    filter: str | None = None,
 ) -> CommandResult:
     """List one server page of a session's nodes."""
     async with _open_asset_client() as client:
@@ -3982,7 +3981,7 @@ async def session_nodes(
             size=size,
             cursor=cursor,
             include_payloads=include_payloads,
-            node_type=node_type,
+            filter=filter,
         )
 
 

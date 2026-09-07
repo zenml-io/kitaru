@@ -234,7 +234,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
         for parameter in session_commands["session.nodes"]["parameters"]
     }
     assert "--include-payloads" in node_parameters
-    assert "--filter" not in node_parameters
+    assert "--filter" in node_parameters
     assert "--sort" not in node_parameters
     session_list_errors = {
         error["kind"] for error in session_commands["session.list"]["errors"]

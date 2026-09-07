@@ -22,6 +22,7 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeListParams,
     SessionNodeResponse,
 )
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.session_node import (
     SessionNodeFilter,
     SessionNodeUpsert,
@@ -182,8 +183,11 @@ def session_node_list_params_to_filter(
     """
     return SessionNodeFilter(
         session_id=session_id,
-        node_type=params.node_type,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         include_payloads=params.include_payloads,
         cursor=params.cursor,
         size=params.size,
+        sort=params.sort,
     )

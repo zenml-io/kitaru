@@ -21,6 +21,7 @@ from sqlalchemy.orm import defer
 
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import NodeStatus
+from kitaru.server.adapters.db.filtering import compile_filter_expression
 from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
@@ -141,9 +142,12 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         statement = select(SessionNodeORM).where(
             SessionNodeORM.session_id == session_node_filter.session_id
         )
-        if session_node_filter.node_type:
+        if session_node_filter.expression is not None:
             statement = statement.where(
-                SessionNodeORM.node_type.in_(session_node_filter.node_type)
+                compile_filter_expression(
+                    session_node_filter.expression,
+                    {"node_type": SessionNodeORM.node_type},
+                )
             )
         statement = statement.options(*(defer(column) for column in deferred))
         rows, next_cursor = await paginate_by_index(

@@ -31,7 +31,7 @@ from conftest import (
     build_payload_store,
     override_idempotency,
 )
-from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
+from kitaru.api_models.v1.filter import AndFilter, Filter, FilterCondition, FilterOp
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionDetailResponse,
@@ -367,15 +367,20 @@ async def test_ingest_nodes_and_list_nodes(api_client: KitaruAPIClient) -> None:
 
 
 @pytest.mark.parametrize(
-    ("node_types", "expected"),
+    ("filter_", "expected"),
     [
-        ([], [0, 1, 2, 3, 4]),
-        ([NodeType.LLM_CALL], [1, 4]),
-        ([NodeType.LLM_CALL, NodeType.TOOL_CALL], [1, 3, 4]),
+        (None, [0, 1, 2, 3, 4]),
+        (FilterCondition(field="node_type", op=FilterOp.EQ, value="llm_call"), [1, 4]),
+        (
+            FilterCondition(
+                field="node_type", op=FilterOp.IN, value=["llm_call", "tool_call"]
+            ),
+            [1, 3, 4],
+        ),
     ],
 )
 async def test_iter_nodes(
-    api_client: KitaruAPIClient, node_types: list[NodeType], expected: list[int]
+    api_client: KitaruAPIClient, filter_: Filter | None, expected: list[int]
 ) -> None:
     """Iterate every node of a session across pages through the SDK."""
     created = await api_client.sessions.create(
@@ -412,7 +417,7 @@ async def test_iter_nodes(
     collected = [
         item.index
         async for item in api_client.sessions.iter_nodes(
-            created.id, SessionNodeListParams(size=2, node_type=node_types)
+            created.id, SessionNodeListParams(size=2, filter=filter_)
         )
     ]
     assert collected == expected

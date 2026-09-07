@@ -74,15 +74,9 @@ async def _get_children(
     state: MCPServerState, request: ActivityChildrenRequest
 ) -> object:
     if isinstance(request, SessionNodesRequest):
-        page = await state.client.sessions.list_nodes(
-            request.parent_id,
-            SessionNodeListParams(
-                cursor=request.cursor,
-                size=request.size,
-                include_payloads=request.include_payloads,
-                node_type=request.node_type,
-            ),
-        )
+        params = build_list_params(SessionNodeListParams, request)
+        params.include_payloads = request.include_payloads
+        page = await state.client.sessions.list_nodes(request.parent_id, params)
     elif request.kind == "experiment_run_jobs":
         page = await state.client.experiment_runs.list_jobs(
             request.parent_id,

@@ -6,7 +6,6 @@ import {
   type Filter,
   KitaruClient,
   type SessionCreateRequest,
-  type SessionNodeListParams,
 } from "../../src/index.js";
 
 const ID = "018f0000-0000-7000-8000-000000000001";
@@ -264,26 +263,38 @@ describe("foundation resources", () => {
     ]);
   });
 
-  it.each<{ nodeType: SessionNodeListParams["nodeType"]; query: string }>([
-    { nodeType: undefined, query: "" },
-    { nodeType: [], query: "" },
-    { nodeType: ["llm_call"], query: "?node_type=llm_call" },
+  it.each<{ filter?: Filter | null }>([
+    {},
+    { filter: null },
     {
-      nodeType: ["llm_call", "tool_call"],
-      query: "?node_type=llm_call&node_type=tool_call",
+      filter: {
+        field: "node_type",
+        op: "in",
+        value: ["llm_call", "tool_call"],
+      },
     },
-  ])("encodes session node types $nodeType", async ({ nodeType, query }) => {
+    {
+      filter: {
+        or: [
+          { field: "node_type", op: "eq", value: "llm_call" },
+          { not: { field: "node_type", op: "eq", value: "span" } },
+        ],
+      },
+    },
+  ])("encodes session node filter $filter", async ({ filter }) => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () =>
       jsonResponse({ items: [], next_cursor: null }),
     );
     const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
 
-    await client.sessions.listNodes(ID, { nodeType });
+    await client.sessions.listNodes(ID, { filter, sort: "index:asc" });
 
-    expect(fetch).toHaveBeenCalledWith(
-      `https://api.example/api/v1/sessions/${ID}/nodes${query}`,
-      expect.objectContaining({ method: "GET" }),
+    const url = new URL(String(fetch.mock.calls[0]?.[0]));
+    expect(url.pathname).toBe(`/api/v1/sessions/${ID}/nodes`);
+    expect(url.searchParams.get("filter")).toBe(
+      filter == null ? null : JSON.stringify(filter),
     );
+    expect(url.searchParams.get("sort")).toBe("index:asc");
   });
 
   it("creates a session run and validates its returned job", async () => {

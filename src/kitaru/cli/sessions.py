@@ -30,7 +30,7 @@ from kitaru.api_models.v1.session import (
     SessionOrigin,
     SessionStatus,
 )
-from kitaru.api_models.v1.session_node import NodeType, SessionNodeListParams
+from kitaru.api_models.v1.session_node import SessionNodeListParams
 from kitaru.api_models.v1.tag import (
     TagCreateRequest,
     TagLinkCreateRequest,
@@ -513,13 +513,15 @@ async def list_session_nodes(
     size: int,
     cursor: str | None,
     include_payloads: bool,
-    node_type: list[NodeType] | None = None,
+    filter: str | None = None,
 ) -> CommandResult:
     """List one bounded server page of session nodes in index order."""
-    params = SessionNodeListParams(
-        size=size,
-        cursor=cursor,
-        include_payloads=include_payloads,
-        node_type=node_type or [],
+    params = SessionNodeListParams.model_validate(
+        {
+            "size": size,
+            "cursor": cursor,
+            "include_payloads": include_payloads,
+            "filter": filter,
+        }
     )
     return page_result(await client.sessions.list_nodes(session_id, params), size=size)

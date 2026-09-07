@@ -618,7 +618,7 @@ async def test_public_sdk_rejects_malformed_arguments_before_handler() -> None:
             "operation": "list_children",
             "kind": "session_nodes",
             "parent_id": str(uuid.uuid4()),
-            "node_type": ["hook"],
+            "filter": {"field": "node_type"},
         },
         {
             "operation": "list_children",
@@ -872,11 +872,23 @@ async def test_public_activity_preserves_typed_token_usage(
     assert item["cost"] == ("0.1250" if kind == "session" else "0.2500")
 
 
-@pytest.mark.parametrize("node_types", [None, ["llm_call", "tool_call"]])
-async def test_public_activity_forwards_session_node_types(
-    node_types: list[str] | None,
+@pytest.mark.parametrize(
+    "filters",
+    [
+        None,
+        {"field": "node_type", "op": "in", "value": ["llm_call", "tool_call"]},
+        {
+            "and": [
+                {"field": "node_type", "op": "ne", "value": "span"},
+                {"not": {"field": "node_type", "op": "eq", "value": "subagent_call"}},
+            ]
+        },
+    ],
+)
+async def test_public_activity_forwards_session_node_filters(
+    filters: dict[str, object] | None,
 ) -> None:
-    """The public tool forwards selected types and preserves unfiltered reads."""
+    """The public tool preserves boolean aliases and unfiltered reads."""
     client = FakeClient()
     session_id = uuid.uuid4()
     calls: list[tuple[uuid.UUID, SessionNodeListParams]] = []
@@ -897,8 +909,8 @@ async def test_public_activity_forwards_session_node_types(
         "cursor": "node-cursor",
         "include_payloads": True,
     }
-    if node_types is not None:
-        request["node_type"] = node_types
+    if filters is not None:
+        request["filter"] = filters
     result = await server.call_tool(
         "kitaru_activity_read", {"request": request}, context
     )
@@ -911,5 +923,6 @@ async def test_public_activity_forwards_session_node_types(
         "size": 3,
         "cursor": "node-cursor",
         "include_payloads": True,
-        "node_type": node_types or [],
+        "filter": json.dumps(filters) if filters else None,
+        "sort": "index:asc",
     }

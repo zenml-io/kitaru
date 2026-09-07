@@ -14,9 +14,10 @@
 """Session node filter and command models."""
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from pydantic import Field
 
@@ -24,6 +25,7 @@ from kitaru.api_models.v1.session import TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
+from kitaru.server.filtering import EQUALITY_OPS, FilterField
 
 
 class SessionNodeFilter(ListFilter):
@@ -35,11 +37,13 @@ class SessionNodeFilter(ListFilter):
     """
 
     sortable_fields: ClassVar[frozenset[str]] = frozenset({"index"})
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "node_type": FilterField(value_type=NodeType, ops=EQUALITY_OPS),
+    }
 
     session_id: uuid.UUID
-    node_type: list[NodeType] = Field(default_factory=list)
     include_payloads: bool = False
-    sort: str = "index:asc"
+    sort: Literal["index:asc"] = "index:asc"
 
 
 class SessionNodeUpsert(FrozenModel):
