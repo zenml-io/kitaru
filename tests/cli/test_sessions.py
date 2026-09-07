@@ -18,14 +18,18 @@ import traceback
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from kitaru.api_models.v1.imports import ImportResponse
+from kitaru.api_models.v1.imports import (
+    ApiImportSource,
+    BlobImportSource,
+    ImportResponse,
+)
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import (
     SessionListParams,
@@ -137,7 +141,7 @@ class StubImportClient:
             agent_id=self.agent.id,
             agent_version_id=self.agent_version.id,
             importer_version_id=self.importer_version.id,
-            payload_blob_id=self.blob.id,
+            source=BlobImportSource(blob_id=self.blob.id),
             params={},
             evaluators=[],
             analyzers=[],
@@ -569,7 +573,8 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
         "agent_id": str(client.agent.id),
         "agent_version_id": str(client.agent_version.id),
         "version": 2,
-        "payload_blob_id": str(client.blob.id),
+        "source": {"type": "blob", "blob_id": str(client.blob.id)},
+        "payload_blob_id": None,
         "params": {
             "secret_value": "not-for-receipt",
             "join_on": "/metadata/conversation~1id",
@@ -979,6 +984,52 @@ async def test_waited_session_import_returns_validated_stats_and_task_action(
     assert '"field":"task_id"' in result.next_actions[0]
 
 
+def _run_terminal_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    job: JobResponse,
+    tasks: list[TaskResponse],
+) -> tuple[int, dict[str, Any]]:
+    """Invoke a waited CLI import against a settled remote job."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield client
+
+    async def wait_for_terminal_tasks(*args, **kwargs):
+        assert args[1] == client.job.id
+        return job, tasks
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(
+        sessions.receipts, "wait_for_terminal_tasks", wait_for_terminal_tasks
+    )
+    exit_code = app_module.main(
+        [
+            "session",
+            "import",
+            str(payload),
+            "--importer",
+            "jsonl@2",
+            "--agent",
+            "assistant@3",
+            "--wait",
+        ]
+    )
+    captured = capsys.readouterr()
+    events = [json.loads(line) for line in captured.out.splitlines()]
+    assert events[0]["event"] == "created"
+    if exit_code:
+        return exit_code, json.loads(captured.err)["error"]
+    assert captured.err == ""
+    assert events[-1]["event"] == "terminal"
+    return exit_code, events[-1]
+
+
 @pytest.mark.parametrize(
     ("job_status", "task_status", "stats", "kind"),
     [
@@ -998,7 +1049,9 @@ async def test_waited_session_import_returns_validated_stats_and_task_action(
     ],
 )
 def test_terminal_import_preserves_partial_and_remote_outcomes(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     job_status: JobStatus,
     task_status: TaskStatus,
     stats: dict[str, Any] | None,
@@ -1007,26 +1060,16 @@ def test_terminal_import_preserves_partial_and_remote_outcomes(
     """Item failures and remote settlement retain the enriched receipt."""
     job = _job(job_status)
     task = _task(job, status=task_status, result=stats)
-    monkeypatch.setattr(sessions, "emit_event", lambda *args: None)
+    exit_code, error = _run_terminal_import(tmp_path, monkeypatch, capsys, job, [task])
 
-    def terminal_job_error(job: JobResponse, receipt: dict[str, Any]) -> CLIError:
-        remote_kind = (
-            "remote_failed" if job.status is JobStatus.FAILED else "remote_canceled"
-        )
-        return CLIError(remote_kind, "remote outcome", details={"receipt": receipt})
-
-    monkeypatch.setattr(sessions.receipts, "terminal_job_error", terminal_job_error)
-
-    with pytest.raises(CLIError) as error:
-        sessions._terminal_import_result(job, [task], identity={"blob": {}})
-
-    assert error.value.kind == kind
-    receipt = error.value.details["receipt"]
+    assert exit_code != 0
+    assert error["kind"] == kind
+    receipt = error["details"]["receipt"]
     assert receipt["task"]["id"] == str(task.id)
     assert receipt["task"]["error"] == task.error
     if stats is not None:
         assert receipt["stats"]["failed"] == 1
-    assert str(task.id) in error.value.details["next_actions"][0]
+    assert str(task.id) in error["details"]["next_actions"][0]
 
 
 @pytest.mark.parametrize(
@@ -1037,7 +1080,9 @@ def test_terminal_import_preserves_partial_and_remote_outcomes(
     ],
 )
 def test_terminal_import_ignores_malformed_remote_diagnostics(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     job_status: JobStatus,
     task_status: TaskStatus,
     kind: str,
@@ -1046,16 +1091,11 @@ def test_terminal_import_ignores_malformed_remote_diagnostics(
     job = _job(job_status)
     task = _task(job, status=task_status, result={"diagnostic": "worker stopped"})
 
-    def terminal_job_error(job: JobResponse, receipt: dict[str, Any]) -> CLIError:
-        return CLIError(kind, "remote outcome", details={"receipt": receipt})
+    exit_code, error = _run_terminal_import(tmp_path, monkeypatch, capsys, job, [task])
 
-    monkeypatch.setattr(sessions.receipts, "terminal_job_error", terminal_job_error)
-
-    with pytest.raises(CLIError) as error:
-        sessions._terminal_import_result(job, [task], identity={})
-
-    assert error.value.kind == kind
-    assert "stats" not in error.value.details["receipt"]
+    assert exit_code != 0
+    assert error["kind"] == kind
+    assert "stats" not in error["details"]["receipt"]
 
 
 def test_session_import_argv_registers_streaming_created_receipt(
@@ -1146,22 +1186,31 @@ async def test_session_import_rejects_invalid_join_pointer_before_upload(
     ],
 )
 def test_terminal_import_rejects_missing_or_malformed_completed_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     tasks: list[TaskResponse] | None,
 ) -> None:
     """Completed receipts reject invalid task sets and malformed statistics."""
     job = _job(JobStatus.COMPLETED)
     observed = tasks if tasks is not None else [_task(job, result={"created": "bad"})]
 
-    with pytest.raises(CLIError) as error:
-        sessions._terminal_import_result(job, observed, identity={})
+    exit_code, error = _run_terminal_import(
+        tmp_path, monkeypatch, capsys, job, observed
+    )
 
-    assert error.value.kind == "internal_error"
+    assert exit_code != 0
+    assert error["kind"] == "internal_error"
 
 
 @pytest.mark.parametrize("extra_kind", [TaskKind.ANALYZER, TaskKind.EVALUATOR])
 @pytest.mark.parametrize("importer_first", [True, False])
 def test_terminal_import_accepts_followup_tasks(
-    extra_kind: TaskKind, importer_first: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    extra_kind: TaskKind,
+    importer_first: bool,
 ) -> None:
     """Read importer statistics even when a job includes follow-up tasks."""
     job = _job(JobStatus.COMPLETED)
@@ -1169,22 +1218,30 @@ def test_terminal_import_accepts_followup_tasks(
     extra = _task(job, kind=extra_kind, result=[])
     tasks = [importer, extra] if importer_first else [extra, importer]
 
-    result = sessions._terminal_import_result(job, tasks, identity={})
+    exit_code, result = _run_terminal_import(tmp_path, monkeypatch, capsys, job, tasks)
 
-    assert result.item["task"]["id"] == str(importer.id)
-    assert result.item["stats"]["created"] == 3
+    assert exit_code == 0
+    assert result["item"]["task"]["id"] == str(importer.id)
+    assert result["item"]["stats"]["created"] == 3
 
 
 @pytest.mark.parametrize("importer_count", [0, 2])
-def test_terminal_import_requires_exactly_one_importer(importer_count: int) -> None:
+def test_terminal_import_requires_exactly_one_importer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    importer_count: int,
+) -> None:
     """Follow-up tasks do not hide missing or duplicate importer tasks."""
     job = _job(JobStatus.COMPLETED)
     tasks = [_task(job, kind=TaskKind.ANALYZER, result=[])] + [
         _task(job, result={"created": 3, "skipped": 0, "failed": 0})
         for _ in range(importer_count)
     ]
-    with pytest.raises(CLIError, match="exactly one importer task"):
-        sessions._terminal_import_result(job, tasks, identity={})
+    exit_code, error = _run_terminal_import(tmp_path, monkeypatch, capsys, job, tasks)
+    assert exit_code != 0
+    assert error["kind"] == "internal_error"
+    assert "exactly one importer task" in error["message"]
 
 
 @pytest.mark.parametrize(
@@ -1211,3 +1268,171 @@ def test_session_nodes_rejects_invalid_filter(
     )
     assert resource.node_calls == []
     assert json.loads(capsys.readouterr().err)["error"]["kind"] == "invalid_arguments"
+
+
+def test_resolve_time_option_relative_duration_resolves_near_now() -> None:
+    """A relative --since duration resolves to a UTC timestamp near now."""
+    before = datetime.now(UTC) - timedelta(days=7)
+    resolved = sessions._resolve_time_option("7d", "--since")
+    after = datetime.now(UTC) - timedelta(days=7)
+
+    assert resolved is not None
+    parsed = datetime.fromisoformat(resolved)
+    assert before <= parsed <= after
+
+
+async def test_session_import_api_query_merges_options_and_uploads_nothing() -> None:
+    """An API import builds the merged query and performs no upload."""
+    client = StubImportClient()
+
+    result = await sessions.import_sessions(
+        client,
+        None,
+        importer="jsonl@2",
+        agent="assistant@3",
+        params=None,
+        media_type=None,
+        wait=False,
+        interval=None,
+        timeout=None,
+        since="2026-08-01T00:00:00Z",
+        trace_ids=["trace-1", "trace-2"],
+        query='{"project_id":"proj-1"}',
+    )
+
+    assert client.uploads == []
+    [request] = client.requests
+    expected_query = {
+        "project_id": "proj-1",
+        "since": "2026-08-01T00:00:00Z",
+        "trace_ids": ["trace-1", "trace-2"],
+    }
+    assert isinstance(request.source, ApiImportSource)
+    assert (
+        request.source.query.model_dump(mode="json", exclude_unset=True)
+        == expected_query
+    )
+    assert result.item["query"] == expected_query
+    assert "blob" not in result.item
+
+
+async def test_session_import_query_clash_rejected_before_remote_call() -> None:
+    """A --query key already set by --since is rejected before any lookup."""
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            None,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type=None,
+            wait=False,
+            interval=None,
+            timeout=None,
+            since="2026-08-01T00:00:00Z",
+            query='{"since":"2026-08-02T00:00:00Z"}',
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []
+    assert client.requests == []
+
+
+async def test_session_import_rejects_an_inverted_query_before_remote_call() -> None:
+    """An inverted window merged from --since and --query is rejected locally."""
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            None,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type=None,
+            wait=False,
+            interval=None,
+            timeout=None,
+            since="2026-08-02T00:00:00Z",
+            query='{"until":"2026-08-01T00:00:00Z"}',
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []
+    assert client.requests == []
+
+
+async def test_session_import_rejects_path_combined_with_since(
+    tmp_path: Path,
+) -> None:
+    """FILE and an API selection option cannot be combined."""
+    payload = tmp_path / "payload.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type="application/jsonl",
+            wait=False,
+            interval=None,
+            timeout=None,
+            since="7d",
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []
+
+
+async def test_session_import_rejects_media_type_without_path() -> None:
+    """--media-type only applies to an uploaded file."""
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            None,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type="application/jsonl",
+            wait=False,
+            interval=None,
+            timeout=None,
+            since="7d",
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []
+
+
+async def test_session_import_rejects_neither_path_nor_api_selection() -> None:
+    """Omitting both FILE and every API selection option is rejected."""
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            None,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type=None,
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []

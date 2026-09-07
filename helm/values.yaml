@@ -377,6 +377,10 @@ server:
       # The Modal app name the sandbox runs under.
       appName: kitaru-workers
 
+      # The Modal environment the app and sandboxes are created in. If not
+      # set, uses the workspace default environment.
+      environment:
+
       # The number of CPU cores to allocate to the sandbox. If not set, uses
       # the Modal default.
       cpu:

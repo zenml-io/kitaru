@@ -5,6 +5,8 @@
 
 import json
 import uuid
+import weakref
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import pytest
@@ -41,7 +43,9 @@ from kitaru.insights.pipeline import (
     InsightGenerationConfig,
     InsightResultSizeError,
     generate_insights,
+    generate_insights_from_profile,
 )
+from kitaru.insights.profiling import profile_sessions
 
 NOW = datetime(2026, 9, 4, tzinfo=UTC)
 OWNER_ID = uuid.UUID("01990000-0000-7000-8000-000000000001")
@@ -250,6 +254,7 @@ async def test_deterministic_result_is_canonical_and_byte_stable() -> None:
     observer = RecordingObserver()
     first = await generate_insights(sessions, context=_context(), observer=observer)
     second = await generate_insights(list(reversed(sessions)), context=_context())
+    assert await generate_insights(iter(sessions), context=_context()) == first
 
     assert first.model_dump_json() == second.model_dump_json()
     assert 1 <= len(first.insights) <= 6
@@ -391,7 +396,7 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
         _session(1, status=SessionStatus.FAILED),
         _session(2, status=SessionStatus.COMPLETED),
     ]
-    profiling = insight_pipeline.profile_sessions(sessions)
+    profiling = profile_sessions(sessions)
     first_candidate = profiling.candidates[0]
     profiling = profiling.model_copy(
         update={
@@ -411,16 +416,11 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
             ],
         }
     )
-    monkeypatch.setattr(
-        insight_pipeline,
-        "profile_sessions",
-        lambda sessions, config, source_session_count: profiling,
-    )
-    full = await generate_insights(sessions, context=_context())
+    full = await generate_insights_from_profile(profiling, context=_context())
     maximum = len(full.model_dump_json().encode("utf-8")) - 1
 
-    bounded = await generate_insights(
-        sessions,
+    bounded = await generate_insights_from_profile(
+        profiling,
         context=_context(),
         config=InsightGenerationConfig(max_result_bytes=maximum),
     )
@@ -457,7 +457,7 @@ async def test_result_byte_bound_tries_lower_priority_individual_cards(
         _session(1, status=SessionStatus.FAILED),
         _session(2, status=SessionStatus.COMPLETED),
     ]
-    profiling = insight_pipeline.profile_sessions(sessions)
+    profiling = profile_sessions(sessions)
     first_candidate = profiling.candidates[0].model_copy(
         update={"investigation_prompt": "x" * 10_000}
     )
@@ -472,14 +472,9 @@ async def test_result_byte_bound_tries_lower_priority_individual_cards(
     profiling = profiling.model_copy(
         update={"candidates": [first_candidate, second_candidate]}
     )
-    monkeypatch.setattr(
-        insight_pipeline,
-        "profile_sessions",
-        lambda sessions, config, source_session_count: profiling,
-    )
 
-    bounded = await generate_insights(
-        sessions,
+    bounded = await generate_insights_from_profile(
+        profiling,
         context=_context(),
         config=InsightGenerationConfig(max_result_bytes=8_000),
     )
@@ -499,7 +494,7 @@ async def test_result_byte_bound_neutralizes_removed_recommendation(
         _session(1, status=SessionStatus.FAILED),
         _session(2, status=SessionStatus.COMPLETED),
     ]
-    profiling = insight_pipeline.profile_sessions(sessions)
+    profiling = profile_sessions(sessions)
     first_candidate = profiling.candidates[0]
     profiling = profiling.model_copy(
         update={
@@ -533,19 +528,14 @@ async def test_result_byte_bound_neutralizes_removed_recommendation(
     )
     monkeypatch.setattr(
         insight_pipeline,
-        "profile_sessions",
-        lambda sessions, config, source_session_count: profiling,
-    )
-    monkeypatch.setattr(
-        insight_pipeline,
         "generate_deterministic_plan",
         lambda profiling: plan,
     )
-    full = await generate_insights(sessions, context=_context())
+    full = await generate_insights_from_profile(profiling, context=_context())
     maximum = len(full.model_dump_json().encode("utf-8")) - 1
 
-    bounded = await generate_insights(
-        sessions,
+    bounded = await generate_insights_from_profile(
+        profiling,
         context=_context(),
         config=InsightGenerationConfig(max_result_bytes=maximum),
     )
@@ -565,7 +555,7 @@ async def test_oversized_prompt_omits_only_the_affected_card(monkeypatch) -> Non
         _session(1, status=SessionStatus.FAILED),
         _session(2, status=SessionStatus.COMPLETED),
     ]
-    profiling = insight_pipeline.profile_sessions(sessions)
+    profiling = profile_sessions(sessions)
     first_candidate = profiling.candidates[0]
     profiling = profiling.model_copy(
         update={
@@ -595,13 +585,8 @@ async def test_oversized_prompt_omits_only_the_affected_card(monkeypatch) -> Non
             ]
         }
     )
-    monkeypatch.setattr(
-        insight_pipeline,
-        "profile_sessions",
-        lambda sessions, config, source_session_count: modified,
-    )
 
-    result = await generate_insights(sessions, context=_context())
+    result = await generate_insights_from_profile(modified, context=_context())
 
     assert result.insights
     assert oversized_id not in {insight.name for insight in result.insights}
@@ -622,7 +607,7 @@ async def test_oversized_recommendation_falls_back_to_first_retained_card(
         _session(1, status=SessionStatus.FAILED),
         _session(2, status=SessionStatus.COMPLETED),
     ]
-    profiling = insight_pipeline.profile_sessions(sessions)
+    profiling = profile_sessions(sessions)
     first_candidate = profiling.candidates[0]
     profiling = profiling.model_copy(
         update={
@@ -652,13 +637,8 @@ async def test_oversized_recommendation_falls_back_to_first_retained_card(
             ]
         }
     )
-    monkeypatch.setattr(
-        insight_pipeline,
-        "profile_sessions",
-        lambda sessions, config, source_session_count: modified,
-    )
 
-    result = await generate_insights(sessions, context=_context())
+    result = await generate_insights_from_profile(modified, context=_context())
 
     assert result.recommendation is not None
     assert result.recommendation.insight_name == result.insights[0].name
@@ -696,19 +676,14 @@ async def test_reports_bounded_card_contribution_references(monkeypatch) -> None
         )
         for number in range(1, 13)
     ]
-    profiling = insight_pipeline.profile_sessions(sessions)
+    profiling = profile_sessions(sessions)
     candidate = profiling.candidates[0].model_copy(
         update={"contributing_session_ids": [item.session.id for item in sessions]}
     )
     modified = profiling.model_copy(update={"candidates": [candidate]})
-    monkeypatch.setattr(
-        insight_pipeline,
-        "profile_sessions",
-        lambda sessions, config, source_session_count: modified,
-    )
 
-    result = await generate_insights(
-        sessions,
+    result = await generate_insights_from_profile(
+        modified,
         context=_context(),
         config=InsightGenerationConfig(max_contributing_sessions_per_insight=3),
     )
@@ -787,3 +762,38 @@ async def test_rejects_node_from_another_session() -> None:
 
     with pytest.raises(ValueError, match="enclosing session"):
         await generate_insights([session], context=_context())
+
+
+async def test_pipeline_releases_each_session_before_requesting_the_next() -> None:
+    def sessions() -> Iterator[SessionWithNodesResponse]:
+        for number in range(1, 302):
+            session = _session(number, status=SessionStatus.FAILED)
+            reference = weakref.ref(session)
+            yield session
+            del session
+            assert reference() is None
+
+    result = await generate_insights(sessions(), context=_context())
+    assert result.coverage.sessions_analyzed == 301
+
+
+async def test_late_invalid_stream_input_prevents_model_calls() -> None:
+    generator = FailingEditor()
+
+    def sessions() -> Iterator[SessionWithNodesResponse]:
+        for number in range(1, 1102):
+            session = _session(number, status=SessionStatus.FAILED)
+            if number == 1101:
+                session.session.import_id = uuid.uuid4()
+            yield session
+
+    with pytest.raises(ValueError, match="source import"):
+        await generate_insights(
+            sessions(),
+            context=_context(),
+            config=InsightGenerationConfig(
+                model=ModelGenerationConfig(model="gpt-test")
+            ),
+            generator=generator,
+        )
+    assert generator.selected is None

@@ -20,7 +20,7 @@
 import json
 import re
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -534,7 +534,10 @@ class LogfireRecordsImporter:
             if fallback:
                 fallback_sessions.add(key)
 
-        for (source_instance, session_id), session_traces in sorted(grouped.items()):
+        # Iterate grouped in insertion order, which follows the
+        # first-appearance order of records in the payload, so ingestion
+        # follows payload order rather than a sort of the group keys.
+        for (source_instance, session_id), session_traces in grouped.items():
             try:
                 session = self._parse_session(
                     source_instance,
@@ -843,6 +846,16 @@ class LogfireRecordsImporter:
             framework=_detect_framework(all_records, framework),
             nodes=node_tree,
         )
+
+    async def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
+        """Fetch parser payloads from the Logfire API."""
+        from .api import fetch
+
+        async for payload in fetch(query):
+            yield payload
+
+
+importer = LogfireRecordsImporter()
 
 
 def parse(

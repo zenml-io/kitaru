@@ -230,12 +230,14 @@ class PluginVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         if self.type == "script":
             assert self.blob_id is not None
             source = ScriptPluginSource(
-                blob_id=self.blob_id, entrypoint=self.entrypoint
+                blob_id=self.blob_id,
+                entrypoint=self.entrypoint,
             )
         else:
             assert self.requirement is not None
             source = PackagePluginSource(
-                requirement=self.requirement, entrypoint=self.entrypoint
+                requirement=self.requirement,
+                entrypoint=self.entrypoint,
             )
         return PluginVersion(
             id=self.id,

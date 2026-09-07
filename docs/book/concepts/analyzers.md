@@ -7,7 +7,7 @@ icon: chart-pie
 
 An [evaluator](evaluators.md) reads one session and writes a verdict about it. An **analyzer** reads a set of sessions at once and writes one or more **insights**: named, typed observations about the set as a whole, such as how sessions split by outcome or how a metric is distributed across them.
 
-Analyzers are global plugins: no agent scoping, no provider. Implementations will mostly call a model to summarize or classify the set, though nothing requires it.
+Analyzers are global plugins: no agent scoping, no provider. They can use deterministic checks, a model, or both. The built-in [post-import insights](../guides/post-import-insights.md) analyzer runs automatically after imports and does not require a model by default.
 
 ## The analyzer contract
 

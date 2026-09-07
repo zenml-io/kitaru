@@ -36,6 +36,7 @@ class ModalEphemeralWorkerSettings(BaseModel):
     token_id: str
     token_secret: SecretStr
     app_name: str = "kitaru-workers"
+    environment: str | None = None
     cpu: float | None = None
     memory_mb: int | None = None
 

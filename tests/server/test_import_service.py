@@ -236,6 +236,31 @@ async def test_create_import_rejects_duplicate_evaluator_versions(
         await services.import_service.create_import(command, actor=ACTOR)
 
 
+async def test_create_import_from_an_api_stores_the_fetch_query(
+    services: JobAndTaskServices,
+) -> None:
+    """An API import stores its query and names no payload blob."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.IMPORTER, name="csv"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        display_version=None,
+    )
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    command = ImportCreate(
+        importer="csv",
+        agent_id=agent.id,
+        fetch_query={"since": "2026-08-01T00:00:00Z"},
+    )
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.payload_blob_id is None
+    assert import_.fetch_query == {"since": "2026-08-01T00:00:00Z"}
+
+
 async def test_create_import_stores_the_resolved_analyzers(
     services: JobAndTaskServices,
 ) -> None:

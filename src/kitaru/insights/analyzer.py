@@ -13,6 +13,8 @@
 #  limitations under the License.
 """Analyzer entrypoint for post-import insight generation."""
 
+from collections.abc import AsyncIterable, AsyncIterator, Iterable
+
 from kitaru.api_models.v1.insight import InsightInput
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from kitaru.insights.generation import ModelGenerationConfig
@@ -25,35 +27,34 @@ from kitaru.insights.observability import (
     GenerationObserver,
     LangfuseGenerationObserver,
 )
-from kitaru.insights.pipeline import InsightGenerationConfig, generate_insights
+from kitaru.insights.pipeline import (
+    InsightGenerationConfig,
+    generate_insights_from_profile,
+    validate_session,
+)
+from kitaru.insights.profiling import SessionProfiler
 from kitaru.task.analyzer import SessionView
 
 
 def _get_context(
-    sessions: list[SessionView], *, agent_name: str | None
+    first: SessionView, *, agent_name: str | None
 ) -> InsightGenerationContext:
     """Derive the identity available on normalized analyzer sessions."""
-    if not sessions:
-        raise ValueError("post-import insight analysis requires at least one session")
-
-    first = sessions[0].session
-    if first.import_id is None:
+    if first.session.import_id is None:
         raise ValueError("every post-import insight session must have an import ID")
 
-    provider = _get_provider(sessions)
     return InsightGenerationContext(
-        agent_id=first.agent_id,
+        agent_id=first.session.agent_id,
         agent_name=agent_name,
-        source_import=SourceImportContext(import_id=first.import_id, provider=provider),
+        source_import=SourceImportContext(
+            import_id=first.session.import_id,
+            provider=_get_provider(first.session.imported_from),
+        ),
     )
 
 
-def _get_provider(sessions: list[SessionView]) -> str | None:
+def _get_provider(provider: str | None) -> str | None:
     """Retain one provider label only when it fits card metadata bounds."""
-    providers = {item.session.imported_from for item in sessions}
-    if len(providers) != 1:
-        return None
-    provider = providers.pop()
     if provider is None or not provider or len(provider) > MAX_NAME_LENGTH:
         return None
     try:
@@ -61,6 +62,20 @@ def _get_provider(sessions: list[SessionView]) -> str | None:
     except UnicodeEncodeError:
         return None
     return provider
+
+
+async def _iterate_session_views(
+    sessions: Iterable[SessionView] | AsyncIterable[SessionView],
+) -> AsyncIterator[SessionView]:
+    """Yield either input form without retaining a view across the next fetch."""
+    if isinstance(sessions, AsyncIterable):
+        async for item in sessions:
+            yield item
+            del item
+    else:
+        for item in sessions:
+            yield item
+            del item
 
 
 def _get_observer(enabled: bool) -> GenerationObserver | None:
@@ -74,7 +89,7 @@ def _get_observer(enabled: bool) -> GenerationObserver | None:
 
 
 async def analyze_post_import_sessions(
-    sessions: list[SessionView],
+    sessions: Iterable[SessionView] | AsyncIterable[SessionView],
     *,
     agent_name: str | None = None,
     model: str | None = None,
@@ -88,32 +103,49 @@ async def analyze_post_import_sessions(
         agent_name: Optional display name included in copied prompt context.
         model: Optional OpenAI model for the bounded analyst and editor calls.
         observe: Whether to emit metadata-only events to a dedicated Langfuse project.
-        source_session_count: Internal eligible-session total before task sampling.
+        source_session_count: Optional eligible-source total for coverage accounting.
 
     Returns:
         Insight inputs ready for the analyzer task to persist.
     """
-    if not sessions:
+    context: InsightGenerationContext | None = None
+    provider: str | None = None
+    with SessionProfiler() as profiler:
+        async for item in _iterate_session_views(sessions):
+            if context is None:
+                context = _get_context(item, agent_name=agent_name)
+                provider = context.source_import.provider
+            elif _get_provider(item.session.imported_from) != provider:
+                provider = None
+            normalized = SessionWithNodesResponse(
+                session=item.session, nodes=item.nodes
+            )
+            validate_session(normalized, context=context)
+            profiler.consume(normalized)
+            del normalized, item
+        profiling = profiler.finish(source_session_count=source_session_count)
+    if context is None:
         return []
-    context = _get_context(sessions, agent_name=agent_name)
-    normalized = [
-        SessionWithNodesResponse(session=item.session, nodes=item.nodes)
-        for item in sessions
-    ]
+    context = context.model_copy(
+        update={
+            "source_import": context.source_import.model_copy(
+                update={"provider": provider}
+            )
+        }
+    )
     generator = None
     if model is not None:
         from kitaru.insights.openai_generator import OpenAIInsightGenerator
 
         generator = OpenAIInsightGenerator()
-    result = await generate_insights(
-        normalized,
+    result = await generate_insights_from_profile(
+        profiling,
         context=context,
         config=InsightGenerationConfig(
             model=ModelGenerationConfig(model=model) if model is not None else None
         ),
         generator=generator,
         observer=_get_observer(observe),
-        source_session_count=source_session_count,
     )
     return result.insights
 

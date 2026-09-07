@@ -17,9 +17,6 @@ from functools import partial
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from kitaru.server.adapters.db.repositories.agent_repository import (
-    SQLAgentRepository,
-)
 from kitaru.server.adapters.db.repositories.evaluation_repository import (
     SQLEvaluationRepository,
 )
@@ -49,7 +46,6 @@ from kitaru.server.application.events import (
     ReplaysSettled,
     TaskTerminal,
 )
-from kitaru.server.application.interfaces.agent_repository import AgentRepository
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationRepository,
 )
@@ -86,7 +82,6 @@ def register_subscribers(
     session_repository: SessionRepository,
     import_repository: ImportRepository,
     insight_repository: InsightRepository,
-    agent_repository: AgentRepository,
     analytics: ServerAnalytics | None = None,
 ) -> None:
     """Register every task-transition subscriber on a dispatcher.
@@ -106,7 +101,6 @@ def register_subscribers(
         session_repository: Session repository.
         import_repository: Import repository.
         insight_repository: Insight repository.
-        agent_repository: Agent repository.
         analytics: Analytics tracker, None skips tracking.
     """
     dispatcher.register(
@@ -125,7 +119,6 @@ def register_subscribers(
             insight_recording.record_task_insights,
             insight_repository=insight_repository,
             job_repository=job_repository,
-            agent_repository=agent_repository,
         ),
     )
     dispatcher.register(
@@ -196,7 +189,6 @@ def build_event_dispatcher(
         session_repository=SQLSessionRepository(session, engine),
         import_repository=SQLImportRepository(session),
         insight_repository=SQLInsightRepository(session),
-        agent_repository=SQLAgentRepository(session),
         analytics=analytics,
     )
     return dispatcher

@@ -50,7 +50,11 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
     SessionWithNodesResponse,
 )
-from kitaru.api_models.v1.task import EvaluationTaskDetails, PackagePluginSpec
+from kitaru.api_models.v1.task import (
+    EvaluationTaskDetails,
+    PackagePluginSpec,
+    ScriptPluginSpec,
+)
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.task import evaluator as evaluator_module
@@ -83,6 +87,26 @@ def _session_view() -> SessionView:
         updated=now,
     )
     return SessionView(session=session, nodes=[])
+
+
+def test_resolve_evaluator_rejects_a_non_callable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An entrypoint that resolves to a non-callable is rejected."""
+    plugin_path = tmp_path / "evaluator.py"
+    plugin_path.write_text("evaluate = 42\n")
+    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
+    details = EvaluationTaskDetails(
+        evaluator_name="score",
+        params={},
+        plugin=ScriptPluginSpec(
+            entrypoint="evaluate", blob_id=uuid.uuid4(), sha256="x"
+        ),
+        input_session_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(EvaluationError, match="not callable"):
+        evaluator_module._resolve_evaluator(details)
 
 
 async def test_call_evaluator_single_result() -> None:

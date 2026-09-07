@@ -16,7 +16,6 @@
 from kitaru.api_models.v1.insight import InsightInput
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.application.events import TaskTerminal
-from kitaru.server.application.interfaces.agent_repository import AgentRepository
 from kitaru.server.application.interfaces.insight_repository import InsightRepository
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.domain.base import NotFoundError
@@ -30,7 +29,6 @@ async def record_task_insights(
     event: TaskTerminal,
     insight_repository: InsightRepository,
     job_repository: JobRepository,
-    agent_repository: AgentRepository,
 ) -> None:
     """Write one insight row per result of a completed analysis task.
 
@@ -42,8 +40,6 @@ async def record_task_insights(
         event: TaskTerminal event.
         insight_repository: Insight repository.
         job_repository: Job repository, for the owning job's owner id.
-        agent_repository: Agent repository, to check the task's agent still
-            exists.
     """
     task = event.task
     if not isinstance(task, AnalysisTask) or task.status is not TaskStatus.COMPLETED:
@@ -70,12 +66,6 @@ async def record_task_insights(
         for result in (InsightInput.model_validate(entry) for entry in results)
     ]
     if not insights:
-        return
-    # The task's agent can be deleted while it runs. A vanished agent leaves
-    # nothing to record.
-    try:
-        await agent_repository.get(task.agent_id)
-    except NotFoundError:
         return
     # The analyzer can be deleted while its task runs. The existence check
     # ahead of the insert then finds the version gone, which leaves nothing

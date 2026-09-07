@@ -1211,9 +1211,11 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.139" },
     { name = "httpx", specifier = ">=0.27,<1" },
     { name = "langfuse", marker = "extra == 'examples'", specifier = ">=4.14,<5" },
+    { name = "langfuse", marker = "extra == 'insights'", specifier = ">=4.14,<5" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0,<3" },
     { name = "modal", marker = "extra == 'modal'", specifier = ">=1.5,<2" },
     { name = "obstore", marker = "extra == 's3'", specifier = ">=0.11.1" },
+    { name = "openai", marker = "extra == 'insights'", specifier = ">=2.15,<4" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.44" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'otel'", specifier = ">=0.65b0" },
     { name = "opentelemetry-instrumentation-httpx", marker = "extra == 'otel'", specifier = ">=0.65b0" },
@@ -1234,7 +1236,7 @@ requires-dist = [
     { name = "uuid-utils", marker = "extra == 'server'", specifier = ">=0.10" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.51" },
 ]
-provides-extras = ["mcp", "cli", "examples", "server", "worker", "otel", "s3", "modal"]
+provides-extras = ["mcp", "cli", "examples", "insights", "server", "worker", "otel", "s3", "modal"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1246,6 +1248,7 @@ dev = [
     { name = "pip-audit", specifier = ">=2.10,<3" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", specifier = ">=0.16.2" },
     { name = "ty", specifier = ">=0.0.72" },
     { name = "yamlfix" },
@@ -1265,14 +1268,18 @@ adapter = [
     { name = "braintrust" },
     { name = "httpx" },
 ]
+api = [
+    { name = "httpx" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "braintrust", marker = "extra == 'adapter'", specifier = ">=0.30,<1" },
-    { name = "httpx", marker = "extra == 'adapter'", specifier = ">=0.27,<1" },
+    { name = "httpx", marker = "extra == 'api'", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
+    { name = "kitaru-braintrust-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/braintrust-importer" },
 ]
-provides-extras = ["adapter"]
+provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-claude-agent-sdk"
@@ -1323,13 +1330,17 @@ dependencies = [
 adapter = [
     { name = "langfuse" },
 ]
+api = [
+    { name = "langfuse" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "kitaru", editable = "../" },
-    { name = "langfuse", marker = "extra == 'adapter'", specifier = ">=4.14,<5" },
+    { name = "kitaru-langfuse-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/langfuse-importer" },
+    { name = "langfuse", marker = "extra == 'api'", specifier = ">=4.14,<5" },
 ]
-provides-extras = ["adapter"]
+provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-langgraph"
@@ -1369,13 +1380,17 @@ dependencies = [
 adapter = [
     { name = "langsmith" },
 ]
+api = [
+    { name = "langsmith" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "kitaru", editable = "../" },
-    { name = "langsmith", marker = "extra == 'adapter'", specifier = ">=0.3,<1" },
+    { name = "kitaru-langsmith-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/langsmith-importer" },
+    { name = "langsmith", marker = "extra == 'api'", specifier = ">=0.3,<1" },
 ]
-provides-extras = ["adapter"]
+provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-logfire-importer"
@@ -1390,14 +1405,19 @@ adapter = [
     { name = "httpx" },
     { name = "logfire" },
 ]
+api = [
+    { name = "httpx" },
+    { name = "logfire" },
+]
 
 [package.metadata]
 requires-dist = [
-    { name = "httpx", marker = "extra == 'adapter'", specifier = ">=0.27,<1" },
+    { name = "httpx", marker = "extra == 'api'", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
-    { name = "logfire", marker = "extra == 'adapter'", specifier = ">=4.35,<6" },
+    { name = "kitaru-logfire-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/logfire-importer" },
+    { name = "logfire", marker = "extra == 'api'", specifier = ">=4.35,<6" },
 ]
-provides-extras = ["adapter"]
+provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-openai-agents"
@@ -1429,16 +1449,21 @@ adapter = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
 ]
+api = [
+    { name = "arize-phoenix-client" },
+    { name = "httpx" },
+]
 
 [package.metadata]
 requires-dist = [
-    { name = "arize-phoenix-client", marker = "extra == 'adapter'", specifier = ">=2.0,<4" },
-    { name = "httpx", marker = "extra == 'adapter'", specifier = ">=0.27,<1" },
+    { name = "arize-phoenix-client", marker = "extra == 'api'", specifier = ">=2.0,<4" },
+    { name = "httpx", marker = "extra == 'api'", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
+    { name = "kitaru-phoenix-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/phoenix-importer" },
     { name = "opentelemetry-api", marker = "extra == 'adapter'", specifier = ">=1.12" },
     { name = "opentelemetry-sdk", marker = "extra == 'adapter'", specifier = ">=1.12" },
 ]
-provides-extras = ["adapter"]
+provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-pydantic-ai"

@@ -58,7 +58,10 @@ class ModalEphemeralWorkers:
         """
         client = await self._get_client()
         app = await modal.App.lookup.aio(
-            self._modal_settings.app_name, client=client, create_if_missing=True
+            self._modal_settings.app_name,
+            client=client,
+            environment_name=self._modal_settings.environment,
+            create_if_missing=True,
         )
         await modal.Sandbox.create.aio(
             *self._command,
@@ -76,4 +79,5 @@ class ModalEphemeralWorkers:
             cpu=self._modal_settings.cpu,
             memory=self._modal_settings.memory_mb,
             client=client,
+            environment_name=self._modal_settings.environment,
         )

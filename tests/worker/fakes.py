@@ -26,9 +26,9 @@ from kitaru.api_models.v1.task import (
     AgentTaskDetails,
     AnalysisTaskDetails,
     EvaluationTaskDetails,
+    ImportSourceSpec,
     ImportTaskDetails,
     PackagePluginSpec,
-    PayloadSpec,
     ScriptPluginSpec,
     TaskClaimResponse,
     TaskKind,
@@ -172,7 +172,7 @@ def make_evaluator_spec(
 def make_importer_spec(
     task_id: uuid.UUID,
     plugin: ScriptPluginSpec | PackagePluginSpec,
-    payload: PayloadSpec,
+    source: ImportSourceSpec,
     timeout_seconds: int = 30,
     agent_id: uuid.UUID | None = None,
     extra_env: dict[str, str] | None = None,
@@ -183,7 +183,7 @@ def make_importer_spec(
     Args:
         task_id: Task the spec belongs to.
         plugin: Importer plugin to load.
-        payload: Payload to parse.
+        source: Where the payload comes from.
         timeout_seconds: Process timeout.
         agent_id: Agent imported sessions are created under.
         extra_env: Creator-set environment extras.
@@ -201,7 +201,7 @@ def make_importer_spec(
         secret_env=secret_env or {},
         details=ImportTaskDetails(
             plugin=plugin,
-            payload=payload,
+            source=source,
             agent_id=agent_id or uuid.uuid4(),
             params={},
         ),

@@ -18,6 +18,8 @@ from kitaru.insights.generation import (
     InsightModelGenerator,
     ModelGenerationConfig,
     ModelStageResponse,
+    build_analyst_projection,
+    build_editorial_projection,
     generate_deterministic_plan,
     generate_model_plan,
     validate_analyst_plan,
@@ -117,6 +119,49 @@ def _editor(ids: Sequence[str]) -> EditorialPlan:
             for item in ids
         ],
     )
+
+
+@pytest.mark.parametrize("stage", ["analyst", "editor"])
+def test_model_projection_preserves_exact_count_with_bounded_references(
+    profiling_result: ProfilingResult, stage: str
+) -> None:
+    candidate = profiling_result.candidates[0]
+    session_ids = [uuid.uuid4(), uuid.uuid4()]
+    candidate = candidate.model_copy(
+        update={
+            "coverage": CandidateCoverage(
+                sessions_analyzed=10,
+                affected_sessions=10,
+                occurrences=10,
+                evidence_available=10,
+                evidence_retained=2,
+                contributing_sessions_available=10,
+                contributing_sessions_retained=2,
+            ),
+            "contributing_session_ids": session_ids,
+            "evidence": [
+                EvidenceLocator(session_id=session_id, signal="test")
+                for session_id in session_ids
+            ],
+        }
+    )
+    profile = profiling_result.model_copy(update={"candidates": [candidate]})
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    projection = (
+        build_analyst_projection(profile)
+        if stage == "analyst"
+        else build_editorial_projection(profile, selection)
+    )
+
+    projected = projection.candidates[0]
+    assert projected.contributing_session_count == 10
+    assert len(candidate.contributing_session_ids) == 2
+    assert projected.evidence_locators == candidate.evidence
+    assert len(projected.evidence_locators) == 2
 
 
 def test_analyst_plan_requires_known_unique_ids(

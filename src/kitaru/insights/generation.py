@@ -277,7 +277,7 @@ class ModelGenerationPlan(_GenerationModel):
     diagnostics: GenerationDiagnostics
 
 
-def _candidate_projection(candidate: CandidateFinding) -> CandidateProjection:
+def _build_candidate_projection(candidate: CandidateFinding) -> CandidateProjection:
     return CandidateProjection(
         id=candidate.id,
         family=candidate.family,
@@ -289,7 +289,7 @@ def _candidate_projection(candidate: CandidateFinding) -> CandidateProjection:
         facts=candidate.facts,
         chart_data=candidate.data,
         evidence_locators=candidate.evidence,
-        contributing_session_count=len(candidate.contributing_session_ids),
+        contributing_session_count=candidate.coverage.contributing_sessions_available,
     )
 
 
@@ -297,7 +297,7 @@ def build_analyst_projection(profiling: ProfilingResult) -> AnalystProjection:
     """Build the only deterministic envelope the analyst may receive."""
     projection = AnalystProjection(
         content_hash=profiling.content_hash,
-        candidates=[_candidate_projection(item) for item in profiling.candidates],
+        candidates=[_build_candidate_projection(item) for item in profiling.candidates],
     )
     return projection
 
@@ -331,7 +331,7 @@ def build_editorial_projection(
         recommendation_id=selection.recommended_candidate_id,
         candidates=[
             SelectedCandidateProjection(
-                **_candidate_projection(candidates[candidate_id]).model_dump(),
+                **_build_candidate_projection(candidates[candidate_id]).model_dump(),
                 position=position,
                 recommended=candidate_id == selection.recommended_candidate_id,
             )
@@ -340,7 +340,7 @@ def build_editorial_projection(
     )
 
 
-def _page_copy(plan: EditorialPlan) -> list[str]:
+def _collect_page_copy(plan: EditorialPlan) -> list[str]:
     return [
         plan.intro_eyebrow,
         plan.intro_title,
@@ -366,7 +366,7 @@ def _validate_copy_safety(value: str) -> None:
         raise ValueError("editor copy contains an unsupported claim")
 
 
-def _quantified_labels(candidate: CandidateFinding) -> set[str]:
+def _get_quantified_labels(candidate: CandidateFinding) -> set[str]:
     """Return quantity-bearing labels that also contain an identity token."""
     if not isinstance(candidate.data, CategoricalInsightData):
         return set()
@@ -389,7 +389,7 @@ def _is_identity_bearing_quantified_label(label: str) -> bool:
     return bool(remaining_words - _NON_IDENTITY_LABEL_WORDS)
 
 
-def _without_known_labels(value: str, labels: set[str]) -> str:
+def _remove_known_labels(value: str, labels: set[str]) -> str:
     """Mask exact known labels so identity tokens are not treated as claims."""
     for label in sorted(labels, key=len, reverse=True):
         value = re.sub(
@@ -400,7 +400,7 @@ def _without_known_labels(value: str, labels: set[str]) -> str:
     return value
 
 
-def _outcome_categories(value: str) -> set[str]:
+def _get_outcome_categories(value: str) -> set[str]:
     """Normalize grammatical variants of outcome words into factual classes."""
     categories: set[str] = set()
     for match in _OUTCOME_TOKEN.finditer(value):
@@ -434,7 +434,7 @@ def _has_outcome_wording(value: str) -> bool:
     return bool(_OUTCOME_TOKEN.search(value) or _WORK_SUCCESS_TOKEN.search(value))
 
 
-def _trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
+def _get_trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
     """Permit outcome language only for observed session-status categories."""
     if (
         candidate.id == "session-outcomes"
@@ -472,13 +472,13 @@ def _validate_page_copy(value: str) -> None:
 def _validate_card_copy(value: str, candidate: CandidateFinding) -> None:
     """Validate one card only against the deterministic candidate it explains."""
     _validate_copy_safety(value)
-    allowed_outcomes = _trusted_outcome_categories(candidate)
-    remaining = _without_known_labels(value, _quantified_labels(candidate))
+    allowed_outcomes = _get_trusted_outcome_categories(candidate)
+    remaining = _remove_known_labels(value, _get_quantified_labels(candidate))
     if _has_negated_outcome(value):
         raise ValueError("editor card copy contains a negated outcome claim")
     if _NUMERIC_TOKEN.search(remaining) or _QUANTITY_TOKEN.search(remaining):
         raise ValueError("editor card copy contains a numeric or quantitative claim")
-    output_outcomes = _outcome_categories(value)
+    output_outcomes = _get_outcome_categories(value)
     if not output_outcomes.issubset(allowed_outcomes):
         raise ValueError("editor card copy contains an unsupported outcome claim")
 
@@ -498,7 +498,7 @@ def validate_editorial_plan(
         for item in candidates
         if item.id in selection.selected_candidate_ids
     }
-    for value in _page_copy(plan):
+    for value in _collect_page_copy(plan):
         _validate_page_copy(value)
     for item in plan.insights:
         for value in (item.eyebrow, item.description):
@@ -552,7 +552,7 @@ def deterministic_editorial(
     )
 
 
-def _fallback(
+def _build_fallback(
     profiling: ProfilingResult,
     *,
     selection: AnalystPlan | None,
@@ -602,7 +602,7 @@ async def generate_model_plan(
     receipts: list[ProviderReceipt] = []
     projection = build_analyst_projection(profiling)
     if len(projection.model_dump_json().encode()) > config.max_input_bytes:
-        return _fallback(
+        return _build_fallback(
             profiling,
             selection=None,
             receipts=receipts,
@@ -654,7 +654,7 @@ async def generate_model_plan(
                 metadata={"outcome": "timed_out"},
             ),
         )
-        return _fallback(
+        return _build_fallback(
             profiling,
             selection=None,
             receipts=receipts,
@@ -677,7 +677,7 @@ async def generate_model_plan(
                 metadata={"outcome": "failed"},
             ),
         )
-        return _fallback(
+        return _build_fallback(
             profiling,
             selection=None,
             receipts=receipts,
@@ -686,7 +686,7 @@ async def generate_model_plan(
 
     editorial_projection = build_editorial_projection(profiling, selection)
     if len(editorial_projection.model_dump_json().encode()) > config.max_input_bytes:
-        return _fallback(
+        return _build_fallback(
             profiling,
             selection=selection,
             receipts=receipts,
@@ -738,7 +738,7 @@ async def generate_model_plan(
                 metadata={"outcome": "timed_out"},
             ),
         )
-        return _fallback(
+        return _build_fallback(
             profiling,
             selection=selection,
             receipts=receipts,
@@ -761,7 +761,7 @@ async def generate_model_plan(
                 metadata={"outcome": "failed"},
             ),
         )
-        return _fallback(
+        return _build_fallback(
             profiling,
             selection=selection,
             receipts=receipts,

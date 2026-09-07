@@ -106,6 +106,8 @@ Node indexes do not need to be contiguous. Every `parent_index` and `secondary_p
 
 ## Import a file
 
+The `kitaru-jsonl` importer has no fetch entrypoint, so it only accepts uploaded files. FILE is always required, and `--since`, `--until`, `--trace-id`, and `--query` do not apply.
+
 The session import command uploads the file, resolves an exact importer and agent version, and creates an import job:
 
 ```bash
@@ -210,6 +212,8 @@ kitaru import get <import-id> --output json
 Existing integrations can continue to send `params.join_on` as a dotted path. The explicit CLI option accepts JSON Pointer syntax only. Langfuse also retains its older `join_path` plus `join_key` parameters for compatibility, but new integrations should use `join_on`.
 
 ## What provider importers normalize
+
+Imports also run the built-in [post-import insights](post-import-insights.md) analyzer automatically. It needs a worker that claims analyzer tasks and produces deterministic insight cards without an OpenAI key. The linked guide covers local and self-hosted setup, reading results, and optional model assistance.
 
 Provider importers apply the same output contract to different source formats:
 

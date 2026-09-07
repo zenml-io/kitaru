@@ -18,14 +18,14 @@ import json
 import math
 import re
 import uuid
-from bisect import bisect_right
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from itertools import pairwise
+from types import TracebackType
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -51,9 +51,15 @@ from kitaru.insights.models import (
     CoverageTruncation,
     EvidenceLocator,
 )
+from kitaru.insights.profiling_state import (
+    CountsStore,
+    Histogram,
+    LabelCounts,
+    SessionReferences,
+)
 from kitaru.redaction import redact_data
 
-ANALYSIS_VERSION = "2026-09-04.1"
+ANALYSIS_VERSION = "2026-09-07.1"
 MAX_LABEL_LENGTH = 120
 MAX_ROLE_LENGTH = 32
 MAX_SELECTOR_LENGTH = 1_024
@@ -115,12 +121,10 @@ class _ProfilingModel(BaseModel):
 
 
 class ProfilingConfig(_ProfilingModel):
-    """Hard bounds for one deterministic profiling run."""
+    """Per-session payload safety limits and bounded result projection."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    max_sessions: int = Field(default=250, ge=1, le=10_000)
-    max_nodes: int = Field(default=25_000, ge=1, le=1_000_000)
     max_text_bytes: int = Field(default=256_000, ge=1, le=10_000_000)
     max_payload_items: int = Field(default=100_000, ge=1, le=10_000_000)
     max_payload_bytes: int = Field(default=2_000_000, ge=1, le=100_000_000)
@@ -202,7 +206,7 @@ class CandidateFinding(_ProfilingModel):
 class ProfilingResult(_ProfilingModel):
     """Stable candidate envelope produced without a model or evaluations."""
 
-    analysis_version: Literal["2026-09-04.1"] = ANALYSIS_VERSION
+    analysis_version: Literal["2026-09-07.1"] = ANALYSIS_VERSION
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     coverage: Coverage
     candidates: list[CandidateFinding]
@@ -212,13 +216,13 @@ class ProfilingResult(_ProfilingModel):
 class _Aggregate:
     """Mutable aggregate retained only while profiling."""
 
+    sessions: SessionReferences
+    categories: LabelCounts
     count: int = 0
-    sessions: set[uuid.UUID] = field(default_factory=set)
-    categories: Counter[str] = field(default_factory=Counter)
     evidence: list[EvidenceLocator] = field(default_factory=list)
 
 
-def _json_string_size(value: str, limit: int) -> int | None:
+def _calculate_json_string_size(value: str, limit: int) -> int | None:
     """Return exact UTF-8 JSON string size, stopping once it exceeds a limit."""
     size = 2  # Opening and closing quotes.
     short_escapes = {"\b", "\t", "\n", "\f", "\r", '"', "\\"}
@@ -243,7 +247,7 @@ def _json_string_size(value: str, limit: int) -> int | None:
     return size if size <= limit else None
 
 
-def _bounded_decimal_text(value: Decimal, limit: int) -> str | None:
+def _get_bounded_decimal_text(value: Decimal, limit: int) -> str | None:
     """Format a finite Decimal only when its canonical fixed form fits."""
     if not value.is_finite():
         return None
@@ -277,7 +281,7 @@ def _bounded_decimal_text(value: Decimal, limit: int) -> str | None:
     return formatted or "0"
 
 
-def _scalar_json_size(value: Any, limit: int) -> int | None:
+def _calculate_scalar_json_size(value: Any, limit: int) -> int | None:
     """Return the bounded immediate JSON size of a supported value."""
     if value is None:
         return 4 if limit >= 4 else None
@@ -285,7 +289,7 @@ def _scalar_json_size(value: Any, limit: int) -> int | None:
         size = 4 if value else 5
         return size if size <= limit else None
     if isinstance(value, str):
-        return _json_string_size(value, limit)
+        return _calculate_json_string_size(value, limit)
     if isinstance(value, int):
         if value:
             estimated_digits = int((abs(value).bit_length() - 1) * math.log10(2)) + 1
@@ -307,8 +311,8 @@ def _scalar_json_size(value: Any, limit: int) -> int | None:
     if isinstance(value, Decimal):
         if not value.is_finite():
             return 0
-        text = _bounded_decimal_text(value, limit)
-        return None if text is None else _json_string_size(text, limit)
+        text = _get_bounded_decimal_text(value, limit)
+        return None if text is None else _calculate_json_string_size(text, limit)
     if isinstance(value, datetime):
         if value.tzinfo is None or value.utcoffset() is None:
             return 0
@@ -317,7 +321,7 @@ def _scalar_json_size(value: Any, limit: int) -> int | None:
             .isoformat(timespec="microseconds")
             .replace("+00:00", "Z")
         )
-        return _json_string_size(text, limit)
+        return _calculate_json_string_size(text, limit)
     if isinstance(value, uuid.UUID):
         return 38 if limit >= 38 else None
     if isinstance(value, (list, tuple)):
@@ -330,7 +334,7 @@ def _scalar_json_size(value: Any, limit: int) -> int | None:
         if not all(isinstance(key, str) for key in value):
             return 0
         for key in value:
-            key_size = _json_string_size(key, limit - size)
+            key_size = _calculate_json_string_size(key, limit - size)
             if key_size is None:
                 return None
             size += key_size
@@ -340,7 +344,7 @@ def _scalar_json_size(value: Any, limit: int) -> int | None:
 
 @dataclass
 class _PayloadBudget:
-    """Global bound for inspecting caller-controlled payload structures."""
+    """Per-session bound for inspecting caller-controlled payload structures."""
 
     max_items: int
     max_bytes: int
@@ -365,7 +369,7 @@ class _PayloadBudget:
         ):
             return False
         remaining = self.max_bytes - self.bytes
-        size = _scalar_json_size(value, remaining)
+        size = _calculate_scalar_json_size(value, remaining)
         if size is None:
             self.record_truncation()
             return False
@@ -398,10 +402,9 @@ class _DistributionSpec:
     eyebrow: str
     title: str
     description: str
-    values: Sequence[float]
-    session_ids: set[uuid.UUID]
+    values: Histogram
+    session_ids: SessionReferences
     sessions_analyzed: int
-    bounds: Sequence[float]
     unit: str
 
 
@@ -411,27 +414,27 @@ class _State:
 
     config: ProfilingConfig
     payload_budget: _PayloadBudget = field(init=False)
-    analyzed_session_ids: set[uuid.UUID] = field(default_factory=set)
-    node_session_ids: set[uuid.UUID] = field(default_factory=set)
-    signals: dict[str, _Aggregate] = field(
-        default_factory=lambda: defaultdict(_Aggregate)
-    )
+    counts_store: CountsStore = field(default_factory=CountsStore)
+    analyzed_session_ids: SessionReferences = field(init=False)
+    node_session_ids: SessionReferences = field(init=False)
+    signals: dict[str, _Aggregate] = field(default_factory=dict)
     statuses: Counter[str] = field(default_factory=Counter)
-    status_sessions: dict[str, set[uuid.UUID]] = field(
-        default_factory=lambda: defaultdict(set)
+    status_sessions: dict[str, SessionReferences] = field(default_factory=dict)
+    tool_counts: Histogram = field(default_factory=lambda: Histogram((3, 6, 10, 15)))
+    model_counts: Histogram = field(default_factory=lambda: Histogram((2, 3, 5)))
+    activity_counts: Histogram = field(
+        default_factory=lambda: Histogram((10, 20, 30, 50))
     )
-    tool_counts: list[int] = field(default_factory=list)
-    model_counts: list[int] = field(default_factory=list)
-    activity_counts: list[int] = field(default_factory=list)
-    durations: list[float] = field(default_factory=list)
-    duration_session_ids: set[uuid.UUID] = field(default_factory=set)
-    models: Counter[str] = field(default_factory=Counter)
-    model_sessions: dict[str, set[uuid.UUID]] = field(
-        default_factory=lambda: defaultdict(set)
-    )
+    durations: Histogram = field(default_factory=lambda: Histogram((5, 15, 30, 60)))
+    duration_session_ids: SessionReferences = field(init=False)
+    models: LabelCounts = field(init=False)
+    model_sessions: SessionReferences = field(init=False)
     text_bytes_available: int = 0
     inspected_text_bytes: int = 0
-    text_inspected_session_ids: set[uuid.UUID] = field(default_factory=set)
+    text_inspected_session_ids: SessionReferences = field(init=False)
+    session_inspected_text_bytes: int = 0
+    nodes_analyzed: int = 0
+    payload_truncation_count: int = 0
     text_available: bool = False
     text_truncated: bool = False
     timing_available: int = 0
@@ -443,6 +446,23 @@ class _State:
 
     def __post_init__(self) -> None:
         """Initialize the traversal budget from the immutable config."""
+        self.analyzed_session_ids = SessionReferences(
+            self.config.max_contributing_sessions
+        )
+        self.node_session_ids = SessionReferences(self.config.max_contributing_sessions)
+        self.duration_session_ids = SessionReferences(
+            self.config.max_contributing_sessions
+        )
+        self.model_sessions = SessionReferences(self.config.max_contributing_sessions)
+        self.text_inspected_session_ids = SessionReferences(
+            self.config.max_contributing_sessions
+        )
+        self.models = LabelCounts(self.counts_store, "models")
+        self.reset_payload_budget()
+
+    def reset_payload_budget(self) -> None:
+        """Give each session an independent payload and text safety budget."""
+        self.session_inspected_text_bytes = 0
         self.payload_budget = _PayloadBudget(
             max_items=self.config.max_payload_items,
             max_bytes=self.config.max_payload_bytes,
@@ -475,7 +495,7 @@ def sanitize_label(value: str | None) -> str | None:
     return candidate
 
 
-def _validated_exact_name(value: str | None) -> str | None:
+def _validate_exact_name(value: str | None) -> str | None:
     """Return a safe bounded name without changing exact identity semantics."""
     if value is None or sanitize_label(value) is None:
         return None
@@ -499,7 +519,7 @@ def _normalize_observed(
     if isinstance(value, Decimal):
         if not value.is_finite():
             return None, False
-        formatted = _bounded_decimal_text(value, budget.max_bytes)
+        formatted = _get_bounded_decimal_text(value, budget.max_bytes)
         return (formatted, True) if formatted is not None else (None, False)
     if isinstance(value, datetime):
         if value.tzinfo is None or value.utcoffset() is None:
@@ -539,23 +559,24 @@ def _normalize_observed(
     return None, False
 
 
-def _tool_identity(
+def _get_tool_identity(
     node: SessionNodeResponse, budget: _PayloadBudget
 ) -> tuple[str, str] | None:
     """Return evaluator-compatible exact tool name and canonical inputs."""
-    tool_name = _validated_exact_name(node.tool_name)
+    tool_name = _validate_exact_name(node.tool_name)
     if tool_name is None or node.inputs is None:
         return None
     normalized, complete = _normalize_observed(node.inputs, budget)
     if not complete:
         return None
-    return tool_name, json.dumps(
+    canonical = json.dumps(
         normalized,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
         allow_nan=False,
     )
+    return tool_name, hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _is_empty_result(value: Any) -> bool:
@@ -563,7 +584,7 @@ def _is_empty_result(value: Any) -> bool:
     return isinstance(value, (str, list, dict)) and len(value) == 0
 
 
-def _mostly_uppercase(value: str) -> bool:
+def _is_mostly_uppercase(value: str) -> bool:
     """Return whether a substantial message is predominantly uppercase."""
     letters = [character for character in value if character.isalpha()]
     return (
@@ -617,7 +638,7 @@ def _resolve_pointer(
     return True, current, len(pointer[1:].split("/"))
 
 
-def _text_parts(
+def _collect_text_parts(
     value: Any, budget: _PayloadBudget, *, start_depth: int = 0
 ) -> list[str]:
     """Extract strings from common structured message text containers."""
@@ -650,7 +671,7 @@ def _text_parts(
     return texts
 
 
-def _user_messages(value: Any, budget: _PayloadBudget) -> list[str]:
+def _get_user_messages(value: Any, budget: _PayloadBudget) -> list[str]:
     """Find explicitly user-authored messages in a nested recorded input."""
     messages: list[str] = []
     stack: list[tuple[Any, int]] = [(value, 0)]
@@ -675,7 +696,7 @@ def _user_messages(value: Any, budget: _PayloadBudget) -> list[str]:
             for key in ("content", "parts", "text"):
                 if key in current:
                     messages.extend(
-                        _text_parts(current[key], budget, start_depth=depth + 1)
+                        _collect_text_parts(current[key], budget, start_depth=depth + 1)
                     )
             continue
         keys = sorted(key for key in current if isinstance(key, str) and key != "role")
@@ -684,7 +705,7 @@ def _user_messages(value: Any, budget: _PayloadBudget) -> list[str]:
     return messages
 
 
-def _selected_user_texts(
+def _select_user_texts(
     state: _State,
     session: SessionWithNodesResponse,
     nodes: list[SessionNodeResponse],
@@ -717,9 +738,9 @@ def _selected_user_texts(
         state.payload_budget,
     )
     session_texts = (
-        _text_parts(value, state.payload_budget, start_depth=value_depth)
+        _collect_text_parts(value, state.payload_budget, start_depth=value_depth)
         if found
-        else _user_messages(session.session.inputs, state.payload_budget)
+        else _get_user_messages(session.session.inputs, state.payload_budget)
     )
     add_mirrored_texts(session_texts, None)
     for node in nodes:
@@ -729,9 +750,9 @@ def _selected_user_texts(
             node.inputs, node.input_text_selector, state.payload_budget
         )
         node_texts = (
-            _text_parts(value, state.payload_budget, start_depth=value_depth)
+            _collect_text_parts(value, state.payload_budget, start_depth=value_depth)
             if found
-            else _user_messages(node.inputs, state.payload_budget)
+            else _get_user_messages(node.inputs, state.payload_budget)
         )
         if found:
             add_selected_node_turns(node_texts, node.id)
@@ -763,17 +784,30 @@ def _record(
     node_id: uuid.UUID | None,
 ) -> None:
     """Record one content-free signal occurrence."""
+    if signal not in state.signals:
+        state.signals[signal] = _Aggregate(
+            sessions=SessionReferences(state.config.max_contributing_sessions),
+            categories=LabelCounts(state.counts_store, signal),
+        )
     aggregate = state.signals[signal]
     aggregate.count += 1
     aggregate.sessions.add(session_id)
-    aggregate.categories[category] += 1
-    if len(aggregate.evidence) < state.config.max_evidence_per_candidate:
-        aggregate.evidence.append(
-            EvidenceLocator(session_id=session_id, node_id=node_id, signal=signal)
-        )
+    aggregate.categories.add(category)
+    if (
+        len(aggregate.evidence) == state.config.max_evidence_per_candidate
+        and session_id >= aggregate.evidence[-1].session_id
+    ):
+        return
+    aggregate.evidence.append(
+        EvidenceLocator(session_id=session_id, node_id=node_id, signal=signal)
+    )
+    # Stable sorting preserves within-session event order while keeping the
+    # same smallest session IDs regardless of input order or batch boundaries.
+    aggregate.evidence.sort(key=lambda locator: locator.session_id)
+    del aggregate.evidence[state.config.max_evidence_per_candidate :]
 
 
-def _cycle_findings(
+def _find_cycles(
     calls: list[SessionNodeResponse],
     identities: list[tuple[str, str] | None],
 ) -> list[tuple[int, int, list[str]]]:
@@ -821,30 +855,24 @@ def _scan_session(
     state: _State,
     session: SessionWithNodesResponse,
     nodes: list[SessionNodeResponse],
-    *,
-    nodes_complete: bool,
 ) -> None:
     """Add one bounded normalized session to aggregate state."""
     session_id = session.session.id
     state.analyzed_session_ids.add(session_id)
     state.statuses[session.session.status.value] += 1
-    state.status_sessions[session.session.status.value].add(session_id)
-    calls = (
-        [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
-        if nodes_complete
-        else []
-    )
-    llm_calls = (
-        [node for node in nodes if node.node_type is NodeType.LLM_CALL]
-        if nodes_complete
-        else []
-    )
-    if nodes_complete:
-        state.node_session_ids.add(session_id)
-        state.tool_calls += len(calls)
-        state.tool_counts.append(len(calls))
-        state.model_counts.append(len(llm_calls))
-        state.activity_counts.append(len(nodes))
+    status = session.session.status.value
+    if status not in state.status_sessions:
+        state.status_sessions[status] = SessionReferences(
+            state.config.max_contributing_sessions
+        )
+    state.status_sessions[status].add(session_id)
+    calls = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
+    llm_calls = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
+    state.node_session_ids.add(session_id)
+    state.tool_calls += len(calls)
+    state.tool_counts.add(len(calls))
+    state.model_counts.add(len(llm_calls))
+    state.activity_counts.add(len(nodes))
 
     started_at = session.session.started_at
     ended_at = session.session.ended_at
@@ -856,17 +884,17 @@ def _scan_session(
         if started_aware == ended_aware:
             duration = (ended_at - started_at).total_seconds()
             if duration >= 0:
-                state.durations.append(duration)
+                state.durations.add(duration)
                 state.duration_session_ids.add(session_id)
                 state.timing_available += 1
 
     for node in llm_calls:
         label = sanitize_label(node.model or node.requested_model)
         if label is not None:
-            state.models[label] += 1
-            state.model_sessions[label].add(session_id)
+            state.models.add(label)
+            state.model_sessions.add(session_id)
 
-    identities = [_tool_identity(call, state.payload_budget) for call in calls]
+    identities = [_get_tool_identity(call, state.payload_budget) for call in calls]
     state.identity_available += sum(identity is not None for identity in identities)
     for call in calls:
         label = sanitize_label(call.tool_name) or "Unavailable tool"
@@ -892,8 +920,8 @@ def _scan_session(
     for position, (first, second) in enumerate(pairwise(calls)):
         first_identity = identities[position]
         second_identity = identities[position + 1]
-        first_tool_name = _validated_exact_name(first.tool_name)
-        second_tool_name = _validated_exact_name(second.tool_name)
+        first_tool_name = _validate_exact_name(first.tool_name)
+        second_tool_name = _validate_exact_name(second.tool_name)
         label = sanitize_label(first.tool_name) or "Unavailable tool"
         if first_identity is not None and first_identity == second_identity:
             _record(
@@ -925,7 +953,7 @@ def _scan_session(
                 node_id=first.id,
             )
 
-    for start, _, tools in _cycle_findings(calls, identities):
+    for start, _, tools in _find_cycles(calls, identities):
         safe_tools = [sanitize_label(tool) or "Unavailable tool" for tool in tools]
         _record(
             state,
@@ -935,9 +963,7 @@ def _scan_session(
             node_id=calls[start].id,
         )
 
-    messages, payload_complete = _selected_user_texts(
-        state, session, nodes if nodes_complete else []
-    )
+    messages, payload_complete = _select_user_texts(state, session, nodes)
     state.text_available = state.text_available or bool(messages)
     if not payload_complete:
         return
@@ -948,13 +974,14 @@ def _scan_session(
     language_matches: list[tuple[str, str, uuid.UUID | None]] = []
     for message, node_id in messages:
         encoded = message.encode("utf-8")
-        remaining = state.config.max_text_bytes - state.inspected_text_bytes
+        remaining = state.config.max_text_bytes - state.session_inspected_text_bytes
         if remaining <= 0:
             state.text_truncated = True
             fully_inspected = False
             break
         inspected = encoded[:remaining].decode("utf-8", errors="ignore")
         state.inspected_text_bytes += len(inspected.encode("utf-8"))
+        state.session_inspected_text_bytes += len(inspected.encode("utf-8"))
         if len(encoded) > remaining:
             state.text_truncated = True
             fully_inspected = False
@@ -974,7 +1001,7 @@ def _scan_session(
                     node_id,
                 )
             )
-        if _mostly_uppercase(inspected):
+        if _is_mostly_uppercase(inspected):
             language_matches.append(
                 (
                     "mostly-uppercase-messages",
@@ -1004,34 +1031,35 @@ def _scan_session(
             )
 
 
-def _percent(numerator: int, denominator: int) -> int | float:
-    """Return a bounded percentage without hiding sparse nonzero shares."""
+def _calculate_percent(numerator: int, denominator: int) -> int | float:
+    """Round percentages, preserving the scale of very sparse shares."""
     if not denominator:
         return 0
-    value = (Decimal(numerator) * 100 / Decimal(denominator)).quantize(
-        Decimal("0.01"), rounding=ROUND_HALF_UP
-    )
-    if numerator > 0:
-        value = max(value, Decimal("0.01"))
-    if numerator < denominator:
-        value = min(value, Decimal("99.99"))
+    exact = Decimal(numerator) * 100 / Decimal(denominator)
+    quantum = Decimal("0.01")
+    value = exact.quantize(quantum, rounding=ROUND_HALF_UP)
+    while 0 < numerator < denominator and value in (0, 100):
+        quantum /= 10
+        value = exact.quantize(quantum, rounding=ROUND_HALF_UP)
     if value == value.to_integral_value():
         return int(value)
     return float(value)
 
 
-def _contributions(state: _State, session_ids: set[uuid.UUID]) -> list[uuid.UUID]:
+def _get_contributions(
+    state: _State, session_ids: SessionReferences
+) -> list[uuid.UUID]:
     """Return a bounded stable contribution set."""
-    ordered = sorted(session_ids, key=str)
+    ordered = list(session_ids)
     state.maximum_contributors_available = max(
-        state.maximum_contributors_available, len(ordered)
+        state.maximum_contributors_available, len(session_ids)
     )
-    if len(ordered) > state.config.max_contributing_sessions:
+    if len(session_ids) > state.config.max_contributing_sessions:
         state.contribution_truncated = True
     return ordered[: state.config.max_contributing_sessions]
 
 
-def _prompt(subject: str) -> str:
+def _build_prompt(subject: str) -> str:
     """Build a deterministic inspect-to-experiment prompt."""
     return (
         f"Use Kitaru to investigate {subject}. Inspect representative affected "
@@ -1043,35 +1071,36 @@ def _prompt(subject: str) -> str:
     )
 
 
-def _categorical(values: Counter[str], *, unit: str) -> CategoricalInsightData:
+def _build_categorical(
+    values: Counter[str] | LabelCounts, *, unit: str
+) -> CategoricalInsightData:
     """Build categorical data with deterministic count and label ordering."""
-    ordered = sorted(values.items(), key=lambda item: (-item[1], item[0]))
+    ordered = (
+        values.top()
+        if isinstance(values, LabelCounts)
+        else sorted(values.items(), key=lambda item: (-item[1], item[0]))
+    )
     return CategoricalInsightData(
         unit=unit,
         values=[CategoryValue(label=label, value=value) for label, value in ordered],
     )
 
 
-def _binned(
-    values: Sequence[float], bounds: Sequence[float], *, unit: str
-) -> BinnedInsightData:
+def _build_binned(values: Histogram, *, unit: str) -> BinnedInsightData:
     """Count values into contiguous half-open bins."""
-    counts = [0] * (len(bounds) + 1)
-    for value in values:
-        index = bisect_right(bounds, value)
-        counts[index] += 1
+    bounds = values.bounds
     bins = [
         Bin(
             lower_bound=None if index == 0 else bounds[index - 1],
             upper_bound=bounds[index] if index < len(bounds) else None,
             count=count,
         )
-        for index, count in enumerate(counts)
+        for index, count in enumerate(values.bins)
     ]
     return BinnedInsightData(unit=unit, bins=bins)
 
 
-def _signal_candidate(
+def _build_signal_candidate(
     state: _State,
     *,
     signal: str,
@@ -1088,17 +1117,15 @@ def _signal_candidate(
     aggregate = state.signals.get(signal)
     if aggregate is None or not aggregate.sessions:
         return None
-    contributions = _contributions(state, aggregate.sessions)
+    contributions = _get_contributions(state, aggregate.sessions)
     contribution_ids = set(contributions)
     eligible_session_ids = (
         state.text_inspected_session_ids
         if family == "language"
         else state.node_session_ids
     )
-    if family == "language" and not aggregate.sessions <= eligible_session_ids:
-        return None
-    share = _percent(len(aggregate.sessions), len(eligible_session_ids))
-    values = aggregate.categories
+    share = _calculate_percent(len(aggregate.sessions), len(eligible_session_ids))
+    values: Counter[str] | LabelCounts = aggregate.categories
     unit = "occurrences"
     if len(values) == 1:
         values = Counter(
@@ -1111,12 +1138,17 @@ def _signal_candidate(
         )
         unit = "sessions"
     candidate_caveat = caveat
-    excluded_sessions = len(state.analyzed_session_ids - eligible_session_ids)
+    if len(aggregate.categories) > 20:
+        candidate_caveat += (
+            " The chart shows the 20 most frequent categories and combines the "
+            "remaining categories."
+        )
+    excluded_sessions = len(state.analyzed_session_ids) - len(eligible_session_ids)
     if family == "language" and excluded_sessions:
         noun = "session was" if excluded_sessions == 1 else "sessions were"
         candidate_caveat = (
-            f"{caveat} {excluded_sessions} analyzed {noun} excluded because user "
-            "text was missing or not fully inspected."
+            f"{candidate_caveat} {excluded_sessions} analyzed {noun} excluded "
+            "because user text was missing or not fully inspected."
         )
     return CandidateFinding(
         id=candidate_id,
@@ -1129,7 +1161,7 @@ def _signal_candidate(
             affected=len(aggregate.sessions),
         ),
         caveat=candidate_caveat,
-        data=_categorical(values, unit=unit),
+        data=_build_categorical(values, unit=unit),
         facts=[
             DeterministicFact(name="occurrences", value=aggregate.count),
             DeterministicFact(name="affected_sessions", value=len(aggregate.sessions)),
@@ -1152,7 +1184,7 @@ def _signal_candidate(
             for locator in aggregate.evidence
             if locator.session_id in contribution_ids
         ],
-        investigation_prompt=_prompt(subject),
+        investigation_prompt=_build_prompt(subject),
     )
 
 
@@ -1292,7 +1324,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
         ),
     )
     for spec in signal_specs:
-        candidate = _signal_candidate(
+        candidate = _build_signal_candidate(
             state,
             signal=spec[0],
             candidate_id=spec[1],
@@ -1308,12 +1340,15 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             candidates.append(candidate)
 
     analyzed_sessions = len(state.analyzed_session_ids)
-    failed_ids = state.status_sessions.get(SessionStatus.FAILED.value, set())
+    failed_ids = state.status_sessions.get(SessionStatus.FAILED.value)
     if analyzed_sessions and failed_ids:
         affected_ids = failed_ids
-        contributions = _contributions(state, affected_ids)
+        contributions = _get_contributions(state, affected_ids)
         contribution_ids = set(contributions)
         completed_sessions = state.statuses.get(SessionStatus.COMPLETED.value, 0)
+        failed_percent = _calculate_percent(
+            state.statuses.get("failed", 0), analyzed_sessions
+        )
         outcome_description = (
             "Recorded session statuses show where to begin comparing failed and "
             "completed runs."
@@ -1337,16 +1372,13 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 family="outcome",
                 rank=55,
                 eyebrow="SESSION OUTCOMES",
-                title=(
-                    f"{_percent(state.statuses.get('failed', 0), analyzed_sessions)}% "
-                    "of sessions are recorded failed"
-                ),
+                title=(f"{failed_percent}% of sessions are recorded failed"),
                 fallback_description=outcome_description,
                 caveat=(
                     "Recorded status describes the session boundary, not the cause of "
                     "the outcome."
                 ),
-                data=_categorical(state.statuses, unit="sessions"),
+                data=_build_categorical(state.statuses, unit="sessions"),
                 facts=[
                     DeterministicFact(
                         name="failed_sessions",
@@ -1365,7 +1397,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 ),
                 contributing_session_ids=contributions,
                 evidence=status_evidence,
-                investigation_prompt=_prompt("recorded failed session outcomes"),
+                investigation_prompt=_build_prompt("recorded failed session outcomes"),
             )
         )
 
@@ -1383,7 +1415,6 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             values=state.tool_counts,
             session_ids=state.node_session_ids,
             sessions_analyzed=len(state.node_session_ids),
-            bounds=[3, 6, 10, 15],
             unit="calls",
         ),
         _DistributionSpec(
@@ -1399,7 +1430,6 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             values=state.model_counts,
             session_ids=state.node_session_ids,
             sessions_analyzed=len(state.node_session_ids),
-            bounds=[2, 3, 5],
             unit="calls",
         ),
         _DistributionSpec(
@@ -1415,7 +1445,6 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             values=state.activity_counts,
             session_ids=state.node_session_ids,
             sessions_analyzed=len(state.node_session_ids),
-            bounds=[10, 20, 30, 50],
             unit="nodes",
         ),
         _DistributionSpec(
@@ -1431,19 +1460,18 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             values=state.durations,
             session_ids=state.duration_session_ids,
             sessions_analyzed=analyzed_sessions,
-            bounds=[5, 15, 30, 60],
             unit="seconds",
         ),
     )
     for spec in distribution_specs:
         if len(spec.values) < 2:
             continue
-        contributing = _contributions(state, spec.session_ids)
+        contributing = _get_contributions(state, spec.session_ids)
         if not contributing:
             continue
-        uniform = len(set(spec.values)) == 1
+        uniform = spec.values.minimum == spec.values.maximum
         title = (
-            f"All recorded observations have {spec.values[0]:g} {spec.unit}"
+            f"All recorded observations have {spec.values.minimum:g} {spec.unit}"
             if uniform
             else spec.title
         )
@@ -1465,14 +1493,10 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                     if spec.family == "timing"
                     else "Activity volume is not evidence of outcome quality."
                 ),
-                data=_binned(
-                    [float(value) for value in spec.values],
-                    spec.bounds,
-                    unit=spec.unit,
-                ),
+                data=_build_binned(spec.values, unit=spec.unit),
                 facts=[
                     DeterministicFact(name="observations", value=len(spec.values)),
-                    DeterministicFact(name="maximum", value=max(spec.values)),
+                    DeterministicFact(name="maximum", value=spec.values.maximum),
                 ],
                 coverage=CandidateCoverage(
                     sessions_analyzed=spec.sessions_analyzed,
@@ -1485,13 +1509,13 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 ),
                 contributing_session_ids=contributing,
                 evidence=[],
-                investigation_prompt=_prompt(title.lower()),
+                investigation_prompt=_build_prompt(title.lower()),
             )
         )
 
     if state.models:
-        model_sessions = set().union(*state.model_sessions.values())
-        contributions = _contributions(state, model_sessions)
+        model_sessions = state.model_sessions
+        contributions = _get_contributions(state, model_sessions)
         candidates.append(
             CandidateFinding(
                 id="model-mix",
@@ -1510,33 +1534,37 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 caveat=(
                     "Requested and served model fields may be absent from some "
                     "recorded calls."
+                    + (
+                        " The chart shows the 20 most frequent models and combines "
+                        "the remaining models."
+                        if len(state.models) > 20
+                        else ""
+                    )
                 ),
-                data=_categorical(state.models, unit="calls"),
+                data=_build_categorical(state.models, unit="calls"),
                 facts=[
                     DeterministicFact(name="models", value=len(state.models)),
-                    DeterministicFact(
-                        name="model_calls", value=sum(state.models.values())
-                    ),
+                    DeterministicFact(name="model_calls", value=state.models.total),
                 ],
                 coverage=CandidateCoverage(
                     sessions_analyzed=len(state.node_session_ids),
                     affected_sessions=len(model_sessions),
-                    occurrences=sum(state.models.values()),
-                    evidence_available=sum(state.models.values()),
+                    occurrences=state.models.total,
+                    evidence_available=state.models.total,
                     evidence_retained=0,
                     contributing_sessions_available=len(model_sessions),
                     contributing_sessions_retained=len(contributions),
                 ),
                 contributing_session_ids=contributions,
                 evidence=[],
-                investigation_prompt=_prompt("the recorded model mix"),
+                investigation_prompt=_build_prompt("the recorded model mix"),
             )
         )
     candidates.sort(key=lambda candidate: (candidate.rank, candidate.id))
     return candidates
 
 
-def _content_hash(
+def _calculate_content_hash(
     config: ProfilingConfig,
     coverage: Coverage,
     candidates: Sequence[CandidateFinding],
@@ -1557,69 +1585,107 @@ def _content_hash(
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+class SessionProfiler:
+    """Scan sessions incrementally with bounded memory and exact aggregate counts.
+
+    Use as a context manager to release temporary storage if iteration fails.
+    Each session ID must be supplied exactly once. No session DTO is retained
+    after consume returns; one individual trace must still fit in memory.
+    """
+
+    def __init__(self, config: ProfilingConfig | None = None) -> None:
+        """Initialize an empty full-import scan."""
+        self._state = _State(config=config or ProfilingConfig())
+        self._closed = False
+
+    def __enter__(self) -> Self:
+        """Return the profiler for a resource-scoped scan."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close temporary storage when leaving the scan context."""
+        self.close()
+
+    def close(self) -> None:
+        """Release temporary storage; no further consumption is allowed."""
+        self._state.counts_store.close()
+        self._closed = True
+
+    def consume(self, session: SessionWithNodesResponse) -> None:
+        """Profile one session, rejecting duplicate IDs and closing on error."""
+        if self._closed:
+            raise ValueError("SessionProfiler is closed")
+        try:
+            state = self._state
+            if (
+                state.counts_store.increment(
+                    "seen-session-ids", str(session.session.id)
+                )
+                != 1
+            ):
+                raise ValueError("session IDs must be unique")
+            state.reset_payload_budget()
+            ordered_nodes = sorted(
+                session.nodes, key=lambda node: (node.index, str(node.id))
+            )
+            _scan_session(state, session, ordered_nodes)
+            state.nodes_analyzed += len(ordered_nodes)
+            state.payload_truncation_count += state.payload_budget.truncation_count
+        except BaseException:
+            self.close()
+            raise
+
+    def finish(self, source_session_count: int | None = None) -> ProfilingResult:
+        """Build the bounded result and release storage, including on failure."""
+        if self._closed:
+            raise ValueError("SessionProfiler is closed")
+        try:
+            return _finish_profile(self._state, source_session_count)
+        finally:
+            self.close()
+
+
 def profile_sessions(
-    sessions: list[SessionWithNodesResponse],
+    sessions: Iterable[SessionWithNodesResponse],
     *,
     config: ProfilingConfig | None = None,
     source_session_count: int | None = None,
 ) -> ProfilingResult:
-    """Profile caller-scoped normalized sessions into stable candidate findings.
+    """Profile every caller-scoped session without materializing the iterable."""
+    with SessionProfiler(config=config) as profiler:
+        for session in sessions:
+            profiler.consume(session)
+        return profiler.finish(source_session_count=source_session_count)
 
-    Raises:
-        ValueError: The source count is invalid or the coverage envelope alone
-            exceeds the projection byte limit.
-    """
-    selected_config = config or ProfilingConfig()
-    sessions_available = len(sessions)
+
+def _finish_profile(state: _State, source_session_count: int | None) -> ProfilingResult:
+    """Project the complete scan into bounded findings and honest coverage."""
+    selected_config = state.config
+    sessions_analyzed = len(state.analyzed_session_ids)
+    sessions_available = sessions_analyzed
     if source_session_count is not None:
-        if type(source_session_count) is not int or source_session_count < len(
-            sessions
+        if (
+            type(source_session_count) is not int
+            or source_session_count < sessions_analyzed
         ):
             raise ValueError(
-                "source_session_count must be an integer >= loaded sessions"
+                "source_session_count must be an integer >= analyzed sessions"
             )
         sessions_available = source_session_count
-    selected_sessions = sorted(sessions, key=lambda item: str(item.session.id))[
-        : selected_config.max_sessions
-    ]
-    nodes_available = sum(len(session.nodes) for session in sessions)
-    remaining_nodes = selected_config.max_nodes
-    selected: list[
-        tuple[SessionWithNodesResponse, list[SessionNodeResponse], bool]
-    ] = []
-    for session in selected_sessions:
-        if len(session.nodes) > remaining_nodes:
-            selected.append((session, [], False))
-            remaining_nodes = 0
-            continue
-        ordered_nodes = sorted(
-            session.nodes, key=lambda node: (node.index, str(node.id))
-        )
-        selected.append((session, ordered_nodes, True))
-        remaining_nodes -= len(ordered_nodes)
-
-    state = _State(config=selected_config)
-    for session, nodes, nodes_complete in selected:
-        _scan_session(state, session, nodes, nodes_complete=nodes_complete)
-
     candidates = _build_candidates(state)
 
     truncations: list[CoverageTruncation] = []
-    if len(selected_sessions) < sessions_available:
+    if sessions_analyzed < sessions_available:
         truncations.append(
             CoverageTruncation(
                 dimension="sessions",
                 available=sessions_available,
-                analyzed=len(selected_sessions),
-            )
-        )
-    nodes_analyzed = sum(
-        len(nodes) for _, nodes, nodes_complete in selected if nodes_complete
-    )
-    if nodes_analyzed < nodes_available:
-        truncations.append(
-            CoverageTruncation(
-                dimension="nodes", available=nodes_available, analyzed=nodes_analyzed
+                analyzed=sessions_analyzed,
             )
         )
     if state.text_truncated:
@@ -1653,17 +1719,12 @@ def profile_sessions(
         "The profiler uses normalized sessions and does not read persisted "
         "evaluation results."
     ]
-    if sessions_available > len(sessions):
+    if sessions_available > sessions_analyzed:
         caveats[0] += (
-            " Sessions were sampled before loading nodes. nodes_available counts "
-            "only nodes in the loaded sample, not the entire source import."
+            " Some source sessions were not supplied for profiling. nodes_available "
+            "counts only nodes in the supplied sessions, not the entire source import."
         )
-    if any(not nodes_complete for _, _, nodes_complete in selected):
-        caveats.append(
-            "Node-derived profiling excludes sessions whose node lists were "
-            "truncated by the configured node limit."
-        )
-    if state.timing_available < len(selected_sessions):
+    if state.timing_available < sessions_analyzed:
         caveats.append(
             "Timing coverage is incomplete because valid session bounds are missing."
         )
@@ -1682,9 +1743,7 @@ def profile_sessions(
             "User text coverage is unavailable because no explicit user-authored "
             "input was found."
         )
-    excluded_text_sessions = len(
-        state.analyzed_session_ids - state.text_inspected_session_ids
-    )
+    excluded_text_sessions = sessions_analyzed - len(state.text_inspected_session_ids)
     if excluded_text_sessions:
         noun = "session" if excluded_text_sessions == 1 else "sessions"
         caveats.append(
@@ -1692,24 +1751,27 @@ def profile_sessions(
             f"{noun} because user text was missing or not fully inspected."
         )
     if state.text_truncated:
-        caveats.append("User text inspection stopped at the configured byte limit.")
-    if state.payload_budget.truncated:
         caveats.append(
-            "Payload inspection reached a configured item, byte, or depth limit; "
+            "User text inspection reached the configured per-session byte limit."
+        )
+    if state.payload_truncation_count:
+        caveats.append(
+            "Payload inspection reached a configured per-session item, byte, or "
+            "depth limit; "
             "tool identity and user text coverage may be incomplete."
         )
 
     coverage = Coverage(
         sessions_available=sessions_available,
-        sessions_analyzed=len(selected_sessions),
-        nodes_available=nodes_available,
-        nodes_analyzed=nodes_analyzed,
+        sessions_analyzed=sessions_analyzed,
+        nodes_available=state.nodes_analyzed,
+        nodes_analyzed=state.nodes_analyzed,
         inspected_text_bytes=state.inspected_text_bytes,
         truncations=truncations,
         caveats=caveats,
     )
     result = ProfilingResult(
-        content_hash=_content_hash(selected_config, coverage, candidates),
+        content_hash=_calculate_content_hash(selected_config, coverage, candidates),
         coverage=coverage,
         candidates=candidates,
     )
@@ -1756,7 +1818,7 @@ def profile_sessions(
         )
     return result.model_copy(
         update={
-            "content_hash": _content_hash(
+            "content_hash": _calculate_content_hash(
                 selected_config, result.coverage, result.candidates
             )
         }

@@ -13,7 +13,12 @@
 #  limitations under the License.
 """Tests for deterministic insight profiling."""
 
+import gc
+import random
+import sqlite3
 import uuid
+import weakref
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -40,6 +45,7 @@ from kitaru.api_models.v1.session_node import (
 from kitaru.insights.profiling import (
     ProfilingConfig,
     ProfilingResult,
+    SessionProfiler,
     profile_sessions,
     sanitize_label,
 )
@@ -49,7 +55,207 @@ OWNER_ID = uuid.UUID("01990000-0000-7000-8000-000000000001")
 AGENT_ID = uuid.UUID("01990000-0000-7000-8000-000000000002")
 
 
-def test_source_count_preserves_sampling_coverage_and_changes_hash() -> None:
+def test_full_import_finds_signal_after_session_250() -> None:
+    sessions = [_session(number) for number in range(1, 301)]
+    sessions.append(_calls(301, [("last_tool", {}, NodeStatus.FAILED, "failed")]))
+    result = profile_sessions(sessions)
+    assert result.coverage.sessions_analyzed == 301
+    assert _candidate(result, "tool-error-mix").coverage.affected_sessions == 1
+
+
+def test_text_budget_resets_for_each_session() -> None:
+    oversized = _session(
+        1, inputs={"messages": [{"role": "user", "content": "x" * 1000}]}
+    )
+    normal = _session(2, inputs={"messages": [{"role": "user", "content": "wrong"}]})
+    result = profile_sessions(
+        [oversized, normal],
+        config=ProfilingConfig(max_payload_bytes=2000, max_text_bytes=10),
+    )
+    candidate = _candidate(result, "correction-language")
+    assert candidate.contributing_session_ids == [normal.session.id]
+    assert result.coverage.inspected_text_bytes == 15
+
+
+def test_payload_budget_resets_for_each_session() -> None:
+    oversized = _calls(1, [("tool", {"values": [0] * 35}, NodeStatus.COMPLETED, "ok")])
+    normal = _session(2, inputs={"messages": [{"role": "user", "content": "wrong"}]})
+    result = profile_sessions(
+        [oversized, normal], config=ProfilingConfig(max_payload_items=40)
+    )
+    assert _candidate(result, "correction-language").contributing_session_ids == [
+        normal.session.id
+    ]
+
+
+def test_full_import_profiles_more_than_25000_nodes() -> None:
+    def sessions() -> Iterator[SessionWithNodesResponse]:
+        for number in range(1, 261):
+            yield _calls(number, [("tool", None, NodeStatus.COMPLETED, "ok")] * 100)
+        yield _calls(261, [("late_failure", {}, NodeStatus.FAILED, "failed")])
+
+    result = profile_sessions(sessions())
+    assert result.coverage.nodes_available == 26_001
+    assert result.coverage.nodes_analyzed == 26_001
+    assert _candidate(result, "tool-error-mix").coverage.occurrences == 1
+    distribution = _candidate(result, "tool-call-distribution")
+    assert isinstance(distribution.data, BinnedInsightData)
+    assert [bin_.count for bin_ in distribution.data.bins] == [1, 0, 0, 0, 260]
+    assert distribution.coverage.occurrences == 261
+    assert {fact.name: fact.value for fact in distribution.facts} == {
+        "observations": 261,
+        "maximum": 100,
+    }
+
+
+@pytest.mark.parametrize("batch_size", [1, 37, 250])
+def test_stream_batching_and_arrival_order_preserve_bounded_projection(
+    batch_size: int,
+) -> None:
+    sessions = [
+        _calls(number, [("tool", {}, NodeStatus.FAILED, "failed")] * 3)
+        for number in range(1, 331)
+    ]
+    config = ProfilingConfig(max_contributing_sessions=7)
+    expected = profile_sessions(sessions, config=config)
+    assert profile_sessions(iter(sessions), config=config) == expected
+    random.Random(123).shuffle(sessions)
+    with SessionProfiler(config=config) as profiler:
+        for start in range(0, len(sessions), batch_size):
+            for session in sessions[start : start + batch_size]:
+                profiler.consume(session)
+        assert profiler.finish() == expected
+    candidate = _candidate(expected, "tool-error-mix")
+    assert candidate.coverage.affected_sessions == 330
+    assert candidate.coverage.occurrences == 990
+    assert len(candidate.evidence) == 20
+    assert all(
+        locator.session_id in candidate.contributing_session_ids
+        for locator in candidate.evidence
+    )
+
+
+def test_spilled_high_cardinality_counts_are_exact_and_order_independent() -> None:
+    sessions = [
+        _session(
+            number,
+            [
+                _node(
+                    0,
+                    session_id=_id(100 + number),
+                    node_type=NodeType.LLM_CALL,
+                    model=f"model-{number:04d}",
+                )
+            ],
+        )
+        for number in range(1, 1101)
+    ]
+    sessions.append(
+        _session(
+            1101,
+            [
+                _node(
+                    0,
+                    session_id=_id(1201),
+                    node_type=NodeType.LLM_CALL,
+                    model="Other categories (combined)",
+                )
+            ],
+        )
+    )
+    result = profile_sessions(iter(sessions))
+    assert profile_sessions(reversed(sessions)) == result
+    candidate = _candidate(result, "model-mix")
+    assert {fact.name: fact.value for fact in candidate.facts} == {
+        "models": 1101,
+        "model_calls": 1101,
+    }
+    assert isinstance(candidate.data, CategoricalInsightData)
+    assert len(candidate.data.values) == 21
+    assert sum(value.value for value in candidate.data.values) == 1101
+    assert candidate.data.values[-1].label == "_Other categories (combined)"
+    assert candidate.data.values[-1].value == 1081
+    assert candidate.coverage.affected_sessions == 1101
+    assert "combines the remaining models" in (candidate.caveat or "")
+
+
+@pytest.mark.parametrize(
+    "end", ["finish", "invalid_count", "duplicate", "iteration_error"]
+)
+def test_spill_resources_close_on_success_and_errors(
+    monkeypatch: pytest.MonkeyPatch, end: str
+) -> None:
+    connections: list[sqlite3.Connection] = []
+    connect = sqlite3.connect
+
+    def record_connection(database: str) -> sqlite3.Connection:
+        connection = connect(database)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", record_connection)
+    expected_error = {
+        "invalid_count": "source_session_count",
+        "duplicate": "session IDs must be unique",
+        "iteration_error": "interrupted input",
+    }
+
+    def scan() -> None:
+        with SessionProfiler() as profiler:
+            for number in range(1, 1101):
+                profiler.consume(_session(number))
+            if end == "duplicate":
+                profiler.consume(_session(1))
+            if end == "iteration_error":
+                raise ValueError("interrupted input")
+            profiler.finish(source_session_count=0 if end == "invalid_count" else None)
+
+    if end == "finish":
+        scan()
+    else:
+        with pytest.raises(ValueError, match=expected_error[end]):
+            scan()
+    assert len(connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connections[0].execute("SELECT 1")
+
+
+def test_incremental_profiler_does_not_retain_session_dtos() -> None:
+    with SessionProfiler() as profiler:
+        session = _calls(1, [("tool", {}, NodeStatus.FAILED, "failed")])
+        session_ref = weakref.ref(session)
+        node_ref = weakref.ref(session.nodes[0])
+        profiler.consume(session)
+        del session
+        gc.collect()
+        assert session_ref() is None
+        assert node_ref() is None
+        assert profiler.finish().coverage.sessions_analyzed == 1
+
+
+def test_very_sparse_percentage_preserves_actual_scale() -> None:
+    def sessions() -> Iterator[SessionWithNodesResponse]:
+        yield _calls(1, [("tool", {}, NodeStatus.FAILED, "failed")])
+        for number in range(2, 100_001):
+            yield _session(number)
+
+    candidate = _candidate(profile_sessions(sessions()), "tool-error-mix")
+    facts = {fact.name: fact.value for fact in candidate.facts}
+    assert facts["affected_share_percent"] == 0.001
+
+
+def test_nearly_universal_percentage_does_not_round_to_universal() -> None:
+    result = profile_sessions(
+        _session(
+            number,
+            status=SessionStatus.FAILED if number > 1 else SessionStatus.COMPLETED,
+        )
+        for number in range(1, 100_001)
+    )
+    assert _candidate(result, "session-outcomes").title.startswith("99.999%")
+
+
+def test_source_count_preserves_external_coverage_and_changes_hash() -> None:
     """Account for unloaded sessions without inventing their node counts."""
     sessions = [_session(1)]
     ordinary = profile_sessions(sessions)
@@ -59,7 +265,7 @@ def test_source_count_preserves_sampling_coverage_and_changes_hash() -> None:
     assert sampled.coverage.sessions_analyzed == 1
     assert sampled.coverage.nodes_available == 0
     assert sampled.content_hash != ordinary.content_hash
-    assert any("loaded sample" in caveat for caveat in sampled.coverage.caveats)
+    assert any("not supplied" in caveat for caveat in sampled.coverage.caveats)
     assert [
         (item.dimension, item.available, item.analyzed)
         for item in sampled.coverage.truncations
@@ -1078,7 +1284,7 @@ def test_enum_payload_counts_one_traversal_item() -> None:
     }
 
 
-def test_bounds_sessions_nodes_text_evidence_candidates_and_projection() -> None:
+def test_bounds_text_evidence_candidates_and_projection() -> None:
     sessions = [
         _calls(
             number,
@@ -1094,8 +1300,6 @@ def test_bounds_sessions_nodes_text_evidence_candidates_and_projection() -> None
         "messages": [{"role": "user", "content": "WRONG!!! " * 100}]
     }
     config = ProfilingConfig(
-        max_sessions=2,
-        max_nodes=4,
         max_text_bytes=12,
         max_evidence_per_candidate=1,
         max_candidates=3,
@@ -1106,9 +1310,9 @@ def test_bounds_sessions_nodes_text_evidence_candidates_and_projection() -> None
     result = profile_sessions(sessions, config=config)
 
     assert result.coverage.sessions_available == 4
-    assert result.coverage.sessions_analyzed == 2
+    assert result.coverage.sessions_analyzed == 4
     assert result.coverage.nodes_available == 12
-    assert result.coverage.nodes_analyzed == 3
+    assert result.coverage.nodes_analyzed == 12
     assert result.coverage.inspected_text_bytes <= 12
     assert len(result.candidates) <= 3
     assert all(len(candidate.evidence) <= 1 for candidate in result.candidates)
@@ -1116,10 +1320,11 @@ def test_bounds_sessions_nodes_text_evidence_candidates_and_projection() -> None
         len(candidate.contributing_session_ids) <= 1 for candidate in result.candidates
     )
     dimensions = {item.dimension for item in result.coverage.truncations}
-    assert {"sessions", "nodes", "text_bytes"} <= dimensions
+    assert "text_bytes" in dimensions
+    assert not {"sessions", "nodes"} & dimensions
 
 
-def test_node_distributions_exclude_sessions_with_truncated_node_lists() -> None:
+def test_node_distributions_include_all_complete_node_lists() -> None:
     complete = _calls(
         1,
         [("complete_tool", {"id": 1}, NodeStatus.COMPLETED, "ok")],
@@ -1135,21 +1340,20 @@ def test_node_distributions_exclude_sessions_with_truncated_node_lists() -> None
 
     result = profile_sessions(
         [complete, truncated, empty_but_complete],
-        config=ProfilingConfig(max_nodes=2),
     )
 
     distribution = _candidate(result, "tool-call-distribution")
     assert distribution.contributing_session_ids == [
         complete.session.id,
+        truncated.session.id,
         empty_but_complete.session.id,
     ]
-    assert distribution.coverage.sessions_analyzed == 2
-    assert distribution.coverage.occurrences == 2
-    assert sum(bin_.count for bin_ in distribution.data.bins) == 2
-    assert "tool-error-mix" not in {candidate.id for candidate in result.candidates}
+    assert distribution.coverage.sessions_analyzed == 3
+    assert distribution.coverage.occurrences == 3
+    assert sum(bin_.count for bin_ in distribution.data.bins) == 3
+    assert "tool-error-mix" in {candidate.id for candidate in result.candidates}
     assert result.coverage.nodes_available == 3
-    assert result.coverage.nodes_analyzed == 1
-    assert "node-derived" in " ".join(result.coverage.caveats).lower()
+    assert result.coverage.nodes_analyzed == 3
 
 
 def test_contribution_truncation_reports_actual_distribution_contributors() -> None:
@@ -1475,9 +1679,12 @@ def test_projection_byte_bound_rejects_oversized_coverage(
         started_at=None,
         ended_at=None,
     )
-    sessions = [session] if has_candidates else [session, _session(2)]
-    config = ProfilingConfig(max_payload_items=1, max_sessions=1)
-    unrestricted = profile_sessions(sessions, config=config)
+    sessions = [session]
+    source_count = 1 if has_candidates else 2
+    config = ProfilingConfig(max_payload_items=1)
+    unrestricted = profile_sessions(
+        sessions, config=config, source_session_count=source_count
+    )
     assert bool(unrestricted.candidates) is has_candidates
 
     # With candidates, the final no-candidate caveat pushes the envelope over
@@ -1485,7 +1692,9 @@ def test_projection_byte_bound_rejects_oversized_coverage(
     limit = 1_100 if has_candidates else 1_000
     with pytest.raises(ValueError, match="Coverage envelope exceeds"):
         profile_sessions(
-            sessions, config=config.model_copy(update={"max_projection_bytes": limit})
+            sessions,
+            config=config.model_copy(update={"max_projection_bytes": limit}),
+            source_session_count=source_count,
         )
 
 

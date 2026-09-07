@@ -4570,6 +4570,32 @@ export interface components {
             value: unknown;
         };
         /**
+         * ApiImportSource
+         * @description API import source.
+         */
+        ApiImportSource: {
+            /** @description Importer-defined selection of what to fetch. */
+            query: components["schemas"]["ImportQuery"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "api";
+        };
+        /**
+         * ApiImportSourceSpec
+         * @description API import source spec.
+         */
+        ApiImportSourceSpec: {
+            /** @description Importer-defined selection of what to fetch. */
+            query: components["schemas"]["ImportQuery"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "api";
+        };
+        /**
          * ApiKeyCreateRequest
          * @description API key create request.
          */
@@ -4761,6 +4787,45 @@ export interface components {
              * @description Unit of the values.
              */
             unit?: string | null;
+        };
+        /**
+         * BlobImportSource
+         * @description Blob import source.
+         */
+        BlobImportSource: {
+            /**
+             * Blob Id
+             * Format: uuid
+             * @description Blob holding the payload to parse.
+             */
+            blob_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "blob";
+        };
+        /**
+         * BlobImportSourceSpec
+         * @description Blob import source spec.
+         */
+        BlobImportSourceSpec: {
+            /**
+             * Blob Id
+             * Format: uuid
+             * @description Blob holding the payload.
+             */
+            blob_id: string;
+            /**
+             * Sha256
+             * @description Blob content hash.
+             */
+            sha256: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "blob";
         };
         /**
          * BlobResponse
@@ -6123,10 +6188,15 @@ export interface components {
             };
             /**
              * Payload Blob Id
-             * Format: uuid
+             * @deprecated
              * @description Blob holding the payload to parse.
              */
-            payload_blob_id: string;
+            payload_blob_id?: string | null;
+            /**
+             * Source
+             * @description Where the payload comes from.
+             */
+            source?: (components["schemas"]["BlobImportSource"] | components["schemas"]["ApiImportSource"]) | null;
             /**
              * Version
              * @description Importer version, an omitted value resolves to latest.
@@ -6153,6 +6223,35 @@ export interface components {
              * @description Line the failure occurred at.
              */
             line: number;
+        };
+        /**
+         * ImportQuery
+         * @description Import query.
+         */
+        ImportQuery: {
+            /**
+             * Concurrency
+             * @description Fetches the importer runs at once.
+             * @default 4
+             */
+            concurrency: number;
+            /**
+             * Since
+             * @description Start of the time window to fetch.
+             */
+            since?: string | null;
+            /**
+             * Trace Ids
+             * @description Exact trace ids to fetch, instead of a time window.
+             */
+            trace_ids?: string[] | null;
+            /**
+             * Until
+             * @description End of the time window to fetch.
+             */
+            until?: string | null;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * ImportResponse
@@ -6221,11 +6320,10 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
-             * Payload Blob Id
-             * Format: uuid
-             * @description Blob holding the payload parsed.
+             * Source
+             * @description Where the payload comes from.
              */
-            payload_blob_id: string;
+            source: components["schemas"]["BlobImportSource"] | components["schemas"]["ApiImportSource"];
             /** @description Stats from a completed import. */
             stats?: components["schemas"]["ImportStats"] | null;
             /**
@@ -6284,8 +6382,6 @@ export interface components {
             params: {
                 [key: string]: unknown;
             };
-            /** @description Payload to parse. */
-            payload: components["schemas"]["PayloadSpec"];
             /**
              * Plugin
              * @description Importer plugin to load.
@@ -6296,6 +6392,11 @@ export interface components {
              * @description Source system named on the import.
              */
             provider?: string | null;
+            /**
+             * Source
+             * @description Where the payload comes from.
+             */
+            source: components["schemas"]["BlobImportSourceSpec"] | components["schemas"]["ApiImportSourceSpec"];
         };
         /**
          * ImporterCreateRequest
@@ -7505,23 +7606,6 @@ export interface components {
              * @enum {string}
              */
             type: "passthrough";
-        };
-        /**
-         * PayloadSpec
-         * @description Payload spec.
-         */
-        PayloadSpec: {
-            /**
-             * Blob Id
-             * Format: uuid
-             * @description Blob holding the payload.
-             */
-            blob_id: string;
-            /**
-             * Sha256
-             * @description Blob content hash.
-             */
-            sha256: string;
         };
         /**
          * ReplayCreateRequest

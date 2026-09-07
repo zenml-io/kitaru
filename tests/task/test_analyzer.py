@@ -266,10 +266,9 @@ async def test_run_loads_from_a_source_ref_and_fetches_sessions_in_order(
     (params,) = listed
     assert params.size == 1000
     assert json.loads(params.model_dump(mode="json")["filter"]) == {
-        "and": [
-            {"field": "import_id", "op": "eq", "value": str(import_id)},
-            {"field": "status", "op": "ne", "value": "in_progress"},
-        ]
+        "field": "import_id",
+        "op": "eq",
+        "value": str(import_id),
     }
     assert captured == [
         [
@@ -315,13 +314,11 @@ async def test_analyzer_flow_end_to_end(
         )
         sessions.append(session)
     # Only an import task can create sessions carrying an import id, so stamp
-    # the import onto the stored rows directly, and complete them since the
-    # flow skips sessions still in progress.
+    # the import onto the stored rows directly.
     import_id = uuid.uuid4()
     for session in sessions:
         stored = task_app.services.sessions._sessions[session.id]
         stored.import_id = import_id
-        stored.status = SessionStatus.COMPLETED
 
     task_id = uuid.uuid4()
     details = AnalysisTaskDetails(

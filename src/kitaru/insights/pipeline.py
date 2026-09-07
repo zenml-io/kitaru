@@ -15,7 +15,7 @@
 
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from itertools import combinations
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -55,7 +55,7 @@ from kitaru.insights.profiling import (
     CandidateFinding,
     ProfilingConfig,
     ProfilingResult,
-    profile_sessions,
+    SessionProfiler,
 )
 
 PROMPT_VERSION = "2026-09-04.1"
@@ -104,7 +104,7 @@ def _append_coverage_caveat(caveats: Sequence[str], message: str) -> list[str]:
     return retained
 
 
-def _empty_result(
+def _build_empty_result(
     *,
     context: InsightGenerationContext,
     coverage: Coverage,
@@ -123,7 +123,7 @@ def _empty_result(
     )
 
 
-def _bounded_references(
+def _get_bounded_references(
     candidate: CandidateFinding, *, maximum: int
 ) -> tuple[list[uuid.UUID], list[EvidenceLocator]]:
     """Retain stable contribution IDs while preserving every evidence reference."""
@@ -137,7 +137,7 @@ def _bounded_references(
     return retained_ids, evidence
 
 
-def _investigation_prompt(
+def _build_investigation_prompt(
     candidate: CandidateFinding,
     *,
     context: InsightGenerationContext,
@@ -180,7 +180,7 @@ def _investigation_prompt(
     return prompt
 
 
-def _output_coverage(
+def _build_output_coverage(
     profiling: ProfilingResult,
     plan: ModelGenerationPlan,
     *,
@@ -225,7 +225,7 @@ def _assemble_result(
     """Assemble only deterministic facts and validated editorial fields."""
     by_id = {candidate.id: candidate for candidate in profiling.candidates}
     copy_by_id = {item.id: item for item in plan.editorial.insights}
-    base_coverage = _output_coverage(
+    base_coverage = _build_output_coverage(
         profiling,
         plan,
         maximum_contributions=config.max_contributing_sessions_per_insight,
@@ -262,12 +262,12 @@ def _assemble_result(
         oversized_ids: set[str] = set()
         for candidate_id in retained_ids:
             candidate = by_id[candidate_id]
-            contributing_ids, evidence = _bounded_references(
+            contributing_ids, evidence = _get_bounded_references(
                 candidate,
                 maximum=config.max_contributing_sessions_per_insight,
             )
             try:
-                prompt = _investigation_prompt(
+                prompt = _build_investigation_prompt(
                     candidate,
                     context=context,
                     coverage=coverage,
@@ -401,7 +401,7 @@ def _get_oversize_result(
             for position, insight in enumerate(retained):
                 original_metadata = result.card_metadata(insight)
                 try:
-                    investigation_prompt = _investigation_prompt(
+                    investigation_prompt = _build_investigation_prompt(
                         candidates[insight.name],
                         context=result.context,
                         coverage=coverage,
@@ -455,7 +455,7 @@ def _get_oversize_result(
             ),
         }
     )
-    return _empty_result(
+    return _build_empty_result(
         context=result.context,
         coverage=coverage,
         mode=result.mode,
@@ -464,36 +464,30 @@ def _get_oversize_result(
     )
 
 
-def _validate_sessions(
-    sessions: Sequence[SessionWithNodesResponse],
+def validate_session(
+    item: SessionWithNodesResponse,
     *,
     context: InsightGenerationContext,
 ) -> None:
-    """Reject ambiguous or internally inconsistent normalized input."""
-    session_ids: set[uuid.UUID] = set()
-    for item in sessions:
-        session = item.session
-        if session.agent_id != context.agent_id:
-            raise ValueError("every session must belong to the context agent")
-        if session.origin is not SessionOrigin.IMPORTED:
-            raise ValueError("every session must originate from an import")
-        if session.import_id != context.source_import.import_id:
-            raise ValueError("every session must belong to the context source import")
-        if session.id in session_ids:
-            raise ValueError("session IDs must be unique")
-        session_ids.add(session.id)
-
-        node_ids: set[uuid.UUID] = set()
-        node_indexes: set[int] = set()
-        for node in item.nodes:
-            if node.session_id != session.id:
-                raise ValueError("every node must belong to its enclosing session")
-            if node.id in node_ids:
-                raise ValueError("node IDs must be unique within a session")
-            if node.index in node_indexes:
-                raise ValueError("node indexes must be unique within a session")
-            node_ids.add(node.id)
-            node_indexes.add(node.index)
+    """Reject a session with inconsistent scope or ambiguous node identities."""
+    session = item.session
+    if session.agent_id != context.agent_id:
+        raise ValueError("every session must belong to the context agent")
+    if session.origin is not SessionOrigin.IMPORTED:
+        raise ValueError("every session must originate from an import")
+    if session.import_id != context.source_import.import_id:
+        raise ValueError("every session must belong to the context source import")
+    node_ids: set[uuid.UUID] = set()
+    node_indexes: set[int] = set()
+    for node in item.nodes:
+        if node.session_id != session.id:
+            raise ValueError("every node must belong to its enclosing session")
+        if node.id in node_ids:
+            raise ValueError("node IDs must be unique within a session")
+        if node.index in node_indexes:
+            raise ValueError("node indexes must be unique within a session")
+        node_ids.add(node.id)
+        node_indexes.add(node.index)
 
 
 async def _finalize_result(
@@ -539,7 +533,7 @@ async def _finalize_result(
 
 
 async def generate_insights(
-    sessions: list[SessionWithNodesResponse],
+    sessions: Iterable[SessionWithNodesResponse],
     *,
     context: InsightGenerationContext,
     config: InsightGenerationConfig | None = None,
@@ -549,14 +543,32 @@ async def generate_insights(
 ) -> InsightGenerationResult:
     """Generate frontend-ready Insights from caller-scoped normalized sessions."""
     selected_config = config or InsightGenerationConfig()
-    _validate_sessions(sessions, context=context)
-    run_id = str(uuid.uuid4())
-
-    profiling = profile_sessions(
-        sessions,
-        config=selected_config.profiling,
-        source_session_count=source_session_count,
+    with SessionProfiler(config=selected_config.profiling) as profiler:
+        for session in sessions:
+            validate_session(session, context=context)
+            profiler.consume(session)
+            del session
+        profiling = profiler.finish(source_session_count=source_session_count)
+    return await generate_insights_from_profile(
+        profiling,
+        context=context,
+        config=selected_config,
+        generator=generator,
+        observer=observer,
     )
+
+
+async def generate_insights_from_profile(
+    profiling: ProfilingResult,
+    *,
+    context: InsightGenerationContext,
+    config: InsightGenerationConfig | None = None,
+    generator: InsightModelGenerator | None = None,
+    observer: GenerationObserver | None = None,
+) -> InsightGenerationResult:
+    """Generate bounded cards from a completed, caller-validated session profile."""
+    selected_config = config or InsightGenerationConfig()
+    run_id = str(uuid.uuid4())
     await observe_safely(
         observer,
         GenerationEvent(
@@ -571,7 +583,7 @@ async def generate_insights(
     )
     if not profiling.candidates:
         return await _finalize_result(
-            _empty_result(
+            _build_empty_result(
                 context=context,
                 coverage=profiling.coverage,
                 mode=GenerationMode.DETERMINISTIC,
@@ -621,7 +633,7 @@ async def generate_insights(
             }
         )
         return await _finalize_result(
-            _empty_result(
+            _build_empty_result(
                 context=context,
                 coverage=coverage,
                 mode=plan.mode,
@@ -648,4 +660,6 @@ __all__ = [
     "InsightGenerationConfig",
     "InsightResultSizeError",
     "generate_insights",
+    "generate_insights_from_profile",
+    "validate_session",
 ]

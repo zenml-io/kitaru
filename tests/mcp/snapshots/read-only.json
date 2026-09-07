@@ -3053,6 +3053,27 @@
           "title": "AnalyzerConfig",
           "type": "object"
         },
+        "ApiImportSource": {
+          "additionalProperties": false,
+          "description": "API import source.",
+          "properties": {
+            "query": {
+              "$ref": "#/$defs/ImportQuery",
+              "description": "Importer-defined selection of what to fetch."
+            },
+            "type": {
+              "const": "api",
+              "default": "api",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "title": "ApiImportSource",
+          "type": "object"
+        },
         "BaselineEvaluationMode": {
           "description": "Baseline evaluation mode.",
           "enum": [
@@ -3062,6 +3083,29 @@
           ],
           "title": "BaselineEvaluationMode",
           "type": "string"
+        },
+        "BlobImportSource": {
+          "additionalProperties": false,
+          "description": "Blob import source.",
+          "properties": {
+            "blob_id": {
+              "description": "Blob holding the payload to parse.",
+              "format": "uuid",
+              "title": "Blob Id",
+              "type": "string"
+            },
+            "type": {
+              "const": "blob",
+              "default": "blob",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "blob_id"
+          ],
+          "title": "BlobImportSource",
+          "type": "object"
         },
         "EvaluationDataType": {
           "description": "Data type an evaluation result carries.",
@@ -3580,6 +3624,65 @@
           "title": "ImportFailure",
           "type": "object"
         },
+        "ImportQuery": {
+          "additionalProperties": true,
+          "description": "Import query.",
+          "properties": {
+            "concurrency": {
+              "default": 4,
+              "description": "Fetches the importer runs at once.",
+              "minimum": 1,
+              "title": "Concurrency",
+              "type": "integer"
+            },
+            "since": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Start of the time window to fetch.",
+              "title": "Since"
+            },
+            "trace_ids": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Exact trace ids to fetch, instead of a time window.",
+              "title": "Trace Ids"
+            },
+            "until": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "End of the time window to fetch.",
+              "title": "Until"
+            }
+          },
+          "title": "ImportQuery",
+          "type": "object"
+        },
         "ImportResponse": {
           "description": "Import response.",
           "properties": {
@@ -3684,11 +3787,24 @@
               "title": "Params",
               "type": "object"
             },
-            "payload_blob_id": {
-              "description": "Blob holding the payload parsed.",
-              "format": "uuid",
-              "title": "Payload Blob Id",
-              "type": "string"
+            "source": {
+              "description": "Where the payload comes from.",
+              "discriminator": {
+                "mapping": {
+                  "api": "#/$defs/ApiImportSource",
+                  "blob": "#/$defs/BlobImportSource"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/BlobImportSource"
+                },
+                {
+                  "$ref": "#/$defs/ApiImportSource"
+                }
+              ],
+              "title": "Source"
             },
             "stats": {
               "anyOf": [
@@ -3715,7 +3831,7 @@
             "owner_id",
             "id",
             "agent_id",
-            "payload_blob_id",
+            "source",
             "params",
             "evaluators",
             "analyzers"

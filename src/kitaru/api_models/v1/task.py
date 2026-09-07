@@ -29,6 +29,7 @@ from kitaru.api_models.v1.base import (
 )
 from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.hook import TaskHook
+from kitaru.api_models.v1.imports import ImportQuery
 
 
 class TaskKind(StrEnum):
@@ -163,11 +164,26 @@ PluginSpec = Annotated[
 ]
 
 
-class PayloadSpec(ResponseModel):
-    """Payload spec."""
+class BlobImportSourceSpec(ResponseModel):
+    """Blob import source spec."""
 
+    type: Literal["blob"] = Field(default="blob")
     blob_id: uuid.UUID = Field(description="Blob holding the payload.")
     sha256: str = Field(description="Blob content hash.")
+
+
+class ApiImportSourceSpec(ResponseModel):
+    """API import source spec."""
+
+    type: Literal["api"] = Field(default="api")
+    query: ImportQuery = Field(
+        description="Importer-defined selection of what to fetch."
+    )
+
+
+ImportSourceSpec = Annotated[
+    BlobImportSourceSpec | ApiImportSourceSpec, Field(discriminator="type")
+]
 
 
 class AgentTaskDetails(ResponseModel):
@@ -197,7 +213,7 @@ class ImportTaskDetails(ResponseModel):
 
     kind: Literal["importer"] = Field(default="importer")
     plugin: PluginSpec = Field(description="Importer plugin to load.")
-    payload: PayloadSpec = Field(description="Payload to parse.")
+    source: ImportSourceSpec = Field(description="Where the payload comes from.")
     provider: str | None = Field(
         default=None, description="Source system named on the import."
     )

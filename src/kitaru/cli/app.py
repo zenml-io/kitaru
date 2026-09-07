@@ -56,6 +56,7 @@ from kitaru.cli import (
     workers,
 )
 from kitaru.cli import auth as auth_commands
+from kitaru.cli import setup as setup_commands
 from kitaru.cli.config import (
     CONFIG_KEYS,
     ResolvedTarget,
@@ -942,6 +943,59 @@ async def doctor() -> CommandResult:
         credential_store=invocation.credential_store,
         explicit_server=invocation.server,
         timeout=invocation.request_timeout,
+    )
+
+
+@_register(
+    app,
+    _spec(
+        ("setup",),
+        "Install the agent skills and register the MCP server with every "
+        "detected coding agent. Re-run after installing a new one. The global "
+        "--server picks the server the MCP server targets.",
+        parameters=(
+            ParameterSpec(
+                "--mode",
+                "string",
+                "option",
+                False,
+                "MCP capability mode: read-only, standard (default), or destructive.",
+            ),
+            ParameterSpec(
+                "--no-skills", "boolean", "option", False, "Skip installing the skills."
+            ),
+            ParameterSpec(
+                "--no-mcp",
+                "boolean",
+                "option",
+                False,
+                "Skip registering the MCP server.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("writes_local_file", "executes_local_code"),
+        idempotency="idempotent",
+        errors=(
+            "invalid_arguments",
+            "invalid_configuration",
+            "network_error",
+            "internal_error",
+        ),
+    ),
+)
+async def setup(
+    *,
+    mode: Annotated[str, Parameter(name="--mode")] = "standard",
+    no_skills: Annotated[bool, Parameter(name="--no-skills")] = False,
+    no_mcp: Annotated[bool, Parameter(name="--no-mcp")] = False,
+) -> CommandResult:
+    """Wire skills and the MCP server into installed coding agents."""
+    invocation = _invocation()
+    return await setup_commands.setup(
+        server=invocation.server,
+        mode=mode,
+        install_skills=not no_skills,
+        register_mcp=not no_mcp,
     )
 
 
@@ -3888,9 +3942,16 @@ async def analyzer_version_get(analyzer_version: str, /) -> CommandResult:
     session_app,
     _spec(
         ("session", "import"),
-        "Upload a local payload and create an import job.",
+        "Upload a local payload or fetch from a provider API, and create "
+        "an import job.",
         parameters=(
-            ParameterSpec("FILE", "path", "argument", True, "Local payload file."),
+            ParameterSpec(
+                "FILE",
+                "path",
+                "argument",
+                False,
+                "Local payload file. Omit for an API import.",
+            ),
             ParameterSpec(
                 "--importer",
                 "reference",
@@ -3914,6 +3975,37 @@ async def analyzer_version_get(analyzer_version: str, /) -> CommandResult:
                 "option",
                 False,
                 "Group source traces by the value at this RFC 6901 JSON Pointer.",
+            ),
+            ParameterSpec(
+                "--since",
+                "timestamp or duration",
+                "option",
+                False,
+                "For an API import, fetch traces at or after this ISO 8601 "
+                "timestamp or relative duration such as 7d, 12h, or 30m.",
+            ),
+            ParameterSpec(
+                "--until",
+                "timestamp or duration",
+                "option",
+                False,
+                "For an API import, fetch traces before this ISO 8601 "
+                "timestamp or relative duration such as 7d, 12h, or 30m.",
+            ),
+            ParameterSpec(
+                "--trace-id",
+                "text[]",
+                "option",
+                False,
+                "For an API import, fetch exactly these provider trace ids.",
+            ),
+            ParameterSpec(
+                "--query",
+                "JSON object",
+                "option",
+                False,
+                "Additional importer-defined API selection fields, merged "
+                "with --since, --until, and --trace-id.",
             ),
             ParameterSpec(
                 "--tag",
@@ -3971,25 +4063,29 @@ async def analyzer_version_get(analyzer_version: str, /) -> CommandResult:
     ),
 )
 async def session_import(
-    file: Path,
+    file: Path | None = None,
     /,
     *,
     importer: str,
     agent: str,
     params: str | None = None,
     join_on: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    trace_id: list[str] | None = None,
+    query: str | None = None,
     tag: list[str] | None = None,
     evaluator: list[str] | None = None,
     evaluator_params: list[str] | None = None,
     analyzer: list[str] | None = None,
     analyzer_params: list[str] | None = None,
-    media_type: str = "application/octet-stream",
+    media_type: str | None = None,
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
-    """Upload a local payload and create one import job."""
+    """Upload a local payload or an API selection, then create one import job."""
     async with _open_asset_client() as client:
         return await sessions.import_sessions(
             client,
@@ -3998,6 +4094,10 @@ async def session_import(
             agent=agent,
             params=params,
             join_on=join_on,
+            since=since,
+            until=until,
+            trace_ids=trace_id,
+            query=query,
             tags=tag,
             evaluators=evaluator,
             evaluator_params=evaluator_params,
