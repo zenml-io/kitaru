@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `kitaru-logfire-importer[adapter]` now supports Logfire 5.x in addition to 4.35+. Logfire 5.0 removed its deprecated query client APIs but keeps `AsyncLogfireQueryClient.query_json_rows`, which is the only query surface the importer uses.
 - `POST /api/v1/imports` now returns the import instead of the job, with the job in its `job_id`. Import task responses carry `import_id` instead of `payload_blob_id` and `agent_id`.
 
 ### Fixed
