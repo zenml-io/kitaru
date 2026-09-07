@@ -161,7 +161,7 @@ Install the adapter in the Node project that runs your agent:
 {% tabs %}
 {% tab title="Mastra" %}
 ```bash
-pnpm add @zenml-io/kitaru-mastra @mastra/core@1.51.0
+pnpm add @zenml-io/kitaru-mastra @mastra/core@1.64.0
 ```
 
 See the [Mastra adapter](../adapters/mastra.md) for the wrapper, replay behavior, and supported boundary.

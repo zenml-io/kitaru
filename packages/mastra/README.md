@@ -1,11 +1,11 @@
 # `@zenml-io/kitaru-mastra`
 
-Experimental non-streaming recording and replay support for Mastra 1.51.x.
+Experimental non-streaming recording and replay support for Mastra 1.51 through 1.64.
 
 This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose repository directory is `packages/core/`. The packages are versioned and released together.
 
 ```bash
-pnpm add @zenml-io/kitaru-mastra @mastra/core@1.51.0
+pnpm add @zenml-io/kitaru-mastra @mastra/core@1.64.0
 ```
 
 ## Links

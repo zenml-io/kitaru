@@ -1,5 +1,5 @@
 ---
-description: Record and replay non-streaming Mastra 1.51 agent runs with the Kitaru TypeScript adapter
+description: Record and replay non-streaming Mastra 1.51-1.64 agent runs with the Kitaru TypeScript adapter
 icon: robot
 ---
 
@@ -8,7 +8,7 @@ icon: robot
 The Kitaru Mastra adapter wraps an existing Mastra `Agent` and records each non-streaming `generate()` call as a Kitaru [session](../concepts/agents-and-sessions.md). Mastra still runs the agent and Kitaru returns the native Mastra result unchanged.
 
 {% hint style="warning" %}
-`@zenml-io/kitaru-mastra` 0.1.0 is the initial stable package release for Node `>=22.22.0 <23` and `@mastra/core >=1.51.0 <1.52.0`. It supports non-streaming `Agent.generate()` only.
+`@zenml-io/kitaru-mastra` 0.1.0 is the initial stable package release for Node `>=22.22.0 <23` and `@mastra/core >=1.51.0 <1.65.0`. It supports non-streaming `Agent.generate()` only.
 {% endhint %}
 
 ## Install
@@ -16,13 +16,13 @@ The Kitaru Mastra adapter wraps an existing Mastra `Agent` and records each non-
 {% tabs %}
 {% tab title="pnpm" %}
 ```bash
-pnpm add @zenml-io/kitaru-mastra @mastra/core@1.51.0
+pnpm add @zenml-io/kitaru-mastra @mastra/core@1.64.0
 ```
 {% endtab %}
 
 {% tab title="npm" %}
 ```bash
-npm install @zenml-io/kitaru-mastra @mastra/core@1.51.0
+npm install @zenml-io/kitaru-mastra @mastra/core@1.64.0
 ```
 {% endtab %}
 {% endtabs %}
