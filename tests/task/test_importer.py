@@ -40,7 +40,7 @@ from conftest import (
     imported_session,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
-from kitaru.api_models.v1.imports import ImportFailure, ImportStats
+from kitaru.api_models.v1.imports import ImportFailure, ImportQuery, ImportStats
 from kitaru.api_models.v1.session import SessionListParams, SessionOrigin, SessionStatus
 from kitaru.api_models.v1.session_node import (
     SessionNodeListParams,
@@ -59,7 +59,6 @@ from kitaru.server.domain.plugin import PluginKind
 from kitaru.task.importer import (
     MAX_IMPORT_FAILURES,
     NODE_BATCH_SIZE,
-    FetchQuery,
     ImportedSession,
     SessionImportError,
     _resolve_importer,
@@ -208,7 +207,7 @@ def _script_details(entrypoint: str) -> ImportTaskDetails:
         plugin=ScriptPluginSpec(
             entrypoint=entrypoint, blob_id=uuid.uuid4(), sha256="x"
         ),
-        source=ApiImportSourceSpec(query={}),
+        source=ApiImportSourceSpec(query=ImportQuery(trace_ids=[])),
         agent_id=uuid.uuid4(),
         params={},
     )
@@ -254,7 +253,7 @@ def test_resolve_importer_package_plugin() -> None:
     """Load a package plugin's entrypoint by module:attribute."""
     details = ImportTaskDetails(
         plugin=PackagePluginSpec(entrypoint="json:dumps", requirement="pkg==1.0"),
-        source=ApiImportSourceSpec(query={}),
+        source=ApiImportSourceSpec(query=ImportQuery(trace_ids=[])),
         agent_id=uuid.uuid4(),
         params={},
     )
@@ -275,47 +274,6 @@ def test_resolve_importer_rejects_a_non_importer(
 
     with pytest.raises(SessionImportError, match="neither callable nor an importer"):
         _resolve_importer(_script_details("importer"))
-
-
-def test_fetch_query_requires_since_without_trace_ids() -> None:
-    with pytest.raises(ValueError, match="since is required"):
-        FetchQuery.model_validate({})
-    query = FetchQuery.model_validate({"trace_ids": ["t1"]})
-    assert query.since is None
-
-
-def test_fetch_query_rejects_unknown_keys_and_naive_datetimes() -> None:
-    with pytest.raises(ValueError, match="project"):
-        FetchQuery.model_validate({"since": "2026-01-01T00:00:00Z", "project": "x"})
-    with pytest.raises(ValueError):
-        FetchQuery.model_validate({"since": "2026-01-01T00:00:00"})
-    with pytest.raises(ValueError):
-        FetchQuery.model_validate({"trace_ids": "t1"})
-
-
-def test_fetch_query_rejects_an_inverted_window() -> None:
-    with pytest.raises(ValueError, match="until must not be before since"):
-        FetchQuery.model_validate(
-            {"since": "2026-01-02T00:00:00Z", "until": "2026-01-01T00:00:00Z"}
-        )
-
-
-def test_fetch_query_window_defaults_until_to_now() -> None:
-    query = FetchQuery.model_validate({"since": "2026-01-01T00:00:00Z"})
-    since, until = query.get_window()
-    assert since == query.since
-    assert until.tzinfo is not None
-    assert until > since
-    query = FetchQuery.model_validate(
-        {"since": "2026-01-01T00:00:00Z", "until": "2026-01-03T00:00:00Z"}
-    )
-    assert query.get_window() == (query.since, query.until)
-
-
-def test_fetch_query_concurrency_defaults_and_rejects_zero() -> None:
-    assert FetchQuery.model_validate({"trace_ids": []}).concurrency == 4
-    with pytest.raises(ValueError):
-        FetchQuery.model_validate({"trace_ids": [], "concurrency": 0})
 
 
 async def test_gather_bounded_limits_in_flight_and_keeps_order() -> None:
@@ -713,7 +671,9 @@ async def _create_api_source_task(
             plugin=ScriptPluginSpec(
                 entrypoint="importer", blob_id=uuid.uuid4(), sha256="x"
             ),
-            source=ApiImportSourceSpec(query=query or {}),
+            source=ApiImportSourceSpec(
+                query=ImportQuery.model_validate(query or {"trace_ids": []})
+            ),
             agent_id=task_app.agent.id,
             params={},
         ),

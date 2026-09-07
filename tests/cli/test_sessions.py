@@ -25,7 +25,11 @@ from typing import Any
 
 import pytest
 
-from kitaru.api_models.v1.imports import BlobImportSource, ImportResponse
+from kitaru.api_models.v1.imports import (
+    ApiImportSource,
+    BlobImportSource,
+    ImportResponse,
+)
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import (
     SessionListParams,
@@ -1134,10 +1138,11 @@ async def test_session_import_api_query_merges_options_and_uploads_nothing() -> 
         "since": "2026-08-01T00:00:00Z",
         "trace_ids": ["trace-1", "trace-2"],
     }
-    assert request.model_dump(mode="json")["source"] == {
-        "type": "api",
-        "query": expected_query,
-    }
+    assert isinstance(request.source, ApiImportSource)
+    assert (
+        request.source.query.model_dump(mode="json", exclude_unset=True)
+        == expected_query
+    )
     assert result.item["query"] == expected_query
     assert "blob" not in result.item
 
@@ -1159,6 +1164,31 @@ async def test_session_import_query_clash_rejected_before_remote_call() -> None:
             timeout=None,
             since="2026-08-01T00:00:00Z",
             query='{"since":"2026-08-02T00:00:00Z"}',
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []
+    assert client.requests == []
+
+
+async def test_session_import_rejects_an_inverted_query_before_remote_call() -> None:
+    """An inverted window merged from --since and --query is rejected locally."""
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            None,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type=None,
+            wait=False,
+            interval=None,
+            timeout=None,
+            since="2026-08-02T00:00:00Z",
+            query='{"until":"2026-08-01T00:00:00Z"}',
         )
 
     assert error.value.kind == "invalid_arguments"

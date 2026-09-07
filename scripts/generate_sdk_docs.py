@@ -228,6 +228,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "ImportResponse",
                 "BlobImportSource",
                 "ApiImportSource",
+                "ImportQuery",
             }
         ),
     ),
@@ -389,7 +390,6 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "SessionImportError",
                 "Parser",
                 "Fetcher",
-                "FetchQuery",
                 "FetchingImporter",
                 "Importer",
                 "gather_bounded",

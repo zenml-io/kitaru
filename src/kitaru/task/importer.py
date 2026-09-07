@@ -16,13 +16,12 @@
 import asyncio
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
-from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Protocol, Self, TypeVar, runtime_checkable
+from typing import Any, Protocol, TypeVar, runtime_checkable
 
 import httpx
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.imports import MAX_IMPORT_FAILURES, ImportFailure, ImportStats
 from kitaru.api_models.v1.session import (
@@ -52,7 +51,6 @@ from kitaru.task.task_io import get_required_env, write_task_result
 __all__ = [
     "MAX_IMPORT_FAILURES",
     "NODE_BATCH_SIZE",
-    "FetchQuery",
     "Fetcher",
     "FetchingImporter",
     "ImportFailure",
@@ -74,7 +72,6 @@ __all__ = [
 ]
 
 NODE_BATCH_SIZE = 200
-DEFAULT_FETCH_CONCURRENCY = 4
 MAX_RATE_LIMIT_RETRIES = 10
 
 T = TypeVar("T")
@@ -173,47 +170,9 @@ class FetchingImporter(Importer, Protocol):
         ...
 
 
-class FetchQuery(BaseModel):
-    """Fetch query."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    trace_ids: list[str] | None = None
-    since: AwareDatetime | None = None
-    until: AwareDatetime | None = None
-    concurrency: int = Field(default=DEFAULT_FETCH_CONCURRENCY, ge=1)
-
-    @model_validator(mode="after")
-    def _check_window(self) -> Self:
-        """Require since without trace ids and reject an inverted window.
-
-        Raises:
-            ValueError: Neither trace_ids nor since is set, or until is
-                before since.
-
-        Returns:
-            The validated query.
-        """
-        if self.trace_ids is None and self.since is None:
-            raise ValueError("since is required when trace_ids is absent")
-        if (
-            self.since is not None
-            and self.until is not None
-            and (self.until < self.since)
-        ):
-            raise ValueError("until must not be before since")
-        return self
-
-    def get_window(self) -> tuple[datetime, datetime]:
-        """Return the time window, with until defaulting to now.
-
-        Returns:
-            Window bounds.
-        """
-        assert self.since is not None
-        return self.since, self.until or datetime.now(UTC)
-
-
+# TODO: Move gather_bounded and retry_rate_limited into a module importer
+# implementations import, separate from the runtime in this module that calls
+# them.
 async def gather_bounded(
     awaitables: Iterable[Awaitable[T]], concurrency: int
 ) -> list[T]:
@@ -591,7 +550,8 @@ async def _iter_payloads(
             f"{_LABEL} entrypoint '{details.plugin.entrypoint}' does not fetch "
             "from an API"
         )
-    async for payload in call_fetcher(fetcher, details.source.query):
+    query = details.source.query.model_dump(mode="json")
+    async for payload in call_fetcher(fetcher, query):
         yield payload
 
 

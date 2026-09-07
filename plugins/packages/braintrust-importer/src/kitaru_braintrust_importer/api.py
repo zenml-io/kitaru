@@ -23,9 +23,11 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
+from pydantic import ConfigDict
 
+from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.env import get_required_env
-from kitaru.task.importer import FetchQuery, gather_bounded, retry_rate_limited
+from kitaru.task.importer import gather_bounded, retry_rate_limited
 
 __all__ = ["fetch", "fetch_spans", "serialize_spans", "wait_for_spans"]
 
@@ -230,8 +232,10 @@ def serialize_spans(rows: list[dict[str, Any]]) -> bytes:
     return json.dumps({"events": rows}).encode("utf-8")
 
 
-class BraintrustFetchQuery(FetchQuery):
-    """Braintrust fetch query."""
+class BraintrustImportQuery(ImportQuery):
+    """Braintrust import query."""
+
+    model_config = ConfigDict(extra="forbid")
 
     project_id: str
 
@@ -255,7 +259,7 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     Yields:
         The trace payload bytes, or nothing when no trace matches.
     """
-    parsed = BraintrustFetchQuery.model_validate(query)
+    parsed = BraintrustImportQuery.model_validate(query)
     async with httpx.AsyncClient() as client:
         if parsed.trace_ids is not None:
             trace_ids = parsed.trace_ids

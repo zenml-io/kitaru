@@ -27,6 +27,7 @@ from kitaru.api_models.v1.imports import (
     ApiImportSource,
     BlobImportSource,
     ImportCreateRequest,
+    ImportQuery,
     ImportSource,
     ImportStats,
 )
@@ -112,7 +113,7 @@ def _build_api_query(
     until: str | None,
     trace_ids: list[str] | None,
     query: str | None,
-) -> dict[str, Any] | None:
+) -> ImportQuery | None:
     """Merge --since, --until, and --trace-id into --query, rejecting overlaps."""
     resolved_since = _resolve_time_option(since, "--since")
     resolved_until = _resolve_time_option(until, "--until")
@@ -139,7 +140,10 @@ def _build_api_query(
             f"--query cannot set {keys}. Already set by --since, --until, "
             "or --trace-id.",
         )
-    return {**parsed_query, **collected}
+    try:
+        return ImportQuery.model_validate({**parsed_query, **collected})
+    except ValidationError as error:
+        raise CLIError("invalid_arguments", f"Invalid --query: {error}") from error
 
 
 def _normalize_import_tags(tags: list[str] | None, *, wait: bool) -> list[str]:
@@ -426,7 +430,7 @@ async def import_sessions(
         source: ImportSource = BlobImportSource(blob_id=blob.id)
     else:
         assert api_query is not None
-        identity["query"] = api_query
+        identity["query"] = api_query.model_dump(mode="json", exclude_unset=True)
         source = ApiImportSource(query=api_query)
     if tags:
         identity["tags"] = tags

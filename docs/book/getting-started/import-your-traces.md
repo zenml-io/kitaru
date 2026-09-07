@@ -60,7 +60,7 @@ kitaru session import \
   --tag imported-baseline --wait
 ```
 
-`--since` and `--until` accept an ISO 8601 timestamp or a relative duration such as `7d`, `12h`, or `30m`. `--trace-id` fetches exactly the trace ids you name instead of a window. The fetch runs on your worker, the same way the parse does, so provider credentials stay in your environment. Set them there as the provider's own SDK expects. Each provider's guide lists its query keys and the environment variables the worker needs.
+`--since` and `--until` accept an ISO 8601 timestamp or a relative duration such as `7d`, `12h`, or `30m`. `--trace-id` fetches exactly the trace ids you name instead of a window. These merge with `--query` into one `ImportQuery` (`kitaru.api_models.v1.imports`), validated before the import is created, and provider-specific keys pass through untouched. The fetch runs on your worker, the same way the parse does, so provider credentials stay in your environment. Set them there as the provider's own SDK expects. Each provider's guide lists its query keys and the environment variables the worker needs.
 
 Use the file upload from step 2 when you already have an export, when you'd rather not hand a worker live API credentials, or for the Kitaru JSONL importer, which only accepts uploaded files. Use the API fetch to skip the export step for the five provider importers.
 

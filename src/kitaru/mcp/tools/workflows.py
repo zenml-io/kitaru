@@ -20,7 +20,9 @@ async def handle_session_import(
         blob = await state.client.blobs.get(request.source.blob_id)
         identity = {"blob_id": str(blob.id)}
     else:
-        identity = {"query": request.source.query}
+        identity = {
+            "query": request.source.query.model_dump(mode="json", exclude_unset=True)
+        }
     importer_version = await state.client.importers.get_version(
         request.importer_id, request.importer_version
     )

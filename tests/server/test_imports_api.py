@@ -178,7 +178,57 @@ async def test_create_api_import(
     response = await client.post("/api/v1/imports", json=body)
     assert response.status_code == 201
     created = response.json()
-    assert created["source"] == body["source"]
+    assert created["source"] == {
+        "type": "api",
+        "query": {
+            "trace_ids": None,
+            "since": "2026-08-01T00:00:00Z",
+            "until": None,
+            "concurrency": 4,
+        },
+    }
+
+
+async def test_create_api_import_rejects_a_naive_since(
+    client: httpx.AsyncClient,
+) -> None:
+    """A naive since fails validation before an import is created."""
+    body = {
+        "importer": "csv",
+        "agent_id": str(uuid.uuid4()),
+        "source": {"type": "api", "query": {"since": "2026-08-01T00:00:00"}},
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_api_import_round_trips_provider_extras(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """A provider-specific query key survives the round trip through the response."""
+    plugin = await create_plugin(
+        services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        display_version=None,
+    )
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {
+            "type": "api",
+            "query": {"trace_ids": ["t1"], "project_id": "proj-1"},
+        },
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["source"]["query"]["project_id"] == "proj-1"
 
 
 async def test_create_import_accepts_the_deprecated_payload_blob_id(

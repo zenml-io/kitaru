@@ -23,9 +23,11 @@ from typing import Any
 import httpx
 from logfire._internal.config import get_base_url_from_token
 from logfire.query_client import AsyncLogfireQueryClient
+from pydantic import ConfigDict
 
+from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.env import get_required_env
-from kitaru.task.importer import FetchQuery, gather_bounded, retry_rate_limited
+from kitaru.task.importer import gather_bounded, retry_rate_limited
 
 __all__ = ["fetch", "fetch_trace", "wait_for_trace"]
 
@@ -237,6 +239,12 @@ async def _list_root_trace_ids(
     return trace_ids
 
 
+class LogfireImportQuery(ImportQuery):
+    """Logfire import query."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     """Fetch every trace matched by the query into one parser payload.
 
@@ -257,7 +265,7 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         One NDJSON payload concatenating every fetched trace, oldest
         first. Nothing when there is nothing to fetch.
     """
-    parsed = FetchQuery.model_validate(query)
+    parsed = LogfireImportQuery.model_validate(query)
     read_token = get_required_env("LOGFIRE_READ_TOKEN")
     async with httpx.AsyncClient(
         base_url=get_base_url_from_token(read_token)

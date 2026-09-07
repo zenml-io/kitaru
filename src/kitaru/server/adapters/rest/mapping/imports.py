@@ -18,6 +18,7 @@ from kitaru.api_models.v1.imports import (
     BlobImportSource,
     ImportCreateRequest,
     ImportListParams,
+    ImportQuery,
     ImportResponse,
     ImportSource,
 )
@@ -41,7 +42,8 @@ def import_create_to_command(body: ImportCreateRequest) -> ImportCreate:
     """
     source = body.get_source()
     if isinstance(source, ApiImportSource):
-        payload_blob_id, fetch_query = None, source.query
+        payload_blob_id = None
+        fetch_query = source.query.model_dump(mode="json", exclude_unset=True)
     else:
         payload_blob_id, fetch_query = source.blob_id, None
     return ImportCreate(
@@ -72,7 +74,7 @@ def import_to_response(import_: Import) -> ImportResponse:
         source = BlobImportSource(blob_id=import_.payload_blob_id)
     else:
         assert import_.fetch_query is not None
-        source = ApiImportSource(query=import_.fetch_query)
+        source = ApiImportSource(query=ImportQuery.model_validate(import_.fetch_query))
     return ImportResponse(
         id=import_.id,
         owner_id=import_.owner_id,

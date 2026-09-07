@@ -15,6 +15,7 @@
 
 import uuid
 
+from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.server.application.models.auth import GrantKind
 from kitaru.server.application.services.resource_access import build_task_grants
@@ -111,7 +112,7 @@ def test_import_spec_with_api_source_grants_only_the_script_blob() -> None:
         timeout_seconds=60,
         details=ImportTaskDetails(
             plugin=_script_plugin(plugin_blob_id),
-            source=ApiImportSourceSpec(query={}),
+            source=ApiImportSourceSpec(query=ImportQuery(trace_ids=[])),
             agent_id=uuid.uuid4(),
         ),
     )

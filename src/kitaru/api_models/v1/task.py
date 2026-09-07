@@ -29,6 +29,7 @@ from kitaru.api_models.v1.base import (
 )
 from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.hook import TaskHook
+from kitaru.api_models.v1.imports import ImportQuery
 
 
 class TaskKind(StrEnum):
@@ -170,7 +171,7 @@ class ApiImportSourceSpec(ResponseModel):
     """API import source spec."""
 
     type: Literal["api"] = Field(default="api")
-    query: dict[str, JsonValue] = Field(
+    query: ImportQuery = Field(
         description="Importer-defined selection of what to fetch."
     )
 

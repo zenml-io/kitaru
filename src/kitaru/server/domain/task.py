@@ -21,6 +21,7 @@ import pydantic
 from pydantic import Field, field_validator
 
 from kitaru.api_models.v1.evaluation import EvaluationResult
+from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import (
     TaskKind,
     TaskOnFailure,
@@ -710,7 +711,7 @@ class ApiImportSourceSpec(FrozenModel):
     """API import source spec."""
 
     type: Literal["api"] = "api"
-    query: dict[str, Any] = Field(default_factory=dict)
+    query: ImportQuery
 
 
 ImportSourceSpec = Annotated[

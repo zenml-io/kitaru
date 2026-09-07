@@ -27,6 +27,7 @@ from fakes import (
     make_importer_spec,
 )
 
+from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import (
     ApiImportSourceSpec,
     BlobImportSourceSpec,
@@ -303,7 +304,7 @@ async def test_import_handler_api_source_script_plugin_materializes_only_the_plu
     plugin = ScriptPluginSpec(
         entrypoint="parse", blob_id=code_blob_id, sha256=code_digest
     )
-    source = ApiImportSourceSpec(query={})
+    source = ApiImportSourceSpec(query=ImportQuery(trace_ids=[]))
     task_id = uuid.uuid4()
     spec = make_importer_spec(task_id, plugin=plugin, source=source)
 
@@ -323,7 +324,7 @@ async def test_import_handler_api_source_package_plugin_materializes_nothing(
 ) -> None:
     """An API source with a package plugin materializes no blobs."""
     plugin = PackagePluginSpec(entrypoint="pkg.mod:parse", requirement="pkg==2.0")
-    source = ApiImportSourceSpec(query={})
+    source = ApiImportSourceSpec(query=ImportQuery(trace_ids=[]))
     task_id = uuid.uuid4()
     spec = make_importer_spec(task_id, plugin=plugin, source=source)
 

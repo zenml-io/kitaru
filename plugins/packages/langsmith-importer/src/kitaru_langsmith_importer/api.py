@@ -22,8 +22,10 @@ from typing import Any
 from langsmith import Client
 from langsmith.schemas import Run
 from langsmith.utils import LangSmithRateLimitError, get_tracer_project
+from pydantic import ConfigDict
 
-from kitaru.task.importer import FetchQuery, gather_bounded, retry_rate_limited
+from kitaru.api_models.v1.imports import ImportQuery
+from kitaru.task.importer import gather_bounded, retry_rate_limited
 
 __all__ = ["fetch", "fetch_runs", "serialize_runs", "wait_for_runs"]
 
@@ -119,8 +121,10 @@ def serialize_runs(runs: list[Run]) -> bytes:
     )
 
 
-class LangSmithFetchQuery(FetchQuery):
-    """LangSmith fetch query."""
+class LangSmithImportQuery(ImportQuery):
+    """LangSmith import query."""
+
+    model_config = ConfigDict(extra="forbid")
 
     project_name: str | None = None
 
@@ -185,7 +189,7 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         A single payload with every fetched trace's runs, in fetch order.
         Nothing when no trace matches the query.
     """
-    parsed = LangSmithFetchQuery.model_validate(query)
+    parsed = LangSmithImportQuery.model_validate(query)
     client = Client()
 
     if parsed.trace_ids is not None:

@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Task execution spec building."""
 
+from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
@@ -229,7 +230,9 @@ class TaskSpecBuilder:
             payload = await self._blobs.get(import_.payload_blob_id)
             return BlobImportSourceSpec(blob_id=payload.id, sha256=payload.sha256)
         assert import_.fetch_query is not None
-        return ApiImportSourceSpec(query=import_.fetch_query)
+        return ApiImportSourceSpec(
+            query=ImportQuery.model_validate(import_.fetch_query)
+        )
 
     async def _plugin_spec(self, plugin_version: PluginVersion) -> PluginSpec:
         """Convert a plugin version's code source into its spec form.

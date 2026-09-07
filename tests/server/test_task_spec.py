@@ -29,6 +29,7 @@ from conftest import (
     create_plugin,
     create_worker,
 )
+from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
@@ -131,7 +132,9 @@ async def test_import_spec_carries_the_api_source(
 
     assert isinstance(spec.details, ImportTaskDetails)
     assert isinstance(spec.details.source, ApiImportSourceSpec)
-    assert spec.details.source.query == {"since": "2026-08-01T00:00:00Z"}
+    assert spec.details.source.query == ImportQuery.model_validate(
+        {"since": "2026-08-01T00:00:00Z"}
+    )
 
 
 async def test_missing_import_row_cancels_the_task_at_claim(

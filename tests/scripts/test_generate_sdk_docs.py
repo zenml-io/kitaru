@@ -219,9 +219,17 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
     ),
     # Published under kitaru.task.importer (reexports). ImportSource is an
     # annotated discriminated-union alias; the two concrete sources are the
-    # developer-facing entry points.
+    # developer-facing entry points. DEFAULT_FETCH_CONCURRENCY backs
+    # ImportQuery.concurrency's default and is not meant to be imported on
+    # its own.
     "kitaru.api_models.v1.imports": frozenset(
-        {"ImportFailure", "ImportStats", "MAX_IMPORT_FAILURES", "ImportSource"}
+        {
+            "ImportFailure",
+            "ImportStats",
+            "MAX_IMPORT_FAILURES",
+            "ImportSource",
+            "DEFAULT_FETCH_CONCURRENCY",
+        }
     ),
     # Validation helper shared by the two requests carrying the deprecated
     # evaluate_baselines bool.

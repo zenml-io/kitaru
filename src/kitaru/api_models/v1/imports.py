@@ -14,9 +14,10 @@
 """Import API models."""
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import AwareDatetime, ConfigDict, Field, model_validator
 
 from kitaru.api_models.v1.base import (
     DiscriminatedRequestModel,
@@ -30,6 +31,7 @@ from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 
 MAX_IMPORT_FAILURES = 20
+DEFAULT_FETCH_CONCURRENCY = 4
 
 
 class BlobImportSource(DiscriminatedRequestModel):
@@ -39,12 +41,64 @@ class BlobImportSource(DiscriminatedRequestModel):
     blob_id: uuid.UUID = Field(description="Blob holding the payload to parse.")
 
 
+class ImportQuery(RequestModel):
+    """Import query."""
+
+    model_config = ConfigDict(extra="allow")
+
+    trace_ids: list[str] | None = Field(
+        default=None,
+        description="Exact trace ids to fetch, instead of a time window.",
+    )
+    since: AwareDatetime | None = Field(
+        default=None, description="Start of the time window to fetch."
+    )
+    until: AwareDatetime | None = Field(
+        default=None, description="End of the time window to fetch."
+    )
+    concurrency: int = Field(
+        default=DEFAULT_FETCH_CONCURRENCY,
+        ge=1,
+        description="Fetches the importer runs at once.",
+    )
+
+    @model_validator(mode="after")
+    def _check_window(self) -> Self:
+        """Require since without trace ids and reject an inverted window.
+
+        Raises:
+            ValueError: Neither trace_ids nor since is set, or until is
+                before since.
+
+        Returns:
+            The validated query.
+        """
+        if self.trace_ids is None and self.since is None:
+            raise ValueError("since is required when trace_ids is absent")
+        if (
+            self.since is not None
+            and self.until is not None
+            and (self.until < self.since)
+        ):
+            raise ValueError("until must not be before since")
+        return self
+
+    def get_window(self) -> tuple[datetime, datetime]:
+        """Return the time window, with until defaulting to now.
+
+        Returns:
+            Window bounds.
+        """
+        assert self.since is not None
+        return self.since, self.until or datetime.now(UTC)
+
+
 class ApiImportSource(DiscriminatedRequestModel):
     """API import source."""
 
     type: Literal["api"] = Field(default="api")
-    query: dict[str, JsonValue] = Field(
-        default_factory=dict, description="Importer-defined selection of what to fetch."
+    query: ImportQuery = Field(
+        description="Importer-defined selection of what to fetch."
     )
 
 

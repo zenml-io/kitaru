@@ -29,8 +29,10 @@ from langfuse.api import (
     TraceWithFullDetails,
 )
 from langfuse.api.core import ApiError, RequestOptions
+from pydantic import ConfigDict
 
-from kitaru.task.importer import FetchQuery, gather_bounded, retry_rate_limited
+from kitaru.api_models.v1.imports import ImportQuery
+from kitaru.task.importer import gather_bounded, retry_rate_limited
 
 __all__ = [
     "fetch",
@@ -262,6 +264,12 @@ async def _assemble_trace_payload(
     return payload
 
 
+class LangfuseImportQuery(ImportQuery):
+    """Langfuse import query."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     """Fetch one parser payload containing every trace matching a query.
 
@@ -281,7 +289,7 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     Yields:
         One trace list payload, or nothing when no trace matches.
     """
-    parsed = FetchQuery.model_validate(query)
+    parsed = LangfuseImportQuery.model_validate(query)
 
     since: datetime | None
     until: datetime | None

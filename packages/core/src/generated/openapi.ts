@@ -4130,13 +4130,8 @@ export interface components {
          * @description API import source.
          */
         ApiImportSource: {
-            /**
-             * Query
-             * @description Importer-defined selection of what to fetch.
-             */
-            query?: {
-                [key: string]: unknown;
-            };
+            /** @description Importer-defined selection of what to fetch. */
+            query: components["schemas"]["ImportQuery"];
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -4148,13 +4143,8 @@ export interface components {
          * @description API import source spec.
          */
         ApiImportSourceSpec: {
-            /**
-             * Query
-             * @description Importer-defined selection of what to fetch.
-             */
-            query: {
-                [key: string]: unknown;
-            };
+            /** @description Importer-defined selection of what to fetch. */
+            query: components["schemas"]["ImportQuery"];
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -5784,6 +5774,35 @@ export interface components {
              * @description Line the failure occurred at.
              */
             line: number;
+        };
+        /**
+         * ImportQuery
+         * @description Import query.
+         */
+        ImportQuery: {
+            /**
+             * Concurrency
+             * @description Fetches the importer runs at once.
+             * @default 4
+             */
+            concurrency: number;
+            /**
+             * Since
+             * @description Start of the time window to fetch.
+             */
+            since?: string | null;
+            /**
+             * Trace Ids
+             * @description Exact trace ids to fetch, instead of a time window.
+             */
+            trace_ids?: string[] | null;
+            /**
+             * Until
+             * @description End of the time window to fetch.
+             */
+            until?: string | null;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * ImportResponse

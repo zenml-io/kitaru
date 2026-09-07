@@ -668,10 +668,8 @@
         "description": "API import source.",
         "properties": {
           "query": {
-            "additionalProperties": true,
-            "description": "Importer-defined selection of what to fetch.",
-            "title": "Query",
-            "type": "object"
+            "$ref": "#/components/schemas/ImportQuery",
+            "description": "Importer-defined selection of what to fetch."
           },
           "type": {
             "const": "api",
@@ -680,6 +678,9 @@
             "type": "string"
           }
         },
+        "required": [
+          "query"
+        ],
         "title": "ApiImportSource",
         "type": "object"
       },
@@ -687,10 +688,8 @@
         "description": "API import source spec.",
         "properties": {
           "query": {
-            "additionalProperties": true,
-            "description": "Importer-defined selection of what to fetch.",
-            "title": "Query",
-            "type": "object"
+            "$ref": "#/components/schemas/ImportQuery",
+            "description": "Importer-defined selection of what to fetch."
           },
           "type": {
             "const": "api",
@@ -3594,6 +3593,62 @@
           "error"
         ],
         "title": "ImportFailure",
+        "type": "object"
+      },
+      "ImportQuery": {
+        "additionalProperties": true,
+        "description": "Import query.",
+        "properties": {
+          "concurrency": {
+            "default": 4,
+            "description": "Fetches the importer runs at once.",
+            "minimum": 1.0,
+            "title": "Concurrency",
+            "type": "integer"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start of the time window to fetch.",
+            "title": "Since"
+          },
+          "trace_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact trace ids to fetch, instead of a time window.",
+            "title": "Trace Ids"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End of the time window to fetch.",
+            "title": "Until"
+          }
+        },
+        "title": "ImportQuery",
         "type": "object"
       },
       "ImportResponse": {

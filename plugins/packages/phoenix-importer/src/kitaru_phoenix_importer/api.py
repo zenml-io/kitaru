@@ -24,8 +24,10 @@ from typing import Any
 import httpx
 from phoenix.client import AsyncClient
 from phoenix.client.utils.config import get_env_project_name
+from pydantic import ConfigDict
 
-from kitaru.task.importer import FetchQuery, gather_bounded, retry_rate_limited
+from kitaru.api_models.v1.imports import ImportQuery
+from kitaru.task.importer import gather_bounded, retry_rate_limited
 
 __all__ = ["fetch", "fetch_spans", "serialize_spans", "wait_for_spans"]
 
@@ -154,8 +156,10 @@ def serialize_spans(spans: list[Any]) -> bytes:
     return json.dumps(spans).encode("utf-8")
 
 
-class PhoenixFetchQuery(FetchQuery):
-    """Phoenix fetch query."""
+class PhoenixImportQuery(ImportQuery):
+    """Phoenix import query."""
+
+    model_config = ConfigDict(extra="forbid")
 
     project: str | None = None
 
@@ -243,7 +247,7 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         One payload with every fetched trace's spans, oldest first, or
         nothing when no trace matches.
     """
-    parsed = PhoenixFetchQuery.model_validate(query)
+    parsed = PhoenixImportQuery.model_validate(query)
     client = AsyncClient()
 
     if parsed.trace_ids is not None:
