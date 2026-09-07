@@ -98,7 +98,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Braintrust project-log and UI exports.",
         provider="braintrust",
         entrypoint="kitaru_braintrust_importer.importer:importer",
-        requirement="kitaru-braintrust-importer[adapter]==0.2.0",
+        requirement="kitaru-braintrust-importer==0.2.0",
         display_version="0.2.0",
     ),
     DefaultPluginDefinition(
@@ -116,7 +116,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Langfuse JSON and JSONL trace exports.",
         provider="langfuse",
         entrypoint="kitaru_langfuse_importer.importer:importer",
-        requirement="kitaru-langfuse-importer[adapter]==0.2.0",
+        requirement="kitaru-langfuse-importer==0.2.0",
         display_version="0.2.0",
     ),
     DefaultPluginDefinition(
@@ -125,7 +125,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Logfire records-query JSON and NDJSON exports.",
         provider="logfire",
         entrypoint="kitaru_logfire_importer.importer:importer",
-        requirement="kitaru-logfire-importer[adapter]==0.2.0",
+        requirement="kitaru-logfire-importer==0.2.0",
         display_version="0.2.0",
     ),
     DefaultPluginDefinition(
@@ -134,7 +134,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import LangSmith run-query and bulk-export records.",
         provider="langsmith",
         entrypoint="kitaru_langsmith_importer.importer:importer",
-        requirement="kitaru-langsmith-importer[adapter]==0.2.0",
+        requirement="kitaru-langsmith-importer==0.2.0",
         display_version="0.2.0",
     ),
     DefaultPluginDefinition(
@@ -143,7 +143,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Arize Phoenix JSON and JSONL trace exports.",
         provider="phoenix",
         entrypoint="kitaru_phoenix_importer.importer:importer",
-        requirement="kitaru-phoenix-importer[adapter]==0.2.0",
+        requirement="kitaru-phoenix-importer==0.2.0",
         display_version="0.2.0",
     ),
     DefaultPluginDefinition(

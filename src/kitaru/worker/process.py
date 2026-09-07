@@ -24,6 +24,8 @@ import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from packaging.requirements import Requirement
+
 from kitaru.worker.platforms import WorkerPlatform, current_platform
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,10 @@ _CONTRACT_ENV_VARIABLES = frozenset(
 _PEP723_BLOCK_REGEX = (
     r"^# /// (?P<type>[A-Za-z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+)^# ///$"
 )
+
+
+# Extra an importer package declares for its API fetch dependencies.
+FETCH_EXTRA = "fetch"
 
 
 class TaskProcess(NamedTuple):
@@ -323,6 +329,21 @@ def parse_inline_dependencies(path: Path) -> list[str]:
     metadata = tomllib.loads(content)
     dependencies = metadata.get("dependencies", [])
     return list(dependencies)
+
+
+def with_extra(requirement: str, extra: str) -> str:
+    """Return a requirement with an extra added.
+
+    Args:
+        requirement: PEP 508 requirement.
+        extra: Extra to add.
+
+    Returns:
+        Requirement naming the extra.
+    """
+    parsed = Requirement(requirement)
+    parsed.extras.add(extra)
+    return str(parsed)
 
 
 def get_python_run_argv(

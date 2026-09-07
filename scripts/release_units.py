@@ -47,7 +47,6 @@ class ReleaseUnit:
     lock_source: str
     version: str
     default_catalog: bool
-    default_extras: tuple[str, ...]
     release_label: str
     impact_paths: tuple[str, ...]
     tag_prefix: str
@@ -58,12 +57,6 @@ class ReleaseUnit:
     def tag(self) -> str:
         """Build the immutable package tag for the current manifest version."""
         return f"{self.tag_prefix}{self.version}"
-
-    @property
-    def requirement(self) -> str:
-        """Build the exact requirement the server default catalog pins."""
-        extras = f"[{','.join(self.default_extras)}]" if self.default_extras else ""
-        return f"{self.distribution}{extras}=={self.version}"
 
     @property
     def maintenance_branch(self) -> str:
@@ -83,7 +76,6 @@ class ReleaseUnit:
             "lock_source": self.lock_source,
             "version": self.version,
             "default_catalog": self.default_catalog,
-            "default_extras": list(self.default_extras),
             "release_label": self.release_label,
             "impact_paths": list(self.impact_paths),
             "tag_prefix": self.tag_prefix,
@@ -386,7 +378,7 @@ def _parse_requirement(value: str, context: str) -> Requirement:
 
 def _load_bootstrap_requirements(
     repo_root: Path,
-) -> dict[str, set[tuple[str, frozenset[str], str]]]:
+) -> dict[str, set[tuple[str, str]]]:
     bootstrap_path = repo_root / "src" / "kitaru" / "server" / "api" / "bootstrap.py"
     try:
         module = ast.parse(bootstrap_path.read_text(), filename=str(bootstrap_path))
@@ -397,7 +389,7 @@ def _load_bootstrap_requirements(
             f"invalid server plugin catalog: {error}"
         ) from error
 
-    requirements: dict[str, set[tuple[str, frozenset[str], str]]] = {}
+    requirements: dict[str, set[tuple[str, str]]] = {}
     for node in ast.walk(module):
         if not (
             isinstance(node, ast.Call)
@@ -438,11 +430,7 @@ def _load_bootstrap_requirements(
             )
         name = str(canonicalize_name(requirement.name))
         requirements.setdefault(name, set()).add(
-            (
-                str(requirement.specifier),
-                frozenset(requirement.extras),
-                display_version_value.value,
-            )
+            (str(requirement.specifier), display_version_value.value)
         )
     return requirements
 
@@ -474,18 +462,20 @@ def _validate_default_catalog(repo_root: Path, units: tuple[ReleaseUnit, ...]) -
         raise ReleaseInventoryError("default catalog does not match inventory")
 
     for name, unit in inventory_defaults.items():
-        expected = {(f"=={unit.version}", frozenset(unit.default_extras), unit.version)}
+        expected = {(f"=={unit.version}", unit.version)}
         if bootstrap_defaults[name] != expected:
             raise ReleaseInventoryError(
                 f"{name}: server default requirement and display version "
-                f"must match {unit.requirement}"
+                f"must match {unit.version}"
             )
 
 
 def default_requirements(inventory: ReleaseInventory) -> dict[str, str]:
     """Return exact requirements for packages in the server default catalog."""
     return {
-        str(canonicalize_name(unit.distribution)): unit.requirement
+        str(canonicalize_name(unit.distribution)): (
+            f"{unit.distribution}=={unit.version}"
+        )
         for unit in inventory.plugin_units
         if unit.default_catalog
     }
@@ -601,15 +591,6 @@ def load_inventory(
             raise ReleaseInventoryError(
                 f"{context}: default-catalog must be true or false"
             )
-        default_extras: tuple[str, ...] = ()
-        if "default-extras" in raw_unit:
-            default_extras = tuple(
-                _get_string_list(raw_unit, "default-extras", context)
-            )
-            if not default_catalog:
-                raise ReleaseInventoryError(
-                    f"{context}: default-extras requires default-catalog"
-                )
         tag_prefix = _get_string(raw_unit, "tag-prefix", context)
         expected_tag_prefix = f"python/{distribution}/v"
         if tag_prefix != expected_tag_prefix:
@@ -649,7 +630,6 @@ def load_inventory(
                 lock_source=lock_source,
                 version=version,
                 default_catalog=default_catalog,
-                default_extras=default_extras,
                 release_label=release_label,
                 impact_paths=impact_paths,
                 tag_prefix=tag_prefix,

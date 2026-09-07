@@ -77,6 +77,8 @@ importer = MyImporter()
 
 Register it with `--entrypoint importer` for a script source, or `my_importer:importer` for a package source. An entrypoint that is a plain callable stays upload-only.
 
+A package source declares what `fetch` needs under a `fetch` extra in its `pyproject.toml`, and the worker installs `my-importer[fetch]` for an API import and the bare package for an upload. A script source lists its dependencies inline as for any script plugin, so they are installed for both.
+
 `fetch` receives the import's `--query` (or `source.query` on the request) and yields parser payloads. Each yielded payload runs through `parse` with the import's `params`, exactly like a file upload would, so every trace that `parse` groups into one session must be in the same payload. The built-in importers yield one payload holding every fetched trace, oldest first. Raise from `fetch` to end the import task with the failure recorded in the import stats. An API import against an importer without `fetch` fails the same way, so `kitaru session import --wait` reports it in the import stats.
 
 ## Scaffold, test offline, register

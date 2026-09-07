@@ -27,9 +27,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-adapter = [
+fetch = [
     "httpx>=0.27,<1",
     "logfire>=4.35,<6",
+]
+adapter = [
+    "kitaru-logfire-importer[fetch]",
 ]
 
 [project.urls]

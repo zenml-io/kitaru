@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from kitaru.api_models.v1.task import (
+    ApiSourceSpec,
     BlobSourceSpec,
     ImportTaskDetails,
     ScriptPluginSpec,
@@ -28,10 +29,12 @@ from kitaru.api_models.v1.task import (
 from kitaru.worker.context import ExecutionContext
 from kitaru.worker.handlers.base import materialize_blob
 from kitaru.worker.process import (
+    FETCH_EXTRA,
     TaskProcess,
     build_process_env,
     get_python_run_argv,
     parse_inline_dependencies,
+    with_extra,
 )
 
 
@@ -76,6 +79,8 @@ class ImportHandler:
             dependencies = parse_inline_dependencies(
                 Path(env["KITARU_TASK_PLUGIN_PATH"])
             )
+        elif isinstance(details.source, ApiSourceSpec):
+            dependencies = [with_extra(details.plugin.requirement, FETCH_EXTRA)]
         else:
             dependencies = [details.plugin.requirement]
         argv = get_python_run_argv("kitaru.task", ["import"], dependencies)

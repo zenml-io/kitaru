@@ -335,3 +335,4 @@ async def test_import_handler_api_source_package_plugin_materializes_nothing(
     assert "KITARU_TASK_PLUGIN_PATH" not in process.env
     assert "KITARU_TASK_PAYLOAD_PATH" not in process.env
     assert client.blobs.download_calls == []
+    assert "pkg[fetch]==2.0" in process.command
