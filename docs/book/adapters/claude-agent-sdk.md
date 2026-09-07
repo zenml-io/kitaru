@@ -36,7 +36,10 @@ async def run() -> None:
     runner = KitaruClaudeRunner(agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]))
     stream = runner.query(
         prompt="Investigate ticket 4821.",
-        options=ClaudeAgentOptions(model="claude-sonnet-4-5"),
+        options=ClaudeAgentOptions(
+            model="claude-sonnet-4-5",
+            setting_sources=[],
+        ),
     )
     async with contextlib.aclosing(stream) as messages:
         async for message in messages:
@@ -44,6 +47,10 @@ async def run() -> None:
 ```
 
 The adapter calls the Claude Agent SDK's public `query()` function and yields each message unchanged. It copies `ClaudeAgentOptions` before adding recording hooks, so it does not modify the options or hook collections you passed in.
+
+Recording preserves the Claude SDK's settings behavior. With `setting_sources` unset, the SDK can load user, project, and local settings, including output styles from `~/.claude/settings.json`. For recordings intended for replay with tool substitution, set `setting_sources=[]` as above so those settings do not add context that the replay omits. Tool substitution forces this setting on replay; an all-passthrough replay preserves your settings instead.
+
+This option disables those settings sources, but does not make the whole execution environment portable. See [Claude's settings isolation limits](https://code.claude.com/docs/en/agent-sdk/claude-code-features#what-settingsources-does-not-control).
 
 Use `contextlib.aclosing()` if the consumer may stop before the terminal `ResultMessage`. Otherwise, cleanup has to wait for Python to close the asynchronous generator. `aclosing()` closes the Claude iterator and finalizes the partial Kitaru session when the consumer exits.
 
@@ -103,6 +110,7 @@ stream = runner.query(
     prompt="Look up ticket 4821.",
     options=ClaudeAgentOptions(
         tools=[],
+        setting_sources=[],
         mcp_servers={},
         allowed_tools=["mcp__support__lookup"],
     ),

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - The Mastra adapter is now developed and tested against `@mastra/core` 1.64.0, and its peer range widened from `>=1.51.0 <1.52.0` to `>=1.51.0 <1.65.0`. Mastra now ships type declarations for `@mastra/core/test-utils/llm-mock`, so the adapter tests and the Mastra example derive their mock model types from that module instead of suppressing the missing declarations.
+- `kitaru-pydantic-ai` now supports the PydanticAI 2.37 through 2.40 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.38.0 with `genai-prices` 0.1.6.
 - `POST /api/v1/imports` now returns the import instead of the job, with the job in its `job_id`. Import task responses carry `import_id` instead of `payload_blob_id` and `agent_id`.
 
 ### Fixed
