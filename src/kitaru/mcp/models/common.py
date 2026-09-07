@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.agent_version import AgentVersionResponse
+from kitaru.api_models.v1.analyzer import AnalyzerResponse, AnalyzerVersionResponse
 from kitaru.api_models.v1.annotation import AnnotationResponse
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.cohort import CohortResponse
@@ -106,10 +107,12 @@ RegistryItem = (
     | ExperimentResponse
     | ImporterResponse
     | EvaluatorResponse
+    | AnalyzerResponse
     | AgentVersionResponse
     | CohortVersionResponse
     | ImporterVersionResponse
     | EvaluatorVersionResponse
+    | AnalyzerVersionResponse
     | AgentResponse
     | TagResponse
     | WorkerResponse
@@ -188,6 +191,12 @@ class EvaluatorsManageResult(ToolResult):
     """Evaluator parent or version management result."""
 
     data: EvaluatorResponse | EvaluatorVersionResponse | None = None
+
+
+class AnalyzersManageResult(ToolResult):
+    """Analyzer parent or version management result."""
+
+    data: AnalyzerResponse | AnalyzerVersionResponse | None = None
 
 
 class SessionImportReceipt(MCPModel):

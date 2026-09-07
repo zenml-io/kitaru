@@ -41,6 +41,7 @@ class StubImportClient:
             source=BlobImportSource(blob_id=uuid.uuid4()),
             params={},
             evaluators=[],
+            analyzers=[],
             stats=None,
             error=None,
             created=now,

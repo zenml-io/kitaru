@@ -102,13 +102,13 @@ async def create_session(
 @router.get("")
 async def list_sessions(
     service: Annotated[SessionService, Depends(get_session_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
     params: Annotated[SessionListParams, Query()],
 ) -> Page[SessionDetailResponse] | Page[SessionResponse]:
     """List sessions.
 
-    Clients observe HTTP 200 on success and 422 on invalid pagination
-    parameters.
+    Clients observe HTTP 200 on success, 403 when a task token is not granted
+    a listing, and 422 on invalid pagination parameters.
 
     Args:
         service: Session service.

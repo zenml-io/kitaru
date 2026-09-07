@@ -38,6 +38,7 @@ from kitaru.server.application.services.resource_access import (
     check_task_attempt,
     check_task_session_read,
     check_task_session_write,
+    scope_task_session_filter,
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.imports import Import
@@ -290,7 +291,7 @@ class SessionService:
             Stored session.
         """
         session = await self._repository.get(session_id, include_payloads=True)
-        check_task_session_read(session_id, session.task_id, actor)
+        check_task_session_read(session, actor)
         await self._payload_store.resolve(
             [p for p in (session.inputs, session.outputs) if p is not None]
         )
@@ -319,7 +320,7 @@ class SessionService:
             Baseline session the replay ran against.
         """
         session = await self._repository.get(session_id, include_payloads=False)
-        check_task_session_read(session_id, session.task_id, actor)
+        check_task_session_read(session, actor)
         replay = await self._replays.get_by_result_session_id(session_id)
         if replay is None:
             raise SessionBaselineNotFound(session_id)
@@ -339,16 +340,22 @@ class SessionService:
     ) -> tuple[list[Session], str | None]:
         """List sessions matching a filter.
 
+        A task principal's listing is restricted to the imports its token is
+        granted.
+
         Args:
             session_filter: Filter and pagination parameters.
             include_payloads: Whether to read and resolve the inputs and
                 outputs.
             actor: Caller context.
 
+        Raises:
+            ForbiddenError: A task principal holds no import grant.
+
         Returns:
             Page of matching sessions and the next cursor.
         """
-        _ = actor
+        session_filter = scope_task_session_filter(session_filter, actor)
         sessions, next_cursor = await self._repository.query(
             session_filter, include_payloads=include_payloads
         )

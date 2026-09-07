@@ -38,6 +38,7 @@ class TaskKind(StrEnum):
     AGENT = "agent"
     EVALUATOR = "evaluator"
     IMPORTER = "importer"
+    ANALYZER = "analyzer"
 
 
 class TaskOnFailure(StrEnum):
@@ -85,7 +86,11 @@ class TaskResponse(TimestampedResponseModel):
         default=None, description="Input session for an evaluator task."
     )
     import_id: uuid.UUID | None = Field(
-        default=None, description="Import run by an importer task."
+        default=None,
+        description="Import run by an importer task or analyzed by an analysis task.",
+    )
+    agent_id: uuid.UUID | None = Field(
+        default=None, description="Agent for an analysis task."
     )
     worker_id: uuid.UUID | None = Field(
         default=None, description="Worker that claimed the task."
@@ -220,8 +225,21 @@ class ImportTaskDetails(ResponseModel):
     )
 
 
+class AnalysisTaskDetails(ResponseModel):
+    """Analysis task details."""
+
+    kind: Literal["analyzer"] = Field(default="analyzer")
+    analyzer_name: str = Field(description="Name the analyzer emits insights under.")
+    params: dict[str, JsonValue] = Field(
+        description="Parameters passed to the analyzer."
+    )
+    plugin: PluginSpec = Field(description="Analyzer plugin to load.")
+    agent_id: uuid.UUID = Field(description="Agent the insights belong to.")
+    import_id: uuid.UUID = Field(description="Import whose sessions are analyzed.")
+
+
 TaskDetails = Annotated[
-    AgentTaskDetails | EvaluationTaskDetails | ImportTaskDetails,
+    AgentTaskDetails | EvaluationTaskDetails | ImportTaskDetails | AnalysisTaskDetails,
     Field(discriminator="kind"),
 ]
 
@@ -234,7 +252,8 @@ class TaskSpecResponse(ResponseModel):
     timeout_seconds: int = Field(description="Process timeout.")
     run: TaskRunSpec | None = Field(
         default=None,
-        description="Command to run, unset for evaluator and importer tasks.",
+        description="Command to run, unset for evaluator, importer, and analyzer "
+        "tasks.",
     )
     env: dict[str, str] = Field(description="Creator-set process environment extras.")
     secret_env: dict[str, str] = Field(

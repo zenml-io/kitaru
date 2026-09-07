@@ -32,7 +32,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
     unique_constraint_name,
 )
 from kitaru.server.domain.imports import Import
-from kitaru.server.domain.replay_config import EvaluatorConfig
+from kitaru.server.domain.replay_config import AnalyzerConfig, EvaluatorConfig
 
 IMPORT_OWNER_ID_FOREIGN_KEY = foreign_key_name("import", ["owner_id"])
 IMPORT_JOB_ID_FOREIGN_KEY = foreign_key_name("import", ["job_id"])
@@ -91,6 +91,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     fetch_query: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     params: Mapped[dict[str, Any]] = mapped_column(JSONB)
     evaluators: Mapped[list[Any]] = mapped_column(JSONB)
+    analyzers: Mapped[list[Any]] = mapped_column(JSONB)
     stats: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     error: Mapped[str | None] = mapped_column(Text)
 
@@ -116,6 +117,9 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             params=import_.params,
             evaluators=[
                 evaluator.model_dump(mode="json") for evaluator in import_.evaluators
+            ],
+            analyzers=[
+                analyzer.model_dump(mode="json") for analyzer in import_.analyzers
             ],
             stats=(
                 import_.stats.model_dump(mode="json")
@@ -155,6 +159,9 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             evaluators=[
                 EvaluatorConfig.model_validate(evaluator)
                 for evaluator in self.evaluators
+            ],
+            analyzers=[
+                AnalyzerConfig.model_validate(analyzer) for analyzer in self.analyzers
             ],
             stats=(
                 ImportStats.model_validate(self.stats)
