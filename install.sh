@@ -324,9 +324,9 @@ elif "$KITARU_BIN" schema setup >/dev/null 2>&1; then
   SETUP_SERVER_ARGS=()
   [ -n "$KITARU_SERVER" ] && SETUP_SERVER_ARGS=(--server "$KITARU_SERVER")
   if [ "$KITARU_QUIET" = "1" ]; then
-    quiet "$KITARU_BIN" "${SETUP_SERVER_ARGS[@]}" setup "${SETUP_ARGS[@]}" || warn "kitaru setup failed; run it again later: $KITARU_BIN setup"
+    quiet "$KITARU_BIN" "${SETUP_SERVER_ARGS[@]:+${SETUP_SERVER_ARGS[@]}}" setup "${SETUP_ARGS[@]}" || warn "kitaru setup failed; run it again later: $KITARU_BIN setup"
   else
-    "$KITARU_BIN" "${SETUP_SERVER_ARGS[@]}" setup "${SETUP_ARGS[@]}" </dev/null || warn "kitaru setup failed; run it again later: $KITARU_BIN setup"
+    "$KITARU_BIN" "${SETUP_SERVER_ARGS[@]:+${SETUP_SERVER_ARGS[@]}}" setup "${SETUP_ARGS[@]}" </dev/null || warn "kitaru setup failed; run it again later: $KITARU_BIN setup"
   fi
   SETUP_DONE=1
 fi
