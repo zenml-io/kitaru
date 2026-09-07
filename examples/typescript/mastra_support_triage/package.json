@@ -11,7 +11,7 @@
     "@ai-sdk/openai": "4.0.20",
     "@zenml-io/kitaru": "workspace:*",
     "@zenml-io/kitaru-mastra": "workspace:*",
-    "@mastra/core": "1.51.0",
+    "@mastra/core": "1.64.0",
     "zod": "3.25.76"
   },
   "scripts": {
