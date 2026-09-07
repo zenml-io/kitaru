@@ -131,6 +131,7 @@ dev = [
     "griffe-typingdoc>=0.2.8,<1.0.0",
     "hypothesis>=6.165",
     "hypothesis-jsonschema>=0.23",
+    "pyyaml>=6.0",
 ]
 fuzz = [
     "schemathesis>=4.25,<5",
