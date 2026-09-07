@@ -304,6 +304,7 @@ def fake_logfire(monkeypatch: pytest.MonkeyPatch) -> FakeLogfire:
         SimpleNamespace(
             AsyncClient=lambda *, base_url: _FakeAsyncClient(fake, base_url),
             HTTPStatusError=httpx.HTTPStatusError,
+            Response=httpx.Response,
         ),
     )
     return fake

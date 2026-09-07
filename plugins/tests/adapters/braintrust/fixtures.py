@@ -252,6 +252,7 @@ def fake_braintrust(monkeypatch: pytest.MonkeyPatch) -> FakeBraintrust:
         SimpleNamespace(
             AsyncClient=lambda: _FakeAsyncClient(fake),
             HTTPStatusError=httpx.HTTPStatusError,
+            Response=httpx.Response,
         ),
     )
     return fake
