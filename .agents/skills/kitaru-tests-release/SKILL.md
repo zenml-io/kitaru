@@ -1,6 +1,6 @@
 ---
 name: kitaru-tests-release
-description: Use for Kitaru tests, CI, releases.
+description: Kitaru test layout, CI workflows, and release-workflow behavior. Use when adding or debugging tests on any surface (CLI, server, task, worker, MCP, plugins), changing CI, or explaining what a release tag triggers.
 ---
 
 # Kitaru Tests, CI, and Release Workflow
@@ -91,7 +91,7 @@ When adding a new CLI command, MCP tool, SDK resource, task, or worker capabilit
 
 `.github/workflows/ci.yml` runs on pushes to `develop` and on pull requests. It includes separate base, CLI, and MCP matrices across Python 3.11 through 3.14, plus installed CLI-artifact and MCP-wheel contracts. Push-only jobs cover Docker server smoke and UI wheel packaging because those paths may require trusted UI release credentials.
 
-Do not describe the inherited `llm-integration.yml` provider markers or absent `tests/live/` suite as v2 release evidence. V2 currently has no tracked `live_llm`, `live_openai`, `live_anthropic`, or `live_gemini` test surface.
+This repository has no live-LLM test surface; do not cite one as release evidence.
 
 ## Docs CI
 
@@ -99,7 +99,7 @@ Do not describe the inherited `llm-integration.yml` provider markers or absent `
 
 ## Release Workflows
 
-Use `.agents/skills/kitaru-release/SKILL.md` for the release interview, metadata edits, validation, and preparation PR. Keep this skill focused on selecting and running test surfaces.
+Use the current host's `kitaru-release` skill for the release interview, metadata edits, validation, and preparation PR. Keep this skill focused on selecting and running test surfaces.
 
 `.github/workflows/release.yml` handles the core tag `python/kitaru/v<VERSION>`. It publishes Kitaru to PyPI, then publishes client, server, worker, and managed images plus Helm, and creates the GitHub Release. Python RC versions such as `0.22.0rc1` become deployable tags such as `0.22.0-rc.1`. There is no separate bundle tag.
 
@@ -119,12 +119,10 @@ Before creating a core tag:
 
 Stable core releases move the public Docker `latest` aliases, advance the core maintenance branch, and create a draft development-reset PR. The release owner fast-forwards `main` to the immutable core tag before merging the reset into `develop`. Report PyPI publication, public deployables, managed-image warnings, installer smoke, maintenance state, and reset state separately. A reset failure can leave the workflow red after artifact publication succeeds.
 
-Do not use the removed `scripts/smoke-test.sh`, provider-area flags, remote-stack smoke, v1 adapters, or local ZenML flow runs as v2 release gates.
-
 ## Branching and Releases
 
 - Default branch is `develop`.
-- Pull requests normally target `develop`; v2 feature work may target its explicit integration branch until that migration lands.
+- Pull requests target `develop`.
 - `main` tracks the latest released version only; do not push directly.
 - Python core and plugin releases use namespaced tags handled by `release.yml` and `release-plugins.yml`, respectively.
 - TypeScript releases are cut with `typescript/kitaru/v<VERSION>` tags handled by `.github/workflows/release-typescript.yml`; rehearse the exact tag through manual dispatch before pushing it.

@@ -1,6 +1,6 @@
 ---
 name: kitaru-dev
-description: Use for Kitaru commands, CLI, analytics, PRs.
+description: Kitaru just recipes, CLI structure and structured-output contract, analytics events, and PR-description conventions. Use when running project commands, adding CLI commands or analytics events, or writing a PR description.
 ---
 
 # Kitaru Development, CLI, and PR Workflow
@@ -40,7 +40,7 @@ Use this when you need the command catalog beyond the daily loop in the root `AG
 
 There is no v2 `kitaru init` command or `local` extra. Do not carry the v1 `.kitaru/` project-marker setup into v2 instructions or tests.
 
-When merging the v2 base into a feature branch and resolving `pyproject.toml` or `uv.lock`, check recent dependency-security changes before regenerating the lockfile broadly. Use targeted upgrades when a package was intentionally bumped and run `just audit` before pushing.
+When resolving `pyproject.toml` or `uv.lock` conflicts, do not regenerate the whole lockfile: that silently reverts intentional dependency-security bumps. Upgrade only the packages involved and run `just audit` before pushing.
 
 ## Docs Workflows
 
