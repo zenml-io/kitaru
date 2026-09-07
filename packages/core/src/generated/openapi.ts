@@ -2945,8 +2945,8 @@ export interface paths {
          * List Sessions
          * @description List sessions.
          *
-         *     Clients observe HTTP 200 on success and 422 on invalid pagination
-         *     parameters.
+         *     Clients observe HTTP 200 on success, 403 when a task token is not granted
+         *     a listing, and 422 on invalid pagination parameters.
          *
          *     Args:
          *         service: Session service.
@@ -4235,10 +4235,11 @@ export interface components {
              */
             analyzer_name: string;
             /**
-             * Input Session Ids
-             * @description Sessions being analyzed.
+             * Import Id
+             * Format: uuid
+             * @description Import whose sessions are analyzed.
              */
-            input_session_ids: string[];
+            import_id: string;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -9144,7 +9145,7 @@ export interface components {
             id: string;
             /**
              * Import Id
-             * @description Import run by an importer task.
+             * @description Import run by an importer task or analyzed by an analysis task.
              */
             import_id?: string | null;
             /**
@@ -9152,11 +9153,6 @@ export interface components {
              * @description Input session for an evaluator task.
              */
             input_session_id?: string | null;
-            /**
-             * Input Session Ids
-             * @description Input sessions for an analysis task.
-             */
-            input_session_ids?: string[] | null;
             /**
              * Job Id
              * Format: uuid

@@ -86,13 +86,11 @@ class TaskResponse(TimestampedResponseModel):
         default=None, description="Input session for an evaluator task."
     )
     import_id: uuid.UUID | None = Field(
-        default=None, description="Import run by an importer task."
+        default=None,
+        description="Import run by an importer task or analyzed by an analysis task.",
     )
     agent_id: uuid.UUID | None = Field(
         default=None, description="Agent for an analysis task."
-    )
-    input_session_ids: list[uuid.UUID] | None = Field(
-        default=None, description="Input sessions for an analysis task."
     )
     worker_id: uuid.UUID | None = Field(
         default=None, description="Worker that claimed the task."
@@ -237,7 +235,7 @@ class AnalysisTaskDetails(ResponseModel):
     )
     plugin: PluginSpec = Field(description="Analyzer plugin to load.")
     agent_id: uuid.UUID = Field(description="Agent the insights belong to.")
-    input_session_ids: list[uuid.UUID] = Field(description="Sessions being analyzed.")
+    import_id: uuid.UUID = Field(description="Import whose sessions are analyzed.")
 
 
 TaskDetails = Annotated[

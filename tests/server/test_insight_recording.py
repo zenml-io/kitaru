@@ -71,7 +71,6 @@ async def _analysis_task_with_job(
     services: ReplayServices,
     agent: Agent,
     plugin_version_id: uuid.UUID,
-    session_ids: list[uuid.UUID] | None = None,
     params: dict[str, Any] | None = None,
 ) -> AnalysisTask:
     job = await create_job(services.jobs, ACTOR.account.id, kind=JobKind.SESSION_RUN)
@@ -80,7 +79,6 @@ async def _analysis_task_with_job(
         job.id,
         plugin_version_id=plugin_version_id,
         agent_id=agent.id,
-        input_session_ids=session_ids if session_ids is not None else [uuid.uuid4()],
         params=params if params is not None else {"focus": "errors"},
     )
 
@@ -146,11 +144,8 @@ async def test_completed_task_writes_one_insight_per_result(
     """A completed analysis task writes one insight per result under its agent."""
     agent = await create_agent(services.agents, ACTOR.account.id)
     version = await _analyzer_version(services)
-    session_ids = [uuid.uuid4(), uuid.uuid4()]
     params = {"focus": "errors"}
-    task = await _analysis_task_with_job(
-        services, agent, version.id, session_ids, params
-    )
+    task = await _analysis_task_with_job(services, agent, version.id, params)
 
     await _complete(
         services,

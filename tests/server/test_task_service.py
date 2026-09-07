@@ -48,6 +48,7 @@ from conftest import (
     create_worker,
 )
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.api_models.v1.imports import ImportStats
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import (
@@ -983,11 +984,12 @@ async def test_apply_status_evaluator_terminal_tracks_evaluation_completed() -> 
 async def test_apply_status_analyzer_terminal_tracks_analysis_completed() -> None:
     """Track an analysis_completed event when an analyzer task turns terminal."""
     analytics = _RecordingAnalytics()
-    transitions, tasks, jobs, _ = _build_transitions(analytics)
+    transitions, tasks, jobs, imports = _build_transitions(analytics)
     job = await create_job(jobs, ACTOR.account.id)
-    task = await create_analysis_task(
-        tasks, job.id, input_session_ids=[uuid.uuid4(), uuid.uuid4()]
-    )
+    import_ = await create_import(imports, ACTOR.account.id, agent_id=uuid.uuid4())
+    import_.record_stats(ImportStats(created=2, skipped=0, failed=0))
+    await imports.update(import_)
+    task = await create_analysis_task(tasks, job.id, import_id=import_.id)
     await create_agent_task(tasks, job.id)
 
     result = [

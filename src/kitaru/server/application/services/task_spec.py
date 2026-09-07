@@ -263,7 +263,7 @@ class TaskSpecBuilder:
                 params=task.params,
                 plugin=await self._plugin_spec(plugin_version),
                 agent_id=task.agent_id,
-                input_session_ids=task.input_session_ids,
+                import_id=task.import_id,
             ),
         )
 

@@ -17,7 +17,6 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import TypeAdapter
 from sqlalchemy import (
     DateTime,
     ForeignKeyConstraint,
@@ -49,8 +48,6 @@ from kitaru.server.domain.task import (
     ImportTask,
     Task,
 )
-
-_INPUT_SESSION_IDS_ADAPTER: TypeAdapter[list[uuid.UUID]] = TypeAdapter(list[uuid.UUID])
 
 KIND_LENGTH = 16
 STATUS_LENGTH = 16
@@ -144,9 +141,6 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     input_session_id: Mapped[uuid.UUID | None]
     import_id: Mapped[uuid.UUID | None]
     agent_id: Mapped[uuid.UUID | None]
-    input_session_ids: Mapped[list[Any] | None] = mapped_column(
-        JSONB(none_as_null=True)
-    )
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     attempt: Mapped[int]
     on_failure: Mapped[str] = mapped_column(String(ON_FAILURE_LENGTH))
@@ -204,9 +198,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         elif isinstance(task, AnalysisTask):
             row.plugin_version_id = task.plugin_version_id
             row.agent_id = task.agent_id
-            row.input_session_ids = _INPUT_SESSION_IDS_ADAPTER.dump_python(
-                task.input_session_ids, mode="json"
-            )
+            row.import_id = task.import_id
             row.inputs = task.params
         return row
 
@@ -276,13 +268,11 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         if kind is TaskKind.ANALYZER:
             assert self.plugin_version_id is not None
             assert self.agent_id is not None
-            assert self.input_session_ids is not None
+            assert self.import_id is not None
             return AnalysisTask(
                 plugin_version_id=self.plugin_version_id,
                 agent_id=self.agent_id,
-                input_session_ids=_INPUT_SESSION_IDS_ADAPTER.validate_python(
-                    self.input_session_ids
-                ),
+                import_id=self.import_id,
                 params=self.inputs if self.inputs is not None else {},
                 **shared,
             )

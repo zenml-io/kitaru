@@ -15,7 +15,7 @@
 
 import json
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,6 +29,7 @@ from kitaru.api_models.v1.insight import InsightInput, TextInsightData
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionDetailResponse,
+    SessionListParams,
     SessionOrigin,
     SessionStatus,
 )
@@ -197,9 +198,10 @@ async def test_call_analyzer_raising_async_analyzer_wrapped() -> None:
 async def test_run_loads_from_a_source_ref_and_fetches_sessions_in_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Load an installed analyzer and fetch every session with its nodes in order."""
+    """Load an installed analyzer and fetch the import's sessions with their nodes."""
     session_ids = [uuid.uuid4(), uuid.uuid4()]
     task_id = uuid.uuid4()
+    import_id = uuid.uuid4()
     details = AnalysisTaskDetails(
         analyzer_name="spread",
         params={"field": "answer"},
@@ -207,7 +209,7 @@ async def test_run_loads_from_a_source_ref_and_fetches_sessions_in_order(
             entrypoint="package:analyze", requirement="package==1.0"
         ),
         agent_id=uuid.uuid4(),
-        input_session_ids=session_ids,
+        import_id=import_id,
     )
     sessions = {
         session_id: SessionDetailResponse.model_construct(id=session_id)
@@ -226,7 +228,16 @@ async def test_run_loads_from_a_source_ref_and_fetches_sessions_in_order(
             assert requested_task_id == task_id
             return SimpleNamespace(details=details)
 
+    listed: list[SessionListParams] = []
+
     class Sessions:
+        async def iter(
+            self, params: SessionListParams
+        ) -> AsyncIterator[SessionDetailResponse]:
+            listed.append(params)
+            for session in sessions.values():
+                yield session
+
         async def get_with_nodes(
             self, requested_id: uuid.UUID
         ) -> SessionWithNodesResponse:
@@ -253,6 +264,14 @@ async def test_run_loads_from_a_source_ref_and_fetches_sessions_in_order(
     await analyzer_module.run(client, str(task_id))
 
     assert calls == session_ids
+    (params,) = listed
+    assert params.size == 1000
+    assert json.loads(params.model_dump(mode="json")["filter"]) == {
+        "and": [
+            {"field": "import_id", "op": "eq", "value": str(import_id)},
+            {"field": "status", "op": "ne", "value": "in_progress"},
+        ]
+    }
     assert captured == [
         [InsightInput(name="spread", title="Spread", data=TextInsightData(content="2"))]
     ]
@@ -292,6 +311,14 @@ async def test_analyzer_flow_end_to_end(
             ),
         )
         sessions.append(session)
+    # Only an import task can create sessions carrying an import id, so stamp
+    # the import onto the stored rows directly, and complete them since the
+    # flow skips sessions still in progress.
+    import_id = uuid.uuid4()
+    for session in sessions:
+        stored = task_app.services.sessions._sessions[session.id]
+        stored.import_id = import_id
+        stored.status = SessionStatus.COMPLETED
 
     task_id = uuid.uuid4()
     details = AnalysisTaskDetails(
@@ -301,7 +328,7 @@ async def test_analyzer_flow_end_to_end(
             entrypoint="analyze", blob_id=uuid.uuid4(), sha256="unused"
         ),
         agent_id=task_app.agent.id,
-        input_session_ids=[session.id for session in sessions],
+        import_id=import_id,
     )
 
     async def fake_get_spec(requested_task_id: uuid.UUID) -> Any:

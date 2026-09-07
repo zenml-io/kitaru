@@ -5273,7 +5273,7 @@
                 }
               ],
               "default": null,
-              "description": "Import run by an importer task.",
+              "description": "Import run by an importer task or analyzed by an analysis task.",
               "title": "Import Id"
             },
             "input_session_id": {
@@ -5289,23 +5289,6 @@
               "default": null,
               "description": "Input session for an evaluator task.",
               "title": "Input Session Id"
-            },
-            "input_session_ids": {
-              "anyOf": [
-                {
-                  "items": {
-                    "format": "uuid",
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Input sessions for an analysis task.",
-              "title": "Input Session Ids"
             },
             "job_id": {
               "description": "Owning job.",

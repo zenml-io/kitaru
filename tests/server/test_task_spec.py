@@ -154,13 +154,13 @@ async def test_analysis_spec_is_built_from_the_task(
     )
     agent = await create_agent(services.agents, ACTOR.account.id)
     job = await create_job(services.jobs, ACTOR.account.id)
-    session_ids = [uuid.uuid4(), uuid.uuid4()]
+    import_id = uuid.uuid4()
     task = await create_analysis_task(
         services.tasks,
         job.id,
         plugin_version_id=version.id,
         agent_id=agent.id,
-        input_session_ids=session_ids,
+        import_id=import_id,
         params={"focus": "errors"},
     )
 
@@ -176,7 +176,7 @@ async def test_analysis_spec_is_built_from_the_task(
     assert spec.details.plugin.sha256 == code_blob.sha256
     assert spec.details.analyzer_name == "trends"
     assert spec.details.agent_id == agent.id
-    assert spec.details.input_session_ids == session_ids
+    assert spec.details.import_id == import_id
     assert spec.details.params == {"focus": "errors"}
 
 

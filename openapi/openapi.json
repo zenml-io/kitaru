@@ -476,14 +476,11 @@
             "title": "Analyzer Name",
             "type": "string"
           },
-          "input_session_ids": {
-            "description": "Sessions being analyzed.",
-            "items": {
-              "format": "uuid",
-              "type": "string"
-            },
-            "title": "Input Session Ids",
-            "type": "array"
+          "import_id": {
+            "description": "Import whose sessions are analyzed.",
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
           },
           "kind": {
             "const": "analyzer",
@@ -522,7 +519,7 @@
           "params",
           "plugin",
           "agent_id",
-          "input_session_ids"
+          "import_id"
         ],
         "title": "AnalysisTaskDetails",
         "type": "object"
@@ -9520,7 +9517,7 @@
                 "type": "null"
               }
             ],
-            "description": "Import run by an importer task.",
+            "description": "Import run by an importer task or analyzed by an analysis task.",
             "title": "Import Id"
           },
           "input_session_id": {
@@ -9535,22 +9532,6 @@
             ],
             "description": "Input session for an evaluator task.",
             "title": "Input Session Id"
-          },
-          "input_session_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Input sessions for an analysis task.",
-            "title": "Input Session Ids"
           },
           "job_id": {
             "description": "Owning job.",
@@ -23266,7 +23247,7 @@
     },
     "/api/v1/sessions": {
       "get": {
-        "description": "List sessions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions, with payloads when include_payloads is set.",
+        "description": "List sessions.\n\nClients observe HTTP 200 on success, 403 when a task token is not granted\na listing, and 422 on invalid pagination parameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions, with payloads when include_payloads is set.",
         "operationId": "list_sessions_api_v1_sessions_get",
         "parameters": [
           {

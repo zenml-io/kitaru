@@ -119,7 +119,7 @@ def test_kinds() -> None:
         job_id=uuid.uuid4(),
         plugin_version_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
-        input_session_ids=[uuid.uuid4()],
+        import_id=uuid.uuid4(),
     )
     assert agent.kind is TaskKind.AGENT
     assert evaluator.kind is TaskKind.EVALUATOR
@@ -272,7 +272,7 @@ def _analysis_task(**overrides: Any) -> AnalysisTask:
         job_id=uuid.uuid4(),
         plugin_version_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
-        input_session_ids=[uuid.uuid4()],
+        import_id=uuid.uuid4(),
         status=TaskStatus.RUNNING,
         **overrides,
     )

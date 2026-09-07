@@ -13,8 +13,6 @@
 #  permissions and limitations under the License.
 """Import outcome recording and evaluator and analyzer fan-out."""
 
-import uuid
-
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.imports import ImportStats
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
@@ -47,8 +45,8 @@ async def record_import_outcome(
     tasks are appended only for a completed import naming evaluators or
     analyzers, skipping sessions still in progress: one evaluator task per
     imported session and evaluator, and one analysis task per analyzer
-    carrying every evaluatable session id. No analysis task is appended when
-    no session is evaluatable. Inserts them without locking the job row. The
+    scoped to the import. No analysis task is appended when no session is
+    evaluatable. Inserts them without locking the job row. The
     completing task's own transition settles the job afterward, in the same
     transaction, and its drained scan reads every task including these, so
     the job can never be judged drained before they exist.
@@ -82,14 +80,14 @@ async def record_import_outcome(
             include_payloads=False,
         )
     )
-    evaluatable_session_ids: list[uuid.UUID] = []
+    evaluatable = False
     fan_out_tasks: list[Task] = []
     for session in sessions:
         try:
             session.check_evaluate()
         except SessionNotEvaluatable:
             continue
-        evaluatable_session_ids.append(session.id)
+        evaluatable = True
         for evaluator in import_.evaluators:
             fan_out_tasks.append(
                 EvaluationTask(
@@ -100,14 +98,14 @@ async def record_import_outcome(
                     on_failure=TaskOnFailure.CONTINUE,
                 )
             )
-    if evaluatable_session_ids:
+    if evaluatable:
         for analyzer in import_.analyzers:
             fan_out_tasks.append(
                 AnalysisTask(
                     job_id=task.job_id,
                     plugin_version_id=analyzer.analyzer_version_id,
                     agent_id=import_.agent_id,
-                    input_session_ids=evaluatable_session_ids,
+                    import_id=import_.id,
                     params=analyzer.params,
                     labels=get_plugin_task_labels(analyzer.analyzer),
                     on_failure=TaskOnFailure.CONTINUE,

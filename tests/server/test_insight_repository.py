@@ -127,7 +127,7 @@ async def _seed_postgres(session: AsyncSession) -> Setup:
                 job_id=job.id,
                 plugin_version_id=analyzer_version_id,
                 agent_id=agent.id,
-                input_session_ids=[uuid.uuid4()],
+                import_id=uuid.uuid4(),
             )
         )
         return task.id
@@ -172,7 +172,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
                     job_id=uuid.uuid4(),
                     plugin_version_id=analyzer_version_id,
                     agent_id=agent_id,
-                    input_session_ids=[uuid.uuid4()],
+                    import_id=uuid.uuid4(),
                 )
             )
             return task.id

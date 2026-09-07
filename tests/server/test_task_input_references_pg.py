@@ -128,18 +128,19 @@ async def test_task_names_a_missing_import(setup: Setup) -> None:
     assert stored.import_id is not None
 
 
-async def test_analysis_task_names_missing_input_sessions(setup: Setup) -> None:
-    """Store an analysis task whose input sessions are already gone."""
+async def test_analysis_task_names_a_missing_import(setup: Setup) -> None:
+    """Store an analysis task whose import is already gone."""
+    import_id = uuid.uuid4()
     stored = await SQLTaskRepository(setup.session).create(
         AnalysisTask(
             job_id=setup.job_id,
             plugin_version_id=uuid.uuid4(),
             agent_id=setup.agent_id,
-            input_session_ids=[uuid.uuid4(), uuid.uuid4()],
+            import_id=import_id,
         )
     )
     assert isinstance(stored, AnalysisTask)
-    assert len(stored.input_session_ids) == 2
+    assert stored.import_id == import_id
 
 
 async def test_analysis_task_still_requires_its_agent(setup: Setup) -> None:
@@ -154,7 +155,7 @@ async def test_analysis_task_still_requires_its_agent(setup: Setup) -> None:
                 job_id=setup.job_id,
                 plugin_version_id=uuid.uuid4(),
                 agent_id=uuid.uuid4(),
-                input_session_ids=[uuid.uuid4()],
+                import_id=uuid.uuid4(),
             )
         )
 
