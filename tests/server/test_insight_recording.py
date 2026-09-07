@@ -169,6 +169,9 @@ async def test_completed_task_writes_one_insight_per_result(
         assert insight.task_id == task.id
         assert insight.analyzer_params == params
         assert insight.params_hash == hash_params(params)
+    invocation_ids = {insight.invocation_id for insight in insights}
+    assert len(invocation_ids) == 1
+    assert None not in invocation_ids
 
 
 async def test_failed_task_writes_nothing(services: ReplayServices) -> None:
@@ -244,3 +247,4 @@ async def test_insight_names_repeat_across_tasks_without_conflict(
     insights = await _agent_insights(services, agent.id)
     assert len(insights) == 2
     assert {insight.task_id for insight in insights} == {first.id, second.id}
+    assert len({insight.invocation_id for insight in insights}) == 2

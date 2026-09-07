@@ -81,6 +81,9 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     agent_id: Mapped[uuid.UUID]
     analyzer_version_id: Mapped[uuid.UUID | None]
     task_id: Mapped[uuid.UUID | None]
+    # No foreign key, identifies the analyzer invocation that produced this row
+    # alongside its siblings.
+    invocation_id: Mapped[uuid.UUID | None]
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     title: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     description: Mapped[str | None] = mapped_column(Text)
@@ -108,6 +111,7 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             agent_id=insight.agent_id,
             analyzer_version_id=insight.analyzer_version_id,
             task_id=insight.task_id,
+            invocation_id=insight.invocation_id,
             name=insight.name,
             title=insight.title,
             description=insight.description,
@@ -130,6 +134,7 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             agent_id=self.agent_id,
             analyzer_version_id=self.analyzer_version_id,
             task_id=self.task_id,
+            invocation_id=self.invocation_id,
             name=self.name,
             title=self.title,
             description=self.description,
