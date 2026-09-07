@@ -1395,7 +1395,7 @@ adapter = [
 requires-dist = [
     { name = "httpx", marker = "extra == 'adapter'", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
-    { name = "logfire", marker = "extra == 'adapter'", specifier = ">=4.35,<5" },
+    { name = "logfire", marker = "extra == 'adapter'", specifier = ">=4.35,<6" },
 ]
 provides-extras = ["adapter"]
 
