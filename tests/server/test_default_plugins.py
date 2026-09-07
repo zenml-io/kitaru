@@ -14,6 +14,7 @@
 """Tests for default plugin registration."""
 
 import pytest
+from pydantic import BaseModel, SecretStr
 
 from conftest import FakeBlobRepository, FakePluginRepository
 from kitaru.server.api import bootstrap
@@ -25,6 +26,20 @@ from kitaru.server.api.bootstrap import (
 from kitaru.server.domain.names import RESERVED_NAMESPACE
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind
 
+
+class SampleConnection(BaseModel):
+    """Sample connection."""
+
+    TEST_API_KEY: SecretStr
+
+
+class RotatedSampleConnection(BaseModel):
+    """Rotated sample connection."""
+
+    TEST_API_KEY: SecretStr
+    TEST_BASE_URL: str = "https://example.com"
+
+
 DEFINITIONS = (
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
@@ -35,6 +50,7 @@ DEFINITIONS = (
         entrypoint="package.importer:parse",
         requirement="kitaru-langfuse-importer==1.0.0",
         display_version="1.0.0",
+        connection_schema=SampleConnection,
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -134,3 +150,58 @@ def test_default_definitions_have_unique_identities() -> None:
     }
 
     assert len(identities) == len(DEFAULT_PLUGIN_DEFINITIONS)
+
+
+async def test_register_stores_the_connection_schema(
+    repository: FakePluginRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Store the JSON Schema of a definition's connection model on the plugin."""
+    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", DEFINITIONS)
+
+    await register_default_plugins(repository)
+
+    importer = await repository.get_by_name(DEFINITIONS[0].kind, DEFINITIONS[0].name)
+    assert importer.connection_schema == SampleConnection.model_json_schema()
+    assert importer.connection_schema is not None
+    key = importer.connection_schema["properties"]["TEST_API_KEY"]
+    assert key["format"] == "password"
+    assert key["writeOnly"] is True
+    evaluator = await repository.get_by_name(DEFINITIONS[1].kind, DEFINITIONS[1].name)
+    assert evaluator.connection_schema is None
+
+
+async def test_register_refreshes_a_changed_connection_schema(
+    repository: FakePluginRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Update the stored schema of an existing plugin when the definition changes."""
+    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", DEFINITIONS)
+    await register_default_plugins(repository)
+
+    rotated = tuple(
+        definition.model_copy(update={"connection_schema": RotatedSampleConnection})
+        if definition.name == DEFINITIONS[0].name
+        else definition
+        for definition in DEFINITIONS
+    )
+    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", rotated)
+    await register_default_plugins(repository)
+
+    importer = await repository.get_by_name(DEFINITIONS[0].kind, DEFINITIONS[0].name)
+    assert importer.connection_schema == RotatedSampleConnection.model_json_schema()
+    assert importer.latest_version == 1
+
+
+def test_default_importer_schemas_mark_secrets_write_only() -> None:
+    """Mark every secret property of a built-in connection schema write-only."""
+    for definition in DEFAULT_PLUGIN_DEFINITIONS:
+        if definition.connection_schema is None:
+            continue
+        schema = definition.connection_schema.model_json_schema()
+        secrets = [
+            name for name, prop in schema["properties"].items() if prop.get("writeOnly")
+        ]
+        assert secrets
+        for name in secrets:
+            assert schema["properties"][name]["format"] == "password"

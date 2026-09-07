@@ -41,6 +41,7 @@ IMPORT_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("import", ["agent_version
 IMPORT_IMPORTER_VERSION_ID_FOREIGN_KEY = foreign_key_name(
     "import", ["importer_version_id"]
 )
+IMPORT_CONNECTION_ID_FOREIGN_KEY = foreign_key_name("import", ["connection_id"])
 IMPORT_PAYLOAD_BLOB_ID_FOREIGN_KEY = foreign_key_name("import", ["payload_blob_id"])
 IMPORT_JOB_ID_UNIQUE_CONSTRAINT = unique_constraint_name("import", ["job_id"])
 IMPORT_AGENT_ID_INDEX = index_name("import", ["agent_id"])
@@ -76,6 +77,12 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ondelete="SET NULL",
         ),
         ForeignKeyConstraint(
+            ["connection_id"],
+            ["connection.id"],
+            name=IMPORT_CONNECTION_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
+        ),
+        ForeignKeyConstraint(
             ["payload_blob_id"], ["blob.id"], name=IMPORT_PAYLOAD_BLOB_ID_FOREIGN_KEY
         ),
         UniqueConstraint("job_id", name=IMPORT_JOB_ID_UNIQUE_CONSTRAINT),
@@ -87,6 +94,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     agent_id: Mapped[uuid.UUID]
     agent_version_id: Mapped[uuid.UUID | None]
     importer_version_id: Mapped[uuid.UUID | None]
+    connection_id: Mapped[uuid.UUID | None]
     payload_blob_id: Mapped[uuid.UUID | None]
     fetch_query: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     params: Mapped[dict[str, Any]] = mapped_column(JSONB)
@@ -112,6 +120,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             agent_id=import_.agent_id,
             agent_version_id=import_.agent_version_id,
             importer_version_id=import_.importer_version_id,
+            connection_id=import_.connection_id,
             payload_blob_id=import_.payload_blob_id,
             fetch_query=import_.fetch_query,
             params=import_.params,
@@ -135,6 +144,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Args:
             import_: Import with modified fields.
         """
+        self.connection_id = import_.connection_id
         self.stats = (
             import_.stats.model_dump(mode="json") if import_.stats is not None else None
         )
@@ -153,6 +163,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             agent_id=self.agent_id,
             agent_version_id=self.agent_version_id,
             importer_version_id=self.importer_version_id,
+            connection_id=self.connection_id,
             payload_blob_id=self.payload_blob_id,
             fetch_query=self.fetch_query,
             params=self.params,

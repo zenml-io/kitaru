@@ -62,6 +62,7 @@ async def resolve_plugin_version(
 
 
 PLUGIN_NAMESPACE_LABEL = f"{RESERVED_LABEL_PREFIX}plugin_namespace"
+PLUGIN_PROVIDER_LABEL = f"{RESERVED_LABEL_PREFIX}provider"
 
 
 def get_plugin_task_labels(name: str) -> dict[str, str]:
@@ -77,3 +78,20 @@ def get_plugin_task_labels(name: str) -> dict[str, str]:
     if namespace is None:
         return {}
     return {PLUGIN_NAMESPACE_LABEL: namespace}
+
+
+def get_importer_task_labels(name: str, provider: str | None) -> dict[str, str]:
+    """Build the labels stamped on a task running an importer.
+
+    Args:
+        name: Plugin name.
+        provider: Provider the importer reads, None stamps no provider label.
+
+    Returns:
+        Labels, empty for an importer with neither a namespace nor a
+        provider.
+    """
+    labels = get_plugin_task_labels(name)
+    if provider is not None:
+        labels[PLUGIN_PROVIDER_LABEL] = provider
+    return labels

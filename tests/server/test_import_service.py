@@ -23,7 +23,9 @@ from conftest import (
     create_agent,
     create_agent_version,
     create_blob,
+    create_connection,
     create_plugin,
+    create_secret,
 )
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -34,10 +36,12 @@ from kitaru.server.application.models.replay_config import (
     EvaluatorConfigInput,
 )
 from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.services.plugin_resolution import PLUGIN_PROVIDER_LABEL
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersionAgentMismatch
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.domain.connection import ConnectionNotFound
 from kitaru.server.domain.imports import ImportNotFound
 from kitaru.server.domain.plugin import (
     PluginKind,
@@ -57,10 +61,16 @@ def services() -> JobAndTaskServices:
     return build_job_and_task_services()
 
 
-async def _importer_version(services: JobAndTaskServices) -> PluginVersion:
+async def _importer_version(
+    services: JobAndTaskServices, provider: str | None = None
+) -> PluginVersion:
     """Register the csv importer with one version."""
     plugin = await create_plugin(
-        services.plugins, ACTOR.account.id, PluginKind.IMPORTER, name="csv"
+        services.plugins,
+        ACTOR.account.id,
+        PluginKind.IMPORTER,
+        name="csv",
+        provider=provider,
     )
     return await services.plugins.create_version(
         plugin.id,
@@ -105,6 +115,7 @@ async def _import_command(
     agent_version_id: uuid.UUID | None = None,
     evaluators: list[EvaluatorConfigInput] | None = None,
     analyzers: list[AnalyzerConfigInput] | None = None,
+    connection_id: uuid.UUID | None = None,
 ) -> ImportCreate:
     """Build a create command naming a stored payload and agent."""
     payload = await create_blob(services.blobs, ACTOR.account.id, content=b"csv-data")
@@ -114,6 +125,7 @@ async def _import_command(
         importer="csv",
         agent_id=agent.id,
         agent_version_id=agent_version_id,
+        connection_id=connection_id,
         payload_blob_id=payload.id,
         params={"delimiter": ","},
         evaluators=evaluators if evaluators is not None else [],
@@ -394,3 +406,64 @@ async def test_list_imports_filters_by_agent_id(
     )
     assert next_cursor is None
     assert [import_.id for import_ in imports] == [first.id]
+
+
+async def test_create_import_stamps_the_provider_label(
+    services: JobAndTaskServices,
+) -> None:
+    """The importer task carries the provider label for worker routing."""
+    await _importer_version(services, provider="langfuse")
+    command = await _import_command(services)
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.job_id is not None
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=import_.job_id), actor=ACTOR
+    )
+    assert tasks[0].labels[PLUGIN_PROVIDER_LABEL] == "langfuse"
+
+
+async def test_create_import_omits_the_provider_label_without_a_provider(
+    services: JobAndTaskServices,
+) -> None:
+    """An importer with no provider stamps no provider label."""
+    await _importer_version(services)
+    command = await _import_command(services)
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.job_id is not None
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=import_.job_id), actor=ACTOR
+    )
+    assert PLUGIN_PROVIDER_LABEL not in tasks[0].labels
+
+
+async def test_create_import_stores_the_named_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """The import row carries the connection the command names."""
+    await _importer_version(services, provider="langfuse")
+    secret = await create_secret(
+        services.secrets, ACTOR.account.id, name="values", internal=True
+    )
+    connection = await create_connection(
+        services.connections, ACTOR.account.id, secret.id
+    )
+    command = await _import_command(services, connection_id=connection.id)
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.connection_id == connection.id
+
+
+async def test_create_import_rejects_an_unknown_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """Reject a command naming a connection that does not exist."""
+    await _importer_version(services)
+    command = await _import_command(services, connection_id=uuid.uuid4())
+
+    with pytest.raises(ConnectionNotFound):
+        await services.import_service.create_import(command, actor=ACTOR)

@@ -79,6 +79,7 @@ class PluginCreate(FrozenModel):
     provider: str | None = None
     logo_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    connection_schema: dict[str, Any] | None = None
     agent_id: uuid.UUID | None = None
 
 
@@ -88,3 +89,4 @@ class PluginUpdate(FrozenModel):
     description: str | None = None
     logo_url: str | None = None
     metadata: dict[str, Any] | None = None
+    connection_schema: dict[str, Any] | None = None

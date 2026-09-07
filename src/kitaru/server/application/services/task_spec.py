@@ -19,6 +19,9 @@ from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
+from kitaru.server.application.interfaces.connection_repository import (
+    ConnectionRepository,
+)
 from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
@@ -27,8 +30,9 @@ from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
+from kitaru.server.domain.connection import Connection
 from kitaru.server.domain.imports import Import, ImportWithoutImporterVersion
-from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
+from kitaru.server.domain.plugin import Plugin, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
     AgentTaskDetails,
@@ -61,6 +65,7 @@ class TaskSpecBuilder:
         secret_repository: SecretRepository,
         replay_repository: ReplayRepository,
         import_repository: ImportRepository,
+        connection_repository: ConnectionRepository,
         policy: TaskPolicy,
     ) -> None:
         """Initialize the builder.
@@ -72,6 +77,7 @@ class TaskSpecBuilder:
             secret_repository: Secret repository.
             replay_repository: Replay repository.
             import_repository: Import repository.
+            connection_repository: Connection repository.
             policy: Task execution policy.
         """
         self._agent_versions = agent_version_repository
@@ -80,6 +86,7 @@ class TaskSpecBuilder:
         self._secrets = secret_repository
         self._replays = replay_repository
         self._imports = import_repository
+        self._connections = connection_repository
         self._policy = policy
 
     async def build_spec(self, task: Task) -> TaskSpec:
@@ -187,6 +194,8 @@ class TaskSpecBuilder:
                 deleted.
             PluginVersionIdNotFound: The import names an unknown plugin
                 version.
+            ConnectionNotFound: The import names an unknown connection.
+            SecretNotFound: The connection names an unknown secret.
             BlobNotFound: The script plugin or the payload names an unknown
                 blob.
 
@@ -201,11 +210,21 @@ class TaskSpecBuilder:
         )
         plugin = await self._plugins.get(plugin_version.plugin_id)
         source = await self._import_source_spec(import_, plugin_version)
+        connection = await self._resolve_connection(import_, plugin)
+        env = task.env
+        secret_env: dict[str, str] = {}
+        if connection is not None:
+            env = {**connection.env, **task.env}
+            secret = await self._secrets.get(connection.secret_id)
+            secret_env = {
+                key: value.get_secret_value() for key, value in secret.values.items()
+            }
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.IMPORTER,
             timeout_seconds=self._policy.importer_timeout_seconds,
-            env=task.env,
+            env=env,
+            secret_env=secret_env,
             details=ImportTaskDetails(
                 plugin=await self._plugin_spec(plugin_version),
                 source=source,
@@ -214,6 +233,32 @@ class TaskSpecBuilder:
                 params=import_.params,
             ),
         )
+
+    async def _resolve_connection(
+        self, import_: Import, plugin: Plugin
+    ) -> Connection | None:
+        """Resolve the connection an import runs with, recording it on the import.
+
+        Args:
+            import_: Import.
+            plugin: Importer the import runs.
+
+        Raises:
+            ConnectionNotFound: The import names an unknown connection.
+
+        Returns:
+            Resolved connection, or ``None`` when nothing resolves.
+        """
+        if import_.connection_id is not None:
+            return await self._connections.get(import_.connection_id)
+        if plugin.provider is None:
+            return None
+        connection = await self._connections.get_default(plugin.provider)
+        if connection is None:
+            return None
+        import_.record_connection_id(connection.id)
+        await self._imports.update(import_)
+        return connection
 
     async def _import_source_spec(
         self, import_: Import, plugin_version: PluginVersion

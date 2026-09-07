@@ -16,6 +16,7 @@
 import uuid
 
 import pytest
+from pydantic import SecretStr
 
 from conftest import (
     JobAndTaskServices,
@@ -24,10 +25,12 @@ from conftest import (
     create_agent,
     create_analysis_task,
     create_blob,
+    create_connection,
     create_import,
     create_import_task,
     create_job,
     create_plugin,
+    create_secret,
     create_worker,
 )
 from kitaru.api_models.v1.imports import ImportQuery
@@ -40,6 +43,7 @@ from kitaru.server.domain.task import (
     AnalysisTaskDetails,
     ApiImportSourceSpec,
     BlobImportSourceSpec,
+    ImportTask,
     ImportTaskDetails,
     ScriptPluginSpec,
 )
@@ -211,6 +215,215 @@ async def test_import_without_importer_version_cancels_the_task_at_claim(
             importer_version_id=None,
             payload_blob_id=uuid.uuid4(),
         )
+    )
+    task = await create_import_task(services.tasks, job.id, import_id=import_.id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+
+    assert claimed == []
+    stored = await services.tasks.get(task.id)
+    assert stored.status is TaskStatus.CANCELED
+
+
+async def build_import_plugin_version(
+    services: JobAndTaskServices, provider: str | None = "langfuse"
+) -> uuid.UUID:
+    """Store an importer plugin with one script version.
+
+    Args:
+        services: Fake-backed job and task services.
+        provider: Provider the importer reads.
+
+    Returns:
+        Id of the stored importer version.
+    """
+    plugin = await create_plugin(
+        services.plugins,
+        ACTOR.account.id,
+        PluginKind.IMPORTER,
+        name="trace-importer",
+        provider=provider,
+    )
+    code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="run"),
+        display_version=None,
+    )
+    return version.id
+
+
+async def store_connection(
+    services: JobAndTaskServices,
+    name: str = "langfuse-prod",
+    env: dict[str, str] | None = None,
+    default: bool = False,
+) -> uuid.UUID:
+    """Store a connection with an internal secret holding one value.
+
+    Args:
+        services: Fake-backed job and task services.
+        name: Connection name.
+        env: Non-secret values.
+        default: Whether the connection is the provider's default.
+
+    Returns:
+        Id of the stored connection.
+    """
+    secret = await create_secret(
+        services.secrets,
+        ACTOR.account.id,
+        name=f"{name}-values",
+        internal=True,
+        values={"LANGFUSE_SECRET_KEY": SecretStr("sk")},
+    )
+    connection = await create_connection(
+        services.connections,
+        ACTOR.account.id,
+        secret.id,
+        name=name,
+        env=env if env is not None else {"LANGFUSE_BASE_URL": "https://cloud"},
+        default=default,
+    )
+    return connection.id
+
+
+async def test_import_spec_uses_the_named_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """An import naming a connection carries that connection's env and secrets."""
+    version_id = await build_import_plugin_version(services)
+    connection_id = await store_connection(services, name="named")
+    await store_connection(services, name="fallback", default=True)
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    payload = await create_blob(services.blobs, ACTOR.account.id, content=b"payload")
+    import_ = await create_import(
+        services.imports,
+        ACTOR.account.id,
+        agent.id,
+        job_id=job.id,
+        importer_version_id=version_id,
+        payload_blob_id=payload.id,
+        connection_id=connection_id,
+    )
+    task = await create_import_task(services.tasks, job.id, import_id=import_.id)
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert spec.env == {"LANGFUSE_BASE_URL": "https://cloud"}
+    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk"}
+
+
+async def test_import_spec_falls_back_to_the_provider_default(
+    services: JobAndTaskServices,
+) -> None:
+    """An import naming no connection uses the provider's default and records it."""
+    version_id = await build_import_plugin_version(services)
+    connection_id = await store_connection(services, name="fallback", default=True)
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    payload = await create_blob(services.blobs, ACTOR.account.id, content=b"payload")
+    import_ = await create_import(
+        services.imports,
+        ACTOR.account.id,
+        agent.id,
+        job_id=job.id,
+        importer_version_id=version_id,
+        payload_blob_id=payload.id,
+    )
+    task = await create_import_task(services.tasks, job.id, import_id=import_.id)
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk"}
+    stored = await services.imports.get(import_.id)
+    assert stored.connection_id == connection_id
+
+
+async def test_import_spec_without_a_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """An importer with no matching connection injects nothing extra."""
+    version_id = await build_import_plugin_version(services, provider=None)
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    payload = await create_blob(services.blobs, ACTOR.account.id, content=b"payload")
+    import_ = await create_import(
+        services.imports,
+        ACTOR.account.id,
+        agent.id,
+        job_id=job.id,
+        importer_version_id=version_id,
+        payload_blob_id=payload.id,
+    )
+    task = await create_import_task(services.tasks, job.id, import_id=import_.id)
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert spec.env == {}
+    assert spec.secret_env == {}
+    stored = await services.imports.get(import_.id)
+    assert stored.connection_id is None
+
+
+async def test_import_spec_task_env_wins_over_the_connection_env(
+    services: JobAndTaskServices,
+) -> None:
+    """The task's own env overrides the connection env of the same key."""
+    version_id = await build_import_plugin_version(services)
+    await store_connection(
+        services,
+        name="fallback",
+        env={"LANGFUSE_BASE_URL": "https://cloud", "REGION": "eu"},
+        default=True,
+    )
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    payload = await create_blob(services.blobs, ACTOR.account.id, content=b"payload")
+    import_ = await create_import(
+        services.imports,
+        ACTOR.account.id,
+        agent.id,
+        job_id=job.id,
+        importer_version_id=version_id,
+        payload_blob_id=payload.id,
+    )
+    stored_task = await services.tasks.create(
+        ImportTask(
+            job_id=job.id,
+            import_id=import_.id,
+            env={"LANGFUSE_BASE_URL": "https://self-hosted"},
+        )
+    )
+
+    spec = await services.task_service.get_spec(stored_task.id, actor=ACTOR)
+
+    assert spec.env == {
+        "LANGFUSE_BASE_URL": "https://self-hosted",
+        "REGION": "eu",
+    }
+
+
+async def test_missing_connection_cancels_the_task_at_claim(
+    services: JobAndTaskServices,
+) -> None:
+    """A task whose named connection is gone is canceled instead of handed out."""
+    version_id = await build_import_plugin_version(services)
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    payload = await create_blob(services.blobs, ACTOR.account.id, content=b"payload")
+    import_ = await create_import(
+        services.imports,
+        ACTOR.account.id,
+        agent.id,
+        job_id=job.id,
+        importer_version_id=version_id,
+        payload_blob_id=payload.id,
+        connection_id=uuid.uuid4(),
     )
     task = await create_import_task(services.tasks, job.id, import_id=import_.id)
     worker = await create_worker(services.workers, ACTOR.account.id)

@@ -15,6 +15,9 @@
 
 import logging
 import uuid
+from typing import Any
+
+from pydantic import BaseModel, Field, SecretStr
 
 from kitaru.base import FrozenModel
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
@@ -78,6 +81,53 @@ async def ensure_default_account(
     await account_service.ensure_account(name, password)
 
 
+class LangfuseConnection(BaseModel):
+    """Langfuse connection."""
+
+    LANGFUSE_PUBLIC_KEY: SecretStr
+    LANGFUSE_SECRET_KEY: SecretStr
+    LANGFUSE_BASE_URL: str = Field(
+        default="https://cloud.langfuse.com", description="Langfuse host."
+    )
+
+
+class LangsmithConnection(BaseModel):
+    """LangSmith connection."""
+
+    LANGSMITH_API_KEY: SecretStr
+    LANGSMITH_ENDPOINT: str = Field(
+        default="https://api.smith.langchain.com", description="LangSmith host."
+    )
+    LANGSMITH_PROJECT: str | None = Field(
+        default=None, description="LangSmith project the runs belong to."
+    )
+
+
+class BraintrustConnection(BaseModel):
+    """Braintrust connection."""
+
+    BRAINTRUST_API_KEY: SecretStr
+    BRAINTRUST_API_URL: str = Field(
+        default="https://api.braintrust.dev", description="Braintrust host."
+    )
+
+
+class LogfireConnection(BaseModel):
+    """Logfire connection."""
+
+    LOGFIRE_READ_TOKEN: SecretStr
+
+
+class PhoenixConnection(BaseModel):
+    """Phoenix connection."""
+
+    PHOENIX_API_KEY: SecretStr
+    PHOENIX_COLLECTOR_ENDPOINT: str = Field(description="Phoenix collector host.")
+    PHOENIX_PROJECT: str | None = Field(
+        default=None, description="Phoenix project the traces belong to."
+    )
+
+
 class DefaultPluginDefinition(FrozenModel):
     """Default plugin definition."""
 
@@ -89,6 +139,7 @@ class DefaultPluginDefinition(FrozenModel):
     entrypoint: str
     requirement: str
     display_version: str
+    connection_schema: type[BaseModel] | None = None
 
 
 DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
@@ -100,6 +151,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         entrypoint="kitaru_braintrust_importer.importer:importer",
         requirement="kitaru-braintrust-importer==0.2.0",
         display_version="0.2.0",
+        connection_schema=BraintrustConnection,
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
@@ -118,6 +170,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         entrypoint="kitaru_langfuse_importer.importer:importer",
         requirement="kitaru-langfuse-importer==0.2.0",
         display_version="0.2.0",
+        connection_schema=LangfuseConnection,
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
@@ -127,6 +180,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         entrypoint="kitaru_logfire_importer.importer:importer",
         requirement="kitaru-logfire-importer==0.2.0",
         display_version="0.2.0",
+        connection_schema=LogfireConnection,
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
@@ -136,6 +190,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         entrypoint="kitaru_langsmith_importer.importer:importer",
         requirement="kitaru-langsmith-importer==0.2.0",
         display_version="0.2.0",
+        connection_schema=LangsmithConnection,
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
@@ -145,6 +200,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         entrypoint="kitaru_phoenix_importer.importer:importer",
         requirement="kitaru-phoenix-importer==0.2.0",
         display_version="0.2.0",
+        connection_schema=PhoenixConnection,
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -266,10 +322,29 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
 )
 
 
+def _get_connection_schema(
+    definition: DefaultPluginDefinition,
+) -> dict[str, Any] | None:
+    """Build the JSON Schema a default plugin declares its connection with.
+
+    Args:
+        definition: Default plugin definition.
+
+    Returns:
+        JSON Schema, None for a definition declaring no connection model.
+    """
+    if definition.connection_schema is None:
+        return None
+    return definition.connection_schema.model_json_schema()
+
+
 async def _get_or_create_plugin(
     repository: PluginRepository, definition: DefaultPluginDefinition
 ) -> Plugin:
     """Load a default plugin, creating it ownerless on first startup.
+
+    An existing plugin whose stored connection schema no longer matches the
+    definition is refreshed, so a deployment picks up a schema change.
 
     Args:
         repository: Plugin repository.
@@ -278,10 +353,19 @@ async def _get_or_create_plugin(
     Returns:
         Stored plugin.
     """
+    connection_schema = _get_connection_schema(definition)
     try:
-        return await repository.get_by_name(definition.kind, definition.name)
+        plugin = await repository.get_by_name(definition.kind, definition.name)
     except PluginNotFound:
         pass
+    else:
+        if plugin.connection_schema != connection_schema:
+            plugin.update_connection_schema(connection_schema)
+            plugin = await repository.update(plugin)
+            logger.info(
+                "Updated the connection schema of default plugin %s.", definition.name
+            )
+        return plugin
     try:
         plugin = await repository.create(
             Plugin(
@@ -292,6 +376,7 @@ async def _get_or_create_plugin(
                 provider=definition.provider,
                 logo_url=definition.logo_url,
                 metadata={},
+                connection_schema=connection_schema,
             )
         )
         logger.info("Created default plugin %s.", definition.name)

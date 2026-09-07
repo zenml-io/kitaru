@@ -21,6 +21,9 @@ from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
+from kitaru.server.application.interfaces.connection_repository import (
+    ConnectionRepository,
+)
 from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
@@ -31,7 +34,7 @@ from kitaru.server.application.services.agent_version_resolution import resolve_
 from kitaru.server.application.services.analyzer_resolution import validate_analyzers
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
 from kitaru.server.application.services.plugin_resolution import (
-    get_plugin_task_labels,
+    get_importer_task_labels,
     resolve_plugin,
     resolve_plugin_version,
 )
@@ -53,6 +56,7 @@ class ImportService:
         agent_version_repository: AgentVersionRepository,
         plugin_repository: PluginRepository,
         blob_repository: BlobRepository,
+        connection_repository: ConnectionRepository,
     ) -> None:
         """Initialize the service.
 
@@ -65,6 +69,8 @@ class ImportService:
             plugin_repository: Plugin repository, for importer, evaluator,
                 and analyzer resolution.
             blob_repository: Blob repository, for the payload lookup.
+            connection_repository: Connection repository, for the named
+                connection lookup.
         """
         self._repository = repository
         self._jobs = job_repository
@@ -73,6 +79,7 @@ class ImportService:
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
         self._blobs = blob_repository
+        self._connections = connection_repository
 
     async def create_import(self, command: ImportCreate, actor: AuthContext) -> Import:
         """Create an import, its job, and the importer task running it.
@@ -92,6 +99,7 @@ class ImportService:
                 number, or an evaluator or analyzer config names an unknown
                 version.
             BlobNotFound: No blob has the payload id.
+            ConnectionNotFound: No connection has this id.
             AgentNotFound: No agent has this id.
             AgentVersionNotFound: No agent version has this id.
             AgentVersionAgentMismatch: The agent version belongs to another
@@ -115,6 +123,8 @@ class ImportService:
             assert command.payload_blob_id is not None
             payload = await self._blobs.get(command.payload_blob_id)
             payload_blob_id = payload.id
+        if command.connection_id is not None:
+            await self._connections.get(command.connection_id)
         agent = await self._agents.get(command.agent_id)
         if command.agent_version_id is not None:
             await resolve_agent_id(
@@ -134,6 +144,7 @@ class ImportService:
                 agent_id=agent.id,
                 agent_version_id=command.agent_version_id,
                 importer_version_id=plugin_version.id,
+                connection_id=command.connection_id,
                 payload_blob_id=payload_blob_id,
                 fetch_query=command.fetch_query,
                 params=command.params,
@@ -147,7 +158,7 @@ class ImportService:
             ImportTask(
                 job_id=job.id,
                 import_id=import_.id,
-                labels=get_plugin_task_labels(plugin.name),
+                labels=get_importer_task_labels(plugin.name, plugin.provider),
             )
         )
         return import_

@@ -72,6 +72,7 @@ class Import(DomainModel):
     agent_id: uuid.UUID
     agent_version_id: uuid.UUID | None = None
     importer_version_id: uuid.UUID | None = None
+    connection_id: uuid.UUID | None = None
     payload_blob_id: uuid.UUID | None = None
     fetch_query: dict[str, Any] | None = None
     params: dict[str, Any] = Field(default_factory=dict)
@@ -95,6 +96,14 @@ class Import(DomainModel):
         if (self.payload_blob_id is None) == (self.fetch_query is None):
             raise InvalidImportSource(self.id)
         return self
+
+    def record_connection_id(self, connection_id: uuid.UUID) -> None:
+        """Set the connection resolved for the import.
+
+        Args:
+            connection_id: Id of the resolved connection.
+        """
+        self.connection_id = connection_id
 
     def record_stats(self, stats: ImportStats) -> None:
         """Set the stats of a completed import.
