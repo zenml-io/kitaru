@@ -29,7 +29,7 @@ from kitaru.api_models.v1.task import (
 from kitaru.worker.context import ExecutionContext
 from kitaru.worker.handlers.base import materialize_blob
 from kitaru.worker.process import (
-    FETCH_EXTRA,
+    API_EXTRA,
     TaskProcess,
     build_process_env,
     get_python_run_argv,
@@ -80,7 +80,7 @@ class ImportHandler:
                 Path(env["KITARU_TASK_PLUGIN_PATH"])
             )
         elif isinstance(details.source, ApiImportSourceSpec):
-            dependencies = [with_extra(details.plugin.requirement, FETCH_EXTRA)]
+            dependencies = [with_extra(details.plugin.requirement, API_EXTRA)]
         else:
             dependencies = [details.plugin.requirement]
         argv = get_python_run_argv("kitaru.task", ["import"], dependencies)

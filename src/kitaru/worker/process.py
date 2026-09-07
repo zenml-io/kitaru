@@ -64,8 +64,8 @@ _PEP723_BLOCK_REGEX = (
 )
 
 
-# Extra an importer package declares for its API fetch dependencies.
-FETCH_EXTRA = "fetch"
+# Extra an importer package declares for its API import dependencies.
+API_EXTRA = "api"
 
 
 class TaskProcess(NamedTuple):

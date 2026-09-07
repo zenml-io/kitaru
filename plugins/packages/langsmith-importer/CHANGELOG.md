@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Fetch traces from the LangSmith API by trace id or time window through the `fetch` extra.
+- Fetch traces from the LangSmith API by trace id or time window through the `api` extra.
 - Import traces oldest first and group them by thread instead of dropping later traces of a thread as duplicates.
 - Fetch traces concurrently, bounded by the fetch query's `concurrency` key.
 - Wait out a LangSmith rate limit and retry instead of failing the import task.

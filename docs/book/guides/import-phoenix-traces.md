@@ -83,7 +83,7 @@ Omitting FILE and setting `--since` selects an API import: the worker calls the 
 | `until` | Timezone-aware ISO 8601 datetime, upper bound of span start time. Defaults to now. |
 | `concurrency` | Traces fetched at once. Defaults to 4. |
 
-Pass `project` through `--query '{"project": "my-project"}'`. The worker installs the package's `fetch` extra for an API import, which carries the provider client, and needs, in its environment, `PHOENIX_ENDPOINT` or `PHOENIX_COLLECTOR_ENDPOINT`, `PHOENIX_API_KEY`, and `PHOENIX_PROJECT` for the default project. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping and limits below apply the same way.
+Pass `project` through `--query '{"project": "my-project"}'`. The worker installs the package's `api` extra for an API import, which carries the provider client, and needs, in its environment, `PHOENIX_ENDPOINT` or `PHOENIX_COLLECTOR_ENDPOINT`, `PHOENIX_API_KEY`, and `PHOENIX_PROJECT` for the default project. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping and limits below apply the same way.
 
 ## What becomes a session
 
