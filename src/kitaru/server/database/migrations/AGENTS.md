@@ -18,12 +18,11 @@ Rules for the Alembic migration scripts under `versions/`.
 Never hand-write a migration from scratch. Generate it against the schema
 state of `develop`:
 
-1. Create the database state from `develop`: check out `develop` and migrate
-   a database to its head revision.
-2. Switch back to your branch and run
-   `alembic revision --autogenerate -m "<short name>"`.
-3. Modify the generated script if necessary, for example for data
-   backfills or operations autogenerate cannot detect.
+1. Create a separate baseline worktree from current `origin/develop` under the repository's `.worktrees/` directory. Keep the active feature checkout on its branch.
+2. From the baseline worktree, migrate a uniquely named disposable database to its head revision. Do not reuse another task's database.
+3. From the feature checkout, point Alembic at that same disposable database and run `alembic revision --autogenerate -m "<short name>"`. The database must still contain the baseline schema when autogenerate compares it with the feature branch's ORM metadata.
+4. Review and modify the generated script as needed for backfills or operations autogenerate cannot detect. Validate it with the migration checks.
+5. Remove the baseline worktree and drop only the disposable database created for this task.
 
 Index and constraint names in the generated script are inherited from the
 ORM classes, which build them with the `orm_utils` helpers. Do not rename

@@ -22,7 +22,11 @@ policy = ToolPolicy(
         "get_current_time": PassthroughConfig(),
         "refund_payment": StaticConfig(
             cases=[
-                StaticCase(match={"order_id": "4821"}, result="refund issued: $129.00")
+                StaticCase(
+                    match_mode="exact",
+                    match={"order_id": "4821"},
+                    result="refund issued: $129.00",
+                )
             ],
             on_miss="error_result",
         ),
