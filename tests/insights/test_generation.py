@@ -303,6 +303,8 @@ def test_editor_validates_numbers_against_each_card_only(
         ("***", "markup"),
         ("_ _ _", "markup"),
         ("Tool behavior\n---", "markup"),
+        ("Tool behavior\n===", "markup"),
+        ("~~~\ninspect\n~~~", "markup"),
         ("Inspect this\x00pattern.", "control"),
         ("This causes retries.", "unsupported claim"),
         ("This is causing retries.", "unsupported claim"),
