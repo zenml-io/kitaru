@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Analyzer Alembic revision.
 
-Revision ID: 015_analyzer
-Revises: 014_evaluation_invocation_id
+Revision ID: 016_analyzer
+Revises: 015_api_imports
 Create Date: 2026-09-04
 
 """
@@ -34,8 +34,8 @@ from kitaru.server.adapters.db.orm.task import (
 )
 
 # revision identifiers, used by Alembic.
-revision = "015_analyzer"
-down_revision = "014_evaluation_invocation_id"
+revision = "016_analyzer"
+down_revision = "015_api_imports"
 branch_labels = None
 depends_on = None
 

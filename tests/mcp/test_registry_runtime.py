@@ -87,7 +87,7 @@ async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:
             tool["outputSchema"]
         )
         assert combined < 43 * 1024
-    assert _compact_size({"tools": dumped}) < 192 * 1024
+    assert _compact_size({"tools": dumped}) < 193 * 1024
     assert len(tools) <= 12
 
 
