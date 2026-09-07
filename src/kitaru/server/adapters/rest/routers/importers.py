@@ -123,8 +123,8 @@ async def update_importer(
 ) -> ImporterResponse:
     """Update an importer.
 
-    Clients observe HTTP 200 on success, 404 when no importer has this id,
-    and 422 on invalid input.
+    Clients observe HTTP 200 on success, 403 when the importer is
+    server-managed, 404 when no importer has this id, and 422 on invalid input.
 
     Args:
         importer_id: Id of the importer.
@@ -152,8 +152,8 @@ async def delete_importer(
 ) -> None:
     """Delete an importer, cascading its versions.
 
-    Clients observe HTTP 204 on success and 404 when no importer has this
-    id.
+    Clients observe HTTP 204 on success, 403 when the importer is
+    server-managed, and 404 when no importer has this id.
 
     Args:
         importer_id: Id of the importer.
@@ -177,8 +177,9 @@ async def create_importer_version(
 ) -> ImporterVersionResponse:
     """Create an importer version.
 
-    Clients observe HTTP 201 on success, 404 when no importer has this id
-    or a script source names an unknown blob, and 422 on invalid input.
+    Clients observe HTTP 201 on success, 403 when the importer is
+    server-managed, 404 when no importer has this id or a script source names
+    an unknown blob, and 422 on invalid input.
 
     Args:
         importer_id: Id of the importer.
@@ -261,8 +262,9 @@ async def update_importer_version(
 ) -> ImporterVersionResponse:
     """Update an importer version's display version.
 
-    Clients observe HTTP 200 on success and 404 when no version with this
-    number exists for this importer.
+    Clients observe HTTP 200 on success, 403 when the importer is
+    server-managed, and 404 when no version with this number exists for this
+    importer.
 
     Args:
         importer_id: Id of the importer.
@@ -279,6 +281,7 @@ async def update_importer_version(
         importer_id,
         version,
         body.display_version,
+        "display_version" in body.model_fields_set,
         ImporterVersionResponse,
         actor=actor,
     )

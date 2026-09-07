@@ -377,8 +377,8 @@ export interface paths {
          * Delete Analyzer
          * @description Delete an analyzer, cascading its versions.
          *
-         *     Clients observe HTTP 204 on success and 404 when no analyzer has this
-         *     id.
+         *     Clients observe HTTP 204 on success, 403 when the analyzer is
+         *     server-managed, and 404 when no analyzer has this id.
          *
          *     Args:
          *         analyzer_id: Id of the analyzer.
@@ -392,8 +392,8 @@ export interface paths {
          * Update Analyzer
          * @description Update an analyzer.
          *
-         *     Clients observe HTTP 200 on success, 404 when no analyzer has this id,
-         *     and 422 on invalid input.
+         *     Clients observe HTTP 200 on success, 403 when the analyzer is
+         *     server-managed, 404 when no analyzer has this id, and 422 on invalid input.
          *
          *     Args:
          *         analyzer_id: Id of the analyzer.
@@ -436,8 +436,9 @@ export interface paths {
          * Create Analyzer Version
          * @description Create an analyzer version.
          *
-         *     Clients observe HTTP 201 on success, 404 when no analyzer has this id
-         *     or a script source names an unknown blob, and 422 on invalid input.
+         *     Clients observe HTTP 201 on success, 403 when the analyzer is
+         *     server-managed, 404 when no analyzer has this id or a script source names
+         *     an unknown blob, and 422 on invalid input.
          *
          *     Args:
          *         analyzer_id: Id of the analyzer.
@@ -488,8 +489,9 @@ export interface paths {
          * Update Analyzer Version
          * @description Update an analyzer version's display version.
          *
-         *     Clients observe HTTP 200 on success and 404 when no version with this
-         *     number exists for this analyzer.
+         *     Clients observe HTTP 200 on success, 403 when the analyzer is
+         *     server-managed, and 404 when no version with this number exists for this
+         *     analyzer.
          *
          *     Args:
          *         analyzer_id: Id of the analyzer.
@@ -1399,8 +1401,8 @@ export interface paths {
          * Delete Evaluator
          * @description Delete an evaluator, cascading its versions.
          *
-         *     Clients observe HTTP 204 on success and 404 when no evaluator has this
-         *     id.
+         *     Clients observe HTTP 204 on success, 403 when the evaluator is
+         *     server-managed, and 404 when no evaluator has this id.
          *
          *     Args:
          *         evaluator_id: Id of the evaluator.
@@ -1414,8 +1416,8 @@ export interface paths {
          * Update Evaluator
          * @description Update an evaluator.
          *
-         *     Clients observe HTTP 200 on success, 404 when no evaluator has this id,
-         *     and 422 on invalid input.
+         *     Clients observe HTTP 200 on success, 403 when the evaluator is
+         *     server-managed, 404 when no evaluator has this id, and 422 on invalid input.
          *
          *     Args:
          *         evaluator_id: Id of the evaluator.
@@ -1458,8 +1460,9 @@ export interface paths {
          * Create Evaluator Version
          * @description Create an evaluator version.
          *
-         *     Clients observe HTTP 201 on success, 404 when no evaluator has this id
-         *     or a script source names an unknown blob, and 422 on invalid input.
+         *     Clients observe HTTP 201 on success, 403 when the evaluator is
+         *     server-managed, 404 when no evaluator has this id or a script source names
+         *     an unknown blob, and 422 on invalid input.
          *
          *     Args:
          *         evaluator_id: Id of the evaluator.
@@ -1510,8 +1513,9 @@ export interface paths {
          * Update Evaluator Version
          * @description Update an evaluator version's display version.
          *
-         *     Clients observe HTTP 200 on success and 404 when no version with this
-         *     number exists for this evaluator.
+         *     Clients observe HTTP 200 on success, 403 when the evaluator is
+         *     server-managed, and 404 when no version with this number exists for this
+         *     evaluator.
          *
          *     Args:
          *         evaluator_id: Id of the evaluator.
@@ -1881,8 +1885,8 @@ export interface paths {
          * Delete Importer
          * @description Delete an importer, cascading its versions.
          *
-         *     Clients observe HTTP 204 on success and 404 when no importer has this
-         *     id.
+         *     Clients observe HTTP 204 on success, 403 when the importer is
+         *     server-managed, and 404 when no importer has this id.
          *
          *     Args:
          *         importer_id: Id of the importer.
@@ -1896,8 +1900,8 @@ export interface paths {
          * Update Importer
          * @description Update an importer.
          *
-         *     Clients observe HTTP 200 on success, 404 when no importer has this id,
-         *     and 422 on invalid input.
+         *     Clients observe HTTP 200 on success, 403 when the importer is
+         *     server-managed, 404 when no importer has this id, and 422 on invalid input.
          *
          *     Args:
          *         importer_id: Id of the importer.
@@ -1940,8 +1944,9 @@ export interface paths {
          * Create Importer Version
          * @description Create an importer version.
          *
-         *     Clients observe HTTP 201 on success, 404 when no importer has this id
-         *     or a script source names an unknown blob, and 422 on invalid input.
+         *     Clients observe HTTP 201 on success, 403 when the importer is
+         *     server-managed, 404 when no importer has this id or a script source names
+         *     an unknown blob, and 422 on invalid input.
          *
          *     Args:
          *         importer_id: Id of the importer.
@@ -1992,8 +1997,9 @@ export interface paths {
          * Update Importer Version
          * @description Update an importer version's display version.
          *
-         *     Clients observe HTTP 200 on success and 404 when no version with this
-         *     number exists for this importer.
+         *     Clients observe HTTP 200 on success, 403 when the importer is
+         *     server-managed, and 404 when no version with this number exists for this
+         *     importer.
          *
          *     Args:
          *         importer_id: Id of the importer.

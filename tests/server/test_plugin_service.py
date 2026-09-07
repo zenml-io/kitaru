@@ -551,6 +551,28 @@ async def test_update_version_display_version(evaluator_service: PluginService) 
     assert updated.display_version == "v1.0.1"
 
 
+async def test_update_version_clears_display_version(
+    evaluator_service: PluginService,
+) -> None:
+    """Clear a version's display version with an explicit null value."""
+    plugin = await evaluator_service.create_plugin(
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
+    )
+    created = await evaluator_service.create_version(
+        plugin.id,
+        PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg:score"),
+        display_version="v1",
+        actor=ACTOR,
+    )
+
+    updated = await evaluator_service.update_version(
+        plugin.id, created.version, display_version=None, actor=ACTOR
+    )
+
+    assert updated.display_version is None
+
+
 async def test_update_version_not_found(evaluator_service: PluginService) -> None:
     """Raise for an unknown version number."""
     plugin = await evaluator_service.create_plugin(

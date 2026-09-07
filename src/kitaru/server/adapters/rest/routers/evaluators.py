@@ -125,8 +125,8 @@ async def update_evaluator(
 ) -> EvaluatorResponse:
     """Update an evaluator.
 
-    Clients observe HTTP 200 on success, 404 when no evaluator has this id,
-    and 422 on invalid input.
+    Clients observe HTTP 200 on success, 403 when the evaluator is
+    server-managed, 404 when no evaluator has this id, and 422 on invalid input.
 
     Args:
         evaluator_id: Id of the evaluator.
@@ -154,8 +154,8 @@ async def delete_evaluator(
 ) -> None:
     """Delete an evaluator, cascading its versions.
 
-    Clients observe HTTP 204 on success and 404 when no evaluator has this
-    id.
+    Clients observe HTTP 204 on success, 403 when the evaluator is
+    server-managed, and 404 when no evaluator has this id.
 
     Args:
         evaluator_id: Id of the evaluator.
@@ -179,8 +179,9 @@ async def create_evaluator_version(
 ) -> EvaluatorVersionResponse:
     """Create an evaluator version.
 
-    Clients observe HTTP 201 on success, 404 when no evaluator has this id
-    or a script source names an unknown blob, and 422 on invalid input.
+    Clients observe HTTP 201 on success, 403 when the evaluator is
+    server-managed, 404 when no evaluator has this id or a script source names
+    an unknown blob, and 422 on invalid input.
 
     Args:
         evaluator_id: Id of the evaluator.
@@ -263,8 +264,9 @@ async def update_evaluator_version(
 ) -> EvaluatorVersionResponse:
     """Update an evaluator version's display version.
 
-    Clients observe HTTP 200 on success and 404 when no version with this
-    number exists for this evaluator.
+    Clients observe HTTP 200 on success, 403 when the evaluator is
+    server-managed, and 404 when no version with this number exists for this
+    evaluator.
 
     Args:
         evaluator_id: Id of the evaluator.
@@ -281,6 +283,7 @@ async def update_evaluator_version(
         evaluator_id,
         version,
         body.display_version,
+        "display_version" in body.model_fields_set,
         EvaluatorVersionResponse,
         actor=actor,
     )

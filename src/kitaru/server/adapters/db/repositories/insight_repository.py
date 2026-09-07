@@ -25,10 +25,10 @@ from kitaru.server.adapters.db.filtering import (
 )
 from kitaru.server.adapters.db.orm.insight import (
     INSIGHT_AGENT_ID_FOREIGN_KEY,
-    INSIGHT_ANALYZER_VERSION_ID_FOREIGN_KEY,
     INSIGHT_TASK_ID_FOREIGN_KEY,
     InsightORM,
 )
+from kitaru.server.adapters.db.orm.plugin import PluginVersionORM
 from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
@@ -85,12 +85,16 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
         """
         if not insights:
             return []
+        analyzer_version_id = insights[0].analyzer_version_id
+        if analyzer_version_id is not None:
+            exists = await self._session.scalar(
+                select(PluginVersionORM.id).where(
+                    PluginVersionORM.id == analyzer_version_id
+                )
+            )
+            if exists is None:
+                raise PluginVersionIdNotFound(analyzer_version_id)
         rows = [InsightORM.from_domain(insight) for insight in insights]
-
-        def _analyzer_version_not_found() -> PluginVersionIdNotFound:
-            analyzer_version_id = insights[0].analyzer_version_id
-            assert analyzer_version_id is not None
-            return PluginVersionIdNotFound(analyzer_version_id)
 
         def _task_not_found() -> TaskNotFound:
             task_id = insights[0].task_id
@@ -103,7 +107,6 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
                 INSIGHT_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(
                     insights[0].agent_id
                 ),
-                INSIGHT_ANALYZER_VERSION_ID_FOREIGN_KEY: _analyzer_version_not_found,
                 INSIGHT_TASK_ID_FOREIGN_KEY: _task_not_found,
             },
         )

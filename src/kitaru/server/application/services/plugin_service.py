@@ -247,6 +247,8 @@ class PluginService:
         plugin_id: uuid.UUID,
         version: int,
         display_version: str | None,
+        update_display_version: bool = True,
+        *,
         actor: AuthContext,
     ) -> PluginVersion:
         """Partially update a plugin version.
@@ -254,7 +256,8 @@ class PluginService:
         Args:
             plugin_id: Id of the plugin.
             version: Version number.
-            display_version: New display version, unchanged when ``None``.
+            display_version: New display version, including ``None`` to clear it.
+            update_display_version: Whether to apply ``display_version``.
             actor: Caller context.
 
         Raises:
@@ -268,6 +271,6 @@ class PluginService:
         plugin = await self._repository.get(plugin_id)
         plugin.check_modify()
         plugin_version = await self._repository.get_version(plugin_id, version)
-        if display_version is not None:
+        if update_display_version:
             plugin_version.update_display_version(display_version)
         return await self._repository.update_version(plugin_version)

@@ -314,6 +314,48 @@ async def test_create_and_get_carries_provenance(setup: Setup) -> None:
     assert loaded == created
 
 
+async def test_analyzer_delete_keeps_the_stored_analyzer_version_id() -> None:
+    """Deleting an analyzer preserves its produced insights' provenance."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, _):
+        setup = await _seed_postgres(session)
+        blobs = SQLBlobRepository(session)
+        plugins = SQLPluginRepository(session)
+        code_blob, _ = await blobs.create(
+            Blob(
+                owner_id=setup.owner_id,
+                sha256=uuid.uuid4().hex.ljust(64, "0"),
+                size=4,
+                media_type="text/x-python",
+                stored_in=BlobStorageBackend.DATABASE,
+            )
+        )
+        plugin = await plugins.create(
+            Plugin(
+                owner_id=setup.owner_id,
+                kind=PluginKind.ANALYZER,
+                name="trends",
+            )
+        )
+        version = await plugins.create_version(
+            plugin.id,
+            ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
+            display_version=None,
+        )
+        stored = await _create_insight(
+            setup.insights,
+            setup.owner_id,
+            setup.agent_id,
+            analyzer_version_id=version.id,
+        )
+
+        await plugins.delete(plugin.id)
+
+        item = await setup.insights.get(stored.id)
+        assert item.analyzer_version_id == version.id
+
+
 async def test_get_not_found(setup: Setup) -> None:
     """Raise for an unknown insight id."""
     missing_id = uuid.uuid4()

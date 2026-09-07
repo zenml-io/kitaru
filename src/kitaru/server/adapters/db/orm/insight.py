@@ -61,12 +61,6 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
-            ["analyzer_version_id"],
-            ["plugin_version.id"],
-            name=INSIGHT_ANALYZER_VERSION_ID_FOREIGN_KEY,
-            ondelete="SET NULL",
-        ),
-        ForeignKeyConstraint(
             ["task_id"],
             ["task.id"],
             name=INSIGHT_TASK_ID_FOREIGN_KEY,
@@ -79,6 +73,8 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     owner_id: Mapped[uuid.UUID]
     agent_id: Mapped[uuid.UUID]
+    # No foreign key, an analyzer-born row keeps this id forever, even after
+    # the plugin version it references is deleted.
     analyzer_version_id: Mapped[uuid.UUID | None]
     task_id: Mapped[uuid.UUID | None]
     # No foreign key, identifies the analyzer invocation that produced this row

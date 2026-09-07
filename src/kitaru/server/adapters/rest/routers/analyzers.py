@@ -123,8 +123,8 @@ async def update_analyzer(
 ) -> AnalyzerResponse:
     """Update an analyzer.
 
-    Clients observe HTTP 200 on success, 404 when no analyzer has this id,
-    and 422 on invalid input.
+    Clients observe HTTP 200 on success, 403 when the analyzer is
+    server-managed, 404 when no analyzer has this id, and 422 on invalid input.
 
     Args:
         analyzer_id: Id of the analyzer.
@@ -152,8 +152,8 @@ async def delete_analyzer(
 ) -> None:
     """Delete an analyzer, cascading its versions.
 
-    Clients observe HTTP 204 on success and 404 when no analyzer has this
-    id.
+    Clients observe HTTP 204 on success, 403 when the analyzer is
+    server-managed, and 404 when no analyzer has this id.
 
     Args:
         analyzer_id: Id of the analyzer.
@@ -177,8 +177,9 @@ async def create_analyzer_version(
 ) -> AnalyzerVersionResponse:
     """Create an analyzer version.
 
-    Clients observe HTTP 201 on success, 404 when no analyzer has this id
-    or a script source names an unknown blob, and 422 on invalid input.
+    Clients observe HTTP 201 on success, 403 when the analyzer is
+    server-managed, 404 when no analyzer has this id or a script source names
+    an unknown blob, and 422 on invalid input.
 
     Args:
         analyzer_id: Id of the analyzer.
@@ -261,8 +262,9 @@ async def update_analyzer_version(
 ) -> AnalyzerVersionResponse:
     """Update an analyzer version's display version.
 
-    Clients observe HTTP 200 on success and 404 when no version with this
-    number exists for this analyzer.
+    Clients observe HTTP 200 on success, 403 when the analyzer is
+    server-managed, and 404 when no version with this number exists for this
+    analyzer.
 
     Args:
         analyzer_id: Id of the analyzer.
@@ -279,6 +281,7 @@ async def update_analyzer_version(
         analyzer_id,
         version,
         body.display_version,
+        "display_version" in body.model_fields_set,
         AnalyzerVersionResponse,
         actor=actor,
     )

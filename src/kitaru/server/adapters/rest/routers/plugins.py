@@ -252,6 +252,7 @@ async def update_version(
     plugin_id: uuid.UUID,
     version: int,
     display_version: str | None,
+    update_display_version: bool,
     response_class: type[PluginVersionResponseT],
     actor: AuthContext,
 ) -> PluginVersionResponseT:
@@ -261,7 +262,8 @@ async def update_version(
         service: Plugin service bound to the resource's kind.
         plugin_id: Id of the plugin.
         version: Version number.
-        display_version: New display version, unchanged when ``None``.
+        display_version: New display version, including ``None`` to clear it.
+        update_display_version: Whether the request included ``display_version``.
         response_class: ``EvaluatorVersionResponse`` or
             ``ImporterVersionResponse``.
         actor: Caller context.
@@ -270,6 +272,10 @@ async def update_version(
         Updated plugin version response.
     """
     plugin_version = await service.update_version(
-        plugin_id, version, display_version=display_version, actor=actor
+        plugin_id,
+        version,
+        display_version=display_version,
+        update_display_version=update_display_version,
+        actor=actor,
     )
     return plugin_version_to_response(plugin_version, response_class)

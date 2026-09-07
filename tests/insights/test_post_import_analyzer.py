@@ -212,17 +212,15 @@ async def test_analyzer_generates_when_observer_initialization_fails(
     assert captured["observer"] is None
 
 
-async def test_analyzer_preserves_source_session_count_in_card_coverage() -> None:
-    """Distinguish the eligible source total from sessions actually analyzed."""
-    insights = await analyze_post_import_sessions(
-        [_view(1, failed_tool=True), _view(2)], source_session_count=5
-    )
-
-    assert insights
-    for insight in insights:
-        coverage = InsightGenerationResult.card_metadata(insight).coverage
-        assert coverage.sessions_available == 5
-        assert coverage.sessions_analyzed == 2
+async def test_analyzer_rejects_caller_controlled_source_session_count() -> None:
+    """Do not let task parameters falsify coverage for a complete import scan."""
+    with pytest.raises(task_analyzer.AnalysisError, match="source_session_count"):
+        await task_analyzer.call_analyzer(
+            "post-import-insights",
+            analyze_post_import_sessions,
+            [_view(1, failed_tool=True), _view(2)],
+            {"source_session_count": 5},
+        )
 
 
 async def test_analyzer_returns_no_cards_for_empty_input() -> None:

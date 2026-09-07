@@ -99,7 +99,8 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("annotation", "session_id"): "CASCADE",
     ("insight", "agent_id"): "CASCADE",
     ("insight", "owner_id"): None,
-    ("insight", "analyzer_version_id"): "SET NULL",
+    # analyzer_version_id carries no constraint, an analyzer-born row keeps
+    # this id forever, even after the plugin version it references is deleted.
     ("insight", "task_id"): "SET NULL",
     ("import", "agent_id"): "CASCADE",
     ("import", "agent_version_id"): "SET NULL",
