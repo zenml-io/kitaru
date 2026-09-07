@@ -69,6 +69,7 @@ _UNSUPPORTED_CLAIM = re.compile(
     r"(?:arise|arises|arose|arisen|arising|"
     r"originate|originates|originated|originating)\s+from|"
     r"explains?|explained|explaining|determines?|determined|determining|"
+    r"improv(?:e|es|ed|ing|ements?)|outperform(?:s|ed|ing)?|"
     r"more|most|less|fewer|higher|lower|increase[ds]?|decrease[ds]?|"
     r"slower|slowest|faster|fastest|better|best|worse|worst|"
     r"longer|longest|shorter|shortest|larger|largest|smaller|smallest|"

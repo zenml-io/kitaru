@@ -235,8 +235,13 @@ def test_tool_identity_preserves_exact_whitespace_in_safe_names() -> None:
         ],
     )
 
-    candidate_ids = {
-        candidate.id for candidate in profile_sessions([session]).candidates
+    result = profile_sessions([session])
+    candidate_ids = {candidate.id for candidate in result.candidates}
+
+    errors = _candidate(result, "tool-error-mix")
+    assert {value.label: value.value for value in errors.data.values} == {
+        "lookup": 1,
+        " lookup ": 1,
     }
 
     assert candidate_ids.isdisjoint(
@@ -636,6 +641,16 @@ def test_sanitize_label_masks_embedded_credential_families() -> None:
 def test_sanitize_label_rejects_invalid_utf8_and_preserves_unicode() -> None:
     assert sanitize_label("réserver_订单") == "réserver_订单"
     assert sanitize_label("invalid-\ud800-label") is None
+
+
+@pytest.mark.parametrize("label", ["lookup", " lookup ", " model-v1 "])
+def test_sanitize_label_preserves_exact_safe_labels(label: str) -> None:
+    assert sanitize_label(label) == label
+
+
+@pytest.mark.parametrize("label", ["", "   ", "\tlookup", "lookup\n"])
+def test_sanitize_label_rejects_blank_or_control_labels(label: str) -> None:
+    assert sanitize_label(label) is None
 
 
 def test_sanitize_label_rejects_huge_whitespace_padding_before_strip() -> None:

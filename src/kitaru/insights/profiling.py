@@ -456,8 +456,8 @@ def sanitize_label(value: str | None) -> str | None:
         return None
     if len(value) > MAX_LABEL_LENGTH:
         return None
-    candidate = value.strip()
-    if not candidate:
+    candidate = value
+    if not candidate.strip():
         return None
     try:
         candidate.encode("utf-8")

@@ -289,6 +289,14 @@ def test_editor_validates_numbers_against_each_card_only(
         ("Retries originated from this pattern.", "unsupported claim"),
         ("This pattern explains retries.", "unsupported claim"),
         ("This pattern determines retries.", "unsupported claim"),
+        ("This pattern improved quality.", "unsupported claim"),
+        ("This pattern improves quality.", "unsupported claim"),
+        ("This pattern is improving quality.", "unsupported claim"),
+        ("Quality improvements appeared.", "unsupported claim"),
+        ("It outperformed the alternative.", "unsupported claim"),
+        ("It outperforms the alternative.", "unsupported claim"),
+        ("It is outperforming the alternative.", "unsupported claim"),
+        ("These paths outperform the alternative.", "unsupported claim"),
         ("This has higher activity.", "unsupported claim"),
         ("This path is slower.", "unsupported claim"),
         ("This path is slowest.", "unsupported claim"),
@@ -1362,9 +1370,11 @@ async def test_editor_failure_preserves_analyst_selection(
         "Inspect ~~this pattern~~.",
         "> Inspect this pattern.",
         "- Inspect this pattern.",
+        "This pattern improved quality.",
+        "It outperformed the alternative.",
     ],
 )
-async def test_editor_markup_uses_deterministic_copy(
+async def test_editor_unsafe_copy_uses_deterministic_copy(
     profiling_result: ProfilingResult,
     description: str,
 ) -> None:
