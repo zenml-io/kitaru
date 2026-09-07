@@ -110,15 +110,14 @@ async def test_call_analyzer_list_result() -> None:
     assert [item.name for item in results] == ["a", "b"]
 
 
-async def test_call_analyzer_empty_list_raises() -> None:
-    """Raise AnalysisError when the analyzer returns no results."""
+async def test_call_analyzer_empty_list_accepted() -> None:
+    """Accept an analysis that finds no useful insights."""
     views = _session_views()
 
     def analyze(sessions: list[SessionView], **params: object) -> list[InsightInput]:
         return []
 
-    with pytest.raises(AnalysisError, match="summary-check"):
-        await call_analyzer("summary-check", analyze, views, {})
+    assert await call_analyzer("summary-check", analyze, views, {}) == []
 
 
 async def test_call_analyzer_duplicate_names_raise() -> None:

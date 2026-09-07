@@ -255,9 +255,11 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
     assert any(evidence.node_id for item in metadata for evidence in item.evidence)
 
 
-async def test_task_runner_still_rejects_no_eligible_findings() -> None:
-    """Document the remaining upstream empty-result incompatibility."""
-    with pytest.raises(task_analyzer.AnalysisError, match="returned no results"):
+async def test_task_runner_accepts_no_eligible_findings() -> None:
+    """Allow an honest empty analysis through the plugin contract."""
+    assert (
         await task_analyzer.call_analyzer(
             "post-import-insights", analyze_post_import_sessions, [_view(2)], {}
         )
+        == []
+    )

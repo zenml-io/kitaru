@@ -1350,6 +1350,82 @@ async def test_editor_failure_preserves_analyst_selection(
     assert result.mode == GenerationMode.DETERMINISTIC_FALLBACK
 
 
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Inspect **this pattern**.",
+        "Inspect *this pattern*.",
+        "Inspect __this pattern__.",
+        "Inspect _this pattern_.",
+        "Inspect `lookup_order`.",
+        "Inspect ``lookup_order``.",
+        "Inspect ~~this pattern~~.",
+        "> Inspect this pattern.",
+        "- Inspect this pattern.",
+    ],
+)
+async def test_editor_markup_uses_deterministic_copy(
+    profiling_result: ProfilingResult,
+    description: str,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    editor = _editor([candidate.id])
+    editor = editor.model_copy(
+        update={
+            "insights": [
+                editor.insights[0].model_copy(update={"description": description})
+            ]
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+
+    result = await generate_model_plan(
+        profiling_result,
+        generator=FakeGenerator(selection, editor),
+        config=ModelGenerationConfig(model="test-model"),
+    )
+
+    assert result.selection == selection
+    assert result.mode == GenerationMode.DETERMINISTIC_FALLBACK
+    assert result.diagnostics.fallback_reason == "editor_failed"
+    assert result.editorial.insights[0].description == candidate.fallback_description
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Inspect lookup_order and lookup_customer_record.",
+        "Inspect the tool's behavior (including retries).",
+        "Inspect lookup_* calls.",
+        "Inspect retries - then compare the cohort.",
+    ],
+)
+def test_editor_preserves_plain_text_punctuation(
+    profiling_result: ProfilingResult,
+    description: str,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    editor = _editor([candidate.id])
+    editor = editor.model_copy(
+        update={
+            "insights": [
+                editor.insights[0].model_copy(update={"description": description})
+            ]
+        }
+    )
+
+    assert validate_editorial_plan(editor, selection, [candidate]) == editor
+
+
 async def test_non_utf8_editor_copy_triggers_deterministic_fallback(
     profiling_result: ProfilingResult,
 ) -> None:

@@ -46,7 +46,12 @@ _QUANTITY_TOKEN = re.compile(
 )
 _LINK = re.compile(r"(?:https?://|www\.)", flags=re.IGNORECASE)
 _MARKUP = re.compile(
-    r"(?:<[^>]+>|\[[^\]]+\]\([^\)]+\)|```|^\s{0,3}#{1,6}\s)", re.MULTILINE
+    r"(?:<[^>]+>|\[[^\]]+\]\([^\)]+\)|```|`+[^`\n]+`+|"
+    r"\*{1,3}(?=\S)[^*\n]+?(?<=\S)\*{1,3}|"
+    r"(?<!\w)_{1,3}(?=\S)[^_\n]+?(?<=\S)_{1,3}(?!\w)|"
+    r"~~(?=\S)[^~\n]+?(?<=\S)~~|"
+    r"^\s{0,3}(?:#{1,6}|>|[-+*])\s)",
+    re.MULTILINE,
 )
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _UNSUPPORTED_CLAIM = re.compile(

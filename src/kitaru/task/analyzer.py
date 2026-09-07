@@ -62,7 +62,7 @@ async def call_analyzer(
         params: Parameters passed to the analyzer.
 
     Raises:
-        AnalysisError: The analyzer raised, returned no results, returned a
+        AnalysisError: The analyzer raised, returned a
             non-InsightInput value, or returned duplicate result names.
 
     Returns:
@@ -75,8 +75,6 @@ async def call_analyzer(
     except Exception as exc:
         raise AnalysisError(f"Analyzer '{name}' raised an error: {exc}") from exc
     results = result if isinstance(result, list) else [result]
-    if not results:
-        raise AnalysisError(f"Analyzer '{name}' returned no results")
     if not all(isinstance(item, InsightInput) for item in results):
         raise AnalysisError(f"Analyzer '{name}' returned a non-InsightInput value")
     names = [item.name for item in results]

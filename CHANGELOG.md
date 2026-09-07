@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Analyzer tasks that return an empty list now complete successfully without creating insights, so an analysis with no eligible findings does not fail its import job. Insight editor copy containing Markdown formatting falls back to deterministic plain text.
 - `if_missing` baseline scoring now adopts every evaluation an evaluator call produced instead of only one of them, so a rerun's baseline aggregates no longer lose metrics from an evaluator that returns multiple results.
 
 ## [0.25.0] - 2026-09-03
