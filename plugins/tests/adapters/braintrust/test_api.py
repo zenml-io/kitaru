@@ -22,7 +22,7 @@ import pytest
 from kitaru.task import importer as importer_module
 from kitaru.task.importer import ImportedSession
 from kitaru_braintrust_importer.api import fetch, serialize_spans
-from kitaru_braintrust_importer.importer import parse
+from kitaru_braintrust_importer.importer import importer, parse
 
 from ..fetch_helpers import collect_payloads
 from .fixtures import FakeBraintrust, build_complete_rows, build_session_rows
@@ -48,6 +48,20 @@ async def test_fetch_trace_ids_fetches_exactly_those_in_order(
         "project-1:root-a",
         "project-1:root-b",
     ]
+
+
+async def test_importer_fetch_matches_api_fetch(
+    fake_braintrust: FakeBraintrust,
+) -> None:
+    """Yield the same payload from the importer instance as from the API fetch."""
+    query = {"project_id": "project-1", "trace_ids": ["root-a"]}
+    fake_braintrust.rows_builders = [build_complete_rows]
+    expected = await collect_payloads(fetch(query))
+
+    fake_braintrust.rows_builders = [build_complete_rows]
+    actual = await collect_payloads(importer.fetch(query))
+
+    assert actual == expected
 
 
 async def test_time_window_lists_root_span_ids_and_fetches_each_trace(

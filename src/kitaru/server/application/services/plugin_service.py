@@ -29,7 +29,6 @@ from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.names import NAMESPACE_SEPARATOR, RESERVED_NAMESPACE
 from kitaru.server.domain.plugin import (
-    InvalidPluginFetchEntrypoint,
     Plugin,
     PluginKind,
     PluginSource,
@@ -183,15 +182,11 @@ class PluginService:
 
         Raises:
             PluginNotFound: No plugin has this id.
-            InvalidPluginFetchEntrypoint: The kind is evaluator and source
-                carries a fetch entrypoint.
             BlobNotFound: The script source names an unknown blob.
 
         Returns:
             Created plugin version.
         """
-        if self.kind is PluginKind.EVALUATOR and source.fetch_entrypoint is not None:
-            raise InvalidPluginFetchEntrypoint
         if isinstance(source, ScriptPluginSource):
             await self._blob_repository.get(source.blob_id)
         version = await self._repository.create_version(

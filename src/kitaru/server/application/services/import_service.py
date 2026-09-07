@@ -36,7 +36,7 @@ from kitaru.server.application.services.plugin_resolution import (
 )
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.job import Job
-from kitaru.server.domain.plugin import PluginKind, PluginVersionWithoutFetchEntrypoint
+from kitaru.server.domain.plugin import PluginKind
 from kitaru.server.domain.task import ImportTask
 
 
@@ -78,8 +78,7 @@ class ImportService:
 
         An omitted importer version resolves to the importer's latest. An
         agent version is stamped on every session the import creates, and
-        the sessions carry none when the command names none. An API import
-        requires an importer version with a fetch entrypoint.
+        the sessions carry none when the command names none.
 
         Args:
             command: Fields for the import.
@@ -91,9 +90,6 @@ class ImportService:
             PluginVersionNotFound: The importer has no version with this
                 number, or an evaluator config names an unknown version.
             BlobNotFound: No blob has the payload id.
-            PluginVersionWithoutFetchEntrypoint: The command sets
-                fetch_query and the resolved importer version carries no
-                fetch entrypoint.
             AgentNotFound: No agent has this id.
             AgentVersionNotFound: No agent version has this id.
             AgentVersionAgentMismatch: The agent version belongs to another
@@ -111,8 +107,6 @@ class ImportService:
             plugin, command.version, self._plugins
         )
         if command.fetch_query is not None:
-            if plugin_version.source.fetch_entrypoint is None:
-                raise PluginVersionWithoutFetchEntrypoint(plugin_version.id)
             payload_blob_id = None
         else:
             assert command.payload_blob_id is not None

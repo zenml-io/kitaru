@@ -710,7 +710,6 @@ class ApiSourceSpec(FrozenModel):
     """API source spec."""
 
     type: Literal["api"] = "api"
-    entrypoint: str
     query: dict[str, Any] = Field(default_factory=dict)
 
 

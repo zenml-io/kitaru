@@ -19,7 +19,7 @@
 
 import json
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -699,6 +699,16 @@ class PhoenixTraceImporter:
             framework=_framework(ordered),
             nodes=nodes,
         )
+
+    async def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
+        """Fetch parser payloads from the Phoenix API."""
+        from .api import fetch
+
+        async for payload in fetch(query):
+            yield payload
+
+
+importer = PhoenixTraceImporter()
 
 
 def parse(

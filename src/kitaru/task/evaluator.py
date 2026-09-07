@@ -110,10 +110,16 @@ def _resolve_evaluator(
     try:
         if isinstance(details.plugin, ScriptPluginSpec):
             path = Path(get_required_env("KITARU_TASK_PLUGIN_PATH"))
-            return load_plugin_entrypoint(path, details.plugin.entrypoint, _LABEL)
-        return load_source_ref(details.plugin.entrypoint, _LABEL)
+            evaluator = load_plugin_entrypoint(path, details.plugin.entrypoint, _LABEL)
+        else:
+            evaluator = load_source_ref(details.plugin.entrypoint, _LABEL)
     except PluginLoadError as exc:
         raise EvaluationError(str(exc)) from exc
+    if not callable(evaluator):
+        raise EvaluationError(
+            f"{_LABEL} entrypoint '{details.plugin.entrypoint}' is not callable"
+        )
+    return evaluator
 
 
 async def run(client: KitaruAPIClient, task_id: str) -> None:

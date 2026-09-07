@@ -180,7 +180,6 @@ class PluginVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     blob_id: Mapped[uuid.UUID | None]
     requirement: Mapped[str | None] = mapped_column(String(MAX_REQUIREMENT_LENGTH))
     entrypoint: Mapped[str] = mapped_column(Text)
-    fetch_entrypoint: Mapped[str | None] = mapped_column(Text)
 
     @classmethod
     def from_domain(
@@ -210,7 +209,6 @@ class PluginVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                 blob_id=source.blob_id,
                 requirement=None,
                 entrypoint=source.entrypoint,
-                fetch_entrypoint=source.fetch_entrypoint,
             )
         return cls(
             plugin_id=plugin_id,
@@ -220,7 +218,6 @@ class PluginVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             blob_id=None,
             requirement=source.requirement,
             entrypoint=source.entrypoint,
-            fetch_entrypoint=source.fetch_entrypoint,
         )
 
     def to_domain(self) -> PluginVersion:
@@ -235,14 +232,12 @@ class PluginVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             source = ScriptPluginSource(
                 blob_id=self.blob_id,
                 entrypoint=self.entrypoint,
-                fetch_entrypoint=self.fetch_entrypoint,
             )
         else:
             assert self.requirement is not None
             source = PackagePluginSource(
                 requirement=self.requirement,
                 entrypoint=self.entrypoint,
-                fetch_entrypoint=self.fetch_entrypoint,
             )
         return PluginVersion(
             id=self.id,

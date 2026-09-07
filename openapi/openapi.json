@@ -893,11 +893,6 @@
       "ApiSourceSpec": {
         "description": "API source spec.",
         "properties": {
-          "entrypoint": {
-            "description": "Fetch entrypoint, in the form of the plugin's entrypoint.",
-            "title": "Entrypoint",
-            "type": "string"
-          },
           "query": {
             "additionalProperties": true,
             "description": "Importer-defined selection of what to fetch.",
@@ -912,7 +907,6 @@
           }
         },
         "required": [
-          "entrypoint",
           "query"
         ],
         "title": "ApiSourceSpec",
@@ -5181,18 +5175,6 @@
             "title": "Entrypoint",
             "type": "string"
           },
-          "fetch_entrypoint": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Module and attribute fetching payloads from an API, as module:attribute.",
-            "title": "Fetch Entrypoint"
-          },
           "requirement": {
             "description": "Pinned PEP 508 requirement.",
             "title": "Requirement",
@@ -6597,18 +6579,6 @@
             "description": "Attribute in the file.",
             "title": "Entrypoint",
             "type": "string"
-          },
-          "fetch_entrypoint": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Attribute in the file fetching payloads from an API.",
-            "title": "Fetch Entrypoint"
           },
           "type": {
             "const": "script",

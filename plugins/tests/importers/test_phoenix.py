@@ -23,7 +23,12 @@ from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession
-from kitaru_phoenix_importer.importer import InvalidImport, PhoenixTraceImporter
+from kitaru_phoenix_importer.importer import (
+    InvalidImport,
+    PhoenixTraceImporter,
+    importer,
+)
+from kitaru_phoenix_importer.importer import parse as unified_parse
 
 
 def span(
@@ -68,6 +73,13 @@ def parse(content: bytes) -> list[ImportedSession | ImportFailure]:
 def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
     """Flatten imported nodes depth-first."""
     return [node for root in nodes for node in (root, *flatten(root.children))]
+
+
+def test_importer_instance_parse_matches_module_parse() -> None:
+    """Yield the same sessions from the module-level instance as from parse."""
+    content = jsonl(span("root", span_kind="AGENT"))
+
+    assert list(importer.parse(content, {})) == list(unified_parse(content, {}))
 
 
 def test_parses_ui_jsonl_and_reconstructs_out_of_order_graph() -> None:

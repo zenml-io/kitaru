@@ -21,7 +21,7 @@ from langfuse.api.core import ApiError
 
 from kitaru.task.importer import ImportedNode, ImportedSession
 from kitaru_langfuse_importer.api import fetch
-from kitaru_langfuse_importer.importer import parse
+from kitaru_langfuse_importer.importer import importer, parse
 
 from ..fetch_helpers import collect_payloads
 from .fixtures import (
@@ -66,6 +66,22 @@ async def test_fetch_with_trace_ids_fetches_exactly_those_in_order(
         ["trace-2"],
         ["trace-1"],
     ]
+
+
+async def test_importer_fetch_matches_api_fetch(
+    fake_langfuse: FakeLangfuseClient,
+) -> None:
+    """Yield the same payload from the importer instance as from the API fetch."""
+    query = {"trace_ids": ["trace-1"]}
+    fake_langfuse.trace_builders = [build_complete_trace]
+    seed_default_observations(fake_langfuse, ["trace-1"])
+    expected = await collect_payloads(fetch(query))
+
+    fake_langfuse.trace_builders = [build_complete_trace]
+    seed_default_observations(fake_langfuse, ["trace-1"])
+    actual = await collect_payloads(importer.fetch(query))
+
+    assert actual == expected
 
 
 async def test_fetch_with_trace_ids_ignores_the_time_window(

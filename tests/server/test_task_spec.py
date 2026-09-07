@@ -111,9 +111,7 @@ async def test_import_spec_carries_the_api_source(
     code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
     version = await services.plugins.create_version(
         plugin.id,
-        ScriptPluginSource(
-            blob_id=code_blob.id, entrypoint="run", fetch_entrypoint="fetch"
-        ),
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="run"),
         display_version=None,
     )
     agent = await create_agent(services.agents, ACTOR.account.id)
@@ -133,7 +131,6 @@ async def test_import_spec_carries_the_api_source(
 
     assert isinstance(spec.details, ImportTaskDetails)
     assert isinstance(spec.details.source, ApiSourceSpec)
-    assert spec.details.source.entrypoint == "fetch"
     assert spec.details.source.query == {"since": "2026-08-01T00:00:00Z"}
 
 

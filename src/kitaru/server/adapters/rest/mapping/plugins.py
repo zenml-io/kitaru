@@ -79,12 +79,10 @@ def plugin_source_to_domain(source: WirePluginSource) -> DomainPluginSource:
         return DomainScriptPluginSource(
             blob_id=source.blob_id,
             entrypoint=source.entrypoint,
-            fetch_entrypoint=source.fetch_entrypoint,
         )
     return DomainPackagePluginSource(
         requirement=source.requirement,
         entrypoint=source.entrypoint,
-        fetch_entrypoint=source.fetch_entrypoint,
     )
 
 
@@ -101,12 +99,10 @@ def plugin_source_to_wire(source: DomainPluginSource) -> WirePluginSource:
         return WireScriptPluginSource(
             blob_id=source.blob_id,
             entrypoint=source.entrypoint,
-            fetch_entrypoint=source.fetch_entrypoint,
         )
     return WirePackagePluginSource(
         requirement=source.requirement,
         entrypoint=source.entrypoint,
-        fetch_entrypoint=source.fetch_entrypoint,
     )
 
 

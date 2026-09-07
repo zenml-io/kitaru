@@ -18,7 +18,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -62,7 +62,7 @@ from kitaru.task.importer import (
     FetchQuery,
     ImportedSession,
     SessionImportError,
-    _resolve_entrypoint,
+    _resolve_importer,
     call_fetcher,
     call_parser,
     flatten_nodes,
@@ -179,39 +179,78 @@ async def test_call_fetcher_rejects_non_bytes_item() -> None:
         await anext(call_fetcher(fetcher, {}))
 
 
-def test_resolve_entrypoint_script_plugin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Load a script plugin's fetch entrypoint from KITARU_TASK_PLUGIN_PATH."""
-    plugin_path = tmp_path / "importer.py"
-    plugin_path.write_text("def fetch(query):\n    return query\n")
-    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
-    source = ApiSourceSpec(entrypoint="fetch", query={})
-    details = ImportTaskDetails(
-        plugin=ScriptPluginSpec(entrypoint="parse", blob_id=uuid.uuid4(), sha256="x"),
-        source=source,
+def _script_details(entrypoint: str) -> ImportTaskDetails:
+    return ImportTaskDetails(
+        plugin=ScriptPluginSpec(
+            entrypoint=entrypoint, blob_id=uuid.uuid4(), sha256="x"
+        ),
+        source=ApiSourceSpec(query={}),
         agent_id=uuid.uuid4(),
         params={},
     )
 
-    fetcher = _resolve_entrypoint(details, source.entrypoint)
 
+def test_resolve_importer_callable_parses_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plain callable entrypoint is the parser and has no fetcher."""
+    plugin_path = tmp_path / "importer.py"
+    plugin_path.write_text("def parse(payload, params):\n    return []\n")
+    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
+
+    parser, fetcher = _resolve_importer(_script_details("parse"))
+
+    assert parser(b"", {}) == []
+    assert fetcher is None
+
+
+def test_resolve_importer_object_with_fetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An importer object exposes its parse and fetch methods."""
+    plugin_path = tmp_path / "importer.py"
+    plugin_path.write_text(
+        "class Importer:\n"
+        "    def parse(self, payload, params):\n"
+        "        return [payload]\n"
+        "    def fetch(self, query):\n"
+        "        return query\n"
+        "importer = Importer()\n"
+    )
+    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
+
+    parser, fetcher = _resolve_importer(_script_details("importer"))
+
+    assert parser(b"x", {}) == [b"x"]
+    assert fetcher is not None
     assert fetcher({"a": 1}) == {"a": 1}
 
 
-def test_resolve_entrypoint_package_plugin() -> None:
-    """Load a package plugin's fetch entrypoint by module:attribute."""
-    source = ApiSourceSpec(entrypoint="json:dumps", query={})
+def test_resolve_importer_package_plugin() -> None:
+    """Load a package plugin's entrypoint by module:attribute."""
     details = ImportTaskDetails(
-        plugin=PackagePluginSpec(entrypoint="pkg.mod:parse", requirement="pkg==1.0"),
-        source=source,
+        plugin=PackagePluginSpec(entrypoint="json:dumps", requirement="pkg==1.0"),
+        source=ApiSourceSpec(query={}),
         agent_id=uuid.uuid4(),
         params={},
     )
 
-    fetcher = _resolve_entrypoint(details, source.entrypoint)
+    parser, fetcher = _resolve_importer(details)
 
-    assert fetcher({"a": 1}) == '{"a": 1}'
+    assert cast(Any, parser)({"a": 1}) == '{"a": 1}'
+    assert fetcher is None
+
+
+def test_resolve_importer_rejects_a_non_importer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An entrypoint that is neither callable nor an importer is rejected."""
+    plugin_path = tmp_path / "importer.py"
+    plugin_path.write_text("importer = 42\n")
+    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
+
+    with pytest.raises(SessionImportError, match="neither callable nor an importer"):
+        _resolve_importer(_script_details("importer"))
 
 
 def test_fetch_query_requires_since_without_trace_ids() -> None:
@@ -648,9 +687,9 @@ async def _create_api_source_task(
         secret_env={},
         details=ImportTaskDetails(
             plugin=ScriptPluginSpec(
-                entrypoint="parse", blob_id=uuid.uuid4(), sha256="x"
+                entrypoint="importer", blob_id=uuid.uuid4(), sha256="x"
             ),
-            source=ApiSourceSpec(entrypoint="fetch", query=query or {}),
+            source=ApiSourceSpec(query=query or {}),
             agent_id=task_app.agent.id,
             params={},
         ),
@@ -845,6 +884,18 @@ def parse(payload: bytes, params: dict):
 async def fetch(query: dict):
     for trace_id in query["trace_ids"]:
         yield trace_id.encode()
+
+
+class _Importer:
+    def parse(self, payload, params):
+        return parse(payload, params)
+
+    async def fetch(self, query):
+        async for payload in fetch(query):
+            yield payload
+
+
+importer = _Importer()
 """
 
 _API_FETCH_CRASHING_SCRIPT = """
@@ -870,6 +921,18 @@ def parse(payload: bytes, params: dict):
 async def fetch(query: dict):
     yield b"first"
     raise RuntimeError("fetcher exploded")
+
+
+class _Importer:
+    def parse(self, payload, params):
+        return parse(payload, params)
+
+    async def fetch(self, query):
+        async for payload in fetch(query):
+            yield payload
+
+
+importer = _Importer()
 """
 
 

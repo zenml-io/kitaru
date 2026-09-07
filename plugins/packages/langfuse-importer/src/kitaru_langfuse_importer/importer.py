@@ -21,7 +21,7 @@ import json
 import math
 import re
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -1591,6 +1591,23 @@ class LangfuseJSONLImporter:
         except PydanticSerializationError as exc:
             raise InvalidImport(f"Session cannot be serialized: {exc}") from exc
         return session
+
+    async def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
+        """Fetch parser payloads from the Langfuse API.
+
+        Args:
+            query: Fetch query.
+
+        Yields:
+            Parser payload bytes.
+        """
+        from .api import fetch
+
+        async for payload in fetch(query):
+            yield payload
+
+
+importer = LangfuseJSONLImporter()
 
 
 def parse(

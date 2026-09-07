@@ -24,7 +24,7 @@ from kitaru.api_models.v1.session import SessionStatus
 from kitaru.task import importer as importer_module
 from kitaru.task.importer import ImportedSession
 from kitaru_phoenix_importer.api import fetch, serialize_spans
-from kitaru_phoenix_importer.importer import parse
+from kitaru_phoenix_importer.importer import importer, parse
 
 from ..fetch_helpers import collect_payloads
 from .fixtures import PROJECT, FakePhoenix, build_complete_spans, build_span
@@ -48,6 +48,18 @@ async def test_trace_ids_fetches_exactly_those_traces_in_order(
     assert [session.external_id for session in sessions] == ["trace-b", "trace-a"]
     assert sessions[0].status == SessionStatus.COMPLETED
     assert [node.name for node in sessions[0].nodes] == ["kitaru-run"]
+
+
+async def test_importer_fetch_matches_api_fetch(fake_phoenix: FakePhoenix) -> None:
+    """Yield the same payload from the importer instance as from the API fetch."""
+    query = {"trace_ids": ["trace-a"]}
+    fake_phoenix.span_builders = [build_complete_spans]
+    expected = await collect_payloads(fetch(query))
+
+    fake_phoenix.span_builders = [build_complete_spans]
+    actual = await collect_payloads(importer.fetch(query))
+
+    assert actual == expected
 
 
 async def test_fetch_bounds_concurrency_and_preserves_order(

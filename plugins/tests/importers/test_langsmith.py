@@ -27,6 +27,7 @@ from kitaru.task.importer import ImportedNode, ImportedSession
 from kitaru_langsmith_importer.importer import (
     InvalidImport,
     LangSmithRunImporter,
+    importer,
     parse,
 )
 
@@ -97,6 +98,13 @@ def failures(
 def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
     """Flatten imported nodes depth-first."""
     return [node for root in nodes for node in (root, *flatten(root.children))]
+
+
+def test_importer_instance_parse_matches_module_parse() -> None:
+    """Yield the same sessions from the module-level instance as from parse."""
+    content = jsonl(run("root", "trace-1", inputs="hello", outputs="world"))
+
+    assert list(importer.parse(content, {})) == list(parse(content, {}))
 
 
 def test_groups_thread_traces_into_ordered_turns_and_nodes() -> None:

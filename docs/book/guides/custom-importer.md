@@ -55,36 +55,29 @@ Set a stable `external_id` from your source system: together with the importer's
 
 ## Fetch traces from your own API instead of a file
 
-A custom importer can accept an API import too, the same way the built-in provider importers do, by declaring a fetch entrypoint on its version source alongside the parse entrypoint. The entrypoint is a second async callable:
+A custom importer can accept an API import too, the same way the built-in provider importers do. Instead of a bare `parse` function, register an importer object as the entrypoint. It exposes `parse` and an async `fetch` generator:
 
 ```python
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 
-async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    for trace_id in select_traces(query):
-        yield fetch_trace_bytes(trace_id)
+class MyImporter:
+    def parse(
+        self, payload: bytes, params: dict[str, Any]
+    ) -> Iterator[ParsedSession]: ...
+
+    async def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
+        for trace_id in select_traces(query):
+            yield fetch_trace_bytes(trace_id)
+
+
+importer = MyImporter()
 ```
 
-`fetch` receives the import's `--query` (or `source.query` on the request) and yields parser payloads. Each yielded payload runs through your `parse` entrypoint with the import's `params`, exactly like a file upload would, so every trace that `parse` groups into one session must be in the same payload. The built-in importers yield one payload holding every fetched trace, oldest first. Raise from the fetcher to end the import task with the failure recorded in the import stats.
+Register it with `--entrypoint importer` for a script source, or `my_importer:importer` for a package source. An entrypoint that is a plain callable stays upload-only.
 
-A script source names the fetch entrypoint as a bare attribute, like the parse entrypoint. A package source names it as `module:attribute`. Pass it alongside `--entrypoint` with `--fetch-entrypoint`:
-
-```bash
-kitaru importer register my-format \
-  --script my_format_importer.py --entrypoint parse \
-  --fetch-entrypoint fetch --provider my-format
-```
-
-The same flag registers a fetch entrypoint on a later version:
-
-```bash
-kitaru importer version register my-format \
-  --script my_format_importer.py --entrypoint parse --fetch-entrypoint fetch
-```
-
-An import against a version without a fetch entrypoint rejects a `--since`, `--until`, `--trace-id`, or `--query` selection.
+`fetch` receives the import's `--query` (or `source.query` on the request) and yields parser payloads. Each yielded payload runs through `parse` with the import's `params`, exactly like a file upload would, so every trace that `parse` groups into one session must be in the same payload. The built-in importers yield one payload holding every fetched trace, oldest first. Raise from `fetch` to end the import task with the failure recorded in the import stats. An API import against an importer without `fetch` fails the same way, so `kitaru session import --wait` reports it in the import stats.
 
 ## Scaffold, test offline, register
 

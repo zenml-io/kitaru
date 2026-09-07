@@ -26,6 +26,7 @@ from kitaru.task.importer import ImportedNode, ImportedSession, ImportFailure
 from kitaru_braintrust_importer.importer import (
     BraintrustProjectLogImporter,
     InvalidImport,
+    importer,
     parse,
 )
 
@@ -175,6 +176,24 @@ def test_unified_parse_returns_prefixed_external_id() -> None:
     assert len(parsed) == 1
     assert isinstance(parsed[0], ImportedSession)
     assert parsed[0].external_id == "project-1:conversation-1"
+
+
+def test_importer_instance_parse_matches_module_parse() -> None:
+    """Yield the same sessions from the module-level instance as from parse."""
+    root = event(
+        event_id="event-root",
+        span_id="root",
+        root_span_id="root",
+        name="assistant",
+        span_type="task",
+        parents=[],
+        input_={"role": "user", "content": "Hello"},
+        output={"role": "assistant", "content": "Hi"},
+        start=1_785_000_000.0,
+    )
+    content = json.dumps({"events": [root]}).encode()
+
+    assert list(importer.parse(content, {})) == list(parse(content, {}))
 
 
 def test_unified_parse_isolates_invalid_token_metrics() -> None:

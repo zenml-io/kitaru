@@ -27,7 +27,7 @@ from kitaru.task import importer as importer_module
 from kitaru.task.importer import ImportedSession
 from kitaru_langsmith_importer.adapter import _PARSER_PARAMS
 from kitaru_langsmith_importer.api import fetch, serialize_runs
-from kitaru_langsmith_importer.importer import parse
+from kitaru_langsmith_importer.importer import importer, parse
 
 from ..fetch_helpers import collect_payloads
 from .fixtures import (
@@ -99,6 +99,21 @@ async def test_fetch_by_trace_ids_fetches_exactly_those_in_one_payload(
         f"{PROJECT_ID}:{trace_id_2}",
     ]
     assert all(session.status == SessionStatus.COMPLETED for session in sessions)
+
+
+async def test_importer_fetch_matches_api_fetch(
+    fake_langsmith_api: FakeLangSmith,
+) -> None:
+    """Yield the same payload from the importer instance as from the API fetch."""
+    trace_id = str(uuid.uuid4())
+    query = {"trace_ids": [trace_id]}
+    fake_langsmith_api.runs_builders = [build_complete_runs]
+    expected = await collect_payloads(fetch(query))
+
+    fake_langsmith_api.runs_builders = [build_complete_runs]
+    actual = await collect_payloads(importer.fetch(query))
+
+    assert actual == expected
 
 
 async def test_fetch_bounds_concurrency_and_preserves_order(

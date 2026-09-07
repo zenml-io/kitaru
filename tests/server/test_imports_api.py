@@ -165,9 +165,7 @@ async def test_create_api_import(
     )
     await services.plugins.create_version(
         plugin.id,
-        ScriptPluginSource(
-            blob_id=uuid.uuid4(), entrypoint="run", fetch_entrypoint="fetch"
-        ),
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
         display_version=None,
     )
     agent = await create_agent(services.agents, ACCOUNT.id)
@@ -210,20 +208,6 @@ async def test_create_import_rejects_both_sources(
 
     response = await client.post("/api/v1/imports", json=body)
     assert response.status_code == 422
-
-
-async def test_create_api_import_rejects_importer_without_fetch_entrypoint(
-    client: httpx.AsyncClient, services: JobAndTaskServices
-) -> None:
-    """An API import on an importer version without a fetch entrypoint is rejected."""
-    await _importer_version(services)
-    body = await _import_request(services)
-    del body["payload_blob_id"]
-    body["source"] = {"type": "api", "query": {"trace_ids": ["t1"]}}
-
-    response = await client.post("/api/v1/imports", json=body)
-    assert response.status_code == 422
-    assert "fetch entrypoint" in response.json()["detail"]
 
 
 async def test_create_import_with_evaluators(

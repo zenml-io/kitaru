@@ -21,7 +21,7 @@ import pytest
 from kitaru.task import importer as importer_module
 from kitaru.task.importer import ImportedSession
 from kitaru_logfire_importer.api import fetch
-from kitaru_logfire_importer.importer import parse
+from kitaru_logfire_importer.importer import importer, parse
 
 from ..fetch_helpers import collect_payloads
 from .fixtures import (
@@ -57,6 +57,18 @@ async def test_fetch_by_trace_ids_fetches_exactly_those_traces_into_one_payload(
     assert len(sessions) == 1
     assert isinstance(sessions[0], ImportedSession)
     assert sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_1, TRACE_ID_2]
+
+
+async def test_importer_fetch_matches_api_fetch(fake_logfire: FakeLogfire) -> None:
+    """Yield the same payload from the importer instance as from the API fetch."""
+    query = {"trace_ids": [TRACE_ID_1], "since": "2026-07-24T09:00:00Z"}
+    fake_logfire.fetch_builders = [build_complete_rows]
+    expected = await collect_payloads(fetch(query))
+
+    fake_logfire.fetch_builders = [build_complete_rows]
+    actual = await collect_payloads(importer.fetch(query))
+
+    assert actual == expected
 
 
 async def test_fetch_by_trace_ids_without_since_uses_the_earliest_bound(

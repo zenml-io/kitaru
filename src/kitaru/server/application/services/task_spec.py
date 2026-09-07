@@ -229,11 +229,7 @@ class TaskSpecBuilder:
             payload = await self._blobs.get(import_.payload_blob_id)
             return BlobSourceSpec(blob_id=payload.id, sha256=payload.sha256)
         assert import_.fetch_query is not None
-        assert plugin_version.source.fetch_entrypoint is not None
-        return ApiSourceSpec(
-            entrypoint=plugin_version.source.fetch_entrypoint,
-            query=import_.fetch_query,
-        )
+        return ApiSourceSpec(query=import_.fetch_query)
 
     async def _plugin_spec(self, plugin_version: PluginVersion) -> PluginSpec:
         """Convert a plugin version's code source into its spec form.

@@ -40,7 +40,6 @@ from kitaru.server.domain.plugin import (
     PluginKind,
     PluginNotFound,
     PluginVersion,
-    PluginVersionWithoutFetchEntrypoint,
     ScriptPluginSource,
 )
 from kitaru.server.domain.task import ImportTask
@@ -210,9 +209,7 @@ async def test_create_import_from_an_api_stores_the_fetch_query(
     )
     await services.plugins.create_version(
         plugin.id,
-        ScriptPluginSource(
-            blob_id=uuid.uuid4(), entrypoint="run", fetch_entrypoint="fetch"
-        ),
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
         display_version=None,
     )
     agent = await create_agent(services.agents, ACTOR.account.id)
@@ -226,20 +223,6 @@ async def test_create_import_from_an_api_stores_the_fetch_query(
 
     assert import_.payload_blob_id is None
     assert import_.fetch_query == {"since": "2026-08-01T00:00:00Z"}
-
-
-async def test_create_import_from_an_api_rejects_a_version_without_fetch_entrypoint(
-    services: JobAndTaskServices,
-) -> None:
-    """An API import needs an importer version that declares a fetch entrypoint."""
-    await _importer_version(services)
-    agent = await create_agent(services.agents, ACTOR.account.id)
-    command = ImportCreate(
-        importer="csv", agent_id=agent.id, fetch_query={"trace_ids": ["t1"]}
-    )
-
-    with pytest.raises(PluginVersionWithoutFetchEntrypoint):
-        await services.import_service.create_import(command, actor=ACTOR)
 
 
 def test_import_create_requires_exactly_one_source() -> None:

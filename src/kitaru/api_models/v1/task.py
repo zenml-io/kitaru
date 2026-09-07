@@ -170,9 +170,6 @@ class ApiSourceSpec(ResponseModel):
     """API source spec."""
 
     type: Literal["api"] = Field(default="api")
-    entrypoint: str = Field(
-        description="Fetch entrypoint, in the form of the plugin's entrypoint."
-    )
     query: dict[str, JsonValue] = Field(
         description="Importer-defined selection of what to fetch."
     )

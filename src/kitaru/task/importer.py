@@ -19,7 +19,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterat
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Self, TypeVar
+from typing import Any, Protocol, Self, TypeVar, runtime_checkable
 
 import httpx
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -54,11 +54,13 @@ __all__ = [
     "NODE_BATCH_SIZE",
     "FetchQuery",
     "Fetcher",
+    "FetchingImporter",
     "ImportFailure",
     "ImportStats",
     "ImportedItem",
     "ImportedNode",
     "ImportedSession",
+    "Importer",
     "Parser",
     "SessionImportError",
     "call_fetcher",
@@ -147,6 +149,24 @@ ImportedItem = ImportedSession | ImportFailure
 Parser = Callable[[bytes, dict[str, Any]], Iterator[ImportedItem]]
 
 Fetcher = Callable[[dict[str, Any]], AsyncIterator[bytes]]
+
+
+@runtime_checkable
+class Importer(Protocol):
+    """Importer object."""
+
+    def parse(self, payload: bytes, params: dict[str, Any]) -> Iterator[ImportedItem]:
+        """Parse one payload into imported items."""
+        ...
+
+
+@runtime_checkable
+class FetchingImporter(Importer, Protocol):
+    """Importer object that also fetches payloads from a provider API."""
+
+    def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
+        """Fetch payloads matching a query."""
+        ...
 
 
 class FetchQuery(BaseModel):
@@ -486,39 +506,55 @@ async def ingest_session(
     return session
 
 
-def _resolve_entrypoint(details: ImportTaskDetails, entrypoint: str) -> Any:
-    """Load a callable named in the form of the task's plugin spec entrypoint.
+def _resolve_importer(details: ImportTaskDetails) -> tuple[Parser, Fetcher | None]:
+    """Load the parser and optional fetcher named by a task's plugin spec.
+
+    The entrypoint is either a parse callable or an importer object exposing
+    parse and, when it supports API imports, fetch.
 
     Args:
         details: Import task details.
-        entrypoint: Attribute name for a script plugin, module:attribute for
-            a package plugin.
 
     Raises:
-        SessionImportError: The plugin file or module fails to import, or
-            the entrypoint is missing or not callable.
+        SessionImportError: The plugin file or module fails to import, the
+            entrypoint is missing, or it is neither callable nor an importer.
 
     Returns:
-        Loaded callable.
+        Parser and fetcher, None when the importer only parses uploads.
     """
     try:
         if isinstance(details.plugin, ScriptPluginSpec):
             path = Path(get_required_env("KITARU_TASK_PLUGIN_PATH"))
-            return load_plugin_entrypoint(path, entrypoint, _LABEL)
-        return load_source_ref(entrypoint, _LABEL)
+            entrypoint = load_plugin_entrypoint(path, details.plugin.entrypoint, _LABEL)
+        else:
+            entrypoint = load_source_ref(details.plugin.entrypoint, _LABEL)
     except PluginLoadError as exc:
         raise SessionImportError(str(exc)) from exc
+    if isinstance(entrypoint, FetchingImporter):
+        return entrypoint.parse, entrypoint.fetch
+    if isinstance(entrypoint, Importer):
+        return entrypoint.parse, None
+    if callable(entrypoint):
+        return entrypoint, None
+    raise SessionImportError(
+        f"{_LABEL} entrypoint '{details.plugin.entrypoint}' is neither callable "
+        "nor an importer"
+    )
 
 
-async def _iter_payloads(details: ImportTaskDetails) -> AsyncIterator[bytes]:
+async def _iter_payloads(
+    details: ImportTaskDetails, fetcher: Fetcher | None
+) -> AsyncIterator[bytes]:
     """Yield the payloads to parse for a blob or API import source.
 
     Args:
         details: Import task details.
+        fetcher: Importer fetcher, None when it only parses uploads.
 
     Raises:
-        SessionImportError: The fetcher raised while starting or advancing,
-            or yielded an item that is not bytes.
+        SessionImportError: The source is an API but the importer has no
+            fetcher, or the fetcher raised while starting or advancing, or
+            yielded an item that is not bytes.
 
     Yields:
         Raw payload bytes.
@@ -527,7 +563,11 @@ async def _iter_payloads(details: ImportTaskDetails) -> AsyncIterator[bytes]:
         yield Path(get_required_env("KITARU_TASK_PAYLOAD_PATH")).read_bytes()
         return
     assert isinstance(details.source, ApiSourceSpec)
-    fetcher = _resolve_entrypoint(details, details.source.entrypoint)
+    if fetcher is None:
+        raise SessionImportError(
+            f"{_LABEL} entrypoint '{details.plugin.entrypoint}' does not fetch "
+            "from an API"
+        )
     async for payload in call_fetcher(fetcher, details.source.query):
         yield payload
 
@@ -548,7 +588,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
     details = spec.details
     if not isinstance(details, ImportTaskDetails):
         raise SessionImportError(f"Task {task_id} is not an importer task")
-    parser = _resolve_entrypoint(details, details.plugin.entrypoint)
+    parser, fetcher = _resolve_importer(details)
 
     created = 0
     skipped = 0
@@ -568,7 +608,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
         )
 
     try:
-        async for payload in _iter_payloads(details):
+        async for payload in _iter_payloads(details, fetcher):
             for item in call_parser(parser, payload, details.params):
                 line += 1
                 if isinstance(item, ImportFailure):

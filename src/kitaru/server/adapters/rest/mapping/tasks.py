@@ -143,7 +143,7 @@ def _source_spec_to_response(
     """
     if isinstance(source, DomainBlobSourceSpec):
         return BlobSourceSpec(blob_id=source.blob_id, sha256=source.sha256)
-    return ApiSourceSpec(entrypoint=source.entrypoint, query=source.query)
+    return ApiSourceSpec(query=source.query)
 
 
 def _run_spec_to_response(run_spec: DomainTaskRunSpec) -> TaskRunSpec:

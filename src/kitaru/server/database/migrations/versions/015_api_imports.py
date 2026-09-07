@@ -32,8 +32,6 @@ depends_on = None
 
 def upgrade() -> None:
     """Upgrade database schema and/or data, creating a new revision."""
-    with op.batch_alter_table("plugin_version", schema=None) as batch_op:
-        batch_op.add_column(sa.Column("fetch_entrypoint", sa.Text(), nullable=True))
     with op.batch_alter_table("import", schema=None) as batch_op:
         batch_op.alter_column("payload_blob_id", existing_type=sa.Uuid(), nullable=True)
         batch_op.add_column(
@@ -52,5 +50,3 @@ def downgrade() -> None:
         batch_op.alter_column(
             "payload_blob_id", existing_type=sa.Uuid(), nullable=False
         )
-    with op.batch_alter_table("plugin_version", schema=None) as batch_op:
-        batch_op.drop_column("fetch_entrypoint")

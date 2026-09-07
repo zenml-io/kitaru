@@ -33,6 +33,7 @@ from kitaru.task.importer import (
 from kitaru_langfuse_importer.importer import (
     InvalidImport,
     LangfuseJSONLImporter,
+    importer,
     parse,
 )
 
@@ -94,6 +95,13 @@ def test_unified_parse_returns_prefixed_external_id() -> None:
     assert len(parsed) == 1
     assert isinstance(parsed[0], ImportedSession)
     assert parsed[0].external_id == "project-1:conversation-1"
+
+
+def test_importer_instance_parse_matches_module_parse() -> None:
+    """Yield the same sessions from the module-level instance as from parse."""
+    content = jsonl(observation("root", "trace-1", input_="hello", output="world"))
+
+    assert list(importer.parse(content, {})) == list(parse(content, {}))
 
 
 def observation(

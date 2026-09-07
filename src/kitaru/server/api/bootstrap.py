@@ -87,7 +87,6 @@ class DefaultPluginDefinition(FrozenModel):
     provider: str | None
     logo_url: str | None = None
     entrypoint: str
-    fetch_entrypoint: str | None = None
     requirement: str
     display_version: str
 
@@ -98,8 +97,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         name=f"{RESERVED_NAMESPACE}/braintrust",
         description="Import Braintrust project-log and UI exports.",
         provider="braintrust",
-        entrypoint="kitaru_braintrust_importer.importer:parse",
-        fetch_entrypoint="kitaru_braintrust_importer.api:fetch",
+        entrypoint="kitaru_braintrust_importer.importer:importer",
         requirement="kitaru-braintrust-importer[adapter]==0.2.0",
         display_version="0.2.0",
     ),
@@ -117,8 +115,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         name=f"{RESERVED_NAMESPACE}/langfuse",
         description="Import Langfuse JSON and JSONL trace exports.",
         provider="langfuse",
-        entrypoint="kitaru_langfuse_importer.importer:parse",
-        fetch_entrypoint="kitaru_langfuse_importer.api:fetch",
+        entrypoint="kitaru_langfuse_importer.importer:importer",
         requirement="kitaru-langfuse-importer[adapter]==0.2.0",
         display_version="0.2.0",
     ),
@@ -127,8 +124,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         name=f"{RESERVED_NAMESPACE}/logfire",
         description="Import Logfire records-query JSON and NDJSON exports.",
         provider="logfire",
-        entrypoint="kitaru_logfire_importer.importer:parse",
-        fetch_entrypoint="kitaru_logfire_importer.api:fetch",
+        entrypoint="kitaru_logfire_importer.importer:importer",
         requirement="kitaru-logfire-importer[adapter]==0.2.0",
         display_version="0.2.0",
     ),
@@ -137,8 +133,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         name=f"{RESERVED_NAMESPACE}/langsmith",
         description="Import LangSmith run-query and bulk-export records.",
         provider="langsmith",
-        entrypoint="kitaru_langsmith_importer.importer:parse",
-        fetch_entrypoint="kitaru_langsmith_importer.api:fetch",
+        entrypoint="kitaru_langsmith_importer.importer:importer",
         requirement="kitaru-langsmith-importer[adapter]==0.2.0",
         display_version="0.2.0",
     ),
@@ -147,8 +142,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         name=f"{RESERVED_NAMESPACE}/phoenix",
         description="Import Arize Phoenix JSON and JSONL trace exports.",
         provider="phoenix",
-        entrypoint="kitaru_phoenix_importer.importer:parse",
-        fetch_entrypoint="kitaru_phoenix_importer.api:fetch",
+        entrypoint="kitaru_phoenix_importer.importer:importer",
         requirement="kitaru-phoenix-importer[adapter]==0.2.0",
         display_version="0.2.0",
     ),
@@ -317,7 +311,6 @@ async def register_default_plugins(repository: PluginRepository) -> None:
         source = PackagePluginSource(
             requirement=definition.requirement,
             entrypoint=definition.entrypoint,
-            fetch_entrypoint=definition.fetch_entrypoint,
         )
         if plugin.latest_version:
             latest = await repository.get_version(plugin.id, plugin.latest_version)

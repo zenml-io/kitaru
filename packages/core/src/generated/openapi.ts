@@ -4288,11 +4288,6 @@ export interface components {
          */
         ApiSourceSpec: {
             /**
-             * Entrypoint
-             * @description Fetch entrypoint, in the form of the plugin's entrypoint.
-             */
-            entrypoint: string;
-            /**
              * Query
              * @description Importer-defined selection of what to fetch.
              */
@@ -6687,11 +6682,6 @@ export interface components {
              */
             entrypoint: string;
             /**
-             * Fetch Entrypoint
-             * @description Module and attribute fetching payloads from an API, as module:attribute.
-             */
-            fetch_entrypoint?: string | null;
-            /**
              * Requirement
              * @description Pinned PEP 508 requirement.
              */
@@ -7363,11 +7353,6 @@ export interface components {
              * @description Attribute in the file.
              */
             entrypoint: string;
-            /**
-             * Fetch Entrypoint
-             * @description Attribute in the file fetching payloads from an API.
-             */
-            fetch_entrypoint?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}

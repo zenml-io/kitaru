@@ -111,7 +111,7 @@ def test_import_spec_with_api_source_grants_only_the_script_blob() -> None:
         timeout_seconds=60,
         details=ImportTaskDetails(
             plugin=_script_plugin(plugin_blob_id),
-            source=ApiSourceSpec(entrypoint="pkg.api:fetch", query={}),
+            source=ApiSourceSpec(query={}),
             agent_id=uuid.uuid4(),
         ),
     )
