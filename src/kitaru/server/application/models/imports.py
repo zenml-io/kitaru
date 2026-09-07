@@ -42,6 +42,7 @@ class ImportCreate(FrozenModel):
     agent_id: uuid.UUID
     agent_version_id: uuid.UUID | None = None
     version: int | None = None
-    payload_blob_id: uuid.UUID
+    payload_blob_id: uuid.UUID | None = None
+    fetch_query: dict[str, Any] | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     evaluators: list[EvaluatorConfigInput] = Field(default_factory=list)

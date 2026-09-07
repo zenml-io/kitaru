@@ -21,6 +21,7 @@ import pydantic
 from pydantic import Field, field_validator
 
 from kitaru.api_models.v1.evaluation import EvaluationResult
+from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import (
     TaskKind,
     TaskOnFailure,
@@ -41,15 +42,17 @@ from kitaru.server.domain.ids import uuid7
 __all__ = [
     "AgentTask",
     "AgentTaskDetails",
+    "ApiImportSourceSpec",
+    "BlobImportSourceSpec",
     "DuplicateEvaluationTask",
     "EvaluationTask",
     "EvaluationTaskDetails",
+    "ImportSourceSpec",
     "ImportTask",
     "ImportTaskDetails",
     "InvalidTaskEnv",
     "InvalidTaskResult",
     "PackagePluginSpec",
-    "PayloadSpec",
     "PluginSpec",
     "ScriptPluginSpec",
     "Task",
@@ -696,11 +699,24 @@ PluginSpec = Annotated[
 ]
 
 
-class PayloadSpec(FrozenModel):
-    """Payload spec."""
+class BlobImportSourceSpec(FrozenModel):
+    """Blob import source spec."""
 
+    type: Literal["blob"] = "blob"
     blob_id: uuid.UUID
     sha256: str
+
+
+class ApiImportSourceSpec(FrozenModel):
+    """API import source spec."""
+
+    type: Literal["api"] = "api"
+    query: ImportQuery
+
+
+ImportSourceSpec = Annotated[
+    BlobImportSourceSpec | ApiImportSourceSpec, Field(discriminator="type")
+]
 
 
 class AgentTaskDetails(FrozenModel):
@@ -726,7 +742,7 @@ class ImportTaskDetails(FrozenModel):
 
     kind: Literal[TaskKind.IMPORTER] = TaskKind.IMPORTER
     plugin: PluginSpec
-    payload: PayloadSpec
+    source: ImportSourceSpec
     provider: str | None = None
     agent_id: uuid.UUID
     params: dict[str, Any] = Field(default_factory=dict)

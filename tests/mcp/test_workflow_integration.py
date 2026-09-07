@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 
+from kitaru.api_models.v1.imports import ApiImportSource, BlobImportSource
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
@@ -99,7 +100,7 @@ async def test_existing_blob_import_uses_four_bounded_preflight_reads() -> None:
         await handle_session_import(
             _get_state(client),
             SessionImportRequest(
-                payload_blob_id=uuid.uuid4(),
+                source=BlobImportSource(blob_id=uuid.uuid4()),
                 importer_id=uuid.uuid4(),
                 importer_version=2,
                 agent_version_id=uuid.uuid4(),
@@ -127,7 +128,7 @@ async def test_session_import_forwards_idempotency_key() -> None:
     await handle_session_import(
         _get_state(client),
         SessionImportRequest(
-            payload_blob_id=uuid.uuid4(),
+            source=BlobImportSource(blob_id=uuid.uuid4()),
             importer_id=uuid.uuid4(),
             importer_version=2,
             agent_version_id=uuid.uuid4(),
@@ -147,7 +148,7 @@ async def test_session_import_forwards_evaluators() -> None:
     await handle_session_import(
         _get_state(client),
         SessionImportRequest(
-            payload_blob_id=uuid.uuid4(),
+            source=BlobImportSource(blob_id=uuid.uuid4()),
             importer_id=uuid.uuid4(),
             importer_version=2,
             agent_version_id=uuid.uuid4(),
@@ -156,6 +157,35 @@ async def test_session_import_forwards_evaluators() -> None:
     )
 
     assert client.request.evaluators == [evaluator]
+
+
+async def test_api_query_import_skips_blob_lookup() -> None:
+    """An API import performs no blob lookup and reports the query in the receipt."""
+    client = _ImportClient()
+    query = {"since": "2026-08-01T00:00:00Z", "trace_ids": ["trace-1"]}
+
+    result = cast(
+        dict[str, Any],
+        await handle_session_import(
+            _get_state(client),
+            SessionImportRequest(
+                source=ApiImportSource(query=query),
+                importer_id=uuid.uuid4(),
+                importer_version=2,
+                agent_version_id=uuid.uuid4(),
+            ),
+        ),
+    )
+
+    assert client.calls == [
+        "importer_version",
+        "importer",
+        "agent_version",
+        "create",
+        "job",
+    ]
+    assert result["query"] == query
+    assert "blob_id" not in result
 
 
 async def test_evaluator_selections_use_name_version_dto_and_cache_parent() -> None:

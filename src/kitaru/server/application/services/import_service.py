@@ -106,7 +106,12 @@ class ImportService:
         plugin_version = await resolve_plugin_version(
             plugin, command.version, self._plugins
         )
-        payload = await self._blobs.get(command.payload_blob_id)
+        if command.fetch_query is not None:
+            payload_blob_id = None
+        else:
+            assert command.payload_blob_id is not None
+            payload = await self._blobs.get(command.payload_blob_id)
+            payload_blob_id = payload.id
         agent = await self._agents.get(command.agent_id)
         if command.agent_version_id is not None:
             await resolve_agent_id(
@@ -125,7 +130,8 @@ class ImportService:
                 agent_id=agent.id,
                 agent_version_id=command.agent_version_id,
                 importer_version_id=plugin_version.id,
-                payload_blob_id=payload.id,
+                payload_blob_id=payload_blob_id,
+                fetch_query=command.fetch_query,
                 params=command.params,
                 evaluators=evaluators,
             )

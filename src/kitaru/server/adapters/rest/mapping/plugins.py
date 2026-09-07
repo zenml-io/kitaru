@@ -77,10 +77,12 @@ def plugin_source_to_domain(source: WirePluginSource) -> DomainPluginSource:
     """
     if isinstance(source, WireScriptPluginSource):
         return DomainScriptPluginSource(
-            blob_id=source.blob_id, entrypoint=source.entrypoint
+            blob_id=source.blob_id,
+            entrypoint=source.entrypoint,
         )
     return DomainPackagePluginSource(
-        requirement=source.requirement, entrypoint=source.entrypoint
+        requirement=source.requirement,
+        entrypoint=source.entrypoint,
     )
 
 
@@ -95,10 +97,12 @@ def plugin_source_to_wire(source: DomainPluginSource) -> WirePluginSource:
     """
     if isinstance(source, DomainScriptPluginSource):
         return WireScriptPluginSource(
-            blob_id=source.blob_id, entrypoint=source.entrypoint
+            blob_id=source.blob_id,
+            entrypoint=source.entrypoint,
         )
     return WirePackagePluginSource(
-        requirement=source.requirement, entrypoint=source.entrypoint
+        requirement=source.requirement,
+        entrypoint=source.entrypoint,
     )
 
 

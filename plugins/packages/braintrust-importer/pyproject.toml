@@ -27,9 +27,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+api = [
+    "httpx>=0.27,<1",
+]
 adapter = [
     "braintrust>=0.30,<1",
-    "httpx>=0.27,<1",
+    "kitaru-braintrust-importer[api]",
 ]
 
 [project.urls]

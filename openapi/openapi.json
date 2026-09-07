@@ -663,6 +663,47 @@
         "title": "AnnotationUpdateRequest",
         "type": "object"
       },
+      "ApiImportSource": {
+        "additionalProperties": false,
+        "description": "API import source.",
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/ImportQuery",
+            "description": "Importer-defined selection of what to fetch."
+          },
+          "type": {
+            "const": "api",
+            "default": "api",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ApiImportSource",
+        "type": "object"
+      },
+      "ApiImportSourceSpec": {
+        "description": "API import source spec.",
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/ImportQuery",
+            "description": "Importer-defined selection of what to fetch."
+          },
+          "type": {
+            "const": "api",
+            "default": "api",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ApiImportSourceSpec",
+        "type": "object"
+      },
       "ApiKeyCreateRequest": {
         "additionalProperties": false,
         "description": "API key create request.",
@@ -967,6 +1008,57 @@
           "bins"
         ],
         "title": "BinnedInsightData",
+        "type": "object"
+      },
+      "BlobImportSource": {
+        "additionalProperties": false,
+        "description": "Blob import source.",
+        "properties": {
+          "blob_id": {
+            "description": "Blob holding the payload to parse.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "blob",
+            "default": "blob",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blob_id"
+        ],
+        "title": "BlobImportSource",
+        "type": "object"
+      },
+      "BlobImportSourceSpec": {
+        "description": "Blob import source spec.",
+        "properties": {
+          "blob_id": {
+            "description": "Blob holding the payload.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Blob content hash.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "type": {
+            "const": "blob",
+            "default": "blob",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blob_id",
+          "sha256"
+        ],
+        "title": "BlobImportSourceSpec",
         "type": "object"
       },
       "BlobResponse": {
@@ -3411,10 +3503,44 @@
             "type": "object"
           },
           "payload_blob_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
             "description": "Blob holding the payload to parse.",
-            "format": "uuid",
-            "title": "Payload Blob Id",
-            "type": "string"
+            "title": "Payload Blob Id"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "api": "#/components/schemas/ApiImportSource",
+                    "blob": "#/components/schemas/BlobImportSource"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/BlobImportSource"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ApiImportSource"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the payload comes from.",
+            "title": "Source"
           },
           "version": {
             "anyOf": [
@@ -3431,8 +3557,7 @@
         },
         "required": [
           "importer",
-          "agent_id",
-          "payload_blob_id"
+          "agent_id"
         ],
         "title": "ImportCreateRequest",
         "type": "object"
@@ -3468,6 +3593,62 @@
           "error"
         ],
         "title": "ImportFailure",
+        "type": "object"
+      },
+      "ImportQuery": {
+        "additionalProperties": true,
+        "description": "Import query.",
+        "properties": {
+          "concurrency": {
+            "default": 4,
+            "description": "Fetches the importer runs at once.",
+            "minimum": 1.0,
+            "title": "Concurrency",
+            "type": "integer"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start of the time window to fetch.",
+            "title": "Since"
+          },
+          "trace_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact trace ids to fetch, instead of a time window.",
+            "title": "Trace Ids"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End of the time window to fetch.",
+            "title": "Until"
+          }
+        },
+        "title": "ImportQuery",
         "type": "object"
       },
       "ImportResponse": {
@@ -3562,11 +3743,24 @@
             "title": "Params",
             "type": "object"
           },
-          "payload_blob_id": {
-            "description": "Blob holding the payload parsed.",
-            "format": "uuid",
-            "title": "Payload Blob Id",
-            "type": "string"
+          "source": {
+            "description": "Where the payload comes from.",
+            "discriminator": {
+              "mapping": {
+                "api": "#/components/schemas/ApiImportSource",
+                "blob": "#/components/schemas/BlobImportSource"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlobImportSource"
+              },
+              {
+                "$ref": "#/components/schemas/ApiImportSource"
+              }
+            ],
+            "title": "Source"
           },
           "stats": {
             "anyOf": [
@@ -3592,7 +3786,7 @@
           "owner_id",
           "id",
           "agent_id",
-          "payload_blob_id",
+          "source",
           "params",
           "evaluators"
         ],
@@ -3656,10 +3850,6 @@
             "title": "Params",
             "type": "object"
           },
-          "payload": {
-            "$ref": "#/components/schemas/PayloadSpec",
-            "description": "Payload to parse."
-          },
           "plugin": {
             "description": "Importer plugin to load.",
             "discriminator": {
@@ -3690,11 +3880,30 @@
             ],
             "description": "Source system named on the import.",
             "title": "Provider"
+          },
+          "source": {
+            "description": "Where the payload comes from.",
+            "discriminator": {
+              "mapping": {
+                "api": "#/components/schemas/ApiImportSourceSpec",
+                "blob": "#/components/schemas/BlobImportSourceSpec"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlobImportSourceSpec"
+              },
+              {
+                "$ref": "#/components/schemas/ApiImportSourceSpec"
+              }
+            ],
+            "title": "Source"
           }
         },
         "required": [
           "plugin",
-          "payload",
+          "source",
           "agent_id",
           "params"
         ],
@@ -5936,28 +6145,6 @@
           }
         },
         "title": "PassthroughConfig",
-        "type": "object"
-      },
-      "PayloadSpec": {
-        "description": "Payload spec.",
-        "properties": {
-          "blob_id": {
-            "description": "Blob holding the payload.",
-            "format": "uuid",
-            "title": "Blob Id",
-            "type": "string"
-          },
-          "sha256": {
-            "description": "Blob content hash.",
-            "title": "Sha256",
-            "type": "string"
-          }
-        },
-        "required": [
-          "blob_id",
-          "sha256"
-        ],
-        "title": "PayloadSpec",
         "type": "object"
       },
       "ReplayCreateRequest": {

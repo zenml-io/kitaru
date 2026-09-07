@@ -87,7 +87,8 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     agent_id: Mapped[uuid.UUID]
     agent_version_id: Mapped[uuid.UUID | None]
     importer_version_id: Mapped[uuid.UUID | None]
-    payload_blob_id: Mapped[uuid.UUID]
+    payload_blob_id: Mapped[uuid.UUID | None]
+    fetch_query: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     params: Mapped[dict[str, Any]] = mapped_column(JSONB)
     evaluators: Mapped[list[Any]] = mapped_column(JSONB)
     stats: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
@@ -111,6 +112,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             agent_version_id=import_.agent_version_id,
             importer_version_id=import_.importer_version_id,
             payload_blob_id=import_.payload_blob_id,
+            fetch_query=import_.fetch_query,
             params=import_.params,
             evaluators=[
                 evaluator.model_dump(mode="json") for evaluator in import_.evaluators
@@ -148,6 +150,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             agent_version_id=self.agent_version_id,
             importer_version_id=self.importer_version_id,
             payload_blob_id=self.payload_blob_id,
+            fetch_query=self.fetch_query,
             params=self.params,
             evaluators=[
                 EvaluatorConfig.model_validate(evaluator)

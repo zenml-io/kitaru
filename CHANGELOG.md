@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The Mastra adapter is now developed and tested against `@mastra/core` 1.64.0, and its peer range widened from `>=1.51.0 <1.52.0` to `>=1.51.0 <1.65.0`. Mastra now ships type declarations for `@mastra/core/test-utils/llm-mock`, so the adapter tests and the Mastra example derive their mock model types from that module instead of suppressing the missing declarations.
 - `kitaru-pydantic-ai` now supports the PydanticAI 2.37 through 2.40 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.38.0 with `genai-prices` 0.1.6.
 - `POST /api/v1/imports` now returns the import instead of the job, with the job in its `job_id`. Import task responses carry `import_id` instead of `payload_blob_id` and `agent_id`.
+- A custom importer's `parse` and `fetch` may each be a regular or an async generator.
 
 ### Fixed
 
@@ -39,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `kitaru worker start` now emits the worker's runtime logs, with the level selected by `--log-level`.
 - Added runtime capabilities to the agent version run spec: `overrides` and `tool_policies` declare whether the runtime can apply replay overrides and non-passthrough tool policies. Both default to true, and clients read them from the agent version response.
 - Added the `kitaru-claude-agent-sdk` distribution, a recording and replay adapter for the Claude Agent SDK. `KitaruClaudeRunner.query()` calls the SDK's public one-shot `query()` and yields its messages unchanged, while recording the prompt, the effective `ClaudeAgentOptions`, model calls, tool calls including Claude built-ins and external MCP servers, subagents, token usage, the cost Claude itself reports, and failures. Replay is a fresh rerun from the recorded root input, not playback of the original trajectory: it replaces the prompt, the system prompt, and the model, either directly or through a mapping keyed by the current model, and it applies `static`, `history`, and `passthrough` tool policies with `fail`, `error_result`, or `passthrough` on a miss to the in-process SDK MCP tools declared through `replayable_sdk_mcp_server()`. Claude built-in tools and external MCP tools are recorded but can only be replayed passthrough. An agent version running this adapter keeps the default runtime capabilities, both `overrides` and `tool_policies` true, because the adapter intercepts model and tool calls inside the agent process. `model_params` is not a replay boundary for this adapter, so the adapter's own preflight rejects it before it creates a session or calls Claude, rather than the server rejecting it with HTTP 422 at replay creation.
+- Added a `source` field to `POST /api/v1/imports`. A blob source (`{"type": "blob", "blob_id": ...}`) uploads a payload to parse, as before. An API source (`{"type": "api", "query": {...}}`) fetches traces from the provider's API on the worker instead, for importers that declare a fetch entrypoint. The Langfuse, LangSmith, Braintrust, Logfire, and Arize Phoenix importers all declare one, with `trace_ids`, `since`, `until`, and `concurrency` query keys plus provider-specific keys such as Braintrust's `project_id`. The Kitaru JSONL importer does not. `kitaru session import` gained `--since`, `--until`, `--trace-id`, and `--query` for an API import, and its FILE argument is now optional. Fetched traces are imported oldest first and grouped into sessions exactly like an uploaded export, and a provider rate limit is waited out instead of failing the import. A custom importer supports API imports by registering an importer object as its entrypoint, exposing `parse` and an async `fetch` generator that receives the query and yields parser payloads. The worker installs a package importer with its `api` extra for an API import, so an upload never installs the provider client.
 
 ### Changed
 
@@ -51,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Creating a replay or starting an experiment run is now rejected with HTTP 422 when the config carries an override or a non-passthrough tool policy that the agent version's runtime capabilities do not declare.
 - Importer-backed adapters now reject a replay config carrying an override or a non-passthrough tool policy with a RuntimeError before the wrapped function runs.
 - `session_request` in `kitaru.task.importer` now takes the parsed session, the agent id, the provider, and the origin instead of the import task details.
+- `payload_blob_id` on `POST /api/v1/imports` is deprecated in favor of `source`. Requests still accept it, mapped to a blob source. Setting both fields on one request returns HTTP 422.
 
 ### Fixed
 
