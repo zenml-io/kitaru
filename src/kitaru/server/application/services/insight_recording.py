@@ -20,6 +20,7 @@ from kitaru.server.application.interfaces.agent_repository import AgentRepositor
 from kitaru.server.application.interfaces.insight_repository import InsightRepository
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.insight import Insight
 from kitaru.server.domain.task import AnalysisTask
 from kitaru.server.utils import hash_params
@@ -50,12 +51,14 @@ async def record_task_insights(
     job = await job_repository.get(task.job_id)
     results = task.result if isinstance(task.result, list) else []
     params_hash = hash_params(task.params)
+    invocation_id = uuid7()
     insights = [
         Insight(
             owner_id=job.owner_id,
             agent_id=task.agent_id,
             analyzer_version_id=task.plugin_version_id,
             task_id=task.id,
+            invocation_id=invocation_id,
             name=result.name,
             title=result.title,
             description=result.description,

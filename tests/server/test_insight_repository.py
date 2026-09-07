@@ -287,17 +287,20 @@ async def test_create_and_get_carries_provenance(setup: Setup) -> None:
     """Round-trip an insight's provenance fields."""
     analyzer_version_id = await setup.make_analyzer_version_id()
     task_id = await setup.make_task_id(analyzer_version_id)
+    invocation_id = uuid.uuid4()
     created = await _create_insight(
         setup.insights,
         setup.owner_id,
         setup.agent_id,
         analyzer_version_id=analyzer_version_id,
         task_id=task_id,
+        invocation_id=invocation_id,
         analyzer_params={"threshold": 0.5},
         params_hash="a" * 64,
     )
     assert created.analyzer_version_id == analyzer_version_id
     assert created.task_id == task_id
+    assert created.invocation_id == invocation_id
     assert created.analyzer_params == {"threshold": 0.5}
     assert created.params_hash == "a" * 64
 

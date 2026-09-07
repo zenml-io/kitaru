@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Analyzer Alembic revision.
 
-Revision ID: 014_analyzer
-Revises: 013_import
+Revision ID: 015_analyzer
+Revises: 014_evaluation_invocation_id
 Create Date: 2026-09-04
 
 """
@@ -34,8 +34,8 @@ from kitaru.server.adapters.db.orm.task import (
 )
 
 # revision identifiers, used by Alembic.
-revision = "014_analyzer"
-down_revision = "013_import"
+revision = "015_analyzer"
+down_revision = "014_evaluation_invocation_id"
 branch_labels = None
 depends_on = None
 
@@ -75,6 +75,7 @@ def upgrade() -> None:
     with op.batch_alter_table("insight", schema=None) as batch_op:
         batch_op.add_column(sa.Column("analyzer_version_id", sa.Uuid(), nullable=True))
         batch_op.add_column(sa.Column("task_id", sa.Uuid(), nullable=True))
+        batch_op.add_column(sa.Column("invocation_id", sa.Uuid(), nullable=True))
         batch_op.add_column(
             sa.Column(
                 "analyzer_params",
@@ -114,6 +115,7 @@ def downgrade() -> None:
         batch_op.drop_index(INSIGHT_ANALYZER_VERSION_ID_INDEX)
         batch_op.drop_column("params_hash")
         batch_op.drop_column("analyzer_params")
+        batch_op.drop_column("invocation_id")
         batch_op.drop_column("task_id")
         batch_op.drop_column("analyzer_version_id")
 
