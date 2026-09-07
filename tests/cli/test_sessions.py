@@ -1095,6 +1095,8 @@ def test_session_nodes_rejects_invalid_filter(
     )
     assert resource.node_calls == []
     assert json.loads(capsys.readouterr().err)["error"]["kind"] == "invalid_arguments"
+
+
 def test_resolve_time_option_relative_duration_resolves_near_now() -> None:
     """A relative --since duration resolves to a UTC timestamp near now."""
     before = datetime.now(UTC) - timedelta(days=7)
