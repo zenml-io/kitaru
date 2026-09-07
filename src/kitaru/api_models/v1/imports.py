@@ -55,7 +55,10 @@ class ImportCreateRequest(RequestModel):
     )
     analyzers: list[AnalyzerConfig] = Field(
         default_factory=list,
-        description="Analyzers run against every imported session.",
+        description=(
+            "Analyzers run across the imported sessions. The server adds "
+            "kitaru/post-import-insights when it is not explicitly configured."
+        ),
     )
 
 

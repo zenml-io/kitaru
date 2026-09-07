@@ -1110,9 +1110,6 @@ def _signal_candidate(
             }
         )
         unit = "sessions"
-    top = sorted(aggregate.categories.items(), key=lambda item: (-item[1], item[0]))[0][
-        0
-    ]
     candidate_caveat = caveat
     excluded_sessions = len(state.analyzed_session_ids - eligible_session_ids)
     if family == "language" and excluded_sessions:
@@ -1130,7 +1127,6 @@ def _signal_candidate(
         fallback_description=description_pattern.format(
             count=aggregate.count,
             affected=len(aggregate.sessions),
-            top=top,
         ),
         caveat=candidate_caveat,
         data=_categorical(values, unit=unit),
@@ -1171,8 +1167,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             10,
             "RETRIES AFTER ERRORS",
             "{share}% of sessions immediately retry the same failed call",
-            "The profiler found {count} exact retries across {affected} sessions; "
-            "{top} appears most often.",
+            "The profiler found {count} exact retries across {affected} sessions. "
+            "Compare the chart groups to choose a starting point.",
             "exact tool calls repeated immediately after a recorded failure",
             "A recorded failure may be recovered later and is not the same as a "
             "failed session.",
@@ -1185,7 +1181,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             "REPEATING TOOL CYCLES",
             "{share}% of sessions contain a repeating tool-call cycle",
             "Two-to-five-call sequences repeated at least three times in {affected} "
-            "sessions; {top} appears most often.",
+            "sessions. Compare the chart groups to choose a starting point.",
             "repeated exact tool-call cycles",
             "Exact cycles require recorded tool names and canonically encodable "
             "inputs.",
@@ -1197,8 +1193,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             30,
             "REPEATED TOOL FAILURES",
             "{share}% of sessions hit the same failing tool twice in a row",
-            "The pattern appears {count} times across {affected} sessions; {top} is "
-            "the largest group.",
+            "The pattern appears {count} times across {affected} sessions. "
+            "Compare the chart groups to choose a starting point.",
             "back-to-back recorded failures from the same tool",
             "A recorded failure may be recovered later and is not the same as a "
             "failed session.",
@@ -1211,7 +1207,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             "REPEATED TOOL CALLS",
             "{share}% of sessions repeat the same tool call back to back",
             "The profiler found {count} exact repeated pairs across {affected} "
-            "sessions; {top} appears most often.",
+            "sessions. Compare the chart groups to choose a starting point.",
             "back-to-back tool calls with the same name and exact inputs",
             "Exact repetition requires a recorded tool name and canonically encodable "
             "input.",
@@ -1223,8 +1219,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             50,
             "ERRORS BY TOOL",
             "Recorded tool errors affect {affected} sessions",
-            "The profiler found {count} recorded errors across {affected} sessions; "
-            "{top} is the largest group.",
+            "The profiler found {count} recorded errors across {affected} sessions. "
+            "Compare the chart groups to choose a starting point.",
             "recorded tool errors grouped by exact tool name",
             "A recorded tool error may be recovered later and is not the same as a "
             "failed session.",
@@ -1249,8 +1245,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             80,
             "EMPTY TOOL RESULTS",
             "{share}% of sessions contain an empty tool result",
-            "The profiler found {count} empty results across {affected} sessions; "
-            "{top} appears most often.",
+            "The profiler found {count} empty results across {affected} sessions. "
+            "Compare the chart groups to choose a starting point.",
             "tool calls with an empty string or container result",
             "Empty results may reflect instrumentation rather than agent behavior.",
         ),
@@ -1565,13 +1561,24 @@ def profile_sessions(
     sessions: list[SessionWithNodesResponse],
     *,
     config: ProfilingConfig | None = None,
+    source_session_count: int | None = None,
 ) -> ProfilingResult:
     """Profile caller-scoped normalized sessions into stable candidate findings.
 
     Raises:
-        ValueError: The coverage envelope alone exceeds the projection byte limit.
+        ValueError: The source count is invalid or the coverage envelope alone
+            exceeds the projection byte limit.
     """
     selected_config = config or ProfilingConfig()
+    sessions_available = len(sessions)
+    if source_session_count is not None:
+        if type(source_session_count) is not int or source_session_count < len(
+            sessions
+        ):
+            raise ValueError(
+                "source_session_count must be an integer >= loaded sessions"
+            )
+        sessions_available = source_session_count
     selected_sessions = sorted(sessions, key=lambda item: str(item.session.id))[
         : selected_config.max_sessions
     ]
@@ -1598,11 +1605,11 @@ def profile_sessions(
     candidates = _build_candidates(state)
 
     truncations: list[CoverageTruncation] = []
-    if len(selected_sessions) < len(sessions):
+    if len(selected_sessions) < sessions_available:
         truncations.append(
             CoverageTruncation(
                 dimension="sessions",
-                available=len(sessions),
+                available=sessions_available,
                 analyzed=len(selected_sessions),
             )
         )
@@ -1646,6 +1653,11 @@ def profile_sessions(
         "The profiler uses normalized sessions and does not read persisted "
         "evaluation results."
     ]
+    if sessions_available > len(sessions):
+        caveats[0] += (
+            " Sessions were sampled before loading nodes. nodes_available counts "
+            "only nodes in the loaded sample, not the entire source import."
+        )
     if any(not nodes_complete for _, _, nodes_complete in selected):
         caveats.append(
             "Node-derived profiling excludes sessions whose node lists were "
@@ -1688,7 +1700,7 @@ def profile_sessions(
         )
 
     coverage = Coverage(
-        sessions_available=len(sessions),
+        sessions_available=sessions_available,
         sessions_analyzed=len(selected_sessions),
         nodes_available=nodes_available,
         nodes_analyzed=nodes_analyzed,

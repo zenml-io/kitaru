@@ -47,13 +47,14 @@ def get_ephemeral_scope(job_id: uuid.UUID) -> WorkerScope:
         job_id: Id of the job the worker drains.
 
     Returns:
-        Scope claiming the job's import and evaluation tasks of plugins in
+        Scope claiming the job's import, evaluation, and analysis tasks in
         the reserved namespace.
     """
     return WorkerScope(
         claims=[
             WorkerClaim(kind=TaskKind.IMPORTER),
             WorkerClaim(kind=TaskKind.EVALUATOR),
+            WorkerClaim(kind=TaskKind.ANALYZER),
         ],
         selectors=[
             LabelSelector(

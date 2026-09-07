@@ -18,13 +18,18 @@ from collections.abc import Mapping
 
 from sqlalchemy import select
 
-from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
+from kitaru.server.adapters.db.filtering import (
+    FilterBinding,
+    build_scope_condition_binding,
+    compile_filter_expression,
+)
 from kitaru.server.adapters.db.orm.insight import (
     INSIGHT_AGENT_ID_FOREIGN_KEY,
     INSIGHT_ANALYZER_VERSION_ID_FOREIGN_KEY,
     INSIGHT_TASK_ID_FOREIGN_KEY,
     InsightORM,
 )
+from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.insight import InsightFilter
@@ -37,6 +42,11 @@ from kitaru.server.domain.task import TaskNotFound
 INSIGHT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": InsightORM.id,
     "agent_id": InsightORM.agent_id,
+    "import_id": build_scope_condition_binding(
+        local_column=InsightORM.task_id,
+        related_key=TaskORM.id,
+        scope_column=TaskORM.import_id,
+    ),
     "name": InsightORM.name,
     "type": InsightORM.type,
 }

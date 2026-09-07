@@ -43,3 +43,27 @@ async def test_default_plugins_are_registered_at_startup(
     matches = [item for item in evaluators if item["name"] == definition.name]
     assert len(matches) == 1
     assert matches[0]["owner_id"] is None
+
+
+async def test_builtin_analyzer_cannot_be_replaced_or_deleted() -> None:
+    """Keep the analyzer executed by hosted workers controlled by the server."""
+    async with lifespan_client(db_settings()) as client:
+        analyzers = (await client.get("/api/v1/analyzers")).json()["items"]
+        analyzer = next(
+            item for item in analyzers if item["name"] == "kitaru/post-import-insights"
+        )
+        path = f"/api/v1/analyzers/{analyzer['id']}"
+        original = (await client.get(f"{path}/versions/1")).json()
+        replaced = await client.post(
+            f"{path}/versions",
+            json={
+                "source": {
+                    "type": "package",
+                    "requirement": "other-code==1.0.0",
+                    "entrypoint": "other_code:run",
+                }
+            },
+        )
+        assert replaced.status_code == 403
+        assert (await client.delete(path)).status_code == 403
+        assert (await client.get(f"{path}/versions/1")).json() == original

@@ -198,7 +198,7 @@ async def test_run_loads_from_a_source_ref_and_fetches_sessions_in_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Load an installed analyzer and fetch the import's sessions with their nodes."""
-    session_ids = [uuid.uuid4(), uuid.uuid4()]
+    session_ids = [uuid.UUID(int=index) for index in range(301, 0, -1)]
     task_id = uuid.uuid4()
     import_id = uuid.uuid4()
     details = AnalysisTaskDetails(
@@ -272,7 +272,11 @@ async def test_run_loads_from_a_source_ref_and_fetches_sessions_in_order(
         ]
     }
     assert captured == [
-        [InsightInput(name="spread", title="Spread", data=TextInsightData(content="2"))]
+        [
+            InsightInput(
+                name="spread", title="Spread", data=TextInsightData(content="301")
+            )
+        ]
     ]
 
 

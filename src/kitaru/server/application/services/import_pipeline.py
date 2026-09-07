@@ -45,8 +45,9 @@ async def record_import_outcome(
     tasks are appended only for a completed import naming evaluators or
     analyzers, skipping sessions still in progress: one evaluator task per
     imported session and evaluator, and one analysis task per analyzer
-    scoped to the import. No analysis task is appended when no session is
-    evaluatable. Inserts them without locking the job row. The
+    scoped to the import. The built-in post-import analyzer also runs when
+    no session is evaluatable, so it can complete without findings.
+    Inserts them without locking the job row. The
     completing task's own transition settles the job afterward, in the same
     transaction, and its drained scan reads every task including these, so
     the job can never be judged drained before they exist.
@@ -73,13 +74,22 @@ async def record_import_outcome(
         not import_.evaluators and not import_.analyzers
     ):
         return
-    membership = FilterCondition(field="import_id", op=FilterOp.EQ, value=import_.id)
-    sessions = await paginate_all(
-        lambda cursor: session_repository.query(
-            SessionFilter(expression=membership, cursor=cursor, size=1000),
-            include_payloads=False,
+    sessions = []
+    # The built-in always runs; only evaluators and custom analyzers need
+    # session eligibility to determine which tasks to create.
+    if import_.evaluators or any(
+        analyzer.analyzer != "kitaru/post-import-insights"
+        for analyzer in import_.analyzers
+    ):
+        membership = FilterCondition(
+            field="import_id", op=FilterOp.EQ, value=import_.id
         )
-    )
+        sessions = await paginate_all(
+            lambda cursor: session_repository.query(
+                SessionFilter(expression=membership, cursor=cursor, size=1000),
+                include_payloads=False,
+            )
+        )
     evaluatable = False
     fan_out_tasks: list[Task] = []
     for session in sessions:
@@ -98,18 +108,19 @@ async def record_import_outcome(
                     on_failure=TaskOnFailure.CONTINUE,
                 )
             )
-    if evaluatable:
-        for analyzer in import_.analyzers:
-            fan_out_tasks.append(
-                AnalysisTask(
-                    job_id=task.job_id,
-                    plugin_version_id=analyzer.analyzer_version_id,
-                    agent_id=import_.agent_id,
-                    import_id=import_.id,
-                    params=analyzer.params,
-                    labels=get_plugin_task_labels(analyzer.analyzer),
-                    on_failure=TaskOnFailure.CONTINUE,
-                )
+    for analyzer in import_.analyzers:
+        if not evaluatable and analyzer.analyzer != "kitaru/post-import-insights":
+            continue
+        fan_out_tasks.append(
+            AnalysisTask(
+                job_id=task.job_id,
+                plugin_version_id=analyzer.analyzer_version_id,
+                agent_id=import_.agent_id,
+                import_id=import_.id,
+                params=analyzer.params,
+                labels=get_plugin_task_labels(analyzer.analyzer),
+                on_failure=TaskOnFailure.CONTINUE,
             )
+        )
     if fan_out_tasks:
         await task_repository.create_many(fan_out_tasks)

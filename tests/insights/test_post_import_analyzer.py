@@ -158,10 +158,9 @@ async def test_analyzer_returns_no_cards_when_no_pattern_is_eligible() -> None:
     assert await analyze_post_import_sessions([_view(2)]) == []
 
 
-async def test_analyzer_rejects_empty_input() -> None:
-    """Reject input that cannot supply agent or import identity."""
-    with pytest.raises(ValueError, match="at least one session"):
-        await analyze_post_import_sessions([])
+async def test_analyzer_returns_no_cards_for_empty_input() -> None:
+    """An import without eligible sessions completes without findings."""
+    assert await analyze_post_import_sessions([]) == []
 
 
 @pytest.mark.parametrize("provider", ["", "p" * 256, "broken-\ud800-provider"])
@@ -196,7 +195,7 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Exercise plugin loading, async invocation, and the JSON task receipt."""
-    views = [_view(1, failed_tool=True), _view(2)]
+    views = [_view(number, failed_tool=number == 1) for number in range(301, 0, -1)]
     task_id = uuid.uuid4()
     details = AnalysisTaskDetails(
         analyzer_name="post-import-insights",
@@ -247,12 +246,28 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
         InsightInput.model_validate(item)
         for item in json.loads(result_path.read_text())
     ]
-    assert fetched == [view.session.id for view in views]
+    assert fetched == sorted(view.session.id for view in views)[:250]
     assert cards
     metadata = [InsightGenerationResult.card_metadata(card) for card in cards]
     assert all(item.context.source_import.import_id == IMPORT_ID for item in metadata)
     assert all(item.context.agent_name == "returns-agent" for item in metadata)
     assert any(evidence.node_id for item in metadata for evidence in item.evidence)
+    assert all(item.coverage.sessions_available == 301 for item in metadata)
+    assert all(item.coverage.sessions_analyzed == 250 for item in metadata)
+    assert all(item.coverage.nodes_available == 1 for item in metadata)
+    assert all(
+        any(
+            truncation.dimension == "sessions"
+            and truncation.available == 301
+            and truncation.analyzed == 250
+            for truncation in item.coverage.truncations
+        )
+        for item in metadata
+    )
+    assert all(
+        any("loaded sample" in caveat for caveat in item.coverage.caveats)
+        for item in metadata
+    )
 
 
 async def test_task_runner_accepts_no_eligible_findings() -> None:

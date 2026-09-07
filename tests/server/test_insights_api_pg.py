@@ -24,18 +24,23 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from conftest import db_settings, lifespan_client
 from kitaru.api_models.v1.insight import TextInsightData
+from kitaru.api_models.v1.job import JobKind
 from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
 from kitaru.server.adapters.db.repositories.insight_repository import (
     SQLInsightRepository,
 )
+from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
+from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.api.config import APISettings
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.blob import Blob, BlobStorageBackend
 from kitaru.server.domain.insight import Insight
+from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
+from kitaru.server.domain.task import AnalysisTask
 
 
 @pytest.fixture
@@ -210,6 +215,18 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
                 ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
                 display_version=None,
             )
+            import_id = uuid.uuid4()
+            job = await SQLJobRepository(session).create(
+                Job(owner_id=owner_id, kind=JobKind.IMPORT)
+            )
+            task = await SQLTaskRepository(session).create(
+                AnalysisTask(
+                    job_id=job.id,
+                    agent_id=uuid.UUID(agent["id"]),
+                    import_id=import_id,
+                    plugin_version_id=version.id,
+                )
+            )
             stored = await SQLInsightRepository(session).create_many(
                 [
                     Insight(
@@ -219,6 +236,7 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
                         title="insight",
                         data=TextInsightData(content="Latency regressed."),
                         analyzer_version_id=version.id,
+                        task_id=task.id,
                         analyzer_params={"window_days": 7},
                     )
                 ]
@@ -230,3 +248,14 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
         body = response.json()
         assert body["analyzer_version_id"] == str(version.id)
         assert body["analyzer_params"] == {"window_days": 7}
+        await _create_insights(client, agent["id"])
+        response = await client.get(
+            "/api/v1/insights",
+            params={
+                "filter": json.dumps(
+                    {"field": "import_id", "op": "eq", "value": str(import_id)}
+                )
+            },
+        )
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()["items"]] == [str(stored[0].id)]

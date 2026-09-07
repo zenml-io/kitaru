@@ -14,6 +14,7 @@
 """Tests for the import service."""
 
 import uuid
+from importlib.metadata import version
 
 import pytest
 
@@ -40,6 +41,7 @@ from kitaru.server.domain.agent_version import AgentVersionAgentMismatch
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.imports import ImportNotFound
 from kitaru.server.domain.plugin import (
+    PackagePluginSource,
     PluginKind,
     PluginNotFound,
     PluginVersion,
@@ -52,9 +54,21 @@ ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
 
 @pytest.fixture
-def services() -> JobAndTaskServices:
+async def services() -> JobAndTaskServices:
     """Provide fake-backed job, task, and import services."""
-    return build_job_and_task_services()
+    services = build_job_and_task_services()
+    plugin = await create_plugin(
+        services.plugins, None, PluginKind.ANALYZER, name="kitaru/post-import-insights"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        PackagePluginSource(
+            requirement=f"kitaru=={version('kitaru')}",
+            entrypoint="kitaru.insights.analyzer:analyze_post_import_sessions",
+        ),
+        display_version=None,
+    )
+    return services
 
 
 async def _importer_version(services: JobAndTaskServices) -> PluginVersion:
@@ -135,6 +149,11 @@ async def test_create_import_creates_the_row_job_and_task_together(
     assert import_.importer_version_id == version.id
     assert import_.payload_blob_id == command.payload_blob_id
     assert import_.params == {"delimiter": ","}
+    assert [item.analyzer for item in import_.analyzers] == [
+        "kitaru/post-import-insights"
+    ]
+    assert import_.analyzers[0].params == {}
+    assert command.analyzers == []
     assert import_.stats is None
     assert import_.error is None
     assert import_.job_id is not None
@@ -230,7 +249,7 @@ async def test_create_import_stores_the_resolved_analyzers(
 
     import_ = await services.import_service.create_import(command, actor=ACTOR)
 
-    assert len(import_.analyzers) == 1
+    assert len(import_.analyzers) == 2
     analyzer = import_.analyzers[0]
     assert analyzer.analyzer == "trends"
     assert analyzer.version == 1
@@ -238,6 +257,24 @@ async def test_create_import_stores_the_resolved_analyzers(
     assert analyzer.analyzer_version_id == analyzer_version.id
     stored = await services.imports.get(import_.id)
     assert stored.analyzers == import_.analyzers
+
+
+async def test_explicit_builtin_analyzer_is_not_duplicated(
+    services: JobAndTaskServices,
+) -> None:
+    """Keep an explicitly configured built-in analyzer and its parameters once."""
+    await _importer_version(services)
+    command = await _import_command(
+        services,
+        analyzers=[
+            AnalyzerConfigInput(
+                analyzer="kitaru/post-import-insights", params={"agent_name": "returns"}
+            )
+        ],
+    )
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+    assert len(import_.analyzers) == 1
+    assert import_.analyzers[0].params == {"agent_name": "returns"}
 
 
 async def test_create_import_rejects_an_unknown_analyzer(

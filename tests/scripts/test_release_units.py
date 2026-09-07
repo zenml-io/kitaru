@@ -41,6 +41,7 @@ EXPECTED_UNITS = {
 }
 
 EXPECTED_DEFAULT_DISTRIBUTIONS = {
+    "kitaru",
     "kitaru-braintrust-importer",
     "kitaru-evaluator",
     "kitaru-jsonl-importer",
@@ -139,7 +140,10 @@ def test_inventory_describes_core_and_eleven_plugin_distributions() -> None:
 
 
 def test_default_requirements_are_derived_from_release_units() -> None:
-    assert set(default_requirements(load_inventory()).values()) == {
+    inventory = load_inventory()
+    core = next(unit for unit in inventory.units if unit.slug == "kitaru")
+    assert set(default_requirements(inventory).values()) == {
+        f"kitaru=={core.version}",
         "kitaru-braintrust-importer==0.2.0",
         "kitaru-evaluator==0.1.3",
         "kitaru-jsonl-importer==0.1.1",

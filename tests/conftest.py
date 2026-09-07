@@ -6579,15 +6579,21 @@ async def create_import_task(
 class FakeInsightRepository:
     """In-memory insight repository."""
 
-    def __init__(self, plugin_repository: FakePluginRepository | None = None) -> None:
+    def __init__(
+        self,
+        plugin_repository: FakePluginRepository | None = None,
+        task_repository: FakeTaskRepository | None = None,
+    ) -> None:
         """Initialize the repository.
 
         Args:
             plugin_repository: Fake plugin repository, consulted to mirror
                 the analyzer version foreign key.
+            task_repository: Fake task repository for import scope filters.
         """
         self._insights: dict[uuid.UUID, Insight] = {}
         self._plugin_repository = plugin_repository
+        self._task_repository = task_repository
 
     async def create_many(self, insights: list[Insight]) -> list[Insight]:
         """Persist a batch of new insights in one transaction.
@@ -6651,6 +6657,17 @@ class FakeInsightRepository:
         """
         return _matches_condition(insight.data.type, condition)
 
+    def _evaluate_import_condition(
+        self, insight: Insight, condition: FilterCondition
+    ) -> bool:
+        """Match an import through the insight's retained task."""
+        if self._task_repository is None or insight.task_id is None:
+            return False
+        task = self._task_repository._tasks.get(insight.task_id)
+        return isinstance(task, (AnalysisTask, ImportTask)) and _matches_condition(
+            task.import_id, condition
+        )
+
     async def query(
         self, insight_filter: InsightFilter
     ) -> tuple[list[Insight], str | None]:
@@ -6664,7 +6681,10 @@ class FakeInsightRepository:
         """
         insights = list(self._insights.values())
         if insight_filter.expression is not None:
-            resolvers = {"type": self._evaluate_type_condition}
+            resolvers = {
+                "type": self._evaluate_type_condition,
+                "import_id": self._evaluate_import_condition,
+            }
             insights = [
                 insight
                 for insight in insights

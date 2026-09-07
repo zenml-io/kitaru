@@ -35,6 +35,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_task_service,
 )
 from kitaru.server.api.app import create_app
+from kitaru.server.api.bootstrap import register_default_plugins
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.task import TaskFilter
@@ -47,9 +48,11 @@ ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 
 @pytest.fixture
-def services() -> JobAndTaskServices:
+async def services() -> JobAndTaskServices:
     """Provide fake-backed job, task, and import services."""
-    return build_job_and_task_services()
+    services = build_job_and_task_services()
+    await register_default_plugins(services.plugins)
+    return services
 
 
 @pytest.fixture
@@ -152,7 +155,9 @@ async def test_create_import(
     assert created["payload_blob_id"] == body["payload_blob_id"]
     assert created["params"] == body["params"]
     assert created["evaluators"] == []
-    assert created["analyzers"] == []
+    assert created["analyzers"] == [
+        {"analyzer": "kitaru/post-import-insights", "version": 1, "params": {}}
+    ]
     assert created["stats"] is None
     assert created["error"] is None
 
@@ -242,7 +247,8 @@ async def test_create_import_with_analyzers(
     assert response.status_code == 201
     created = response.json()
     assert created["analyzers"] == [
-        {"analyzer": "trends", "version": 1, "params": {"k": 1}}
+        {"analyzer": "trends", "version": 1, "params": {"k": 1}},
+        {"analyzer": "kitaru/post-import-insights", "version": 1, "params": {}},
     ]
     assert created["stats"] is None
     assert created["error"] is None

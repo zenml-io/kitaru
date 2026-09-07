@@ -247,6 +247,12 @@ def test_editor_validates_numbers_against_each_card_only(
         ("The agent resolved these requests.", "outcome"),
         ("The agent fixed the issue.", "outcome"),
         ("Read https://example.com for details.", "link"),
+        ("Read docs.example.com/guide for details.", "link"),
+        ("Read docs.example.com for details.", "link"),
+        ("Read docs.example.email for details.", "link"),
+        ("Read example.ai for details.", "link"),
+        ("Read example.ai/guide for details.", "link"),
+        ("Read DOCS.EXAMPLE.COM/guide for details.", "link"),
         ("# Tool behavior", "markup"),
         ("Inspect this\x00pattern.", "control"),
         ("This causes retries.", "unsupported claim"),
@@ -1373,6 +1379,8 @@ async def test_editor_failure_preserves_analyst_selection(
     "description",
     [
         "Inspect **this pattern**.",
+        "Read docs.example.com/guide for details.",
+        "Read docs.example.com for details.",
         "Inspect *this pattern*.",
         "Inspect __this pattern__.",
         "Inspect _this pattern_.",
@@ -1425,6 +1433,7 @@ async def test_editor_unsafe_copy_uses_deterministic_copy(
         "Inspect the tool's behavior (including retries).",
         "Inspect lookup_* calls.",
         "Inspect retries - then compare the cohort.",
+        "Inspect the pattern, e.g. repeated lookups.",
     ],
 )
 def test_editor_preserves_plain_text_punctuation(

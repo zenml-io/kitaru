@@ -44,7 +44,14 @@ _QUANTITY_TOKEN = re.compile(
     r"tenths?|fractions?|proportions?)\b",
     flags=re.IGNORECASE,
 )
-_LINK = re.compile(r"(?:https?://|www\.)", flags=re.IGNORECASE)
+# Hostname-like editorial text is conservatively rejected, including dotted
+# identifiers; deterministic chart labels are not checked as editorial copy.
+_LINK = re.compile(
+    r"(?:https?://|www\.|"
+    r"(?<![\w.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+"
+    r"[a-z]{2,63}(?![\w-]|\.[a-z0-9]))",
+    flags=re.IGNORECASE,
+)
 _MARKUP = re.compile(
     r"(?:<[^>]+>|\[[^\]]+\]\([^\)]+\)|```|`+[^`\n]+`+|"
     r"\*{1,3}(?=\S)[^*\n]+?(?<=\S)\*{1,3}|"

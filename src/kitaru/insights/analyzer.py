@@ -79,6 +79,7 @@ async def analyze_post_import_sessions(
     agent_name: str | None = None,
     model: str | None = None,
     observe: bool = False,
+    source_session_count: int | None = None,
 ) -> list[InsightInput]:
     """Generate persistable insight cards from normalized imported sessions.
 
@@ -87,10 +88,13 @@ async def analyze_post_import_sessions(
         agent_name: Optional display name included in copied prompt context.
         model: Optional OpenAI model for the bounded analyst and editor calls.
         observe: Whether to emit metadata-only events to a dedicated Langfuse project.
+        source_session_count: Internal eligible-session total before task sampling.
 
     Returns:
         Insight inputs ready for the analyzer task to persist.
     """
+    if not sessions:
+        return []
     context = _get_context(sessions, agent_name=agent_name)
     normalized = [
         SessionWithNodesResponse(session=item.session, nodes=item.nodes)
@@ -109,6 +113,7 @@ async def analyze_post_import_sessions(
         ),
         generator=generator,
         observer=_get_observer(observe),
+        source_session_count=source_session_count,
     )
     return result.insights
 

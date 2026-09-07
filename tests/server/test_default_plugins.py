@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Tests for default plugin registration."""
 
+from importlib.metadata import version
+
 import pytest
 
 from conftest import FakeBlobRepository, FakePluginRepository
@@ -46,6 +48,21 @@ DEFINITIONS = (
         display_version="1.0.0",
     ),
 )
+
+
+def test_post_import_analyzer_is_registered_from_core() -> None:
+    """The built-in analyzer uses the installed core distribution."""
+    definition = next(
+        item
+        for item in DEFAULT_PLUGIN_DEFINITIONS
+        if item.kind is PluginKind.ANALYZER
+        and item.name == "kitaru/post-import-insights"
+    )
+    assert (
+        definition.entrypoint == "kitaru.insights.analyzer:analyze_post_import_sessions"
+    )
+    assert definition.requirement == f"kitaru=={version('kitaru')}"
+    assert definition.display_version == version("kitaru")
 
 
 @pytest.fixture

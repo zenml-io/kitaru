@@ -15,6 +15,7 @@
 
 import inspect
 import uuid
+from bisect import insort
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -123,6 +124,10 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
     if not isinstance(details, AnalysisTaskDetails):
         raise AnalysisError(f"Task {task_id} is not an analyzer task")
     analyzer = _resolve_analyzer(details)
+    from kitaru.insights.analyzer import analyze_post_import_sessions
+    from kitaru.insights.profiling import ProfilingConfig
+
+    builtin = analyzer is analyze_post_import_sessions
 
     # Sessions still in progress are skipped, matching the evaluator fan-out.
     params = SessionListParams(
@@ -143,10 +148,25 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
         size=1000,
     )
     views: list[SessionView] = []
+    selected_ids: list[uuid.UUID] = []
+    source_session_count = 0
+    maximum = ProfilingConfig().max_sessions
     async for session in client.sessions.iter(params):
+        if builtin:
+            source_session_count += 1
+            insort(selected_ids, session.id)
+            if len(selected_ids) > maximum:
+                selected_ids.pop()
+            continue
         full = await client.sessions.get_with_nodes(session.id)
         views.append(SessionView(session=full.session, nodes=full.nodes))
+    analyzer_params = dict(details.params)
+    if builtin:
+        for session_id in selected_ids:
+            full = await client.sessions.get_with_nodes(session_id)
+            views.append(SessionView(session=full.session, nodes=full.nodes))
+        analyzer_params["source_session_count"] = source_session_count
     results = await call_analyzer(
-        details.analyzer_name, analyzer, views, details.params
+        details.analyzer_name, analyzer, views, analyzer_params
     )
     write_task_result(results)

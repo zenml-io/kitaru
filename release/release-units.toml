@@ -25,7 +25,7 @@ registry = "pypi"
 version-source = "pyproject.toml"
 changelog = "CHANGELOG.md"
 lock-source = "uv.lock"
-default-catalog = false
+default-catalog = true
 release-label = "requires:core"
 impact-paths = [
     "pyproject.toml",

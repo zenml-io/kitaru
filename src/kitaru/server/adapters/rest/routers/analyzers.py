@@ -114,7 +114,7 @@ async def get_analyzer(
     return await plugins.get_plugin(service, analyzer_id, AnalyzerResponse, actor=actor)
 
 
-@router.patch("/{analyzer_id}", responses=error_responses(404))
+@router.patch("/{analyzer_id}", responses=error_responses(403, 404))
 async def update_analyzer(
     analyzer_id: uuid.UUID,
     body: AnalyzerUpdateRequest,
@@ -143,7 +143,7 @@ async def update_analyzer(
 @router.delete(
     "/{analyzer_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=error_responses(404),
+    responses=error_responses(403, 404),
 )
 async def delete_analyzer(
     analyzer_id: uuid.UUID,
@@ -166,7 +166,7 @@ async def delete_analyzer(
 @router.post(
     "/{analyzer_id}/versions",
     status_code=status.HTTP_201_CREATED,
-    responses=error_responses(400, 404, 409),
+    responses=error_responses(400, 403, 404, 409),
 )
 @idempotent
 async def create_analyzer_version(
@@ -251,7 +251,7 @@ async def get_analyzer_version(
     )
 
 
-@router.patch("/{analyzer_id}/versions/{version}", responses=error_responses(404))
+@router.patch("/{analyzer_id}/versions/{version}", responses=error_responses(403, 404))
 async def update_analyzer_version(
     analyzer_id: uuid.UUID,
     version: Annotated[int, Path(ge=1, le=plugins.INT32_MAX)],

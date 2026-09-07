@@ -3806,7 +3806,7 @@
             "title": "Agent Version Id"
           },
           "analyzers": {
-            "description": "Analyzers run against every imported session.",
+            "description": "Analyzers run across the imported sessions. The server adds kitaru/post-import-insights when it is not explicitly configured.",
             "items": {
               "$ref": "#/components/schemas/AnalyzerConfig"
             },

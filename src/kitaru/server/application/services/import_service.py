@@ -27,6 +27,7 @@ from kitaru.server.application.interfaces.plugin_repository import PluginReposit
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.imports import ImportCreate, ImportFilter
+from kitaru.server.application.models.replay_config import AnalyzerConfigInput
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
 from kitaru.server.application.services.analyzer_resolution import validate_analyzers
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
@@ -80,6 +81,8 @@ class ImportService:
         An omitted importer version resolves to the importer's latest. An
         agent version is stamped on every session the import creates, and
         the sessions carry none when the command names none.
+        The built-in post-import insight analyzer is included automatically
+        unless explicitly configured in the command.
 
         Args:
             command: Fields for the import.
@@ -118,7 +121,15 @@ class ImportService:
         evaluators = await validate_evaluators(
             command.evaluators, self._plugins, agent.id, actor
         )
-        analyzers = await validate_analyzers(command.analyzers, self._plugins, actor)
+        analyzer_configs = list(command.analyzers)
+        if not any(
+            config.analyzer == "kitaru/post-import-insights"
+            for config in analyzer_configs
+        ):
+            analyzer_configs.append(
+                AnalyzerConfigInput(analyzer="kitaru/post-import-insights")
+            )
+        analyzers = await validate_analyzers(analyzer_configs, self._plugins, actor)
         job = await self._jobs.create(
             Job(owner_id=actor.account.id, kind=JobKind.IMPORT)
         )

@@ -318,6 +318,22 @@ async def test_list_insights_filters_by_agent_id(
     assert body["items"][0]["agent_id"] == agent_id
 
 
+@pytest.mark.parametrize("value, status", [(str(uuid.uuid4()), 200), ("bad-id", 422)])
+async def test_list_insights_validates_import_filter(
+    client: httpx.AsyncClient, value: str, status: int
+) -> None:
+    """Accept an import scope and reject malformed import identifiers."""
+    response = await client.get(
+        "/api/v1/insights",
+        params={
+            "filter": json.dumps({"field": "import_id", "op": "eq", "value": value})
+        },
+    )
+    assert response.status_code == status
+    if status == 200:
+        assert response.json()["items"] == []
+
+
 async def test_list_insights_filters_by_name(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:

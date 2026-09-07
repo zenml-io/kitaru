@@ -414,7 +414,7 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
     monkeypatch.setattr(
         insight_pipeline,
         "profile_sessions",
-        lambda sessions, config: profiling,
+        lambda sessions, config, source_session_count: profiling,
     )
     full = await generate_insights(sessions, context=_context())
     maximum = len(full.model_dump_json().encode("utf-8")) - 1
@@ -475,7 +475,7 @@ async def test_result_byte_bound_tries_lower_priority_individual_cards(
     monkeypatch.setattr(
         insight_pipeline,
         "profile_sessions",
-        lambda sessions, config: profiling,
+        lambda sessions, config, source_session_count: profiling,
     )
 
     bounded = await generate_insights(
@@ -534,7 +534,7 @@ async def test_result_byte_bound_neutralizes_removed_recommendation(
     monkeypatch.setattr(
         insight_pipeline,
         "profile_sessions",
-        lambda sessions, config: profiling,
+        lambda sessions, config, source_session_count: profiling,
     )
     monkeypatch.setattr(
         insight_pipeline,
@@ -598,7 +598,7 @@ async def test_oversized_prompt_omits_only_the_affected_card(monkeypatch) -> Non
     monkeypatch.setattr(
         insight_pipeline,
         "profile_sessions",
-        lambda sessions, config: modified,
+        lambda sessions, config, source_session_count: modified,
     )
 
     result = await generate_insights(sessions, context=_context())
@@ -655,7 +655,7 @@ async def test_oversized_recommendation_falls_back_to_first_retained_card(
     monkeypatch.setattr(
         insight_pipeline,
         "profile_sessions",
-        lambda sessions, config: modified,
+        lambda sessions, config, source_session_count: modified,
     )
 
     result = await generate_insights(sessions, context=_context())
@@ -704,7 +704,7 @@ async def test_reports_bounded_card_contribution_references(monkeypatch) -> None
     monkeypatch.setattr(
         insight_pipeline,
         "profile_sessions",
-        lambda sessions, config: modified,
+        lambda sessions, config, source_session_count: modified,
     )
 
     result = await generate_insights(

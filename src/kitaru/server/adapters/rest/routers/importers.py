@@ -114,7 +114,7 @@ async def get_importer(
     return await plugins.get_plugin(service, importer_id, ImporterResponse, actor=actor)
 
 
-@router.patch("/{importer_id}", responses=error_responses(404))
+@router.patch("/{importer_id}", responses=error_responses(403, 404))
 async def update_importer(
     importer_id: uuid.UUID,
     body: ImporterUpdateRequest,
@@ -143,7 +143,7 @@ async def update_importer(
 @router.delete(
     "/{importer_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=error_responses(404),
+    responses=error_responses(403, 404),
 )
 async def delete_importer(
     importer_id: uuid.UUID,
@@ -166,7 +166,7 @@ async def delete_importer(
 @router.post(
     "/{importer_id}/versions",
     status_code=status.HTTP_201_CREATED,
-    responses=error_responses(400, 404, 409),
+    responses=error_responses(400, 403, 404, 409),
 )
 @idempotent
 async def create_importer_version(
@@ -251,7 +251,7 @@ async def get_importer_version(
     )
 
 
-@router.patch("/{importer_id}/versions/{version}", responses=error_responses(404))
+@router.patch("/{importer_id}/versions/{version}", responses=error_responses(403, 404))
 async def update_importer_version(
     importer_id: uuid.UUID,
     version: Annotated[int, Path(ge=1, le=plugins.INT32_MAX)],

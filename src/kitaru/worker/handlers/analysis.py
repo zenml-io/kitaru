@@ -14,6 +14,7 @@
 """Analyzer task handler."""
 
 import uuid
+from importlib.metadata import version
 
 from kitaru.api_models.v1.task import (
     AnalysisTaskDetails,
@@ -62,6 +63,21 @@ class AnalysisHandler:
             dependencies = parse_inline_dependencies(path)
         else:
             dependencies = [plugin.requirement]
+            if (
+                spec.details.analyzer_name == "kitaru/post-import-insights"
+                and plugin.entrypoint
+                == "kitaru.insights.analyzer:analyze_post_import_sessions"
+            ):
+                if (
+                    spec.details.params.get("model") is not None
+                    or spec.details.params.get("observe", False) is not False
+                ):
+                    # Keep the requested version constraint while installing
+                    # dependencies absent from worker-only environments.
+                    dependencies.append("kitaru[insights]")
+                elif plugin.requirement == f"kitaru=={version('kitaru')}":
+                    # The deterministic built-in ships with this worker.
+                    dependencies = []
         argv = get_python_run_argv("kitaru.task", ["analyze"], dependencies)
         return TaskProcess(
             command=argv,

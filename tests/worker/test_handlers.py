@@ -17,8 +17,10 @@ import hashlib
 import json
 import sys
 import uuid
+from importlib.metadata import version
 from pathlib import Path
 
+import pytest
 from fakes import (
     FakeKitaruAPIClient,
     as_client,
@@ -29,6 +31,7 @@ from fakes import (
 )
 
 from kitaru.api_models.v1.task import (
+    AnalysisTaskDetails,
     PackagePluginSpec,
     PayloadSpec,
     ScriptPluginSpec,
@@ -292,6 +295,80 @@ async def test_analysis_handler_package_plugin_skips_materialization(
         "kitaru.task",
         "analyze",
     ]
+
+
+@pytest.mark.parametrize(
+    "variant", ["builtin", "name", "entrypoint", "version", "model", "observe"]
+)
+async def test_analysis_handler_installed_builtin(tmp_path: Path, variant: str) -> None:
+    """Only the exact deterministic built-in uses the installed environment."""
+    requirement = f"kitaru=={version('kitaru')}"
+    plugin = PackagePluginSpec(
+        entrypoint="kitaru.insights.analyzer:analyze_post_import_sessions",
+        requirement=requirement,
+    )
+    task_id = uuid.uuid4()
+    spec = make_analyzer_spec(task_id, plugin=plugin)
+    assert isinstance(spec.details, AnalysisTaskDetails)
+    spec.details.analyzer_name = "kitaru/post-import-insights"
+    if variant == "name":
+        spec.details.analyzer_name = "custom/insights"
+    elif variant == "entrypoint":
+        plugin.entrypoint = "custom:analyze"
+    elif variant == "version":
+        plugin.requirement = "kitaru==0.0.0"
+    elif variant == "model":
+        spec.details.params = {"model": "gpt-5.4"}
+    elif variant == "observe":
+        spec.details.params = {"observe": True}
+
+    process = await AnalysisHandler().prepare(
+        _ctx(tmp_path, FakeKitaruAPIClient()), task_id, spec, "task-token"
+    )
+    if variant == "builtin":
+        assert process.command == [sys.executable, "-m", "kitaru.task", "analyze"]
+    else:
+        assert process.command[0] == "uv"
+        assert (
+            process.command[process.command.index("--with") + 1] == plugin.requirement
+        )
+
+
+@pytest.mark.parametrize("mode", ["model", "observe"])
+@pytest.mark.parametrize("variant", ["builtin", "version", "name", "entrypoint"])
+async def test_analysis_handler_optional_builtin_dependencies(
+    tmp_path: Path, mode: str, variant: str
+) -> None:
+    """Optional built-in runs install insights without losing the requested pin."""
+    plugin = PackagePluginSpec(
+        entrypoint="kitaru.insights.analyzer:analyze_post_import_sessions",
+        requirement=f"kitaru=={version('kitaru')}",
+    )
+    task_id = uuid.uuid4()
+    spec = make_analyzer_spec(task_id, plugin=plugin)
+    assert isinstance(spec.details, AnalysisTaskDetails)
+    spec.details.analyzer_name = "kitaru/post-import-insights"
+    spec.details.params = {"model": "gpt-5.4"} if mode == "model" else {"observe": True}
+    if variant == "version":
+        plugin.requirement = "kitaru==0.0.0"
+    elif variant == "name":
+        spec.details.analyzer_name = "custom/insights"
+    elif variant == "entrypoint":
+        plugin.entrypoint = "custom:analyze"
+
+    process = await AnalysisHandler().prepare(
+        _ctx(tmp_path, FakeKitaruAPIClient()), task_id, spec, "task-token"
+    )
+
+    dependencies = [
+        process.command[index + 1]
+        for index, argument in enumerate(process.command)
+        if argument == "--with"
+    ]
+    expected = [plugin.requirement]
+    if variant in {"builtin", "version"}:
+        expected.append("kitaru[insights]")
+    assert dependencies == expected
 
 
 async def test_analysis_handler_reuses_cached_plugin(tmp_path: Path) -> None:

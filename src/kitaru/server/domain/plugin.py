@@ -25,6 +25,7 @@ from kitaru.base import FrozenModel
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
+    ForbiddenError,
     NotFoundError,
     ValidationError,
 )
@@ -86,6 +87,14 @@ class ReservedPluginName(ValidationError):
         super().__init__(
             f"Plugin name '{name}' uses the reserved namespace '{RESERVED_NAMESPACE}'"
         )
+
+
+class DefaultPluginReadOnly(ForbiddenError):
+    """Modification of a server-managed default plugin is forbidden."""
+
+    def __init__(self, name: str) -> None:
+        """Initialize the error for the default plugin name."""
+        super().__init__(f"Default plugin '{name}' is read-only")
 
 
 class DuplicatePluginVersion(ConflictError):
@@ -287,6 +296,15 @@ class Plugin(DomainModel):
     agent_id: uuid.UUID | None = None
     created: datetime | None = None
     updated: datetime | None = None
+
+    def check_modify(self) -> None:
+        """Reject changes to plugins provided by server bootstrap.
+
+        Raises:
+            DefaultPluginReadOnly: The plugin has no owning account.
+        """
+        if self.owner_id is None:
+            raise DefaultPluginReadOnly(self.name)
 
     @model_validator(mode="after")
     def _check_provider(self) -> "Plugin":

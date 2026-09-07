@@ -37,12 +37,14 @@ from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound
+from kitaru.server.domain.base import ForbiddenError
 from kitaru.server.domain.blob import BlobNotFound
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     InvalidPluginAgentScope,
     InvalidPluginProvider,
     PackagePluginSource,
+    Plugin,
     PluginKind,
     PluginNotFound,
     PluginVersionNotFound,
@@ -51,6 +53,44 @@ from kitaru.server.domain.plugin import (
 )
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+@pytest.mark.parametrize("kind", list(PluginKind))
+@pytest.mark.parametrize(
+    "operation", ["update", "delete", "create_version", "update_version"]
+)
+async def test_default_plugins_cannot_be_modified(
+    kind: PluginKind,
+    operation: str,
+    repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+) -> None:
+    """Keep code in the trusted namespace controlled by server bootstrap."""
+    plugin = await repository.create(
+        Plugin(owner_id=None, kind=kind, name="kitaru/default")
+    )
+    source = PackagePluginSource(requirement="example==1.0.0", entrypoint="example:run")
+    await repository.create_version(plugin.id, source, "1.0.0")
+    service = PluginService(
+        kind=kind, repository=repository, blob_repository=blob_repository
+    )
+
+    with pytest.raises(ForbiddenError, match="read-only"):
+        if operation == "update":
+            await service.update_plugin(
+                plugin.id, PluginUpdate(description="changed"), actor=ACTOR
+            )
+        elif operation == "delete":
+            await service.delete_plugin(plugin.id, actor=ACTOR)
+        elif operation == "create_version":
+            await service.create_version(plugin.id, source, "2.0.0", actor=ACTOR)
+        else:
+            await service.update_version(plugin.id, 1, "changed", actor=ACTOR)
+
+    stored = await repository.get(plugin.id)
+    assert stored.latest_version == 1
+    assert stored.description is None
+    assert (await repository.get_version(plugin.id, 1)).display_version == "1.0.0"
 
 
 class _RecordingAnalytics(ServerAnalytics):

@@ -545,13 +545,18 @@ async def generate_insights(
     config: InsightGenerationConfig | None = None,
     generator: InsightModelGenerator | None = None,
     observer: GenerationObserver | None = None,
+    source_session_count: int | None = None,
 ) -> InsightGenerationResult:
     """Generate frontend-ready Insights from caller-scoped normalized sessions."""
     selected_config = config or InsightGenerationConfig()
     _validate_sessions(sessions, context=context)
     run_id = str(uuid.uuid4())
 
-    profiling = profile_sessions(sessions, config=selected_config.profiling)
+    profiling = profile_sessions(
+        sessions,
+        config=selected_config.profiling,
+        source_session_count=source_session_count,
+    )
     await observe_safely(
         observer,
         GenerationEvent(
