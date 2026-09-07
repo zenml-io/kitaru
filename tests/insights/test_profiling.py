@@ -1386,6 +1386,49 @@ def test_projection_byte_bound_drops_lower_ranked_candidates() -> None:
     )
 
 
+@pytest.mark.parametrize("has_candidates", [False, True])
+def test_projection_byte_bound_rejects_oversized_coverage(
+    has_candidates: bool,
+) -> None:
+    session = _session(
+        1,
+        [
+            _node(
+                0,
+                session_id=_id(101),
+                tool_name="tool",
+                inputs={"a": [1, 2, 3]},
+                status=NodeStatus.FAILED if has_candidates else NodeStatus.COMPLETED,
+            )
+        ],
+        inputs={"messages": [{"role": "user", "content": "hello"}]},
+        started_at=None,
+        ended_at=None,
+    )
+    sessions = [session] if has_candidates else [session, _session(2)]
+    config = ProfilingConfig(max_payload_items=1, max_sessions=1)
+    unrestricted = profile_sessions(sessions, config=config)
+    assert bool(unrestricted.candidates) is has_candidates
+
+    # With candidates, the final no-candidate caveat pushes the envelope over
+    # the limit after the last candidate has already been removed.
+    limit = 1_100 if has_candidates else 1_000
+    with pytest.raises(ValueError, match="Coverage envelope exceeds"):
+        profile_sessions(
+            sessions, config=config.model_copy(update={"max_projection_bytes": limit})
+        )
+
+
+def test_projection_byte_bound_allows_empty_result_that_fits() -> None:
+    result = profile_sessions(
+        [_calls(1, [("tool", {}, NodeStatus.FAILED, None)])],
+        config=ProfilingConfig(max_projection_bytes=1_000),
+    )
+
+    assert not result.candidates
+    assert len(result.model_dump_json().encode("utf-8")) <= 1_000
+
+
 def test_missing_payload_and_timing_fields_report_honest_coverage() -> None:
     session = _session(
         1,

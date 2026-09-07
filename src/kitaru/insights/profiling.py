@@ -1566,7 +1566,11 @@ def profile_sessions(
     *,
     config: ProfilingConfig | None = None,
 ) -> ProfilingResult:
-    """Profile caller-scoped normalized sessions into stable candidate findings."""
+    """Profile caller-scoped normalized sessions into stable candidate findings.
+
+    Raises:
+        ValueError: The coverage envelope alone exceeds the projection byte limit.
+    """
     selected_config = config or ProfilingConfig()
     selected_sessions = sorted(sessions, key=lambda item: str(item.session.id))[
         : selected_config.max_sessions
@@ -1724,14 +1728,19 @@ def profile_sessions(
         )
         projection_bytes = len(result.model_dump_json().encode("utf-8"))
     if original_count and not result.candidates:
-        # The configured byte ceiling can be lower than the irreducible coverage
-        # envelope. Keep the empty bounded result and state that explicitly.
         caveats = [
             *result.coverage.caveats,
             "No candidate fit within the configured projection byte limit.",
         ]
         result = result.model_copy(
             update={"coverage": result.coverage.model_copy(update={"caveats": caveats})}
+        )
+    projection_bytes = len(result.model_dump_json().encode("utf-8"))
+    if projection_bytes > selected_config.max_projection_bytes:
+        raise ValueError(
+            "Coverage envelope exceeds max_projection_bytes even without candidates "
+            f"({projection_bytes} > {selected_config.max_projection_bytes}); "
+            "increase max_projection_bytes to retain coverage details."
         )
     return result.model_copy(
         update={

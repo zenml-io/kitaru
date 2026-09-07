@@ -83,6 +83,7 @@ _UNSUPPORTED_CLAIM = re.compile(
 _OUTCOME_TOKEN = re.compile(
     r"\b(?:fail(?:ed|ing|s)?|failures?|succeed(?:ed|ing|s)?|"
     r"success|successes|successful|successfully|pass(?:ed|es|ing)?|"
+    r"resolv(?:e|es|ed|ing)|fix(?:es|ed|ing)?|"
     r"complete(?:d|s)?|"
     r"completion(?:s)?|completing|finish(?:ed|es|ing)?|done|"
     r"in[ -]progress|"
@@ -399,7 +400,7 @@ def _outcome_categories(value: str) -> set[str]:
         token = match.group(0).lower()
         if token.startswith("fail"):
             categories.add("failure")
-        elif token.startswith(("success", "succeed", "pass")):
+        elif token.startswith(("success", "succeed", "pass", "resolv", "fix")):
             categories.add("success")
         elif (
             token.startswith(("complete", "completion", "completing", "finish"))

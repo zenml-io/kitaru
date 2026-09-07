@@ -244,6 +244,8 @@ def test_editor_validates_numbers_against_each_card_only(
         ("Two sessions need attention.", "quantitative"),
         ("This happens twice as often.", "quantitative"),
         ("These sessions timed out.", "outcome"),
+        ("The agent resolved these requests.", "outcome"),
+        ("The agent fixed the issue.", "outcome"),
         ("Read https://example.com for details.", "link"),
         ("# Tool behavior", "markup"),
         ("Inspect this\x00pattern.", "control"),
@@ -906,9 +908,17 @@ def test_completed_sessions_do_not_authorize_successful_pass_wording(
         "The system works correctly.",
         "The agent worked properly.",
         "The run is working normally.",
+        "The agent resolved these requests.",
+        "The agent resolves requests.",
+        "The agent is resolving requests.",
+        "Agents resolve requests.",
+        "The agent fixed the issue.",
+        "The agent fixes issues.",
+        "The agent is fixing issues.",
+        "Agents fix issues.",
     ],
 )
-def test_completed_sessions_do_not_authorize_working_success_claims(
+def test_completed_sessions_do_not_authorize_business_success_claims(
     profiling_result: ProfilingResult,
     description: str,
 ) -> None:
@@ -946,6 +956,7 @@ def test_completed_sessions_do_not_authorize_working_success_claims(
     [
         "Work on this pattern next.",
         "Coworkers and workflows are worth investigating.",
+        "Inspect the resolver configuration and fixture setup.",
     ],
 )
 def test_non_outcome_work_language_is_allowed(
@@ -1372,6 +1383,8 @@ async def test_editor_failure_preserves_analyst_selection(
         "- Inspect this pattern.",
         "This pattern improved quality.",
         "It outperformed the alternative.",
+        "The agent resolved these requests.",
+        "The agent fixed the issue.",
     ],
 )
 async def test_editor_unsafe_copy_uses_deterministic_copy(
