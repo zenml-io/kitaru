@@ -51,7 +51,7 @@ runtime modes:
 
 | Stage | Purpose |
 |---|---|
-| `pre-builder` | Installs locked `server` and `otel` dependencies without the project |
+| `pre-builder` | Installs locked `server`, `s3`, `otel`, and `modal` dependencies without the project |
 | `common-runtime` | Installs local source editably for bind-mounted development |
 | `local-runtime` | Runs uvicorn with source reload enabled |
 | `builder` | Installs local source non-editably for the self-contained image |
@@ -110,6 +110,11 @@ docker build -f docker/release-worker.Dockerfile --target worker \
 # Release server from the matching published package
 docker build -f docker/release-server.Dockerfile --target server \
   --build-arg KITARU_VERSION=<version> -t kitaru-server .
+
+# Managed server with the modal extra, as published to the private ECR registry
+docker build -f docker/release-server.Dockerfile --target server \
+  --build-arg KITARU_VERSION=<version> --build-arg ADDITIONAL_EXTRAS=modal \
+  -t kitaru-pro-server .
 
 # Onboarding sandbox from the published worker image
 docker build -f docker/onboarding-sandbox.Dockerfile --target worker \

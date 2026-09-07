@@ -9,6 +9,7 @@ ARG USERNAME=kitaru
 ARG USER_UID=1000
 ARG USER_GID=1000
 ARG KITARU_VERSION=""
+ARG ADDITIONAL_EXTRAS=""
 
 FROM docker.io/astral/uv:${UV_VERSION} AS uv
 
@@ -19,6 +20,7 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG KITARU_VERSION
+ARG ADDITIONAL_EXTRAS
 
 FROM python:${PYTHON_VERSION}-slim-bookworm AS base
 
@@ -29,6 +31,7 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG KITARU_VERSION
+ARG ADDITIONAL_EXTRAS
 
 RUN groupadd --gid $USER_GID $USERNAME && \
   useradd --uid $USER_UID --gid $USER_GID -m $USERNAME && \
@@ -46,6 +49,7 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG KITARU_VERSION
+ARG ADDITIONAL_EXTRAS
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
@@ -60,18 +64,24 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 USER $USERNAME
 
-# Install the locked server and OpenTelemetry dependencies, then install the
-# matching published Kitaru wheel without resolving its dependencies again.
-# Keep a snapshot of the resulting environment for external inspection.
+# Install the locked server and OpenTelemetry dependencies plus any additional
+# extras, then install the matching published Kitaru wheel without resolving
+# its dependencies again. Keep a snapshot of the resulting environment for
+# external inspection.
 RUN test -n "$KITARU_VERSION" && \
   test "$(uv version --short)" = "$KITARU_VERSION" && \
+  additional_extra_args="" && \
+  for extra in $ADDITIONAL_EXTRAS; do \
+    additional_extra_args="$additional_extra_args --extra $extra"; \
+  done && \
   uv sync \
     --locked \
     --no-dev \
     --no-install-project \
     --extra server \
     --extra s3 \
-    --extra otel && \
+    --extra otel \
+    $additional_extra_args && \
   sh ./install-release-wheel.sh && \
   uv pip check && \
   python -c \
@@ -87,6 +97,7 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG KITARU_VERSION
+ARG ADDITIONAL_EXTRAS
 
 # The Python base image includes package-management tools that are unnecessary
 # at runtime. uv is mounted only for this command and is not included in the

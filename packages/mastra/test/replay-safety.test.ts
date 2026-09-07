@@ -4,7 +4,6 @@ import {
   MASTRA_THREAD_ID_KEY,
   RequestContext,
 } from "@mastra/core/request-context";
-// @ts-expect-error Mastra 1.51.0 exports this public test helper without declarations.
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
 import { ToolPolicyError, ToolPolicyMissError } from "@zenml-io/kitaru";
@@ -26,13 +25,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-type ModelResult = {
-  content: unknown[];
-  finishReason: string;
-  response: { id: string; modelId: string; timestamp: Date };
-  usage: { inputTokens: number; outputTokens: number; totalTokens: number };
-  warnings: unknown[];
-};
+type DoGenerate = Extract<
+  NonNullable<
+    ConstructorParameters<typeof MastraLanguageModelV2Mock>[0]["doGenerate"]
+  >,
+  (options: never) => unknown
+>;
+type ModelCall = Parameters<DoGenerate>[0];
+type ModelResult = Awaited<ReturnType<DoGenerate>>;
 
 function toolCallResult(toolName: string, toolCallId: string): ModelResult {
   return {
@@ -61,9 +61,9 @@ function textResult(text: string): ModelResult {
 }
 
 function makeModel(results: ModelResult[]) {
-  const calls: unknown[] = [];
+  const calls: ModelCall[] = [];
   const model = new MastraLanguageModelV2Mock({
-    doGenerate: async (options: unknown) => {
+    doGenerate: async (options: ModelCall) => {
       calls.push(options);
       const result = results[calls.length - 1];
       if (!result) {

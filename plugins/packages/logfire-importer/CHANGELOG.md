@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Support Logfire 5.x for the `adapter` extra in addition to the existing 4.35+ line.
+
 ## 0.2.0
 
 - Add the Logfire importer-backed adapter, installed through the `adapter` extra.

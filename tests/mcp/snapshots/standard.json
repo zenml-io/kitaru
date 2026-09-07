@@ -2658,6 +2658,27 @@
               "default": null,
               "title": "Cursor"
             },
+            "filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Filter"
+            },
             "include_payloads": {
               "default": false,
               "title": "Include Payloads",

@@ -513,9 +513,15 @@ async def list_session_nodes(
     size: int,
     cursor: str | None,
     include_payloads: bool,
+    filter: str | None = None,
 ) -> CommandResult:
     """List one bounded server page of session nodes in index order."""
-    params = SessionNodeListParams(
-        size=size, cursor=cursor, include_payloads=include_payloads
+    params = SessionNodeListParams.model_validate(
+        {
+            "size": size,
+            "cursor": cursor,
+            "include_payloads": include_payloads,
+            "filter": filter,
+        }
     )
     return page_result(await client.sessions.list_nodes(session_id, params), size=size)
