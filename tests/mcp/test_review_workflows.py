@@ -1683,6 +1683,7 @@ async def test_script_analyzer_version_rejects_mismatched_blob() -> None:
     [
         "cohort",
         "cohort_version",
+        "connection",
         "experiment",
         "experiment_run",
         "insight",
@@ -1703,6 +1704,7 @@ async def test_existing_delete_payloads_keep_exact_resource_behavior(kind: str) 
     client = SimpleNamespace(
         cohorts=SimpleNamespace(delete=delete_resource("cohort")),
         cohort_versions=SimpleNamespace(delete=delete_resource("cohort_version")),
+        connections=SimpleNamespace(delete=delete_resource("connection")),
         experiments=SimpleNamespace(delete=delete_resource("experiment")),
         experiment_runs=SimpleNamespace(delete=delete_resource("experiment_run")),
         insights=SimpleNamespace(delete=delete_resource("insight")),

@@ -40,6 +40,7 @@ from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.cli import (
     annotations,
     cohorts,
+    connections,
     diagnostics,
     evaluations,
     experiment_runs,
@@ -136,6 +137,11 @@ cohort_app = App(
 cohort_version_app = App(
     name="version",
     help="Create and manage immutable cohort membership versions.",
+    default_parameter=Parameter(negative=False),
+)
+connection_app = App(
+    name="connection",
+    help=GROUP_DESCRIPTIONS["connection"],
     default_parameter=Parameter(negative=False),
 )
 annotation_app = App(
@@ -245,6 +251,7 @@ app.command(agent_app, name="agent")
 app.command(analyzer_app, name="analyzer")
 app.command(annotation_app, name="annotation")
 app.command(cohort_app, name="cohort")
+app.command(connection_app, name="connection")
 app.command(experiment_app, name="experiment")
 app.command(import_app, name="import")
 app.command(importer_app, name="importer")
@@ -1943,6 +1950,204 @@ async def cohort_version_delete(
         return await cohorts.delete_cohort_version(client, version, force=force)
 
 
+_CONNECTION_REFERENCE_PARAMETER = ParameterSpec(
+    "CONNECTION", "reference", "argument", True, "Connection UUID or name."
+)
+_CONNECTION_VALUE_PARAMETERS = (
+    ParameterSpec(
+        "--set", "KEY=VALUE[]", "option", False, "Non-secret environment value."
+    ),
+    ParameterSpec(
+        "--set-secret", "KEY=VALUE[]", "option", False, "Sensitive environment value."
+    ),
+)
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "create"),
+        "Create a connection from an importer schema or from direct values.",
+        parameters=(
+            ParameterSpec("NAME", "string", "argument", True, "New connection name."),
+            ParameterSpec(
+                "--importer",
+                "reference",
+                "option",
+                False,
+                "Importer whose connection schema drives the prompts.",
+            ),
+            ParameterSpec(
+                "--provider", "string", "option", False, "Provider addressed directly."
+            ),
+            *_CONNECTION_VALUE_PARAMETERS,
+            ParameterSpec(
+                "--default",
+                "boolean",
+                "option",
+                False,
+                "Make this the provider's default connection.",
+            ),
+            _IDEMPOTENCY_KEY_PARAMETER,
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_remote_create",
+        interaction="visible and hidden schema value prompts",
+        errors=(*_ASSET_WRITE_ERRORS, "interaction_required"),
+    ),
+)
+async def connection_create(
+    name: str,
+    /,
+    *,
+    importer: str | None = None,
+    provider: str | None = None,
+    set: list[str] | None = None,
+    set_secret: list[str] | None = None,
+    default: bool = False,
+    idempotency_key: str | None = None,
+) -> CommandResult:
+    """Create one connection, prompting for the importer's schema values."""
+    invocation = _invocation()
+    async with _open_asset_client() as client:
+        return await connections.create_connection(
+            client,
+            name,
+            importer=importer,
+            provider=provider,
+            values=set,
+            secret_values=set_secret,
+            default=default,
+            non_interactive=invocation.non_interactive,
+            idempotency_key=idempotency_key,
+        )
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "list"),
+        "List connections.",
+        parameters=_LIST_PARAMETERS,
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def connection_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of connections."""
+    async with _open_asset_client() as client:
+        return await connections.list_connections(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "get"),
+        "Get a connection by exact UUID or case-sensitive name.",
+        parameters=(_CONNECTION_REFERENCE_PARAMETER,),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def connection_get(connection: str, /) -> CommandResult:
+    """Get one exact connection."""
+    async with _open_asset_client() as client:
+        return await connections.get_connection(client, connection)
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "update"),
+        "Merge values into an exact connection by key.",
+        parameters=(
+            _CONNECTION_REFERENCE_PARAMETER,
+            *_CONNECTION_VALUE_PARAMETERS,
+            ParameterSpec(
+                "--default/--no-default",
+                "boolean",
+                "option",
+                False,
+                "Set or clear the provider's default connection.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent merge by key",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def connection_update(
+    connection: str,
+    /,
+    *,
+    set: list[str] | None = None,
+    set_secret: list[str] | None = None,
+    default: Annotated[
+        bool | None, Parameter(name="--default", negative="--no-default")
+    ] = None,
+) -> CommandResult:
+    """Update only explicitly selected connection fields."""
+    async with _open_asset_client() as client:
+        return await connections.update_connection(
+            client,
+            connection,
+            values=set,
+            secret_values=set_secret,
+            default=default,
+        )
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "set-default"),
+        "Make a connection the default for its provider.",
+        parameters=(_CONNECTION_REFERENCE_PARAMETER,),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def connection_set_default(connection: str, /) -> CommandResult:
+    """Make one connection the default for its provider."""
+    async with _open_asset_client() as client:
+        return await connections.set_default_connection(client, connection)
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "delete"),
+        "Delete a connection and the secret holding its values.",
+        parameters=(
+            _CONNECTION_REFERENCE_PARAMETER,
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def connection_delete(
+    connection: str, /, *, force: bool = False
+) -> CommandResult:
+    """Delete one connection and the secret holding its values."""
+    async with _open_asset_client() as client:
+        return await connections.delete_connection(client, connection, force=force)
+
+
 @_register(
     insight_app,
     _spec(
@@ -3192,6 +3397,15 @@ def _plugin_register_parameters(kind: str) -> tuple[ParameterSpec, ...]:
         parent.append(
             ParameterSpec("--provider", "string", "option", False, "Source provider.")
         )
+        parent.append(
+            ParameterSpec(
+                "--connection-schema",
+                "path",
+                "option",
+                False,
+                "JSON Schema file describing the connection values.",
+            )
+        )
     if kind == "evaluator":
         parent.append(
             ParameterSpec("--agent-id", "UUID", "option", False, "Scoping agent.")
@@ -3211,6 +3425,7 @@ async def _register_plugin_command(
     metadata: str | None,
     agent_id: uuid.UUID | None,
     display_version: str | None,
+    connection_schema: Path | None = None,
 ) -> CommandResult:
     """Run one kind-specific parent-plus-version registration."""
     source = registration.prepare_plugin_source(
@@ -3223,6 +3438,7 @@ async def _register_plugin_command(
         provider=provider,
         metadata=metadata,
         agent_id=agent_id,
+        connection_schema=connection_schema,
     )
     async with _open_asset_client() as client:
         return await registration.register_plugin(
@@ -3401,6 +3617,7 @@ async def importer_register(
     entrypoint: str | None = None,
     description: str | None = None,
     provider: str | None = None,
+    connection_schema: Path | None = None,
     metadata: str | None = None,
     display_version: str | None = None,
 ) -> CommandResult:
@@ -3416,6 +3633,7 @@ async def importer_register(
         metadata=metadata,
         agent_id=None,
         display_version=display_version,
+        connection_schema=connection_schema,
     )
 
 
@@ -4008,6 +4226,14 @@ async def analyzer_version_get(analyzer_version: str, /) -> CommandResult:
                 "with --since, --until, and --trace-id.",
             ),
             ParameterSpec(
+                "--connection",
+                "reference",
+                "option",
+                False,
+                "For an API import, the connection UUID or name supplying "
+                "provider credentials.",
+            ),
+            ParameterSpec(
                 "--tag",
                 "text[]",
                 "option",
@@ -4074,6 +4300,7 @@ async def session_import(
     until: str | None = None,
     trace_id: list[str] | None = None,
     query: str | None = None,
+    connection: str | None = None,
     tag: list[str] | None = None,
     evaluator: list[str] | None = None,
     evaluator_params: list[str] | None = None,
@@ -4098,6 +4325,7 @@ async def session_import(
             until=until,
             trace_ids=trace_id,
             query=query,
+            connection=connection,
             tags=tag,
             evaluators=evaluator,
             evaluator_params=evaluator_params,

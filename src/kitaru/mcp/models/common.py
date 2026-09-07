@@ -15,6 +15,7 @@ from kitaru.api_models.v1.annotation import AnnotationResponse
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.cohort import CohortResponse
 from kitaru.api_models.v1.cohort_version import CohortVersionResponse
+from kitaru.api_models.v1.connection import ConnectionResponse
 from kitaru.api_models.v1.evaluation import EvaluationResponse
 from kitaru.api_models.v1.evaluator import EvaluatorResponse, EvaluatorVersionResponse
 from kitaru.api_models.v1.experiment import ExperimentResponse
@@ -175,6 +176,18 @@ class ReviewManageResult(ToolResult):
     links: dict[Literal["review"], str] = Field(default_factory=dict)
 
 
+class ConnectionReadResult(ToolResult):
+    """Typed connection read result."""
+
+    data: ConnectionResponse | PageData[ConnectionResponse] | None = None
+
+
+class ConnectionsManageResult(ToolResult):
+    """Connection management result."""
+
+    data: ConnectionResponse | None = None
+
+
 class CohortsManageResult(ToolResult):
     """Cohort management result."""
 
@@ -271,6 +284,7 @@ class WorkflowCancelResult(ToolResult):
 DeleteKind = Literal[
     "cohort",
     "cohort_version",
+    "connection",
     "experiment",
     "experiment_run",
     "insight",

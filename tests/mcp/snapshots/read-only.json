@@ -7103,5 +7103,358 @@
       "title": "ReviewReadResult",
       "type": "object"
     }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Read provider connections without their secret values.",
+    "inputSchema": {
+      "$defs": {
+        "ConnectionGetRequest": {
+          "additionalProperties": false,
+          "description": "Get a connection by UUID or exact case-sensitive name.",
+          "properties": {
+            "operation": {
+              "const": "get",
+              "title": "Operation",
+              "type": "string"
+            },
+            "reference": {
+              "minLength": 1,
+              "title": "Reference",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "reference"
+          ],
+          "title": "ConnectionGetRequest",
+          "type": "object"
+        },
+        "ConnectionListRequest": {
+          "additionalProperties": false,
+          "description": "List one page of connections, optionally for one provider.",
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "operation": {
+              "const": "list",
+              "title": "Operation",
+              "type": "string"
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Provider"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            },
+            "sort": {
+              "default": "created:desc",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "title": "ConnectionListRequest",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "discriminator": {
+            "mapping": {
+              "get": "#/$defs/ConnectionGetRequest",
+              "list": "#/$defs/ConnectionListRequest"
+            },
+            "propertyName": "operation"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ConnectionListRequest"
+            },
+            {
+              "$ref": "#/$defs/ConnectionGetRequest"
+            }
+          ],
+          "title": "Request"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "connection_read_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_connection_read",
+    "outputSchema": {
+      "$defs": {
+        "ConnectionResponse": {
+          "description": "Connection response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "default": {
+              "description": "Whether this is the provider's default connection.",
+              "title": "Default",
+              "type": "boolean"
+            },
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Non-secret environment values.",
+              "title": "Env",
+              "type": "object"
+            },
+            "id": {
+              "description": "Connection id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "name": {
+              "description": "Connection name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "provider": {
+              "description": "Provider the connection addresses.",
+              "title": "Provider",
+              "type": "string"
+            },
+            "secret_id": {
+              "description": "Secret holding the sensitive values.",
+              "format": "uuid",
+              "title": "Secret Id",
+              "type": "string"
+            },
+            "secret_keys": {
+              "description": "Key names of the sensitive values.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Secret Keys",
+              "type": "array"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name",
+            "provider",
+            "env",
+            "secret_id",
+            "secret_keys",
+            "default"
+          ],
+          "title": "ConnectionResponse",
+          "type": "object"
+        },
+        "PageData_ConnectionResponse_": {
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/ConnectionResponse"
+              },
+              "title": "Items",
+              "type": "array"
+            },
+            "page": {
+              "$ref": "#/$defs/PageMetadata"
+            }
+          },
+          "required": [
+            "items",
+            "page"
+          ],
+          "title": "PageData[ConnectionResponse]",
+          "type": "object"
+        },
+        "PageMetadata": {
+          "additionalProperties": false,
+          "description": "Opaque one-page cursor metadata.",
+          "properties": {
+            "has_more": {
+              "title": "Has More",
+              "type": "boolean"
+            },
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next Cursor"
+            },
+            "size": {
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "size",
+            "next_cursor",
+            "has_more"
+          ],
+          "title": "PageMetadata",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Typed connection read result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConnectionResponse"
+            },
+            {
+              "$ref": "#/$defs/PageData_ConnectionResponse_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "ConnectionReadResult",
+      "type": "object"
+    }
   }
 ]

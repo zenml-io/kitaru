@@ -447,6 +447,19 @@ def parse_json_object(value: str | None, *, option: str) -> dict[str, Any]:
     return parsed
 
 
+def read_json_object(path: Path | None, *, option: str) -> dict[str, Any] | None:
+    """Read a JSON object from a local file."""
+    if path is None:
+        return None
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise CLIError(
+            "invalid_arguments", f"{option} could not be read: {error}"
+        ) from error
+    return parse_json_object(content, option=option)
+
+
 def parse_replay_override(value: str, *, option: str) -> ReplayOverride:
     """Parse an inline replay override using the existing API model."""
     return ReplayOverride.model_validate(parse_json_object(value, option=option))
@@ -718,6 +731,7 @@ def plugin_parent_request(
     provider: str | None,
     metadata: str | None,
     agent_id: uuid.UUID | None,
+    connection_schema: Path | None = None,
 ) -> ImporterCreateRequest | EvaluatorCreateRequest | AnalyzerCreateRequest:
     """Build one kind-specific plugin parent request."""
     parsed_metadata = parse_json_object(metadata, option="--metadata")
@@ -731,6 +745,9 @@ def plugin_parent_request(
             description=description,
             provider=provider,
             metadata=parsed_metadata,
+            connection_schema=read_json_object(
+                connection_schema, option="--connection-schema"
+            ),
         )
     if kind == "analyzer":
         if agent_id is not None:
@@ -746,6 +763,10 @@ def plugin_parent_request(
         )
     if provider is not None:
         raise CLIError("invalid_arguments", "--provider is only valid for importers.")
+    if connection_schema is not None:
+        raise CLIError(
+            "invalid_arguments", "--connection-schema is only valid for importers."
+        )
     return EvaluatorCreateRequest(
         name=name, description=description, metadata=parsed_metadata, agent_id=agent_id
     )

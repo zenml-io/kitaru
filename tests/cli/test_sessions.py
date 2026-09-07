@@ -132,6 +132,7 @@ class StubImportClient:
         self.blob = SimpleNamespace(
             id=uuid.uuid4(), sha256="a" * 64, size=7, media_type="application/jsonl"
         )
+        self.connection = SimpleNamespace(id=uuid.uuid4(), name="langfuse-prod")
         self.job = _job()
         now = datetime(2026, 8, 3, tzinfo=UTC)
         self.import_response = ImportResponse(
@@ -159,6 +160,7 @@ class StubImportClient:
         self.evaluators = self._Evaluators(self)
         self.analyzers = self._Analyzers(self)
         self.blobs = self._Blobs(self)
+        self.connections = self._Connections(self)
         self.imports = self._Imports(self)
         self.jobs = self._Jobs(self)
 
@@ -179,6 +181,15 @@ class StubImportClient:
             assert parent_id == self.owner.importer.id
             assert version == self.owner.importer_version.version
             return self.owner.importer_version
+
+    class _Connections:
+        def __init__(self, owner: "StubImportClient") -> None:
+            self.owner = owner
+
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            self.owner.lookup_calls.append("connection")
+            return SimpleNamespace(items=[self.owner.connection], next_cursor=None)
 
     class _Agents:
         def __init__(self, owner: "StubImportClient") -> None:
@@ -1233,6 +1244,60 @@ async def test_session_import_api_query_merges_options_and_uploads_nothing() -> 
     )
     assert result.item["query"] == expected_query
     assert "blob" not in result.item
+
+
+async def test_session_import_carries_a_resolved_connection() -> None:
+    """A named connection resolves to the id sent on the API source."""
+    client = StubImportClient()
+
+    result = await sessions.import_sessions(
+        client,
+        None,
+        importer="jsonl@2",
+        agent="assistant@3",
+        params=None,
+        media_type=None,
+        wait=False,
+        interval=None,
+        timeout=None,
+        since="2026-08-01T00:00:00Z",
+        connection="langfuse-prod",
+    )
+
+    [request] = client.requests
+    assert isinstance(request.source, ApiImportSource)
+    assert request.source.connection_id == client.connection.id
+    assert result.item["connection"] == {
+        "id": str(client.connection.id),
+        "name": "langfuse-prod",
+    }
+
+
+async def test_session_import_rejects_a_connection_with_a_payload_file(
+    tmp_path: Path,
+) -> None:
+    """A blob import carries no connection."""
+    client = StubImportClient()
+    payload = tmp_path / "traces.jsonl"
+    payload.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type=None,
+            wait=False,
+            interval=None,
+            timeout=None,
+            connection="langfuse-prod",
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []
 
 
 async def test_session_import_query_clash_rejected_before_remote_call() -> None:

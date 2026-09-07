@@ -16,6 +16,7 @@ from kitaru.api_models.v1.analyzer import (
 )
 from kitaru.api_models.v1.base import JsonValue, Page
 from kitaru.api_models.v1.cohort import CohortListParams, CohortResponse
+from kitaru.api_models.v1.connection import ConnectionListParams, ConnectionResponse
 from kitaru.api_models.v1.evaluator import (
     EvaluatorListParams,
     EvaluatorResponse,
@@ -90,7 +91,8 @@ ParentResource = (
 PluginVersionResponse = (
     ImporterVersionResponse | EvaluatorVersionResponse | AnalyzerVersionResponse
 )
-ParentT = TypeVar("ParentT", bound=ParentResponse)
+NamedResponse = ParentResponse | ConnectionResponse
+NamedT = TypeVar("NamedT", bound=NamedResponse)
 
 
 async def resolve_parent(
@@ -111,6 +113,30 @@ async def resolve_parent(
     else:
         resource = client.analyzers
     return await _resolve_parent_resource(resource, kind, reference)
+
+
+async def resolve_connection(
+    client: "KitaruAPIClient", reference: str
+) -> ConnectionResponse:
+    """Resolve one connection with one direct get or one bounded list."""
+    normalized = reference.strip()
+    if not normalized:
+        raise ReferenceResolutionError(
+            "invalid_arguments", "Connection reference cannot be blank."
+        )
+    try:
+        item_id = uuid.UUID(normalized)
+    except ValueError:
+        item_id = None
+    if item_id is not None:
+        return await client.connections.get(item_id)
+    page = await client.connections.list(
+        ConnectionListParams(
+            size=2,
+            filter=FilterCondition(field="name", op=FilterOp.EQ, value=normalized),
+        )
+    )
+    return _select_named(page, "connection", normalized)
 
 
 async def resolve_plugin_version(
@@ -167,20 +193,20 @@ async def _resolve_parent_resource(
         page = await cast(AnalyzersResource, resource).list(
             AnalyzerListParams(size=2, filter=name_filter)
         )
-    return _select_parent(page, kind, normalized)
+    return _select_named(page, kind.value, normalized)
 
 
-def _select_parent(page: Page[ParentT], kind: ParentKind, normalized: str) -> ParentT:
+def _select_named(page: Page[NamedT], kind: str, normalized: str) -> NamedT:
     """Select one exact-name match from a bounded page."""
     matches = [item for item in page.items if item.name == normalized]
     if not matches:
         raise ReferenceResolutionError(
-            "not_found", f"{kind.value.title()} {normalized!r} was not found."
+            "not_found", f"{kind.title()} {normalized!r} was not found."
         )
     if len(matches) > 1:
         raise ReferenceResolutionError(
             "conflict",
-            f"More than one {kind.value} has the exact name {normalized!r}.",
+            f"More than one {kind} has the exact name {normalized!r}.",
             details={"ids": [str(item.id) for item in matches[:2]]},
         )
     return matches[0]

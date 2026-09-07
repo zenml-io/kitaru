@@ -60,6 +60,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "annotation",
         "cohort",
         "config",
+        "connection",
         "doctor",
         "evaluation",
         "evaluator",
@@ -89,6 +90,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         descriptions["cohort"]
         == "Manage cohort namespaces and immutable membership versions."
     )
+    assert descriptions["connection"] == "Create and manage provider connections."
     assert descriptions["evaluation"] == "Inspect stored evaluations."
     assert (
         descriptions["experiment"]
