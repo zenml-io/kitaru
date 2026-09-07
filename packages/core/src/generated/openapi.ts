@@ -3167,7 +3167,6 @@ export interface paths {
          *         service: Task service.
          *         auth_service: Authentication service for the current request.
          *         actor: Caller context.
-         *         api_imports: API import capability advertised by the claiming executable.
          *
          *     Returns:
          *         Claimed tasks with their execution specs and a task token each.
@@ -5867,12 +5866,6 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
-             * Payload Blob Id
-             * @deprecated
-             * @description Blob holding the payload, unset for API imports.
-             */
-            payload_blob_id?: string | null;
-            /**
              * Source
              * @description Where the payload comes from.
              */
@@ -5935,11 +5928,6 @@ export interface components {
             params: {
                 [key: string]: unknown;
             };
-            /**
-             * @deprecated
-             * @description Payload to parse, unset for API imports.
-             */
-            payload?: components["schemas"]["PayloadSpec"] | null;
             /**
              * Plugin
              * @description Importer plugin to load.
@@ -7126,23 +7114,6 @@ export interface components {
              * @enum {string}
              */
             type: "passthrough";
-        };
-        /**
-         * PayloadSpec
-         * @description Deprecated blob payload spec.
-         */
-        PayloadSpec: {
-            /**
-             * Blob Id
-             * Format: uuid
-             * @description Blob holding the payload.
-             */
-            blob_id: string;
-            /**
-             * Sha256
-             * @description Blob content hash.
-             */
-            sha256: string;
         };
         /**
          * ReplayCreateRequest
@@ -18565,9 +18536,7 @@ export interface operations {
     claim_tasks_api_v1_tasks_claim_post: {
         parameters: {
             query?: never;
-            header?: {
-                "X-Kitaru-Api-Imports"?: string;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };

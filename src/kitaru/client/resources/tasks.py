@@ -27,7 +27,6 @@ from kitaru.api_models.v1.task import (
     TaskUpdateRequest,
 )
 from kitaru.client.resources.pagination import iterate_pages
-from kitaru.headers import API_IMPORTS_HEADER
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -59,7 +58,6 @@ class TasksResource:
         response = await self._client.request(
             "POST",
             "/api/v1/tasks/claim",
-            headers={API_IMPORTS_HEADER: "true"},
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return TaskClaimResponse.model_validate(response.json())

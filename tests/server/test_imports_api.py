@@ -138,7 +138,6 @@ async def test_create_import(
     assert created["agent_version_id"] is None
     assert created["importer_version_id"] == str(version.id)
     assert created["source"] == {"type": "blob", "blob_id": body["payload_blob_id"]}
-    assert created["payload_blob_id"] == body["payload_blob_id"]
     assert created["params"] == body["params"]
     assert created["evaluators"] == []
     assert created["stats"] is None

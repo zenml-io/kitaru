@@ -16,9 +16,9 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from kitaru.api_models.v1.base import (
     JsonValue,
@@ -159,13 +159,6 @@ PluginSpec = Annotated[
 ]
 
 
-class PayloadSpec(ResponseModel):
-    """Deprecated blob payload spec."""
-
-    blob_id: uuid.UUID = Field(description="Blob holding the payload.")
-    sha256: str = Field(description="Blob content hash.")
-
-
 class BlobImportSourceSpec(ResponseModel):
     """Blob import source spec."""
 
@@ -216,11 +209,6 @@ class ImportTaskDetails(ResponseModel):
     kind: Literal["importer"] = Field(default="importer")
     plugin: PluginSpec = Field(description="Importer plugin to load.")
     source: ImportSourceSpec = Field(description="Where the payload comes from.")
-    payload: PayloadSpec | None = Field(
-        default=None,
-        deprecated="Use source instead.",
-        description="Payload to parse, unset for API imports.",
-    )
     provider: str | None = Field(
         default=None, description="Source system named on the import."
     )
@@ -230,39 +218,6 @@ class ImportTaskDetails(ResponseModel):
     params: dict[str, JsonValue] = Field(
         description="Parameters passed to the importer."
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _read_legacy_source(cls, data: Any) -> Any:
-        """Normalize task specs from servers that predate source.
-
-        Args:
-            data: Task details data.
-
-        Returns:
-            Task details data with the blob source populated.
-        """
-        if isinstance(data, dict) and "source" not in data:
-            payload = data.get("payload")
-            if isinstance(payload, PayloadSpec):
-                payload = payload.model_dump()
-            if isinstance(payload, dict):
-                return {**data, "source": {**payload, "type": "blob"}}
-        return data
-
-    @model_validator(mode="after")
-    def _populate_legacy_payload(self) -> Self:
-        """Keep the deprecated payload field aligned with source.
-
-        Returns:
-            Task details with its legacy payload populated.
-        """
-        self.payload = (
-            PayloadSpec(blob_id=self.source.blob_id, sha256=self.source.sha256)
-            if isinstance(self.source, BlobImportSourceSpec)
-            else None
-        )
-        return self
 
 
 TaskDetails = Annotated[

@@ -5953,22 +5953,16 @@ class FakeJobRepository:
 class FakeTaskRepository:
     """In-memory task repository."""
 
-    def __init__(
-        self,
-        sessions: FakeSessionRepository | None = None,
-        imports: FakeImportRepository | None = None,
-    ) -> None:
+    def __init__(self, sessions: FakeSessionRepository | None = None) -> None:
         """Initialize the repository.
 
         Args:
             sessions: Fake session repository, wired back onto the session
                 repository so its delete can clear this task's session
                 pointers.
-            imports: Fake import repository used to check import sources.
         """
         self._tasks: dict[uuid.UUID, Task] = {}
         self._sessions = sessions
-        self._imports = imports if imports is not None else FakeImportRepository()
         if sessions is not None:
             sessions._tasks = self
         # Assigned after construction, since the fake job repository takes
@@ -6193,13 +6187,7 @@ class FakeTaskRepository:
         return renewed.model_copy()
 
     async def claim_pending(
-        self,
-        scope: WorkerScope,
-        worker_id: uuid.UUID,
-        limit: int,
-        now: datetime,
-        *,
-        exclude_api_imports: bool = False,
+        self, scope: WorkerScope, worker_id: uuid.UUID, limit: int, now: datetime
     ) -> list[Task]:
         """Hand pending tasks matching a scope to a worker, oldest first.
 
@@ -6212,7 +6200,6 @@ class FakeTaskRepository:
             worker_id: Worker claiming the tasks.
             limit: Maximum number of tasks to claim.
             now: Current time.
-            exclude_api_imports: Whether to skip imports with an API fetch query.
 
         Returns:
             Claimed tasks carrying their incremented attempt.
@@ -6226,20 +6213,11 @@ class FakeTaskRepository:
             ),
             key=lambda task: task.id,
         )
-        selected = []
-        for task in pending:
-            if not any(self._matches_claim(task, claim) for claim in scope.claims):
-                continue
-            if exclude_api_imports and isinstance(task, ImportTask):
-                try:
-                    import_ = await self._imports.get(task.import_id)
-                except ImportNotFound:
-                    pass
-                else:
-                    if import_.fetch_query is not None:
-                        continue
-            selected.append(task)
-        selected = selected[:limit]
+        selected = [
+            task
+            for task in pending
+            if any(self._matches_claim(task, claim) for claim in scope.claims)
+        ][:limit]
         claimed: list[Task] = []
         for task in selected:
             claimed_task = task.model_copy()
@@ -6579,10 +6557,10 @@ def _build_task_substrate() -> TaskSubstrate:
     plugins = FakePluginRepository(blob_repository=blobs)
     secrets = FakeSecretRepository()
     workers = FakeWorkerRepository()
-    imports = FakeImportRepository()
-    tasks = FakeTaskRepository(sessions=sessions, imports=imports)
+    tasks = FakeTaskRepository(sessions=sessions)
     jobs = FakeJobRepository(tasks=tasks)
     tasks.jobs = jobs
+    imports = FakeImportRepository()
     return TaskSubstrate(
         sessions=sessions,
         agents=agents,

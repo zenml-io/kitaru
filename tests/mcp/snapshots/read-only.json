@@ -3563,21 +3563,6 @@
               "title": "Params",
               "type": "object"
             },
-            "payload_blob_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "deprecated": true,
-              "description": "Blob holding the payload, unset for API imports.",
-              "title": "Payload Blob Id"
-            },
             "source": {
               "description": "Where the payload comes from.",
               "discriminator": {

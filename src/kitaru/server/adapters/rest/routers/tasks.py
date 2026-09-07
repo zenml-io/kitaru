@@ -16,7 +16,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Query
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.task import (
@@ -27,7 +27,6 @@ from kitaru.api_models.v1.task import (
     TaskSpecResponse,
     TaskUpdateRequest,
 )
-from kitaru.headers import API_IMPORTS_HEADER
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.jwt import TaskSubject
 from kitaru.server.adapters.rest.dependencies import (
@@ -90,7 +89,6 @@ async def claim_tasks(
     service: Annotated[TaskService, Depends(get_task_service)],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
     actor: Annotated[WorkerAuthContext, Depends(authorize_worker_only)],
-    api_imports: Annotated[str, Header(alias=API_IMPORTS_HEADER)] = "",
 ) -> TaskClaimResponse:
     """Claim pending tasks matching the worker's stored scope.
 
@@ -103,14 +101,11 @@ async def claim_tasks(
         service: Task service.
         auth_service: Authentication service for the current request.
         actor: Caller context.
-        api_imports: API import capability advertised by the claiming executable.
 
     Returns:
         Claimed tasks with their execution specs and a task token each.
     """
-    claimed = await service.claim_tasks(
-        body.max_tasks, actor=actor, supports_api_imports=api_imports == "true"
-    )
+    claimed = await service.claim_tasks(body.max_tasks, actor=actor)
     worker_id = actor.principal.worker_id
     tokens = {
         item.task.id: auth_service.issue_task_token(

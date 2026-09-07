@@ -38,7 +38,6 @@ from kitaru.server.domain.imports import Import
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.server.domain.task import ImportTask
-from kitaru.server.domain.worker import IMPORT_SOURCE_LABEL
 
 
 class ImportService:
@@ -143,14 +142,7 @@ class ImportService:
             ImportTask(
                 job_id=job.id,
                 import_id=import_.id,
-                labels={
-                    **get_plugin_task_labels(plugin.name),
-                    **(
-                        {IMPORT_SOURCE_LABEL: "api"}
-                        if command.fetch_query is not None
-                        else {}
-                    ),
-                },
+                labels=get_plugin_task_labels(plugin.name),
             )
         )
         return import_

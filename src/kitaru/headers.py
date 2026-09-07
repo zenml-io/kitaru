@@ -20,7 +20,6 @@ from kitaru.analytics.source import AnalyticsSource
 
 CLIENT_HEADER = "X-Kitaru-Client"
 SKILL_HEADER = "X-Kitaru-Skill"
-API_IMPORTS_HEADER = "X-Kitaru-Api-Imports"
 
 
 def format_client_header(

@@ -34,7 +34,6 @@ from kitaru.api_models.v1.task import (
     TaskWithSpec,
 )
 from kitaru.api_models.v1.worker import (
-    API_IMPORT_CAPABILITY,
     WorkerCreateRequest,
     WorkerResponse,
     WorkerRuntime,
@@ -230,7 +229,7 @@ class Worker:
             name=name,
             scope=self._config.scope,
             runtime=detect_runtime(),
-            metadata={**self._config.metadata, API_IMPORT_CAPABILITY: "true"},
+            metadata=self._config.metadata,
         )
         response = await api_client.workers.create(registration)
         worker = response.worker

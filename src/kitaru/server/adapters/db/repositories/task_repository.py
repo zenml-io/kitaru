@@ -31,7 +31,6 @@ from sqlalchemy import (
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.api_models.v1.worker import WorkerScope
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
-from kitaru.server.adapters.db.orm.imports import ImportORM
 from kitaru.server.adapters.db.orm.job import JobORM
 from kitaru.server.adapters.db.orm.task import (
     TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT,
@@ -275,13 +274,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         return row.to_domain()
 
     async def claim_pending(
-        self,
-        scope: WorkerScope,
-        worker_id: uuid.UUID,
-        limit: int,
-        now: datetime,
-        *,
-        exclude_api_imports: bool = False,
+        self, scope: WorkerScope, worker_id: uuid.UUID, limit: int, now: datetime
     ) -> list[Task]:
         """Hand pending tasks matching a scope to a worker, oldest first.
 
@@ -297,23 +290,12 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
             worker_id: Worker claiming the tasks.
             limit: Maximum number of tasks to claim.
             now: Current time.
-            exclude_api_imports: Whether to skip imports with an API fetch query.
 
         Returns:
             Claimed tasks carrying their incremented attempt.
         """
         terms = _claim_terms(scope)
         residual = _residual_conditions(scope)
-        if exclude_api_imports:
-            # Read the durable source, including tasks enqueued before source labels.
-            residual.append(
-                ~select(ImportORM.id)
-                .where(
-                    ImportORM.id == TaskORM.import_id,
-                    ImportORM.fetch_query.is_not(None),
-                )
-                .exists()
-            )
         if len(terms) == 1:
             statement = (
                 select(TaskORM)
