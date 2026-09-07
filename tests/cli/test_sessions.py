@@ -32,7 +32,7 @@ from kitaru.api_models.v1.session import (
     SessionOrigin,
     SessionStatus,
 )
-from kitaru.api_models.v1.session_node import SessionNodeListParams
+from kitaru.api_models.v1.session_node import NodeType, SessionNodeListParams
 from kitaru.api_models.v1.task import (
     TaskKind,
     TaskOnFailure,
@@ -386,8 +386,8 @@ def test_invalid_list_values_are_concise_and_option_named(capsys) -> None:
     assert "errors.pydantic.dev" not in payload["error"]["message"]
 
 
-async def test_session_nodes_controls_payload_flag_only() -> None:
-    """Node reads expose only cursor pagination and the explicit payload flag."""
+async def test_session_nodes_controls_payload_flag_and_node_types() -> None:
+    """Node reads forward pagination, payload inclusion, and selected node types."""
     resource = StubSessions()
     client = SimpleNamespace(sessions=resource)
 
@@ -397,6 +397,7 @@ async def test_session_nodes_controls_payload_flag_only() -> None:
         size=3,
         cursor="node-cursor",
         include_payloads=True,
+        node_type=[NodeType.LLM_CALL, NodeType.TOOL_CALL],
     )
 
     session_id, params = resource.node_calls[0]
@@ -406,6 +407,7 @@ async def test_session_nodes_controls_payload_flag_only() -> None:
         "cursor": "node-cursor",
         "size": 3,
         "include_payloads": True,
+        "node_type": ["llm_call", "tool_call"],
     }
     assert result.items == [{"id": str(resource.node.id), "index": 0, "inputs": None}]
     assert result.page == {
@@ -460,8 +462,11 @@ def test_session_list_and_get_argv_use_bounded_resource_calls(
     assert resource.get_calls == [resource.session_id]
 
 
+@pytest.mark.parametrize("node_types", [[], ["llm_call", "tool_call"]])
 def test_session_nodes_argv_passes_exact_uuid_and_payload_flag(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    node_types: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The registered leaf maps argv into the bounded node helper."""
     resource = StubSessions()
@@ -482,6 +487,7 @@ def test_session_nodes_argv_passes_exact_uuid_and_payload_flag(
                 "--size",
                 "1",
                 "--include-payloads",
+                *[arg for value in node_types for arg in ("--node-type", value)],
             ]
         )
         == 0
@@ -492,6 +498,7 @@ def test_session_nodes_argv_passes_exact_uuid_and_payload_flag(
     session_id, params = resource.node_calls[0]
     assert session_id == resource.session_id
     assert params.include_payloads is True
+    assert params.node_type == node_types
 
 
 async def test_session_import_uploads_once_and_returns_exact_created_receipt(
@@ -1042,3 +1049,19 @@ def test_terminal_import_rejects_missing_or_malformed_completed_result(
         sessions._terminal_import_result(job, observed, identity={})
 
     assert error.value.kind == "internal_error"
+
+
+def test_session_nodes_rejects_unknown_node_type(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Invalid types fail during argument parsing, before a client opens."""
+
+    def fail_open_client():
+        pytest.fail("Invalid node types must not open a client")
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fail_open_client)
+    assert (
+        app_module.main(["session", "nodes", str(uuid.uuid4()), "--node-type", "hook"])
+        != 0
+    )
+    assert "--node-type" in capsys.readouterr().err

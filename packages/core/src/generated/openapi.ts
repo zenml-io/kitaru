@@ -17796,6 +17796,8 @@ export interface operations {
                 cursor?: string | null;
                 /** @description Items per page. */
                 size?: number;
+                /** @description Match any selected type; omitted or empty matches all nodes. */
+                node_type?: components["schemas"]["NodeType"][];
                 /** @description Include reasoning, inputs, outputs, and attributes. */
                 include_payloads?: boolean;
             };

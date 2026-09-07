@@ -22358,6 +22358,20 @@
             }
           },
           {
+            "description": "Match any selected type; omitted or empty matches all nodes.",
+            "in": "query",
+            "name": "node_type",
+            "required": false,
+            "schema": {
+              "description": "Match any selected type; omitted or empty matches all nodes.",
+              "items": {
+                "$ref": "#/components/schemas/NodeType"
+              },
+              "title": "Node Type",
+              "type": "array"
+            }
+          },
+          {
             "description": "Include reasoning, inputs, outputs, and attributes.",
             "in": "query",
             "name": "include_payloads",

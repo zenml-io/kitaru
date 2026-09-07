@@ -141,6 +141,10 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         statement = select(SessionNodeORM).where(
             SessionNodeORM.session_id == session_node_filter.session_id
         )
+        if session_node_filter.node_type:
+            statement = statement.where(
+                SessionNodeORM.node_type.in_(session_node_filter.node_type)
+            )
         statement = statement.options(*(defer(column) for column in deferred))
         rows, next_cursor = await paginate_by_index(
             self._session,

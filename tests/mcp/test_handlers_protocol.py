@@ -21,7 +21,7 @@ from kitaru.api_models.v1.cohort import CohortResponse
 from kitaru.api_models.v1.imports import ImportListParams, ImportResponse
 from kitaru.api_models.v1.investigation import InvestigationSessionResponse
 from kitaru.api_models.v1.session import SessionDetailResponse, TokenUsage
-from kitaru.api_models.v1.session_node import SessionNodeResponse
+from kitaru.api_models.v1.session_node import SessionNodeListParams, SessionNodeResponse
 from kitaru.api_models.v1.tag import TagResponse
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import (
@@ -616,6 +616,12 @@ async def test_public_sdk_rejects_malformed_arguments_before_handler() -> None:
         },
         {
             "operation": "list_children",
+            "kind": "session_nodes",
+            "parent_id": str(uuid.uuid4()),
+            "node_type": ["hook"],
+        },
+        {
+            "operation": "list_children",
             "kind": "experiment_run_jobs",
             "parent_id": str(uuid.uuid4()),
             "include_payloads": True,
@@ -864,3 +870,46 @@ async def test_public_activity_preserves_typed_token_usage(
     item = data if kind == "session" else data["items"][0]
     assert item["tokens"] == (usage.model_dump() if usage is not None else None)
     assert item["cost"] == ("0.1250" if kind == "session" else "0.2500")
+
+
+@pytest.mark.parametrize("node_types", [None, ["llm_call", "tool_call"]])
+async def test_public_activity_forwards_session_node_types(
+    node_types: list[str] | None,
+) -> None:
+    """The public tool forwards selected types and preserves unfiltered reads."""
+    client = FakeClient()
+    session_id = uuid.uuid4()
+    calls: list[tuple[uuid.UUID, SessionNodeListParams]] = []
+
+    async def list_nodes(
+        parent_id: uuid.UUID, params: SessionNodeListParams
+    ) -> Page[SessionNodeResponse]:
+        calls.append((parent_id, params))
+        return Page(items=[], next_cursor=None)
+
+    client.sessions.list_nodes = list_nodes
+    server, context = _get_context(client)
+    request: dict[str, object] = {
+        "operation": "list_children",
+        "kind": "session_nodes",
+        "parent_id": str(session_id),
+        "size": 3,
+        "cursor": "node-cursor",
+        "include_payloads": True,
+    }
+    if node_types is not None:
+        request["node_type"] = node_types
+    result = await server.call_tool(
+        "kitaru_activity_read", {"request": request}, context
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.is_error is False
+    assert len(calls) == 1
+    assert calls[0][0] == session_id
+    assert calls[0][1].model_dump(mode="json") == {
+        "size": 3,
+        "cursor": "node-cursor",
+        "include_payloads": True,
+        "node_type": node_types or [],
+    }

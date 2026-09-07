@@ -366,7 +366,17 @@ async def test_ingest_nodes_and_list_nodes(api_client: KitaruAPIClient) -> None:
     assert page.items[0].inputs == {"q": "hi"}
 
 
-async def test_iter_nodes(api_client: KitaruAPIClient) -> None:
+@pytest.mark.parametrize(
+    ("node_types", "expected"),
+    [
+        ([], [0, 1, 2, 3, 4]),
+        ([NodeType.LLM_CALL], [1, 4]),
+        ([NodeType.LLM_CALL, NodeType.TOOL_CALL], [1, 3, 4]),
+    ],
+)
+async def test_iter_nodes(
+    api_client: KitaruAPIClient, node_types: list[NodeType], expected: list[int]
+) -> None:
     """Iterate every node of a session across pages through the SDK."""
     created = await api_client.sessions.create(
         SessionCreateRequest(
@@ -381,7 +391,13 @@ async def test_iter_nodes(api_client: KitaruAPIClient) -> None:
         nodes=[
             SessionNodeCreateRequest(
                 index=index,
-                node_type=NodeType.SPAN,
+                node_type=[
+                    NodeType.SPAN,
+                    NodeType.LLM_CALL,
+                    NodeType.SPAN,
+                    NodeType.TOOL_CALL,
+                    NodeType.LLM_CALL,
+                ][index],
                 name="span",
                 status=NodeStatus.COMPLETED,
                 inputs=None,
@@ -396,7 +412,7 @@ async def test_iter_nodes(api_client: KitaruAPIClient) -> None:
     collected = [
         item.index
         async for item in api_client.sessions.iter_nodes(
-            created.id, SessionNodeListParams(size=2)
+            created.id, SessionNodeListParams(size=2, node_type=node_types)
         )
     ]
-    assert collected == [0, 1, 2, 3, 4]
+    assert collected == expected

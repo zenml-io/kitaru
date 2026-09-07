@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from kitaru.api_models.v1.filter import Filter
+from kitaru.api_models.v1.session_node import NodeType
 from kitaru.mcp.models.common import MCPModel, PageOptions
 
 ActivityKind = Literal[
@@ -41,6 +42,10 @@ class SessionNodesRequest(MCPModel):
     cursor: str | None = None
     size: int = Field(default=20, ge=1, le=100)
     include_payloads: bool = False
+    node_type: list[NodeType] = Field(
+        default_factory=list,
+        description="Match any selected node type; omit to include all.",
+    )
 
 
 class SortedChildrenRequest(PageOptions):

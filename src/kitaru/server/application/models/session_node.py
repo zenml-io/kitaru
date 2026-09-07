@@ -37,6 +37,7 @@ class SessionNodeFilter(ListFilter):
     sortable_fields: ClassVar[frozenset[str]] = frozenset({"index"})
 
     session_id: uuid.UUID
+    node_type: list[NodeType] = Field(default_factory=list)
     include_payloads: bool = False
     sort: str = "index:asc"
 

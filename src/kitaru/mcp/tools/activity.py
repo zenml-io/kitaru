@@ -80,6 +80,7 @@ async def _get_children(
                 cursor=request.cursor,
                 size=request.size,
                 include_payloads=request.include_payloads,
+                node_type=request.node_type,
             ),
         )
     elif request.kind == "experiment_run_jobs":

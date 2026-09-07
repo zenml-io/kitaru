@@ -140,4 +140,5 @@ export interface SessionNodeListParams {
   cursor?: string | null;
   size?: number;
   includePayloads?: boolean;
+  nodeType?: components["schemas"]["NodeType"][];
 }

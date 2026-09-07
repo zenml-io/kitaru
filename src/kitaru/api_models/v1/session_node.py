@@ -113,6 +113,10 @@ class SessionNodeCreateRequest(RequestModel):
 class SessionNodeListParams(CursorParams):
     """Session node list params."""
 
+    node_type: list[NodeType] = Field(
+        default_factory=list,
+        description="Match any selected type; omitted or empty matches all nodes.",
+    )
     include_payloads: bool = Field(
         default=False,
         description="Include reasoning, inputs, outputs, and attributes.",

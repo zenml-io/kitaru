@@ -182,6 +182,7 @@ def session_node_list_params_to_filter(
     """
     return SessionNodeFilter(
         session_id=session_id,
+        node_type=params.node_type,
         include_payloads=params.include_payloads,
         cursor=params.cursor,
         size=params.size,

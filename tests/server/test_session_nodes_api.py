@@ -316,6 +316,60 @@ async def test_list_nodes_pagination_walks_pages(
     assert collected == [0, 1, 2, 3, 4]
 
 
+async def test_list_nodes_filters_types_before_pagination(
+    client: httpx.AsyncClient, session_id: str
+) -> None:
+    """Skip spans while preserving page size, indexes, and hidden parent links."""
+    path = f"/api/v1/sessions/{session_id}/nodes"
+    response = await client.post(
+        path,
+        json={
+            "nodes": [
+                _node(0, node_type="span", name="query"),
+                _node(1, node_type="span", name="HookEventMessage", parent_index=0),
+                _node(2, parent_index=1),
+                _node(3, node_type="span", name="SystemMessage", parent_index=0),
+                _node(
+                    4,
+                    node_type="tool_call",
+                    parent_index=2,
+                    secondary_parent_indexes=[3],
+                ),
+                _node(5, parent_index=0),
+            ]
+        },
+    )
+    assert response.status_code == 200
+    params: dict[str, Any] = {"size": 2, "node_type": ["llm_call", "tool_call"]}
+    response = await client.get(path, params=params)
+    assert response.status_code == 200
+    first = response.json()
+    assert [node["index"] for node in first["items"]] == [2, 4]
+    assert first["items"][0]["parent_index"] == 1
+    assert first["items"][1]["secondary_parent_indexes"] == [3]
+    assert first["next_cursor"] is not None
+    response = await client.get(path, params={**params, "cursor": first["next_cursor"]})
+    assert response.status_code == 200
+    assert [node["index"] for node in response.json()["items"]] == [5]
+    assert response.json()["next_cursor"] is None
+    unfiltered = await client.get(path)
+    assert [node["index"] for node in unfiltered.json()["items"]] == list(range(6))
+    empty = await client.get(path, params={"node_type": "subagent_call"})
+    assert empty.status_code == 200
+    assert empty.json() == {"items": [], "next_cursor": None}
+
+
+async def test_list_nodes_rejects_unknown_node_type(
+    client: httpx.AsyncClient, session_id: str
+) -> None:
+    """Reject invalid types rather than silently returning an unfiltered trace."""
+    response = await client.get(
+        f"/api/v1/sessions/{session_id}/nodes", params={"node_type": "unknown"}
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["type"] == "enum"
+
+
 async def test_get_session_with_nodes_returns_every_node_unpaginated(
     client: httpx.AsyncClient, session_id: str
 ) -> None:

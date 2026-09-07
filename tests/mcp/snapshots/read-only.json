@@ -2580,6 +2580,17 @@
           "title": "FilterOp",
           "type": "string"
         },
+        "NodeType": {
+          "description": "Kind of work a session node records.",
+          "enum": [
+            "llm_call",
+            "tool_call",
+            "subagent_call",
+            "span"
+          ],
+          "title": "NodeType",
+          "type": "string"
+        },
         "NotFilter": {
           "additionalProperties": false,
           "description": "Not filter.",
@@ -2667,6 +2678,14 @@
               "const": "session_nodes",
               "title": "Kind",
               "type": "string"
+            },
+            "node_type": {
+              "description": "Match any selected node type; omit to include all.",
+              "items": {
+                "$ref": "#/$defs/NodeType"
+              },
+              "title": "Node Type",
+              "type": "array"
             },
             "operation": {
               "const": "list_children",

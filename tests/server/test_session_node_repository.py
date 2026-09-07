@@ -330,6 +330,57 @@ async def test_query_walks_pages_by_index(setup: Setup) -> None:
     assert collected == [0, 1, 2, 3, 4]
 
 
+@pytest.mark.parametrize(
+    ("node_type", "expected"),
+    [
+        ([], [0, 1, 2, 3, 4, 5]),
+        ([NodeType.LLM_CALL], [1, 5]),
+        ([NodeType.LLM_CALL, NodeType.TOOL_CALL], [1, 3, 5]),
+        ([NodeType.SUBAGENT_CALL], []),
+    ],
+)
+async def test_query_filters_node_types_before_pagination(
+    setup: Setup, node_type: list[NodeType], expected: list[int]
+) -> None:
+    """Fill pages with matching types while retaining original node indexes."""
+    repository, session_id, make_session_id = setup
+    types = [
+        NodeType.SPAN,
+        NodeType.LLM_CALL,
+        NodeType.SPAN,
+        NodeType.TOOL_CALL,
+        NodeType.SPAN,
+        NodeType.LLM_CALL,
+    ]
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(index, session_id=session_id, node_type=kind)
+            for index, kind in enumerate(types)
+        ],
+    )
+    other_session_id = await make_session_id()
+    await repository.upsert_batch(
+        other_session_id,
+        [_node(0, session_id=other_session_id, node_type=NodeType.LLM_CALL)],
+    )
+    collected: list[int] = []
+    cursor = None
+    for _ in range(len(types) + 1):
+        nodes, cursor = await repository.query(
+            SessionNodeFilter(
+                session_id=session_id, node_type=node_type, size=2, cursor=cursor
+            )
+        )
+        collected.extend(node.index for node in nodes)
+        if cursor is None:
+            break
+        assert len(nodes) == 2
+    else:
+        pytest.fail("Filtered pagination did not terminate")
+    assert collected == expected
+
+
 async def test_query_include_payloads_false_nulls_heavy_columns(
     setup: Setup,
 ) -> None:
