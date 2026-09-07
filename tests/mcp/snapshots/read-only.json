@@ -1328,6 +1328,19 @@
         "ImporterResponse": {
           "description": "Importer response.",
           "properties": {
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "JSON Schema of the connection values this importer reads.",
+              "title": "Connection Schema"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -1422,6 +1435,7 @@
             "provider",
             "logo_url",
             "metadata",
+            "connection_schema",
             "latest_version"
           ],
           "title": "ImporterResponse",
@@ -3057,6 +3071,20 @@
           "additionalProperties": false,
           "description": "API import source.",
           "properties": {
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Connection supplying provider credentials, an omitted value resolves to the provider's default.",
+              "title": "Connection Id"
+            },
             "query": {
               "$ref": "#/$defs/ImportQuery",
               "description": "Importer-defined selection of what to fetch."
@@ -3713,6 +3741,20 @@
               },
               "title": "Analyzers",
               "type": "array"
+            },
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Connection resolved for the import.",
+              "title": "Connection Id"
             },
             "created": {
               "description": "Creation time.",

@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Connection Alembic revision.
 
-Revision ID: 016_connection
-Revises: 015_api_imports
+Revision ID: 017_connection
+Revises: 016_analyzer
 Create Date: 2026-09-07
 
 """
@@ -24,8 +24,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = "016_connection"
-down_revision = "015_api_imports"
+revision = "017_connection"
+down_revision = "016_analyzer"
 branch_labels = None
 depends_on = None
 

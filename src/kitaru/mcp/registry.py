@@ -345,6 +345,8 @@ TOOL_SPECS = (
         analyzers_manage_tool.__doc__ or "",
         _annotations(read_only=False, destructive=False, idempotent=False),
         analyzers_manage_tool,
+    ),
+    ToolSpec(
         "kitaru_connections_manage",
         CapabilityMode.STANDARD,
         connections_manage_tool.__doc__ or "",
