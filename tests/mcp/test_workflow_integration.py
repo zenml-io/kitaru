@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from pydantic import ValidationError
 
+from kitaru.api_models.v1.imports import ApiImportSource, BlobImportSource
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
@@ -100,7 +100,7 @@ async def test_existing_blob_import_uses_four_bounded_preflight_reads() -> None:
         await handle_session_import(
             _get_state(client),
             SessionImportRequest(
-                payload_blob_id=uuid.uuid4(),
+                source=BlobImportSource(blob_id=uuid.uuid4()),
                 importer_id=uuid.uuid4(),
                 importer_version=2,
                 agent_version_id=uuid.uuid4(),
@@ -128,7 +128,7 @@ async def test_session_import_forwards_idempotency_key() -> None:
     await handle_session_import(
         _get_state(client),
         SessionImportRequest(
-            payload_blob_id=uuid.uuid4(),
+            source=BlobImportSource(blob_id=uuid.uuid4()),
             importer_id=uuid.uuid4(),
             importer_version=2,
             agent_version_id=uuid.uuid4(),
@@ -148,7 +148,7 @@ async def test_session_import_forwards_evaluators() -> None:
     await handle_session_import(
         _get_state(client),
         SessionImportRequest(
-            payload_blob_id=uuid.uuid4(),
+            source=BlobImportSource(blob_id=uuid.uuid4()),
             importer_id=uuid.uuid4(),
             importer_version=2,
             agent_version_id=uuid.uuid4(),
@@ -169,7 +169,7 @@ async def test_api_query_import_skips_blob_lookup() -> None:
         await handle_session_import(
             _get_state(client),
             SessionImportRequest(
-                query=query,
+                source=ApiImportSource(query=query),
                 importer_id=uuid.uuid4(),
                 importer_version=2,
                 agent_version_id=uuid.uuid4(),
@@ -186,24 +186,6 @@ async def test_api_query_import_skips_blob_lookup() -> None:
     ]
     assert result["query"] == query
     assert "blob_id" not in result
-
-
-def test_session_import_requires_exactly_one_source() -> None:
-    """Setting both or neither of payload_blob_id and query is rejected."""
-    with pytest.raises(ValidationError, match="exactly one"):
-        SessionImportRequest(
-            importer_id=uuid.uuid4(),
-            importer_version=2,
-            agent_version_id=uuid.uuid4(),
-        )
-    with pytest.raises(ValidationError, match="exactly one"):
-        SessionImportRequest(
-            payload_blob_id=uuid.uuid4(),
-            query={"since": "2026-08-01T00:00:00Z"},
-            importer_id=uuid.uuid4(),
-            importer_version=2,
-            agent_version_id=uuid.uuid4(),
-        )
 
 
 async def test_evaluator_selections_use_name_version_dto_and_cache_parent() -> None:

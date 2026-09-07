@@ -3883,7 +3883,7 @@ async def session_import(
     tag: list[str] | None = None,
     evaluator: list[str] | None = None,
     evaluator_params: list[str] | None = None,
-    media_type: str = "application/octet-stream",
+    media_type: str | None = None,
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,

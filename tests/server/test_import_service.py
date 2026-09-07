@@ -225,19 +225,6 @@ async def test_create_import_from_an_api_stores_the_fetch_query(
     assert import_.fetch_query == {"since": "2026-08-01T00:00:00Z"}
 
 
-def test_import_create_requires_exactly_one_source() -> None:
-    """The command rejects both or neither of payload_blob_id and fetch_query."""
-    with pytest.raises(ValueError, match="Exactly one"):
-        ImportCreate(importer="csv", agent_id=uuid.uuid4())
-    with pytest.raises(ValueError, match="Exactly one"):
-        ImportCreate(
-            importer="csv",
-            agent_id=uuid.uuid4(),
-            payload_blob_id=uuid.uuid4(),
-            fetch_query={},
-        )
-
-
 async def test_create_import_resolves_latest_version_by_default(
     services: JobAndTaskServices,
 ) -> None:

@@ -5847,11 +5847,6 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
-             * Payload Blob Id
-             * @description Blob holding the payload parsed.
-             */
-            payload_blob_id?: string | null;
-            /**
              * Source
              * @description Where the payload comes from.
              */

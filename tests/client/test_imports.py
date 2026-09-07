@@ -28,6 +28,7 @@ from conftest import (
     override_idempotency,
 )
 from kitaru.api_models.v1.imports import (
+    BlobImportSource,
     ImportCreateRequest,
     ImportListParams,
     ImportResponse,
@@ -109,7 +110,8 @@ async def test_create(
     created = await api_client.imports.create(import_request)
     assert isinstance(created, ImportResponse)
     assert created.agent_id == import_request.agent_id
-    assert created.payload_blob_id == import_request.payload_blob_id
+    assert isinstance(created.source, BlobImportSource)
+    assert created.source.blob_id == import_request.payload_blob_id
     assert created.evaluators == [
         EvaluatorConfig(evaluator="accuracy", version=1, params={})
     ]

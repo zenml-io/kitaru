@@ -162,9 +162,6 @@ class ImportResponse(OwnedResponseModel):
         default=None, description="Importer version run."
     )
     source: ImportSource = Field(description="Where the payload comes from.")
-    payload_blob_id: uuid.UUID | None = Field(
-        default=None, description="Blob holding the payload parsed."
-    )
     params: dict[str, JsonValue] = Field(
         description="Parameters passed to the importer."
     )

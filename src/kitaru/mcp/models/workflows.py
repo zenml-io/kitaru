@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import JsonValue
+from kitaru.api_models.v1.imports import ImportSource
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.tag import TagResourceType
@@ -19,8 +20,7 @@ from kitaru.mcp.models.management import EvaluatorSelection
 class SessionImportRequest(MCPModel):
     """Import sessions from an existing payload blob or a provider API selection."""
 
-    payload_blob_id: uuid.UUID | None = None
-    query: dict[str, JsonValue] | None = None
+    source: ImportSource
     importer_id: uuid.UUID
     importer_version: int = Field(ge=1)
     agent_version_id: uuid.UUID
@@ -30,12 +30,6 @@ class SessionImportRequest(MCPModel):
         default=None,
         description=IDEMPOTENCY_KEY_DESCRIPTION,
     )
-
-    @model_validator(mode="after")
-    def _validate_source(self) -> "SessionImportRequest":
-        if (self.payload_blob_id is None) == (self.query is None):
-            raise ValueError("exactly one of payload_blob_id or query is required")
-        return self
 
 
 class EvaluationStart(MCPModel):

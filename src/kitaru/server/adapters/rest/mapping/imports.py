@@ -81,7 +81,6 @@ def import_to_response(import_: Import) -> ImportResponse:
         agent_version_id=import_.agent_version_id,
         importer_version_id=import_.importer_version_id,
         source=source,
-        payload_blob_id=import_.payload_blob_id,
         params=import_.params,
         evaluators=[
             evaluator_config_to_wire(evaluator) for evaluator in import_.evaluators

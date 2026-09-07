@@ -137,7 +137,7 @@ async def test_create_import(
     assert created["agent_id"] == body["agent_id"]
     assert created["agent_version_id"] is None
     assert created["importer_version_id"] == str(version.id)
-    assert created["payload_blob_id"] == body["payload_blob_id"]
+    assert created["source"] == {"type": "blob", "blob_id": body["payload_blob_id"]}
     assert created["params"] == body["params"]
     assert created["evaluators"] == []
     assert created["stats"] is None
@@ -179,7 +179,6 @@ async def test_create_api_import(
     assert response.status_code == 201
     created = response.json()
     assert created["source"] == body["source"]
-    assert created["payload_blob_id"] is None
 
 
 async def test_create_import_accepts_the_deprecated_payload_blob_id(

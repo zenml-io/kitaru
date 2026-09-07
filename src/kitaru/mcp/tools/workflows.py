@@ -4,10 +4,8 @@
 """Session import handler."""
 
 from kitaru.api_models.v1.imports import (
-    ApiImportSource,
     BlobImportSource,
     ImportCreateRequest,
-    ImportSource,
 )
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.workflows import SessionImportRequest
@@ -17,16 +15,12 @@ async def handle_session_import(
     state: MCPServerState, request: SessionImportRequest
 ) -> object:
     """Start one import and return immediately without polling."""
-    source: ImportSource
     identity: dict[str, object]
-    if request.payload_blob_id is not None:
-        blob = await state.client.blobs.get(request.payload_blob_id)
-        source = BlobImportSource(blob_id=blob.id)
+    if isinstance(request.source, BlobImportSource):
+        blob = await state.client.blobs.get(request.source.blob_id)
         identity = {"blob_id": str(blob.id)}
     else:
-        assert request.query is not None
-        source = ApiImportSource(query=request.query)
-        identity = {"query": request.query}
+        identity = {"query": request.source.query}
     importer_version = await state.client.importers.get_version(
         request.importer_id, request.importer_version
     )
@@ -37,7 +31,7 @@ async def handle_session_import(
         version=importer_version.version,
         agent_id=agent_version.agent_id,
         agent_version_id=agent_version.id,
-        source=source,
+        source=request.source,
         params=request.params,
         evaluators=request.evaluators,
     )

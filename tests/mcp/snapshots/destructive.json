@@ -3503,20 +3503,6 @@
               "title": "Params",
               "type": "object"
             },
-            "payload_blob_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Blob holding the payload parsed.",
-              "title": "Payload Blob Id"
-            },
             "source": {
               "description": "Where the payload comes from.",
               "discriminator": {
@@ -8412,6 +8398,49 @@
     "description": "Import sessions from one existing blob and return the queued job.",
     "inputSchema": {
       "$defs": {
+        "ApiImportSource": {
+          "additionalProperties": false,
+          "description": "API import source.",
+          "properties": {
+            "query": {
+              "additionalProperties": true,
+              "description": "Importer-defined selection of what to fetch.",
+              "title": "Query",
+              "type": "object"
+            },
+            "type": {
+              "const": "api",
+              "default": "api",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "title": "ApiImportSource",
+          "type": "object"
+        },
+        "BlobImportSource": {
+          "additionalProperties": false,
+          "description": "Blob import source.",
+          "properties": {
+            "blob_id": {
+              "description": "Blob holding the payload to parse.",
+              "format": "uuid",
+              "title": "Blob Id",
+              "type": "string"
+            },
+            "type": {
+              "const": "blob",
+              "default": "blob",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "blob_id"
+          ],
+          "title": "BlobImportSource",
+          "type": "object"
+        },
         "EvaluatorConfig": {
           "additionalProperties": false,
           "description": "Evaluator config.",
@@ -8491,34 +8520,27 @@
               "title": "Params",
               "type": "object"
             },
-            "payload_blob_id": {
-              "anyOf": [
+            "source": {
+              "discriminator": {
+                "mapping": {
+                  "api": "#/$defs/ApiImportSource",
+                  "blob": "#/$defs/BlobImportSource"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
                 {
-                  "format": "uuid",
-                  "type": "string"
+                  "$ref": "#/$defs/BlobImportSource"
                 },
                 {
-                  "type": "null"
+                  "$ref": "#/$defs/ApiImportSource"
                 }
               ],
-              "default": null,
-              "title": "Payload Blob Id"
-            },
-            "query": {
-              "anyOf": [
-                {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Query"
+              "title": "Source"
             }
           },
           "required": [
+            "source",
             "importer_id",
             "importer_version",
             "agent_version_id"

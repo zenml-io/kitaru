@@ -132,7 +132,6 @@ class StubImportClient:
             agent_version_id=self.agent_version.id,
             importer_version_id=self.importer_version.id,
             source=BlobImportSource(blob_id=self.blob.id),
-            payload_blob_id=self.blob.id,
             params={},
             evaluators=[],
             created=now,
@@ -1117,7 +1116,7 @@ async def test_session_import_api_query_merges_options_and_uploads_nothing() -> 
         importer="jsonl@2",
         agent="assistant@3",
         params=None,
-        media_type="application/octet-stream",
+        media_type=None,
         wait=False,
         interval=None,
         timeout=None,
@@ -1152,7 +1151,7 @@ async def test_session_import_query_clash_rejected_before_remote_call() -> None:
             importer="jsonl@2",
             agent="assistant@3",
             params=None,
-            media_type="application/octet-stream",
+            media_type=None,
             wait=False,
             interval=None,
             timeout=None,
@@ -1193,6 +1192,29 @@ async def test_session_import_rejects_path_combined_with_since(
     assert client.uploads == []
 
 
+async def test_session_import_rejects_media_type_without_path() -> None:
+    """--media-type only applies to an uploaded file."""
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            None,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type="application/jsonl",
+            wait=False,
+            interval=None,
+            timeout=None,
+            since="7d",
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []
+
+
 async def test_session_import_rejects_neither_path_nor_api_selection() -> None:
     """Omitting both FILE and every API selection option is rejected."""
     client = StubImportClient()
@@ -1204,7 +1226,7 @@ async def test_session_import_rejects_neither_path_nor_api_selection() -> None:
             importer="jsonl@2",
             agent="assistant@3",
             params=None,
-            media_type="application/octet-stream",
+            media_type=None,
             wait=False,
             interval=None,
             timeout=None,

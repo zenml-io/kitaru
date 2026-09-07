@@ -320,7 +320,7 @@ async def import_sessions(
     tags: list[str] | None = None,
     evaluators: Sequence[str] | None = None,
     evaluator_params: Sequence[str] | None = None,
-    media_type: str,
+    media_type: str | None,
     wait: bool,
     interval: float | None,
     timeout: float | None,
@@ -375,6 +375,11 @@ async def import_sessions(
             "invalid_arguments",
             "FILE cannot be combined with --since, --until, --trace-id, or --query.",
         )
+    if path is None and media_type is not None:
+        raise CLIError(
+            "invalid_arguments",
+            "--media-type requires FILE.",
+        )
     if path is None and api_query is None:
         raise CLIError(
             "invalid_arguments",
@@ -412,7 +417,9 @@ async def import_sessions(
     if path is not None:
         assert content is not None
         blob = await client.blobs.upload(
-            content, media_type=media_type, filename=path.name
+            content,
+            media_type=media_type or "application/octet-stream",
+            filename=path.name,
         )
         blob_identity = _blob_metadata(blob)
         identity["blob"] = blob_identity

@@ -3688,19 +3688,6 @@
             "title": "Params",
             "type": "object"
           },
-          "payload_blob_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Blob holding the payload parsed.",
-            "title": "Payload Blob Id"
-          },
           "source": {
             "description": "Where the payload comes from.",
             "discriminator": {
