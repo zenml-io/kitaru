@@ -53,6 +53,8 @@ def test_route_manifest_is_registered() -> None:
         "/api/v1/cohorts",
         "/api/v1/cohorts/{cohort_id}",
         "/api/v1/cohorts/{cohort_id}/versions",
+        "/api/v1/connections",
+        "/api/v1/connections/{connection_id}",
         "/api/v1/device_authorization",
         "/api/v1/devices",
         "/api/v1/devices/{device_id}",

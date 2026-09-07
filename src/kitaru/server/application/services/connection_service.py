@@ -136,6 +136,21 @@ class ConnectionService:
         _ = actor
         return await self._repository.query(connection_filter)
 
+    async def get_secret_keys(self, connection: Connection) -> list[str]:
+        """Get the key names held by a connection's internal secret.
+
+        Args:
+            connection: Stored connection.
+
+        Raises:
+            SecretNotFound: The connection's internal secret is gone.
+
+        Returns:
+            Sorted key names, without their values.
+        """
+        secret = await self._secrets.get(connection.secret_id)
+        return sorted(secret.values)
+
     async def update_connection(
         self,
         connection_id: uuid.UUID,

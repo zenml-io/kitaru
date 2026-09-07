@@ -38,6 +38,10 @@ class ImporterCreateRequest(RequestModel):
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict, description="Arbitrary metadata."
     )
+    connection_schema: dict[str, JsonValue] | None = Field(
+        default=None,
+        description="JSON Schema of the connection values this importer reads.",
+    )
 
 
 class ImporterUpdateRequest(RequestModel):
@@ -49,6 +53,9 @@ class ImporterUpdateRequest(RequestModel):
     logo_url: str | None = Field(default=None, description="New logo URL.")
     metadata: dict[str, JsonValue] | None = Field(
         default=None, description="New metadata."
+    )
+    connection_schema: dict[str, JsonValue] | None = Field(
+        default=None, description="New connection schema."
     )
 
 
@@ -68,6 +75,9 @@ class ImporterResponse(TimestampedResponseModel):
     provider: str | None = Field(description="Source system this importer reads.")
     logo_url: str | None = Field(description="Importer logo URL.")
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
+    connection_schema: dict[str, JsonValue] | None = Field(
+        description="JSON Schema of the connection values this importer reads."
+    )
     latest_version: int = Field(
         description="Highest version number created for this importer."
     )

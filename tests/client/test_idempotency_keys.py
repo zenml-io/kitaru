@@ -76,6 +76,7 @@ MAPPING = {
     ),
     ("POST", "/api/v1/tags"): ("tags", "create"),
     ("POST", "/api/v1/secrets"): ("secrets", "create"),
+    ("POST", "/api/v1/connections"): ("connections", "create"),
     ("POST", "/api/v1/service-accounts"): ("service_accounts", "create"),
     ("POST", "/api/v1/users"): ("users", "create"),
 }
