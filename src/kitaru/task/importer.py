@@ -146,17 +146,21 @@ class ImportedSession(BaseModel):
 
 ImportedItem = ImportedSession | ImportFailure
 
-Parser = Callable[[bytes, dict[str, Any]], Iterator[ImportedItem]]
+Parser = Callable[
+    [bytes, dict[str, Any]], Iterator[ImportedItem] | AsyncIterator[ImportedItem]
+]
 
-Fetcher = Callable[[dict[str, Any]], AsyncIterator[bytes]]
+Fetcher = Callable[[dict[str, Any]], Iterator[bytes] | AsyncIterator[bytes]]
 
 
 @runtime_checkable
 class Importer(Protocol):
     """Importer object."""
 
-    def parse(self, payload: bytes, params: dict[str, Any]) -> Iterator[ImportedItem]:
-        """Parse one payload into imported items."""
+    def parse(
+        self, payload: bytes, params: dict[str, Any]
+    ) -> Iterator[ImportedItem] | AsyncIterator[ImportedItem]:
+        """Parse one payload into imported items, sync or async."""
         ...
 
 
@@ -164,8 +168,8 @@ class Importer(Protocol):
 class FetchingImporter(Importer, Protocol):
     """Importer object that also fetches payloads from a provider API."""
 
-    def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
-        """Fetch payloads matching a query."""
+    def fetch(self, query: dict[str, Any]) -> Iterator[bytes] | AsyncIterator[bytes]:
+        """Fetch payloads matching a query, sync or async."""
         ...
 
 
@@ -259,9 +263,26 @@ async def retry_rate_limited(
             await asyncio.sleep(retry_after)
 
 
-def call_parser(
+async def _advance(iterator: Iterator[T] | AsyncIterator[T]) -> T:
+    """Advance a sync or async iterator by one item.
+
+    Raises:
+        StopAsyncIteration: The iterator is exhausted.
+
+    Returns:
+        The next item.
+    """
+    if isinstance(iterator, AsyncIterator):
+        return await anext(iterator)
+    try:
+        return next(iterator)
+    except StopIteration:
+        raise StopAsyncIteration from None
+
+
+async def call_parser(
     parser: Parser, payload: bytes, params: dict[str, Any]
-) -> Iterator[ImportedItem]:
+) -> AsyncIterator[ImportedItem]:
     """Advance a parser one item at a time, wrapping any failure.
 
     Wrapping only the parser call would protect nothing, since a generator
@@ -269,7 +290,7 @@ def call_parser(
     iteration instead.
 
     Args:
-        parser: Parser callable.
+        parser: Parser callable, sync or async.
         payload: Raw payload bytes.
         params: Parameters passed to the parser.
 
@@ -281,15 +302,16 @@ def call_parser(
         Imported items.
     """
     try:
-        iterator = iter(parser(payload, params))
+        result = parser(payload, params)
+        iterator = result if isinstance(result, AsyncIterator) else iter(result)
     except Exception as exc:
         raise SessionImportError(
             f"Parser raised an error: {type(exc).__name__}: {exc}"
         ) from exc
     while True:
         try:
-            item = next(iterator)
-        except StopIteration:
+            item = await _advance(iterator)
+        except StopAsyncIteration:
             return
         except Exception as exc:
             raise SessionImportError(
@@ -306,12 +328,12 @@ def call_parser(
 async def call_fetcher(fetcher: Fetcher, query: dict[str, Any]) -> AsyncIterator[bytes]:
     """Advance a fetcher one payload at a time, wrapping any failure.
 
-    Wrapping only the fetcher call would protect nothing, since an async
-    generator function runs no code until iterated. This wraps every step of
-    the iteration instead.
+    Wrapping only the fetcher call would protect nothing, since a generator
+    function runs no code until iterated. This wraps every step of the
+    iteration instead.
 
     Args:
-        fetcher: Fetcher callable.
+        fetcher: Fetcher callable, sync or async.
         query: Importer-defined selection of what to fetch.
 
     Raises:
@@ -322,14 +344,15 @@ async def call_fetcher(fetcher: Fetcher, query: dict[str, Any]) -> AsyncIterator
         Fetched payloads.
     """
     try:
-        iterator = fetcher(query)
+        result = fetcher(query)
+        iterator = result if isinstance(result, AsyncIterator) else iter(result)
     except Exception as exc:
         raise SessionImportError(
             f"Fetcher raised an error: {type(exc).__name__}: {exc}"
         ) from exc
     while True:
         try:
-            payload = await anext(iterator)
+            payload = await _advance(iterator)
         except StopAsyncIteration:
             return
         except Exception as exc:
@@ -609,7 +632,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
 
     try:
         async for payload in _iter_payloads(details, fetcher):
-            for item in call_parser(parser, payload, details.params):
+            async for item in call_parser(parser, payload, details.params):
                 line += 1
                 if isinstance(item, ImportFailure):
                     _record_failure(item)

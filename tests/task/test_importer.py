@@ -80,7 +80,7 @@ async def task_app() -> AsyncGenerator[TaskAppFixture, None]:
         yield value
 
 
-def test_call_parser_is_lazy() -> None:
+async def test_call_parser_is_lazy() -> None:
     """Not advance the parser until the caller iterates."""
     started = False
 
@@ -91,11 +91,11 @@ def test_call_parser_is_lazy() -> None:
 
     iterator = call_parser(parser, b"", {})
     assert started is False
-    next(iterator)
+    await anext(iterator)
     assert started is True
 
 
-def test_call_parser_wraps_start_failure() -> None:
+async def test_call_parser_wraps_start_failure() -> None:
     """Wrap an exception raised while constructing the parser's iterator."""
 
     def parser(payload: bytes, params: dict) -> Any:
@@ -103,10 +103,10 @@ def test_call_parser_wraps_start_failure() -> None:
         yield  # pragma: no cover
 
     with pytest.raises(SessionImportError, match="bad payload"):
-        next(call_parser(parser, b"", {}))
+        await anext(call_parser(parser, b"", {}))
 
 
-def test_call_parser_wraps_mid_stream_crash() -> None:
+async def test_call_parser_wraps_mid_stream_crash() -> None:
     """Yield items until the parser crashes, then wrap the crash."""
 
     def parser(payload: bytes, params: dict) -> Any:
@@ -114,20 +114,32 @@ def test_call_parser_wraps_mid_stream_crash() -> None:
         raise ValueError("boom")
 
     iterator = call_parser(parser, b"", {})
-    first = next(iterator)
+    first = await anext(iterator)
     assert isinstance(first, ImportedSession)
     with pytest.raises(SessionImportError, match="boom"):
-        next(iterator)
+        await anext(iterator)
 
 
-def test_call_parser_rejects_unknown_item() -> None:
+async def test_call_parser_rejects_unknown_item() -> None:
     """Raise SessionImportError when the parser yields an unsupported item type."""
 
     def parser(payload: bytes, params: dict) -> Any:
         yield {"not": "a imported item"}
 
     with pytest.raises(SessionImportError, match="ImportedSession"):
-        next(call_parser(parser, b"", {}))
+        await anext(call_parser(parser, b"", {}))
+
+
+async def test_call_parser_accepts_an_async_parser() -> None:
+    """Advance an async parser with anext instead of next."""
+
+    async def parser(payload: bytes, params: dict) -> Any:
+        yield imported_session("a")
+        yield imported_session("b")
+
+    items = [item async for item in call_parser(parser, b"", {})]
+
+    assert [item.external_id for item in items] == ["a", "b"]
 
 
 async def test_call_fetcher_is_lazy() -> None:
@@ -177,6 +189,18 @@ async def test_call_fetcher_rejects_non_bytes_item() -> None:
 
     with pytest.raises(SessionImportError, match="not bytes"):
         await anext(call_fetcher(fetcher, {}))
+
+
+async def test_call_fetcher_accepts_a_sync_fetcher() -> None:
+    """Advance a sync fetcher with next instead of anext."""
+
+    def fetcher(query: dict) -> Any:
+        yield b"first"
+        yield b"second"
+
+    payloads = [payload async for payload in call_fetcher(fetcher, {})]
+
+    assert payloads == [b"first", b"second"]
 
 
 def _script_details(entrypoint: str) -> ImportTaskDetails:
@@ -898,6 +922,44 @@ class _Importer:
 importer = _Importer()
 """
 
+_ASYNC_PARSER_SCRIPT = """
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.task.importer import ImportedSession
+
+
+async def parse(payload: bytes, params: dict):
+    external_id = payload.decode()
+    yield ImportedSession(
+        status=SessionStatus.COMPLETED,
+        name=external_id,
+        inputs=None,
+        outputs=None,
+        error=None,
+        started_at=None,
+        ended_at=None,
+        external_id=external_id,
+        metadata={},
+        nodes=[],
+    )
+
+
+async def fetch(query: dict):
+    for trace_id in query["trace_ids"]:
+        yield trace_id.encode()
+
+
+class _Importer:
+    def parse(self, payload, params):
+        return parse(payload, params)
+
+    async def fetch(self, query):
+        async for payload in fetch(query):
+            yield payload
+
+
+importer = _Importer()
+"""
+
 _API_FETCH_CRASHING_SCRIPT = """
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.task.importer import ImportedSession
@@ -945,6 +1007,27 @@ async def test_run_with_api_source_parses_every_fetched_payload(
     task_id = await _create_api_source_task(
         task_app,
         _API_FETCH_PARSER_SCRIPT,
+        tmp_path,
+        monkeypatch,
+        query={"trace_ids": ["a", "b", "c"]},
+    )
+
+    await run(task_app.client, str(task_id))
+
+    written = ImportStats.model_validate(json.loads(result_path.read_text()))
+    assert written.created == 3
+    assert written.failed == 0
+
+
+async def test_run_with_api_source_and_an_async_parser(
+    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run the import flow to completion with an async parser."""
+    result_path = tmp_path / "result.json"
+    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
+    task_id = await _create_api_source_task(
+        task_app,
+        _ASYNC_PARSER_SCRIPT,
         tmp_path,
         monkeypatch,
         query={"trace_ids": ["a", "b", "c"]},
