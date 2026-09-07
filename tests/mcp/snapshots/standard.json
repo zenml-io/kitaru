@@ -2863,6 +2863,26 @@
     "name": "kitaru_activity_read",
     "outputSchema": {
       "$defs": {
+        "ApiImportSource": {
+          "additionalProperties": false,
+          "description": "API import source.",
+          "properties": {
+            "query": {
+              "additionalProperties": true,
+              "description": "Importer-defined selection of what to fetch.",
+              "title": "Query",
+              "type": "object"
+            },
+            "type": {
+              "const": "api",
+              "default": "api",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "title": "ApiImportSource",
+          "type": "object"
+        },
         "BaselineEvaluationMode": {
           "description": "Baseline evaluation mode.",
           "enum": [
@@ -2872,6 +2892,29 @@
           ],
           "title": "BaselineEvaluationMode",
           "type": "string"
+        },
+        "BlobImportSource": {
+          "additionalProperties": false,
+          "description": "Blob import source.",
+          "properties": {
+            "blob_id": {
+              "description": "Blob holding the payload to parse.",
+              "format": "uuid",
+              "title": "Blob Id",
+              "type": "string"
+            },
+            "type": {
+              "const": "blob",
+              "default": "blob",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "blob_id"
+          ],
+          "title": "BlobImportSource",
+          "type": "object"
         },
         "EvaluationDataType": {
           "description": "Data type an evaluation result carries.",
@@ -3487,10 +3530,37 @@
               "type": "object"
             },
             "payload_blob_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
               "description": "Blob holding the payload parsed.",
-              "format": "uuid",
-              "title": "Payload Blob Id",
-              "type": "string"
+              "title": "Payload Blob Id"
+            },
+            "source": {
+              "description": "Where the payload comes from.",
+              "discriminator": {
+                "mapping": {
+                  "api": "#/$defs/ApiImportSource",
+                  "blob": "#/$defs/BlobImportSource"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/BlobImportSource"
+                },
+                {
+                  "$ref": "#/$defs/ApiImportSource"
+                }
+              ],
+              "title": "Source"
             },
             "stats": {
               "anyOf": [
@@ -3517,7 +3587,7 @@
             "owner_id",
             "id",
             "agent_id",
-            "payload_blob_id",
+            "source",
             "params",
             "evaluators"
           ],

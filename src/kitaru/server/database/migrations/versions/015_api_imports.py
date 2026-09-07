@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """API imports Alembic revision.
 
-Revision ID: 014_api_imports
-Revises: 013_import
+Revision ID: 015_api_imports
+Revises: 014_evaluation_invocation_id
 Create Date: 2026-09-04
 
 """
@@ -24,8 +24,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = "014_api_imports"
-down_revision = "013_import"
+revision = "015_api_imports"
+down_revision = "014_evaluation_invocation_id"
 branch_labels = None
 depends_on = None
 
