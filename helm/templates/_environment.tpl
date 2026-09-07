@@ -94,6 +94,9 @@ ephemeral_worker__modal__token_id: {{ .tokenID | quote }}
 {{- if .appName }}
 ephemeral_worker__modal__app_name: {{ .appName | quote }}
 {{- end }}
+{{- if .environment }}
+ephemeral_worker__modal__environment: {{ .environment | quote }}
+{{- end }}
 {{- if .cpu }}
 ephemeral_worker__modal__cpu: {{ .cpu | quote }}
 {{- end }}
