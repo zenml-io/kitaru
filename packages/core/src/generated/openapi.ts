@@ -6101,7 +6101,7 @@ export interface components {
             agent_version_id?: string | null;
             /**
              * Analyzers
-             * @description Analyzers run against every imported session.
+             * @description Analyzers run across the imported sessions. The server adds kitaru/post-import-insights when it is not explicitly configured.
              */
             analyzers?: components["schemas"]["AnalyzerConfig"][];
             /**

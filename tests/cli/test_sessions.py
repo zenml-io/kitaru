@@ -1158,6 +1158,35 @@ def test_terminal_import_rejects_missing_or_malformed_completed_result(
     assert error.value.kind == "internal_error"
 
 
+@pytest.mark.parametrize("extra_kind", [TaskKind.ANALYZER, TaskKind.EVALUATOR])
+@pytest.mark.parametrize("importer_first", [True, False])
+def test_terminal_import_accepts_followup_tasks(
+    extra_kind: TaskKind, importer_first: bool
+) -> None:
+    """Read importer statistics even when a job includes follow-up tasks."""
+    job = _job(JobStatus.COMPLETED)
+    importer = _task(job, result={"created": 3, "skipped": 0, "failed": 0})
+    extra = _task(job, kind=extra_kind, result=[])
+    tasks = [importer, extra] if importer_first else [extra, importer]
+
+    result = sessions._terminal_import_result(job, tasks, identity={})
+
+    assert result.item["task"]["id"] == str(importer.id)
+    assert result.item["stats"]["created"] == 3
+
+
+@pytest.mark.parametrize("importer_count", [0, 2])
+def test_terminal_import_requires_exactly_one_importer(importer_count: int) -> None:
+    """Follow-up tasks do not hide missing or duplicate importer tasks."""
+    job = _job(JobStatus.COMPLETED)
+    tasks = [_task(job, kind=TaskKind.ANALYZER, result=[])] + [
+        _task(job, result={"created": 3, "skipped": 0, "failed": 0})
+        for _ in range(importer_count)
+    ]
+    with pytest.raises(CLIError, match="exactly one importer task"):
+        sessions._terminal_import_result(job, tasks, identity={})
+
+
 @pytest.mark.parametrize(
     "filter_value", ["not-json", '{"or": []}', '{"field": "node_type"}']
 )
