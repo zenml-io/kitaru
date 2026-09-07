@@ -33,6 +33,7 @@ class FakeResponses:
         self.parsed = parsed
         self.response_id = response_id
         self.response_model = response_model
+        self.has_usage = True
         self.kwargs: dict[str, object] | None = None
 
     async def parse(self, **kwargs):
@@ -40,7 +41,9 @@ class FakeResponses:
         return SimpleNamespace(
             id=self.response_id,
             model=self.response_model,
-            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5)
+            if self.has_usage
+            else None,
             output_parsed=self.parsed,
         )
 
@@ -79,13 +82,15 @@ def test_missing_credential_fails_closed(monkeypatch) -> None:
         OpenAIInsightGenerator()
 
 
-async def test_openai_request_is_bounded_and_not_stored(monkeypatch) -> None:
+@pytest.mark.parametrize("has_usage", [False, True])
+async def test_openai_request_is_bounded_and_not_stored(monkeypatch, has_usage) -> None:
     plan = AnalystPlan(
         selected_candidate_ids=["candidate"],
         recommended_candidate_id="candidate",
         rationale="Useful.",
     )
     responses = FakeResponses(plan)
+    responses.has_usage = has_usage
     constructed = {}
 
     class FakeAsyncOpenAI:
@@ -95,7 +100,9 @@ async def test_openai_request_is_bounded_and_not_stored(monkeypatch) -> None:
 
     monkeypatch.setattr(
         "kitaru.insights.openai_generator.importlib.import_module",
-        lambda name: SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI),
+        lambda name: SimpleNamespace(
+            AsyncOpenAI=FakeAsyncOpenAI, APITimeoutError=TimeoutError
+        ),
     )
     generator = OpenAIInsightGenerator(api_key="test-secret")
     result = await generator.analyze(
@@ -113,6 +120,8 @@ async def test_openai_request_is_bounded_and_not_stored(monkeypatch) -> None:
     assert responses.kwargs["text_format"] is AnalystPlan
     assert "test-secret" not in repr(generator)
     assert result.receipt.request_id == "resp_1"
+    assert result.receipt.input_tokens == (10 if has_usage else None)
+    assert result.receipt.output_tokens == (5 if has_usage else None)
 
 
 @pytest.mark.parametrize(
@@ -147,7 +156,9 @@ async def test_malformed_provider_receipt_strings_are_omitted(
 
     monkeypatch.setattr(
         "kitaru.insights.openai_generator.importlib.import_module",
-        lambda name: SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI),
+        lambda name: SimpleNamespace(
+            AsyncOpenAI=FakeAsyncOpenAI, APITimeoutError=TimeoutError
+        ),
     )
     generator = OpenAIInsightGenerator(api_key="test-secret")
 
@@ -183,7 +194,9 @@ async def test_valid_unicode_provider_receipt_strings_are_preserved(
 
     monkeypatch.setattr(
         "kitaru.insights.openai_generator.importlib.import_module",
-        lambda name: SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI),
+        lambda name: SimpleNamespace(
+            AsyncOpenAI=FakeAsyncOpenAI, APITimeoutError=TimeoutError
+        ),
     )
     generator = OpenAIInsightGenerator(api_key="test-secret")
 

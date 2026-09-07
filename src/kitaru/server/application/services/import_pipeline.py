@@ -45,8 +45,8 @@ async def record_import_outcome(
     tasks are appended only for a completed import naming evaluators or
     analyzers, skipping sessions still in progress: one evaluator task per
     imported session and evaluator, and one analysis task per analyzer
-    scoped to the import. The built-in post-import analyzer also runs when
-    no session is evaluatable, so it can complete without findings.
+    scoped to the import. Analyzers also run when no session is evaluatable,
+    so they can complete without findings.
     Inserts them without locking the job row. The
     completing task's own transition settles the job afterward, in the same
     transaction, and its drained scan reads every task including these, so
@@ -75,12 +75,7 @@ async def record_import_outcome(
     ):
         return
     sessions = []
-    # The built-in always runs; only evaluators and custom analyzers need
-    # session eligibility to determine which tasks to create.
-    if import_.evaluators or any(
-        analyzer.analyzer != "kitaru/post-import-insights"
-        for analyzer in import_.analyzers
-    ):
+    if import_.evaluators:
         membership = FilterCondition(
             field="import_id", op=FilterOp.EQ, value=import_.id
         )
@@ -90,14 +85,12 @@ async def record_import_outcome(
                 include_payloads=False,
             )
         )
-    evaluatable = False
     fan_out_tasks: list[Task] = []
     for session in sessions:
         try:
             session.check_evaluate()
         except SessionNotEvaluatable:
             continue
-        evaluatable = True
         for evaluator in import_.evaluators:
             fan_out_tasks.append(
                 EvaluationTask(
@@ -109,8 +102,6 @@ async def record_import_outcome(
                 )
             )
     for analyzer in import_.analyzers:
-        if not evaluatable and analyzer.analyzer != "kitaru/post-import-insights":
-            continue
         fan_out_tasks.append(
             AnalysisTask(
                 job_id=task.job_id,

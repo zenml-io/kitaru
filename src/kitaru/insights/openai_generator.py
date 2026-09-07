@@ -48,7 +48,7 @@ class OpenAIInsightGenerator:
                 "OpenAI credentials are required for model-backed insights"
             )
         module: Any = importlib.import_module("openai")
-        self._timeout_errors = _timeout_error_types(module)
+        self._timeout_errors = (TimeoutError, module.APITimeoutError)
         self._client: Any = module.AsyncOpenAI(api_key=credential, max_retries=0)
 
     def __repr__(self) -> str:
@@ -148,15 +148,15 @@ class OpenAIInsightGenerator:
             raise OpenAIInsightGenerationError(
                 f"{stage} returned no usable structured output"
             )
-        usage = getattr(response, "usage", None)
+        usage = response.usage
         return ModelStageResponse(
             value=parsed,
             receipt=ProviderReceipt(
                 stage=stage,
-                request_id=_bounded_string(getattr(response, "id", None)),
-                model=_bounded_string(getattr(response, "model", None)),
-                input_tokens=_nonnegative_int(getattr(usage, "input_tokens", None)),
-                output_tokens=_nonnegative_int(getattr(usage, "output_tokens", None)),
+                request_id=_bounded_string(response.id),
+                model=_bounded_string(response.model),
+                input_tokens=_nonnegative_int(usage.input_tokens) if usage else None,
+                output_tokens=_nonnegative_int(usage.output_tokens) if usage else None,
                 latency_ms=int((time.monotonic() - started) * 1000),
                 outcome="succeeded",
             ),
@@ -172,19 +172,6 @@ def _bounded_string(value: object) -> str | None:
     except UnicodeEncodeError:
         return None
     return value
-
-
-def _timeout_error_types(module: Any) -> tuple[type[Exception], ...]:
-    """Resolve optional SDK timeout types without importing OpenAI eagerly."""
-    timeout_types: list[type[Exception]] = [TimeoutError]
-    provider_timeout = getattr(module, "APITimeoutError", None)
-    if (
-        isinstance(provider_timeout, type)
-        and issubclass(provider_timeout, Exception)
-        and provider_timeout not in timeout_types
-    ):
-        timeout_types.append(provider_timeout)
-    return tuple(timeout_types)
 
 
 def _nonnegative_int(value: object) -> int | None:

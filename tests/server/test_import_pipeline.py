@@ -457,32 +457,12 @@ async def test_in_progress_session_does_not_block_the_analysis_task(
     assert analysis_task.import_id == import_.id
 
 
-async def test_import_whose_sessions_are_all_in_progress_appends_no_analysis_task(
-    services: ReplayServices,
-) -> None:
-    """An import whose sessions are all in progress appends no analysis task."""
-    analyzer = await _analyzer(services, "trends")
-    import_, import_task = await _import_with_task(services, [], [analyzer])
-    await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
-    worker = await create_worker(services.workers, ACTOR.account.id)
-
-    (running,) = await _claim_and_start(services, worker, 1)
-    await _finish(
-        services,
-        worker,
-        running,
-        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
-    )
-
-    assert await _analysis_tasks(services, import_task.job_id) == []
-
-
 @pytest.mark.parametrize("in_progress", [False, True])
-async def test_builtin_analysis_runs_without_eligible_sessions(
+async def test_all_analyzers_run_without_eligible_sessions(
     services: ReplayServices,
     in_progress: bool,
 ) -> None:
-    """Complete default analysis when the import has no finished sessions."""
+    """Every analyzer can complete without findings when no sessions are finished."""
     analyzer = await _analyzer(services, "kitaru/post-import-insights")
     custom = await _analyzer(services, "trends")
     import_, import_task = await _import_with_task(services, [], [analyzer, custom])
@@ -496,16 +476,28 @@ async def test_builtin_analysis_runs_without_eligible_sessions(
         running,
         TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
     )
-    (analysis_task,) = await _analysis_tasks(services, import_task.job_id)
-    assert analysis_task.plugin_version_id == analyzer.analyzer_version_id
-    assert analysis_task.import_id == import_.id
+    analysis_tasks = await _analysis_tasks(services, import_task.job_id)
+    assert {task.plugin_version_id for task in analysis_tasks} == {
+        analyzer.analyzer_version_id,
+        custom.analyzer_version_id,
+    }
+    assert all(task.import_id == import_.id for task in analysis_tasks)
+    for task in await _claim_and_start(services, worker, 2):
+        await _finish(
+            services,
+            worker,
+            task,
+            TaskUpdate(status=TaskStatus.COMPLETED, result=[]),
+        )
+    assert (await services.jobs.get(import_task.job_id)).status is JobStatus.COMPLETED
 
 
-async def test_builtin_only_skips_session_listing(
-    services: ReplayServices, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("name", ["kitaru/post-import-insights", "trends"])
+async def test_analyzer_only_import_skips_session_listing(
+    services: ReplayServices, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    """Default analysis scheduling needs no scan of imported sessions."""
-    analyzer = await _analyzer(services, "kitaru/post-import-insights")
+    """Analysis scheduling needs no scan of imported sessions."""
+    analyzer = await _analyzer(services, name)
     import_, import_task = await _import_with_task(services, [], [analyzer])
     await _imported_session(services, import_)
     worker = await create_worker(services.workers, ACTOR.account.id)
