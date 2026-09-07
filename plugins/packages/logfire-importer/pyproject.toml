@@ -29,7 +29,7 @@ dependencies = [
 [project.optional-dependencies]
 adapter = [
     "httpx>=0.27,<1",
-    "logfire>=4.35,<5",
+    "logfire>=4.35,<6",
 ]
 
 [project.urls]
