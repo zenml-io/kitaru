@@ -26,6 +26,7 @@ from worker_coverage_cases import COVERAGE_CASES, CoverageCase, CoverageIds
 
 from conftest import (
     UNSCOPED_WORKER_SCOPE,
+    FakeImportRepository,
     FakeJobRepository,
     FakeTaskRepository,
     create_job,
@@ -50,6 +51,7 @@ from kitaru.server.adapters.db.repositories.agent_version_repository import (
     SQLAgentVersionRepository,
 )
 from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.import_repository import SQLImportRepository
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
@@ -61,6 +63,7 @@ from kitaru.server.adapters.db.repositories.task_repository import SQLTaskReposi
 from kitaru.server.adapters.db.repositories.worker_repository import (
     SQLWorkerRepository,
 )
+from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.task import TaskFilter
@@ -68,6 +71,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.blob import Blob, BlobStorageBackend
+from kitaru.server.domain.imports import Import
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 from kitaru.server.domain.session import Session
@@ -88,7 +92,10 @@ class Setup(NamedTuple):
 
     tasks: TaskRepository
     jobs: JobRepository
+    imports: ImportRepository
     owner_id: uuid.UUID
+    agent_id: uuid.UUID
+    blob_id: uuid.UUID
     job_id: uuid.UUID
     agent_version_id: uuid.UUID
     agent_version_id_2: uuid.UUID
@@ -158,7 +165,10 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
     return Setup(
         tasks=SQLTaskRepository(session),
         jobs=SQLJobRepository(session),
+        imports=SQLImportRepository(session),
         owner_id=owner.id,
+        agent_id=agent.id,
+        blob_id=code_blob.id,
         job_id=job.id,
         agent_version_id=agent_version.id,
         agent_version_id_2=agent_version_2.id,
@@ -174,14 +184,18 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
     """Provide each task repository implementation with a ready job to attach to."""
     if request.param == "fake":
         jobs = FakeJobRepository()
-        tasks = FakeTaskRepository()
+        imports = FakeImportRepository()
+        tasks = FakeTaskRepository(imports=imports)
         tasks.jobs = jobs
         owner_id = uuid.uuid4()
         job = await create_job(jobs, owner_id)
         yield Setup(
             tasks=tasks,
             jobs=jobs,
+            imports=imports,
             owner_id=owner_id,
+            agent_id=uuid.uuid4(),
+            blob_id=uuid.uuid4(),
             job_id=job.id,
             agent_version_id=uuid.uuid4(),
             agent_version_id_2=uuid.uuid4(),
@@ -389,6 +403,67 @@ async def test_claim_pending_kind_filter(setup: Setup) -> None:
     )
     assert [task.id for task in claimed] == [import_task.id]
     assert agent_task.id != import_task.id
+
+
+@pytest.mark.parametrize("claims_everything", [True, False])
+@pytest.mark.parametrize("optional_source_selector", [True, False])
+async def test_claim_excludes_unlabeled_api_imports_before_limit(
+    setup: Setup, claims_everything: bool, optional_source_selector: bool
+) -> None:
+    """Legacy claims skip old API imports, keeping blob tasks and queue order."""
+    api_import = await setup.imports.create(
+        Import(owner_id=setup.owner_id, agent_id=setup.agent_id, fetch_query={})
+    )
+    blob_import = await setup.imports.create(
+        Import(
+            owner_id=setup.owner_id,
+            agent_id=setup.agent_id,
+            payload_blob_id=setup.blob_id,
+        )
+    )
+    api_task = await setup.tasks.create(
+        ImportTask(job_id=setup.job_id, import_id=api_import.id)
+    )
+    blob_task = await setup.tasks.create(
+        ImportTask(job_id=setup.job_id, import_id=blob_import.id)
+    )
+    scope = WorkerScope(
+        claims=(
+            UNSCOPED_WORKER_SCOPE.claims
+            if claims_everything
+            else [
+                WorkerClaim(kind=TaskKind.AGENT),
+                WorkerClaim(kind=TaskKind.IMPORTER),
+            ]
+        ),
+        selectors=(
+            [LabelSelector(key="kitaru/import_source", values=["api"], required=False)]
+            if optional_source_selector
+            else None
+        ),
+    )
+
+    claimed = await setup.tasks.claim_pending(
+        scope,
+        setup.worker_id,
+        1,
+        datetime.now(UTC),
+        exclude_api_imports=True,
+    )
+
+    assert [task.id for task in claimed] == [blob_task.id]
+    pending_api = await setup.tasks.get(api_task.id)
+    assert pending_api.status is TaskStatus.PENDING
+    assert pending_api.attempt == 0
+
+    claimed_by_current_worker = await setup.tasks.claim_pending(
+        scope,
+        setup.worker_id_2,
+        1,
+        datetime.now(UTC),
+        exclude_api_imports=False,
+    )
+    assert [task.id for task in claimed_by_current_worker] == [api_task.id]
 
 
 async def test_claim_pending_required_selector(setup: Setup) -> None:

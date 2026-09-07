@@ -19,3 +19,15 @@ Deprecated surfaces that are still served for backwards compatibility. One entry
 - **Deprecated:** The `payload_blob_id` field on `POST /api/v1/imports`. Requests still accept it, mapped to a blob source (`source: {"type": "blob", "blob_id": ...}`).
 - **Replaced by:** `source`, accepting a blob source or an API source.
 - **Removable:** Once the dashboard and generated clients send `source` directly.
+
+## `payload_blob_id` on import responses
+
+- **Deprecated:** The `payload_blob_id` field on import responses. Blob imports still emit the blob id alongside `source`; API imports emit `null`. New clients also accept legacy responses containing only `payload_blob_id`.
+- **Replaced by:** `source`, accepting a blob source or an API source.
+- **Removable:** Once deployed clients read `source` and supported servers emit it.
+
+## `payload` on importer task details
+
+- **Deprecated:** The `payload` field and `PayloadSpec` model on importer task details. Blob tasks still emit `{blob_id, sha256}` alongside `source`; API tasks emit `null`. New workers also accept legacy specs containing only `payload`.
+- **Replaced by:** `source`, accepting a blob source or an API source. API tasks require the claiming worker to advertise API import support.
+- **Removable:** Once deployed workers read `source` and supported servers emit it.

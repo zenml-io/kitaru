@@ -671,7 +671,7 @@ async def test_run_registers_and_drains_a_claimed_task(
     created = client.workers.created[0]
     assert created.name == "worker-under-test"
     assert created.scope == scope
-    assert created.metadata == {"pool": "test"}
+    assert created.metadata == {"pool": "test", "kitaru/api_imports": "true"}
     assert created.runtime == detect_runtime()
     assert [call.status for _, call in client.tasks.update_calls] == [
         TaskStatus.RUNNING,

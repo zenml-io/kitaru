@@ -133,7 +133,13 @@ class TaskRepository(Protocol):
         ...
 
     async def claim_pending(
-        self, scope: WorkerScope, worker_id: uuid.UUID, limit: int, now: datetime
+        self,
+        scope: WorkerScope,
+        worker_id: uuid.UUID,
+        limit: int,
+        now: datetime,
+        *,
+        exclude_api_imports: bool = False,
     ) -> list[Task]:
         """Hand pending tasks matching a scope to a worker, oldest first.
 
@@ -146,6 +152,7 @@ class TaskRepository(Protocol):
             worker_id: Worker claiming the tasks.
             limit: Maximum number of tasks to claim.
             now: Current time.
+            exclude_api_imports: Whether to skip imports with an API fetch query.
 
         Returns:
             Claimed tasks carrying their incremented attempt.

@@ -18,7 +18,12 @@ from datetime import datetime
 
 from pydantic import Field
 
-from kitaru.api_models.v1.worker import WorkerClaim, WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.worker import (
+    API_IMPORT_CAPABILITY,
+    WorkerClaim,
+    WorkerRuntime,
+    WorkerScope,
+)
 from kitaru.server.domain.base import (
     DomainModel,
     ForbiddenError,
@@ -28,6 +33,8 @@ from kitaru.server.domain.base import (
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
 from kitaru.server.domain.task import AgentTask, Task
+
+IMPORT_SOURCE_LABEL = "kitaru/import_source"
 
 
 class WorkerNotFound(NotFoundError):
@@ -156,4 +163,9 @@ class Worker(DomainModel):
         Returns:
             Whether the worker would claim the task.
         """
+        if (
+            task.labels.get(IMPORT_SOURCE_LABEL) == "api"
+            and self.metadata.get(API_IMPORT_CAPABILITY) != "true"
+        ):
+            return False
         return scope_covers(self.scope, task)

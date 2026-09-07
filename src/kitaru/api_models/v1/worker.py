@@ -29,6 +29,8 @@ from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.base import FrozenModel
 
+API_IMPORT_CAPABILITY = "kitaru/api_imports"
+
 _ALL_TASK_KINDS = frozenset(TaskKind)
 
 

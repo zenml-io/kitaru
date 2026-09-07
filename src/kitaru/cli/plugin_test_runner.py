@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from kitaru.task.importer import Importer
 from kitaru.task.plugins import load_plugin_entrypoint
 
 _CAPTURE_LIMIT = 32 * 1024
@@ -77,6 +78,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         callable_ = load_plugin_entrypoint(
             args.path, args.entrypoint, args.kind.title()
         )
+        if args.kind == "importer" and isinstance(callable_, Importer):
+            callable_ = callable_.parse
         signature = inspect.signature(callable_)
         if args.kind == "importer":
             signature.bind(b"", {})

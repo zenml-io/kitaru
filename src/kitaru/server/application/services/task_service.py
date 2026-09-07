@@ -95,7 +95,11 @@ class TaskService:
         self._policy = policy
 
     async def claim_tasks(
-        self, max_tasks: int, actor: WorkerAuthContext
+        self,
+        max_tasks: int,
+        supports_api_imports: bool = False,
+        *,
+        actor: WorkerAuthContext,
     ) -> list[ClaimedTask]:
         """Claim pending tasks matching the worker's scope.
 
@@ -104,6 +108,7 @@ class TaskService:
 
         Args:
             max_tasks: Maximum number of tasks to claim.
+            supports_api_imports: Whether the claiming worker supports API imports.
             actor: Caller context.
 
         Raises:
@@ -120,7 +125,11 @@ class TaskService:
         now = datetime.now(UTC)
         await self._workers.update_last_seen_at(worker_id, now)
         claimed = await self._repository.claim_pending(
-            worker.scope, worker_id, max_tasks, now
+            worker.scope,
+            worker_id,
+            max_tasks,
+            now,
+            exclude_api_imports=not supports_api_imports,
         )
         job_ids = sorted({task.job_id for task in claimed})
         owners = await self._jobs.get_many(job_ids)

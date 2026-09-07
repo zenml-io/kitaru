@@ -30,7 +30,9 @@ from conftest import (
     create_worker,
 )
 from kitaru.api_models.v1.imports import ImportQuery
-from kitaru.api_models.v1.task import TaskStatus
+from kitaru.api_models.v1.task import TaskKind, TaskStatus
+from kitaru.api_models.v1.worker import LabelSelector, WorkerClaim, WorkerScope
+from kitaru.server.adapters.rest.mapping.tasks import spec_to_response
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
@@ -98,12 +100,39 @@ async def test_import_spec_is_built_from_the_import_row(
     assert isinstance(spec.details.source, BlobImportSourceSpec)
     assert spec.details.source.blob_id == payload.id
     assert spec.details.source.sha256 == payload.sha256
+    wire = spec_to_response(spec).model_dump(mode="json")
+    assert wire["details"]["payload"] == {
+        "blob_id": str(payload.id),
+        "sha256": payload.sha256,
+    }
     assert spec.details.agent_id == agent.id
     assert spec.details.params == {"delimiter": ","}
 
+    worker = await create_worker(
+        services.workers,
+        ACTOR.account.id,
+        scope=WorkerScope(
+            claims=[WorkerClaim(kind=TaskKind.IMPORTER)],
+            selectors=[
+                LabelSelector(
+                    key="kitaru/import_source", values=["api"], required=False
+                )
+            ],
+        ),
+    )
+    assert worker.covers(task)
+    claimed = await services.task_service.claim_tasks(
+        1, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    assert [entry.task.id for entry in claimed] == [task.id]
+    assert isinstance(claimed[0].spec.details, ImportTaskDetails)
+    assert isinstance(claimed[0].spec.details.source, BlobImportSourceSpec)
 
+
+@pytest.mark.parametrize("source_labels", [{}, {"kitaru/import_source": "api"}])
 async def test_import_spec_carries_the_api_source(
     services: JobAndTaskServices,
+    source_labels: dict[str, str],
 ) -> None:
     """An API import's spec names the fetch entrypoint and query, no payload."""
     plugin = await create_plugin(
@@ -135,6 +164,21 @@ async def test_import_spec_carries_the_api_source(
     assert spec.details.source.query == ImportQuery.model_validate(
         {"since": "2026-08-01T00:00:00Z"}
     )
+
+    await services.tasks.update(task.model_copy(update={"labels": source_labels}))
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    actor = build_worker_actor(ACTOR.account, worker.id)
+    assert await services.task_service.claim_tasks(1, actor=actor) == []
+    pending = await services.tasks.get(task.id)
+    assert pending.status is TaskStatus.PENDING
+    assert pending.attempt == 0
+
+    claimed = await services.task_service.claim_tasks(
+        1, supports_api_imports=True, actor=actor
+    )
+    assert [entry.task.id for entry in claimed] == [task.id]
+    assert isinstance(claimed[0].spec.details, ImportTaskDetails)
+    assert isinstance(claimed[0].spec.details.source, ApiImportSourceSpec)
 
 
 async def test_missing_import_row_cancels_the_task_at_claim(

@@ -3743,6 +3743,20 @@
             "title": "Params",
             "type": "object"
           },
+          "payload_blob_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "Blob holding the payload, unset for API imports.",
+            "title": "Payload Blob Id"
+          },
           "source": {
             "description": "Where the payload comes from.",
             "discriminator": {
@@ -3849,6 +3863,18 @@
             "description": "Parameters passed to the importer.",
             "title": "Params",
             "type": "object"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayloadSpec"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "Payload to parse, unset for API imports."
           },
           "plugin": {
             "description": "Importer plugin to load.",
@@ -6145,6 +6171,28 @@
           }
         },
         "title": "PassthroughConfig",
+        "type": "object"
+      },
+      "PayloadSpec": {
+        "description": "Deprecated blob payload spec.",
+        "properties": {
+          "blob_id": {
+            "description": "Blob holding the payload.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Blob content hash.",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blob_id",
+          "sha256"
+        ],
+        "title": "PayloadSpec",
         "type": "object"
       },
       "ReplayCreateRequest": {
@@ -23531,8 +23579,20 @@
     },
     "/api/v1/tasks/claim": {
       "post": {
-        "description": "Claim pending tasks matching the worker's stored scope.\n\nClients observe HTTP 200 on success, 403 when the caller holds no worker\ntoken, 404 when no worker has the claiming principal's id, and 422 on\ninvalid input.\n\nArgs:\n    body: Task claim request.\n    service: Task service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n\nReturns:\n    Claimed tasks with their execution specs and a task token each.",
+        "description": "Claim pending tasks matching the worker's stored scope.\n\nClients observe HTTP 200 on success, 403 when the caller holds no worker\ntoken, 404 when no worker has the claiming principal's id, and 422 on\ninvalid input.\n\nArgs:\n    body: Task claim request.\n    service: Task service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n    api_imports: API import capability advertised by the claiming executable.\n\nReturns:\n    Claimed tasks with their execution specs and a task token each.",
         "operationId": "claim_tasks_api_v1_tasks_claim_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Kitaru-Api-Imports",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Kitaru-Api-Imports",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

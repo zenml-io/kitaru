@@ -29,7 +29,9 @@ from conftest import (
     create_agent,
     create_agent_task,
     create_agent_version,
+    create_blob,
     create_job,
+    create_plugin,
     create_worker,
     local_settings,
     mint_worker_token,
@@ -37,6 +39,8 @@ from conftest import (
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import (
+    ApiImportSourceSpec,
+    ImportTaskDetails,
     TaskClaimRequest,
     TaskListParams,
     TaskResponse,
@@ -53,8 +57,12 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.imports import ImportCreate
+from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
+from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
+from kitaru.server.domain.worker import IMPORT_SOURCE_LABEL
 
 
 @pytest.fixture
@@ -269,3 +277,66 @@ async def test_update_requires_a_status(
 
     with pytest.raises(ValidationError):
         await task_client.tasks.update(task.id, TaskUpdateRequest())
+
+
+async def test_api_import_claim_requires_capability_header(
+    api_client: KitaruAPIClient,
+    services: JobAndTaskServices,
+    account: Account,
+    auth_service: AuthService,
+) -> None:
+    """Legacy claims drain blob imports while new clients can claim API imports."""
+    actor = AuthContext(account=account)
+    agent = await create_agent(services.agents, account.id)
+    plugin = await create_plugin(
+        services.plugins, account.id, PluginKind.IMPORTER, name="api-capable"
+    )
+    code = await create_blob(services.blobs, account.id, content=b"code")
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code.id, entrypoint="importer"),
+        display_version=None,
+    )
+    api_import = await services.import_service.create_import(
+        ImportCreate(
+            importer=plugin.name,
+            agent_id=agent.id,
+            fetch_query={"trace_ids": ["trace-1"]},
+        ),
+        actor=actor,
+    )
+    payload = await create_blob(services.blobs, account.id, content=b"payload")
+    blob_import = await services.import_service.create_import(
+        ImportCreate(
+            importer=plugin.name, agent_id=agent.id, payload_blob_id=payload.id
+        ),
+        actor=actor,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=api_import.job_id), actor=actor
+    )
+    assert tasks[0].labels[IMPORT_SOURCE_LABEL] == "api"
+    worker = await create_worker(services.workers, account.id)
+    assert not worker.covers(tasks[0])
+    capable = worker.model_copy(update={"metadata": {"kitaru/api_imports": "true"}})
+    assert capable.covers(tasks[0])
+    worker_client = api_client.with_token(
+        mint_worker_token(auth_service, worker.id, account)
+    )
+
+    legacy_response = await worker_client.request(
+        "POST", "/api/v1/tasks/claim", json={"max_tasks": 10}
+    )
+    legacy_tasks = legacy_response.json()["tasks"]
+    assert len(legacy_tasks) == 1
+    assert legacy_tasks[0]["task"]["import_id"] == str(blob_import.id)
+    assert legacy_tasks[0]["spec"]["details"]["payload"]["blob_id"] == str(payload.id)
+    assert (await services.tasks.get(tasks[0].id)).status.value == "pending"
+
+    response = await worker_client.tasks.claim(TaskClaimRequest(max_tasks=10))
+    assert len(response.tasks) == 1
+    assert response.tasks[0].task.import_id == api_import.id
+    details = response.tasks[0].spec.details
+    assert isinstance(details, ImportTaskDetails)
+    assert isinstance(details.source, ApiImportSourceSpec)
+    assert details.source.query.trace_ids == ["trace-1"]

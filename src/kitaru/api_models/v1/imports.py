@@ -15,7 +15,7 @@
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import AwareDatetime, ConfigDict, Field, model_validator
 
@@ -216,6 +216,11 @@ class ImportResponse(OwnedResponseModel):
         default=None, description="Importer version run."
     )
     source: ImportSource = Field(description="Where the payload comes from.")
+    payload_blob_id: uuid.UUID | None = Field(
+        default=None,
+        deprecated="Use source instead.",
+        description="Blob holding the payload, unset for API imports.",
+    )
     params: dict[str, JsonValue] = Field(
         description="Parameters passed to the importer."
     )
@@ -226,3 +231,32 @@ class ImportResponse(OwnedResponseModel):
         default=None, description="Stats from a completed import."
     )
     error: str | None = Field(default=None, description="Error from a failed import.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_legacy_source(cls, data: Any) -> Any:
+        """Normalize blob responses from servers that predate source.
+
+        Args:
+            data: Response data.
+
+        Returns:
+            Response data with the blob source populated.
+        """
+        if isinstance(data, dict) and "source" not in data:
+            blob_id = data.get("payload_blob_id")
+            if blob_id is not None:
+                return {**data, "source": {"type": "blob", "blob_id": blob_id}}
+        return data
+
+    @model_validator(mode="after")
+    def _populate_legacy_payload(self) -> Self:
+        """Keep the deprecated blob field aligned with source.
+
+        Returns:
+            Response with its legacy blob field populated.
+        """
+        self.payload_blob_id = (
+            self.source.blob_id if isinstance(self.source, BlobImportSource) else None
+        )
+        return self
