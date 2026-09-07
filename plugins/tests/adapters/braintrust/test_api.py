@@ -13,14 +13,16 @@
 #  permissions and limitations under the License.
 """Focused contract tests for the Braintrust API fetch entrypoint."""
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 import pytest
 
+import kitaru_braintrust_importer.api as api_module
 from kitaru.task import importer as importer_module
-from kitaru.task.importer import ImportedSession
+from kitaru.task.importer import ImportedSession, flatten_nodes
 from kitaru_braintrust_importer.api import fetch, serialize_spans
 from kitaru_braintrust_importer.importer import importer, parse
 
@@ -110,6 +112,81 @@ async def test_time_window_paginates_through_multiple_list_pages(
     assert fake_braintrust.list_cursors_received == [None, "cursor-1"]
     assert fake_braintrust.requested == ["root-a", "root-b"]
     assert len(payloads) == 1
+
+
+async def test_window_uses_supported_btql_and_restores_creation_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Follow query-clause cursors and sort roots across pages by creation time."""
+    requests: list[str] = []
+
+    async def post(
+        client: httpx.AsyncClient, api_url: str, body: dict[str, Any]
+    ) -> httpx.Response:
+        assert set(body) == {"query"}
+        query = body["query"]
+        requests.append(query)
+        assert "sort: _pagination_key asc" in query
+        if query.startswith("select: root_span_id"):
+            assert "filter: is_root AND" in query
+            if "cursor:" not in query:
+                data = {
+                    "data": [{"root_span_id": "newer", "created": "2026-01-02"}],
+                    "cursor": "next-page",
+                }
+            else:
+                assert query.endswith(" | cursor: 'next-page'")
+                data = {"data": [{"root_span_id": "older", "created": "2026-01-01"}]}
+        else:
+            root_id = "older" if "root_span_id = 'older'" in query else "newer"
+            data = {"data": build_complete_rows(root_id)}
+        return httpx.Response(200, json=data)
+
+    monkeypatch.setattr(api_module, "_post_btql", post)
+    payloads = await collect_payloads(
+        fetch({"project_id": "project-1", "since": "2026-01-01T00:00:00Z"})
+    )
+
+    sessions = list(parse(payloads[0], {}))
+    assert [session.external_id for session in sessions] == [
+        "project-1:older",
+        "project-1:newer",
+    ]
+    assert len(requests) == 4
+
+
+async def test_exact_trace_fetch_includes_spans_after_first_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A child on a later BTQL page remains attached to its imported root."""
+    rows = build_complete_rows("root-a")
+    requests: list[str] = []
+
+    async def post(
+        client: httpx.AsyncClient, api_url: str, body: dict[str, Any]
+    ) -> httpx.Response:
+        assert set(body) == {"query"}
+        query = body["query"]
+        requests.append(query)
+        assert "sort: _pagination_key asc" in query
+        if "cursor:" not in query:
+            return httpx.Response(200, json={"data": rows[:1], "cursor": "child"})
+        assert query.endswith(" | cursor: 'child'")
+        return httpx.Response(200, json={"data": rows[1:]})
+
+    monkeypatch.setattr(api_module, "_post_btql", post)
+    payloads = await collect_payloads(
+        fetch({"project_id": "project-1", "trace_ids": ["root-a"]})
+    )
+
+    assert json.loads(payloads[0])["events"] == rows
+    sessions = list(parse(payloads[0], {}))
+    assert len(sessions) == 1
+    assert isinstance(sessions[0], ImportedSession)
+    nodes = flatten_nodes(sessions[0].nodes)
+    assert len(nodes) == 2
+    assert nodes[1].parent_index == nodes[0].index
+    assert len(requests) == 2
 
 
 async def test_traces_sharing_a_session_are_fetched_in_one_payload(

@@ -98,6 +98,33 @@ async def _post_btql(
     return response
 
 
+async def _query_rows(client: httpx.AsyncClient, query: str) -> list[dict[str, Any]]:
+    """Fetch every page of a BTQL query ordered by its pagination key.
+
+    Args:
+        client: HTTP client.
+        query: BTQL query with a cursor-compatible sort.
+
+    Returns:
+        All matching rows.
+    """
+    api_url = os.environ.get("BRAINTRUST_API_URL") or _DEFAULT_API_URL
+    rows: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while True:
+        # BTQL accepts cursors as query clauses, not top-level request fields.
+        page_query = query if cursor is None else f"{query} | cursor: '{cursor}'"
+        response = await retry_rate_limited(
+            functools.partial(_post_btql, client, api_url, {"query": page_query}),
+            _get_retry_after,
+        )
+        payload = response.json()
+        rows.extend(payload["data"])
+        cursor = payload.get("cursor")
+        if not cursor:
+            return rows
+
+
 async def _query_spans(
     client: httpx.AsyncClient, project_id: str, root_span_id: str
 ) -> list[dict[str, Any]]:
@@ -111,22 +138,18 @@ async def _query_spans(
     Returns:
         Span rows.
     """
-    api_url = os.environ.get("BRAINTRUST_API_URL") or _DEFAULT_API_URL
     query = (
         f"select: * | from: project_logs('{project_id}') spans"
         f" | filter: root_span_id = '{root_span_id}'"
+        f" | sort: _pagination_key asc | limit: {_LIST_PAGE_SIZE}"
     )
-    response = await retry_rate_limited(
-        functools.partial(_post_btql, client, api_url, {"query": query}),
-        _get_retry_after,
-    )
-    return response.json()["data"]
+    return await _query_rows(client, query)
 
 
 async def _list_root_span_ids(
     client: httpx.AsyncClient, project_id: str, since: datetime, until: datetime
 ) -> AsyncIterator[str]:
-    """List root span ids of a project in ascending start-time order.
+    """List root span ids of a project in ascending creation-time order.
 
     Args:
         client: HTTP client.
@@ -135,34 +158,22 @@ async def _list_root_span_ids(
         until: Upper bound of root span start time.
 
     Yields:
-        Root span ids, one BTQL page at a time.
+        Root span ids, ordered after collecting every BTQL page.
     """
-    api_url = os.environ.get("BRAINTRUST_API_URL") or _DEFAULT_API_URL
     since_ts, until_ts = since.timestamp(), until.timestamp()
     query = (
-        f"select: root_span_id | from: project_logs('{project_id}') spans"
-        f" | filter: NOT EXISTS(span_parents) AND"
+        f"select: root_span_id, created | from: project_logs('{project_id}') spans"
+        f" | filter: is_root AND"
         f" ((created >= '{since.isoformat()}' AND created <= '{until.isoformat()}')"
         f" OR (metrics.start >= {since_ts} AND metrics.start <= {until_ts}))"
-        f" | sort: created asc"
+        f" | sort: _pagination_key asc"
         f" | limit: {_LIST_PAGE_SIZE}"
     )
-    cursor: str | None = None
-    while True:
-        body: dict[str, Any] = {"query": query}
-        if cursor is not None:
-            body["cursor"] = cursor
-        response = await retry_rate_limited(
-            functools.partial(_post_btql, client, api_url, body), _get_retry_after
-        )
-        payload = response.json()
-        rows = payload["data"]
-        for row in rows:
-            if row.get("root_span_id"):
-                yield str(row["root_span_id"])
-        cursor = payload.get("cursor")
-        if not cursor:
-            return
+    rows = await _query_rows(client, query)
+    # Sorting by created on the server suppresses its pagination cursor.
+    for row in sorted(rows, key=lambda row: row.get("created") or ""):
+        if row.get("root_span_id"):
+            yield str(row["root_span_id"])
 
 
 def _roots_have_ended(rows: list[dict[str, Any]]) -> bool:

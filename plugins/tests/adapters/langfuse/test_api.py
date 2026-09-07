@@ -55,7 +55,7 @@ async def test_fetch_with_trace_ids_fetches_exactly_those_in_order(
         "trace-1",
     ]
     assert all(
-        call["from_start_time"] is None and call["to_start_time"] is None
+        call.get("from_start_time") is None and call.get("to_start_time") is None
         for call in fake_langfuse.observation_calls
     )
     assert len(payloads) == 1
@@ -128,8 +128,7 @@ async def test_fetch_time_window_lists_across_two_pages_and_fetches_each_trace(
         "trace-3",
     ]
     assert all(
-        call["from_start_time"] == datetime.fromisoformat(since)
-        and call["to_start_time"] == datetime.fromisoformat(until)
+        call.get("from_start_time") is None and call.get("to_start_time") is None
         for call in fake_langfuse.observation_calls
     )
     sessions = list(parse(payloads[0], {}))
@@ -321,3 +320,49 @@ async def test_fetch_propagates_a_non_rate_limit_api_error(
         await collect_payloads(fetch({"trace_ids": ["trace-1"]}))
 
     assert fake_langfuse.observation_calls == []
+
+
+async def test_window_keeps_children_outside_trace_selection_bounds(
+    fake_langfuse: FakeLangfuseClient,
+) -> None:
+    """Import every observation of a selected trace, across observation pages."""
+    fake_langfuse.trace_list_pages = [
+        build_trace_page(["trace-1"], page=1, total_pages=1)
+    ]
+    fake_langfuse.observation_pages = {
+        "trace-1": [
+            build_observations_page(
+                [
+                    build_observation_v2("root", "trace-1"),
+                    build_observation_v2(
+                        "early-child",
+                        "trace-1",
+                        parent_id="root",
+                        start_time="2026-07-24T09:59:59Z",
+                    ),
+                ],
+                cursor="next",
+            ),
+            build_observations_page(
+                [
+                    build_observation_v2(
+                        "late-child",
+                        "trace-1",
+                        parent_id="root",
+                        start_time="2026-07-24T10:01:00Z",
+                        end_time="2026-07-24T10:02:00Z",
+                    ),
+                ]
+            ),
+        ]
+    }
+    [payload] = await collect_payloads(
+        fetch({"since": "2026-07-24T10:00:00Z", "until": "2026-07-24T10:00:30Z"})
+    )
+    [session] = list(parse(payload, {}))
+    assert isinstance(session, ImportedSession)
+    assert {node.name for node in _flatten(session.nodes)} == {
+        "root",
+        "early-child",
+        "late-child",
+    }

@@ -14,10 +14,11 @@
 """Focused contract tests for the Phoenix API fetch entrypoint."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from phoenix.client import AsyncClient
 
 import kitaru_phoenix_importer.api as api_module
 from kitaru.api_models.v1.session import SessionStatus
@@ -90,54 +91,68 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
     assert len(payloads) == 1
 
 
-async def test_time_window_lists_spans_across_two_pages(
-    fake_phoenix: FakePhoenix, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("same_timestamp", [False, True])
+@pytest.mark.parametrize("selection", ["window", "trace"])
+async def test_fetch_preserves_more_than_1000_spans_with_real_sdk_pagination(
+    same_timestamp: bool, selection: str
 ) -> None:
-    """Page through the listing and fetch each distinct root trace once."""
-    monkeypatch.setattr(api_module, "_SPAN_LIMIT", 2)
-    fake_phoenix.list_pages = [
-        [
-            build_span(
-                "root-1",
-                "trace-1",
-                name="kitaru-run",
-                start_time="2026-08-27T10:00:00+00:00",
-            ),
-            build_span(
-                "child-1",
-                "trace-1",
-                parent_id="root-1",
-                start_time="2026-08-27T10:00:00+00:00",
-            ),
-        ],
-        [
-            build_span(
-                "root-2",
-                "trace-2",
-                name="kitaru-run",
-                start_time="2026-08-27T10:00:01+00:00",
-            ),
-        ],
-    ]
-    fake_phoenix.span_builders = [build_complete_spans, build_complete_spans]
-
-    payloads = await collect_payloads(
-        fetch(
-            {"since": "2026-08-27T09:00:00+00:00", "until": "2026-08-27T11:00:00+00:00"}
+    """Follow provider cursors even with descending or tied start timestamps."""
+    since = datetime(2026, 8, 27, 9, tzinfo=UTC)
+    until = since + timedelta(hours=1)
+    spans = [
+        build_span(
+            f"span-{index:04d}",
+            f"trace-{index:04d}" if selection == "window" else "trace-1",
+            start_time=(
+                since + timedelta(seconds=0 if same_timestamp else index)
+            ).isoformat(),
         )
-    )
+        for index in range(1005)
+    ]
+    cursors: list[str | None] = []
 
-    assert len(payloads) == 1
-    assert fake_phoenix.requested == ["trace-1", "trace-2"]
-    assert fake_phoenix.project_identifiers[:2] == [PROJECT, PROJECT]
-    since = datetime(2026, 8, 27, 9, 0, 0, tzinfo=UTC)
-    assert fake_phoenix.list_windows[0] == (
-        since,
-        datetime(2026, 8, 27, 11, 0, 0, tzinfo=UTC),
-    )
-    assert fake_phoenix.list_windows[1][0] == datetime(
-        2026, 8, 27, 10, 0, 0, tzinfo=UTC
-    )
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/arize_phoenix_version":
+            return httpx.Response(200, text="19.6.0")
+        assert request.url.path == f"/v1/projects/{PROJECT}/spans"
+        params = request.url.params
+        cursor = params.get("cursor")
+        cursors.append(cursor)
+        # The provider orders by descending database id, not by start time.
+        matches = list(reversed(spans))
+        if "start_time" in params:
+            matches = [
+                span
+                for span in matches
+                if datetime.fromisoformat(span["start_time"])
+                >= datetime.fromisoformat(params["start_time"])
+            ]
+        offset = int(cursor or "0")
+        page = matches[offset : offset + int(params["limit"])]
+        next_offset = offset + len(page)
+        return httpx.Response(
+            200,
+            json={
+                "data": page,
+                "next_cursor": str(next_offset) if next_offset < len(matches) else None,
+            },
+        )
+
+    async with httpx.AsyncClient(
+        base_url="https://phoenix.test", transport=httpx.MockTransport(respond)
+    ) as http_client:
+        client = AsyncClient(http_client=http_client)
+        if selection == "window":
+            trace_ids = await api_module._list_root_trace_ids(
+                client, PROJECT, since, until
+            )
+            assert trace_ids == [span["context"]["trace_id"] for span in spans]
+        else:
+            fetched = await api_module.fetch_spans("trace-1", PROJECT, client)
+            assert {span["context"]["span_id"] for span in fetched} == {
+                span["context"]["span_id"] for span in spans
+            }
+    assert cursors == [None, *map(str, range(100, 1005, 100))]
 
 
 async def test_time_window_fetch_yields_one_oldest_first_payload(
