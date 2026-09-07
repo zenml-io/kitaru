@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the nested session node routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -314,6 +315,107 @@ async def test_list_nodes_pagination_walks_pages(
             break
 
     assert collected == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        {"field": "node_type", "op": "in", "value": ["llm_call", "tool_call"]},
+        {
+            "and": [
+                {
+                    "or": [
+                        {"field": "node_type", "op": "eq", "value": "llm_call"},
+                        {"field": "node_type", "op": "eq", "value": "tool_call"},
+                    ]
+                },
+                {"not": {"field": "node_type", "op": "eq", "value": "span"}},
+            ]
+        },
+    ],
+)
+async def test_list_nodes_filters_types_before_pagination(
+    client: httpx.AsyncClient, session_id: str, expression: dict[str, Any]
+) -> None:
+    """Skip spans while preserving page size, indexes, and hidden parent links."""
+    path = f"/api/v1/sessions/{session_id}/nodes"
+    response = await client.post(
+        path,
+        json={
+            "nodes": [
+                _node(0, node_type="span", name="query"),
+                _node(1, node_type="span", name="HookEventMessage", parent_index=0),
+                _node(2, parent_index=1),
+                _node(3, node_type="span", name="SystemMessage", parent_index=0),
+                _node(
+                    4,
+                    node_type="tool_call",
+                    parent_index=2,
+                    secondary_parent_indexes=[3],
+                ),
+                _node(5, parent_index=0),
+            ]
+        },
+    )
+    assert response.status_code == 200
+    params: dict[str, Any] = {
+        "size": 2,
+        "filter": json.dumps(expression),
+        "sort": "index:asc",
+    }
+    response = await client.get(path, params=params)
+    assert response.status_code == 200
+    first = response.json()
+    assert [node["index"] for node in first["items"]] == [2, 4]
+    assert first["items"][0]["parent_index"] == 1
+    assert first["items"][1]["secondary_parent_indexes"] == [3]
+    assert first["next_cursor"] is not None
+    response = await client.get(path, params={**params, "cursor": first["next_cursor"]})
+    assert response.status_code == 200
+    assert [node["index"] for node in response.json()["items"]] == [5]
+    assert response.json()["next_cursor"] is None
+    unfiltered = await client.get(path)
+    assert [node["index"] for node in unfiltered.json()["items"]] == list(range(6))
+    empty = await client.get(
+        path,
+        params={
+            "filter": json.dumps(
+                {"field": "node_type", "op": "eq", "value": "subagent_call"}
+            )
+        },
+    )
+    assert empty.status_code == 200
+    assert empty.json() == {"items": [], "next_cursor": None}
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        {"field": "node_type", "op": "eq", "value": "unknown"},
+        {"field": "node_type", "op": "contains", "value": "call"},
+        {"field": "unknown", "op": "eq", "value": "llm_call"},
+    ],
+)
+async def test_list_nodes_rejects_invalid_filters(
+    client: httpx.AsyncClient, session_id: str, expression: dict[str, Any]
+) -> None:
+    """Reject fields, operators, and values outside the node filter allowlist."""
+    response = await client.get(
+        f"/api/v1/sessions/{session_id}/nodes",
+        params={"filter": json.dumps(expression)},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("sort", ["index:desc", "created:asc", "created:desc"])
+async def test_list_nodes_rejects_unsupported_sort(
+    client: httpx.AsyncClient, session_id: str, sort: str
+) -> None:
+    """Keep node pagination fixed to ascending indexes."""
+    response = await client.get(
+        f"/api/v1/sessions/{session_id}/nodes", params={"sort": sort}
+    )
+    assert response.status_code == 422
 
 
 async def test_get_session_with_nodes_returns_every_node_unpaginated(

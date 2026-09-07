@@ -3022,6 +3022,10 @@ class FakeSessionNodeRepository:
             node
             for node in self._nodes.values()
             if node.session_id == session_node_filter.session_id
+            and (
+                session_node_filter.expression is None
+                or _evaluate_filter_expression(node, session_node_filter.expression)
+            )
         ]
         page, next_cursor = _paginate_fake_by_index(
             nodes, session_node_filter, lambda node: node.index

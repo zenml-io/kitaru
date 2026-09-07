@@ -253,7 +253,7 @@ async def list_session_nodes(
     """List the nodes of a session, ordered by index ascending.
 
     Clients observe HTTP 200 on success, 403 when a task token neither owns
-    nor reads this session, and 422 on invalid pagination parameters.
+    nor reads this session, and 422 on invalid filters or pagination parameters.
 
     Args:
         session_id: Id of the session.

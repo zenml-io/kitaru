@@ -22312,7 +22312,7 @@
     },
     "/api/v1/sessions/{session_id}/nodes": {
       "get": {
-        "description": "List the nodes of a session, ordered by index ascending.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 422 on invalid pagination parameters.\n\nArgs:\n    session_id: Id of the session.\n    service: Session node service.\n    actor: Caller context.\n    params: Session node list params.\n\nReturns:\n    Page of session nodes, ordered by index.",
+        "description": "List the nodes of a session, ordered by index ascending.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 422 on invalid filters or pagination parameters.\n\nArgs:\n    session_id: Id of the session.\n    service: Session node service.\n    actor: Caller context.\n    params: Session node list params.\n\nReturns:\n    Page of session nodes, ordered by index.",
         "operationId": "list_session_nodes_api_v1_sessions__session_id__nodes_get",
         "parameters": [
           {
@@ -22355,6 +22355,46 @@
               "minimum": 1,
               "title": "Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Nodes are ordered by ascending index.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "const": "index:asc",
+              "default": "index:asc",
+              "description": "Nodes are ordered by ascending index.",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter expression, JSON-encoded in the query string.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           },
           {

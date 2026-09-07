@@ -9,11 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Session node listings support the shared filter-expression syntax through the API, SDK, MCP, and `kitaru session nodes --filter`. The `node_type` field supports `eq`, `ne`, and `in` comparisons before pagination, so LLM and tool calls can be read without paging past framework spans. Omitting the filter still returns every node type in ascending index order.
 - Added evaluators to imports. Pass `evaluators` on `POST /api/v1/imports`, or `--evaluator` to `kitaru session import`, and every listed evaluator scores every imported session once the import finishes. A failed evaluator marks the job failed while the import's `stats` still records the parse outcome. Added `GET /api/v1/imports` and `GET /api/v1/imports/{import_id}`, with `client.imports.list(...)` and `client.imports.get(...)`, the `kitaru import list` and `kitaru import get` commands, and the `import` kind of the MCP `kitaru_activity_read` tool, to read imports back with their `stats` and `error`. Sessions created by an import carry `import_id`.
 - Added agent-scoped insights. Create a batch of insights for an agent with `client.insights.create(...)` or `POST /api/v1/insights`, each carrying a name, a title, an optional description, and data of type `text`, `categorical`, or `binned`. Insights can be listed with filters on `agent_id`, `name`, and `type`, fetched, updated in title and description, and deleted.
 
 ### Changed
 
+- `kitaru-logfire-importer[adapter]` now supports Logfire 5.x in addition to 4.35+. Logfire 5.0 removed its deprecated query client APIs but keeps `AsyncLogfireQueryClient.query_json_rows`, which is the only query surface the importer uses.
 - The Mastra adapter is now developed and tested against `@mastra/core` 1.64.0, and its peer range widened from `>=1.51.0 <1.52.0` to `>=1.51.0 <1.65.0`. Mastra now ships type declarations for `@mastra/core/test-utils/llm-mock`, so the adapter tests and the Mastra example derive their mock model types from that module instead of suppressing the missing declarations.
 - `kitaru-pydantic-ai` now supports the PydanticAI 2.37 through 2.40 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.38.0 with `genai-prices` 0.1.6.
 - `POST /api/v1/imports` now returns the import instead of the job, with the job in its `job_id`. Import task responses carry `import_id` instead of `payload_blob_id` and `agent_id`.

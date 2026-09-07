@@ -31,7 +31,7 @@ from conftest import (
     build_payload_store,
     override_idempotency,
 )
-from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
+from kitaru.api_models.v1.filter import AndFilter, Filter, FilterCondition, FilterOp
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionDetailResponse,
@@ -366,7 +366,22 @@ async def test_ingest_nodes_and_list_nodes(api_client: KitaruAPIClient) -> None:
     assert page.items[0].inputs == {"q": "hi"}
 
 
-async def test_iter_nodes(api_client: KitaruAPIClient) -> None:
+@pytest.mark.parametrize(
+    ("filter_", "expected"),
+    [
+        (None, [0, 1, 2, 3, 4]),
+        (FilterCondition(field="node_type", op=FilterOp.EQ, value="llm_call"), [1, 4]),
+        (
+            FilterCondition(
+                field="node_type", op=FilterOp.IN, value=["llm_call", "tool_call"]
+            ),
+            [1, 3, 4],
+        ),
+    ],
+)
+async def test_iter_nodes(
+    api_client: KitaruAPIClient, filter_: Filter | None, expected: list[int]
+) -> None:
     """Iterate every node of a session across pages through the SDK."""
     created = await api_client.sessions.create(
         SessionCreateRequest(
@@ -381,7 +396,13 @@ async def test_iter_nodes(api_client: KitaruAPIClient) -> None:
         nodes=[
             SessionNodeCreateRequest(
                 index=index,
-                node_type=NodeType.SPAN,
+                node_type=[
+                    NodeType.SPAN,
+                    NodeType.LLM_CALL,
+                    NodeType.SPAN,
+                    NodeType.TOOL_CALL,
+                    NodeType.LLM_CALL,
+                ][index],
                 name="span",
                 status=NodeStatus.COMPLETED,
                 inputs=None,
@@ -396,7 +417,7 @@ async def test_iter_nodes(api_client: KitaruAPIClient) -> None:
     collected = [
         item.index
         async for item in api_client.sessions.iter_nodes(
-            created.id, SessionNodeListParams(size=2)
+            created.id, SessionNodeListParams(size=2, filter=filter_)
         )
     ]
-    assert collected == [0, 1, 2, 3, 4]
+    assert collected == expected

@@ -386,8 +386,8 @@ def test_invalid_list_values_are_concise_and_option_named(capsys) -> None:
     assert "errors.pydantic.dev" not in payload["error"]["message"]
 
 
-async def test_session_nodes_controls_payload_flag_only() -> None:
-    """Node reads expose only cursor pagination and the explicit payload flag."""
+async def test_session_nodes_controls_payload_flag_and_filters() -> None:
+    """Node reads forward pagination, payload inclusion, and filter expressions."""
     resource = StubSessions()
     client = SimpleNamespace(sessions=resource)
 
@@ -397,6 +397,9 @@ async def test_session_nodes_controls_payload_flag_only() -> None:
         size=3,
         cursor="node-cursor",
         include_payloads=True,
+        filter=json.dumps(
+            {"field": "node_type", "op": "in", "value": ["llm_call", "tool_call"]}
+        ),
     )
 
     session_id, params = resource.node_calls[0]
@@ -406,6 +409,10 @@ async def test_session_nodes_controls_payload_flag_only() -> None:
         "cursor": "node-cursor",
         "size": 3,
         "include_payloads": True,
+        "filter": json.dumps(
+            {"field": "node_type", "op": "in", "value": ["llm_call", "tool_call"]}
+        ),
+        "sort": "index:asc",
     }
     assert result.items == [{"id": str(resource.node.id), "index": 0, "inputs": None}]
     assert result.page == {
@@ -460,8 +467,23 @@ def test_session_list_and_get_argv_use_bounded_resource_calls(
     assert resource.get_calls == [resource.session_id]
 
 
+@pytest.mark.parametrize(
+    "filters",
+    [
+        None,
+        {"field": "node_type", "op": "in", "value": ["llm_call", "tool_call"]},
+        {
+            "or": [
+                {"field": "node_type", "op": "eq", "value": "llm_call"},
+                {"not": {"field": "node_type", "op": "eq", "value": "span"}},
+            ]
+        },
+    ],
+)
 def test_session_nodes_argv_passes_exact_uuid_and_payload_flag(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    filters: dict[str, Any] | None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The registered leaf maps argv into the bounded node helper."""
     resource = StubSessions()
@@ -482,6 +504,7 @@ def test_session_nodes_argv_passes_exact_uuid_and_payload_flag(
                 "--size",
                 "1",
                 "--include-payloads",
+                *(["--filter", json.dumps(filters)] if filters else []),
             ]
         )
         == 0
@@ -492,6 +515,9 @@ def test_session_nodes_argv_passes_exact_uuid_and_payload_flag(
     session_id, params = resource.node_calls[0]
     assert session_id == resource.session_id
     assert params.include_payloads is True
+    assert (
+        params.filter.model_dump(mode="json", by_alias=True) if params.filter else None
+    ) == filters
 
 
 async def test_session_import_uploads_once_and_returns_exact_created_receipt(
@@ -1042,3 +1068,29 @@ def test_terminal_import_rejects_missing_or_malformed_completed_result(
         sessions._terminal_import_result(job, observed, identity={})
 
     assert error.value.kind == "internal_error"
+
+
+@pytest.mark.parametrize(
+    "filter_value", ["not-json", '{"or": []}', '{"field": "node_type"}']
+)
+def test_session_nodes_rejects_invalid_filter(
+    filter_value: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Invalid filter shapes fail before any SDK request."""
+    resource = StubSessions()
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield SimpleNamespace(sessions=resource)
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    assert (
+        app_module.main(
+            ["session", "nodes", str(resource.session_id), "--filter", filter_value]
+        )
+        != 0
+    )
+    assert resource.node_calls == []
+    assert json.loads(capsys.readouterr().err)["error"]["kind"] == "invalid_arguments"
