@@ -125,7 +125,7 @@ Omitting FILE and setting `--since` selects an API import: the worker calls the 
 | `until` | Timezone-aware ISO 8601 datetime, upper bound of trace start time. Defaults to now. |
 | `concurrency` | Traces fetched at once. Defaults to 4. |
 
-The worker installs the package's `api` extra for an API import, which carries the provider client, and needs `LOGFIRE_READ_TOKEN` in its environment. The token itself carries the Logfire host, so no separate host variable is needed. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way.
+The worker installs the package's `api` extra for an API import, which carries the provider client. A [connection](provider-connections.md) you name with `--connection`, or the provider's default connection, supplies `LOGFIRE_READ_TOKEN`. Without either, the worker's own environment does, as it always could. The token itself carries the Logfire host, so no separate host variable is needed. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way.
 
 ## What a trace becomes
 
