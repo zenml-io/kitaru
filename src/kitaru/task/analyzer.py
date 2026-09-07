@@ -19,9 +19,9 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.insight import InsightInput
-from kitaru.api_models.v1.session import SessionListParams, SessionStatus
+from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.task import AnalysisTaskDetails, ScriptPluginSpec
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.task.evaluator import SessionView
@@ -126,21 +126,9 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
         raise AnalysisError(f"Task {task_id} is not an analyzer task")
     analyzer = _resolve_analyzer(details)
 
-    # Sessions still in progress are skipped, matching the evaluator fan-out.
     params = SessionListParams(
-        filter=AndFilter.model_validate(
-            {
-                "and": [
-                    FilterCondition(
-                        field="import_id", op=FilterOp.EQ, value=str(details.import_id)
-                    ),
-                    FilterCondition(
-                        field="status",
-                        op=FilterOp.NE,
-                        value=SessionStatus.IN_PROGRESS.value,
-                    ),
-                ]
-            }
+        filter=FilterCondition(
+            field="import_id", op=FilterOp.EQ, value=str(details.import_id)
         ),
         size=1000,
     )

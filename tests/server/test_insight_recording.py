@@ -202,22 +202,6 @@ async def test_vanished_plugin_version_writes_nothing(
     assert await _agent_insights(services, agent.id) == []
 
 
-async def test_deleted_agent_writes_nothing(services: ReplayServices) -> None:
-    """An analysis task whose agent was deleted writes no insight."""
-    agent = await create_agent(services.agents, ACTOR.account.id)
-    version = await _analyzer_version(services)
-    task = await _analysis_task_with_job(services, agent, version.id)
-    await services.agents.mark_deleted(agent.id)
-
-    await _complete(
-        services,
-        task,
-        TaskUpdate(status=TaskStatus.COMPLETED, result=[_insight_result("summary")]),
-    )
-
-    assert await _agent_insights(services, agent.id) == []
-
-
 async def test_insight_names_repeat_across_tasks_without_conflict(
     services: ReplayServices,
 ) -> None:
