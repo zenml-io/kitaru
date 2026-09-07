@@ -111,6 +111,11 @@ docker build -f docker/release-worker.Dockerfile --target worker \
 docker build -f docker/release-server.Dockerfile --target server \
   --build-arg KITARU_VERSION=<version> -t kitaru-server .
 
+# Managed server with the modal extra, as published to the private ECR registry
+docker build -f docker/release-server.Dockerfile --target server \
+  --build-arg KITARU_VERSION=<version> --build-arg ADDITIONAL_EXTRAS=modal \
+  -t kitaru-pro-server .
+
 # Onboarding sandbox from the published worker image
 docker build -f docker/onboarding-sandbox.Dockerfile --target worker \
   --build-arg BASE_IMAGE=zenmldocker/kitaru-worker:<version> \
