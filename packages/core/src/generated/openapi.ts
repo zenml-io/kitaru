@@ -4144,6 +4144,24 @@ export interface components {
             type: "api";
         };
         /**
+         * ApiImportSourceSpec
+         * @description API import source spec.
+         */
+        ApiImportSourceSpec: {
+            /**
+             * Query
+             * @description Importer-defined selection of what to fetch.
+             */
+            query: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "api";
+        };
+        /**
          * ApiKeyCreateRequest
          * @description API key create request.
          */
@@ -4283,24 +4301,6 @@ export interface components {
             active: boolean;
         };
         /**
-         * ApiSourceSpec
-         * @description API source spec.
-         */
-        ApiSourceSpec: {
-            /**
-             * Query
-             * @description Importer-defined selection of what to fetch.
-             */
-            query: {
-                [key: string]: unknown;
-            };
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "api";
-        };
-        /**
          * AuthScheme
          * @description Authentication scheme.
          * @enum {string}
@@ -4372,6 +4372,28 @@ export interface components {
             type: "blob";
         };
         /**
+         * BlobImportSourceSpec
+         * @description Blob import source spec.
+         */
+        BlobImportSourceSpec: {
+            /**
+             * Blob Id
+             * Format: uuid
+             * @description Blob holding the payload.
+             */
+            blob_id: string;
+            /**
+             * Sha256
+             * @description Blob content hash.
+             */
+            sha256: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "blob";
+        };
+        /**
          * BlobResponse
          * @description Blob response.
          */
@@ -4403,28 +4425,6 @@ export interface components {
              * @description Content size in bytes.
              */
             size: number;
-        };
-        /**
-         * BlobSourceSpec
-         * @description Blob source spec.
-         */
-        BlobSourceSpec: {
-            /**
-             * Blob Id
-             * Format: uuid
-             * @description Blob holding the payload.
-             */
-            blob_id: string;
-            /**
-             * Sha256
-             * @description Blob content hash.
-             */
-            sha256: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "blob";
         };
         /** Body_device_authorization_api_v1_device_authorization_post */
         Body_device_authorization_api_v1_device_authorization_post: {
@@ -5923,7 +5923,7 @@ export interface components {
              * Source
              * @description Where the payload comes from.
              */
-            source: components["schemas"]["BlobSourceSpec"] | components["schemas"]["ApiSourceSpec"];
+            source: components["schemas"]["BlobImportSourceSpec"] | components["schemas"]["ApiImportSourceSpec"];
         };
         /**
          * ImporterCreateRequest

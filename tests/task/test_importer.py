@@ -46,7 +46,7 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeListParams,
 )
 from kitaru.api_models.v1.task import (
-    ApiSourceSpec,
+    ApiImportSourceSpec,
     ImportTaskDetails,
     PackagePluginSpec,
     ScriptPluginSpec,
@@ -184,7 +184,7 @@ def _script_details(entrypoint: str) -> ImportTaskDetails:
         plugin=ScriptPluginSpec(
             entrypoint=entrypoint, blob_id=uuid.uuid4(), sha256="x"
         ),
-        source=ApiSourceSpec(query={}),
+        source=ApiImportSourceSpec(query={}),
         agent_id=uuid.uuid4(),
         params={},
     )
@@ -230,7 +230,7 @@ def test_resolve_importer_package_plugin() -> None:
     """Load a package plugin's entrypoint by module:attribute."""
     details = ImportTaskDetails(
         plugin=PackagePluginSpec(entrypoint="json:dumps", requirement="pkg==1.0"),
-        source=ApiSourceSpec(query={}),
+        source=ApiImportSourceSpec(query={}),
         agent_id=uuid.uuid4(),
         params={},
     )
@@ -689,7 +689,7 @@ async def _create_api_source_task(
             plugin=ScriptPluginSpec(
                 entrypoint="importer", blob_id=uuid.uuid4(), sha256="x"
             ),
-            source=ApiSourceSpec(query=query or {}),
+            source=ApiImportSourceSpec(query=query or {}),
             agent_id=task_app.agent.id,
             params={},
         ),

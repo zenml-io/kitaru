@@ -35,8 +35,8 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
-    ApiSourceSpec,
-    BlobSourceSpec,
+    ApiImportSourceSpec,
+    BlobImportSourceSpec,
     ImportTaskDetails,
     ScriptPluginSpec,
 )
@@ -94,7 +94,7 @@ async def test_import_spec_is_built_from_the_import_row(
     assert spec.details.plugin.blob_id == code_blob.id
     assert spec.details.plugin.sha256 == code_blob.sha256
     assert spec.details.provider == "acme"
-    assert isinstance(spec.details.source, BlobSourceSpec)
+    assert isinstance(spec.details.source, BlobImportSourceSpec)
     assert spec.details.source.blob_id == payload.id
     assert spec.details.source.sha256 == payload.sha256
     assert spec.details.agent_id == agent.id
@@ -130,7 +130,7 @@ async def test_import_spec_carries_the_api_source(
     spec = await services.task_service.get_spec(task.id, actor=ACTOR)
 
     assert isinstance(spec.details, ImportTaskDetails)
-    assert isinstance(spec.details.source, ApiSourceSpec)
+    assert isinstance(spec.details.source, ApiImportSourceSpec)
     assert spec.details.source.query == {"since": "2026-08-01T00:00:00Z"}
 
 

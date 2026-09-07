@@ -683,6 +683,28 @@
         "title": "ApiImportSource",
         "type": "object"
       },
+      "ApiImportSourceSpec": {
+        "description": "API import source spec.",
+        "properties": {
+          "query": {
+            "additionalProperties": true,
+            "description": "Importer-defined selection of what to fetch.",
+            "title": "Query",
+            "type": "object"
+          },
+          "type": {
+            "const": "api",
+            "default": "api",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ApiImportSourceSpec",
+        "type": "object"
+      },
       "ApiKeyCreateRequest": {
         "additionalProperties": false,
         "description": "API key create request.",
@@ -890,28 +912,6 @@
         "title": "ApiKeyUpdateRequest",
         "type": "object"
       },
-      "ApiSourceSpec": {
-        "description": "API source spec.",
-        "properties": {
-          "query": {
-            "additionalProperties": true,
-            "description": "Importer-defined selection of what to fetch.",
-            "title": "Query",
-            "type": "object"
-          },
-          "type": {
-            "const": "api",
-            "default": "api",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "query"
-        ],
-        "title": "ApiSourceSpec",
-        "type": "object"
-      },
       "AuthScheme": {
         "description": "Authentication scheme.",
         "enum": [
@@ -1034,6 +1034,34 @@
         "title": "BlobImportSource",
         "type": "object"
       },
+      "BlobImportSourceSpec": {
+        "description": "Blob import source spec.",
+        "properties": {
+          "blob_id": {
+            "description": "Blob holding the payload.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Blob content hash.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "type": {
+            "const": "blob",
+            "default": "blob",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blob_id",
+          "sha256"
+        ],
+        "title": "BlobImportSourceSpec",
+        "type": "object"
+      },
       "BlobResponse": {
         "description": "Blob response.",
         "properties": {
@@ -1073,34 +1101,6 @@
           "created"
         ],
         "title": "BlobResponse",
-        "type": "object"
-      },
-      "BlobSourceSpec": {
-        "description": "Blob source spec.",
-        "properties": {
-          "blob_id": {
-            "description": "Blob holding the payload.",
-            "format": "uuid",
-            "title": "Blob Id",
-            "type": "string"
-          },
-          "sha256": {
-            "description": "Blob content hash.",
-            "title": "Sha256",
-            "type": "string"
-          },
-          "type": {
-            "const": "blob",
-            "default": "blob",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "blob_id",
-          "sha256"
-        ],
-        "title": "BlobSourceSpec",
         "type": "object"
       },
       "Body_device_authorization_api_v1_device_authorization_post": {
@@ -3830,17 +3830,17 @@
             "description": "Where the payload comes from.",
             "discriminator": {
               "mapping": {
-                "api": "#/components/schemas/ApiSourceSpec",
-                "blob": "#/components/schemas/BlobSourceSpec"
+                "api": "#/components/schemas/ApiImportSourceSpec",
+                "blob": "#/components/schemas/BlobImportSourceSpec"
               },
               "propertyName": "type"
             },
             "oneOf": [
               {
-                "$ref": "#/components/schemas/BlobSourceSpec"
+                "$ref": "#/components/schemas/BlobImportSourceSpec"
               },
               {
-                "$ref": "#/components/schemas/ApiSourceSpec"
+                "$ref": "#/components/schemas/ApiImportSourceSpec"
               }
             ],
             "title": "Source"

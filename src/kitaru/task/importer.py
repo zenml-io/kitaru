@@ -39,8 +39,8 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeCreateRequest,
 )
 from kitaru.api_models.v1.task import (
-    ApiSourceSpec,
-    BlobSourceSpec,
+    ApiImportSourceSpec,
+    BlobImportSourceSpec,
     ImportTaskDetails,
     ScriptPluginSpec,
 )
@@ -559,10 +559,10 @@ async def _iter_payloads(
     Yields:
         Raw payload bytes.
     """
-    if isinstance(details.source, BlobSourceSpec):
+    if isinstance(details.source, BlobImportSourceSpec):
         yield Path(get_required_env("KITARU_TASK_PAYLOAD_PATH")).read_bytes()
         return
-    assert isinstance(details.source, ApiSourceSpec)
+    assert isinstance(details.source, ApiImportSourceSpec)
     if fetcher is None:
         raise SessionImportError(
             f"{_LABEL} entrypoint '{details.plugin.entrypoint}' does not fetch "

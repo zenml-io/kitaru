@@ -41,11 +41,12 @@ from kitaru.server.domain.ids import uuid7
 __all__ = [
     "AgentTask",
     "AgentTaskDetails",
-    "ApiSourceSpec",
-    "BlobSourceSpec",
+    "ApiImportSourceSpec",
+    "BlobImportSourceSpec",
     "DuplicateEvaluationTask",
     "EvaluationTask",
     "EvaluationTaskDetails",
+    "ImportSourceSpec",
     "ImportTask",
     "ImportTaskDetails",
     "InvalidTaskEnv",
@@ -53,7 +54,6 @@ __all__ = [
     "PackagePluginSpec",
     "PluginSpec",
     "ScriptPluginSpec",
-    "SourceSpec",
     "Task",
     "TaskAccessDenied",
     "TaskAttemptMismatch",
@@ -698,22 +698,24 @@ PluginSpec = Annotated[
 ]
 
 
-class BlobSourceSpec(FrozenModel):
-    """Blob source spec."""
+class BlobImportSourceSpec(FrozenModel):
+    """Blob import source spec."""
 
     type: Literal["blob"] = "blob"
     blob_id: uuid.UUID
     sha256: str
 
 
-class ApiSourceSpec(FrozenModel):
-    """API source spec."""
+class ApiImportSourceSpec(FrozenModel):
+    """API import source spec."""
 
     type: Literal["api"] = "api"
     query: dict[str, Any] = Field(default_factory=dict)
 
 
-SourceSpec = Annotated[BlobSourceSpec | ApiSourceSpec, Field(discriminator="type")]
+ImportSourceSpec = Annotated[
+    BlobImportSourceSpec | ApiImportSourceSpec, Field(discriminator="type")
+]
 
 
 class AgentTaskDetails(FrozenModel):
@@ -739,7 +741,7 @@ class ImportTaskDetails(FrozenModel):
 
     kind: Literal[TaskKind.IMPORTER] = TaskKind.IMPORTER
     plugin: PluginSpec
-    source: SourceSpec
+    source: ImportSourceSpec
     provider: str | None = None
     agent_id: uuid.UUID
     params: dict[str, Any] = Field(default_factory=dict)

@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from kitaru.api_models.v1.task import (
-    ApiSourceSpec,
-    BlobSourceSpec,
+    ApiImportSourceSpec,
+    BlobImportSourceSpec,
     ImportTaskDetails,
     ScriptPluginSpec,
     TaskSpecResponse,
@@ -67,7 +67,7 @@ class ImportHandler:
             materializations["KITARU_TASK_PLUGIN_PATH"] = materialize_blob(
                 ctx, ctx.blob_cache, details.plugin.blob_id, details.plugin.sha256
             )
-        if isinstance(details.source, BlobSourceSpec):
+        if isinstance(details.source, BlobImportSourceSpec):
             materializations["KITARU_TASK_PAYLOAD_PATH"] = materialize_blob(
                 ctx, ctx.payload_cache, details.source.blob_id, details.source.sha256
             )
@@ -79,7 +79,7 @@ class ImportHandler:
             dependencies = parse_inline_dependencies(
                 Path(env["KITARU_TASK_PLUGIN_PATH"])
             )
-        elif isinstance(details.source, ApiSourceSpec):
+        elif isinstance(details.source, ApiImportSourceSpec):
             dependencies = [with_extra(details.plugin.requirement, FETCH_EXTRA)]
         else:
             dependencies = [details.plugin.requirement]

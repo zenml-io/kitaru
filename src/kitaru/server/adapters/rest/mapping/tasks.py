@@ -17,14 +17,14 @@ import uuid
 
 from kitaru.api_models.v1.task import (
     AgentTaskDetails,
-    ApiSourceSpec,
-    BlobSourceSpec,
+    ApiImportSourceSpec,
+    BlobImportSourceSpec,
     EvaluationTaskDetails,
+    ImportSourceSpec,
     ImportTaskDetails,
     PackagePluginSpec,
     PluginSpec,
     ScriptPluginSpec,
-    SourceSpec,
     TaskClaimResponse,
     TaskDetails,
     TaskListParams,
@@ -48,10 +48,10 @@ from kitaru.server.domain.task import (
     AgentTaskDetails as DomainAgentTaskDetails,
 )
 from kitaru.server.domain.task import (
-    ApiSourceSpec as DomainApiSourceSpec,
+    ApiImportSourceSpec as DomainApiSourceSpec,
 )
 from kitaru.server.domain.task import (
-    BlobSourceSpec as DomainBlobSourceSpec,
+    BlobImportSourceSpec as DomainBlobSourceSpec,
 )
 from kitaru.server.domain.task import (
     EvaluationTaskDetails as DomainEvaluationTaskDetails,
@@ -132,7 +132,7 @@ def _plugin_spec_to_response(plugin: DomainPluginSpec) -> PluginSpec:
 
 def _source_spec_to_response(
     source: DomainBlobSourceSpec | DomainApiSourceSpec,
-) -> SourceSpec:
+) -> ImportSourceSpec:
     """Convert a source spec value object to its response DTO.
 
     Args:
@@ -142,8 +142,8 @@ def _source_spec_to_response(
         Source spec DTO.
     """
     if isinstance(source, DomainBlobSourceSpec):
-        return BlobSourceSpec(blob_id=source.blob_id, sha256=source.sha256)
-    return ApiSourceSpec(query=source.query)
+        return BlobImportSourceSpec(blob_id=source.blob_id, sha256=source.sha256)
+    return ApiImportSourceSpec(query=source.query)
 
 
 def _run_spec_to_response(run_spec: DomainTaskRunSpec) -> TaskRunSpec:

@@ -25,10 +25,10 @@ from kitaru.api_models.v1.session import SessionOrigin, SessionResponse, Session
 from kitaru.api_models.v1.task import (
     AgentTaskDetails,
     EvaluationTaskDetails,
+    ImportSourceSpec,
     ImportTaskDetails,
     PackagePluginSpec,
     ScriptPluginSpec,
-    SourceSpec,
     TaskClaimResponse,
     TaskKind,
     TaskOnFailure,
@@ -171,7 +171,7 @@ def make_evaluator_spec(
 def make_importer_spec(
     task_id: uuid.UUID,
     plugin: ScriptPluginSpec | PackagePluginSpec,
-    source: SourceSpec,
+    source: ImportSourceSpec,
     timeout_seconds: int = 30,
     agent_id: uuid.UUID | None = None,
     extra_env: dict[str, str] | None = None,

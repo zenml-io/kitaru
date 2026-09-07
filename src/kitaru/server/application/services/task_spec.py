@@ -31,16 +31,16 @@ from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
     AgentTaskDetails,
-    ApiSourceSpec,
-    BlobSourceSpec,
+    ApiImportSourceSpec,
+    BlobImportSourceSpec,
     EvaluationTask,
     EvaluationTaskDetails,
+    ImportSourceSpec,
     ImportTask,
     ImportTaskDetails,
     PackagePluginSpec,
     PluginSpec,
     ScriptPluginSpec,
-    SourceSpec,
     Task,
     TaskRunSpec,
     TaskSpec,
@@ -212,7 +212,7 @@ class TaskSpecBuilder:
 
     async def _import_source_spec(
         self, import_: Import, plugin_version: PluginVersion
-    ) -> SourceSpec:
+    ) -> ImportSourceSpec:
         """Convert an import's source into its spec form.
 
         Args:
@@ -227,9 +227,9 @@ class TaskSpecBuilder:
         """
         if import_.payload_blob_id is not None:
             payload = await self._blobs.get(import_.payload_blob_id)
-            return BlobSourceSpec(blob_id=payload.id, sha256=payload.sha256)
+            return BlobImportSourceSpec(blob_id=payload.id, sha256=payload.sha256)
         assert import_.fetch_query is not None
-        return ApiSourceSpec(query=import_.fetch_query)
+        return ApiImportSourceSpec(query=import_.fetch_query)
 
     async def _plugin_spec(self, plugin_version: PluginVersion) -> PluginSpec:
         """Convert a plugin version's code source into its spec form.
