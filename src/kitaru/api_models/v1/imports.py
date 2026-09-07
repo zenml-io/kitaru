@@ -104,7 +104,7 @@ class ImportCreateRequest(RequestModel):
             raise ValueError("source is required")
         return self
 
-    def get_source(self) -> "BlobImportSource | ApiImportSource":
+    def get_source(self) -> ImportSource:
         """Return the import source, mapping the deprecated blob id to it.
 
         Returns:

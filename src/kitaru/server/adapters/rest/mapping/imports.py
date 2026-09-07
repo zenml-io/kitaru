@@ -19,6 +19,7 @@ from kitaru.api_models.v1.imports import (
     ImportCreateRequest,
     ImportListParams,
     ImportResponse,
+    ImportSource,
 )
 from kitaru.server.adapters.rest.mapping.evaluator_config import (
     evaluator_config_input,
@@ -66,7 +67,7 @@ def import_to_response(import_: Import) -> ImportResponse:
     """
     assert import_.created is not None
     assert import_.updated is not None
-    source: BlobImportSource | ApiImportSource
+    source: ImportSource
     if import_.payload_blob_id is not None:
         source = BlobImportSource(blob_id=import_.payload_blob_id)
     else:

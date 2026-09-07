@@ -27,6 +27,7 @@ from kitaru.api_models.v1.imports import (
     ApiImportSource,
     BlobImportSource,
     ImportCreateRequest,
+    ImportSource,
     ImportStats,
 )
 from kitaru.api_models.v1.job import JobResponse, JobStatus
@@ -415,7 +416,7 @@ async def import_sessions(
         )
         blob_identity = _blob_metadata(blob)
         identity["blob"] = blob_identity
-        source: BlobImportSource | ApiImportSource = BlobImportSource(blob_id=blob.id)
+        source: ImportSource = BlobImportSource(blob_id=blob.id)
     else:
         assert api_query is not None
         identity["query"] = api_query
