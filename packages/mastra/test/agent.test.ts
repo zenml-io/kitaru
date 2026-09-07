@@ -1,5 +1,4 @@
 import { Agent } from "@mastra/core/agent";
-// @ts-expect-error Mastra 1.51.0 exports this public test helper without declarations.
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
