@@ -264,20 +264,22 @@ def _scope_only(cwd: Path) -> Literal["project", "user"]:
 
 
 def _find_project_dir(prefix: Path, cwd: Path) -> Path | None:
-    """Return the project a virtual environment belongs to, if any."""
-    if prefix.name != ".venv":
-        return None
-    project = prefix.parent
-    if not (project / "pyproject.toml").is_file():
-        return None
-    # The working directory must be inside the project, otherwise a setup
-    # run from elsewhere would register a project-scoped entry in the wrong
-    # place.
-    try:
-        cwd.relative_to(project)
-    except ValueError:
-        return None
-    return project
+    """Return the project whose uv environment is ``prefix``, if any.
+
+    The environment is ``<project>/.venv`` unless ``UV_PROJECT_ENVIRONMENT``
+    points elsewhere; uv resolves a relative value against the project root.
+    """
+    environment = os.environ.get("UV_PROJECT_ENVIRONMENT") or ".venv"
+    resolved_prefix = prefix.resolve()
+    # Walk up from the working directory rather than down from the prefix, so
+    # a setup run from outside the project never registers a project-scoped
+    # entry in the wrong place.
+    for candidate in (cwd, *cwd.parents):
+        if not (candidate / "pyproject.toml").is_file():
+            continue
+        if (candidate / environment).resolve() == resolved_prefix:
+            return candidate
+    return None
 
 
 def _find_sibling_executable(name: str) -> Path | None:
@@ -408,7 +410,13 @@ def _write_skills(destination: Path, skills: dict[str, dict[str, bytes]]) -> Non
                 )
                 retired.rmdir()
                 os.replace(target, retired)
-                os.replace(staging, target)
+                try:
+                    os.replace(staging, target)
+                except BaseException:
+                    # Put the previous version back so a failed swap never
+                    # leaves the skill missing or hidden in the retired copy.
+                    os.replace(retired, target)
+                    raise
                 shutil.rmtree(retired, ignore_errors=True)
                 continue
             os.replace(staging, target)
@@ -498,6 +506,42 @@ class McpClient:
         raise NotImplementedError
 
 
+@dataclass(frozen=True, slots=True)
+class ClaudeEntry:
+    """An MCP entry as `claude mcp get` reports it."""
+
+    command: str
+    args: tuple[str, ...]
+    scope: str
+
+    def matches(self, command: str, args: tuple[str, ...]) -> bool:
+        """Check that this entry launches exactly ``command`` with ``args``."""
+        return self.command == command and self.args == args
+
+
+def _parse_claude_entry(output: str) -> ClaudeEntry | None:
+    """Read the launch and scope out of `claude mcp get` output.
+
+    The CLI prints one `Command:` line, one space-joined `Args:` line, and a
+    `Scope:` line starting with `User`, `Project`, or `Local`. A space-joined
+    argument list cannot recover an argument containing whitespace; entries
+    written by `kitaru setup` never contain one.
+    """
+    fields: dict[str, str] = {}
+    for line in output.splitlines():
+        key, separator, value = line.strip().partition(":")
+        if separator:
+            fields.setdefault(key, value.strip())
+    command = fields.get("Command")
+    if not command:
+        return None
+    return ClaudeEntry(
+        command=command,
+        args=tuple(fields.get("Args", "").split()),
+        scope=fields.get("Scope", "").split(" ", 1)[0].lower(),
+    )
+
+
 class ClaudeCodeClient(McpClient):
     """Claude Code, configured through its own `claude mcp` commands."""
 
@@ -512,16 +556,64 @@ class ClaudeCodeClient(McpClient):
         """Replace any existing `kitaru` entry and verify it is the one in use.
 
         `claude mcp get` is scope-agnostic and reports whichever entry wins.
-        After adding ours, read it back: if the winning entry does not carry
-        our command, an entry in another scope shadows it and the user has to
-        remove that one.
+        An entry in our scope that already matches is left untouched. Otherwise
+        the entry in our scope is removed and ours added; if the add fails, the
+        removed entry is put back so a failed run never leaves Claude Code
+        without the server it had. The result is read back and must carry
+        exactly our command and arguments: a stale entry in another scope, or a
+        readback that cannot be parsed, is reported as a failure.
         """
         existing = await _run_command(self.executable, "mcp", "get", MCP_SERVER_NAME)
+        previous: ClaudeEntry | None = None
+        removed: ProcessResult | None = None
         if existing.returncode == 0:
-            await _run_command(
+            entry = _parse_claude_entry(existing.stdout)
+            if entry is not None and entry.scope == self.scope:
+                if entry.matches(command, args):
+                    return self._done()
+                previous = entry
+            removed = await _run_command(
                 self.executable, "mcp", "remove", "--scope", self.scope, MCP_SERVER_NAME
             )
-        added = await _run_command(
+        added = await self._add(command, args)
+        if added.returncode != 0:
+            detail = _failure_detail(added)
+            if removed is not None and removed.returncode == 0:
+                detail += await self._restore(previous)
+            return _step("mcp", self.name, "failed", detail)
+        current = await _run_command(self.executable, "mcp", "get", MCP_SERVER_NAME)
+        if current.returncode != 0:
+            return _step(
+                "mcp",
+                self.name,
+                "failed",
+                f"registered in {self.scope} scope, but reading it back failed "
+                f"({_failure_detail(current)}). Check `claude mcp get "
+                f"{MCP_SERVER_NAME}` and run `kitaru setup` again.",
+            )
+        entry = _parse_claude_entry(current.stdout)
+        if entry is None or not entry.matches(command, args):
+            return _step(
+                "mcp",
+                self.name,
+                "failed",
+                f"registered in {self.scope} scope, but `claude mcp get` reports "
+                f"a different command or arguments: an entry named "
+                f"'{MCP_SERVER_NAME}' in another scope still wins. Remove it "
+                f"with `claude mcp remove {MCP_SERVER_NAME}` in that scope and "
+                "run `kitaru setup` again.",
+            )
+        return self._done()
+
+    def _done(self) -> dict[str, Any]:
+        """Build the successful registration step."""
+        return _step(
+            "mcp", self.name, "done", f"server '{MCP_SERVER_NAME}', {self.scope} scope"
+        )
+
+    async def _add(self, command: str, args: tuple[str, ...]) -> ProcessResult:
+        """Add the `kitaru` entry in this client's scope."""
+        return await _run_command(
             self.executable,
             "mcp",
             "add",
@@ -532,21 +624,20 @@ class ClaudeCodeClient(McpClient):
             command,
             *args,
         )
-        if added.returncode != 0:
-            return _step("mcp", self.name, "failed", _failure_detail(added))
-        current = await _run_command(self.executable, "mcp", "get", MCP_SERVER_NAME)
-        if current.returncode == 0 and command not in current.stdout:
-            return _step(
-                "mcp",
-                self.name,
-                "failed",
-                f"registered in {self.scope} scope, but an entry named "
-                f"'{MCP_SERVER_NAME}' in another scope still wins. Remove it "
-                f"with `claude mcp remove {MCP_SERVER_NAME}` in that scope and "
-                "run `kitaru setup` again.",
+
+    async def _restore(self, previous: ClaudeEntry | None) -> str:
+        """Re-add the entry that was removed and describe the outcome."""
+        if previous is None:
+            return (
+                f"; the previous '{MCP_SERVER_NAME}' entry was removed and could "
+                "not be read back to restore it, re-add it manually"
             )
-        return _step(
-            "mcp", self.name, "done", f"server '{MCP_SERVER_NAME}', {self.scope} scope"
+        restored = await self._add(previous.command, previous.args)
+        if restored.returncode == 0:
+            return f"; the previous '{MCP_SERVER_NAME}' entry was restored"
+        return (
+            f"; the previous '{MCP_SERVER_NAME}' entry could not be restored "
+            f"({_failure_detail(restored)})"
         )
 
 

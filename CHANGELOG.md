@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `kitaru setup` is now safe to re-run against Claude Code. It verifies the whole registered launch (command, `--server`, and `--mode`) when it reads the entry back, so a stale entry in another scope or a failed readback is reported instead of passing as success, and it restores the previous `kitaru` entry when the replacement cannot be added. A project whose uv environment is set through `UV_PROJECT_ENVIRONMENT` is now recognized as a project install, so Cursor gets the project file rather than the global one. A skill whose final rename fails is put back in place instead of being left in a hidden retired directory.
 - `kitaru doctor` no longer prints "Kitaru is needs attention", and its missing-skills hint points at `kitaru setup`. The one-line installer prints `uvx kitaru ...` for its next steps when the tool directory is not on the current shell's PATH yet, so they work without opening a new terminal.
 - `if_missing` baseline scoring now adopts every evaluation an evaluator call produced instead of only one of them, so a rerun's baseline aggregates no longer lose metrics from an evaluator that returns multiple results.
 

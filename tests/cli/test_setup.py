@@ -104,17 +104,52 @@ def _clis(monkeypatch, **paths: str) -> None:
     monkeypatch.setattr(setup_cli.shutil, "which", lambda name: paths.get(name))
 
 
-def _fake_claude(calls: list[tuple[str, ...]], *, existing: bool, winner: str):
-    """A claude/codex CLI stub; `winner` is what `claude mcp get` reports."""
+_OLD_ENTRY = ("/old/kitaru-mcp", "--server", "http://old:8000", "--mode", "destructive")
+
+
+def _claude_get_output(launch: tuple[str, ...], scope: str = "User") -> str:
+    """Render an entry the way `claude mcp get` prints it."""
+    command, *args = launch
+    return (
+        f"kitaru:\n  Scope: {scope} config\n  Status: ✓ Connected\n  Type: stdio\n"
+        f"  Command: {command}\n  Args: {' '.join(args)}\n"
+    )
+
+
+def _fake_claude(
+    calls: list[tuple[str, ...]],
+    *,
+    existing: tuple[str, ...] | None,
+    winner: tuple[str, ...] | None = None,
+    existing_scope: str = "User",
+    failing_adds: int = 0,
+    readback_fails: bool = False,
+):
+    """A claude/codex CLI stub.
+
+    `existing` is the entry `claude mcp get` reports before our add, in
+    `existing_scope`; `winner` the one it reports afterwards (defaulting to
+    whatever was last added). The first `failing_adds` add calls fail;
+    `readback_fails` makes the get after the add fail.
+    """
 
     async def run(executable: str, *arguments: str) -> ProcessResult:
         calls.append((executable, *arguments))
+        adds = [c for c in calls if c[1:3] == ("mcp", "add")]
         if arguments[:2] == ("mcp", "get"):
-            # Before the add: only "existing" answers. After: the winner.
-            adds = [c for c in calls if c[1:3] == ("mcp", "add")]
-            if not adds and not existing:
-                return ProcessResult(returncode=1, stdout="", stderr="not found")
-            return ProcessResult(returncode=0, stdout=f"kitaru: {winner}", stderr="")
+            if not adds:
+                if existing is None:
+                    return ProcessResult(returncode=1, stdout="", stderr="not found")
+                return ProcessResult(
+                    0, _claude_get_output(existing, existing_scope), ""
+                )
+            if readback_fails:
+                return ProcessResult(returncode=1, stdout="", stderr="config broken")
+            last_add = adds[-1]
+            reported = winner or tuple(last_add[last_add.index("--") + 1 :])
+            return ProcessResult(0, _claude_get_output(reported), "")
+        if arguments[:2] == ("mcp", "add") and len(adds) <= failing_adds:
+            return ProcessResult(returncode=1, stdout="", stderr="add refused")
         return ProcessResult(returncode=0, stdout="", stderr="")
 
     return run
@@ -212,7 +247,7 @@ async def test_claude_and_codex_clients_register_through_their_clis(
     _clis(monkeypatch, claude="/bin/claude", codex="/bin/codex")
     calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(
-        setup_cli, "_run_command", _fake_claude(calls, existing=True, winner=MCP)
+        setup_cli, "_run_command", _fake_claude(calls, existing=_OLD_ENTRY)
     )
 
     result = await _run(home, server="http://localhost:9000", mode="read-only")
@@ -247,7 +282,7 @@ async def test_claude_entry_shadowed_by_another_scope_is_reported(
     monkeypatch.setattr(
         setup_cli,
         "_run_command",
-        _fake_claude(calls, existing=True, winner="/old/kitaru-mcp"),
+        _fake_claude(calls, existing=_OLD_ENTRY, winner=_OLD_ENTRY),
     )
 
     result = await _run(home, install_skills=False)
@@ -256,6 +291,124 @@ async def test_claude_entry_shadowed_by_another_scope_is_reported(
     assert step["status"] == "failed"
     assert "another scope still wins" in step["detail"]
     assert result.exit_code == 1
+
+
+async def test_claude_readback_with_stale_arguments_is_rejected(
+    home: Path, monkeypatch
+):
+    """A readback carrying our command but old --server/--mode is not success."""
+    _clis(monkeypatch, claude="/bin/claude")
+    stale = (MCP, "--server", "http://old:8000", "--mode", "destructive")
+    monkeypatch.setattr(
+        setup_cli, "_run_command", _fake_claude([], existing=stale, winner=stale)
+    )
+
+    result = await _run(home, install_skills=False, mode="read-only")
+
+    step = result.item["steps"][0]
+    assert step["status"] == "failed"
+    assert "different command or arguments" in step["detail"]
+    assert result.exit_code == 1
+
+
+async def test_claude_failed_readback_is_a_failure(home: Path, monkeypatch):
+    """When `claude mcp get` fails after the add, setup does not report done."""
+    _clis(monkeypatch, claude="/bin/claude")
+    monkeypatch.setattr(
+        setup_cli, "_run_command", _fake_claude([], existing=None, readback_fails=True)
+    )
+
+    result = await _run(home, install_skills=False)
+
+    step = result.item["steps"][0]
+    assert step["status"] == "failed"
+    assert "reading it back failed" in step["detail"]
+    assert "config broken" in step["detail"]
+    assert result.exit_code == 1
+
+
+async def test_claude_failed_add_restores_the_previous_entry(home: Path, monkeypatch):
+    """If the replacement cannot be added, the removed entry is put back."""
+    _clis(monkeypatch, claude="/bin/claude")
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        setup_cli,
+        "_run_command",
+        _fake_claude(calls, existing=_OLD_ENTRY, failing_adds=1),
+    )
+
+    result = await _run(home, install_skills=False)
+
+    add_prefix = ("/bin/claude", "mcp", "add", "--scope", "user", "kitaru", "--")
+    assert calls == [
+        ("/bin/claude", "mcp", "get", "kitaru"),
+        ("/bin/claude", "mcp", "remove", "--scope", "user", "kitaru"),
+        (*add_prefix, MCP, "--server", "http://localhost:8000", "--mode", "standard"),
+        (*add_prefix, *_OLD_ENTRY),
+    ]
+    step = result.item["steps"][0]
+    assert step["status"] == "failed"
+    assert step["detail"] == (
+        "exit 1: add refused; the previous 'kitaru' entry was restored"
+    )
+    assert result.exit_code == 1
+
+
+async def test_claude_matching_entry_in_our_scope_is_left_untouched(
+    home: Path, monkeypatch
+):
+    """Re-running against an already correct entry never removes or re-adds it."""
+    _clis(monkeypatch, claude="/bin/claude")
+    calls: list[tuple[str, ...]] = []
+    current = (MCP, "--server", "http://localhost:8000", "--mode", "standard")
+    monkeypatch.setattr(
+        setup_cli, "_run_command", _fake_claude(calls, existing=current)
+    )
+
+    result = await _run(home, install_skills=False)
+
+    assert calls == [("/bin/claude", "mcp", "get", "kitaru")]
+    assert result.item["steps"][0]["status"] == "done"
+    assert result.exit_code == 0
+
+
+async def test_claude_failed_add_does_not_restore_an_entry_from_another_scope(
+    home: Path, monkeypatch
+):
+    """A shadowing entry from another scope is never re-added into ours."""
+    _clis(monkeypatch, claude="/bin/claude")
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        setup_cli,
+        "_run_command",
+        _fake_claude(
+            calls, existing=_OLD_ENTRY, existing_scope="Local", failing_adds=1
+        ),
+    )
+
+    result = await _run(home, install_skills=False)
+
+    adds = [c for c in calls if c[1:3] == ("mcp", "add")]
+    assert len(adds) == 1
+    step = result.item["steps"][0]
+    assert step["status"] == "failed"
+    assert "could not be read back to restore it" in step["detail"]
+
+
+async def test_claude_failed_add_reports_an_unrestorable_entry(home: Path, monkeypatch):
+    """An entry that was removed but cannot be restored is called out."""
+    _clis(monkeypatch, claude="/bin/claude")
+    monkeypatch.setattr(
+        setup_cli,
+        "_run_command",
+        _fake_claude([], existing=_OLD_ENTRY, failing_adds=2),
+    )
+
+    result = await _run(home, install_skills=False)
+
+    step = result.item["steps"][0]
+    assert step["status"] == "failed"
+    assert "could not be restored" in step["detail"]
 
 
 async def test_one_failed_client_among_several_is_a_warning(home: Path, monkeypatch):
@@ -350,9 +503,7 @@ async def test_project_install_uses_uv_run_and_project_scope(home: Path, monkeyp
     )
     _clis(monkeypatch, claude="/bin/claude")
     calls: list[tuple[str, ...]] = []
-    monkeypatch.setattr(
-        setup_cli, "_run_command", _fake_claude(calls, existing=False, winner="/bin/uv")
-    )
+    monkeypatch.setattr(setup_cli, "_run_command", _fake_claude(calls, existing=None))
 
     result = await _run(home, install_skills=False, cwd=project)
 
@@ -499,6 +650,32 @@ async def test_unwritable_destination_leaves_previous_skill_intact(
     assert result.exit_code == 0
 
 
+async def test_failed_skill_swap_restores_the_previous_skill(home: Path, monkeypatch):
+    """When the final rename fails, the old skill is put back, not left retired."""
+    _clis(monkeypatch, codex="/bin/codex")
+    await _run(home, register_mcp=False)
+    codex_skills = home / ".codex" / "skills"
+    codex_skill = codex_skills / "kitaru-investigation"
+    before = (codex_skill / "SKILL.md").read_bytes()
+
+    real_replace = setup_cli.os.replace
+
+    def failing_replace(src, dst):
+        if ".staging" in str(src) and Path(dst) == codex_skill:
+            raise OSError("rename refused")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(setup_cli.os, "replace", failing_replace)
+
+    result = await _run(home, register_mcp=False)
+
+    statuses = {s["target"]: s["status"] for s in result.item["steps"]}
+    assert statuses[str(codex_skills)] == "failed"
+    assert statuses[str(home / ".agents" / "skills")] == "done"
+    assert (codex_skill / "SKILL.md").read_bytes() == before
+    assert [p.name for p in codex_skills.iterdir() if p.name.startswith(".")] == []
+
+
 async def test_nothing_to_do_is_a_warning(home: Path):
     """--no-skills --no-mcp does nothing and says so."""
     result = await _run(home, install_skills=False, register_mcp=False)
@@ -531,6 +708,35 @@ def test_resolve_mcp_launch_project_mode(tmp_path: Path, monkeypatch):
     )
     with pytest.raises(CLIError):
         # From outside the project there is no sibling executable either.
+        setup_cli.resolve_mcp_launch(tmp_path, tmp_path)
+
+
+@pytest.mark.parametrize("environment", ["env", "{tmp}/envs/kitaru-dev"])
+def test_resolve_mcp_launch_honors_uv_project_environment(
+    tmp_path: Path, monkeypatch, environment: str
+):
+    """A project whose uv environment is not `.venv` still gets project scope."""
+    project = tmp_path / "repo"
+    (project / "src").mkdir(parents=True)
+    (project / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+    environment = environment.format(tmp=tmp_path)
+    prefix = project / environment
+    (prefix / "bin").mkdir(parents=True)
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", environment)
+    monkeypatch.setattr(setup_cli.sys, "prefix", str(prefix))
+    monkeypatch.setattr(setup_cli.sys, "executable", str(prefix / "bin" / "python"))
+    monkeypatch.setattr(
+        setup_cli.shutil, "which", lambda name: "/bin/uv" if name == "uv" else None
+    )
+
+    launch = setup_cli.resolve_mcp_launch(project / "src", tmp_path)
+
+    assert launch.scope == "project"
+    assert launch.project_dir == project
+    assert setup_cli._scope_only(project / "src") == "project"
+    with pytest.raises(CLIError):
+        # From outside the project the environment does not belong to any
+        # ancestor of the working directory, so there is no project scope.
         setup_cli.resolve_mcp_launch(tmp_path, tmp_path)
 
 
