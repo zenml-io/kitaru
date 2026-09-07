@@ -44,13 +44,6 @@ def upgrade() -> None:
     """Upgrade database schema and/or data, creating a new revision."""
     with op.batch_alter_table("task", schema=None) as batch_op:
         batch_op.add_column(sa.Column("agent_id", sa.Uuid(), nullable=True))
-        batch_op.add_column(
-            sa.Column(
-                "input_session_ids",
-                postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
-                nullable=True,
-            )
-        )
         batch_op.create_index(TASK_AGENT_ID_INDEX, ["agent_id"], unique=False)
         batch_op.create_foreign_key(
             TASK_AGENT_ID_FOREIGN_KEY,
@@ -125,5 +118,4 @@ def downgrade() -> None:
     with op.batch_alter_table("task", schema=None) as batch_op:
         batch_op.drop_constraint(TASK_AGENT_ID_FOREIGN_KEY, type_="foreignkey")
         batch_op.drop_index(TASK_AGENT_ID_INDEX)
-        batch_op.drop_column("input_session_ids")
         batch_op.drop_column("agent_id")

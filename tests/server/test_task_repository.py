@@ -277,20 +277,20 @@ async def test_import_task_round_trips_its_fields(setup: Setup) -> None:
 
 
 async def test_analysis_task_round_trips_its_fields(setup: Setup) -> None:
-    """An analysis task round-trips its agent id, session ids, and params."""
-    input_session_ids = [uuid.uuid4(), uuid.uuid4()]
+    """An analysis task round-trips its agent id, import id, and params."""
+    import_id = uuid.uuid4()
     task = AnalysisTask(
         job_id=setup.job_id,
         plugin_version_id=setup.plugin_version_id,
         agent_id=setup.agent_id,
-        input_session_ids=input_session_ids,
+        import_id=import_id,
         params={"threshold": 0.5},
     )
     created = await setup.tasks.create(task)
     assert isinstance(created, AnalysisTask)
     assert created.plugin_version_id == setup.plugin_version_id
     assert created.agent_id == setup.agent_id
-    assert created.input_session_ids == input_session_ids
+    assert created.import_id == import_id
     assert created.params == {"threshold": 0.5}
 
     loaded = await setup.tasks.get(created.id)

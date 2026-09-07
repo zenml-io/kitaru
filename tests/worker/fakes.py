@@ -213,7 +213,7 @@ def make_analyzer_spec(
     plugin: ScriptPluginSpec | PackagePluginSpec,
     timeout_seconds: int = 30,
     agent_id: uuid.UUID | None = None,
-    input_session_ids: list[uuid.UUID] | None = None,
+    import_id: uuid.UUID | None = None,
     extra_env: dict[str, str] | None = None,
     secret_env: dict[str, str] | None = None,
 ) -> TaskSpecResponse:
@@ -224,7 +224,7 @@ def make_analyzer_spec(
         plugin: Analyzer plugin to load.
         timeout_seconds: Process timeout.
         agent_id: Agent the insights belong to.
-        input_session_ids: Sessions being analyzed.
+        import_id: Import whose sessions are analyzed.
         extra_env: Creator-set environment extras.
         secret_env: Secrets merged into the process environment.
 
@@ -243,7 +243,7 @@ def make_analyzer_spec(
             params={},
             plugin=plugin,
             agent_id=agent_id or uuid.uuid4(),
-            input_session_ids=input_session_ids or [uuid.uuid4()],
+            import_id=import_id or uuid.uuid4(),
         ),
     )
 

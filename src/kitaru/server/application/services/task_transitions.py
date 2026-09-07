@@ -373,7 +373,9 @@ class TaskTransitions:
                 job.owner_id,
                 AnalyticsEvent.ANALYSIS_COMPLETED,
                 analytics_events.build_analysis_completed_properties(
-                    task, await self._get_task_plugin(task.plugin_version_id)
+                    task,
+                    await self._get_task_plugin(task.plugin_version_id),
+                    await self._get_task_import(task.import_id),
                 ),
             )
 

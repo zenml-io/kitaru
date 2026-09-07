@@ -211,7 +211,7 @@ def test_task_spec_response_carries_analysis_details() -> None:
     """Convert an analysis task spec's details to their wire DTO."""
     blob_id = uuid.uuid4()
     agent_id = uuid.uuid4()
-    input_session_ids = [uuid.uuid4(), uuid.uuid4()]
+    import_id = uuid.uuid4()
     spec = DomainTaskSpec(
         task_id=uuid.uuid4(),
         kind=TaskKind.ANALYZER,
@@ -223,7 +223,7 @@ def test_task_spec_response_carries_analysis_details() -> None:
                 entrypoint="analyze", blob_id=blob_id, sha256="a" * 64
             ),
             agent_id=agent_id,
-            input_session_ids=input_session_ids,
+            import_id=import_id,
         ),
     )
 
@@ -236,7 +236,7 @@ def test_task_spec_response_carries_analysis_details() -> None:
             entrypoint="analyze", blob_id=blob_id, sha256="a" * 64
         ),
         agent_id=agent_id,
-        input_session_ids=input_session_ids,
+        import_id=import_id,
     )
 
 

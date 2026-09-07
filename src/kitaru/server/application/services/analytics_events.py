@@ -22,6 +22,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.annotation import Annotation
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.imports import Import
 from kitaru.server.domain.insight import Insight
 from kitaru.server.domain.investigation import Investigation
 from kitaru.server.domain.job import Job
@@ -198,23 +199,25 @@ def build_evaluation_completed_properties(
 
 
 def build_analysis_completed_properties(
-    task: AnalysisTask, plugin: Plugin | None
+    task: AnalysisTask, plugin: Plugin | None, import_: Import | None
 ) -> dict[str, Any]:
     """Build the properties of an analysis task's transition to a terminal status.
 
     Args:
         task: Analysis task that transitioned to a terminal status.
         plugin: Analyzer plugin the task ran.
+        import_: Import the task analyzed.
 
     Returns:
         Event properties.
     """
     properties: dict[str, Any] = {
         "status": task.status.value,
-        "session_count": len(task.input_session_ids),
         **_plugin_properties(plugin),
         **_duration_properties(task.started_at, task.ended_at),
     }
+    if import_ is not None and import_.stats is not None:
+        properties["session_count"] = import_.stats.created
     if isinstance(task.result, list):
         properties["insight_count"] = len(task.result)
     return properties

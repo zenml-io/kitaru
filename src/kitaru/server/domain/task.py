@@ -674,7 +674,7 @@ class AnalysisTask(Task):
 
     plugin_version_id: uuid.UUID
     agent_id: uuid.UUID
-    input_session_ids: list[uuid.UUID]
+    import_id: uuid.UUID
     params: dict[str, Any] = Field(default_factory=dict)
 
     @property
@@ -790,7 +790,7 @@ class AnalysisTaskDetails(FrozenModel):
     params: dict[str, Any] = Field(default_factory=dict)
     plugin: PluginSpec
     agent_id: uuid.UUID
-    input_session_ids: list[uuid.UUID]
+    import_id: uuid.UUID
 
 
 TaskDetails = Annotated[

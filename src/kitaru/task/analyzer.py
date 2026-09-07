@@ -19,7 +19,9 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.insight import InsightInput
+from kitaru.api_models.v1.session import SessionListParams, SessionStatus
 from kitaru.api_models.v1.task import AnalysisTaskDetails, ScriptPluginSpec
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.task.evaluator import SessionView
@@ -108,7 +110,7 @@ def _resolve_analyzer(
 
 
 async def run(client: KitaruAPIClient, task_id: str) -> None:
-    """Run the analysis flow: analyze the input sessions and write the result.
+    """Run the analysis flow: analyze the import's sessions and write the result.
 
     Args:
         client: API client.
@@ -124,9 +126,27 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
         raise AnalysisError(f"Task {task_id} is not an analyzer task")
     analyzer = _resolve_analyzer(details)
 
+    # Sessions still in progress are skipped, matching the evaluator fan-out.
+    params = SessionListParams(
+        filter=AndFilter.model_validate(
+            {
+                "and": [
+                    FilterCondition(
+                        field="import_id", op=FilterOp.EQ, value=str(details.import_id)
+                    ),
+                    FilterCondition(
+                        field="status",
+                        op=FilterOp.NE,
+                        value=SessionStatus.IN_PROGRESS.value,
+                    ),
+                ]
+            }
+        ),
+        size=1000,
+    )
     views: list[SessionView] = []
-    for session_id in details.input_session_ids:
-        full = await client.sessions.get_with_nodes(session_id)
+    async for session in client.sessions.iter(params):
+        full = await client.sessions.get_with_nodes(session.id)
         views.append(SessionView(session=full.session, nodes=full.nodes))
     results = await call_analyzer(
         details.analyzer_name, analyzer, views, details.params

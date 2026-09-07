@@ -411,7 +411,8 @@ async def test_completed_import_appends_one_task_per_analyzer(
         await _analyzer(services, "risks"),
     ]
     import_, import_task = await _import_with_task(services, [], analyzers)
-    sessions = [await _imported_session(services, import_) for _ in range(3)]
+    for _ in range(3):
+        await _imported_session(services, import_)
     worker = await create_worker(services.workers, ACTOR.account.id)
 
     (running,) = await _claim_and_start(services, worker, 1)
@@ -430,17 +431,16 @@ async def test_completed_import_appends_one_task_per_analyzer(
     assert {task.plugin_version_id for task in analysis_tasks} == {
         analyzer.analyzer_version_id for analyzer in analyzers
     }
-    for task in analysis_tasks:
-        assert set(task.input_session_ids) == {session.id for session in sessions}
+    assert all(task.import_id == import_.id for task in analysis_tasks)
 
 
-async def test_in_progress_session_excluded_from_analysis_task_ids(
+async def test_in_progress_session_does_not_block_the_analysis_task(
     services: ReplayServices,
 ) -> None:
-    """An in-progress session's id is left out of the analysis task's session list."""
+    """One evaluatable session is enough for the import-scoped analysis task."""
     analyzer = await _analyzer(services, "trends")
     import_, import_task = await _import_with_task(services, [], [analyzer])
-    completed = await _imported_session(services, import_)
+    await _imported_session(services, import_)
     await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
     worker = await create_worker(services.workers, ACTOR.account.id)
 
@@ -453,7 +453,7 @@ async def test_in_progress_session_excluded_from_analysis_task_ids(
     )
 
     (analysis_task,) = await _analysis_tasks(services, import_task.job_id)
-    assert analysis_task.input_session_ids == [completed.id]
+    assert analysis_task.import_id == import_.id
 
 
 async def test_import_whose_sessions_are_all_in_progress_appends_no_analysis_task(
