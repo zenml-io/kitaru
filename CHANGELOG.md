@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `kitaru-pydantic-ai` now supports the PydanticAI 2.37 through 2.40 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.38.0 with `genai-prices` 0.1.6.
 - `POST /api/v1/imports` now returns the import instead of the job, with the job in its `job_id`. Import task responses carry `import_id` instead of `payload_blob_id` and `agent_id`.
 
 ### Fixed
