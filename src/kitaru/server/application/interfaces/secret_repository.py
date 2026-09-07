@@ -14,6 +14,7 @@
 """Secret repository interface."""
 
 import uuid
+from collections.abc import Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.secret import SecretFilter
@@ -48,6 +49,19 @@ class SecretRepository(Protocol):
 
         Returns:
             Stored secret.
+        """
+        ...
+
+    async def get_many(
+        self, secret_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Secret]:
+        """Bulk-load secrets by id, keyed by id, missing ids omitted.
+
+        Args:
+            secret_ids: Ids of the secrets to load.
+
+        Returns:
+            Stored secrets keyed by id.
         """
         ...
 

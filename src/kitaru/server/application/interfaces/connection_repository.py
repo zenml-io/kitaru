@@ -26,9 +26,6 @@ class ConnectionRepository(Protocol):
     async def create(self, connection: Connection) -> Connection:
         """Persist a new connection, clearing the provider's previous default.
 
-        A connection stored with ``default`` set clears the flag on the
-        provider's previous default in the same transaction.
-
         Args:
             connection: Connection to store.
 
@@ -80,10 +77,7 @@ class ConnectionRepository(Protocol):
         ...
 
     async def update(self, connection: Connection) -> Connection:
-        """Persist changes to an existing connection.
-
-        A connection stored with ``default`` set clears the flag on the
-        provider's previous default in the same transaction.
+        """Persist changes to an existing connection, clearing the previous default.
 
         Args:
             connection: Connection with modified fields.

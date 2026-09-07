@@ -1736,6 +1736,24 @@ class FakeSecretRepository:
             raise SecretNotFound(secret_id)
         return secret.model_copy()
 
+    async def get_many(
+        self, secret_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Secret]:
+        """Bulk-load secrets by id, keyed by id, missing ids omitted.
+
+        Args:
+            secret_ids: Ids of the secrets to load.
+
+        Returns:
+            Stored secrets keyed by id.
+        """
+        wanted = set(secret_ids)
+        return {
+            secret_id: secret.model_copy(deep=True)
+            for secret_id, secret in self._secrets.items()
+            if secret_id in wanted
+        }
+
     async def query(
         self, secret_filter: SecretFilter
     ) -> tuple[list[Secret], str | None]:

@@ -67,7 +67,9 @@ async def create_connection(
     """
     command = connection_create_to_command(body)
     connection = await service.create_connection(command, actor=actor)
-    return connection_to_response(connection, await service.get_secret_keys(connection))
+    return connection_to_response(
+        connection, (await service.get_secret_keys([connection]))[connection.id]
+    )
 
 
 @router.get("")
@@ -93,11 +95,10 @@ async def list_connections(
     connections, next_cursor = await service.list_connections(
         connection_filter, actor=actor
     )
+    secret_keys = await service.get_secret_keys(connections)
     return Page[ConnectionResponse](
         items=[
-            connection_to_response(
-                connection, await service.get_secret_keys(connection)
-            )
+            connection_to_response(connection, secret_keys[connection.id])
             for connection in connections
         ],
         next_cursor=next_cursor,
@@ -124,7 +125,9 @@ async def get_connection(
         Stored connection without secret values.
     """
     connection = await service.get_connection(connection_id, actor=actor)
-    return connection_to_response(connection, await service.get_secret_keys(connection))
+    return connection_to_response(
+        connection, (await service.get_secret_keys([connection]))[connection.id]
+    )
 
 
 @router.patch("/{connection_id}", responses=error_responses(404))
@@ -156,7 +159,9 @@ async def update_connection(
         default=body.default,
         actor=actor,
     )
-    return connection_to_response(connection, await service.get_secret_keys(connection))
+    return connection_to_response(
+        connection, (await service.get_secret_keys([connection]))[connection.id]
+    )
 
 
 @router.delete(

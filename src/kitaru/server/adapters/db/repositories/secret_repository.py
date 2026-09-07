@@ -15,7 +15,7 @@
 
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from pydantic import SecretStr
 from sqlalchemy import select
@@ -133,6 +133,23 @@ class SQLSecretRepository(BaseSQLRepository[SecretORM]):
         """
         row = await self._get_row(secret_id)
         return row.to_domain(self._decrypt_values(row.values_encrypted))
+
+    async def get_many(
+        self, secret_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Secret]:
+        """Bulk-load secrets by id, keyed by id, missing ids omitted.
+
+        Args:
+            secret_ids: Ids of the secrets to load.
+
+        Returns:
+            Stored secrets keyed by id.
+        """
+        rows = await self._load_by_ids(list(secret_ids))
+        return {
+            secret_id: row.to_domain(self._decrypt_values(row.values_encrypted))
+            for secret_id, row in rows.items()
+        }
 
     async def query(
         self, secret_filter: SecretFilter

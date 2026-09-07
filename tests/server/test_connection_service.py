@@ -194,13 +194,12 @@ async def test_get_connection_not_found(service: ConnectionService) -> None:
 
 
 async def test_get_secret_keys(service: ConnectionService) -> None:
-    """Return the internal secret's key names sorted and without values."""
+    """Return each internal secret's key names sorted and without values."""
     connection = await service.create_connection(build_command(), actor=ACTOR)
 
-    assert await service.get_secret_keys(connection) == [
-        "LANGFUSE_PUBLIC_KEY",
-        "LANGFUSE_SECRET_KEY",
-    ]
+    assert await service.get_secret_keys([connection]) == {
+        connection.id: ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"]
+    }
 
 
 async def test_get_secret_keys_without_a_secret(service: ConnectionService) -> None:
@@ -209,7 +208,7 @@ async def test_get_secret_keys_without_a_secret(service: ConnectionService) -> N
     connection.secret_id = uuid.uuid4()
 
     with pytest.raises(SecretNotFound):
-        await service.get_secret_keys(connection)
+        await service.get_secret_keys([connection])
 
 
 async def test_list_connections(service: ConnectionService) -> None:

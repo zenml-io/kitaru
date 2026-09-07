@@ -604,4 +604,4 @@ def test_importer_register_rejects_a_malformed_connection_schema(
         == 2
     )
     error = json.loads(capsys.readouterr().err)
-    assert "must contain a JSON object" in error["error"]["message"]
+    assert "must contain one mapping document" in error["error"]["message"]

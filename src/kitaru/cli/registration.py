@@ -451,13 +451,7 @@ def read_json_object(path: Path | None, *, option: str) -> dict[str, Any] | None
     """Read a JSON object from a local file."""
     if path is None:
         return None
-    try:
-        content = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as error:
-        raise CLIError(
-            "invalid_arguments", f"{option} could not be read: {error}"
-        ) from error
-    return parse_json_object(content, option=option)
+    return _load_document(path, label=option)
 
 
 def parse_replay_override(value: str, *, option: str) -> ReplayOverride:
@@ -878,20 +872,22 @@ def _list_validation_error(error: ValidationError) -> CLIError:
     return CLIError("invalid_arguments", message)
 
 
-def _load_document(path: Path) -> dict[str, Any]:
+def _load_document(path: Path, label: str = "Spec") -> dict[str, Any]:
     """Read one YAML or JSON mapping."""
     if not path.exists() or not path.is_file():
         raise CLIError(
-            "invalid_arguments", f"Spec {str(path)!r} is not a regular file."
+            "invalid_arguments", f"{label} {str(path)!r} is not a regular file."
         )
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError) as error:
         raise CLIError(
-            "invalid_arguments", f"Could not read spec {str(path)!r}: {error}"
+            "invalid_arguments", f"Could not read {label} {str(path)!r}: {error}"
         ) from error
     if not isinstance(data, dict):
-        raise CLIError("invalid_arguments", "Spec must contain one mapping document.")
+        raise CLIError(
+            "invalid_arguments", f"{label} must contain one mapping document."
+        )
     return data
 
 

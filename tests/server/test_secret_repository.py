@@ -148,6 +148,18 @@ async def test_get_not_found(setup: Setup) -> None:
         await repository.get(missing_id)
 
 
+async def test_get_many(setup: Setup) -> None:
+    """Bulk-load stored secrets keyed by id, omitting unknown ids."""
+    repository, owner_id, _ = setup
+    db = await repository.create(Secret(owner_id=owner_id, name="db", values=VALUES))
+    smtp = await repository.create(
+        Secret(owner_id=owner_id, name="smtp", values=VALUES)
+    )
+    loaded = await repository.get_many([db.id, smtp.id, uuid.uuid4()])
+    assert loaded == {db.id: db, smtp.id: smtp}
+    assert loaded[db.id].values == VALUES
+
+
 async def test_query(setup: Setup) -> None:
     """Query secrets newest-first with filters."""
     repository, owner_id, other_owner_id = setup

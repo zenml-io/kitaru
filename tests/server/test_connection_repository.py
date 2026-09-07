@@ -266,10 +266,10 @@ async def test_update(setup: Setup) -> None:
     repository, owner_id, secret_id = setup
     created = await repository.create(build_connection(owner_id, secret_id))
 
-    created.update_env({"LANGFUSE_BASE_URL": "https://eu.langfuse.com"})
+    created.merge_env({"LANGFUSE_BASE_URL": "https://eu.langfuse.com"})
     updated = await repository.update(created)
 
-    assert updated.env == {"LANGFUSE_BASE_URL": "https://eu.langfuse.com"}
+    assert updated.env == {**ENV, "LANGFUSE_BASE_URL": "https://eu.langfuse.com"}
     assert updated.created == created.created
     assert updated.updated is not None
     assert created.updated is not None

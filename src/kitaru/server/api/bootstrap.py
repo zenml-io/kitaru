@@ -15,7 +15,6 @@
 
 import logging
 import uuid
-from typing import Any
 
 from pydantic import BaseModel, Field, SecretStr
 
@@ -322,29 +321,10 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
 )
 
 
-def _get_connection_schema(
-    definition: DefaultPluginDefinition,
-) -> dict[str, Any] | None:
-    """Build the JSON Schema a default plugin declares its connection with.
-
-    Args:
-        definition: Default plugin definition.
-
-    Returns:
-        JSON Schema, None for a definition declaring no connection model.
-    """
-    if definition.connection_schema is None:
-        return None
-    return definition.connection_schema.model_json_schema()
-
-
 async def _get_or_create_plugin(
     repository: PluginRepository, definition: DefaultPluginDefinition
 ) -> Plugin:
     """Load a default plugin, creating it ownerless on first startup.
-
-    An existing plugin whose stored connection schema no longer matches the
-    definition is refreshed, so a deployment picks up a schema change.
 
     Args:
         repository: Plugin repository.
@@ -353,7 +333,11 @@ async def _get_or_create_plugin(
     Returns:
         Stored plugin.
     """
-    connection_schema = _get_connection_schema(definition)
+    connection_schema = (
+        None
+        if definition.connection_schema is None
+        else definition.connection_schema.model_json_schema()
+    )
     try:
         plugin = await repository.get_by_name(definition.kind, definition.name)
     except PluginNotFound:

@@ -14,6 +14,7 @@
 """Connection use cases."""
 
 import uuid
+from collections.abc import Sequence
 
 from pydantic import SecretStr
 
@@ -28,7 +29,7 @@ from kitaru.server.application.models.connection import (
 )
 from kitaru.server.domain.connection import Connection
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.secret import Secret
+from kitaru.server.domain.secret import Secret, SecretNotFound
 
 # Internal secret names carry the connection id rather than the connection
 # name, so a user-created secret can never take the name first.
@@ -136,20 +137,29 @@ class ConnectionService:
         _ = actor
         return await self._repository.query(connection_filter)
 
-    async def get_secret_keys(self, connection: Connection) -> list[str]:
-        """Get the key names held by a connection's internal secret.
+    async def get_secret_keys(
+        self, connections: Sequence[Connection]
+    ) -> dict[uuid.UUID, list[str]]:
+        """Get the key names held by each connection's internal secret.
 
         Args:
-            connection: Stored connection.
+            connections: Stored connections.
 
         Raises:
-            SecretNotFound: The connection's internal secret is gone.
+            SecretNotFound: A connection's internal secret is gone.
 
         Returns:
-            Sorted key names, without their values.
+            Sorted key names without their values, keyed by connection id.
         """
-        secret = await self._secrets.get(connection.secret_id)
-        return sorted(secret.values)
+        secrets = await self._secrets.get_many(
+            [connection.secret_id for connection in connections]
+        )
+        keys: dict[uuid.UUID, list[str]] = {}
+        for connection in connections:
+            if connection.secret_id not in secrets:
+                raise SecretNotFound(connection.secret_id)
+            keys[connection.id] = sorted(secrets[connection.secret_id].values)
+        return keys
 
     async def update_connection(
         self,
@@ -181,7 +191,7 @@ class ConnectionService:
         connection = await self._repository.get(connection_id)
         secret = await self._secrets.get(connection.secret_id)
         if env is not None:
-            connection.update_env({**connection.env, **env})
+            connection.merge_env(env)
         if secrets is not None:
             secret.update_values({**secret.values, **secrets})
         if default is not None:
