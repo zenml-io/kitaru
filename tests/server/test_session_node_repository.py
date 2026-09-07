@@ -29,6 +29,7 @@ from conftest import (
     pg_session_with_engine,
     postgres_available,
 )
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -62,6 +63,12 @@ from kitaru.server.domain.cohort_version import CohortVersion
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.session_node import SessionNode
+from kitaru.server.filtering import (
+    FilterCondition,
+    FilterExpression,
+    NotExpression,
+    OrExpression,
+)
 
 Setup = tuple[SessionNodeRepository, uuid.UUID, Callable[[], Awaitable[uuid.UUID]]]
 ScopedSetup = tuple[
@@ -328,6 +335,80 @@ async def test_query_walks_pages_by_index(setup: Setup) -> None:
         cursor = next_cursor
 
     assert collected == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        (None, [0, 1, 2, 3, 4, 5]),
+        (FilterCondition(field="node_type", op=FilterOp.EQ, value="llm_call"), [1, 5]),
+        (
+            FilterCondition(
+                field="node_type", op=FilterOp.IN, value=["llm_call", "tool_call"]
+            ),
+            [1, 3, 5],
+        ),
+        (FilterCondition(field="node_type", op=FilterOp.NE, value="span"), [1, 3, 5]),
+        (FilterCondition(field="node_type", op=FilterOp.EQ, value="subagent_call"), []),
+        (
+            OrExpression(
+                operands=(
+                    FilterCondition(
+                        field="node_type", op=FilterOp.EQ, value="tool_call"
+                    ),
+                    NotExpression(
+                        operand=FilterCondition(
+                            field="node_type",
+                            op=FilterOp.IN,
+                            value=["span", "tool_call"],
+                        )
+                    ),
+                )
+            ),
+            [1, 3, 5],
+        ),
+    ],
+)
+async def test_query_filters_node_types_before_pagination(
+    setup: Setup, expression: FilterExpression | None, expected: list[int]
+) -> None:
+    """Fill pages with matching types while retaining original node indexes."""
+    repository, session_id, make_session_id = setup
+    types = [
+        NodeType.SPAN,
+        NodeType.LLM_CALL,
+        NodeType.SPAN,
+        NodeType.TOOL_CALL,
+        NodeType.SPAN,
+        NodeType.LLM_CALL,
+    ]
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(index, session_id=session_id, node_type=kind)
+            for index, kind in enumerate(types)
+        ],
+    )
+    other_session_id = await make_session_id()
+    await repository.upsert_batch(
+        other_session_id,
+        [_node(0, session_id=other_session_id, node_type=NodeType.LLM_CALL)],
+    )
+    collected: list[int] = []
+    cursor = None
+    for _ in range(len(types) + 1):
+        nodes, cursor = await repository.query(
+            SessionNodeFilter(
+                session_id=session_id, expression=expression, size=2, cursor=cursor
+            )
+        )
+        collected.extend(node.index for node in nodes)
+        if cursor is None:
+            break
+        assert len(nodes) == 2
+    else:
+        pytest.fail("Filtered pagination did not terminate")
+    assert collected == expected
 
 
 async def test_query_include_payloads_false_nulls_heavy_columns(

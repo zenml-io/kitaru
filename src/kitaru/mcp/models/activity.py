@@ -41,6 +41,7 @@ class SessionNodesRequest(MCPModel):
     cursor: str | None = None
     size: int = Field(default=20, ge=1, le=100)
     include_payloads: bool = False
+    filter: Filter | None = None
 
 
 class SortedChildrenRequest(PageOptions):

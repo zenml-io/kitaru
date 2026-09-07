@@ -3947,6 +3947,13 @@ async def session_get(session: uuid.UUID, /) -> CommandResult:
             ParameterSpec("--size", "integer", "option", False, "Items per page."),
             ParameterSpec("--cursor", "string", "option", False, "Page cursor."),
             ParameterSpec(
+                "--filter",
+                "JSON",
+                "option",
+                False,
+                "Filter expression as a JSON object.",
+            ),
+            ParameterSpec(
                 "--include-payloads",
                 "boolean",
                 "option",
@@ -3964,6 +3971,7 @@ async def session_nodes(
     size: int = 20,
     cursor: str | None = None,
     include_payloads: bool = False,
+    filter: str | None = None,
 ) -> CommandResult:
     """List one server page of a session's nodes."""
     async with _open_asset_client() as client:
@@ -3973,6 +3981,7 @@ async def session_nodes(
             size=size,
             cursor=cursor,
             include_payloads=include_payloads,
+            filter=filter,
         )
 
 
