@@ -36,7 +36,7 @@ uv run python devtools/stack.py up --db-name kitaru_<yourtask> --fresh
 uv run python devtools/stack.py workers --count 2
 ```
 
-Jobs (imports, session runs, experiments) settle only while a worker runs. A job stuck pending means no worker, not a bug.
+Jobs (imports, session runs, experiments) need a running worker. For a pending job, first check worker availability and eligibility; if a suitable worker is active, inspect claim and dispatch failures.
 
 `--auth local` prints an API key export, the default is `none`. `--env KEY=VALUE` passes server settings. `--docker` runs from `docker-compose.yml` instead.
 
