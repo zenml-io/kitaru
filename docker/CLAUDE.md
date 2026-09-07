@@ -51,7 +51,7 @@ runtime modes:
 
 | Stage | Purpose |
 |---|---|
-| `pre-builder` | Installs locked `server` and `otel` dependencies without the project |
+| `pre-builder` | Installs locked `server`, `s3`, `otel`, and `modal` dependencies without the project |
 | `common-runtime` | Installs local source editably for bind-mounted development |
 | `local-runtime` | Runs uvicorn with source reload enabled |
 | `builder` | Installs local source non-editably for the self-contained image |
