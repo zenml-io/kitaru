@@ -111,6 +111,7 @@ def _settings(
     command: str = "python -m kitaru.worker",
     cpu: float | None = None,
     memory_mb: int | None = None,
+    environment: str | None = None,
 ) -> EphemeralWorkerSettings:
     return EphemeralWorkerSettings(
         backend=EphemeralWorkerBackend.MODAL,
@@ -118,7 +119,11 @@ def _settings(
         command=command,
         timeout_seconds=120,
         modal=ModalEphemeralWorkerSettings(
-            token_id="ak-test", token_secret="as-test", cpu=cpu, memory_mb=memory_mb
+            token_id="ak-test",
+            token_secret="as-test",
+            cpu=cpu,
+            memory_mb=memory_mb,
+            environment=environment,
         ),
     )
 
@@ -151,7 +156,11 @@ async def test_start_creates_sandbox_with_resource_limits(
     assert fake_modal.app_lookup.calls == [
         (
             ("kitaru-workers",),
-            {"client": fake_modal.client, "create_if_missing": True},
+            {
+                "client": fake_modal.client,
+                "environment_name": None,
+                "create_if_missing": True,
+            },
         )
     ]
     assert len(fake_modal.sandbox_create.calls) == 1
@@ -171,6 +180,19 @@ async def test_start_creates_sandbox_with_resource_limits(
     assert kwargs["cpu"] == 2.0
     assert kwargs["memory"] == 4096
     assert kwargs["client"] is fake_modal.client
+    assert kwargs["environment_name"] is None
+
+
+async def test_start_in_a_configured_environment(fake_modal: _FakeModal) -> None:
+    """Look up the app and create the sandbox in the configured environment."""
+    ephemeral_workers = ModalEphemeralWorkers(_settings(environment="staging"))
+
+    await ephemeral_workers.start(_spec())
+
+    _, lookup_kwargs = fake_modal.app_lookup.calls[0]
+    assert lookup_kwargs["environment_name"] == "staging"
+    _, create_kwargs = fake_modal.sandbox_create.calls[0]
+    assert create_kwargs["environment_name"] == "staging"
 
 
 async def test_start_without_resource_limits_passes_none_through(
