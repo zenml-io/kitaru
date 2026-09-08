@@ -26,11 +26,14 @@ from kitaru_post_import_insights.profiling import (
 
 # A numeric token is a number plus an optional unit, so the number parser can
 # read the leading number of any token the numeric scan produces.
-_NUMBER_PATTERN = r"-?\d+(?:[.,]\d+)*"
+# Digits with optional separators, or a leading-dot decimal such as ".5".
+_NUMBER_PATTERN = r"-?(?:\d+(?:[.,]\d+)*|\.\d+)"
 _NUMBER = re.compile(_NUMBER_PATTERN)
-# A minus sign counts only when it does not follow a word character, so a
-# range such as "3-6" reads as two positive numbers, not "3" and "-6".
-_NUMERIC_TOKEN = re.compile(r"(?<![\w.])(?<![\w])-?\d+(?:[.,]\d+)*(?:%|[A-Za-z]+)?")
+# A token starts only where no word character or dot precedes it, so a range
+# such as "3-6" reads as two positive numbers and "1332.029" is not rescanned
+# from its fractional part; ".5" is still reached because the dot itself is
+# where that token begins.
+_NUMERIC_TOKEN = re.compile(rf"(?<![\w.]){_NUMBER_PATTERN}(?:%|[A-Za-z]+)?")
 _UNIT_WORD = re.compile(r"\s*(%|[A-Za-z]+)")
 _CURRENCY_PREFIX = re.compile(r"[$€£]\s*$")
 _PERCENT_UNITS = {"%", "percent", "pct"}
