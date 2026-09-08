@@ -58,7 +58,7 @@ from kitaru.insights.profiling import (
     SessionProfiler,
 )
 
-PROMPT_VERSION = "2026-09-04.1"
+PROMPT_VERSION = "2026-09-08.1"
 _MAX_COVERAGE_CAVEATS = 10
 
 
@@ -140,6 +140,7 @@ def _get_bounded_references(
 def _build_investigation_prompt(
     candidate: CandidateFinding,
     *,
+    card_description: str,
     context: InsightGenerationContext,
     coverage: Coverage,
     contributing_session_ids: Sequence[uuid.UUID],
@@ -151,18 +152,31 @@ def _build_investigation_prompt(
         sort_keys=True,
         separators=(",", ":"),
     )
-    finding_data = json.dumps(
-        {
-            "title": candidate.title,
-            "deterministic_description": candidate.fallback_description,
-            "chart": candidate.data.model_dump(mode="json"),
-            "candidate_coverage": candidate.coverage.model_dump(mode="json"),
-            "overall_coverage": coverage.model_dump(mode="json"),
-            "contributing_session_ids": [
-                str(item) for item in contributing_session_ids
-            ],
-            "evidence_locators": [item.model_dump(mode="json") for item in evidence],
+    supplied_session_count = len(contributing_session_ids)
+    finding: dict[str, object] = {
+        "title": candidate.title,
+        "card_description": card_description,
+        "deterministic_description": candidate.fallback_description,
+        "facts": [item.model_dump(mode="json") for item in candidate.facts],
+        "chart": candidate.data.model_dump(mode="json"),
+        "candidate_coverage": candidate.coverage.model_dump(mode="json"),
+        "overall_coverage": coverage.model_dump(mode="json"),
+        "session_id_scope": {
+            "kind": (
+                "full_affected_population"
+                if supplied_session_count == candidate.coverage.affected_sessions
+                else "retained_subset"
+            ),
+            "supplied_session_count": supplied_session_count,
+            "affected_session_count": candidate.coverage.affected_sessions,
         },
+        "contributing_session_ids": [str(item) for item in contributing_session_ids],
+        "evidence_locators": [item.model_dump(mode="json") for item in evidence],
+    }
+    if candidate.caveat is not None:
+        finding["check_first"] = candidate.caveat
+    finding_data = json.dumps(
+        finding,
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -269,6 +283,7 @@ def _assemble_result(
             try:
                 prompt = _build_investigation_prompt(
                     candidate,
+                    card_description=copy_by_id[candidate_id].description,
                     context=context,
                     coverage=coverage,
                     contributing_session_ids=contributing_ids,
@@ -313,6 +328,7 @@ def _assemble_result(
         contributing_ids, evidence, investigation_prompt = prepared[candidate_id]
         metadata = InsightCardMetadata(
             eyebrow=copy.eyebrow,
+            check_first=candidate.caveat,
             position=position,
             recommended=candidate_id == recommendation_id,
             contributing_session_ids=contributing_ids,
@@ -400,9 +416,11 @@ def _get_oversize_result(
             prompts_fit = True
             for position, insight in enumerate(retained):
                 original_metadata = result.card_metadata(insight)
+                assert insight.description is not None
                 try:
                     investigation_prompt = _build_investigation_prompt(
                         candidates[insight.name],
+                        card_description=insight.description,
                         context=result.context,
                         coverage=coverage,
                         contributing_session_ids=(

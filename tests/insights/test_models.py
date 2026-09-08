@@ -164,6 +164,7 @@ def _metadata(
     contribution_ids = session_ids or [SESSION_A]
     return InsightCardMetadata(
         eyebrow="TOOL RELIABILITY",
+        check_first="A tool error may have been recovered later in the session.",
         position=position,
         recommended=recommended,
         contributing_session_ids=contribution_ids,
@@ -302,6 +303,9 @@ def test_result_round_trips_through_json() -> None:
     metadata = restored.card_metadata(restored.insights[0])
     assert metadata.contributing_session_ids == [SESSION_A]
     assert metadata.evidence[0].node_id == NODE_A
+    assert metadata.check_first == (
+        "A tool error may have been recovered later in the session."
+    )
 
 
 def test_duplicate_positions_are_rejected() -> None:

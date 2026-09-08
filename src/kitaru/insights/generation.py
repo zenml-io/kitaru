@@ -106,6 +106,19 @@ _WORK_SUCCESS_TOKEN = re.compile(
     r"as\s+(?:expected|intended|designed)|correctly|properly|normally)\b",
     flags=re.IGNORECASE,
 )
+_SESSION_OUTCOME_CLAIM = re.compile(
+    r"(?:\b(?:failed|failing|successful|completed|in[ -]progress|timed?[ -]out|"
+    r"cancel(?:ed|led)|abandoned)\s+(?:sessions?|runs?|traces?)\b|"
+    r"\b(?:sessions?|runs?|traces?)\s+"
+    r"(?:(?:were|are|have|had)\s+)?"
+    r"(?:fail(?:ed|ing|ures?)?|succeed(?:ed|ing)?|"
+    r"success|successes|successful|"
+    r"pass(?:ed|ing)?|complete|completed|completing|completions?|"
+    r"finish(?:ed|ing)|in[ -]progress|timed?[ -]out|timeouts?|"
+    r"cancel(?:ed|led|ing|lations?)?|abandon(?:ed|ing|ments?)?|"
+    r"errors?|work(?:ed|ing)?\s+(?:correctly|properly)))\b",
+    flags=re.IGNORECASE,
+)
 _NEGATION_TOKEN = re.compile(
     r"\b(?:no|not|never|none|neither|nor|without|cannot|absent)\b|n['\u2019]t\b",
     flags=re.IGNORECASE,
@@ -324,6 +337,39 @@ def validate_analyst_plan(
     return plan
 
 
+def _diversify_analyst_plan(
+    plan: AnalystPlan, candidates: list[CandidateFinding]
+) -> AnalystPlan:
+    """Keep one selected candidate per family and refill unused families."""
+    by_id = {candidate.id: candidate for candidate in candidates}
+    recommendation = by_id[plan.recommended_candidate_id]
+    selected: list[str] = []
+    families: set[str] = set()
+    for candidate_id in plan.selected_candidate_ids:
+        candidate = by_id[candidate_id]
+        if candidate.family in families:
+            continue
+        selected.append(
+            recommendation.id
+            if candidate.family == recommendation.family
+            else candidate_id
+        )
+        families.add(candidate.family)
+
+    target_count = len(plan.selected_candidate_ids)
+    refill_ids = deterministic_selection(candidates).selected_candidate_ids
+    for candidate_id in refill_ids:
+        if len(selected) == target_count:
+            break
+        candidate = by_id[candidate_id]
+        if candidate.family in families:
+            continue
+        selected.append(candidate.id)
+        families.add(candidate.family)
+
+    return plan.model_copy(update={"selected_candidate_ids": selected})
+
+
 def build_editorial_projection(
     profiling: ProfilingResult, selection: AnalystPlan
 ) -> EditorialProjection:
@@ -437,20 +483,54 @@ def _has_outcome_wording(value: str) -> bool:
     return bool(_OUTCOME_TOKEN.search(value) or _WORK_SUCCESS_TOKEN.search(value))
 
 
-def _get_trusted_outcome_categories(candidate: CandidateFinding) -> set[str]:
-    """Permit outcome language only for observed session-status categories."""
+def _get_supported_outcome_categories(candidate: CandidateFinding) -> set[str]:
+    """Return outcomes stated by the deterministic candidate evidence."""
+    categories = set()
     if (
         candidate.id == "session-outcomes"
         and candidate.family == "outcome"
         and isinstance(candidate.data, CategoricalInsightData)
     ):
-        return {
+        categories.update(
             outcome
             for item in candidate.data.values
             if item.value > 0
             and (outcome := _SESSION_STATUS_OUTCOMES.get(item.label)) is not None
-        }
-    return set()
+        )
+    for value in (
+        candidate.eyebrow,
+        candidate.title,
+        candidate.fallback_description,
+    ):
+        categories.update(_get_outcome_categories(value))
+    return categories
+
+
+def _get_supported_session_outcome_categories(
+    candidate: CandidateFinding,
+) -> set[str]:
+    """Return observed session outcomes represented by a candidate."""
+    if not (
+        candidate.id == "session-outcomes"
+        and candidate.family == "outcome"
+        and isinstance(candidate.data, CategoricalInsightData)
+    ):
+        return set()
+    return {
+        outcome
+        for item in candidate.data.values
+        if item.value > 0
+        and (outcome := _SESSION_STATUS_OUTCOMES.get(item.label)) is not None
+    }
+
+
+def _get_session_outcome_claims(value: str) -> set[str]:
+    """Return outcome categories explicitly attributed to sessions."""
+    return {
+        outcome
+        for match in _SESSION_OUTCOME_CLAIM.finditer(value)
+        for outcome in _get_outcome_categories(match.group(0))
+    }
 
 
 def _has_negated_outcome(value: str) -> bool:
@@ -461,26 +541,41 @@ def _has_negated_outcome(value: str) -> bool:
     )
 
 
-def _validate_page_copy(value: str) -> None:
+def _validate_page_copy(
+    value: str,
+    allowed_outcomes: set[str],
+    *,
+    allowed_session_outcomes: set[str],
+) -> None:
     """Validate friendly page framing separately from candidate facts."""
     _validate_copy_safety(value)
     if _has_negated_outcome(value):
         raise ValueError("editor page copy contains a negated outcome claim")
     if _NUMERIC_TOKEN.search(value) or _QUANTITY_TOKEN.search(value):
         raise ValueError("editor page copy contains a numeric or quantitative claim")
-    if _has_outcome_wording(value):
+    if not _get_session_outcome_claims(value).issubset(allowed_session_outcomes):
+        raise ValueError(
+            "editor page copy contains an unsupported outcome claim about sessions"
+        )
+    if not _get_outcome_categories(value).issubset(allowed_outcomes):
         raise ValueError("editor page copy contains an unsupported outcome claim")
 
 
 def _validate_card_copy(value: str, candidate: CandidateFinding) -> None:
     """Validate one card only against the deterministic candidate it explains."""
     _validate_copy_safety(value)
-    allowed_outcomes = _get_trusted_outcome_categories(candidate)
+    allowed_outcomes = _get_supported_outcome_categories(candidate)
     remaining = _remove_known_labels(value, _get_quantified_labels(candidate))
     if _has_negated_outcome(value):
         raise ValueError("editor card copy contains a negated outcome claim")
     if _NUMERIC_TOKEN.search(remaining) or _QUANTITY_TOKEN.search(remaining):
         raise ValueError("editor card copy contains a numeric or quantitative claim")
+    if not _get_session_outcome_claims(value).issubset(
+        _get_supported_session_outcome_categories(candidate)
+    ):
+        raise ValueError(
+            "editor card copy contains an unsupported outcome claim about sessions"
+        )
     output_outcomes = _get_outcome_categories(value)
     if not output_outcomes.issubset(allowed_outcomes):
         raise ValueError("editor card copy contains an unsupported outcome claim")
@@ -501,8 +596,19 @@ def validate_editorial_plan(
         for item in candidates
         if item.id in selection.selected_candidate_ids
     }
+    page_outcomes: set[str] = set()
+    page_session_outcomes: set[str] = set()
+    for candidate in selected.values():
+        page_outcomes.update(_get_supported_outcome_categories(candidate))
+        page_session_outcomes.update(
+            _get_supported_session_outcome_categories(candidate)
+        )
     for value in _collect_page_copy(plan):
-        _validate_page_copy(value)
+        _validate_page_copy(
+            value,
+            page_outcomes,
+            allowed_session_outcomes=page_session_outcomes,
+        )
     for item in plan.insights:
         for value in (item.eyebrow, item.description):
             _validate_card_copy(value, selected[item.id])
@@ -624,7 +730,10 @@ async def generate_model_plan(
             )
         if analyst_response.receipt.stage != "analyst":
             raise ValueError("analyst returned the wrong receipt stage")
-        selection = validate_analyst_plan(analyst_response.value, profiling.candidates)
+        selection = _diversify_analyst_plan(
+            validate_analyst_plan(analyst_response.value, profiling.candidates),
+            profiling.candidates,
+        )
         receipts.append(analyst_response.receipt)
         observation_started = loop.time()
         await observe_safely(
@@ -708,22 +817,6 @@ async def generate_model_plan(
             )
         if editor_response.receipt.stage != "editor":
             raise ValueError("editor returned the wrong receipt stage")
-        editorial = validate_editorial_plan(
-            editor_response.value, selection, profiling.candidates
-        )
-        receipts.append(editor_response.receipt)
-        await observe_safely(
-            observer,
-            GenerationEvent(
-                name="editor",
-                run_id=effective_run_id,
-                stage="editor",
-                metadata={
-                    "outcome": "succeeded",
-                    "copy_count": len(editorial.insights),
-                },
-            ),
-        )
     except TimeoutError:
         receipts.append(
             ProviderReceipt(
@@ -770,6 +863,40 @@ async def generate_model_plan(
             receipts=receipts,
             reason="editor_failed",
         )
+
+    receipts.append(editor_response.receipt)
+    try:
+        editorial = validate_editorial_plan(
+            editor_response.value, selection, profiling.candidates
+        )
+    except ValueError:
+        await observe_safely(
+            observer,
+            GenerationEvent(
+                name="editor",
+                run_id=effective_run_id,
+                stage="editor",
+                metadata={"outcome": "validation_failed"},
+            ),
+        )
+        return _build_fallback(
+            profiling,
+            selection=selection,
+            receipts=receipts,
+            reason="editor_validation_failed",
+        )
+    await observe_safely(
+        observer,
+        GenerationEvent(
+            name="editor",
+            run_id=effective_run_id,
+            stage="editor",
+            metadata={
+                "outcome": "succeeded",
+                "copy_count": len(editorial.insights),
+            },
+        ),
+    )
     return ModelGenerationPlan(
         selection=selection,
         editorial=editorial,

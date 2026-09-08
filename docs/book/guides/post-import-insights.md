@@ -46,11 +46,13 @@ uv run kitaru insight list --agent customer-service --output json
 uv run kitaru insight get <insight-id> --output json
 ```
 
-Insight metadata contains the analysis coverage, source import, supporting references, and investigation prompt. Use that evidence to choose sessions for an investigation or cohort before testing a change. A detected pattern is a starting point, not proof of its cause.
+Insight metadata contains the analysis coverage, source import, supporting references, investigation prompt, and a `check_first` caveat when the deterministic detector has one. The evidence-specific prompt preserves the exact description displayed on the card alongside the deterministic facts, chart, coverage, session IDs, and node references. It includes the caveat when present and labels the supplied session IDs as either the full affected population or a retained subset with both counts. Use that evidence to choose sessions for an investigation or cohort before testing a change. A detected pattern is a starting point, not proof of its cause.
 
 SDK and REST consumers can read the same records through `client.insights` and `/api/v1/insights`. In MCP, `kitaru_session_import` starts the import workflow, and `kitaru_review_read` reads insights with `kind: "insight"`. See [Set up your coding agent](../agent-native/setup.md) for MCP configuration.
 
 There is no separate command or MCP tool to regenerate these cards over arbitrary existing sessions. `kitaru insight create` stores a supplied insight; it does not run analysis. Analyzers currently run as part of an import.
+
+The `import_id` insight filter follows the analyzer task back to its import job. Deleting that job deletes its tasks, so retained insights no longer match the import filter; they remain available through direct agent filtering. Analyzer provenance normally survives deletion of an analyzer version. One downgrade is necessarily lossy: if an analyzer version was deleted after schema revision `017_insight_analyzer_provenance` was installed, downgrading to revision `016_analyzer` clears that deleted version ID from retained insights so the older foreign key can be restored.
 
 ## Optional OpenAI assistance
 

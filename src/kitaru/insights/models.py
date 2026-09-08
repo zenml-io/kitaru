@@ -156,6 +156,7 @@ class InsightCardMetadata(_InsightGenerationModel):
 
     schema_version: Literal["1"] = "1"
     eyebrow: str = Field(min_length=1, max_length=80)
+    check_first: str | None = Field(min_length=1, max_length=1000)
     position: int = Field(ge=0, lt=MAX_INSIGHTS)
     recommended: bool = False
     contributing_session_ids: list[uuid.UUID] = Field(

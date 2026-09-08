@@ -40,7 +40,15 @@ from kitaru.insights.profiling import (
 
 
 def _receipt(stage: Literal["analyst", "editor"]) -> ProviderReceipt:
-    return ProviderReceipt(stage=stage, latency_ms=1, outcome="succeeded")
+    return ProviderReceipt(
+        stage=stage,
+        request_id=f"request-{stage}",
+        model="test-model",
+        input_tokens=10,
+        output_tokens=5,
+        latency_ms=1,
+        outcome="succeeded",
+    )
 
 
 @pytest.fixture
@@ -188,6 +196,43 @@ def test_analyst_plan_requires_known_unique_ids(
         validate_analyst_plan(
             valid.model_copy(update={"recommended_candidate_id": "unknown"}), known
         )
+
+
+async def test_analyst_selection_keeps_recommendation_and_diversifies_families(
+    profiling_result: ProfilingResult,
+) -> None:
+    first, second = profiling_result.candidates
+    duplicate = first.model_copy(
+        update={"id": "candidate-duplicate", "family": first.family, "rank": 1}
+    )
+    unused = second.model_copy(
+        update={"id": "candidate-unused", "family": "family-unused", "rank": 3}
+    )
+    profiling = profiling_result.model_copy(
+        update={"candidates": [first, duplicate, second, unused]}
+    )
+    analyst = AnalystPlan(
+        selected_candidate_ids=[first.id, duplicate.id, second.id],
+        recommended_candidate_id=duplicate.id,
+        rationale="Useful.",
+    )
+    expected_ids = [duplicate.id, second.id, unused.id]
+
+    result = await generate_model_plan(
+        profiling,
+        generator=FakeGenerator(analyst, _editor(expected_ids)),
+        config=ModelGenerationConfig(model="test-model"),
+    )
+
+    assert result.selection.selected_candidate_ids == expected_ids
+    assert result.selection.recommended_candidate_id == duplicate.id
+    candidates = {candidate.id: candidate for candidate in profiling.candidates}
+    assert len(
+        {
+            candidates[candidate_id].family
+            for candidate_id in result.selection.selected_candidate_ids
+        }
+    ) == len(result.selection.selected_candidate_ids)
 
 
 def test_editor_preserves_selection_and_allows_known_digit_label(
@@ -822,7 +867,7 @@ def test_editor_allows_friendly_variant_of_grounded_outcome(
                 EditorialCardCopy(
                     id=candidate.id,
                     eyebrow="Session outcomes",
-                    description="Failures are worth investigating.",
+                    description="Sessions failed.",
                 )
             ]
         }
@@ -1215,24 +1260,12 @@ def test_chart_label_cannot_authorize_outcome_claim(
         validate_editorial_plan(copy, selection, [candidate])
 
 
-@pytest.mark.parametrize(
-    ("candidate_id", "description"),
-    [
-        ("tool-error-mix", "Sessions failed."),
-        ("tool-error-mix", "Tool calls failed."),
-        ("tool-error-mix", "Session errors are worth investigating."),
-        ("adjacent-same-tool-failures", "Tool calls failed."),
-        ("failed-identical-retries", "Tool calls failed."),
-    ],
-)
-def test_completed_session_tool_failure_cannot_authorize_outcome_copy(
+def test_deterministic_tool_failure_authorizes_failure_copy(
     profiling_result: ProfilingResult,
-    candidate_id: str,
-    description: str,
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
         update={
-            "id": candidate_id,
+            "id": "tool-error-mix",
             "family": "tool_health",
             "title": "A recorded tool call failed in a completed session",
             "fallback_description": (
@@ -1255,13 +1288,100 @@ def test_completed_session_tool_failure_cannot_authorize_outcome_copy(
                 EditorialCardCopy(
                     id=candidate.id,
                     eyebrow="Tool behavior",
-                    description=description,
+                    description="Tool calls failed.",
                 )
             ]
         }
     )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+
+def test_tool_failure_does_not_authorize_session_failure_copy(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "id": "tool-error-mix",
+            "family": "tool_health",
+            "title": "Recorded tool errors affect one session",
+            "fallback_description": "Recorded tool errors are worth inspecting.",
+            "caveat": (
+                "A recorded tool error may be recovered later and is not the same "
+                "as a failed session."
+            ),
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description="Session errors are worth investigating.",
+                )
+            ],
+        }
+    )
+
     with pytest.raises(ValueError, match="unsupported outcome"):
         validate_editorial_plan(copy, selection, [candidate])
+
+
+def test_page_session_outcomes_require_matching_session_evidence(
+    profiling_result: ProfilingResult,
+) -> None:
+    tool_candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "title": "A recorded tool call failed",
+            "fallback_description": "Recorded tool failures are worth inspecting.",
+        }
+    )
+    session_candidate = profiling_result.candidates[1].model_copy(
+        update={
+            "id": "session-outcomes",
+            "family": "outcome",
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="completed", value=1)]
+            ),
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[tool_candidate.id, session_candidate.id],
+        recommended_candidate_id=tool_candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor(selection.selected_candidate_ids).model_copy(
+        update={"intro_title": "Sessions failed"}
+    )
+
+    with pytest.raises(ValueError, match="unsupported outcome"):
+        validate_editorial_plan(copy, selection, [tool_candidate, session_candidate])
+
+
+def test_selected_candidate_outcomes_authorize_page_copy(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "title": "A recorded tool call failed",
+            "fallback_description": "Recorded tool failures are worth inspecting.",
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={"intro_title": "Failures deserve attention"}
+    )
+
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
 
 
 def test_deterministic_plan_makes_no_model_call(
@@ -1473,7 +1593,11 @@ async def test_editor_unsafe_copy_uses_deterministic_copy(
 
     assert result.selection == selection
     assert result.mode == GenerationMode.DETERMINISTIC_FALLBACK
-    assert result.diagnostics.fallback_reason == "editor_failed"
+    assert result.diagnostics.fallback_reason == "editor_validation_failed"
+    assert result.diagnostics.provider_receipts == [
+        _receipt("analyst"),
+        _receipt("editor"),
+    ]
     assert result.editorial.insights[0].description == candidate.fallback_description
 
 
@@ -1533,7 +1657,11 @@ async def test_non_utf8_editor_copy_triggers_deterministic_fallback(
 
     assert generator.calls == ["analyst", "editor"]
     assert result.mode == GenerationMode.DETERMINISTIC_FALLBACK
-    assert result.diagnostics.fallback_reason == "editor_failed"
+    assert result.diagnostics.fallback_reason == "editor_validation_failed"
+    assert result.diagnostics.provider_receipts == [
+        _receipt("analyst"),
+        _receipt("editor"),
+    ]
     assert "broken" not in result.model_dump_json()
 
 

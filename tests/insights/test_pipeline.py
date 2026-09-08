@@ -91,6 +91,20 @@ def _context() -> InsightGenerationContext:
     )
 
 
+def _get_finding_data(prompt: str) -> dict[str, object]:
+    finding_json = prompt.split("Finding data: ", maxsplit=1)[1].split(
+        "\n\n", maxsplit=1
+    )[0]
+    return json.loads(finding_json)
+
+
+def _get_context_data(prompt: str) -> dict[str, object]:
+    context_json = prompt.split("Context data: ", maxsplit=1)[1].split(
+        "\n", maxsplit=1
+    )[0]
+    return json.loads(context_json)
+
+
 def _node(
     *, session_id: uuid.UUID, node_id: uuid.UUID, index: int
 ) -> SessionNodeResponse:
@@ -255,14 +269,49 @@ async def test_deterministic_result_is_canonical_and_byte_stable() -> None:
     first = await generate_insights(sessions, context=_context(), observer=observer)
     second = await generate_insights(list(reversed(sessions)), context=_context())
     assert await generate_insights(iter(sessions), context=_context()) == first
+    candidates = {
+        candidate.id: candidate for candidate in profile_sessions(sessions).candidates
+    }
 
     assert first.model_dump_json() == second.model_dump_json()
     assert 1 <= len(first.insights) <= 6
     assert first.mode is GenerationMode.DETERMINISTIC
     for insight in first.insights:
         metadata = first.card_metadata(insight)
+        candidate = candidates[insight.name]
+        finding = _get_finding_data(metadata.investigation_prompt)
         assert set(insight.metadata) == {INSIGHT_METADATA_KEY}
         assert metadata.context == _context()
+        assert _get_context_data(
+            metadata.investigation_prompt
+        ) == _context().model_dump(mode="json")
+        assert metadata.check_first == candidate.caveat
+        assert metadata.generation.prompt == "2026-09-08.1"
+        assert finding["card_description"] == insight.description
+        assert finding["deterministic_description"] == candidate.fallback_description
+        assert finding["facts"] == [
+            fact.model_dump(mode="json") for fact in candidate.facts
+        ]
+        assert finding["chart"] == insight.data.model_dump(mode="json")
+        assert finding["candidate_coverage"] == candidate.coverage.model_dump(
+            mode="json"
+        )
+        assert finding["overall_coverage"] == first.coverage.model_dump(mode="json")
+        assert finding["contributing_session_ids"] == [
+            str(session_id) for session_id in metadata.contributing_session_ids
+        ]
+        assert finding["evidence_locators"] == [
+            evidence.model_dump(mode="json") for evidence in metadata.evidence
+        ]
+        if metadata.check_first is not None:
+            assert finding["check_first"] == metadata.check_first
+        else:
+            assert "check_first" not in finding
+        assert finding["session_id_scope"] == {
+            "kind": "full_affected_population",
+            "supplied_session_count": len(metadata.contributing_session_ids),
+            "affected_session_count": candidate.coverage.affected_sessions,
+        }
         assert str(IMPORT_ID) in metadata.investigation_prompt
         assert (
             str(metadata.contributing_session_ids[0]) in metadata.investigation_prompt
@@ -275,6 +324,25 @@ async def test_deterministic_result_is_canonical_and_byte_stable() -> None:
         assert chart_json in metadata.investigation_prompt
     _assert_pipeline_events(observer)
     assert observer.events[-1].metadata["outcome"] == "deterministic"
+
+
+async def test_prompt_omits_absent_check_first_instruction() -> None:
+    profiling = profile_sessions(
+        [
+            _session(1, status=SessionStatus.FAILED),
+            _session(2, status=SessionStatus.COMPLETED),
+        ]
+    )
+    candidate = profiling.candidates[0].model_copy(update={"caveat": None})
+
+    result = await generate_insights_from_profile(
+        profiling.model_copy(update={"candidates": [candidate]}),
+        context=_context(),
+    )
+
+    metadata = result.card_metadata(result.insights[0])
+    assert metadata.check_first is None
+    assert "check_first" not in _get_finding_data(metadata.investigation_prompt)
 
 
 async def test_editor_failure_preserves_analyst_selection() -> None:
@@ -343,12 +411,14 @@ async def test_malformed_custom_provider_receipt_falls_back_safely() -> None:
 
 
 async def test_model_result_uses_one_pipeline_run_id_and_final_event() -> None:
+    sessions = [
+        _session(1, status=SessionStatus.FAILED),
+        _session(2, status=SessionStatus.COMPLETED),
+    ]
+    candidate = profile_sessions(sessions).candidates[0]
     observer = RecordingObserver()
     result = await generate_insights(
-        [
-            _session(1, status=SessionStatus.FAILED),
-            _session(2, status=SessionStatus.COMPLETED),
-        ],
+        sessions,
         context=_context(),
         config=InsightGenerationConfig(model=ModelGenerationConfig(model="test-model")),
         generator=SuccessfulGenerator(),
@@ -356,6 +426,11 @@ async def test_model_result_uses_one_pipeline_run_id_and_final_event() -> None:
     )
 
     assert result.mode is GenerationMode.MODEL_BACKED
+    insight = result.insights[0]
+    finding = _get_finding_data(result.card_metadata(insight).investigation_prompt)
+    assert insight.description == "This pattern is worth a closer look."
+    assert finding["card_description"] == insight.description
+    assert finding["deterministic_description"] == candidate.fallback_description
     _assert_pipeline_events(observer)
     assert observer.events[-1].metadata["outcome"] == "model_backed"
 
@@ -443,10 +518,8 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
     )
     for insight in bounded.insights:
         prompt = bounded.card_metadata(insight).investigation_prompt
-        finding_json = prompt.split("Finding data: ", maxsplit=1)[1].split(
-            "\n\n", maxsplit=1
-        )[0]
-        finding = json.loads(finding_json)
+        finding = _get_finding_data(prompt)
+        assert finding["card_description"] == insight.description
         assert finding["overall_coverage"] == bounded.coverage.model_dump(mode="json")
 
 
@@ -678,7 +751,17 @@ async def test_reports_bounded_card_contribution_references(monkeypatch) -> None
     ]
     profiling = profile_sessions(sessions)
     candidate = profiling.candidates[0].model_copy(
-        update={"contributing_session_ids": [item.session.id for item in sessions]}
+        update={
+            "coverage": profiling.candidates[0].coverage.model_copy(
+                update={
+                    "sessions_analyzed": 12,
+                    "affected_sessions": 12,
+                    "contributing_sessions_available": 12,
+                    "contributing_sessions_retained": 12,
+                }
+            ),
+            "contributing_session_ids": [item.session.id for item in sessions],
+        }
     )
     modified = profiling.model_copy(update={"candidates": [candidate]})
 
@@ -693,7 +776,13 @@ async def test_reports_bounded_card_contribution_references(monkeypatch) -> None
         for item in result.coverage.truncations
     )
     for insight in result.insights:
-        assert len(result.card_metadata(insight).contributing_session_ids) <= 3
+        metadata = result.card_metadata(insight)
+        assert len(metadata.contributing_session_ids) == 3
+        assert _get_finding_data(metadata.investigation_prompt)["session_id_scope"] == {
+            "kind": "retained_subset",
+            "supplied_session_count": 3,
+            "affected_session_count": 12,
+        }
 
 
 async def test_rejects_sessions_from_another_agent() -> None:
