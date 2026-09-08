@@ -44,7 +44,10 @@ from kitaru.api_models.v1.task import (
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.task import TaskFilter, TaskUpdate
-from kitaru.server.application.services.plugin_resolution import PLUGIN_PROVIDER_LABEL
+from kitaru.server.application.services.plugin_resolution import (
+    PLUGIN_NAMESPACE_LABEL,
+    PLUGIN_PROVIDER_LABEL,
+)
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
@@ -222,8 +225,8 @@ async def test_completed_import_appends_one_task_per_session_and_evaluator(
 ) -> None:
     """Three sessions and two evaluators fan out into six continue tasks."""
     evaluators = [
-        await _evaluator(services, "accuracy"),
-        await _evaluator(services, "tone"),
+        await _evaluator(services, "kitaru/accuracy"),
+        await _evaluator(services, "kitaru/tone"),
     ]
     import_, import_task = await _import_with_task(services, evaluators)
     sessions = [await _imported_session(services, import_) for _ in range(3)]
@@ -244,6 +247,9 @@ async def test_completed_import_appends_one_task_per_session_and_evaluator(
     evaluator_tasks = await _evaluator_tasks(services, import_task.job_id)
     assert len(evaluator_tasks) == 6
     assert all(task.on_failure is TaskOnFailure.CONTINUE for task in evaluator_tasks)
+    assert all(
+        task.labels[PLUGIN_NAMESPACE_LABEL] == "kitaru" for task in evaluator_tasks
+    )
     assert all(task.params == {"threshold": 0.5} for task in evaluator_tasks)
     assert {
         (task.input_session_id, task.plugin_version_id) for task in evaluator_tasks
