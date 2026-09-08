@@ -39,7 +39,6 @@ from kitaru.task.importer import (
     ImportedSession,
 )
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _MAX_NESTED_DEPTH = 64
 _SESSION_FIELDS = (
     "session_id",
@@ -503,8 +502,6 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 def _parse_records(content: bytes) -> tuple[list[dict[str, Any]], bool]:
     """Parse Braintrust JSON, JSONL, or API fetch output."""
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise InvalidImport("Braintrust import exceeds the 50 MiB upload limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:

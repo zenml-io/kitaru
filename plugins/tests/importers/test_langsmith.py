@@ -19,7 +19,6 @@ from typing import Any
 
 import pytest
 
-import kitaru_langsmith_importer.importer as langsmith_module
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -427,14 +426,6 @@ def test_unified_parse_yields_worker_contract_models() -> None:
 
     assert len(parsed) == 1
     assert isinstance(parsed[0], ImportedSession)
-
-
-def test_rejects_oversized_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Enforce the upload limit before decoding."""
-    monkeypatch.setattr(langsmith_module, "MAX_UPLOAD_BYTES", 3)
-
-    with pytest.raises(InvalidImport, match="50 MiB upload limit"):
-        LangSmithRunImporter().parse(b"1234", {})
 
 
 def assert_bad_run_isolated(row: dict[str, Any]) -> None:

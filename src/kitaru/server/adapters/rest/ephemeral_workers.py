@@ -32,7 +32,6 @@ from kitaru.server.application.services.worker_service import (
     WorkerService,
     get_ephemeral_scope,
 )
-from kitaru.server.domain.job import Job
 from kitaru.server.domain.worker import Worker, scope_covers
 
 logger = logging.getLogger(__name__)
@@ -40,61 +39,82 @@ logger = logging.getLogger(__name__)
 SANDBOX_TAG_PREFIX = "kitaru/"
 
 
-async def start_ephemeral_worker(
-    job: Job,
-    job_service: JobService,
-    worker_service: WorkerService,
-    auth_service: AuthService,
-    ephemeral_workers: EphemeralWorkers,
-    settings: APISettings,
-    server_id: uuid.UUID | None,
-    background_tasks: BackgroundTasks,
-    actor: AuthContext,
-) -> None:
-    """Register a worker for the job and start it after the response.
+class EphemeralWorkerStarter:
+    """Ephemeral worker start scheduling for one request."""
 
-    A live worker whose scope covers the job's tasks suppresses the start, as
-    does any task the ephemeral scope would not claim.
+    def __init__(
+        self,
+        job_service: JobService,
+        worker_service: WorkerService,
+        auth_service: AuthService,
+        ephemeral_workers: EphemeralWorkers | None,
+        settings: APISettings,
+        server_id: uuid.UUID | None,
+        background_tasks: BackgroundTasks,
+    ) -> None:
+        """Initialize the starter.
 
-    Args:
-        job: Created job.
-        job_service: Job service.
-        worker_service: Worker service.
-        auth_service: Authentication service for the current request.
-        ephemeral_workers: Ephemeral worker backend.
-        settings: API settings for this process.
-        server_id: Persisted server id, None before startup resolved it.
-        background_tasks: Tasks run after the response is sent.
-        actor: Caller context.
-    """
-    tasks, _ = await job_service.list_job_tasks(job.id, TaskFilter(), actor=actor)
-    scope = get_ephemeral_scope(job.id, settings.EPHEMERAL_WORKER.selectors)
-    if not all(scope_covers(scope, task) for task in tasks):
-        return
-    if await worker_service.is_covered(tasks):
-        return
-    worker = await worker_service.register_ephemeral_worker(
-        job.id,
-        WorkerRuntime(platform=settings.EPHEMERAL_WORKER.backend.value),
-        settings.EPHEMERAL_WORKER.selectors,
-        actor=actor,
-    )
-    issued_token = auth_service.issue_worker_token(
-        worker_id=worker.id,
-        account_id=actor.account.id,
-        timeout_seconds=settings.EPHEMERAL_WORKER.timeout_seconds,
-    )
-    spec = EphemeralWorkerSpec(
-        worker_id=worker.id,
-        name=worker.name,
-        worker_token=SecretStr(issued_token.token),
-        server_url=settings.SERVER_URL,
-        job_id=job.id,
-        tags=_get_tags(worker, actor, server_id),
-    )
-    # Background tasks run after the route commits, so the worker is persisted
-    # in the DB by then.
-    background_tasks.add_task(_start_worker, ephemeral_workers, spec)
+        Args:
+            job_service: Job service.
+            worker_service: Worker service.
+            auth_service: Authentication service for the current request.
+            ephemeral_workers: Ephemeral worker backend, None when none is
+                configured.
+            settings: API settings for this process.
+            server_id: Persisted server id, None before startup resolved it.
+            background_tasks: Tasks run after the response is sent.
+        """
+        self._job_service = job_service
+        self._worker_service = worker_service
+        self._auth_service = auth_service
+        self._ephemeral_workers = ephemeral_workers
+        self._settings = settings
+        self._server_id = server_id
+        self._background_tasks = background_tasks
+
+    async def start(self, job_id: uuid.UUID, actor: AuthContext) -> None:
+        """Register a worker for the job and start it after the response.
+
+        No configured backend suppresses the start, as does a live worker
+        whose scope covers the job's tasks or any task the ephemeral scope
+        would not claim.
+
+        Args:
+            job_id: Id of the job the worker drains.
+            actor: Caller context.
+        """
+        if self._ephemeral_workers is None:
+            return
+        tasks, _ = await self._job_service.list_job_tasks(
+            job_id, TaskFilter(), actor=actor
+        )
+        scope = get_ephemeral_scope(job_id, self._settings.EPHEMERAL_WORKER.selectors)
+        if not all(scope_covers(scope, task) for task in tasks):
+            return
+        if await self._worker_service.is_covered(tasks):
+            return
+        worker = await self._worker_service.register_ephemeral_worker(
+            job_id,
+            WorkerRuntime(platform=self._settings.EPHEMERAL_WORKER.backend.value),
+            self._settings.EPHEMERAL_WORKER.selectors,
+            actor=actor,
+        )
+        issued_token = self._auth_service.issue_worker_token(
+            worker_id=worker.id,
+            account_id=actor.account.id,
+            timeout_seconds=self._settings.EPHEMERAL_WORKER.timeout_seconds,
+        )
+        spec = EphemeralWorkerSpec(
+            worker_id=worker.id,
+            name=worker.name,
+            worker_token=SecretStr(issued_token.token),
+            server_url=self._settings.SERVER_URL,
+            job_id=job_id,
+            tags=_get_tags(worker, actor, self._server_id),
+        )
+        # Background tasks run after the route commits, so the worker is
+        # persisted in the DB by then.
+        self._background_tasks.add_task(_start_worker, self._ephemeral_workers, spec)
 
 
 def _get_tags(

@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Annotated, NamedTuple
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kitaru.analytics.client import AnalyticsClient
@@ -105,6 +105,7 @@ from kitaru.server.adapters.db.repositories.worker_repository import (
 )
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.permissions.allow_all import AllowAllPermissionProvider
+from kitaru.server.adapters.rest.ephemeral_workers import EphemeralWorkerStarter
 from kitaru.server.adapters.rest.request_state import (
     attach_request_session,
     request_uses_read_engine,
@@ -1198,6 +1199,43 @@ def get_auth_service(
         password_hasher=BcryptPasswordHasher(),
         device_service=_build_device_service(auth_session, engine, settings),
         control_plane=control_plane,
+    )
+
+
+def get_ephemeral_worker_starter(
+    job_service: Annotated[JobService, Depends(get_job_service)],
+    worker_service: Annotated[WorkerService, Depends(get_worker_service)],
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+    ephemeral_workers: Annotated[
+        EphemeralWorkers | None, Depends(get_ephemeral_workers)
+    ],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+    server_id: Annotated[uuid.UUID | None, Depends(get_server_id_state)],
+    background_tasks: BackgroundTasks,
+) -> EphemeralWorkerStarter:
+    """Return an ephemeral worker starter for the current request.
+
+    Args:
+        job_service: Job service.
+        worker_service: Worker service.
+        auth_service: Authentication service for the current request.
+        ephemeral_workers: Ephemeral worker backend, None when none is
+            configured.
+        settings: API settings for this process.
+        server_id: Persisted server id, None before startup resolved it.
+        background_tasks: Tasks run after the response is sent.
+
+    Returns:
+        Starter bound to the request's services and background tasks.
+    """
+    return EphemeralWorkerStarter(
+        job_service=job_service,
+        worker_service=worker_service,
+        auth_service=auth_service,
+        ephemeral_workers=ephemeral_workers,
+        settings=settings,
+        server_id=server_id,
+        background_tasks=background_tasks,
     )
 
 

@@ -38,7 +38,6 @@ from kitaru.task.importer import (
     ImportedSession,
 )
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_TREE_DEPTH = 64
 MAX_TOOL_SCAN_DEPTH = 64
 _TRACE_SHAPE = "trace"
@@ -749,8 +748,6 @@ def _detect_shape(record: dict[str, Any]) -> str:
 
 def _parse_records(content: bytes) -> list[dict[str, Any]]:
     """Parse non-empty JSON or JSONL records."""
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise InvalidImport("Langfuse import exceeds the 50 MiB upload limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:

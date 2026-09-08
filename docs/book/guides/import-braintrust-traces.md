@@ -20,7 +20,7 @@ The importer is permissive about the container because Braintrust logs reach you
 - **A JSON object with an `events` array**, the shape the Braintrust API returns for a log fetch.
 - **A single JSON object**, treated as a one-event export.
 
-Payloads are capped at 50 MiB per import (the importer's own limit, separate from the server's configurable blob limit). Import in slices as often as you like; [dedup](#re-runs-skip-what-is-already-there) makes overlapping slices safe.
+Uploads are capped by the server's configurable blob limit. Import in slices as often as you like; [dedup](#re-runs-skip-what-is-already-there) makes overlapping slices safe.
 
 What matters is the fields on each record, not how you got the file. A full project-log export carries span identity, and that is what you want:
 

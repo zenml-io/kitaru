@@ -16,12 +16,14 @@
 import json
 import uuid
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
 import pytest
 
 from conftest import (
+    FakeEphemeralWorkers,
     JobAndTaskServices,
     build_job_and_task_services,
     create_agent,
@@ -30,20 +32,32 @@ from conftest import (
     create_plugin,
     override_idempotency,
 )
+from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    get_auth_service,
+    get_ephemeral_workers,
     get_import_service,
+    get_job_service,
     get_task_service,
+    get_worker_service,
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.bootstrap import register_default_plugins
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.models.worker import WorkerFilter
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import ImportTask
+from kitaru.server.ephemeral_worker_settings import (
+    EphemeralWorkerBackend,
+    EphemeralWorkerSettings,
+    ModalEphemeralWorkerSettings,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
@@ -57,19 +71,52 @@ async def services() -> JobAndTaskServices:
 
 
 @pytest.fixture
-async def client(
+def ephemeral_workers() -> FakeEphemeralWorkers:
+    """Provide a fake ephemeral worker backend recording starts."""
+    return FakeEphemeralWorkers()
+
+
+def _settings(**overrides: Any) -> APISettings:
+    """Build API settings for the test app."""
+    return APISettings(
+        DB_HOST="localhost",
+        SECRET_ENCRYPTION_KEY="test-encryption-key",
+        JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        **overrides,
+    )
+
+
+def _ephemeral_settings() -> APISettings:
+    """Build API settings with a Modal ephemeral worker backend configured."""
+    return _settings(
+        SERVER_URL="https://kitaru.example.com",
+        EPHEMERAL_WORKER=EphemeralWorkerSettings(
+            backend=EphemeralWorkerBackend.MODAL,
+            image="zenmldocker/kitaru-worker:1.0.0",
+            modal=ModalEphemeralWorkerSettings(
+                token_id="ak-test", token_secret="as-test"
+            ),
+        ),
+    )
+
+
+@asynccontextmanager
+async def _client(
     services: JobAndTaskServices,
+    auth_service: AuthService,
+    settings: APISettings,
+    ephemeral_workers: FakeEphemeralWorkers | None = None,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed import services."""
-    app = create_app(
-        APISettings(
-            DB_HOST="localhost",
-            SECRET_ENCRYPTION_KEY="test-encryption-key",
-            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
-        )
-    )
+    app = create_app(settings)
     app.dependency_overrides[get_import_service] = lambda: services.import_service
     app.dependency_overrides[get_task_service] = lambda: services.task_service
+    app.dependency_overrides[get_job_service] = lambda: services.job_service
+    app.dependency_overrides[get_worker_service] = lambda: WorkerService(
+        repository=services.workers, liveness_timeout_seconds=60
+    )
+    app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_ephemeral_workers] = lambda: ephemeral_workers
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
@@ -77,10 +124,44 @@ async def client(
         yield client
 
 
+@pytest.fixture
+async def client(
+    services: JobAndTaskServices, auth_service: AuthService
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app without an ephemeral worker backend."""
+    async with _client(services, auth_service, _settings()) as client:
+        yield client
+
+
+@pytest.fixture
+async def ephemeral_client(
+    services: JobAndTaskServices,
+    auth_service: AuthService,
+    ephemeral_workers: FakeEphemeralWorkers,
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app with a fake ephemeral worker backend."""
+    async with _client(
+        services, auth_service, _ephemeral_settings(), ephemeral_workers
+    ) as client:
+        yield client
+
+
 async def _importer_version(services: JobAndTaskServices) -> PluginVersion:
     """Register the csv importer with one version."""
     plugin = await create_plugin(
         services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
+    )
+    return await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        display_version=None,
+    )
+
+
+async def _builtin_importer_version(services: JobAndTaskServices) -> PluginVersion:
+    """Register the reserved namespace csv importer with one version."""
+    plugin = await create_plugin(
+        services.plugins, None, PluginKind.IMPORTER, name="kitaru/csv"
     )
     return await services.plugins.create_version(
         plugin.id,
@@ -171,6 +252,58 @@ async def test_create_import(
     assert task.kind.value == "importer"
     assert task.import_id == uuid.UUID(created["id"])
     assert task.labels == {}
+
+
+async def test_create_import_starts_an_ephemeral_worker(
+    ephemeral_client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+) -> None:
+    """Start a worker pinned to the import's job after the response."""
+    await _builtin_importer_version(services)
+    body = await _import_request(services, importer="kitaru/csv")
+
+    response = await ephemeral_client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+
+    assert len(ephemeral_workers.starts) == 1
+    spec = ephemeral_workers.starts[0]
+    assert spec.job_id == uuid.UUID(created["job_id"])
+    worker = await services.workers.get(spec.worker_id)
+    assert worker.scope.job_id == spec.job_id
+    assert worker.metadata == {"ephemeral": "true"}
+
+
+async def test_create_import_skips_the_ephemeral_worker_for_a_user_importer(
+    ephemeral_client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+) -> None:
+    """Leave a job for a user importer to the account's own workers."""
+    await _importer_version(services)
+    body = await _import_request(services)
+
+    response = await ephemeral_client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+
+    assert ephemeral_workers.starts == []
+    workers, _ = await services.workers.query(WorkerFilter(), None)
+    assert workers == []
+
+
+async def test_create_import_registers_no_worker_without_a_backend(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Register no worker when no ephemeral worker backend is configured."""
+    await _builtin_importer_version(services)
+    body = await _import_request(services, importer="kitaru/csv")
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+
+    workers, _ = await services.workers.query(WorkerFilter(), None)
+    assert workers == []
 
 
 async def test_create_api_import(

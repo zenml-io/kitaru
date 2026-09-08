@@ -33,7 +33,6 @@ from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_PARENT_DEPTH = 64
 _DEFAULT_JOIN_PATHS = (
     "attributes.session.id",
@@ -163,8 +162,6 @@ def _decimal(value: Any) -> Decimal | None:
 
 def _parse_records(content: bytes) -> list[dict[str, Any]]:
     """Parse Logfire JSON, JSONL, or streaming NDJSON output."""
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise InvalidImport("Logfire import exceeds the 50 MiB upload limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:
