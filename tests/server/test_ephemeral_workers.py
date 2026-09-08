@@ -160,6 +160,7 @@ async def test_start_registers_and_starts_a_worker_pinned_to_the_job(
         claims=[
             WorkerClaim(kind=TaskKind.IMPORTER),
             WorkerClaim(kind=TaskKind.EVALUATOR),
+            WorkerClaim(kind=TaskKind.ANALYZER),
         ],
         selectors=[
             LabelSelector(

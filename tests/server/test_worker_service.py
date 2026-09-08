@@ -230,6 +230,7 @@ async def test_register_ephemeral_worker(service: WorkerService) -> None:
         claims=[
             WorkerClaim(kind=TaskKind.IMPORTER),
             WorkerClaim(kind=TaskKind.EVALUATOR),
+            WorkerClaim(kind=TaskKind.ANALYZER),
         ],
         selectors=[
             LabelSelector(
