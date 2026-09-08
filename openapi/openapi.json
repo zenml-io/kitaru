@@ -20628,7 +20628,7 @@
         ]
       },
       "post": {
-        "description": "Import sessions from a payload blob, as a job holding one importer task.\n\nClients observe HTTP 201 on success, 404 when the importer, the version,\nthe payload blob, the agent, the agent version, or an evaluator does not\nexist, and 422 when the agent version belongs to another agent, an\nevaluator is scoped to another agent, or an evaluator version repeats.\n\nArgs:\n    body: Import create request.\n    service: Import service.\n    actor: Caller context.\n\nReturns:\n    Created import.",
+        "description": "Import sessions from a payload blob, as a job holding one importer task.\n\nClients observe HTTP 201 on success, 404 when the importer, the version,\nthe payload blob, the agent, the agent version, or an evaluator does not\nexist, and 422 when the agent version belongs to another agent, an\nevaluator is scoped to another agent, or an evaluator version repeats.\n\nArgs:\n    body: Import create request.\n    service: Import service.\n    starter: Ephemeral worker starter.\n    actor: Caller context.\n\nReturns:\n    Created import.",
         "operationId": "create_import_api_v1_imports_post",
         "parameters": [
           {

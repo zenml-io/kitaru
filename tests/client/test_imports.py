@@ -36,15 +36,19 @@ from kitaru.api_models.v1.imports import (
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import NotFoundError
+from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    get_auth_service,
     get_import_service,
     get_job_service,
     get_task_service,
+    get_worker_service,
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 
@@ -59,7 +63,7 @@ def services() -> JobAndTaskServices:
 
 @pytest.fixture
 async def api_client(
-    services: JobAndTaskServices,
+    services: JobAndTaskServices, auth_service: AuthService
 ) -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with fake-backed services."""
     app = create_app(
@@ -72,6 +76,10 @@ async def api_client(
     app.dependency_overrides[get_job_service] = lambda: services.job_service
     app.dependency_overrides[get_task_service] = lambda: services.task_service
     app.dependency_overrides[get_import_service] = lambda: services.import_service
+    app.dependency_overrides[get_worker_service] = lambda: WorkerService(
+        repository=services.workers, liveness_timeout_seconds=60
+    )
+    app.dependency_overrides[get_auth_service] = lambda: auth_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     override_idempotency(app, ACCOUNT)
     async with asgi_api_client(app) as client:

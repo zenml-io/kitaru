@@ -24,7 +24,12 @@ from kitaru.api_models.v1.imports import (
     ImportListParams,
     ImportResponse,
 )
-from kitaru.server.adapters.rest.dependencies import authorize, get_import_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    get_ephemeral_worker_starter,
+    get_import_service,
+)
+from kitaru.server.adapters.rest.ephemeral_workers import EphemeralWorkerStarter
 from kitaru.server.adapters.rest.mapping.imports import (
     import_create_to_command,
     import_list_params_to_filter,
@@ -45,6 +50,7 @@ router = APIRouter(route_class=KitaruAPIRoute)
 async def create_import(
     body: ImportCreateRequest,
     service: Annotated[ImportService, Depends(get_import_service)],
+    starter: Annotated[EphemeralWorkerStarter, Depends(get_ephemeral_worker_starter)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> ImportResponse:
     """Import sessions from a payload blob, as a job holding one importer task.
@@ -57,6 +63,7 @@ async def create_import(
     Args:
         body: Import create request.
         service: Import service.
+        starter: Ephemeral worker starter.
         actor: Caller context.
 
     Returns:
@@ -64,6 +71,8 @@ async def create_import(
     """
     command = import_create_to_command(body)
     import_ = await service.create_import(command, actor=actor)
+    if import_.job_id is not None:
+        await starter.start(import_.job_id, actor=actor)
     return import_to_response(import_)
 
 

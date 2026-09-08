@@ -2151,6 +2151,7 @@ export interface paths {
          *     Args:
          *         body: Import create request.
          *         service: Import service.
+         *         starter: Ephemeral worker starter.
          *         actor: Caller context.
          *
          *     Returns:
