@@ -1183,7 +1183,7 @@ def _card(candidate: CandidateFinding, description: str) -> EditorialPlan:
         "Look at the sessions with the longer durations first.",
         "It takes 500 ms on average.",
         "This affects 50% of the analyzed sessions.",
-        "One label accounts for 3 of the results.",
+        "Counts sit in the 2-3 range.",
     ],
 )
 def test_card_copy_may_restate_grounded_numbers_and_plain_quantities(
@@ -1604,6 +1604,10 @@ def test_editor_validates_numbers_against_each_card_only(
         ("This pattern is improving quality.", "unsupported claim"),
         ("Quality improvements appeared.", "unsupported claim"),
         ("It outperformed the alternative.", "unsupported claim"),
+        ("This pattern accounts for retries.", "unsupported claim"),
+        ("This pattern may account for retries.", "unsupported claim"),
+        ("This pattern accounted for retries.", "unsupported claim"),
+        ("This pattern is accounting for retries.", "unsupported claim"),
         ("This result is better.", "unsupported claim"),
         ("This result is best.", "unsupported claim"),
         ("This result is worse.", "unsupported claim"),
@@ -1649,6 +1653,12 @@ def test_editor_rejects_fabricated_or_unsafe_card_copy(
         "This affects 3 percent of sessions.",
         "This affects 14.29 seconds of work.",
         "This affects 2% of sessions.",
+        "Latency was -3 seconds.",
+        "It ran -3 times.",
+        "This costs 3 dollars.",
+        "This costs $3.",
+        "Latency is 3x the baseline.",
+        "It used 3k tokens.",
     ],
 )
 def test_card_copy_numbers_must_keep_their_unit(
@@ -1686,7 +1696,12 @@ def test_card_copy_grounds_time_units_on_the_chart_unit(
         }
     )
     candidate = candidate.model_copy(
-        update={"facts": [DeterministicFact(name="maximum", value=1332.029)]}
+        update={
+            "facts": [
+                DeterministicFact(name="maximum", value=1332.029),
+                DeterministicFact(name="observations", value=10),
+            ]
+        }
     )
     selection = _single_selection(candidate)
     for description in (
@@ -1696,10 +1711,15 @@ def test_card_copy_grounds_time_units_on_the_chart_unit(
     ):
         copy = _card(candidate, description)
         assert validate_editorial_plan(copy, selection, [candidate]) == copy
-    with pytest.raises(ValueError, match="numeric claim absent"):
-        validate_editorial_plan(
-            _card(candidate, "The split is at 500 seconds."), selection, [candidate]
-        )
+    for description in (
+        "The split is at 500 seconds.",
+        "It covers 10 seconds.",
+        "It covers 1332 sessions.",
+    ):
+        with pytest.raises(ValueError, match="numeric claim absent"):
+            validate_editorial_plan(
+                _card(candidate, description), selection, [candidate]
+            )
 
 
 def test_card_copy_cannot_negate_a_quoted_candidate_phrase(

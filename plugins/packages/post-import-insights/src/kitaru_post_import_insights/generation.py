@@ -26,11 +26,50 @@ from kitaru_post_import_insights.profiling import (
 
 # A numeric token is a number plus an optional unit, so the number parser can
 # read the leading number of any token the numeric scan produces.
-_NUMBER_PATTERN = r"\d+(?:[.,]\d+)*"
+_NUMBER_PATTERN = r"-?\d+(?:[.,]\d+)*"
 _NUMBER = re.compile(_NUMBER_PATTERN)
-_NUMERIC_TOKEN = re.compile(rf"{_NUMBER_PATTERN}(?:%|[A-Za-z]+)?")
+# A minus sign counts only when it does not follow a word character, so a
+# range such as "3-6" reads as two positive numbers, not "3" and "-6".
+_NUMERIC_TOKEN = re.compile(r"(?<![\w.])(?<![\w])-?\d+(?:[.,]\d+)*(?:%|[A-Za-z]+)?")
 _UNIT_WORD = re.compile(r"\s*(%|[A-Za-z]+)")
+_CURRENCY_PREFIX = re.compile(r"[$€£]\s*$")
 _PERCENT_UNITS = {"%", "percent", "pct"}
+# Written units that name something the profiler never measures.
+_NON_COUNT_UNITS = {
+    "x",
+    "times",
+    "dollar",
+    "dollars",
+    "cent",
+    "cents",
+    "usd",
+    "eur",
+    "euro",
+    "euros",
+    "gbp",
+    "pound",
+    "pounds",
+    "byte",
+    "bytes",
+    "kb",
+    "mb",
+    "gb",
+    "tb",
+    "token",
+    "tokens",
+}
+# Facts named as a statistic of the chart's values share the chart's unit.
+_CHART_STATISTIC_FACTS = {
+    "maximum",
+    "minimum",
+    "median",
+    "mean",
+    "average",
+    "p50",
+    "p90",
+    "p95",
+    "p99",
+}
 # Written time units normalized to seconds, so "500 ms" can ground on 0.5 s.
 _TIME_UNIT_SECONDS = {
     "ms": 0.001,
@@ -92,6 +131,7 @@ _UNSUPPORTED_CLAIM = re.compile(
     r"(?:stems?|stemmed|stemming)\s+from|"
     r"produc(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|"
     r"trigger(?:s|ed|ing)?|responsible\s+for|attributable\s+to|"
+    r"(?:account|accounts|accounted|accounting)\s+for|"
     r"(?:contributes?|contributed|contributing)\s+to|"
     r"(?:give|gives|gave|given|giving)\s+rise\s+to|"
     r"(?:bring|brings|brought|bringing)\s+about|"
@@ -176,6 +216,27 @@ _NON_IDENTITY_LABEL_WORDS = {
     "times",
     "tool",
     "tools",
+}
+
+# A number followed by one of these nouns counts things, so it cannot borrow
+# a duration such as a chart maximum that happens to have the same digits.
+_COUNT_NOUNS = {
+    word
+    for word in _NON_IDENTITY_LABEL_WORDS
+    if len(word) > 3 and word not in {"time", "times"}
+} | {
+    "label",
+    "labels",
+    "model",
+    "models",
+    "node",
+    "nodes",
+    "observation",
+    "observations",
+    "pair",
+    "pairs",
+    "turn",
+    "turns",
 }
 
 
@@ -610,7 +671,12 @@ def _get_grounded_numbers(candidate: CandidateFinding) -> dict[str, set[float]]:
     data = candidate.data
     chart_kind, chart_scale = _classify_unit(data.unit)
     for fact in candidate.facts:
-        kind, scale = _classify_unit(fact.name)
+        # A statistic of the chart's values, such as "maximum", is measured in
+        # the chart's unit; every other fact keeps the unit its name declares.
+        if fact.name.lower() in _CHART_STATISTIC_FACTS:
+            kind, scale = chart_kind, chart_scale
+        else:
+            kind, scale = _classify_unit(fact.name)
         if isinstance(fact.value, str):
             values = [
                 parsed
@@ -620,10 +686,6 @@ def _get_grounded_numbers(candidate: CandidateFinding) -> dict[str, set[float]]:
         else:
             values = [float(fact.value)]
         numbers[kind].update(value * scale for value in values)
-        # A fact named without a unit, such as a distribution's "maximum",
-        # measures the same thing as the chart, so it also grounds that unit.
-        if kind == "count" and chart_kind != "count":
-            numbers[chart_kind].update(value * chart_scale for value in values)
     kind, scale = chart_kind, chart_scale
     if isinstance(data, CategoricalInsightData):
         numbers[kind].update(float(item.value) * scale for item in data.values)
@@ -658,13 +720,20 @@ def _matches_grounded(value: float, decimals: int, grounded: set[float]) -> bool
 
 
 def _is_grounded_number(
-    token: str, following: str, grounded: dict[str, set[float]]
+    token: str,
+    *,
+    preceding: str,
+    following: str,
+    grounded: dict[str, set[float]],
+    chart_unit: str | None,
 ) -> bool:
     """Accept a written number that equals or rounds a grounded quantity.
 
     A percent sign or time unit, attached to the token or as the next word,
     selects the kind the number must ground on; a bare number may ground on
-    a count or a time value but never on a percentage.
+    a count or a time value but never on a percentage. A currency prefix, a
+    letter suffix outside the known units, or a unit word the profiler never
+    measures rejects the number outright.
     """
     match = _NUMBER.match(token)
     if match is None:
@@ -674,11 +743,20 @@ def _is_grounded_number(
     if value is None:
         return False
     decimals = len(raw.rsplit(".", 1)[1]) if "." in raw else 0
-    unit = token[match.end() :].lower()
+    if _CURRENCY_PREFIX.search(preceding):
+        return False
+    attached = token[match.end() :].lower()
+    if attached and attached not in _PERCENT_UNITS | set(_TIME_UNIT_SECONDS):
+        return False
+    unit = attached
     if not unit and (next_word := _UNIT_WORD.match(following)):
         unit = next_word.group(1).lower()
+    if unit in _NON_COUNT_UNITS and unit != (chart_unit or "").lower():
+        return False
     if unit in _PERCENT_UNITS:
         return _matches_grounded(value, decimals, grounded["percent"])
+    if unit in _COUNT_NOUNS:
+        return _matches_grounded(value, decimals, grounded["count"])
     if unit in _TIME_UNIT_SECONDS:
         scaled = value * _TIME_UNIT_SECONDS[unit]
         # Compare at the written precision after scaling to seconds.
@@ -732,7 +810,13 @@ def _validate_card_copy(value: str, candidate: CandidateFinding) -> None:
         raise ValueError("editor card copy contains a negated outcome claim")
     grounded = _get_grounded_numbers(candidate)
     for match in _NUMERIC_TOKEN.finditer(remaining):
-        if not _is_grounded_number(match.group(0), remaining[match.end() :], grounded):
+        if not _is_grounded_number(
+            match.group(0),
+            preceding=remaining[: match.start()],
+            following=remaining[match.end() :],
+            grounded=grounded,
+            chart_unit=candidate.data.unit,
+        ):
             raise ValueError(
                 "editor card copy contains a numeric claim absent from the "
                 "candidate facts"
