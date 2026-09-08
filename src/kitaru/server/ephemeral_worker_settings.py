@@ -48,6 +48,7 @@ class EphemeralWorkerSettings(BaseModel):
     image: str | None = None
     command: str = DEFAULT_WORKER_COMMAND
     timeout_seconds: int = 3600
+    env: dict[str, SecretStr] = {}
     modal: ModalEphemeralWorkerSettings | None = None
 
     @model_validator(mode="after")

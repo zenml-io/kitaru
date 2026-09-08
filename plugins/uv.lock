@@ -1225,6 +1225,7 @@ requires-dist = [
     { name = "packaging", marker = "extra == 'cli'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'mcp'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'server'", specifier = ">=24.0" },
+    { name = "packaging", marker = "extra == 'worker'", specifier = ">=24.0" },
     { name = "pydantic", specifier = ">=2,<3" },
     { name = "pydantic-settings", marker = "extra == 'server'", specifier = ">=2.14" },
     { name = "pydantic-settings", marker = "extra == 'worker'", specifier = ">=2.14" },

@@ -91,6 +91,9 @@ def test_modal_settings_parsed_from_env_vars(monkeypatch: pytest.MonkeyPatch) ->
         "KITARU_SERVER_EPHEMERAL_WORKER__COMMAND", "python -m kitaru.worker --debug"
     )
     monkeypatch.setenv("KITARU_SERVER_EPHEMERAL_WORKER__TIMEOUT_SECONDS", "120")
+    monkeypatch.setenv(
+        "KITARU_SERVER_EPHEMERAL_WORKER__ENV", '{"MY_API_KEY": "secret-value"}'
+    )
 
     settings = local_settings(SERVER_URL="https://kitaru.example.com")
 
@@ -101,7 +104,11 @@ def test_modal_settings_parsed_from_env_vars(monkeypatch: pytest.MonkeyPatch) ->
     assert settings.EPHEMERAL_WORKER.image == "zenmldocker/kitaru-worker:1.0.0"
     assert settings.EPHEMERAL_WORKER.command == "python -m kitaru.worker --debug"
     assert settings.EPHEMERAL_WORKER.timeout_seconds == 120
+    assert settings.EPHEMERAL_WORKER.env["MY_API_KEY"].get_secret_value() == (
+        "secret-value"
+    )
     assert "as-test" not in repr(settings.EPHEMERAL_WORKER)
+    assert "secret-value" not in repr(settings.EPHEMERAL_WORKER)
 
 
 def test_modal_backend_requires_server_url() -> None:

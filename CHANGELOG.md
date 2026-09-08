@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added agent-scoped insights. Create a batch of insights for an agent with `client.insights.create(...)` or `POST /api/v1/insights`, each carrying a name, a title, an optional description, and data of type `text`, `categorical`, or `binned`. Insights can be listed with filters on `agent_id`, `name`, and `type`, fetched, updated in title and description, and deleted.
 - Added analyzers, a plugin kind that reads a set of sessions at once and writes insights about the set. Register one with `kitaru analyzer register` and version it with `kitaru analyzer version register`, the same way as an evaluator, minus any agent scoping. Pass `analyzers` on `POST /api/v1/imports`, or `--analyzer` and `--analyzer-params` to `kitaru session import`, and each listed analyzer runs once over every session the import created, in parallel with the import's evaluator tasks. A failed analyzer marks the job failed while the import's `stats` still records the parse outcome. Insights written this way record the analyzer version, the task, and the params that produced them.
 - Evaluator and analyzer entrypoints can be `async def`. The task process awaits the returned value.
+- Set `KITARU_SERVER_EPHEMERAL_WORKER__ENV` to a JSON object, or `server.ephemeralWorker.env` in the Helm chart, to set extra environment variables such as provider API keys in every ephemeral worker. Task processes inherit them.
 
 ### Changed
 
@@ -29,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Analyzer tasks that return an empty list now complete successfully without creating insights, so an analysis with no eligible findings does not fail its import job. Insight editor copy containing Markdown formatting falls back to deterministic plain text.
+- Worker-only installations now include the packaging dependency, and `kitaru importer test` accepts importer objects exposing `parse` and `fetch`.
 - `kitaru doctor` no longer prints "Kitaru is needs attention", and its missing-skills hint points at `kitaru setup`. The one-line installer prints `uvx kitaru ...` for its next steps when the tool directory is not on the current shell's PATH yet, so they work without opening a new terminal.
 - `if_missing` baseline scoring now adopts every evaluation an evaluator call produced instead of only one of them, so a rerun's baseline aggregates no longer lose metrics from an evaluator that returns multiple results.
 

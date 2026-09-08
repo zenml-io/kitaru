@@ -363,6 +363,13 @@ server:
     # KITARU_WORKER_TIMEOUT and enforced by the backend.
     timeoutSeconds: 3600
 
+    # Extra environment variables set in every ephemeral worker and inherited
+    # by the task processes it runs. For production deployments, consider
+    # referencing an existing Kubernetes secret holding the JSON object
+    # through server.environmentSecretKeyRefs as
+    # KITARU_SERVER_EPHEMERAL_WORKER__ENV instead of setting values here.
+    env: {}
+
     # Settings for the modal backend. Only used when backend is set to modal.
     modal:
       # The Modal API token id.

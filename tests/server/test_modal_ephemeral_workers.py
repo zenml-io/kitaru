@@ -112,12 +112,14 @@ def _settings(
     cpu: float | None = None,
     memory_mb: int | None = None,
     environment: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> EphemeralWorkerSettings:
     return EphemeralWorkerSettings(
         backend=EphemeralWorkerBackend.MODAL,
         image=image,
         command=command,
         timeout_seconds=120,
+        env=env or {},
         modal=ModalEphemeralWorkerSettings(
             token_id="ak-test",
             token_secret="as-test",
@@ -181,6 +183,27 @@ async def test_start_creates_sandbox_with_resource_limits(
     assert kwargs["memory"] == 4096
     assert kwargs["client"] is fake_modal.client
     assert kwargs["environment_name"] is None
+
+
+async def test_start_sets_the_configured_env(fake_modal: _FakeModal) -> None:
+    """Set the configured env on the sandbox under the contract variables."""
+    ephemeral_workers = ModalEphemeralWorkers(
+        _settings(
+            env={"MY_API_KEY": "secret-value", "KITARU_API_URL": "https://evil.example"}
+        )
+    )
+    spec = _spec()
+
+    await ephemeral_workers.start(spec)
+
+    _, kwargs = fake_modal.sandbox_create.calls[0]
+    assert kwargs["env"] == {
+        "MY_API_KEY": "secret-value",
+        "KITARU_API_URL": spec.server_url,
+        "KITARU_API_TOKEN": "worker-token",
+        "KITARU_WORKER_ID": str(spec.worker_id),
+        "KITARU_WORKER_TIMEOUT": "120",
+    }
 
 
 async def test_start_in_a_configured_environment(fake_modal: _FakeModal) -> None:

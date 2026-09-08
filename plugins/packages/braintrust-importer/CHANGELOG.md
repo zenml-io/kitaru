@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Use supported Braintrust root filtering and cursor pagination so window imports succeed and complete traces are fetched beyond the first page.
 - Fetch traces directly from the Braintrust API through the `api` extra.
 - Import API-fetched traces oldest first in a single payload, so traces sharing a session are grouped instead of dropped as duplicates.
 - Fetch traces concurrently, bounded by the fetch query's `concurrency` key.
