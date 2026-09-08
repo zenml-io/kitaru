@@ -31,7 +31,6 @@ from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_PARENT_DEPTH = 64
 
 
@@ -142,8 +141,6 @@ def _parse_values(
     content: bytes,
 ) -> tuple[list[tuple[int, dict[str, Any]]], list[ImportFailure]]:
     """Parse Phoenix UI or CLI JSON and JSONL values."""
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise InvalidImport("Phoenix import exceeds the 50 MiB upload limit")
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
