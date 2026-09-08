@@ -9,7 +9,8 @@
 - Pluralize the model-mix title.
 - Extract post-import insight generation into an independent analyzer distribution.
 - Fetch sessions sequentially from the IDs supplied by analyzer tasks, preserving bounded trace memory and complete import coverage.
-- Include OpenAI generation and dedicated Langfuse telemetry dependencies in the plugin package.
+- Make OpenAI generation available through the optional `openai` extra, selected by the OpenAI analyzer's default package requirement.
+- Remove Langfuse telemetry and its dependency from insight generation.
 - Register separate deterministic and OpenAI analyzers so callers can select either or both for an import. Require a model and OpenAI credentials for the OpenAI analyzer.
 
 ### Release context

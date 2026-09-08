@@ -33,7 +33,6 @@ from kitaru_post_import_insights.models import (
     ProviderReceipt,
     SourceImportContext,
 )
-from kitaru_post_import_insights.observability import GenerationObserver
 from kitaru_post_import_insights.pipeline import (
     InsightGenerationConfig,
     InsightResultSizeError,
@@ -47,7 +46,6 @@ __all__ = [
     "EvidenceLocator",
     "GenerationDiagnostics",
     "GenerationMode",
-    "GenerationObserver",
     "GenerationVersions",
     "InsightCardMetadata",
     "InsightGenerationConfig",

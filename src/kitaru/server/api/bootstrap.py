@@ -165,7 +165,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         ),
         provider="openai",
         entrypoint="kitaru_post_import_insights.analyzer:analyze_openai_post_import_sessions",
-        requirement="kitaru-post-import-insights==0.1.0",
+        requirement="kitaru-post-import-insights[openai]==0.1.0",
         display_version="0.1.0",
         connection_schema=OpenAIConnection,
     ),

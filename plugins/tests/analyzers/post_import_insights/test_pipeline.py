@@ -38,7 +38,6 @@ from kitaru_post_import_insights.generation import (
     generate_deterministic_plan,
 )
 from kitaru_post_import_insights.models import GenerationMode, ProviderReceipt
-from kitaru_post_import_insights.observability import GenerationEvent
 from kitaru_post_import_insights.pipeline import (
     InsightGenerationConfig,
     InsightResultSizeError,
@@ -123,22 +122,6 @@ def _node(
         tool_name="lookup_order",
         metadata={},
     )
-
-
-class RecordingObserver:
-    """Retain metadata-only pipeline lifecycle events."""
-
-    def __init__(self) -> None:
-        self.events: list[GenerationEvent] = []
-
-    async def record(self, event: GenerationEvent) -> None:
-        self.events.append(event)
-
-
-def _assert_pipeline_events(observer: RecordingObserver) -> None:
-    assert [event.name for event in observer.events].count("profiling") == 1
-    assert [event.name for event in observer.events].count("validation") == 1
-    assert len({event.run_id for event in observer.events}) == 1
 
 
 class FailingEditor(InsightModelGenerator):
@@ -232,14 +215,11 @@ class SuccessfulGenerator(InsightModelGenerator):
 
 
 async def test_empty_input_returns_without_model_generation() -> None:
-    observer = RecordingObserver()
-    result = await generate_insights([], context=_context(), observer=observer)
+    result = await generate_insights([], context=_context())
 
     assert result.insights == []
     assert result.empty_reason == "no_eligible_candidates"
     assert result.mode is GenerationMode.DETERMINISTIC
-    _assert_pipeline_events(observer)
-    assert observer.events[-1].metadata["outcome"] == "empty"
 
 
 async def test_empty_generation_preserves_utf8_context() -> None:
@@ -265,8 +245,7 @@ async def test_deterministic_result_is_canonical_and_byte_stable() -> None:
         _session(2, status=SessionStatus.COMPLETED),
     ]
 
-    observer = RecordingObserver()
-    first = await generate_insights(sessions, context=_context(), observer=observer)
+    first = await generate_insights(sessions, context=_context())
     second = await generate_insights(list(reversed(sessions)), context=_context())
     assert await generate_insights(iter(sessions), context=_context()) == first
     candidates = {
@@ -322,8 +301,6 @@ async def test_deterministic_result_is_canonical_and_byte_stable() -> None:
             separators=(",", ":"),
         )
         assert chart_json in metadata.investigation_prompt
-    _assert_pipeline_events(observer)
-    assert observer.events[-1].metadata["outcome"] == "deterministic"
 
 
 async def test_prompt_omits_absent_check_first_instruction() -> None:
@@ -352,13 +329,11 @@ async def test_editor_failure_preserves_analyst_selection() -> None:
     ]
     generator = FailingEditor()
 
-    observer = RecordingObserver()
     result = await generate_insights(
         sessions,
         context=_context(),
         config=InsightGenerationConfig(model=ModelGenerationConfig(model="test-model")),
         generator=generator,
-        observer=observer,
     )
 
     assert result.mode is GenerationMode.DETERMINISTIC_FALLBACK
@@ -366,8 +341,6 @@ async def test_editor_failure_preserves_analyst_selection() -> None:
     assert result.insights[0].name == generator.selected
     assert result.diagnostics.fallback_reason == "editor_failed"
     assert "provider detail" not in result.model_dump_json()
-    _assert_pipeline_events(observer)
-    assert observer.events[-1].metadata["outcome"] == "deterministic_fallback"
 
 
 async def test_analyst_failure_uses_stable_deterministic_selection() -> None:
@@ -410,19 +383,17 @@ async def test_malformed_custom_provider_receipt_falls_back_safely() -> None:
     result.model_dump_json().encode("utf-8")
 
 
-async def test_model_result_uses_one_pipeline_run_id_and_final_event() -> None:
+async def test_model_result_keeps_editorial_and_deterministic_descriptions() -> None:
     sessions = [
         _session(1, status=SessionStatus.FAILED),
         _session(2, status=SessionStatus.COMPLETED),
     ]
     candidate = profile_sessions(sessions).candidates[0]
-    observer = RecordingObserver()
     result = await generate_insights(
         sessions,
         context=_context(),
         config=InsightGenerationConfig(model=ModelGenerationConfig(model="test-model")),
         generator=SuccessfulGenerator(),
-        observer=observer,
     )
 
     assert result.mode is GenerationMode.MODEL_BACKED
@@ -431,8 +402,6 @@ async def test_model_result_uses_one_pipeline_run_id_and_final_event() -> None:
     assert insight.description == "This pattern is worth a closer look."
     assert finding["card_description"] == insight.description
     assert finding["deterministic_description"] == candidate.fallback_description
-    _assert_pipeline_events(observer)
-    assert observer.events[-1].metadata["outcome"] == "model_backed"
 
 
 async def test_model_config_requires_a_model_implementation() -> None:

@@ -9,7 +9,9 @@ Generate evidence-backed insight cards from imported Kitaru sessions. This distr
 
 Both entrypoints accept a list of session UUIDs for one agent and import, fetch each session with its nodes through `KitaruAPIClient`, and return `list[InsightInput]` for the task runner to persist. Each fetched trace is processed and released before the next fetch. Select either analyzer or both for an import. Each invocation persists its own cards; matching candidate names do not replace another analyzer's results.
 
-The API client uses `KITARU_API_URL` and `KITARU_API_TOKEN`. Both analyzers accept `agent_name` for display context and `observe` for metadata-only Langfuse telemetry. The deterministic analyzer does not accept a `model` parameter or call OpenAI. The OpenAI analyzer requires an explicit `model` parameter and fails when its credential is missing. Telemetry uses the dedicated `KITARU_INSIGHTS_LANGFUSE_PUBLIC_KEY`, `KITARU_INSIGHTS_LANGFUSE_SECRET_KEY`, and `KITARU_INSIGHTS_LANGFUSE_BASE_URL` settings and is best effort.
+The API client uses `KITARU_API_URL` and `KITARU_API_TOKEN`. Both analyzers accept `agent_name` for display context. The deterministic analyzer does not accept a `model` parameter or call OpenAI. The OpenAI analyzer requires an explicit `model` parameter and fails when its credential is missing.
+
+Install `kitaru-post-import-insights` for deterministic analysis, or `kitaru-post-import-insights[openai]` for OpenAI generation. The default catalog selects the corresponding requirement for each analyzer. The package does not depend on Langfuse or send insight-generation telemetry to it.
 
 ## Release context
 

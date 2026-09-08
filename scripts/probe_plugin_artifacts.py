@@ -8,6 +8,9 @@ import importlib.metadata
 import uuid
 from typing import cast
 
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+
 from kitaru.server.api import bootstrap
 from kitaru.server.api.bootstrap import (
     DEFAULT_PLUGIN_DEFINITIONS,
@@ -81,11 +84,15 @@ class _MemoryPluginRepository:
 
 
 async def _probe(expected_requirements: set[str], import_modules: set[str]) -> None:
+    expected_packages: set[tuple[str, str]] = set()
     for requirement in expected_requirements:
-        distribution, separator, expected_version = requirement.partition("==")
-        if not separator:
+        parsed = Requirement(requirement)
+        specifiers = list(parsed.specifier)
+        if len(specifiers) != 1 or specifiers[0].operator != "==":
             raise RuntimeError(f"Bundled requirement is not exact: {requirement!r}")
-        installed_version = importlib.metadata.version(distribution)
+        expected_version = specifiers[0].version
+        expected_packages.add((canonicalize_name(parsed.name), str(parsed.specifier)))
+        installed_version = importlib.metadata.version(parsed.name)
         if installed_version != expected_version:
             raise RuntimeError(
                 f"Bundled requirement {requirement!r} installed as "
@@ -100,10 +107,18 @@ async def _probe(expected_requirements: set[str], import_modules: set[str]) -> N
     definitions = tuple(
         definition
         for definition in DEFAULT_PLUGIN_DEFINITIONS
-        if definition.requirement in expected_requirements
+        if (
+            canonicalize_name(Requirement(definition.requirement).name),
+            str(Requirement(definition.requirement).specifier),
+        )
+        in expected_packages
     )
-    actual_requirements = {definition.requirement for definition in definitions}
-    if actual_requirements != expected_requirements:
+    actual_requirements = {
+        (canonicalize_name(parsed.name), str(parsed.specifier))
+        for definition in definitions
+        for parsed in [Requirement(definition.requirement)]
+    }
+    if actual_requirements != expected_packages:
         raise RuntimeError(
             "Default requirements differ from installed artifacts: "
             f"expected={sorted(expected_requirements)!r}, "

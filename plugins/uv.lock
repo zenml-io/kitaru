@@ -42,7 +42,7 @@ dev = [
     { name = "kitaru-logfire-importer", extras = ["adapter"], editable = "packages/logfire-importer" },
     { name = "kitaru-openai-agents", editable = "packages/openai-agents" },
     { name = "kitaru-phoenix-importer", extras = ["adapter"], editable = "packages/phoenix-importer" },
-    { name = "kitaru-post-import-insights", editable = "packages/post-import-insights" },
+    { name = "kitaru-post-import-insights", extras = ["openai"], editable = "packages/post-import-insights" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], editable = "packages/pydantic-ai" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
@@ -1472,16 +1472,19 @@ version = "0.1.0"
 source = { editable = "packages/post-import-insights" }
 dependencies = [
     { name = "kitaru" },
-    { name = "langfuse" },
+]
+
+[package.optional-dependencies]
+openai = [
     { name = "openai" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "kitaru", editable = "../" },
-    { name = "langfuse", specifier = ">=4.14,<5" },
-    { name = "openai", specifier = ">=2.15,<4" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=2.15,<4" },
 ]
+provides-extras = ["openai"]
 
 [[package]]
 name = "kitaru-pydantic-ai"

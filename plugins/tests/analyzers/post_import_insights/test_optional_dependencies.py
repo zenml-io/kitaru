@@ -13,11 +13,9 @@ import sys
 import kitaru_post_import_insights
 import kitaru_post_import_insights.generation
 from kitaru_post_import_insights import (
-    GenerationObserver,
     InsightModelGenerator,
     ModelGenerationConfig,
 )
-assert GenerationObserver is not None
 assert InsightModelGenerator is not None
 assert ModelGenerationConfig is not None
 assert "openai" not in sys.modules

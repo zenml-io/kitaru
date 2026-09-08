@@ -880,12 +880,6 @@ def test_deterministic_plan_makes_no_model_call(
 
 
 async def test_two_calls_on_valid_path(profiling_result: ProfilingResult) -> None:
-    events = []
-
-    class Observer:
-        async def record(self, event) -> None:
-            events.append(event)
-
     first = profiling_result.candidates[0].id
     generator = FakeGenerator(
         AnalystPlan(
@@ -899,62 +893,10 @@ async def test_two_calls_on_valid_path(profiling_result: ProfilingResult) -> Non
         profiling_result,
         generator=generator,
         config=ModelGenerationConfig(model="test-model"),
-        observer=Observer(),
-        run_id="pipeline-run",
     )
     assert generator.calls == ["analyst", "editor"]
     assert result.mode == GenerationMode.MODEL_BACKED
     assert len(result.diagnostics.provider_receipts) == 2
-    assert [event.name for event in events] == ["analyst", "editor"]
-    assert {event.run_id for event in events} == {"pipeline-run"}
-
-
-async def test_observer_wait_does_not_consume_model_deadline(
-    profiling_result: ProfilingResult,
-) -> None:
-    class TimedGenerator(FakeGenerator):
-        async def analyze(self, *, projection, config, timeout_seconds):
-            await asyncio.sleep(0.04)
-            return await super().analyze(
-                projection=projection,
-                config=config,
-                timeout_seconds=timeout_seconds,
-            )
-
-        async def edit(self, *, projection, config, timeout_seconds):
-            await asyncio.sleep(0.04)
-            return await super().edit(
-                projection=projection,
-                config=config,
-                timeout_seconds=timeout_seconds,
-            )
-
-    class SlowObserver:
-        async def record(self, event) -> None:
-            await asyncio.sleep(0.08)
-
-    first = profiling_result.candidates[0].id
-    generator = TimedGenerator(
-        AnalystPlan(
-            selected_candidate_ids=[first],
-            recommended_candidate_id=first,
-            rationale="Useful.",
-        ),
-        _editor([first]),
-    )
-    result = await generate_model_plan(
-        profiling_result,
-        generator=generator,
-        config=ModelGenerationConfig(
-            model="test-model",
-            total_timeout_seconds=0.12,
-            analyst_timeout_seconds=0.1,
-            editor_timeout_seconds=0.1,
-        ),
-        observer=SlowObserver(),
-    )
-    assert generator.calls == ["analyst", "editor"]
-    assert result.mode == GenerationMode.MODEL_BACKED
 
 
 async def test_analyst_failure_skips_editor(profiling_result: ProfilingResult) -> None:
