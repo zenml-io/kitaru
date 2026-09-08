@@ -20,8 +20,11 @@ from kitaru_post_import_insights.generation import (
     ModelGenerationConfig,
     ModelStageResponse,
     apply_editorial_copy,
+    build_analyst_projection,
+    build_editorial_projection,
     generate_deterministic_plan,
     generate_model_plan,
+    validate_analyst_plan,
     validate_editorial_plan,
 )
 from kitaru_post_import_insights.models import (
@@ -1386,3 +1389,301 @@ def test_card_copy_may_quote_the_candidate_caveat(
     invented = _card(candidate, "No sessions failed in this group.")
     with pytest.raises(ValueError, match="negated outcome"):
         validate_editorial_plan(invented, selection, [candidate])
+
+
+@pytest.mark.parametrize("stage", ["analyst", "editor"])
+def test_model_projection_preserves_exact_count_with_bounded_references(
+    profiling_result: ProfilingResult, stage: str
+) -> None:
+    candidate = profiling_result.candidates[0]
+    session_ids = [uuid.uuid4(), uuid.uuid4()]
+    candidate = candidate.model_copy(
+        update={
+            "coverage": CandidateCoverage(
+                sessions_analyzed=10,
+                affected_sessions=10,
+                occurrences=10,
+                evidence_available=10,
+                evidence_retained=2,
+                contributing_sessions_available=10,
+                contributing_sessions_retained=2,
+            ),
+            "contributing_session_ids": session_ids,
+            "evidence": [
+                EvidenceLocator(session_id=session_id, signal="test")
+                for session_id in session_ids
+            ],
+        }
+    )
+    profile = profiling_result.model_copy(update={"candidates": [candidate]})
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    projection = (
+        build_analyst_projection(profile)
+        if stage == "analyst"
+        else build_editorial_projection(profile, selection)
+    )
+
+    projected = projection.candidates[0]
+    assert projected.contributing_session_count == 10
+    assert len(candidate.contributing_session_ids) == 2
+    assert projected.evidence_locators == candidate.evidence
+    assert len(projected.evidence_locators) == 2
+
+
+def test_analyst_plan_requires_known_unique_ids(
+    profiling_result: ProfilingResult,
+) -> None:
+    known = profiling_result.candidates
+    first = known[0].id
+    valid = AnalystPlan(
+        selected_candidate_ids=[first],
+        recommended_candidate_id=first,
+        rationale="Strong and actionable.",
+    )
+    assert validate_analyst_plan(valid, known) == valid
+
+    with pytest.raises(ValueError, match="unknown"):
+        validate_analyst_plan(
+            valid.model_copy(update={"selected_candidate_ids": ["unknown"]}), known
+        )
+    with pytest.raises(ValueError, match="unique"):
+        validate_analyst_plan(
+            valid.model_copy(update={"selected_candidate_ids": [first, first]}), known
+        )
+    with pytest.raises(ValueError, match="recommendation"):
+        validate_analyst_plan(
+            valid.model_copy(update={"recommended_candidate_id": "unknown"}), known
+        )
+
+
+async def test_analyst_selection_keeps_recommendation_and_diversifies_families(
+    profiling_result: ProfilingResult,
+) -> None:
+    first, second = profiling_result.candidates
+    duplicate = first.model_copy(
+        update={"id": "candidate-duplicate", "family": first.family, "rank": 1}
+    )
+    unused = second.model_copy(
+        update={"id": "candidate-unused", "family": "family-unused", "rank": 3}
+    )
+    profiling = profiling_result.model_copy(
+        update={"candidates": [first, duplicate, second, unused]}
+    )
+    analyst = AnalystPlan(
+        selected_candidate_ids=[first.id, duplicate.id, second.id],
+        recommended_candidate_id=duplicate.id,
+        rationale="Useful.",
+    )
+    expected_ids = [duplicate.id, second.id, unused.id]
+
+    result = await generate_model_plan(
+        profiling,
+        generator=FakeGenerator(analyst, _editor(expected_ids)),
+        config=ModelGenerationConfig(model="test-model"),
+    )
+
+    assert result.selection.selected_candidate_ids == expected_ids
+    assert result.selection.recommended_candidate_id == duplicate.id
+    candidates = {candidate.id: candidate for candidate in profiling.candidates}
+    assert len(
+        {
+            candidates[candidate_id].family
+            for candidate_id in result.selection.selected_candidate_ids
+        }
+    ) == len(result.selection.selected_candidate_ids)
+
+
+def test_editor_preserves_selection_and_allows_known_digit_label(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "title": "gpt-5.4 appears in the model mix",
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="gpt-5.4", value=1)]
+            ),
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Model mix",
+                    description="gpt-5.4 appears often enough to inspect.",
+                )
+            ]
+        }
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+
+    novel = copy.model_copy(
+        update={
+            "insights": [
+                copy.insights[0].model_copy(
+                    update={"description": "This affects 42% of sessions."}
+                )
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="numeric"):
+        validate_editorial_plan(novel, selection, [candidate])
+
+    with pytest.raises(ValueError, match="membership and order"):
+        validate_editorial_plan(
+            _editor(["unknown"]),
+            selection,
+            [candidate],
+        )
+
+
+def test_editor_validates_numbers_against_each_card_only(
+    profiling_result: ProfilingResult,
+) -> None:
+    first, second = profiling_result.candidates
+    first = first.model_copy(
+        update={
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="gpt-5.4", value=1)]
+            )
+        }
+    )
+    second = second.model_copy(
+        update={
+            "data": CategoricalInsightData(
+                values=[CategoryValue(label="claude-3.7", value=1)]
+            )
+        }
+    )
+    selection = AnalystPlan(
+        selected_candidate_ids=[first.id, second.id],
+        recommended_candidate_id=first.id,
+        rationale="Useful.",
+    )
+    copy = _editor(selection.selected_candidate_ids).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=first.id,
+                    eyebrow="Model mix",
+                    description="claude-3.7 appears in this pattern.",
+                ),
+                EditorialCardCopy(
+                    id=second.id,
+                    eyebrow="Model mix",
+                    description="This pattern is worth a closer look.",
+                ),
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="numeric"):
+        validate_editorial_plan(copy, selection, [first, second])
+
+
+@pytest.mark.parametrize(
+    ("description", "message"),
+    [
+        ("It takes 17 ms to respond.", "numeric"),
+        ("These sessions timed out.", "outcome"),
+        ("The agent resolved these requests.", "outcome"),
+        ("The agent fixed the issue.", "outcome"),
+        ("Read https://example.com for details.", "link"),
+        ("Read docs.example.com/guide for details.", "link"),
+        ("Read docs.example.com for details.", "link"),
+        ("Read docs.example.email for details.", "link"),
+        ("Read example.ai for details.", "link"),
+        ("Read example.ai/guide for details.", "link"),
+        ("Read DOCS.EXAMPLE.COM/guide for details.", "link"),
+        ("# Tool behavior", "markup"),
+        ("---", "markup"),
+        ("***", "markup"),
+        ("_ _ _", "markup"),
+        ("Tool behavior\n---", "markup"),
+        ("Tool behavior\n===", "markup"),
+        ("~~~\ninspect\n~~~", "markup"),
+        ("Inspect this\x00pattern.", "control"),
+        ("This causes retries.", "unsupported claim"),
+        ("This is causing retries.", "unsupported claim"),
+        ("This results in retries.", "unsupported claim"),
+        ("This resulted in retries.", "unsupported claim"),
+        ("This is resulting in retries.", "unsupported claim"),
+        ("This leads to retries.", "unsupported claim"),
+        ("This led to retries.", "unsupported claim"),
+        ("This is leading to retries.", "unsupported claim"),
+        ("This pattern drives retries.", "unsupported claim"),
+        ("This pattern drove retries.", "unsupported claim"),
+        ("This pattern may drive retries.", "unsupported claim"),
+        ("This pattern is driving retries.", "unsupported claim"),
+        ("Retries are driven by this pattern.", "unsupported claim"),
+        ("This pattern has driven retries.", "unsupported claim"),
+        ("This pattern stems from retries.", "unsupported claim"),
+        ("This pattern stemmed from retries.", "unsupported claim"),
+        ("This pattern produces retries.", "unsupported claim"),
+        ("This pattern may produce retries.", "unsupported claim"),
+        ("This pattern produced retries.", "unsupported claim"),
+        ("This pattern creates retries.", "unsupported claim"),
+        ("This pattern may create retries.", "unsupported claim"),
+        ("This pattern created retries.", "unsupported claim"),
+        ("This pattern triggers retries.", "unsupported claim"),
+        ("This pattern may trigger retries.", "unsupported claim"),
+        ("This pattern triggered retries.", "unsupported claim"),
+        ("This pattern is responsible for retries.", "unsupported claim"),
+        ("Retries are attributable to this pattern.", "unsupported claim"),
+        ("This pattern accounts for retries.", "unsupported claim"),
+        ("This pattern may account for retries.", "unsupported claim"),
+        ("This pattern accounted for retries.", "unsupported claim"),
+        ("This pattern is accounting for retries.", "unsupported claim"),
+        ("This pattern contributes to retries.", "unsupported claim"),
+        ("This pattern gives rise to retries.", "unsupported claim"),
+        ("This pattern is giving rise to retries.", "unsupported claim"),
+        ("This pattern has given rise to retries.", "unsupported claim"),
+        ("This pattern brought about retries.", "unsupported claim"),
+        ("This pattern is bringing about retries.", "unsupported claim"),
+        ("Retries arise from this pattern.", "unsupported claim"),
+        ("Retries are arising from this pattern.", "unsupported claim"),
+        ("Retries originated from this pattern.", "unsupported claim"),
+        ("This pattern explains retries.", "unsupported claim"),
+        ("This pattern determines retries.", "unsupported claim"),
+        ("This pattern improved quality.", "unsupported claim"),
+        ("This pattern improves quality.", "unsupported claim"),
+        ("This pattern is improving quality.", "unsupported claim"),
+        ("Quality improvements appeared.", "unsupported claim"),
+        ("It outperformed the alternative.", "unsupported claim"),
+        ("It outperforms the alternative.", "unsupported claim"),
+        ("It is outperforming the alternative.", "unsupported claim"),
+        ("These paths outperform the alternative.", "unsupported claim"),
+    ],
+)
+def test_editor_rejects_fabricated_or_unsafe_card_copy(
+    profiling_result: ProfilingResult,
+    description: str,
+    message: str,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    selection = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Useful.",
+    )
+    copy = _editor([candidate.id]).model_copy(
+        update={
+            "insights": [
+                EditorialCardCopy(
+                    id=candidate.id,
+                    eyebrow="Tool behavior",
+                    description=description,
+                )
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match=message):
+        validate_editorial_plan(copy, selection, [candidate])
