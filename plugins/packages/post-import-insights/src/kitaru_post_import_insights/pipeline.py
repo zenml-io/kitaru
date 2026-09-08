@@ -45,11 +45,6 @@ from kitaru_post_import_insights.models import (
     PageIntro,
     PageRecommendation,
 )
-from kitaru_post_import_insights.observability import (
-    GenerationEvent,
-    GenerationObserver,
-    observe_safely,
-)
 from kitaru_post_import_insights.profiling import (
     ANALYSIS_VERSION,
     CandidateFinding,
@@ -508,45 +503,18 @@ def validate_session(
         node_indexes.add(node.index)
 
 
-async def _finalize_result(
+def _finalize_result(
     result: InsightGenerationResult,
     *,
     profiling: ProfilingResult,
     maximum: int,
-    observer: GenerationObserver | None,
-    run_id: str,
 ) -> InsightGenerationResult:
-    """Apply the final byte bound and emit exactly one validation event."""
+    """Apply the final byte bound to generated insight cards."""
     bounded = _get_oversize_result(result, maximum, profiling) or result
     result_bytes = len(bounded.model_dump_json().encode("utf-8"))
     if result_bytes > maximum:
-        await observe_safely(
-            observer,
-            GenerationEvent(
-                name="validation",
-                run_id=run_id,
-                metadata={
-                    "outcome": "failed",
-                    "result_bytes": result_bytes,
-                    "maximum_result_bytes": maximum,
-                },
-            ),
-        )
         raise InsightResultSizeError(available=result_bytes, maximum=maximum)
 
-    await observe_safely(
-        observer,
-        GenerationEvent(
-            name="validation",
-            run_id=run_id,
-            metadata={
-                "outcome": "empty" if not bounded.insights else bounded.mode.value,
-                "mode": bounded.mode.value,
-                "insight_count": len(bounded.insights),
-                "result_bytes": result_bytes,
-            },
-        ),
-    )
     return bounded
 
 
@@ -556,7 +524,6 @@ async def generate_insights(
     context: InsightGenerationContext,
     config: InsightGenerationConfig | None = None,
     generator: InsightModelGenerator | None = None,
-    observer: GenerationObserver | None = None,
     source_session_count: int | None = None,
 ) -> InsightGenerationResult:
     """Generate frontend-ready Insights from caller-scoped normalized sessions."""
@@ -572,7 +539,6 @@ async def generate_insights(
         context=context,
         config=selected_config,
         generator=generator,
-        observer=observer,
     )
 
 
@@ -582,25 +548,11 @@ async def generate_insights_from_profile(
     context: InsightGenerationContext,
     config: InsightGenerationConfig | None = None,
     generator: InsightModelGenerator | None = None,
-    observer: GenerationObserver | None = None,
 ) -> InsightGenerationResult:
     """Generate bounded cards from a completed, caller-validated session profile."""
     selected_config = config or InsightGenerationConfig()
-    run_id = str(uuid.uuid4())
-    await observe_safely(
-        observer,
-        GenerationEvent(
-            name="profiling",
-            run_id=run_id,
-            metadata={
-                "candidate_count": len(profiling.candidates),
-                "content_hash": profiling.content_hash,
-                "sessions_analyzed": profiling.coverage.sessions_analyzed,
-            },
-        ),
-    )
     if not profiling.candidates:
-        return await _finalize_result(
+        return _finalize_result(
             _build_empty_result(
                 context=context,
                 coverage=profiling.coverage,
@@ -609,8 +561,6 @@ async def generate_insights_from_profile(
             ),
             profiling=profiling,
             maximum=selected_config.max_result_bytes,
-            observer=observer,
-            run_id=run_id,
         )
 
     if selected_config.model is None:
@@ -622,8 +572,6 @@ async def generate_insights_from_profile(
             profiling,
             generator=generator,
             config=selected_config.model,
-            observer=observer,
-            run_id=run_id,
         )
 
     try:
@@ -650,7 +598,7 @@ async def generate_insights_from_profile(
                 ),
             }
         )
-        return await _finalize_result(
+        return _finalize_result(
             _build_empty_result(
                 context=context,
                 coverage=coverage,
@@ -660,15 +608,11 @@ async def generate_insights_from_profile(
             ),
             profiling=profiling,
             maximum=selected_config.max_result_bytes,
-            observer=observer,
-            run_id=run_id,
         )
-    return await _finalize_result(
+    return _finalize_result(
         result,
         profiling=profiling,
         maximum=selected_config.max_result_bytes,
-        observer=observer,
-        run_id=run_id,
     )
 
 

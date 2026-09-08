@@ -82,6 +82,29 @@ def test_missing_credential_fails_closed(monkeypatch) -> None:
         OpenAIInsightGenerator()
 
 
+@pytest.mark.parametrize("missing_module", ["openai", "openai_dependency"])
+def test_missing_dependency_reports_install_extra_only_for_openai(
+    monkeypatch: pytest.MonkeyPatch, missing_module: str
+) -> None:
+    error = ModuleNotFoundError("missing module", name=missing_module)
+
+    def fail_import(name: str) -> None:
+        raise error
+
+    monkeypatch.setattr(
+        "kitaru_post_import_insights.openai_generator.importlib.import_module",
+        fail_import,
+    )
+    with pytest.raises(ModuleNotFoundError) as caught:
+        OpenAIInsightGenerator(api_key="test-secret")
+
+    assert caught.value.name == missing_module
+    if missing_module == "openai":
+        assert "kitaru-post-import-insights[openai]" in str(caught.value)
+    else:
+        assert caught.value is error
+
+
 @pytest.mark.parametrize("has_usage", [False, True])
 async def test_openai_request_is_bounded_and_not_stored(monkeypatch, has_usage) -> None:
     plan = AnalystPlan(

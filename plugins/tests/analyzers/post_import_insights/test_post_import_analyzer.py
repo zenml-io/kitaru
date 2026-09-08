@@ -396,61 +396,6 @@ async def test_analyzer_returns_no_cards_when_no_pattern_is_eligible(
     assert await analyze_post_import_sessions(client.add([_view(2)])) == []
 
 
-async def test_analyzer_forwards_enabled_observer(
-    client: StubClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Pass the initialized observer to insight generation."""
-    sentinel_observer = object()
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(
-        analyzer_module, "LangfuseGenerationObserver", lambda: sentinel_observer
-    )
-
-    async def fake_generate_insights(profiling: Any, **kwargs: Any) -> SimpleNamespace:
-        captured.update(kwargs)
-        return SimpleNamespace(insights=[])
-
-    monkeypatch.setattr(
-        analyzer_module, "generate_insights_from_profile", fake_generate_insights
-    )
-
-    assert (
-        await analyze_post_import_sessions(client.add([_view(1)]), observe=True) == []
-    )
-    assert captured["observer"] is sentinel_observer
-
-
-async def test_analyzer_generates_when_observer_initialization_fails(
-    client: StubClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Continue generation without telemetry when its setup fails."""
-    captured: dict[str, Any] = {}
-    initialization_attempts = 0
-
-    def failing_observer() -> None:
-        nonlocal initialization_attempts
-        initialization_attempts += 1
-        raise RuntimeError("telemetry is unavailable")
-
-    monkeypatch.setattr(analyzer_module, "LangfuseGenerationObserver", failing_observer)
-
-    async def fake_generate_insights(profiling: Any, **kwargs: Any) -> SimpleNamespace:
-        captured.update(kwargs)
-        return SimpleNamespace(insights=[])
-
-    monkeypatch.setattr(
-        analyzer_module, "generate_insights_from_profile", fake_generate_insights
-    )
-
-    assert (
-        await analyze_post_import_sessions(client.add([_view(1)]), observe=True) == []
-    )
-    assert initialization_attempts == 1
-    assert captured["observer"] is None
-
-
 async def test_analyzer_rejects_caller_controlled_source_session_count(
     client: StubClient,
 ) -> None:
@@ -496,10 +441,7 @@ async def test_empty_ids_return_without_client_or_model_initialization(
         unexpected_model,
     )
     monkeypatch.setattr(analyzer_module, "KitaruAPIClient", unexpected_model)
-    assert (
-        await analyze_openai_post_import_sessions([], model="gpt-test", observe=True)
-        == []
-    )
+    assert await analyze_openai_post_import_sessions([], model="gpt-test") == []
 
 
 @pytest.mark.parametrize(

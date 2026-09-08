@@ -24,10 +24,6 @@ from kitaru_post_import_insights.models import (
     InsightGenerationContext,
     SourceImportContext,
 )
-from kitaru_post_import_insights.observability import (
-    GenerationObserver,
-    LangfuseGenerationObserver,
-)
 from kitaru_post_import_insights.pipeline import (
     InsightGenerationConfig,
     generate_insights_from_profile,
@@ -64,35 +60,21 @@ def _get_provider(provider: str | None) -> str | None:
     return provider
 
 
-def _get_observer(enabled: bool) -> GenerationObserver | None:
-    """Build best-effort telemetry from insight-specific configuration."""
-    if not enabled:
-        return None
-    try:
-        return LangfuseGenerationObserver()
-    except Exception:
-        return None
-
-
 async def analyze_post_import_sessions(
     session_ids: list[UUID],
     *,
     agent_name: str | None = None,
-    observe: bool = False,
 ) -> list[InsightInput]:
     """Generate deterministic insight cards without provider credentials.
 
     Args:
         session_ids: IDs of imported sessions for one agent and import.
         agent_name: Optional display name included in copied prompt context.
-        observe: Whether to emit metadata-only events to a dedicated Langfuse project.
 
     Returns:
         Insight inputs ready for the analyzer task to persist.
     """
-    return await _analyze_sessions(
-        session_ids, agent_name=agent_name, observe=observe, model=None
-    )
+    return await _analyze_sessions(session_ids, agent_name=agent_name, model=None)
 
 
 async def analyze_openai_post_import_sessions(
@@ -100,7 +82,6 @@ async def analyze_openai_post_import_sessions(
     *,
     model: str,
     agent_name: str | None = None,
-    observe: bool = False,
 ) -> list[InsightInput]:
     """Generate insight cards selected and edited by OpenAI.
 
@@ -108,7 +89,6 @@ async def analyze_openai_post_import_sessions(
         session_ids: IDs of imported sessions for one agent and import.
         model: OpenAI model for the bounded analyst and editor calls.
         agent_name: Optional display name included in copied prompt context.
-        observe: Whether to emit metadata-only events to a dedicated Langfuse project.
 
     Returns:
         Insight inputs ready for the analyzer task to persist.
@@ -119,7 +99,6 @@ async def analyze_openai_post_import_sessions(
     return await _analyze_sessions(
         session_ids,
         agent_name=agent_name,
-        observe=observe,
         model=ModelGenerationConfig(model=model),
     )
 
@@ -128,7 +107,6 @@ async def _analyze_sessions(
     session_ids: list[UUID],
     *,
     agent_name: str | None,
-    observe: bool,
     model: ModelGenerationConfig | None,
 ) -> list[InsightInput]:
     """Profile normalized sessions and generate cards using the selected analyzer."""
@@ -168,7 +146,6 @@ async def _analyze_sessions(
         context=context,
         config=InsightGenerationConfig(model=model),
         generator=generator,
-        observer=_get_observer(observe),
     )
     return result.insights
 

@@ -24,9 +24,10 @@ classifiers = [
 keywords = ["ai-agents", "insights", "kitaru", "llm", "analysis"]
 dependencies = [
     "kitaru==0.25.0+dev",
-    "openai>=2.15,<4",
-    "langfuse>=4.14,<5",
 ]
+
+[project.optional-dependencies]
+openai = ["openai>=2.15,<4"]
 
 [project.urls]
 Homepage = "https://kitaru.ai"

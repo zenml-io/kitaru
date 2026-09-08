@@ -93,7 +93,7 @@ def test_openai_post_import_analyzer_has_separate_entrypoint_and_credentials() -
     assert definition.entrypoint == (
         "kitaru_post_import_insights.analyzer:analyze_openai_post_import_sessions"
     )
-    assert definition.requirement == "kitaru-post-import-insights==0.1.0"
+    assert definition.requirement == "kitaru-post-import-insights[openai]==0.1.0"
     assert definition.display_version == "0.1.0"
     assert definition.provider == "openai"
     assert definition.connection_schema is not None

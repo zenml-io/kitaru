@@ -28,7 +28,7 @@ dev = [
     "kitaru-logfire-importer[adapter]",
     "kitaru-openai-agents",
     "kitaru-phoenix-importer[adapter]",
-    "kitaru-post-import-insights",
+    "kitaru-post-import-insights[openai]",
     "kitaru-pydantic-ai[openai]",
     "pytest>=8.0",
     "pytest-asyncio>=1.4.0",

@@ -6,7 +6,6 @@
 import asyncio
 import re
 import time
-import uuid
 from typing import Generic, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,11 +17,6 @@ from kitaru_post_import_insights.models import (
     GenerationDiagnostics,
     GenerationMode,
     ProviderReceipt,
-)
-from kitaru_post_import_insights.observability import (
-    GenerationEvent,
-    GenerationObserver,
-    observe_safely,
 )
 from kitaru_post_import_insights.profiling import (
     CandidateFinding,
@@ -699,13 +693,10 @@ async def generate_model_plan(
     *,
     generator: InsightModelGenerator,
     config: ModelGenerationConfig,
-    observer: GenerationObserver | None = None,
-    run_id: str | None = None,
 ) -> ModelGenerationPlan:
     """Run at most one analyst and one editor request under one deadline."""
     if not profiling.candidates:
         raise ValueError("model generation requires at least one candidate")
-    effective_run_id = run_id or str(uuid.uuid4())
     loop = asyncio.get_running_loop()
     deadline = loop.time() + config.total_timeout_seconds
     receipts: list[ProviderReceipt] = []
@@ -735,20 +726,6 @@ async def generate_model_plan(
             profiling.candidates,
         )
         receipts.append(analyst_response.receipt)
-        observation_started = loop.time()
-        await observe_safely(
-            observer,
-            GenerationEvent(
-                name="analyst",
-                run_id=effective_run_id,
-                stage="analyst",
-                metadata={
-                    "outcome": "succeeded",
-                    "selected_count": len(selection.selected_candidate_ids),
-                },
-            ),
-        )
-        deadline += loop.time() - observation_started
     except TimeoutError:
         receipts.append(
             ProviderReceipt(
@@ -756,15 +733,6 @@ async def generate_model_plan(
                 latency_ms=int((time.monotonic() - analyst_started) * 1000),
                 outcome="timed_out",
             )
-        )
-        await observe_safely(
-            observer,
-            GenerationEvent(
-                name="analyst",
-                run_id=effective_run_id,
-                stage="analyst",
-                metadata={"outcome": "timed_out"},
-            ),
         )
         return _build_fallback(
             profiling,
@@ -779,15 +747,6 @@ async def generate_model_plan(
                 latency_ms=int((time.monotonic() - analyst_started) * 1000),
                 outcome="failed",
             )
-        )
-        await observe_safely(
-            observer,
-            GenerationEvent(
-                name="analyst",
-                run_id=effective_run_id,
-                stage="analyst",
-                metadata={"outcome": "failed"},
-            ),
         )
         return _build_fallback(
             profiling,
@@ -825,15 +784,6 @@ async def generate_model_plan(
                 outcome="timed_out",
             )
         )
-        await observe_safely(
-            observer,
-            GenerationEvent(
-                name="editor",
-                run_id=effective_run_id,
-                stage="editor",
-                metadata={"outcome": "timed_out"},
-            ),
-        )
         return _build_fallback(
             profiling,
             selection=selection,
@@ -848,15 +798,6 @@ async def generate_model_plan(
                 outcome="failed",
             )
         )
-        await observe_safely(
-            observer,
-            GenerationEvent(
-                name="editor",
-                run_id=effective_run_id,
-                stage="editor",
-                metadata={"outcome": "failed"},
-            ),
-        )
         return _build_fallback(
             profiling,
             selection=selection,
@@ -870,33 +811,12 @@ async def generate_model_plan(
             editor_response.value, selection, profiling.candidates
         )
     except ValueError:
-        await observe_safely(
-            observer,
-            GenerationEvent(
-                name="editor",
-                run_id=effective_run_id,
-                stage="editor",
-                metadata={"outcome": "validation_failed"},
-            ),
-        )
         return _build_fallback(
             profiling,
             selection=selection,
             receipts=receipts,
             reason="editor_validation_failed",
         )
-    await observe_safely(
-        observer,
-        GenerationEvent(
-            name="editor",
-            run_id=effective_run_id,
-            stage="editor",
-            metadata={
-                "outcome": "succeeded",
-                "copy_count": len(editorial.insights),
-            },
-        ),
-    )
     return ModelGenerationPlan(
         selection=selection,
         editorial=editorial,
