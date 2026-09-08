@@ -339,7 +339,7 @@ async def test_editor_failure_preserves_analyst_selection() -> None:
     assert result.mode is GenerationMode.DETERMINISTIC_FALLBACK
     assert len(result.insights) == 1
     assert result.insights[0].name == generator.selected
-    assert result.diagnostics.fallback_reason == "editor_failed"
+    assert result.diagnostics.fallback_reason == "editor_failed: RuntimeError"
     assert "provider detail" not in result.model_dump_json()
 
 
@@ -362,7 +362,8 @@ async def test_analyst_failure_uses_stable_deterministic_selection() -> None:
     assert [item.name for item in result.insights] == [
         item.name for item in deterministic.insights
     ]
-    assert result.diagnostics.fallback_reason == "analyst_failed"
+    assert result.diagnostics.fallback_reason is not None
+    assert result.diagnostics.fallback_reason.startswith("analyst_failed: ")
     assert generator.editor_called is False
 
 
@@ -378,7 +379,8 @@ async def test_malformed_custom_provider_receipt_falls_back_safely() -> None:
     )
 
     assert result.mode is GenerationMode.DETERMINISTIC_FALLBACK
-    assert result.diagnostics.fallback_reason == "analyst_failed"
+    assert result.diagnostics.fallback_reason is not None
+    assert result.diagnostics.fallback_reason.startswith("analyst_failed: ")
     assert result.diagnostics.provider_receipts[0].request_id is None
     result.model_dump_json().encode("utf-8")
 

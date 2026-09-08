@@ -955,7 +955,7 @@ async def test_invalid_analyst_output_skips_editor(
         config=ModelGenerationConfig(model="test-model"),
     )
     assert generator.calls == ["analyst"]
-    assert result.diagnostics.fallback_reason == "analyst_failed"
+    assert result.diagnostics.fallback_reason == "analyst_failed: ValueError"
 
 
 async def test_editor_failure_preserves_analyst_selection(
@@ -1176,6 +1176,7 @@ def _card(candidate: CandidateFinding, description: str) -> EditorialPlan:
         "This affects 14.29% of the analyzed sessions.",
         "This affects 14.3% of the analyzed sessions.",
         "This affects 14% of the analyzed sessions.",
+        "The matching group has a 14.29 share of the analyzed sessions.",
         "It takes 0.5 seconds on average.",
         "Every session in this group repeats the same call.",
         "Several sessions retry twice.",
@@ -1769,3 +1770,100 @@ def test_card_copy_binds_numbers_to_the_outcome_label_that_follows(
         validate_editorial_plan(
             _card(candidate, "Zero sessions failed."), selection, [candidate]
         )
+
+
+def test_card_copy_binds_numbers_only_to_adjacent_chart_labels(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "data": CategoricalInsightData(
+                unit="occurrences",
+                values=[
+                    CategoryValue(label="prepareRunner", value=39),
+                    CategoryValue(label="runCommand", value=16),
+                ],
+            ),
+        }
+    )
+    selection = _single_selection(candidate)
+    for description in (
+        "The chart shows prepareRunner at 39 and runCommand at 16.",
+        "The chart shows 39 for prepareRunner and 16 for runCommand.",
+        "The chart shows prepareRunner (39) and runCommand (16).",
+        "The chart covers runCommand, with 39 occurrences overall.",
+    ):
+        copy = _card(candidate, description)
+        assert validate_editorial_plan(copy, selection, [candidate]) == copy
+    for description in (
+        "The chart shows prepareRunner at 16 and runCommand at 39.",
+        "The chart shows 16 for prepareRunner.",
+    ):
+        with pytest.raises(ValueError, match="numeric claim absent"):
+            validate_editorial_plan(_card(candidate, description), selection, [candidate])
+
+
+def test_card_copy_allows_share_wording_with_accounts_for(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "data": CategoricalInsightData(
+                unit="occurrences",
+                values=[
+                    CategoryValue(label="prepareRunner", value=39),
+                    CategoryValue(label="runCommand", value=16),
+                ],
+            ),
+        }
+    )
+    selection = _single_selection(candidate)
+    for description in (
+        "prepareRunner accounts for 39 of the occurrences.",
+        "prepareRunner accounts for the larger share.",
+        "prepareRunner accounts for most of the chart.",
+    ):
+        copy = _card(candidate, description)
+        assert validate_editorial_plan(copy, selection, [candidate]) == copy
+    with pytest.raises(ValueError, match="unsupported claim"):
+        validate_editorial_plan(
+            _card(candidate, "prepareRunner accounts for the repeated failures."),
+            selection,
+            [candidate],
+        )
+
+
+def test_card_copy_may_paraphrase_the_start_of_a_negated_caveat(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "caveat": (
+                "A recorded failure may be recovered later and is not the same "
+                "as a failed session."
+            )
+        }
+    )
+    selection = _single_selection(candidate)
+    copy = _card(
+        candidate,
+        "Check the matching sessions first, keeping in mind a recorded failure "
+        "can be recovered later and is not the same as a failed session.",
+    )
+    assert validate_editorial_plan(copy, selection, [candidate]) == copy
+    with pytest.raises(ValueError, match="negated outcome"):
+        validate_editorial_plan(
+            _card(candidate, "These sessions did not fail."), selection, [candidate]
+        )
+
+
+def test_analyst_rationale_wording_is_not_validated(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0]
+    plan = AnalystPlan(
+        selected_candidate_ids=[candidate.id],
+        recommended_candidate_id=candidate.id,
+        rationale="Picked `tool-error-mix` because **it** is broad; see docs.example.com.",
+    )
+    assert validate_analyst_plan(plan, profiling_result.candidates) == plan

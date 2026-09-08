@@ -36,7 +36,7 @@ _NUMBER = re.compile(_NUMBER_PATTERN)
 _NUMERIC_TOKEN = re.compile(rf"(?<![\w.]){_NUMBER_PATTERN}(?:%|[A-Za-z]+)?")
 _UNIT_WORD = re.compile(r"\s*(%|[A-Za-z]+)")
 _CURRENCY_PREFIX = re.compile(r"[$€£]\s*$")
-_PERCENT_UNITS = {"%", "percent", "percentage", "pct"}
+_PERCENT_UNITS = {"%", "percent", "percentage", "pct", "share"}
 # Written units that name something the profiler never measures.
 _NON_COUNT_UNITS = {
     "x",
@@ -134,7 +134,10 @@ _UNSUPPORTED_CLAIM = re.compile(
     r"(?:stems?|stemmed|stemming)\s+from|"
     r"produc(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|"
     r"trigger(?:s|ed|ing)?|responsible\s+for|attributable\s+to|"
-    r"(?:account|accounts|accounted|accounting)\s+for|"
+    r"(?:account|accounts|accounted|accounting)\s+for\s+"
+    r"(?!(?:(?:the|about|around|roughly|nearly|almost|over|under)\s+)*"
+    r"(?:\d|most\b|half\b|larger|largest|smaller|smallest|bulk\b|"
+    r"majority\b|rest\b|remaining|remainder))|"
     r"(?:contributes?|contributed|contributing)\s+to|"
     r"(?:give|gives|gave|given|giving)\s+rise\s+to|"
     r"(?:bring|brings|brought|bringing)\s+about|"
@@ -242,6 +245,19 @@ _COUNT_NOUNS = {
     "turn",
     "turns",
 }
+
+
+# A chart label directly before or after a number, with at most one short
+# connector word between them and no punctuation other than a colon, an
+# equals sign, or a parenthesis.
+_PRECEDING_LABEL = re.compile(
+    r"(?<![\w./:-])([A-Za-z_][\w./:-]*)"
+    r"(?:\s+(?:at|with|of|is|was|has|had|shows))?[\s:(=]*$"
+)
+_FOLLOWING_LABEL = re.compile(
+    r"^[\s):,]*(?:(?P<connector>for|in|on|of|from|at|by|per|to)\s+)?"
+    r"(?P<label>[A-Za-z_][\w./:-]*)"
+)
 
 
 class _GenerationModel(BaseModel):
@@ -422,7 +438,11 @@ def build_analyst_projection(profiling: ProfilingResult) -> AnalystProjection:
 def validate_analyst_plan(
     plan: AnalystPlan, candidates: list[CandidateFinding]
 ) -> AnalystPlan:
-    """Require one to six distinct known IDs and an in-selection recommendation."""
+    """Require one to six distinct known IDs and an in-selection recommendation.
+
+    The rationale is neither persisted nor rendered, so its wording is not
+    checked; rejecting it would fail the whole run over text nobody sees.
+    """
     selected = plan.selected_candidate_ids
     if len(selected) != len(set(selected)):
         raise ValueError("analyst candidate IDs must be unique")
@@ -431,10 +451,6 @@ def validate_analyst_plan(
         raise ValueError("analyst selected an unknown candidate ID")
     if plan.recommended_candidate_id not in selected:
         raise ValueError("analyst recommendation must be in the selection")
-    if _CONTROL.search(plan.rationale) or _LINK.search(plan.rationale):
-        raise ValueError("analyst rationale contains unsafe content")
-    if _MARKUP.search(plan.rationale):
-        raise ValueError("analyst rationale contains markup")
     return plan
 
 
@@ -592,6 +608,7 @@ def _get_supported_outcome_categories(candidate: CandidateFinding) -> set[str]:
         candidate.eyebrow,
         candidate.title,
         candidate.fallback_description,
+        candidate.caveat or "",
     ):
         categories.update(_get_outcome_categories(value))
     return categories
@@ -736,20 +753,41 @@ def _get_label_values(candidate: CandidateFinding) -> dict[str, float]:
     return values
 
 
-def _get_bound_label_value(
-    following: str, label_values: dict[str, float]
+def _lookup_label_value(
+    word: str, label_values: dict[str, float], *, outcomes: bool
 ) -> float | None:
-    """Return the value a number must equal when a chart label follows it."""
-    words = re.findall(r"[A-Za-z_][\w-]*", following[:80])[:2]
-    for word in words:
-        lowered = word.lower()
-        for key in (lowered, lowered.rstrip("s")):
-            if key in label_values:
-                return label_values[key]
+    lowered = word.lower().strip("./:-")
+    for key in (lowered, lowered.rstrip("s")):
+        if key in label_values:
+            return label_values[key]
+    if outcomes:
         for outcome in _get_outcome_categories(word):
             if outcome in label_values:
                 return label_values[outcome]
     return None
+
+
+def _get_bound_label_value(
+    *, preceding: str, following: str, label_values: dict[str, float]
+) -> float | None:
+    """Return the value a number must equal when a chart label is adjacent to it.
+
+    "runner at 39" and "39 for runner" bind 39 to the runner's value. A label
+    further away, as in "39 and runner at 16" or "runner, with 14 sessions",
+    does not bind, because the number belongs to whatever label sits next to
+    it, not to the nearest label mentioned.
+    """
+    before = _PRECEDING_LABEL.search(preceding)
+    if before is not None:
+        bound = _lookup_label_value(before.group(1), label_values, outcomes=False)
+        if bound is not None:
+            return bound
+    after = _FOLLOWING_LABEL.match(following)
+    if after is None:
+        return None
+    return _lookup_label_value(
+        after.group("label"), label_values, outcomes=after.group("connector") is None
+    )
 
 
 def _is_grounded_number(
@@ -790,7 +828,12 @@ def _is_grounded_number(
         return False
     if (
         not attached
-        and (bound := _get_bound_label_value(following, label_values)) is not None
+        and (
+            bound := _get_bound_label_value(
+                preceding=preceding, following=following, label_values=label_values
+            )
+        )
+        is not None
     ):
         return _matches_grounded(value, decimals, {bound})
     if unit in _PERCENT_UNITS:
@@ -833,7 +876,7 @@ def _remove_candidate_phrases(value: str, candidate: CandidateFinding) -> str:
         clause.strip().lower()
         for text in (candidate.title, candidate.fallback_description, candidate.caveat)
         if text
-        for clause in re.split(r"[.;!?\n]+", text)
+        for clause in re.split(r"[.;!?\n,]+|\s(?:and|but)\s", text)
         if len(clause.strip()) >= 12
     }
     for clause in sorted(clauses, key=len, reverse=True):
@@ -1068,7 +1111,7 @@ async def generate_model_plan(
             receipts=receipts,
             reason="analyst_timed_out",
         )
-    except Exception:
+    except Exception as error:
         receipts.append(
             ProviderReceipt(
                 stage="analyst",
@@ -1080,7 +1123,7 @@ async def generate_model_plan(
             profiling,
             selection=None,
             receipts=receipts,
-            reason="analyst_failed",
+            reason=f"analyst_failed: {type(error).__name__}",
         )
 
     editorial_projection = build_editorial_projection(profiling, selection)
@@ -1118,7 +1161,7 @@ async def generate_model_plan(
             receipts=receipts,
             reason="editor_timed_out",
         )
-    except Exception:
+    except Exception as error:
         receipts.append(
             ProviderReceipt(
                 stage="editor",
@@ -1130,7 +1173,7 @@ async def generate_model_plan(
             profiling,
             selection=selection,
             receipts=receipts,
-            reason="editor_failed",
+            reason=f"editor_failed: {type(error).__name__}",
         )
 
     receipts.append(editor_response.receipt)

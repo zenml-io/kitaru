@@ -7,6 +7,9 @@
 - Ask the editor for a fresh description per card instead of an echo of the deterministic text.
 - Fail the OpenAI analyzer task when a model request fails or times out instead of returning deterministic cards.
 - Pluralize the model-mix title.
+- Bind a card number to a chart label only when the label is adjacent to it, so "runner at 39 and command at 16" is read as written; allow "accounts for" when it states a share rather than a cause; mask each clause of the deterministic caveat separately so a lightly paraphrased caveat still passes; and stop validating the analyst rationale, which is never persisted or shown.
+- Name the failing exception class in the fallback reason so a failed OpenAI analyzer task says why the model call failed.
+- Tell the analyst that at most one candidate per family is kept.
 - Extract post-import insight generation into an independent analyzer distribution.
 - Fetch sessions sequentially from the IDs supplied by analyzer tasks, preserving bounded trace memory and complete import coverage.
 - Make OpenAI generation available through the optional `openai` extra, selected by the OpenAI analyzer's default package requirement.
