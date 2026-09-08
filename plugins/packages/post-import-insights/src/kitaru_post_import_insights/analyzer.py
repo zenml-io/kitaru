@@ -18,9 +18,11 @@ from uuid import UUID
 from kitaru.api_models.v1.insight import InsightInput
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from kitaru.client import KitaruAPIClient
+from kitaru.client.exceptions import KitaruClientError
 from kitaru_post_import_insights.generation import ModelGenerationConfig
 from kitaru_post_import_insights.models import (
     MAX_NAME_LENGTH,
+    MAX_SERVER_URL_LENGTH,
     GenerationMode,
     InsightGenerationContext,
     SourceImportContext,
@@ -34,7 +36,10 @@ from kitaru_post_import_insights.profiling import SessionProfiler
 
 
 def _get_context(
-    first: SessionWithNodesResponse, *, agent_name: str | None
+    first: SessionWithNodesResponse,
+    *,
+    agent_name: str | None,
+    server_url: str | None,
 ) -> InsightGenerationContext:
     """Derive the identity available on normalized analyzer sessions."""
     if first.session.import_id is None:
@@ -47,7 +52,26 @@ def _get_context(
             import_id=first.session.import_id,
             provider=_get_provider(first.session.imported_from),
         ),
+        server_url=server_url,
     )
+
+
+async def _lookup_agent_name(client: KitaruAPIClient, agent_id: UUID) -> str | None:
+    """Fetch the agent's display name, or None when the lookup fails."""
+    try:
+        agent = await client.agents.get(agent_id)
+    except KitaruClientError:
+        # The name only decorates the copied prompt, so a missing agent, a
+        # token without agent read access, or a transient server error must
+        # not fail an analysis whose session reads already succeeded.
+        return None
+    return agent.name if 0 < len(agent.name) <= MAX_NAME_LENGTH else None
+
+
+def _get_server_url(client: KitaruAPIClient) -> str | None:
+    """Return the client's resolved server URL when it fits the context bounds."""
+    server_url = client.base_url.rstrip("/")
+    return server_url if 0 < len(server_url) <= MAX_SERVER_URL_LENGTH else None
 
 
 def _get_provider(provider: str | None) -> str | None:
@@ -120,21 +144,28 @@ async def _analyze_sessions(
             for session_id in session_ids:
                 normalized = await client.sessions.get_with_nodes(session_id)
                 if context is None:
-                    context = _get_context(normalized, agent_name=agent_name)
+                    context = _get_context(
+                        normalized,
+                        agent_name=agent_name,
+                        server_url=_get_server_url(client),
+                    )
                     provider = context.source_import.provider
                 elif _get_provider(normalized.session.imported_from) != provider:
                     provider = None
                 validate_session(normalized, context=context)
                 profiler.consume(normalized)
                 del normalized
+            if context is not None and agent_name is None:
+                agent_name = await _lookup_agent_name(client, context.agent_id)
         profiling = profiler.finish()
     if context is None:
         return []
     context = context.model_copy(
         update={
+            "agent_name": agent_name,
             "source_import": context.source_import.model_copy(
                 update={"provider": provider}
-            )
+            ),
         }
     )
     generator = None
