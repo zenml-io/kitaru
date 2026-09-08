@@ -421,7 +421,7 @@ async def test_create_import_with_analyzers(
     assert response.status_code == 201
     created = response.json()
     assert created["analyzers"] == [
-        {"analyzer": "trends", "version": 1, "params": {"k": 1}}
+        {"analyzer": "trends", "version": 1, "params": {"k": 1}, "connection_id": None}
     ]
     assert created["stats"] is None
     assert created["error"] is None
