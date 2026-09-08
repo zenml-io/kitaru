@@ -923,7 +923,10 @@ async def test_prompt_omits_unknown_agent_name_and_server_url() -> None:
         assert "`kitaru login <server URL>`" in prompt
         assert "Server: " not in prompt
         assert "Agent: " not in prompt
-        assert f"\nAgent id: {AGENT_ID} (name: run `kitaru agent get {AGENT_ID}`)\nImport id: {IMPORT_ID}\n" in prompt
+        assert (
+            f"\nAgent id: {AGENT_ID} (name: run `kitaru agent get {AGENT_ID}`)\n"
+            f"Import id: {IMPORT_ID}\n"
+        ) in prompt
         assert "(source:" not in prompt
 
 

@@ -1800,7 +1800,9 @@ def test_card_copy_binds_numbers_only_to_adjacent_chart_labels(
         "The chart shows 16 for prepareRunner.",
     ):
         with pytest.raises(ValueError, match="numeric claim absent"):
-            validate_editorial_plan(_card(candidate, description), selection, [candidate])
+            validate_editorial_plan(
+                _card(candidate, description), selection, [candidate]
+            )
 
 
 def test_card_copy_allows_share_wording_with_accounts_for(
@@ -1864,6 +1866,8 @@ def test_analyst_rationale_wording_is_not_validated(
     plan = AnalystPlan(
         selected_candidate_ids=[candidate.id],
         recommended_candidate_id=candidate.id,
-        rationale="Picked `tool-error-mix` because **it** is broad; see docs.example.com.",
+        rationale=(
+            "Picked `tool-error-mix` because **it** is broad; see docs.example.com."
+        ),
     )
     assert validate_analyst_plan(plan, profiling_result.candidates) == plan
