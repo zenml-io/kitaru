@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fail API imports visibly when a successful HTTP response contains a query stream error, including after partial results.
+
 - Support Logfire 5.x for the `adapter` extra in addition to the existing 4.35+ line.
 - Fetch traces from the Logfire Query API by trace id or time window through the `api` extra, importing traces oldest first and grouped by session, fetched concurrently bounded by the fetch query's `concurrency` key.
 - Wait out a Logfire rate limit and retry instead of failing the import task.

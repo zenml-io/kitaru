@@ -32,16 +32,19 @@ RowsBuilder = Callable[[str], list[dict[str, Any]]]
 _QUERY_PATTERN = re.compile(
     r"select: \* \| from: project_logs\('(?P<project_id>[^']+)'\) spans"
     r" \| filter: root_span_id = '(?P<root_span_id>[^']+)'"
+    r" \| sort: _pagination_key asc \| limit: \d+"
 )
 
 _LIST_QUERY_PATTERN = re.compile(
-    r"select: root_span_id \| from: project_logs\('(?P<project_id>[^']+)'\) spans"
-    r" \| filter: NOT EXISTS\(span_parents\) AND"
+    r"select: root_span_id, created"
+    r" \| from: project_logs\('(?P<project_id>[^']+)'\) spans"
+    r" \| filter: is_root AND"
     r" \(\(created >= '(?P<since>[^']+)' AND created <= '(?P<until>[^']+)'\)"
     r" OR \(metrics\.start >= (?P<since_ts>[-0-9.]+)"
     r" AND metrics\.start <= (?P<until_ts>[-0-9.]+)\)\)"
-    r" \| sort: created asc"
+    r" \| sort: _pagination_key asc"
     r" \| limit: (?P<limit>\d+)"
+    r"(?: \| cursor: '(?P<cursor>[^']+)')?"
 )
 
 
@@ -211,7 +214,7 @@ class FakeBraintrust:
         if list_match is not None:
             assert list_match["project_id"] == self.project_id
             self.list_queries.append(list_match.groupdict())
-            self.list_cursors_received.append(json.get("cursor"))
+            self.list_cursors_received.append(list_match["cursor"])
             self.events.append("list")
             assert self.list_pages, "unexpected BTQL list query"
             root_span_ids, cursor = self.list_pages.pop(0)

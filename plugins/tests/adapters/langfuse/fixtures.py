@@ -243,7 +243,19 @@ class FakeLangfuseClient:
         self.observation_calls.append({"trace_id": trace_id, **kwargs})
         pages = self.observation_pages.get(trace_id)
         assert pages, f"unexpected observations listing for trace {trace_id!r}"
-        return pages.pop(0)
+        page = pages.pop(0)
+        since = kwargs.get("from_start_time")
+        until = kwargs.get("to_start_time")
+        return page.model_copy(
+            update={
+                "data": [
+                    observation
+                    for observation in page.data
+                    if (since is None or observation.start_time >= since)
+                    and (until is None or observation.start_time <= until)
+                ]
+            }
+        )
 
     @contextmanager
     def start_as_current_observation(

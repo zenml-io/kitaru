@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve observations outside the selection window when importing a trace that starts inside the window.
+
 - Fetch traces directly from the Langfuse API by trace id or time window, through the `api` extra.
 - Import traces oldest first and grouped by session, fixing later traces in a session being dropped as duplicates.
 - Fetch traces concurrently, bounded by the fetch query's `concurrency` key.

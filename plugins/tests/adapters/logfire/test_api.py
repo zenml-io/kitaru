@@ -17,7 +17,9 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
+from httpx import AsyncClient
 
+import kitaru_logfire_importer.api as api_module
 from kitaru.task import importer as importer_module
 from kitaru.task.importer import ImportedSession
 from kitaru_logfire_importer.api import fetch
@@ -266,3 +268,50 @@ async def test_fetch_rejects_invalid_queries() -> None:
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         async for _ in fetch({"trace_ids": [TRACE_ID_1], "extra": 1}):
             pass
+
+
+@pytest.mark.parametrize("partial_rows", [[], [{"trace_id": TRACE_ID_1}]])
+async def test_listing_stream_error_fails_instead_of_importing_partial_results(
+    partial_rows: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logfire: FakeLogfire,
+) -> None:
+    """Expose query errors even when HTTP succeeded and data preceded the error."""
+
+    async def post_query(*args: object) -> bytes:
+        return (
+            ndjson(partial_rows).rsplit(b"\n", 1)[0]
+            + b'\n{"type":"error","message":"Query execution timed out"}'
+        )
+
+    monkeypatch.setattr(api_module, "_post_query", post_query)
+    with pytest.raises(RuntimeError, match="Query execution timed out"):
+        await collect_payloads(
+            fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
+        )
+    assert fake_logfire.requested == []
+
+
+@pytest.mark.parametrize("partial_data", [False, True])
+async def test_trace_stream_error_fails_before_returning_payload(
+    partial_data: bool, fake_logfire: FakeLogfire
+) -> None:
+    """Reject an HTTP-successful failed trace query before parsing partial data."""
+    content = b'{"type":"error","message":"Query execution timed out"}'
+    if partial_data:
+        content = (
+            ndjson(build_complete_rows(TRACE_ID_1)).rsplit(b"\n", 1)[0]
+            + b"\n"
+            + content
+        )
+
+    async with AsyncClient(
+        base_url="https://logfire-api.test",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=content)
+        ),
+    ) as client:
+        with pytest.raises(RuntimeError, match="Query execution timed out"):
+            await api_module.fetch_trace(
+                TRACE_ID_1, datetime(2026, 7, 24, tzinfo=UTC), client
+            )

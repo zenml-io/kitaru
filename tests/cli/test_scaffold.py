@@ -98,6 +98,42 @@ def test_importer_test_loads_signature_and_validates_payload_items(
     assert "not a sandbox" in result.warnings[0]
 
 
+@pytest.mark.parametrize("with_payload", [False, True])
+def test_importer_test_accepts_importer_object(
+    tmp_path: Path, with_payload: bool
+) -> None:
+    """Object entrypoints validate and invoke parse without fetching remote data."""
+    script = tmp_path / "provider.py"
+    script.write_text(
+        "from kitaru.task.importer import ImportFailure\n"
+        "class Provider:\n"
+        "    def parse(self, payload, params):\n"
+        "        assert payload == b'payload'\n"
+        "        assert params == {'mode': 'test'}\n"
+        "        yield ImportFailure(line=1, external_id='x', error='bad')\n"
+        "    def fetch(self, query):\n"
+        "        raise AssertionError('local tests must not fetch')\n"
+        "importer = Provider()\n",
+        encoding="utf-8",
+    )
+    payload = tmp_path / "payload.bin"
+    payload.write_bytes(b"payload")
+
+    result = run_importer_test(
+        script,
+        entrypoint="importer",
+        payload=payload if with_payload else None,
+        params='{"mode":"test"}',
+        timeout=5,
+    )
+
+    assert result.item["loaded"] is True
+    assert result.item["invoked"] is with_payload
+    if with_payload:
+        assert result.item["items"] == 1
+        assert result.item["failures"] == 1
+
+
 def test_evaluator_test_validates_signature_without_invoking(tmp_path: Path) -> None:
     """Stage 1 evaluator tests load code but do not invent a SessionView fixture."""
     marker = tmp_path / "called"
