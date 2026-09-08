@@ -75,14 +75,6 @@ def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
     return [node for root in nodes for node in (root, *flatten(root.children))]
 
 
-def test_rejects_oversized_upload(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reject content before decoding when it exceeds the importer limit."""
-    monkeypatch.setattr(langfuse_module, "MAX_UPLOAD_BYTES", 3)
-
-    with pytest.raises(InvalidImport, match="50 MiB upload limit"):
-        LangfuseJSONLImporter().parse(b"1234", {})
-
-
 def test_unified_parse_returns_prefixed_external_id() -> None:
     """Expose normalized sessions through the unified plugin entrypoint."""
     parsed = list(

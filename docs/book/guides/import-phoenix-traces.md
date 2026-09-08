@@ -28,7 +28,7 @@ The importer also accepts the JSON written by Phoenix CLI trace retrieval. A CLI
 
 The UI and CLI therefore carry the same span objects in different containers. You do not need to reshape either one. See Phoenix's [trace retrieval guide](https://arize.com/docs/phoenix/tracing/how-to-tracing/importing-and-exporting-traces/retrieve-traces-via-cli) for the current CLI commands.
 
-Payloads are capped at 50 MiB per import. Split a larger export into smaller files.
+Uploads are capped by the server's configurable blob limit. Split a larger export into smaller files.
 
 ## 2. Import the file
 

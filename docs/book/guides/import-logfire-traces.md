@@ -21,7 +21,7 @@ The importer reads rows from Logfire's **records** table, one row per span. Expo
 - **A single JSON object**, treated as a one-row export.
 - **The Query API's streaming NDJSON**, where each line is a typed message. `schema`, `explain`, and `end` messages are skipped, rows arrive inside `{"type": "data", "rows": [...]}` (or a single `{"type": "data", "data": {...}}`), and a `{"type": "error"}` message fails the import with the message it carries.
 
-Payloads are capped at 50 MiB per import (the importer's own limit, separate from the server's configurable blob limit). Export in slices as often as you like; [dedup](#re-runs-skip-what-is-already-there) makes overlapping slices safe.
+Uploads are capped by the server's configurable blob limit. Export in slices as often as you like; [dedup](#re-runs-skip-what-is-already-there) makes overlapping slices safe.
 
 Every row needs `trace_id` and `span_id`; a row without both is reported as a failure and the rest of the file still imports. Beyond those, the importer reads `project_id`, `parent_span_id`, `span_name`, `message`, `kind`, `level`, `start_timestamp`, `end_timestamp`, `otel_status_code` / `status_code`, `otel_status_message`, `is_exception`, `exception_message`, `service_name`, `service_namespace`, `service_version`, `deployment_environment`, `otel_scope_name`, `otel_scope_version`, `tags`, and the `attributes` column:
 
@@ -179,7 +179,7 @@ Because a records query returns exactly the rows you asked for, the importer nev
 - `"Trace '<id>' has <n> root records"` when a trace has no single root span, usually a query that sliced through the middle of a trace.
 - `"Span '<id>' references missing parent '<id>'"` when a `parent_span_id` is not in the file. Those nodes are kept as roots.
 
-Some problems fail one session or one row rather than the file, and are reported as import failures: `"Logfire row lacks trace_id or span_id"`, `"Session '<id>' contains conflicting Logfire project ids"`, `"The import contains duplicate span ids"`, and `"The imported span graph contains a parent cycle"`. A malformed file (invalid JSON, non-UTF-8, empty, no data rows, or over 50 MiB) fails the task as a whole.
+Some problems fail one session or one row rather than the file, and are reported as import failures: `"Logfire row lacks trace_id or span_id"`, `"Session '<id>' contains conflicting Logfire project ids"`, `"The import contains duplicate span ids"`, and `"The imported span graph contains a parent cycle"`. A malformed file (invalid JSON, non-UTF-8, empty, or no data rows) fails the task as a whole.
 
 Two more things worth knowing before you rely on an import:
 

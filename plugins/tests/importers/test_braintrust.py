@@ -19,7 +19,6 @@ from typing import Any
 
 import pytest
 
-import kitaru_braintrust_importer.importer as braintrust_module
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession, ImportFailure
@@ -58,14 +57,6 @@ def sessions(
 def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
     """Flatten imported nodes depth-first for assertions."""
     return [node for root in nodes for node in (root, *flatten(root.children))]
-
-
-def test_rejects_oversized_upload(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reject content before decoding when it exceeds the importer limit."""
-    monkeypatch.setattr(braintrust_module, "MAX_UPLOAD_BYTES", 3)
-
-    with pytest.raises(InvalidImport, match="50 MiB upload limit"):
-        BraintrustProjectLogImporter().parse(b"1234", params())
 
 
 def event(

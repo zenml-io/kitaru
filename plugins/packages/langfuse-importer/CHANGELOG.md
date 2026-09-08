@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Remove the importer payload size cap. Uploads are bounded by the server blob limit only.
 - Preserve observations outside the selection window when importing a trace that starts inside the window.
 
 - Fetch traces directly from the Langfuse API by trace id or time window, through the `api` extra.
