@@ -5,26 +5,31 @@ icon: chart-pie
 
 # Write an analyzer
 
-An [analyzer](../concepts/analyzers.md) reads a whole set of sessions at once and writes insights about the set: named, typed observations rather than per-session verdicts. This guide takes you from a question about a batch of sessions to a registered analyzer running on your imports.
+An [analyzer](../concepts/analyzers.md) writes insights about a set of sessions: named, typed observations rather than per-session verdicts. This guide takes you from a question about a batch of sessions to a registered analyzer running on your imports.
 
 ## The analyzer contract
 
-An analyzer is a callable, a single Python file or an installable package, that receives every session in the set and returns one or more insights:
+An analyzer is a callable, a single Python file or an installable package, that receives every session ID in the set and fetches the data it needs:
 
 ```python
 # session_outcomes_analyzer.py
 from collections import Counter
+from uuid import UUID
 
 from kitaru.api_models.v1.insight import (
     CategoricalInsightData,
     CategoryValue,
     InsightInput,
 )
-from kitaru.task.evaluator import SessionView
+from kitaru.client.api_client import KitaruAPIClient
 
 
-def analyzer(sessions: list[SessionView], **params) -> InsightInput:
-    counts = Counter(view.session.status for view in sessions)
+async def analyzer(session_ids: list[UUID], **params) -> InsightInput:
+    counts: Counter[str] = Counter()
+    async with KitaruAPIClient() as client:
+        for session_id in session_ids:
+            session = await client.sessions.get(session_id)
+            counts[session.status] += 1
     return InsightInput(
         name="session_outcomes",
         title="Session outcomes",
@@ -38,9 +43,9 @@ def analyzer(sessions: list[SessionView], **params) -> InsightInput:
     )
 ```
 
-`SessionView` is the same type an evaluator receives, one per session in the set: `session.session` is the [session](../concepts/agents-and-sessions.md) with its inputs, outputs, and rollups, and `session.nodes` is every model call and tool call with payloads. Return one `InsightInput` or a list. Each becomes one stored insight. `analyzer` can also be `async def`, for example to call a model client asynchronously, and the task process awaits it. `params` are per-run knobs, passed when you name the analyzer on an import.
+The first argument is `list[UUID]`. `KitaruAPIClient()` uses the server URL and credentials supplied to the task process. `client.sessions.get(session_id)` returns [session](../concepts/agents-and-sessions.md) metadata; `client.sessions.get_with_nodes(session_id)` includes its model and tool calls with payloads. Fetch only what the analysis needs, and process traces one at a time to avoid retaining the whole import in memory. Return one `InsightInput` or a list, including an empty list when there are no findings. Each returned item becomes one stored insight. Both synchronous and asynchronous callables are supported. `params` are per-run knobs, passed when you name the analyzer on an import.
 
-This example needs no provider credentials, since it only reads session status off the set it is handed. An analyzer that judges the set instead of just counting it, for example one that reads every node and summarizes what went wrong across the batch, calls a model inside `analyzer` the same way an [LLM judge](write-an-evaluator.md) does inside `evaluate`. Such an analyzer can declare its provider and a [connection schema](provider-connections.md) when registered:
+This example needs no provider credentials: it reads session status through Kitaru's task credentials. An analyzer that judges the set instead of just counting it, for example one that reads every node and summarizes what went wrong across the batch, calls a model inside `analyzer` the same way an [LLM judge](write-an-evaluator.md) does inside `evaluate`. Such an analyzer can declare its provider and a [connection schema](provider-connections.md) when registered:
 
 ```bash
 kitaru analyzer register model-judge \

@@ -31,6 +31,7 @@ from conftest import (
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL
+from kitaru.server.api.bootstrap import register_default_plugins
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.imports import ImportCreate, ImportFilter
 from kitaru.server.application.models.replay_config import (
@@ -46,6 +47,7 @@ from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.connection import ConnectionNotFound
 from kitaru.server.domain.imports import ImportNotFound
 from kitaru.server.domain.plugin import (
+    PackagePluginSource,
     PluginKind,
     PluginNotFound,
     PluginVersion,
@@ -58,9 +60,21 @@ ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
 
 @pytest.fixture
-def services() -> JobAndTaskServices:
+async def services() -> JobAndTaskServices:
     """Provide fake-backed job, task, and import services."""
-    return build_job_and_task_services()
+    services = build_job_and_task_services()
+    plugin = await create_plugin(
+        services.plugins, None, PluginKind.ANALYZER, name="kitaru/post-import-insights"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        PackagePluginSource(
+            requirement="kitaru-post-import-insights==0.1.0",
+            entrypoint="kitaru_post_import_insights.analyzer:analyze_post_import_sessions",
+        ),
+        display_version=None,
+    )
+    return services
 
 
 async def _importer_version(
@@ -166,6 +180,8 @@ async def test_create_import_creates_the_row_job_and_task_together(
     assert import_.importer_version_id == version.id
     assert import_.payload_blob_id == command.payload_blob_id
     assert import_.params == {"delimiter": ","}
+    assert import_.analyzers == []
+    assert command.analyzers == []
     assert import_.stats is None
     assert import_.error is None
     assert import_.job_id is not None
@@ -294,6 +310,52 @@ async def test_create_import_stores_the_resolved_analyzers(
     assert analyzer.analyzer_version_id == analyzer_version.id
     stored = await services.imports.get(import_.id)
     assert stored.analyzers == import_.analyzers
+
+
+async def test_explicit_builtin_analyzer_is_not_duplicated(
+    services: JobAndTaskServices,
+) -> None:
+    """Keep an explicitly configured built-in analyzer and its parameters once."""
+    await _importer_version(services)
+    command = await _import_command(
+        services,
+        analyzers=[
+            AnalyzerConfigInput(
+                analyzer="kitaru/post-import-insights", params={"agent_name": "returns"}
+            )
+        ],
+    )
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+    assert len(import_.analyzers) == 1
+    assert import_.analyzers[0].params == {"agent_name": "returns"}
+
+
+async def test_import_preserves_both_selected_insight_analyzers(
+    services: JobAndTaskServices,
+) -> None:
+    """The caller can select independent deterministic and OpenAI analysis."""
+    await register_default_plugins(services.plugins)
+    await _importer_version(services)
+    command = await _import_command(
+        services,
+        analyzers=[
+            AnalyzerConfigInput(analyzer="kitaru/post-import-insights"),
+            AnalyzerConfigInput(
+                analyzer="kitaru/openai-post-import-insights",
+                params={"model": "test-model"},
+            ),
+        ],
+    )
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert [item.analyzer for item in import_.analyzers] == [
+        "kitaru/post-import-insights",
+        "kitaru/openai-post-import-insights",
+    ]
+    assert import_.analyzers[0].provider is None
+    assert import_.analyzers[1].provider == "openai"
+    assert import_.analyzers[1].params == {"model": "test-model"}
 
 
 async def test_create_import_stores_the_analyzer_named_connection(

@@ -691,18 +691,18 @@ class AnalysisTask(Task):
         return TaskKind.ANALYZER
 
     def check_result(self, result: Any) -> None:
-        """Require a non-empty list of insight results with unique names.
+        """Require a list of insight results with unique names.
 
         Args:
             result: Result the completion carries.
 
         Raises:
-            InvalidTaskResult: The result is not a non-empty list of valid
+            InvalidTaskResult: The result is not a list of valid
                 insight results, or two results share a name.
         """
-        if not isinstance(result, list) or not result:
+        if not isinstance(result, list):
             raise InvalidTaskResult(
-                f"Task {self.id} requires a non-empty list of insight results"
+                f"Task {self.id} requires a list of insight results"
             )
         names: set[str] = set()
         for entry in result:

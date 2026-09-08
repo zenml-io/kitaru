@@ -393,6 +393,62 @@ async def test_update_analyzer_version(client: httpx.AsyncClient) -> None:
     assert response.json()["display_version"] == "v1.0.1"
 
 
+async def test_clear_analyzer_version_display_version(
+    client: httpx.AsyncClient,
+) -> None:
+    """Clear an analyzer version's display version with explicit null."""
+    created = (await client.post("/api/v1/analyzers", json={"name": "trends"})).json()
+    version = (
+        await client.post(
+            f"/api/v1/analyzers/{created['id']}/versions",
+            json={
+                "source": {
+                    "type": "package",
+                    "requirement": "kitaru-trends==1.0.0",
+                    "entrypoint": "pkg:analyze",
+                },
+                "display_version": "v1",
+            },
+        )
+    ).json()
+
+    response = await client.patch(
+        f"/api/v1/analyzers/{created['id']}/versions/{version['version']}",
+        json={"display_version": None},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["display_version"] is None
+
+
+async def test_omitted_analyzer_version_display_version_is_unchanged(
+    client: httpx.AsyncClient,
+) -> None:
+    """Keep an analyzer version's display version when the field is omitted."""
+    created = (await client.post("/api/v1/analyzers", json={"name": "trends"})).json()
+    version = (
+        await client.post(
+            f"/api/v1/analyzers/{created['id']}/versions",
+            json={
+                "source": {
+                    "type": "package",
+                    "requirement": "kitaru-trends==1.0.0",
+                    "entrypoint": "pkg:analyze",
+                },
+                "display_version": "v1",
+            },
+        )
+    ).json()
+
+    response = await client.patch(
+        f"/api/v1/analyzers/{created['id']}/versions/{version['version']}",
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["display_version"] == "v1"
+
+
 async def test_update_analyzer_version_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown version number."""
     created = (await client.post("/api/v1/analyzers", json={"name": "trends"})).json()

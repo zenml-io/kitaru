@@ -25,18 +25,21 @@ from kitaru.api_models.v1.analyzer import (
     AnalyzerCreateRequest,
     AnalyzerUpdateRequest,
     AnalyzerVersionResponse,
+    AnalyzerVersionUpdateRequest,
 )
 from kitaru.api_models.v1.base import ListParams, TimestampedResponseModel
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
     EvaluatorUpdateRequest,
     EvaluatorVersionResponse,
+    EvaluatorVersionUpdateRequest,
 )
 from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.importer import (
     ImporterCreateRequest,
     ImporterUpdateRequest,
     ImporterVersionResponse,
+    ImporterVersionUpdateRequest,
 )
 from kitaru.api_models.v1.plugin import PackagePluginSource as WirePackagePluginSource
 from kitaru.api_models.v1.plugin import PluginSource as WirePluginSource
@@ -49,6 +52,7 @@ from kitaru.server.application.models.plugin import (
     PluginCreate,
     PluginFilter,
     PluginUpdate,
+    PluginVersionUpdate,
 )
 from kitaru.server.domain.plugin import (
     PackagePluginSource as DomainPackagePluginSource,
@@ -236,6 +240,22 @@ def plugin_create_to_command(
         connection_schema=connection_schema,
         agent_id=agent_id,
     )
+
+
+def plugin_version_update_to_command(
+    body: EvaluatorVersionUpdateRequest
+    | ImporterVersionUpdateRequest
+    | AnalyzerVersionUpdateRequest,
+) -> PluginVersionUpdate:
+    """Convert a plugin version update request, preserving omitted fields.
+
+    Args:
+        body: Evaluator, importer, or analyzer version update request.
+
+    Returns:
+        Plugin version update command.
+    """
+    return PluginVersionUpdate(**body.model_dump(exclude_unset=True))
 
 
 def plugin_update_to_command(

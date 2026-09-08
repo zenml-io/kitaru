@@ -39,9 +39,11 @@ INSIGHT_ANALYZER_VERSION_ID_FOREIGN_KEY = foreign_key_name(
     "insight", ["analyzer_version_id"]
 )
 INSIGHT_TASK_ID_FOREIGN_KEY = foreign_key_name("insight", ["task_id"])
+INSIGHT_IMPORT_ID_FOREIGN_KEY = foreign_key_name("insight", ["import_id"])
 INSIGHT_OWNER_ID_INDEX = index_name("insight", ["owner_id"])
 INSIGHT_AGENT_ID_INDEX = index_name("insight", ["agent_id"])
 INSIGHT_ANALYZER_VERSION_ID_INDEX = index_name("insight", ["analyzer_version_id"])
+INSIGHT_IMPORT_ID_INDEX = index_name("insight", ["import_id"])
 
 TYPE_LENGTH = 32
 
@@ -67,6 +69,12 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ondelete="SET NULL",
         ),
         ForeignKeyConstraint(
+            ["import_id"],
+            ["import.id"],
+            name=INSIGHT_IMPORT_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
+        ),
+        ForeignKeyConstraint(
             ["task_id"],
             ["task.id"],
             name=INSIGHT_TASK_ID_FOREIGN_KEY,
@@ -75,12 +83,14 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(INSIGHT_OWNER_ID_INDEX, "owner_id"),
         Index(INSIGHT_AGENT_ID_INDEX, "agent_id"),
         Index(INSIGHT_ANALYZER_VERSION_ID_INDEX, "analyzer_version_id"),
+        Index(INSIGHT_IMPORT_ID_INDEX, "import_id"),
     )
 
     owner_id: Mapped[uuid.UUID]
     agent_id: Mapped[uuid.UUID]
     analyzer_version_id: Mapped[uuid.UUID | None]
     task_id: Mapped[uuid.UUID | None]
+    import_id: Mapped[uuid.UUID | None]
     # No foreign key, identifies the analyzer invocation that produced this row
     # alongside its siblings.
     invocation_id: Mapped[uuid.UUID | None]
@@ -111,6 +121,7 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             agent_id=insight.agent_id,
             analyzer_version_id=insight.analyzer_version_id,
             task_id=insight.task_id,
+            import_id=insight.import_id,
             invocation_id=insight.invocation_id,
             name=insight.name,
             title=insight.title,
@@ -134,6 +145,7 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             agent_id=self.agent_id,
             analyzer_version_id=self.analyzer_version_id,
             task_id=self.task_id,
+            import_id=self.import_id,
             invocation_id=self.invocation_id,
             name=self.name,
             title=self.title,

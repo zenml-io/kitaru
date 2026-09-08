@@ -24,7 +24,6 @@ from kitaru.api_models.v1.insight import InsightInput
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.task import AnalysisTaskDetails, ScriptPluginSpec
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.task.evaluator import SessionView
 from kitaru.task.plugins import PluginLoadError, load_plugin_entrypoint, load_source_ref
 from kitaru.task.task_io import get_required_env, write_task_result
 
@@ -32,7 +31,6 @@ __all__ = [
     "AnalysisError",
     "AnalyzerReturn",
     "InsightInput",
-    "SessionView",
     "call_analyzer",
     "run",
 ]
@@ -50,7 +48,7 @@ AnalyzerReturn = InsightInput | list[InsightInput]
 async def call_analyzer(
     name: str,
     analyzer: Callable[..., AnalyzerReturn | Awaitable[AnalyzerReturn]],
-    sessions: list[SessionView],
+    session_ids: list[uuid.UUID],
     params: dict[str, Any],
 ) -> list[InsightInput]:
     """Invoke an analyzer and validate its results.
@@ -58,25 +56,24 @@ async def call_analyzer(
     Args:
         name: Analyzer name, named in error messages.
         analyzer: Analyzer callable, sync or returning an awaitable.
-        sessions: Session views passed to the analyzer.
+        session_ids: Imported session IDs passed to the analyzer. Analyzers
+            fetch any session details they need through the API client.
         params: Parameters passed to the analyzer.
 
     Raises:
-        AnalysisError: The analyzer raised, returned no results, returned a
+        AnalysisError: The analyzer raised, returned a
             non-InsightInput value, or returned duplicate result names.
 
     Returns:
         Insight inputs.
     """
     try:
-        result = analyzer(sessions, **params)
+        result = analyzer(session_ids, **params)
         if inspect.isawaitable(result):
             result = await result
     except Exception as exc:
         raise AnalysisError(f"Analyzer '{name}' raised an error: {exc}") from exc
     results = result if isinstance(result, list) else [result]
-    if not results:
-        raise AnalysisError(f"Analyzer '{name}' returned no results")
     if not all(isinstance(item, InsightInput) for item in results):
         raise AnalysisError(f"Analyzer '{name}' returned a non-InsightInput value")
     names = [item.name for item in results]
@@ -132,11 +129,8 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
         ),
         size=1000,
     )
-    views: list[SessionView] = []
-    async for session in client.sessions.iter(params):
-        full = await client.sessions.get_with_nodes(session.id)
-        views.append(SessionView(session=full.session, nodes=full.nodes))
+    session_ids = [session.id async for session in client.sessions.iter(params)]
     results = await call_analyzer(
-        details.analyzer_name, analyzer, views, details.params
+        details.analyzer_name, analyzer, session_ids, details.params
     )
     write_task_result(results)

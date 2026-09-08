@@ -26,25 +26,31 @@ from conftest import (
     FakeEphemeralWorkers,
     JobAndTaskServices,
     build_job_and_task_services,
+    build_task_actor,
+    build_worker_actor,
     create_agent,
     create_blob,
     create_plugin,
     create_worker,
     local_settings,
 )
-from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.task import TaskKind, TaskStatus
 from kitaru.api_models.v1.worker import LabelSelector, WorkerClaim, WorkerScope
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.jwt import JWTToken
 from kitaru.server.adapters.rest.ephemeral_workers import EphemeralWorkerStarter
+from kitaru.server.api.bootstrap import register_default_plugins
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
 from kitaru.server.application.models.imports import ImportCreate
+from kitaru.server.application.models.task import TaskUpdate
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
+from kitaru.server.domain.task import AnalysisTask
 from kitaru.server.ephemeral_worker_settings import (
     EphemeralWorkerBackend,
     EphemeralWorkerSettings,
@@ -90,7 +96,8 @@ async def _create_import(
     services: JobAndTaskServices, builtin: bool = False, fetch: bool = False
 ) -> Job:
     """Create an import job for a user or a reserved namespace importer."""
-    name = "kitaru/csv" if builtin else "csv"
+    await register_default_plugins(services.plugins)
+    name = "kitaru/test-csv" if builtin else "csv"
     plugin = await create_plugin(
         services.plugins,
         None if builtin else ACCOUNT.id,
@@ -99,9 +106,10 @@ async def _create_import(
         provider="langfuse",
         connection_schema={"type": "object"},
     )
+    code = await create_blob(services.blobs, ACCOUNT.id, content=b"def run(): pass")
     await services.plugins.create_version(
         plugin.id,
-        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        ScriptPluginSource(blob_id=code.id, entrypoint="run"),
         display_version=None,
     )
     agent = await create_agent(services.agents, ACCOUNT.id)
@@ -274,6 +282,65 @@ async def test_start_skips_a_user_plugin(
     assert ephemeral_workers.starts == []
     workers, _ = await services.workers.query(WorkerFilter(include_stale=True), None)
     assert workers == []
+
+
+async def test_worker_drains_analysis_added_after_import_claim(
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+    stored_auth_service: AuthService,
+) -> None:
+    """The same worker claims later analysis tasks and settles its import job."""
+    job = await _create_import(services, builtin=True)
+    await _start(job, services, ephemeral_workers, stored_auth_service)
+    worker_id = ephemeral_workers.starts[0].worker_id
+    actor = build_worker_actor(ACCOUNT, worker_id)
+    [claimed] = await services.task_service.claim_tasks(10, actor=actor)
+    importer = claimed.task
+    await services.task_service.update_task(
+        importer.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACCOUNT, importer.id, importer.attempt, worker_id),
+    )
+
+    plugin = await services.plugins.get_by_name(
+        PluginKind.ANALYZER, "kitaru/post-import-insights"
+    )
+    assert plugin.latest_version is not None
+    plugin_version = await services.plugins.get_version(
+        plugin.id, plugin.latest_version
+    )
+    analysis = await services.tasks.create(
+        AnalysisTask(
+            job_id=job.id,
+            plugin_version_id=plugin_version.id,
+            agent_id=uuid.uuid4(),
+            import_id=uuid.uuid4(),
+            labels={"kitaru/plugin_namespace": "kitaru"},
+        )
+    )
+    await services.task_service.update_task(
+        importer.id,
+        TaskUpdate(status=TaskStatus.COMPLETED, result={}),
+        actor=build_task_actor(ACCOUNT, importer.id, importer.attempt, worker_id),
+    )
+    assert (await services.jobs.get(job.id)).status is JobStatus.RUNNING
+    [claimed_analysis] = await services.task_service.claim_tasks(10, actor=actor)
+    assert claimed_analysis.task.id == analysis.id
+    await services.task_service.update_task(
+        analysis.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(
+            ACCOUNT, analysis.id, claimed_analysis.task.attempt, worker_id
+        ),
+    )
+    await services.task_service.update_task(
+        analysis.id,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=[]),
+        actor=build_task_actor(
+            ACCOUNT, analysis.id, claimed_analysis.task.attempt, worker_id
+        ),
+    )
+    assert (await services.jobs.get(job.id)).status is JobStatus.COMPLETED
 
 
 async def test_start_logs_a_failed_start(

@@ -6799,7 +6799,10 @@ async def create_import_task(
 class FakeInsightRepository:
     """In-memory insight repository."""
 
-    def __init__(self, plugin_repository: FakePluginRepository | None = None) -> None:
+    def __init__(
+        self,
+        plugin_repository: FakePluginRepository | None = None,
+    ) -> None:
         """Initialize the repository.
 
         Args:
@@ -6884,7 +6887,9 @@ class FakeInsightRepository:
         """
         insights = list(self._insights.values())
         if insight_filter.expression is not None:
-            resolvers = {"type": self._evaluate_type_condition}
+            resolvers = {
+                "type": self._evaluate_type_condition,
+            }
             insights = [
                 insight
                 for insight in insights

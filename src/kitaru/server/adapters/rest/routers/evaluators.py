@@ -116,7 +116,7 @@ async def get_evaluator(
     )
 
 
-@router.patch("/{evaluator_id}", responses=error_responses(404))
+@router.patch("/{evaluator_id}", responses=error_responses(403, 404))
 async def update_evaluator(
     evaluator_id: uuid.UUID,
     body: EvaluatorUpdateRequest,
@@ -125,8 +125,8 @@ async def update_evaluator(
 ) -> EvaluatorResponse:
     """Update an evaluator.
 
-    Clients observe HTTP 200 on success, 404 when no evaluator has this id,
-    and 422 on invalid input.
+    Clients observe HTTP 200 on success, 403 when the evaluator is
+    server-managed, 404 when no evaluator has this id, and 422 on invalid input.
 
     Args:
         evaluator_id: Id of the evaluator.
@@ -145,7 +145,7 @@ async def update_evaluator(
 @router.delete(
     "/{evaluator_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=error_responses(404),
+    responses=error_responses(403, 404),
 )
 async def delete_evaluator(
     evaluator_id: uuid.UUID,
@@ -154,8 +154,8 @@ async def delete_evaluator(
 ) -> None:
     """Delete an evaluator, cascading its versions.
 
-    Clients observe HTTP 204 on success and 404 when no evaluator has this
-    id.
+    Clients observe HTTP 204 on success, 403 when the evaluator is
+    server-managed, and 404 when no evaluator has this id.
 
     Args:
         evaluator_id: Id of the evaluator.
@@ -168,7 +168,7 @@ async def delete_evaluator(
 @router.post(
     "/{evaluator_id}/versions",
     status_code=status.HTTP_201_CREATED,
-    responses=error_responses(400, 404, 409),
+    responses=error_responses(400, 403, 404, 409),
 )
 @idempotent
 async def create_evaluator_version(
@@ -179,8 +179,9 @@ async def create_evaluator_version(
 ) -> EvaluatorVersionResponse:
     """Create an evaluator version.
 
-    Clients observe HTTP 201 on success, 404 when no evaluator has this id
-    or a script source names an unknown blob, and 422 on invalid input.
+    Clients observe HTTP 201 on success, 403 when the evaluator is
+    server-managed, 404 when no evaluator has this id or a script source names
+    an unknown blob, and 422 on invalid input.
 
     Args:
         evaluator_id: Id of the evaluator.
@@ -253,7 +254,7 @@ async def get_evaluator_version(
     )
 
 
-@router.patch("/{evaluator_id}/versions/{version}", responses=error_responses(404))
+@router.patch("/{evaluator_id}/versions/{version}", responses=error_responses(403, 404))
 async def update_evaluator_version(
     evaluator_id: uuid.UUID,
     version: Annotated[int, Path(ge=1, le=plugins.INT32_MAX)],
@@ -263,8 +264,9 @@ async def update_evaluator_version(
 ) -> EvaluatorVersionResponse:
     """Update an evaluator version's display version.
 
-    Clients observe HTTP 200 on success and 404 when no version with this
-    number exists for this evaluator.
+    Clients observe HTTP 200 on success, 403 when the evaluator is
+    server-managed, and 404 when no version with this number exists for this
+    evaluator.
 
     Args:
         evaluator_id: Id of the evaluator.
@@ -280,7 +282,7 @@ async def update_evaluator_version(
         service,
         evaluator_id,
         version,
-        body.display_version,
+        body,
         EvaluatorVersionResponse,
         actor=actor,
     )

@@ -25,6 +25,7 @@ from conftest import (
     override_idempotency,
 )
 from kitaru.api_models.v1.agent import AgentCreateRequest
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp, NotFilter
 from kitaru.api_models.v1.insight import (
     InsightInput,
     InsightListParams,
@@ -153,6 +154,23 @@ async def test_list_and_iter(api_client: KitaruAPIClient) -> None:
 
     collected = [item.title async for item in api_client.insights.iter()]
     assert collected == ["gamma", "beta", "alpha"]
+
+
+async def test_import_scope_excludes_manual_insights(
+    api_client: KitaruAPIClient,
+) -> None:
+    """Round-trip import scope and its complement through the SDK."""
+    agent_id = await _make_agent(api_client)
+    created = (await api_client.insights.create(agent_id, [_insight_input()]))[0]
+    condition = FilterCondition(
+        field="import_id", op=FilterOp.EQ, value=str(uuid.uuid4())
+    )
+    page = await api_client.insights.list(InsightListParams(filter=condition))
+    assert page.items == []
+    page = await api_client.insights.list(
+        InsightListParams(filter=NotFilter.model_validate({"not": condition}))
+    )
+    assert [item.id for item in page.items] == [created.id]
 
 
 async def test_update(api_client: KitaruAPIClient) -> None:

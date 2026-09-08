@@ -223,6 +223,8 @@ Existing integrations can continue to send `params.join_on` as a dotted path. Th
 
 ## What provider importers normalize
 
+Select the built-in [post-import insights](post-import-insights.md) analyzers explicitly to produce deterministic cards, OpenAI-backed cards, or both. They need a worker that claims analyzer tasks; only the OpenAI analyzer requires model credentials. The linked guide covers local and self-hosted setup and reading results.
+
 Provider importers apply the same output contract to different source formats:
 
 | Source | Accepted shape | Default grouping |

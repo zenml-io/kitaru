@@ -42,6 +42,7 @@
 ## Import your traces
 
 - [Overview](getting-started/import-your-traces.md)
+- [Post-import insights](guides/post-import-insights.md)
 - [Langfuse](guides/import-langfuse-traces.md)
 - [LangSmith](guides/import-langsmith-traces.md)
 - [Braintrust](guides/import-braintrust-traces.md)

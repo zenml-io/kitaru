@@ -31,7 +31,7 @@ from conftest import (
     create_worker,
 )
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.job import JobKind
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.insight import InsightFilter
@@ -162,11 +162,29 @@ async def test_completed_task_writes_one_insight_per_result(
         assert insight.agent_id == agent.id
         assert insight.analyzer_version_id == version.id
         assert insight.task_id == task.id
+        assert insight.import_id == task.import_id
         assert insight.analyzer_params == params
         assert insight.params_hash == hash_params(params)
     invocation_ids = {insight.invocation_id for insight in insights}
     assert len(invocation_ids) == 1
     assert None not in invocation_ids
+
+
+async def test_empty_analysis_completes_job_without_insights(
+    services: ReplayServices,
+) -> None:
+    """An empty analysis completes its task and job without creating cards."""
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    version = await _analyzer_version(services)
+    task = await _analysis_task_with_job(services, agent, version.id)
+
+    await _complete(services, task, TaskUpdate(status=TaskStatus.COMPLETED, result=[]))
+
+    completed = await services.tasks.get(task.id)
+    assert completed.status is TaskStatus.COMPLETED
+    assert completed.result == []
+    assert (await services.jobs.get(task.job_id)).status is JobStatus.COMPLETED
+    assert await _agent_insights(services, agent.id) == []
 
 
 async def test_failed_task_writes_nothing(services: ReplayServices) -> None:
@@ -202,8 +220,10 @@ async def test_vanished_plugin_version_writes_nothing(
     assert await _agent_insights(services, agent.id) == []
 
 
+@pytest.mark.parametrize("different_analyzers", [False, True])
 async def test_insight_names_repeat_across_tasks_without_conflict(
     services: ReplayServices,
+    different_analyzers: bool,
 ) -> None:
     """Two analysis tasks can each produce an insight with the same name."""
     agent = await create_agent(services.agents, ACTOR.account.id)
@@ -216,7 +236,12 @@ async def test_insight_names_repeat_across_tasks_without_conflict(
         TaskUpdate(status=TaskStatus.COMPLETED, result=[_insight_result("summary")]),
     )
 
-    second = await _analysis_task_with_job(services, agent, version.id)
+    second_version = (
+        await _analyzer_version(services, name="other-trends")
+        if different_analyzers
+        else version
+    )
+    second = await _analysis_task_with_job(services, agent, second_version.id)
     await _complete(
         services,
         second,
@@ -227,3 +252,7 @@ async def test_insight_names_repeat_across_tasks_without_conflict(
     assert len(insights) == 2
     assert {insight.task_id for insight in insights} == {first.id, second.id}
     assert len({insight.invocation_id for insight in insights}) == 2
+    assert {insight.analyzer_version_id for insight in insights} == {
+        version.id,
+        second_version.id,
+    }

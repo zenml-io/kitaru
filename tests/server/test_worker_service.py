@@ -35,7 +35,7 @@ from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.task import AgentTask, ImportTask
+from kitaru.server.domain.task import AgentTask, AnalysisTask, ImportTask
 from kitaru.server.domain.worker import WorkerAccessDenied, WorkerNotFound
 from kitaru.server.filtering import FilterCondition
 
@@ -248,6 +248,33 @@ async def test_register_ephemeral_worker(service: WorkerService) -> None:
     assert worker.runtime == runtime
     assert worker.metadata == {"ephemeral": "true"}
     assert worker.owner_id == ACTOR.account.id
+
+
+@pytest.mark.parametrize(
+    ("namespace", "same_job", "covered"),
+    [
+        ("kitaru", True, True),
+        ("custom", True, False),
+        (None, True, False),
+        ("kitaru", False, False),
+    ],
+)
+async def test_ephemeral_analyzer_scope(
+    service: WorkerService, namespace: str | None, same_job: bool, covered: bool
+) -> None:
+    """Only reserved analyzers belonging to this job can use its worker."""
+    job_id = uuid.uuid4()
+    worker = await service.register_ephemeral_worker(
+        job_id, WorkerRuntime(platform="modal"), [], actor=ACTOR
+    )
+    task = AnalysisTask(
+        job_id=job_id if same_job else uuid.uuid4(),
+        plugin_version_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        import_id=uuid.uuid4(),
+        labels={"kitaru/plugin_namespace": namespace} if namespace else {},
+    )
+    assert worker.covers(task) is covered
 
 
 async def test_renew_worker_stamps_last_seen_at(service: WorkerService) -> None:

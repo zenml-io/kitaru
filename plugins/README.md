@@ -1,6 +1,6 @@
 # Kitaru plugins
 
-Each adapter and importer under `packages/` is an independently versioned Python distribution. The built-in evaluators share the `kitaru-evaluator` distribution and are released together.
+Each adapter, importer, and analyzer under `packages/` is an independently versioned Python distribution. The built-in evaluators share the `kitaru-evaluator` distribution and are released together.
 
 Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At startup, the server records each exact distribution requirement and `module:callable` entrypoint without installing or importing the plugin package.
 
@@ -18,6 +18,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 | `logfire-importer` | `kitaru-logfire-importer` | Logfire importer and importer-backed adapter |
 | `openai-agents` | `kitaru-openai-agents` | OpenAI Agents SDK recording adapter |
 | `phoenix-importer` | `kitaru-phoenix-importer` | Arize Phoenix importer and importer-backed adapter |
+| `post-import-insights` | `kitaru-post-import-insights` | Post-import profiling and insight generation |
 | `pydantic-ai` | `kitaru-pydantic-ai` | PydanticAI recording and replay adapter |
 
 ## Development and releases

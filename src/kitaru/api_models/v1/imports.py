@@ -146,7 +146,7 @@ class ImportCreateRequest(RequestModel):
     )
     analyzers: list[AnalyzerConfig] = Field(
         default_factory=list,
-        description="Analyzers run against every imported session.",
+        description="Analyzers selected to run across the imported sessions.",
     )
 
     @model_validator(mode="after")

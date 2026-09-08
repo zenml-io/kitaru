@@ -114,7 +114,7 @@ async def get_analyzer(
     return await plugins.get_plugin(service, analyzer_id, AnalyzerResponse, actor=actor)
 
 
-@router.patch("/{analyzer_id}", responses=error_responses(404))
+@router.patch("/{analyzer_id}", responses=error_responses(403, 404))
 async def update_analyzer(
     analyzer_id: uuid.UUID,
     body: AnalyzerUpdateRequest,
@@ -123,8 +123,8 @@ async def update_analyzer(
 ) -> AnalyzerResponse:
     """Update an analyzer.
 
-    Clients observe HTTP 200 on success, 404 when no analyzer has this id,
-    and 422 on invalid input.
+    Clients observe HTTP 200 on success, 403 when the analyzer is
+    server-managed, 404 when no analyzer has this id, and 422 on invalid input.
 
     Args:
         analyzer_id: Id of the analyzer.
@@ -143,7 +143,7 @@ async def update_analyzer(
 @router.delete(
     "/{analyzer_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=error_responses(404),
+    responses=error_responses(403, 404),
 )
 async def delete_analyzer(
     analyzer_id: uuid.UUID,
@@ -152,8 +152,8 @@ async def delete_analyzer(
 ) -> None:
     """Delete an analyzer, cascading its versions.
 
-    Clients observe HTTP 204 on success and 404 when no analyzer has this
-    id.
+    Clients observe HTTP 204 on success, 403 when the analyzer is
+    server-managed, and 404 when no analyzer has this id.
 
     Args:
         analyzer_id: Id of the analyzer.
@@ -166,7 +166,7 @@ async def delete_analyzer(
 @router.post(
     "/{analyzer_id}/versions",
     status_code=status.HTTP_201_CREATED,
-    responses=error_responses(400, 404, 409),
+    responses=error_responses(400, 403, 404, 409),
 )
 @idempotent
 async def create_analyzer_version(
@@ -177,8 +177,9 @@ async def create_analyzer_version(
 ) -> AnalyzerVersionResponse:
     """Create an analyzer version.
 
-    Clients observe HTTP 201 on success, 404 when no analyzer has this id
-    or a script source names an unknown blob, and 422 on invalid input.
+    Clients observe HTTP 201 on success, 403 when the analyzer is
+    server-managed, 404 when no analyzer has this id or a script source names
+    an unknown blob, and 422 on invalid input.
 
     Args:
         analyzer_id: Id of the analyzer.
@@ -251,7 +252,7 @@ async def get_analyzer_version(
     )
 
 
-@router.patch("/{analyzer_id}/versions/{version}", responses=error_responses(404))
+@router.patch("/{analyzer_id}/versions/{version}", responses=error_responses(403, 404))
 async def update_analyzer_version(
     analyzer_id: uuid.UUID,
     version: Annotated[int, Path(ge=1, le=plugins.INT32_MAX)],
@@ -261,8 +262,9 @@ async def update_analyzer_version(
 ) -> AnalyzerVersionResponse:
     """Update an analyzer version's display version.
 
-    Clients observe HTTP 200 on success and 404 when no version with this
-    number exists for this analyzer.
+    Clients observe HTTP 200 on success, 403 when the analyzer is
+    server-managed, and 404 when no version with this number exists for this
+    analyzer.
 
     Args:
         analyzer_id: Id of the analyzer.
@@ -278,7 +280,7 @@ async def update_analyzer_version(
         service,
         analyzer_id,
         version,
-        body.display_version,
+        body,
         AnalyzerVersionResponse,
         actor=actor,
     )

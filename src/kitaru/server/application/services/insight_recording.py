@@ -54,6 +54,7 @@ async def record_task_insights(
             agent_id=task.agent_id,
             analyzer_version_id=task.plugin_version_id,
             task_id=task.id,
+            import_id=task.import_id,
             invocation_id=invocation_id,
             name=result.name,
             title=result.title,
@@ -67,9 +68,8 @@ async def record_task_insights(
     ]
     if not insights:
         return
-    # The analyzer can be deleted while its task runs. The existence check
-    # ahead of the insert then finds the version gone, which leaves nothing
-    # to record.
+    # Related resources can disappear while the task runs. A foreign-key
+    # violation then leaves nothing to record.
     try:
         await insight_repository.create_many(insights)
     except NotFoundError:

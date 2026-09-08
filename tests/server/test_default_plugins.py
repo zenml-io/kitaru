@@ -64,6 +64,63 @@ DEFINITIONS = (
 )
 
 
+def test_post_import_analyzer_is_registered_from_plugin_package() -> None:
+    """The default analyzer resolves its independently versioned distribution."""
+    definition = next(
+        item
+        for item in DEFAULT_PLUGIN_DEFINITIONS
+        if item.kind is PluginKind.ANALYZER
+        and item.name == "kitaru/post-import-insights"
+    )
+    assert (
+        definition.entrypoint
+        == "kitaru_post_import_insights.analyzer:analyze_post_import_sessions"
+    )
+    assert definition.requirement == "kitaru-post-import-insights==0.1.0"
+    assert definition.display_version == "0.1.0"
+    assert definition.provider is None
+    assert definition.connection_schema is None
+
+
+def test_openai_post_import_analyzer_has_separate_entrypoint_and_credentials() -> None:
+    """Expose OpenAI generation as a selectable provider-backed analyzer."""
+    definition = next(
+        item
+        for item in DEFAULT_PLUGIN_DEFINITIONS
+        if item.kind is PluginKind.ANALYZER
+        and item.name == "kitaru/openai-post-import-insights"
+    )
+    assert definition.entrypoint == (
+        "kitaru_post_import_insights.analyzer:analyze_openai_post_import_sessions"
+    )
+    assert definition.requirement == "kitaru-post-import-insights==0.1.0"
+    assert definition.display_version == "0.1.0"
+    assert definition.provider == "openai"
+    assert definition.connection_schema is not None
+    schema = definition.connection_schema.model_json_schema()
+    assert schema["required"] == ["OPENAI_API_KEY"]
+    assert schema["properties"]["OPENAI_API_KEY"]["writeOnly"] is True
+
+
+async def test_register_keeps_both_post_import_analyzers_independent(
+    repository: FakePluginRepository,
+) -> None:
+    """Register both plugins idempotently even though they share a distribution."""
+    await register_default_plugins(repository)
+    await register_default_plugins(repository)
+
+    deterministic = await repository.get_by_name(
+        PluginKind.ANALYZER, "kitaru/post-import-insights"
+    )
+    openai = await repository.get_by_name(
+        PluginKind.ANALYZER, "kitaru/openai-post-import-insights"
+    )
+    assert deterministic.id != openai.id
+    assert deterministic.latest_version == openai.latest_version == 1
+    assert deterministic.connection_schema is None
+    assert openai.connection_schema is not None
+
+
 @pytest.fixture
 def blob_repository() -> FakeBlobRepository:
     """Provide a fake blob repository."""

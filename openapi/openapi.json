@@ -4167,7 +4167,7 @@
             "title": "Agent Version Id"
           },
           "analyzers": {
-            "description": "Analyzers run against every imported session.",
+            "description": "Analyzers selected to run across the imported sessions.",
             "items": {
               "$ref": "#/components/schemas/AnalyzerConfig"
             },
@@ -5179,6 +5179,19 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Import whose sessions produced the insight.",
+            "title": "Import Id"
           },
           "metadata": {
             "additionalProperties": true,
@@ -12786,7 +12799,7 @@
     },
     "/api/v1/analyzers/{analyzer_id}": {
       "delete": {
-        "description": "Delete an analyzer, cascading its versions.\n\nClients observe HTTP 204 on success and 404 when no analyzer has this\nid.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    service: Analyzer service.\n    actor: Caller context.",
+        "description": "Delete an analyzer, cascading its versions.\n\nClients observe HTTP 204 on success, 403 when the analyzer is\nserver-managed, and 404 when no analyzer has this id.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    service: Analyzer service.\n    actor: Caller context.",
         "operationId": "delete_analyzer_api_v1_analyzers__analyzer_id__delete",
         "parameters": [
           {
@@ -12943,7 +12956,7 @@
         ]
       },
       "patch": {
-        "description": "Update an analyzer.\n\nClients observe HTTP 200 on success, 404 when no analyzer has this id,\nand 422 on invalid input.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    body: Analyzer update request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Updated analyzer.",
+        "description": "Update an analyzer.\n\nClients observe HTTP 200 on success, 403 when the analyzer is\nserver-managed, 404 when no analyzer has this id, and 422 on invalid input.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    body: Analyzer update request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Updated analyzer.",
         "operationId": "update_analyzer_api_v1_analyzers__analyzer_id__patch",
         "parameters": [
           {
@@ -13154,7 +13167,7 @@
         ]
       },
       "post": {
-        "description": "Create an analyzer version.\n\nClients observe HTTP 201 on success, 404 when no analyzer has this id\nor a script source names an unknown blob, and 422 on invalid input.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    body: Analyzer version create request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Created analyzer version.",
+        "description": "Create an analyzer version.\n\nClients observe HTTP 201 on success, 403 when the analyzer is\nserver-managed, 404 when no analyzer has this id or a script source names\nan unknown blob, and 422 on invalid input.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    body: Analyzer version create request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Created analyzer version.",
         "operationId": "create_analyzer_version_api_v1_analyzers__analyzer_id__versions_post",
         "parameters": [
           {
@@ -13377,7 +13390,7 @@
         ]
       },
       "patch": {
-        "description": "Update an analyzer version's display version.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this analyzer.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    version: Version number.\n    body: Analyzer version update request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Updated analyzer version.",
+        "description": "Update an analyzer version's display version.\n\nClients observe HTTP 200 on success, 403 when the analyzer is\nserver-managed, and 404 when no version with this number exists for this\nanalyzer.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    version: Version number.\n    body: Analyzer version update request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Updated analyzer version.",
         "operationId": "update_analyzer_version_api_v1_analyzers__analyzer_id__versions__version__patch",
         "parameters": [
           {
@@ -17668,7 +17681,7 @@
     },
     "/api/v1/evaluators/{evaluator_id}": {
       "delete": {
-        "description": "Delete an evaluator, cascading its versions.\n\nClients observe HTTP 204 on success and 404 when no evaluator has this\nid.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    service: Evaluator service.\n    actor: Caller context.",
+        "description": "Delete an evaluator, cascading its versions.\n\nClients observe HTTP 204 on success, 403 when the evaluator is\nserver-managed, and 404 when no evaluator has this id.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    service: Evaluator service.\n    actor: Caller context.",
         "operationId": "delete_evaluator_api_v1_evaluators__evaluator_id__delete",
         "parameters": [
           {
@@ -17825,7 +17838,7 @@
         ]
       },
       "patch": {
-        "description": "Update an evaluator.\n\nClients observe HTTP 200 on success, 404 when no evaluator has this id,\nand 422 on invalid input.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    body: Evaluator update request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Updated evaluator.",
+        "description": "Update an evaluator.\n\nClients observe HTTP 200 on success, 403 when the evaluator is\nserver-managed, 404 when no evaluator has this id, and 422 on invalid input.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    body: Evaluator update request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Updated evaluator.",
         "operationId": "update_evaluator_api_v1_evaluators__evaluator_id__patch",
         "parameters": [
           {
@@ -18036,7 +18049,7 @@
         ]
       },
       "post": {
-        "description": "Create an evaluator version.\n\nClients observe HTTP 201 on success, 404 when no evaluator has this id\nor a script source names an unknown blob, and 422 on invalid input.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    body: Evaluator version create request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Created evaluator version.",
+        "description": "Create an evaluator version.\n\nClients observe HTTP 201 on success, 403 when the evaluator is\nserver-managed, 404 when no evaluator has this id or a script source names\nan unknown blob, and 422 on invalid input.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    body: Evaluator version create request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Created evaluator version.",
         "operationId": "create_evaluator_version_api_v1_evaluators__evaluator_id__versions_post",
         "parameters": [
           {
@@ -18259,7 +18272,7 @@
         ]
       },
       "patch": {
-        "description": "Update an evaluator version's display version.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this evaluator.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    version: Version number.\n    body: Evaluator version update request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Updated evaluator version.",
+        "description": "Update an evaluator version's display version.\n\nClients observe HTTP 200 on success, 403 when the evaluator is\nserver-managed, and 404 when no version with this number exists for this\nevaluator.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    version: Version number.\n    body: Evaluator version update request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Updated evaluator version.",
         "operationId": "update_evaluator_version_api_v1_evaluators__evaluator_id__versions__version__patch",
         "parameters": [
           {
@@ -19798,7 +19811,7 @@
     },
     "/api/v1/importers/{importer_id}": {
       "delete": {
-        "description": "Delete an importer, cascading its versions.\n\nClients observe HTTP 204 on success and 404 when no importer has this\nid.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Importer service.\n    actor: Caller context.",
+        "description": "Delete an importer, cascading its versions.\n\nClients observe HTTP 204 on success, 403 when the importer is\nserver-managed, and 404 when no importer has this id.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Importer service.\n    actor: Caller context.",
         "operationId": "delete_importer_api_v1_importers__importer_id__delete",
         "parameters": [
           {
@@ -19955,7 +19968,7 @@
         ]
       },
       "patch": {
-        "description": "Update an importer.\n\nClients observe HTTP 200 on success, 404 when no importer has this id,\nand 422 on invalid input.\n\nArgs:\n    importer_id: Id of the importer.\n    body: Importer update request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Updated importer.",
+        "description": "Update an importer.\n\nClients observe HTTP 200 on success, 403 when the importer is\nserver-managed, 404 when no importer has this id, and 422 on invalid input.\n\nArgs:\n    importer_id: Id of the importer.\n    body: Importer update request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Updated importer.",
         "operationId": "update_importer_api_v1_importers__importer_id__patch",
         "parameters": [
           {
@@ -20166,7 +20179,7 @@
         ]
       },
       "post": {
-        "description": "Create an importer version.\n\nClients observe HTTP 201 on success, 404 when no importer has this id\nor a script source names an unknown blob, and 422 on invalid input.\n\nArgs:\n    importer_id: Id of the importer.\n    body: Importer version create request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Created importer version.",
+        "description": "Create an importer version.\n\nClients observe HTTP 201 on success, 403 when the importer is\nserver-managed, 404 when no importer has this id or a script source names\nan unknown blob, and 422 on invalid input.\n\nArgs:\n    importer_id: Id of the importer.\n    body: Importer version create request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Created importer version.",
         "operationId": "create_importer_version_api_v1_importers__importer_id__versions_post",
         "parameters": [
           {
@@ -20389,7 +20402,7 @@
         ]
       },
       "patch": {
-        "description": "Update an importer version's display version.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this importer.\n\nArgs:\n    importer_id: Id of the importer.\n    version: Version number.\n    body: Importer version update request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Updated importer version.",
+        "description": "Update an importer version's display version.\n\nClients observe HTTP 200 on success, 403 when the importer is\nserver-managed, and 404 when no version with this number exists for this\nimporter.\n\nArgs:\n    importer_id: Id of the importer.\n    version: Version number.\n    body: Importer version update request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Updated importer version.",
         "operationId": "update_importer_version_api_v1_importers__importer_id__versions__version__patch",
         "parameters": [
           {

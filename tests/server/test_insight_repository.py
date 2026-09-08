@@ -39,6 +39,7 @@ from kitaru.server.adapters.db.repositories.account_repository import (
 )
 from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
 from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.import_repository import SQLImportRepository
 from kitaru.server.adapters.db.repositories.insight_repository import (
     SQLInsightRepository,
 )
@@ -52,6 +53,7 @@ from kitaru.server.application.models.insight import InsightFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.blob import Blob, BlobStorageBackend
+from kitaru.server.domain.imports import Import
 from kitaru.server.domain.insight import Insight, InsightNotFound
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import (
@@ -61,7 +63,7 @@ from kitaru.server.domain.plugin import (
     ScriptPluginSource,
 )
 from kitaru.server.domain.task import AnalysisTask, TaskNotFound
-from kitaru.server.filtering import FilterCondition
+from kitaru.server.filtering import FilterCondition, NotExpression
 
 
 class Setup(NamedTuple):
@@ -72,7 +74,7 @@ class Setup(NamedTuple):
     agent_id: uuid.UUID
     make_agent_id: Callable[[], Awaitable[uuid.UUID]]
     make_analyzer_version_id: Callable[[], Awaitable[uuid.UUID]]
-    make_task_id: Callable[[uuid.UUID], Awaitable[uuid.UUID]]
+    make_task_id: Callable[[uuid.UUID, uuid.UUID], Awaitable[uuid.UUID]]
 
 
 async def _seed_postgres(session: AsyncSession) -> Setup:
@@ -120,14 +122,19 @@ async def _seed_postgres(session: AsyncSession) -> Setup:
         )
         return version.id
 
-    async def make_task_id(analyzer_version_id: uuid.UUID) -> uuid.UUID:
+    async def make_task_id(
+        analyzer_version_id: uuid.UUID, import_id: uuid.UUID
+    ) -> uuid.UUID:
+        await SQLImportRepository(session).create(
+            Import(id=import_id, owner_id=owner.id, agent_id=agent.id, fetch_query={})
+        )
         job = await jobs.create(Job(owner_id=owner.id, kind=JobKind.SESSION_RUN))
         task = await tasks.create(
             AnalysisTask(
                 job_id=job.id,
                 plugin_version_id=analyzer_version_id,
                 agent_id=agent.id,
-                import_id=uuid.uuid4(),
+                import_id=import_id,
             )
         )
         return task.id
@@ -166,13 +173,15 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             )
             return version.id
 
-        async def make_task_id(analyzer_version_id: uuid.UUID) -> uuid.UUID:
+        async def make_task_id(
+            analyzer_version_id: uuid.UUID, import_id: uuid.UUID
+        ) -> uuid.UUID:
             task = await task_repository.create(
                 AnalysisTask(
                     job_id=uuid.uuid4(),
                     plugin_version_id=analyzer_version_id,
                     agent_id=agent_id,
-                    import_id=uuid.uuid4(),
+                    import_id=import_id,
                 )
             )
             return task.id
@@ -286,7 +295,8 @@ async def test_create_many_names_a_missing_task() -> None:
 async def test_create_and_get_carries_provenance(setup: Setup) -> None:
     """Round-trip an insight's provenance fields."""
     analyzer_version_id = await setup.make_analyzer_version_id()
-    task_id = await setup.make_task_id(analyzer_version_id)
+    import_id = uuid.uuid4()
+    task_id = await setup.make_task_id(analyzer_version_id, import_id)
     invocation_id = uuid.uuid4()
     created = await _create_insight(
         setup.insights,
@@ -294,18 +304,68 @@ async def test_create_and_get_carries_provenance(setup: Setup) -> None:
         setup.agent_id,
         analyzer_version_id=analyzer_version_id,
         task_id=task_id,
+        import_id=import_id,
         invocation_id=invocation_id,
         analyzer_params={"threshold": 0.5},
         params_hash="a" * 64,
     )
     assert created.analyzer_version_id == analyzer_version_id
     assert created.task_id == task_id
+    assert created.import_id == import_id
     assert created.invocation_id == invocation_id
     assert created.analyzer_params == {"threshold": 0.5}
     assert created.params_hash == "a" * 64
 
     loaded = await setup.insights.get(created.id)
     assert loaded == created
+
+
+async def test_analyzer_delete_nulls_version_and_keeps_invocation_provenance() -> None:
+    """Deleting an analyzer clears its foreign key and retains the insight."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, _):
+        setup = await _seed_postgres(session)
+        blobs = SQLBlobRepository(session)
+        plugins = SQLPluginRepository(session)
+        code_blob, _ = await blobs.create(
+            Blob(
+                owner_id=setup.owner_id,
+                sha256=uuid.uuid4().hex.ljust(64, "0"),
+                size=4,
+                media_type="text/x-python",
+                stored_in=BlobStorageBackend.DATABASE,
+            )
+        )
+        plugin = await plugins.create(
+            Plugin(
+                owner_id=setup.owner_id,
+                kind=PluginKind.ANALYZER,
+                name="trends",
+            )
+        )
+        version = await plugins.create_version(
+            plugin.id,
+            ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
+            display_version=None,
+        )
+        stored = await _create_insight(
+            setup.insights,
+            setup.owner_id,
+            setup.agent_id,
+            analyzer_version_id=version.id,
+            invocation_id=uuid.uuid4(),
+            analyzer_params={"threshold": 0.5},
+            params_hash="a" * 64,
+        )
+
+        await plugins.delete(plugin.id)
+
+        item = await setup.insights.get(stored.id)
+        assert item.analyzer_version_id is None
+        assert item.invocation_id == stored.invocation_id
+        assert item.analyzer_params == stored.analyzer_params
+        assert item.params_hash == stored.params_hash
 
 
 async def test_get_not_found(setup: Setup) -> None:
@@ -327,6 +387,89 @@ async def test_query_filters_by_agent_id(setup: Setup) -> None:
         )
     )
     assert [insight.id for insight in insights] == [matching.id]
+
+
+async def test_query_filters_by_import_with_pagination_and_negation(
+    setup: Setup,
+) -> None:
+    """Select one import's cards without including other or manual cards."""
+    version_id = await setup.make_analyzer_version_id()
+    import_id, other_import_id = uuid.uuid4(), uuid.uuid4()
+    task_id = await setup.make_task_id(version_id, import_id)
+    other_task_id = await setup.make_task_id(version_id, other_import_id)
+    matching = [
+        await _create_insight(
+            setup.insights,
+            setup.owner_id,
+            setup.agent_id,
+            task_id=task_id,
+            import_id=import_id,
+        )
+        for _ in range(3)
+    ]
+    other = await _create_insight(
+        setup.insights,
+        setup.owner_id,
+        setup.agent_id,
+        task_id=other_task_id,
+        import_id=other_import_id,
+    )
+    condition = {"field": "import_id", "op": "eq", "value": str(import_id)}
+    collected: list[uuid.UUID] = []
+    cursor = None
+    while True:
+        page, cursor = await setup.insights.query(
+            InsightFilter.model_validate(
+                {"expression": condition, "size": 2, "cursor": cursor}
+            )
+        )
+        collected.extend(item.id for item in page)
+        if cursor is None:
+            break
+    assert collected == [item.id for item in reversed(matching)]
+    negated, _ = await setup.insights.query(
+        InsightFilter(
+            expression=NotExpression(operand=FilterCondition.model_validate(condition))
+        )
+    )
+    assert {item.id for item in negated} == {other.id}
+    await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
+    both, _ = await setup.insights.query(
+        InsightFilter.model_validate(
+            {
+                "expression": {
+                    "field": "import_id",
+                    "op": "in",
+                    "value": [str(import_id), str(other_import_id)],
+                }
+            }
+        )
+    )
+    assert {item.id for item in both} == {item.id for item in matching} | {other.id}
+    missing, _ = await setup.insights.query(
+        InsightFilter(
+            expression=FilterCondition(
+                field="import_id", op=FilterOp.EQ, value=uuid.uuid4()
+            )
+        )
+    )
+    assert missing == []
+
+
+@pytest.mark.parametrize("setup", ["postgres"], indirect=True)
+async def test_negated_import_filter_excludes_null_imports(setup: Setup) -> None:
+    """Use SQL null semantics when negating a direct import column filter."""
+    await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
+    insights, _ = await setup.insights.query(
+        InsightFilter(
+            expression=NotExpression(
+                operand=FilterCondition(
+                    field="import_id", op=FilterOp.EQ, value=uuid.uuid4()
+                )
+            )
+        )
+    )
+    assert insights == []
 
 
 async def test_query_filters_by_name(setup: Setup) -> None:

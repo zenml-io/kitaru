@@ -84,6 +84,12 @@ class PluginCreate(FrozenModel):
     agent_id: uuid.UUID | None = None
 
 
+class PluginVersionUpdate(FrozenModel):
+    """Plugin version update command."""
+
+    display_version: str | None = None
+
+
 class PluginUpdate(FrozenModel):
     """Plugin update command."""
 

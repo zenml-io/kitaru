@@ -1054,6 +1054,52 @@ async def test_waited_session_import_returns_validated_stats_and_task_action(
     assert '"field":"task_id"' in result.next_actions[0]
 
 
+def _run_terminal_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    job: JobResponse,
+    tasks: list[TaskResponse],
+) -> tuple[int, dict[str, Any]]:
+    """Invoke a waited CLI import against a settled remote job."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield client
+
+    async def wait_for_terminal_tasks(*args, **kwargs):
+        assert args[1] == client.job.id
+        return job, tasks
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(
+        sessions.receipts, "wait_for_terminal_tasks", wait_for_terminal_tasks
+    )
+    exit_code = app_module.main(
+        [
+            "session",
+            "import",
+            str(payload),
+            "--importer",
+            "jsonl@2",
+            "--agent",
+            "assistant@3",
+            "--wait",
+        ]
+    )
+    captured = capsys.readouterr()
+    events = [json.loads(line) for line in captured.out.splitlines()]
+    assert events[0]["event"] == "created"
+    if exit_code:
+        return exit_code, json.loads(captured.err)["error"]
+    assert captured.err == ""
+    assert events[-1]["event"] == "terminal"
+    return exit_code, events[-1]
+
+
 @pytest.mark.parametrize(
     ("job_status", "task_status", "stats", "kind"),
     [
@@ -1073,7 +1119,9 @@ async def test_waited_session_import_returns_validated_stats_and_task_action(
     ],
 )
 def test_terminal_import_preserves_partial_and_remote_outcomes(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     job_status: JobStatus,
     task_status: TaskStatus,
     stats: dict[str, Any] | None,
@@ -1082,26 +1130,16 @@ def test_terminal_import_preserves_partial_and_remote_outcomes(
     """Item failures and remote settlement retain the enriched receipt."""
     job = _job(job_status)
     task = _task(job, status=task_status, result=stats)
-    monkeypatch.setattr(sessions, "emit_event", lambda *args: None)
+    exit_code, error = _run_terminal_import(tmp_path, monkeypatch, capsys, job, [task])
 
-    def terminal_job_error(job: JobResponse, receipt: dict[str, Any]) -> CLIError:
-        remote_kind = (
-            "remote_failed" if job.status is JobStatus.FAILED else "remote_canceled"
-        )
-        return CLIError(remote_kind, "remote outcome", details={"receipt": receipt})
-
-    monkeypatch.setattr(sessions.receipts, "terminal_job_error", terminal_job_error)
-
-    with pytest.raises(CLIError) as error:
-        sessions._terminal_import_result(job, [task], identity={"blob": {}})
-
-    assert error.value.kind == kind
-    receipt = error.value.details["receipt"]
+    assert exit_code != 0
+    assert error["kind"] == kind
+    receipt = error["details"]["receipt"]
     assert receipt["task"]["id"] == str(task.id)
     assert receipt["task"]["error"] == task.error
     if stats is not None:
         assert receipt["stats"]["failed"] == 1
-    assert str(task.id) in error.value.details["next_actions"][0]
+    assert str(task.id) in error["details"]["next_actions"][0]
 
 
 @pytest.mark.parametrize(
@@ -1112,7 +1150,9 @@ def test_terminal_import_preserves_partial_and_remote_outcomes(
     ],
 )
 def test_terminal_import_ignores_malformed_remote_diagnostics(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     job_status: JobStatus,
     task_status: TaskStatus,
     kind: str,
@@ -1121,16 +1161,11 @@ def test_terminal_import_ignores_malformed_remote_diagnostics(
     job = _job(job_status)
     task = _task(job, status=task_status, result={"diagnostic": "worker stopped"})
 
-    def terminal_job_error(job: JobResponse, receipt: dict[str, Any]) -> CLIError:
-        return CLIError(kind, "remote outcome", details={"receipt": receipt})
+    exit_code, error = _run_terminal_import(tmp_path, monkeypatch, capsys, job, [task])
 
-    monkeypatch.setattr(sessions.receipts, "terminal_job_error", terminal_job_error)
-
-    with pytest.raises(CLIError) as error:
-        sessions._terminal_import_result(job, [task], identity={})
-
-    assert error.value.kind == kind
-    assert "stats" not in error.value.details["receipt"]
+    assert exit_code != 0
+    assert error["kind"] == kind
+    assert "stats" not in error["details"]["receipt"]
 
 
 def test_session_import_argv_registers_streaming_created_receipt(
@@ -1224,16 +1259,62 @@ async def test_session_import_rejects_invalid_join_pointer_before_upload(
     ],
 )
 def test_terminal_import_rejects_missing_or_malformed_completed_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     tasks: list[TaskResponse] | None,
 ) -> None:
     """Completed receipts reject invalid task sets and malformed statistics."""
     job = _job(JobStatus.COMPLETED)
     observed = tasks if tasks is not None else [_task(job, result={"created": "bad"})]
 
-    with pytest.raises(CLIError) as error:
-        sessions._terminal_import_result(job, observed, identity={})
+    exit_code, error = _run_terminal_import(
+        tmp_path, monkeypatch, capsys, job, observed
+    )
 
-    assert error.value.kind == "internal_error"
+    assert exit_code != 0
+    assert error["kind"] == "internal_error"
+
+
+@pytest.mark.parametrize("extra_kind", [TaskKind.ANALYZER, TaskKind.EVALUATOR])
+@pytest.mark.parametrize("importer_first", [True, False])
+def test_terminal_import_accepts_followup_tasks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    extra_kind: TaskKind,
+    importer_first: bool,
+) -> None:
+    """Read importer statistics even when a job includes follow-up tasks."""
+    job = _job(JobStatus.COMPLETED)
+    importer = _task(job, result={"created": 3, "skipped": 0, "failed": 0})
+    extra = _task(job, kind=extra_kind, result=[])
+    tasks = [importer, extra] if importer_first else [extra, importer]
+
+    exit_code, result = _run_terminal_import(tmp_path, monkeypatch, capsys, job, tasks)
+
+    assert exit_code == 0
+    assert result["item"]["task"]["id"] == str(importer.id)
+    assert result["item"]["stats"]["created"] == 3
+
+
+@pytest.mark.parametrize("importer_count", [0, 2])
+def test_terminal_import_requires_exactly_one_importer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    importer_count: int,
+) -> None:
+    """Follow-up tasks do not hide missing or duplicate importer tasks."""
+    job = _job(JobStatus.COMPLETED)
+    tasks = [_task(job, kind=TaskKind.ANALYZER, result=[])] + [
+        _task(job, result={"created": 3, "skipped": 0, "failed": 0})
+        for _ in range(importer_count)
+    ]
+    exit_code, error = _run_terminal_import(tmp_path, monkeypatch, capsys, job, tasks)
+    assert exit_code != 0
+    assert error["kind"] == "internal_error"
+    assert "exactly one importer task" in error["message"]
 
 
 def test_terminal_import_selects_importer_task_among_evaluator_tasks() -> None:

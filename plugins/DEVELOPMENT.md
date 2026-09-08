@@ -4,7 +4,7 @@ This guide explains how to test and publish the plugin distributions in `plugins
 
 ## Understand the package model
 
-Each adapter and importer is an independent Python distribution. All built-in evaluators share the `kitaru-evaluator` distribution. Adapter distributions are installed directly in agent environments and are not registered in the server's default plugin catalog.
+Each directory under `plugins/packages/` is an independent Python distribution. All built-in evaluators share the `kitaru-evaluator` distribution. The deterministic and OpenAI post-import analyzers share `kitaru-post-import-insights`, with separate catalog names and entrypoints. Adapter distributions are installed directly in agent environments and are not registered in the server's default plugin catalog.
 
 The default catalog lives in `src/kitaru/server/api/bootstrap.py`. Server startup stores one package source for each definition. The source contains an exact requirement and a `module:callable` entrypoint. The server does not install or import the plugin package.
 
@@ -107,7 +107,7 @@ docker run --rm kitaru-plugin-e2e:local \
   python -c 'from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS; print(f"definitions={len(DEFAULT_PLUGIN_DEFINITIONS)}"); [print(d.kind.value, d.name, d.requirement, d.entrypoint) for d in DEFAULT_PLUGIN_DEFINITIONS]'
 ```
 
-The current catalog contains six importers and thirteen evaluators. Adapter distributions are installed directly by agent projects and are not registered in this catalog.
+The catalog includes importers, evaluators, and both post-import insights analyzers. Adapter distributions are installed directly by agent projects and are not registered in this catalog.
 
 ## Start the candidate server
 
@@ -136,6 +136,7 @@ List all default plugins:
 ```bash
 uv run --no-sync kitaru importer list --server "$KITARU_API_URL" --size 100
 uv run --no-sync kitaru evaluator list --server "$KITARU_API_URL" --size 100
+uv run --no-sync kitaru analyzer list --server "$KITARU_API_URL" --size 100
 ```
 
 Inspect exact package sources:
@@ -238,7 +239,8 @@ kitaru worker start \
   --server "$KITARU_API_URL" \
   --name local-wheel-worker \
   --claim importer \
-  --claim evaluator
+  --claim evaluator \
+  --claim analyzer
 ```
 
 Keep the worker active while you create an import or evaluation job. Task subprocesses inherit `UV_FIND_LINKS` and resolve the candidate wheels.
@@ -275,6 +277,7 @@ Use the package directory and distribution name from this table:
 | `langgraph` | `kitaru-langgraph` | `python/kitaru-langgraph/vX.Y.Z` |
 | `logfire-importer` | `kitaru-logfire-importer` | `python/kitaru-logfire-importer/vX.Y.Z` |
 | `phoenix-importer` | `kitaru-phoenix-importer` | `python/kitaru-phoenix-importer/vX.Y.Z` |
+| `post-import-insights` | `kitaru-post-import-insights` | `python/kitaru-post-import-insights/vX.Y.Z` |
 | `langsmith-importer` | `kitaru-langsmith-importer` | `python/kitaru-langsmith-importer/vX.Y.Z` |
 | `openai-agents` | `kitaru-openai-agents` | `python/kitaru-openai-agents/vX.Y.Z` |
 | `pydantic-ai` | `kitaru-pydantic-ai` | `python/kitaru-pydantic-ai/vX.Y.Z` |

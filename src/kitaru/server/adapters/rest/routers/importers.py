@@ -114,7 +114,7 @@ async def get_importer(
     return await plugins.get_plugin(service, importer_id, ImporterResponse, actor=actor)
 
 
-@router.patch("/{importer_id}", responses=error_responses(404))
+@router.patch("/{importer_id}", responses=error_responses(403, 404))
 async def update_importer(
     importer_id: uuid.UUID,
     body: ImporterUpdateRequest,
@@ -123,8 +123,8 @@ async def update_importer(
 ) -> ImporterResponse:
     """Update an importer.
 
-    Clients observe HTTP 200 on success, 404 when no importer has this id,
-    and 422 on invalid input.
+    Clients observe HTTP 200 on success, 403 when the importer is
+    server-managed, 404 when no importer has this id, and 422 on invalid input.
 
     Args:
         importer_id: Id of the importer.
@@ -143,7 +143,7 @@ async def update_importer(
 @router.delete(
     "/{importer_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=error_responses(404),
+    responses=error_responses(403, 404),
 )
 async def delete_importer(
     importer_id: uuid.UUID,
@@ -152,8 +152,8 @@ async def delete_importer(
 ) -> None:
     """Delete an importer, cascading its versions.
 
-    Clients observe HTTP 204 on success and 404 when no importer has this
-    id.
+    Clients observe HTTP 204 on success, 403 when the importer is
+    server-managed, and 404 when no importer has this id.
 
     Args:
         importer_id: Id of the importer.
@@ -166,7 +166,7 @@ async def delete_importer(
 @router.post(
     "/{importer_id}/versions",
     status_code=status.HTTP_201_CREATED,
-    responses=error_responses(400, 404, 409),
+    responses=error_responses(400, 403, 404, 409),
 )
 @idempotent
 async def create_importer_version(
@@ -177,8 +177,9 @@ async def create_importer_version(
 ) -> ImporterVersionResponse:
     """Create an importer version.
 
-    Clients observe HTTP 201 on success, 404 when no importer has this id
-    or a script source names an unknown blob, and 422 on invalid input.
+    Clients observe HTTP 201 on success, 403 when the importer is
+    server-managed, 404 when no importer has this id or a script source names
+    an unknown blob, and 422 on invalid input.
 
     Args:
         importer_id: Id of the importer.
@@ -251,7 +252,7 @@ async def get_importer_version(
     )
 
 
-@router.patch("/{importer_id}/versions/{version}", responses=error_responses(404))
+@router.patch("/{importer_id}/versions/{version}", responses=error_responses(403, 404))
 async def update_importer_version(
     importer_id: uuid.UUID,
     version: Annotated[int, Path(ge=1, le=plugins.INT32_MAX)],
@@ -261,8 +262,9 @@ async def update_importer_version(
 ) -> ImporterVersionResponse:
     """Update an importer version's display version.
 
-    Clients observe HTTP 200 on success and 404 when no version with this
-    number exists for this importer.
+    Clients observe HTTP 200 on success, 403 when the importer is
+    server-managed, and 404 when no version with this number exists for this
+    importer.
 
     Args:
         importer_id: Id of the importer.
@@ -278,7 +280,7 @@ async def update_importer_version(
         service,
         importer_id,
         version,
-        body.display_version,
+        body,
         ImporterVersionResponse,
         actor=actor,
     )

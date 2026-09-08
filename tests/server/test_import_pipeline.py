@@ -15,6 +15,7 @@
 
 import uuid
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -556,15 +557,18 @@ async def test_in_progress_session_does_not_block_the_analysis_task(
     assert analysis_task.import_id == import_.id
 
 
-async def test_import_whose_sessions_are_all_in_progress_appends_no_analysis_task(
+@pytest.mark.parametrize("in_progress", [False, True])
+async def test_all_analyzers_skip_without_eligible_sessions(
     services: ReplayServices,
+    in_progress: bool,
 ) -> None:
-    """An import whose sessions are all in progress appends no analysis task."""
-    analyzer = await _analyzer(services, "trends")
-    import_, import_task = await _import_with_task(services, [], [analyzer])
-    await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
+    """Empty and unfinished-only imports do not launch analysis tasks."""
+    analyzer = await _analyzer(services, "kitaru/post-import-insights")
+    custom = await _analyzer(services, "trends")
+    import_, import_task = await _import_with_task(services, [], [analyzer, custom])
+    if in_progress:
+        await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
     worker = await create_worker(services.workers, ACTOR.account.id)
-
     (running,) = await _claim_and_start(services, worker, 1)
     await _finish(
         services,
@@ -572,8 +576,34 @@ async def test_import_whose_sessions_are_all_in_progress_appends_no_analysis_tas
         running,
         TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
     )
+    analysis_tasks = await _analysis_tasks(services, import_task.job_id)
+    assert analysis_tasks == []
+    assert (await services.jobs.get(import_task.job_id)).status is JobStatus.COMPLETED
 
-    assert await _analysis_tasks(services, import_task.job_id) == []
+
+@pytest.mark.parametrize("name", ["kitaru/post-import-insights", "trends"])
+async def test_analyzer_only_import_checks_session_eligibility(
+    services: ReplayServices, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Analysis scheduling checks eligibility even without evaluators."""
+    analyzer = await _analyzer(services, name)
+    import_, import_task = await _import_with_task(services, [], [analyzer])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    (running,) = await _claim_and_start(services, worker, 1)
+    query = AsyncMock(wraps=services.sessions.query)
+    monkeypatch.setattr(services.sessions, "query", query)
+
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+
+    query.assert_awaited_once()
+    (analysis_task,) = await _analysis_tasks(services, import_task.job_id)
+    assert analysis_task.plugin_version_id == analyzer.analyzer_version_id
 
 
 async def test_evaluator_and_analysis_tasks_land_in_one_job(

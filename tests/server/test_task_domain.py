@@ -282,7 +282,6 @@ def _analysis_task(**overrides: Any) -> AnalysisTask:
     "result",
     [
         None,
-        [],
         "not-a-list",
         [{"title": "Trend", "data": {"type": "text", "content": "x"}}],
         [{"name": "trend", "data": {"type": "text", "content": "x"}}],
@@ -290,14 +289,15 @@ def _analysis_task(**overrides: Any) -> AnalysisTask:
     ],
 )
 def test_analyzer_result_validation(result: object) -> None:
-    """An analyzer result must be a non-empty list of uniquely named results."""
+    """An analyzer result must be a list of uniquely named results."""
     task = _analysis_task()
     with pytest.raises(InvalidTaskResult):
         task.complete(result, NOW)
     assert task.status is TaskStatus.RUNNING
 
 
-def test_analyzer_result_accepted() -> None:
+@pytest.mark.parametrize("empty", [False, True])
+def test_analyzer_result_accepted(empty: bool) -> None:
     """A valid analyzer result completes the task and is stored."""
     result = [
         _INSIGHT,
@@ -307,6 +307,8 @@ def test_analyzer_result_accepted() -> None:
             "data": {"type": "text", "content": "y"},
         },
     ]
+    if empty:
+        result = []
     task = _analysis_task()
     task.complete(result, NOW)
     assert task.status is TaskStatus.COMPLETED

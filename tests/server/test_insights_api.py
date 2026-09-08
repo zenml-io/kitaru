@@ -251,6 +251,7 @@ async def test_get_insight(client: httpx.AsyncClient, agent_id: str) -> None:
     assert body == created
     assert body["analyzer_version_id"] is None
     assert body["analyzer_params"] is None
+    assert body["import_id"] is None
 
 
 async def test_get_insight_not_found(client: httpx.AsyncClient) -> None:
@@ -284,6 +285,7 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight(
                 data=TextInsightData(content="Latency regressed."),
                 analyzer_version_id=version.id,
                 analyzer_params={"window_days": 7},
+                import_id=uuid.uuid4(),
             )
         ]
     )
@@ -293,6 +295,7 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight(
     body = response.json()
     assert body["analyzer_version_id"] == str(version.id)
     assert body["analyzer_params"] == {"window_days": 7}
+    assert body["import_id"] == str(stored[0].import_id)
 
 
 async def test_list_insights_filters_by_agent_id(
@@ -316,6 +319,22 @@ async def test_list_insights_filters_by_agent_id(
     body = response.json()
     assert len(body["items"]) == 1
     assert body["items"][0]["agent_id"] == agent_id
+
+
+@pytest.mark.parametrize("value, status", [(str(uuid.uuid4()), 200), ("bad-id", 422)])
+async def test_list_insights_validates_import_filter(
+    client: httpx.AsyncClient, value: str, status: int
+) -> None:
+    """Accept an import scope and reject malformed import identifiers."""
+    response = await client.get(
+        "/api/v1/insights",
+        params={
+            "filter": json.dumps({"field": "import_id", "op": "eq", "value": value})
+        },
+    )
+    assert response.status_code == status
+    if status == 200:
+        assert response.json()["items"] == []
 
 
 async def test_list_insights_filters_by_name(

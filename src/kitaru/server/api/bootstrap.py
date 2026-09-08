@@ -127,6 +127,12 @@ class PhoenixConnection(BaseModel):
     )
 
 
+class OpenAIConnection(BaseModel):
+    """OpenAI connection."""
+
+    OPENAI_API_KEY: SecretStr
+
+
 class DefaultPluginDefinition(FrozenModel):
     """Default plugin definition."""
 
@@ -142,6 +148,27 @@ class DefaultPluginDefinition(FrozenModel):
 
 
 DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
+    DefaultPluginDefinition(
+        kind=PluginKind.ANALYZER,
+        name="kitaru/post-import-insights",
+        description="Generate deterministic insights from imported sessions.",
+        provider=None,
+        entrypoint="kitaru_post_import_insights.analyzer:analyze_post_import_sessions",
+        requirement="kitaru-post-import-insights==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.ANALYZER,
+        name="kitaru/openai-post-import-insights",
+        description=(
+            "Generate insights selected and edited by OpenAI from imported sessions."
+        ),
+        provider="openai",
+        entrypoint="kitaru_post_import_insights.analyzer:analyze_openai_post_import_sessions",
+        requirement="kitaru-post-import-insights==0.1.0",
+        display_version="0.1.0",
+        connection_schema=OpenAIConnection,
+    ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
         name=f"{RESERVED_NAMESPACE}/braintrust",

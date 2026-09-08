@@ -46,6 +46,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_worker_service,
 )
 from kitaru.server.api.app import create_app
+from kitaru.server.api.bootstrap import register_default_plugins
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.worker_service import WorkerService
@@ -56,9 +57,11 @@ ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 
 @pytest.fixture
-def services() -> JobAndTaskServices:
+async def services() -> JobAndTaskServices:
     """Provide fake-backed job and task services."""
-    return build_job_and_task_services()
+    services = build_job_and_task_services()
+    await register_default_plugins(services.plugins)
+    return services
 
 
 @pytest.fixture

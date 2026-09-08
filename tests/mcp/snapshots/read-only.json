@@ -6684,6 +6684,20 @@
               "title": "Id",
               "type": "string"
             },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import whose sessions produced the insight.",
+              "title": "Import Id"
+            },
             "metadata": {
               "additionalProperties": true,
               "description": "Arbitrary metadata.",
