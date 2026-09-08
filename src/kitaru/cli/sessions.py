@@ -242,12 +242,14 @@ def _get_import_stats(
     job: JobResponse, tasks: list[TaskResponse]
 ) -> tuple[TaskResponse, ImportStats | None]:
     """Validate the single importer task and its optional diagnostic result."""
-    if len(tasks) != 1 or tasks[0].kind is not TaskKind.IMPORTER:
+    # Evaluator and analyzer tasks named on the import share its job.
+    importer_tasks = [task for task in tasks if task.kind is TaskKind.IMPORTER]
+    if len(importer_tasks) != 1:
         raise _internal_receipt_error(
             "An import job must contain exactly one importer task.", job, tasks
         )
 
-    task = tasks[0]
+    task = importer_tasks[0]
     stats = None
     if task.result is not None:
         try:
