@@ -189,7 +189,7 @@ jobs:
         env:
           KITARU_VERSION: ${{ needs.build.outputs.version }}
         run: curl -fsS "https://pypi.org/pypi/kitaru/$KITARU_VERSION/json" >/dev/null
-      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4.3.0
         with:
           platforms: arm64
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
@@ -282,7 +282,7 @@ jobs:
           echo "### Managed image publication failed" >> "$GITHUB_STEP_SUMMARY"
           echo "The private ECR images are unavailable for this release. Public Docker Hub images and the Helm chart continue publishing." >> "$GITHUB_STEP_SUMMARY"
       - name: Configure AWS credentials for Helm
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: arn:aws:iam::715803424590:role/gh-action-role-zenml-helm
           aws-region: us-east-1
