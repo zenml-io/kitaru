@@ -1317,6 +1317,22 @@ def test_terminal_import_requires_exactly_one_importer(
     assert "exactly one importer task" in error["message"]
 
 
+def test_terminal_import_selects_importer_task_among_evaluator_tasks() -> None:
+    """Evaluator tasks appended to the import job do not hide the importer task."""
+    job = _job(JobStatus.COMPLETED)
+    importer_task = _task(
+        job, result={"created": 2, "skipped": 0, "failed": 0, "failures": []}
+    )
+    evaluator_tasks = [_task(job, kind=TaskKind.EVALUATOR) for _ in range(3)]
+
+    result = sessions._terminal_import_result(
+        job, [*evaluator_tasks, importer_task], identity={}
+    )
+
+    assert result.item["task"]["id"] == str(importer_task.id)
+    assert result.item["stats"]["created"] == 2
+
+
 @pytest.mark.parametrize(
     "filter_value", ["not-json", '{"or": []}', '{"field": "node_type"}']
 )

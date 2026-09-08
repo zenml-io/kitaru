@@ -242,6 +242,7 @@ def _get_import_stats(
     job: JobResponse, tasks: list[TaskResponse]
 ) -> tuple[TaskResponse, ImportStats | None]:
     """Validate the single importer task and its optional diagnostic result."""
+    # Evaluator and analyzer tasks named on the import share its job.
     importer_tasks = [task for task in tasks if task.kind is TaskKind.IMPORTER]
     if len(importer_tasks) != 1:
         raise _internal_receipt_error(
