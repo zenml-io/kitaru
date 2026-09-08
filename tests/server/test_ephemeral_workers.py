@@ -36,7 +36,7 @@ from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import LabelSelector, WorkerClaim, WorkerScope
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.jwt import JWTToken
-from kitaru.server.adapters.rest.ephemeral_workers import start_ephemeral_worker
+from kitaru.server.adapters.rest.ephemeral_workers import EphemeralWorkerStarter
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
 from kitaru.server.application.models.imports import ImportCreate
@@ -128,17 +128,18 @@ async def _start(
 ) -> None:
     """Schedule the start for a job and run the background tasks."""
     background_tasks = BackgroundTasks()
-    await start_ephemeral_worker(
-        job.id,
-        services.job_service,
-        WorkerService(repository=services.workers, liveness_timeout_seconds=60),
-        auth_service,
-        ephemeral_workers,
-        settings,
-        SERVER_ID,
-        background_tasks,
-        ACTOR,
+    starter = EphemeralWorkerStarter(
+        job_service=services.job_service,
+        worker_service=WorkerService(
+            repository=services.workers, liveness_timeout_seconds=60
+        ),
+        auth_service=auth_service,
+        ephemeral_workers=ephemeral_workers,
+        settings=settings,
+        server_id=SERVER_ID,
+        background_tasks=background_tasks,
     )
+    await starter.start(job.id, actor=ACTOR)
     await background_tasks()
 
 
