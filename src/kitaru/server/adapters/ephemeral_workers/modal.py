@@ -35,6 +35,9 @@ class ModalEphemeralWorkers:
         self._image = settings.get_image()
         self._command = shlex.split(settings.command)
         self._timeout_seconds = settings.timeout_seconds
+        self._env = {
+            key: value.get_secret_value() for key, value in settings.env.items()
+        }
         self._client: modal.Client | None = None
 
     async def _get_client(self) -> modal.Client:
@@ -69,7 +72,10 @@ class ModalEphemeralWorkers:
             name=spec.name,
             tags=spec.tags,
             image=modal.Image.from_registry(self._image),
+            # The contract variables go last so a configured value cannot
+            # override them.
             env={
+                **self._env,
                 "KITARU_API_URL": spec.server_url,
                 "KITARU_API_TOKEN": spec.worker_token.get_secret_value(),
                 "KITARU_WORKER_ID": str(spec.worker_id),
