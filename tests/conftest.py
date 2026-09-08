@@ -6724,6 +6724,7 @@ async def create_analysis_task(
     plugin_version_id: uuid.UUID | None = None,
     agent_id: uuid.UUID | None = None,
     import_id: uuid.UUID | None = None,
+    connection_id: uuid.UUID | None = None,
     params: dict[str, Any] | None = None,
     labels: dict[str, str] | None = None,
     on_failure: TaskOnFailure = TaskOnFailure.CONTINUE,
@@ -6736,6 +6737,7 @@ async def create_analysis_task(
         plugin_version_id: Analyzer version the task runs.
         agent_id: Agent the produced insights belong to.
         import_id: Import whose sessions are analyzed.
+        connection_id: Connection injected into the task environment.
         params: Parameters passed to the analyzer.
         labels: Labels matched by worker scope selectors.
         on_failure: Effect of a hard failure on the job.
@@ -6750,6 +6752,7 @@ async def create_analysis_task(
         ),
         agent_id=agent_id if agent_id is not None else uuid.uuid4(),
         import_id=import_id if import_id is not None else uuid.uuid4(),
+        connection_id=connection_id,
         params=params if params is not None else {},
         labels=labels if labels is not None else {},
         on_failure=on_failure,

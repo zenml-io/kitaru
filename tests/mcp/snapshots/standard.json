@@ -665,6 +665,19 @@
         "AnalyzerResponse": {
           "description": "Analyzer response.",
           "properties": {
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "JSON Schema of the connection values this analyzer reads.",
+              "title": "Connection Schema"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -730,6 +743,18 @@
               "description": "Id of the owning account, null for a default plugin.",
               "title": "Owner Id"
             },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "External service this analyzer calls.",
+              "title": "Provider"
+            },
             "updated": {
               "description": "Last modification time.",
               "format": "date-time",
@@ -744,8 +769,10 @@
             "id",
             "name",
             "description",
+            "provider",
             "logo_url",
             "metadata",
+            "connection_schema",
             "latest_version"
           ],
           "title": "AnalyzerResponse",
@@ -3040,6 +3067,20 @@
               "description": "Analyzer name.",
               "title": "Analyzer",
               "type": "string"
+            },
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Connection supplying provider credentials, an omitted value resolves to the provider's default.",
+              "title": "Connection Id"
             },
             "params": {
               "additionalProperties": true,
@@ -9130,6 +9171,20 @@
               "title": "Analyzer",
               "type": "string"
             },
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Connection supplying provider credentials, an omitted value resolves to the provider's default.",
+              "title": "Connection Id"
+            },
             "params": {
               "additionalProperties": true,
               "description": "Parameters passed to the analyzer.",
@@ -12992,6 +13047,19 @@
           "additionalProperties": false,
           "description": "Create an analyzer parent.",
           "properties": {
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Connection Schema"
+            },
             "description": {
               "anyOf": [
                 {
@@ -13031,6 +13099,18 @@
               "const": "create",
               "title": "Operation",
               "type": "string"
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Provider"
             }
           },
           "required": [
@@ -13049,10 +13129,28 @@
               "title": "Analyzer Id",
               "type": "string"
             },
+            "clear_connection_schema": {
+              "default": false,
+              "title": "Clear Connection Schema",
+              "type": "boolean"
+            },
             "clear_description": {
               "default": false,
               "title": "Clear Description",
               "type": "boolean"
+            },
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Connection Schema"
             },
             "description": {
               "anyOf": [
@@ -13301,6 +13399,19 @@
         "AnalyzerResponse": {
           "description": "Analyzer response.",
           "properties": {
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "JSON Schema of the connection values this analyzer reads.",
+              "title": "Connection Schema"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -13366,6 +13477,18 @@
               "description": "Id of the owning account, null for a default plugin.",
               "title": "Owner Id"
             },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "External service this analyzer calls.",
+              "title": "Provider"
+            },
             "updated": {
               "description": "Last modification time.",
               "format": "date-time",
@@ -13380,8 +13503,10 @@
             "id",
             "name",
             "description",
+            "provider",
             "logo_url",
             "metadata",
+            "connection_schema",
             "latest_version"
           ],
           "title": "AnalyzerResponse",

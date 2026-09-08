@@ -1,5 +1,5 @@
 ---
-description: Store provider credentials once on the server and let importer tasks pick them up automatically, instead of setting them in every worker's environment.
+description: Store provider credentials once on the server and let importer and analyzer tasks pick them up automatically, instead of setting them in every worker's environment.
 icon: plug
 ---
 
@@ -7,14 +7,20 @@ icon: plug
 
 Every import guide so far sets provider credentials in the worker's environment: `LANGFUSE_SECRET_KEY`, `LANGSMITH_API_KEY`, and so on. That works, but it ties every credential to one worker's process, and rotating a key means touching every worker that might claim an import task.
 
-A **connection** is the alternative: a server-side resource that holds a provider's credentials and non-secret values, so an import task carries them to whichever worker claims it. Like a [secret](../deploy/secrets.md), the sensitive values are encrypted at rest. Unlike a secret, a connection is scoped to one `provider` and can be marked the provider's default, so most imports don't need to name one at all.
+A **connection** is the alternative: a server-side resource that holds a provider's credentials and non-secret values, so an importer or analyzer task carries them to whichever worker claims it. Like a [secret](../deploy/secrets.md), the sensitive values are encrypted at rest. Unlike a secret, a connection is scoped to one `provider` and can be marked the provider's default, so most imports and analyzers don't need to name one at all.
 
-## Create one from an importer's schema
+## Create one from a plugin schema
 
-The built-in importers each declare a `connection_schema`, the set of environment variables their provider SDK reads. Naming an importer drives the create form:
+Importers and analyzers can declare a `connection_schema`, the set of environment variables their provider SDK reads. Naming either plugin drives the create form:
 
 ```bash
 kitaru connection create langfuse-prod --importer kitaru/langfuse@latest
+```
+
+For an analyzer, use `--analyzer` instead:
+
+```bash
+kitaru connection create model-judge-prod --analyzer model-judge
 ```
 
 This prompts for each property in the schema, in order, hiding input for anything the schema marks as secret (`LANGFUSE_SECRET_KEY`, in Langfuse's case). Skip the prompts with `--set KEY=VALUE` for a non-secret property or `--set-secret KEY=VALUE` for a secret one, repeated for as many keys as you already know:
@@ -52,7 +58,7 @@ A provider has at most one default connection. Setting a new one clears the prev
 
 `kitaru connection list`, `get CONNECTION`, and `update CONNECTION [--set ...] [--set-secret ...]` round out management. An update replaces the whole `env` and secret maps, so `--set` sends the stored `env` with the keys you name applied on top and keeps the other values, while `--set-secret` sends exactly the secret values you name and replaces every stored one. Responses never carry secret values, only a `secret_keys` list naming which keys are set. Deleting a connection also deletes the secret holding its values, so `delete CONNECTION` requires `--force`.
 
-## Use one on an import
+## Use one on an import or analyzer
 
 An import that fetches from a provider's API can name a connection explicitly:
 
@@ -66,17 +72,30 @@ kitaru session import \
 
 `--connection` only applies to an API import (one with no FILE argument), since a file upload is parsed without talking to the provider at all. On the REST API and the Python client, name it as `connection_id` on the API `source` of the import create request.
 
+An analyzer selected for any import can name its own connection:
+
+```bash
+kitaru session import sessions.jsonl \
+  --importer kitaru/kitaru-jsonl@latest \
+  --agent support-agent@latest \
+  --analyzer model-judge@latest \
+  --analyzer-connection model-judge@latest=model-judge-prod \
+  --wait
+```
+
+Repeat `--analyzer-connection ANALYZER@VERSION=CONNECTION` when different analyzers need different credentials. The analyzer token must exactly match one of the `--analyzer` values. On the REST API and the Python client, set `connection_id` on that analyzer's `AnalyzerConfig`.
+
 ## Resolution
 
-An import resolves its connection when it is created, in this order:
+Each importer and analyzer connection resolves when the import is created, in this order:
 
-1. The connection the import named.
-2. Otherwise, the default connection for the importer's `provider`.
+1. The connection the importer or analyzer named.
+2. Otherwise, the default connection for that plugin's `provider`.
 3. Otherwise, nothing is injected, and the package falls back to reading the worker's own environment, exactly as it did before connections existed.
 
 Self-hosted, single-tenant deployments can keep doing that. A connection overrides the worker's environment, it is never required.
 
-The resolved connection is recorded on the import as `connection_id`, so a later look at an import shows which credentials it ran with. A default connection created after the import only applies to later imports. If the connection is deleted before a worker claims the task, the import runs with nothing injected.
+The resolved importer connection is recorded on the import as `connection_id`. Each resolved analyzer connection is recorded in its analyzer config and copied to the analysis task. A default connection created after the import only applies to later imports. If a resolved connection is deleted before a worker claims the task, that task runs with nothing injected.
 
 ## Merge order
 
@@ -92,13 +111,13 @@ Only step 2 is new. Creating or updating a connection rejects a `KITARU_*` key o
 
 ## The worker-routing escape hatch
 
-Some customers won't hand a Kitaru server their provider credentials at all, and a connection doesn't change that: it still means putting a secret on the server. For that case, every import task carries a `kitaru/provider=<provider>` label alongside its usual [task labels](../deploy/workers.md), so a worker can be pinned to it with a selector:
+Some customers won't hand a Kitaru server their provider credentials at all, and a connection doesn't change that: it still means putting a secret on the server. For that case, importer and analyzer tasks carry a `kitaru/provider=<provider>` label alongside their usual [task labels](../deploy/workers.md), so a worker can be pinned to it with a selector:
 
 ```bash
 kitaru worker start --claim importer --selector kitaru/provider=langfuse
 ```
 
-That worker only claims Langfuse import tasks, and reads `LANGFUSE_SECRET_KEY` and friends from its own environment the way every import did before this page existed. No connection is created, and none is needed.
+That worker only claims Langfuse tasks, and reads `LANGFUSE_SECRET_KEY` and friends from its own environment. No connection is created, and none is needed.
 
 ## SDK and MCP
 

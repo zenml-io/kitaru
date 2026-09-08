@@ -78,6 +78,14 @@ class StubConnectionClient:
                 "connection_schema": connection_schema,
             },
         )
+        self.analyzer = StubModel(
+            uuid.uuid4(),
+            {
+                "name": "model-judge",
+                "provider": "model-provider",
+                "connection_schema": connection_schema,
+            },
+        )
         self.connection = StubModel(
             uuid.uuid4(),
             {
@@ -94,6 +102,7 @@ class StubConnectionClient:
         self.update_calls: list[tuple[uuid.UUID, ConnectionUpdateRequest]] = []
         self.deleted: list[uuid.UUID] = []
         self.importers = self._Importers(self)
+        self.analyzers = self._Analyzers(self)
         self.connections = self._Connections(self)
 
     class _Importers:
@@ -107,6 +116,18 @@ class StubConnectionClient:
         async def list(self, params: Any) -> Any:
             assert params.size == 2
             return SimpleNamespace(items=[self.owner.importer], next_cursor=None)
+
+    class _Analyzers:
+        def __init__(self, owner: "StubConnectionClient") -> None:
+            self.owner = owner
+
+        async def get(self, analyzer_id: uuid.UUID) -> StubModel:
+            assert analyzer_id == self.owner.analyzer.id
+            return self.owner.analyzer
+
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            return SimpleNamespace(items=[self.owner.analyzer], next_cursor=None)
 
     class _Connections:
         def __init__(self, owner: "StubConnectionClient") -> None:
@@ -309,21 +330,50 @@ async def test_create_from_a_provider_sends_only_direct_values() -> None:
     assert client.create_idempotency_keys == ["retry-connection-1"]
 
 
-@pytest.mark.parametrize(
-    ("importer", "provider"),
-    [(None, None), ("zenml/langfuse", "langfuse")],
-)
-async def test_create_requires_exactly_one_source(
-    importer: str | None, provider: str | None
-) -> None:
-    """The importer and provider options are mutually exclusive."""
+async def test_create_from_an_analyzer_schema() -> None:
+    """An analyzer schema supplies its provider and connection values."""
     client = StubConnectionClient(connection_schema=_SCHEMA)
 
-    with pytest.raises(CLIError, match="exactly one of --importer or --provider"):
+    await connections.create_connection(
+        client,
+        "model-provider-prod",
+        importer=None,
+        analyzer="model-judge",
+        provider=None,
+        values=["LANGFUSE_BASE_URL=https://self.hosted"],
+        secret_values=[
+            "LANGFUSE_PUBLIC_KEY=pk-live",
+            "LANGFUSE_SECRET_KEY=sk-live",
+        ],
+        default=False,
+        non_interactive=True,
+    )
+
+    [request] = client.created
+    assert request.provider == "model-provider"
+    assert request.env == {"LANGFUSE_BASE_URL": "https://self.hosted"}
+
+
+@pytest.mark.parametrize(
+    ("importer", "analyzer", "provider"),
+    [
+        (None, None, None),
+        ("zenml/langfuse", None, "langfuse"),
+        (None, "model-judge", "model-provider"),
+    ],
+)
+async def test_create_requires_exactly_one_source(
+    importer: str | None, analyzer: str | None, provider: str | None
+) -> None:
+    """The plugin and provider options are mutually exclusive."""
+    client = StubConnectionClient(connection_schema=_SCHEMA)
+
+    with pytest.raises(CLIError, match="exactly one of --importer, --analyzer"):
         await connections.create_connection(
             client,
             "langfuse-prod",
             importer=importer,
+            analyzer=analyzer,
             provider=provider,
             values=None,
             secret_values=None,
@@ -528,6 +578,32 @@ def test_public_connection_output_never_shows_secret_values(
         "LANGFUSE_PUBLIC_KEY",
         "LANGFUSE_SECRET_KEY",
     ]
+
+
+def test_public_connection_create_accepts_an_analyzer_schema(
+    argv_client: StubConnectionClient, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The registered create leaf forwards an analyzer schema selection."""
+    assert (
+        app_module.main(
+            [
+                "connection",
+                "create",
+                "model-provider-prod",
+                "--analyzer",
+                "model-judge",
+                "--set-secret",
+                "LANGFUSE_PUBLIC_KEY=pk-live",
+                "--set-secret",
+                "LANGFUSE_SECRET_KEY=sk-live",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "connection.create"
+    assert argv_client.created[-1].provider == "model-provider"
 
 
 def test_non_interactive_create_exits_with_interaction_required(

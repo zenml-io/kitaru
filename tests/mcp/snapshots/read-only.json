@@ -665,6 +665,19 @@
         "AnalyzerResponse": {
           "description": "Analyzer response.",
           "properties": {
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "JSON Schema of the connection values this analyzer reads.",
+              "title": "Connection Schema"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -730,6 +743,18 @@
               "description": "Id of the owning account, null for a default plugin.",
               "title": "Owner Id"
             },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "External service this analyzer calls.",
+              "title": "Provider"
+            },
             "updated": {
               "description": "Last modification time.",
               "format": "date-time",
@@ -744,8 +769,10 @@
             "id",
             "name",
             "description",
+            "provider",
             "logo_url",
             "metadata",
+            "connection_schema",
             "latest_version"
           ],
           "title": "AnalyzerResponse",
@@ -3040,6 +3067,20 @@
               "description": "Analyzer name.",
               "title": "Analyzer",
               "type": "string"
+            },
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Connection supplying provider credentials, an omitted value resolves to the provider's default.",
+              "title": "Connection Id"
             },
             "params": {
               "additionalProperties": true,

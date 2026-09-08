@@ -4376,6 +4376,11 @@ export interface components {
              */
             analyzer: string;
             /**
+             * Connection Id
+             * @description Connection supplying provider credentials, an omitted value resolves to the provider's default.
+             */
+            connection_id?: string | null;
+            /**
              * Params
              * @description Parameters passed to the analyzer.
              */
@@ -4393,6 +4398,13 @@ export interface components {
          * @description Analyzer create request.
          */
         AnalyzerCreateRequest: {
+            /**
+             * Connection Schema
+             * @description JSON Schema of the connection values this analyzer reads.
+             */
+            connection_schema?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Description
              * @description Analyzer description.
@@ -4415,12 +4427,24 @@ export interface components {
              * @description Analyzer name.
              */
             name: string;
+            /**
+             * Provider
+             * @description External service this analyzer calls.
+             */
+            provider?: string | null;
         };
         /**
          * AnalyzerResponse
          * @description Analyzer response.
          */
         AnalyzerResponse: {
+            /**
+             * Connection Schema
+             * @description JSON Schema of the connection values this analyzer reads.
+             */
+            connection_schema: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Created
              * Format: date-time
@@ -4466,6 +4490,11 @@ export interface components {
              */
             owner_id: string | null;
             /**
+             * Provider
+             * @description External service this analyzer calls.
+             */
+            provider: string | null;
+            /**
              * Updated
              * Format: date-time
              * @description Last modification time.
@@ -4477,6 +4506,13 @@ export interface components {
          * @description Analyzer update request.
          */
         AnalyzerUpdateRequest: {
+            /**
+             * Connection Schema
+             * @description New connection schema.
+             */
+            connection_schema?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Description
              * @description New analyzer description.

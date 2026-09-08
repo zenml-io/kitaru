@@ -291,19 +291,15 @@ class Plugin(DomainModel):
 
     @model_validator(mode="after")
     def _check_provider(self) -> "Plugin":
-        """Reject a provider on an evaluator or analyzer plugin.
+        """Reject a provider on an evaluator plugin.
 
         Raises:
-            InvalidPluginProvider: The kind is evaluator or analyzer and
-                provider is set.
+            InvalidPluginProvider: The kind is evaluator and provider is set.
 
         Returns:
             The validated plugin.
         """
-        if (
-            self.kind in (PluginKind.EVALUATOR, PluginKind.ANALYZER)
-            and self.provider is not None
-        ):
+        if self.kind is PluginKind.EVALUATOR and self.provider is not None:
             raise InvalidPluginProvider(self.kind)
         return self
 

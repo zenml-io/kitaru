@@ -97,10 +97,16 @@ async def _evaluator_version(
     )
 
 
-async def _analyzer_version(services: JobAndTaskServices, name: str) -> PluginVersion:
+async def _analyzer_version(
+    services: JobAndTaskServices, name: str, provider: str | None = None
+) -> PluginVersion:
     """Register an analyzer with one version."""
     plugin = await create_plugin(
-        services.plugins, ACTOR.account.id, PluginKind.ANALYZER, name=name
+        services.plugins,
+        ACTOR.account.id,
+        PluginKind.ANALYZER,
+        name=name,
+        provider=provider,
     )
     return await services.plugins.create_version(
         plugin.id,
@@ -275,6 +281,53 @@ async def test_create_import_stores_the_resolved_analyzers(
     assert analyzer.analyzer_version_id == analyzer_version.id
     stored = await services.imports.get(import_.id)
     assert stored.analyzers == import_.analyzers
+
+
+async def test_create_import_stores_the_analyzer_named_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """The resolved analyzer records its explicitly named connection."""
+    await _importer_version(services)
+    await _analyzer_version(services, "trends", provider="langfuse")
+    secret = await create_secret(
+        services.secrets, ACTOR.account.id, name="analyzer-values", internal=True
+    )
+    connection = await create_connection(
+        services.connections, ACTOR.account.id, secret.id, name="analyzer"
+    )
+    command = await _import_command(
+        services,
+        analyzers=[AnalyzerConfigInput(analyzer="trends", connection_id=connection.id)],
+    )
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.analyzers[0].connection_id == connection.id
+
+
+async def test_create_import_stores_the_analyzer_default_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """The resolved analyzer records its provider's default connection."""
+    await _importer_version(services)
+    await _analyzer_version(services, "trends", provider="langfuse")
+    secret = await create_secret(
+        services.secrets, ACTOR.account.id, name="analyzer-values", internal=True
+    )
+    connection = await create_connection(
+        services.connections,
+        ACTOR.account.id,
+        secret.id,
+        name="analyzer",
+        default=True,
+    )
+    command = await _import_command(
+        services, analyzers=[AnalyzerConfigInput(analyzer="trends")]
+    )
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.analyzers[0].connection_id == connection.id
 
 
 async def test_create_import_rejects_an_unknown_analyzer(

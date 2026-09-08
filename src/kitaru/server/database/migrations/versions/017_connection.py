@@ -80,9 +80,15 @@ def upgrade() -> None:
             ondelete="SET NULL",
         )
 
+    with op.batch_alter_table("task", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("connection_id", sa.Uuid(), nullable=True))
+
 
 def downgrade() -> None:
     """Downgrade database schema and/or data back to the previous revision."""
+    with op.batch_alter_table("task", schema=None) as batch_op:
+        batch_op.drop_column("connection_id")
+
     with op.batch_alter_table("import", schema=None) as batch_op:
         batch_op.drop_constraint("fk_import_connection_id", type_="foreignkey")
         batch_op.drop_column("connection_id")

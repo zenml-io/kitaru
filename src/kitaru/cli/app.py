@@ -1984,7 +1984,7 @@ _CONNECTION_UPDATE_VALUE_PARAMETERS = (
     connection_app,
     _spec(
         ("connection", "create"),
-        "Create a connection from an importer schema or from direct values.",
+        "Create a connection from a plugin schema or from direct values.",
         parameters=(
             ParameterSpec("NAME", "string", "argument", True, "New connection name."),
             ParameterSpec(
@@ -1993,6 +1993,13 @@ _CONNECTION_UPDATE_VALUE_PARAMETERS = (
                 "option",
                 False,
                 "Importer whose connection schema drives the prompts.",
+            ),
+            ParameterSpec(
+                "--analyzer",
+                "reference",
+                "option",
+                False,
+                "Analyzer whose connection schema drives the prompts.",
             ),
             ParameterSpec(
                 "--provider", "string", "option", False, "Provider addressed directly."
@@ -2019,19 +2026,21 @@ async def connection_create(
     /,
     *,
     importer: str | None = None,
+    analyzer: str | None = None,
     provider: str | None = None,
     set: list[str] | None = None,
     set_secret: list[str] | None = None,
     default: bool = False,
     idempotency_key: str | None = None,
 ) -> CommandResult:
-    """Create one connection, prompting for the importer's schema values."""
+    """Create one connection, prompting for a plugin's schema values."""
     invocation = _invocation()
     async with _open_asset_client() as client:
         return await connections.create_connection(
             client,
             name,
             importer=importer,
+            analyzer=analyzer,
             provider=provider,
             values=set,
             secret_values=set_secret,
@@ -3410,7 +3419,7 @@ def _plugin_register_parameters(kind: str) -> tuple[ParameterSpec, ...]:
         ),
         ParameterSpec("--metadata", "JSON object", "option", False, "Parent metadata."),
     ]
-    if kind == "importer":
+    if kind in {"importer", "analyzer"}:
         parent.append(
             ParameterSpec("--provider", "string", "option", False, "Source provider.")
         )
@@ -4025,6 +4034,8 @@ async def analyzer_register(
     package: str | None = None,
     entrypoint: str | None = None,
     description: str | None = None,
+    provider: str | None = None,
+    connection_schema: Path | None = None,
     metadata: str | None = None,
     display_version: str | None = None,
 ) -> CommandResult:
@@ -4036,10 +4047,11 @@ async def analyzer_register(
         package=package,
         entrypoint=entrypoint,
         description=description,
-        provider=None,
+        provider=provider,
         metadata=metadata,
         agent_id=None,
         display_version=display_version,
+        connection_schema=connection_schema,
     )
 
 
@@ -4286,6 +4298,13 @@ async def analyzer_version_get(analyzer_version: str, /) -> CommandResult:
                 "Parameters for a selected analyzer token.",
             ),
             ParameterSpec(
+                "--analyzer-connection",
+                "ANALYZER@VERSION=CONNECTION[]",
+                "option",
+                False,
+                "Connection for a selected analyzer token.",
+            ),
+            ParameterSpec(
                 "--media-type",
                 "string",
                 "option",
@@ -4323,6 +4342,7 @@ async def session_import(
     evaluator_params: list[str] | None = None,
     analyzer: list[str] | None = None,
     analyzer_params: list[str] | None = None,
+    analyzer_connection: list[str] | None = None,
     media_type: str | None = None,
     wait: bool = False,
     interval: float | None = None,
@@ -4348,6 +4368,7 @@ async def session_import(
             evaluator_params=evaluator_params,
             analyzers=analyzer,
             analyzer_params=analyzer_params,
+            analyzer_connections=analyzer_connection,
             media_type=media_type,
             wait=wait,
             interval=interval,

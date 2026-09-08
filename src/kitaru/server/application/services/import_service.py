@@ -32,9 +32,12 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.imports import ImportCreate, ImportFilter
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
 from kitaru.server.application.services.analyzer_resolution import validate_analyzers
+from kitaru.server.application.services.connection_resolution import (
+    resolve_connection_id,
+)
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
 from kitaru.server.application.services.plugin_resolution import (
-    get_importer_task_labels,
+    get_plugin_task_labels,
     resolve_plugin,
     resolve_plugin_version,
 )
@@ -123,8 +126,8 @@ class ImportService:
             assert command.payload_blob_id is not None
             payload = await self._blobs.get(command.payload_blob_id)
             payload_blob_id = payload.id
-        connection_id = await self._resolve_connection_id(
-            command.connection_id, plugin.provider
+        connection_id = await resolve_connection_id(
+            command.connection_id, plugin.provider, self._connections
         )
         agent = await self._agents.get(command.agent_id)
         if command.agent_version_id is not None:
@@ -134,7 +137,9 @@ class ImportService:
         evaluators = await validate_evaluators(
             command.evaluators, self._plugins, agent.id, actor
         )
-        analyzers = await validate_analyzers(command.analyzers, self._plugins, actor)
+        analyzers = await validate_analyzers(
+            command.analyzers, self._plugins, self._connections, actor
+        )
         job = await self._jobs.create(
             Job(owner_id=actor.account.id, kind=JobKind.IMPORT)
         )
@@ -159,33 +164,10 @@ class ImportService:
             ImportTask(
                 job_id=job.id,
                 import_id=import_.id,
-                labels=get_importer_task_labels(plugin.name, plugin.provider),
+                labels=get_plugin_task_labels(plugin.name, plugin.provider),
             )
         )
         return import_
-
-    async def _resolve_connection_id(
-        self, connection_id: uuid.UUID | None, provider: str | None
-    ) -> uuid.UUID | None:
-        """Resolve the connection an import runs with.
-
-        Args:
-            connection_id: Connection the import names.
-            provider: Provider of the importer the import runs.
-
-        Raises:
-            ConnectionNotFound: No connection has this id.
-
-        Returns:
-            Named connection, otherwise the provider's default, otherwise
-            ``None``.
-        """
-        if connection_id is not None:
-            return (await self._connections.get(connection_id)).id
-        if provider is None:
-            return None
-        default = await self._connections.get_default(provider)
-        return None if default is None else default.id
 
     async def get_import(self, import_id: uuid.UUID, actor: AuthContext) -> Import:
         """Get an import by id.

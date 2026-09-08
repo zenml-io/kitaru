@@ -15,9 +15,15 @@
 
 import uuid
 
+from kitaru.server.application.interfaces.connection_repository import (
+    ConnectionRepository,
+)
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.replay_config import AnalyzerConfigInput
+from kitaru.server.application.services.connection_resolution import (
+    resolve_connection_id,
+)
 from kitaru.server.application.services.plugin_resolution import (
     resolve_plugin,
     resolve_plugin_version,
@@ -30,6 +36,7 @@ from kitaru.server.domain.replay_config import AnalyzerConfig
 async def resolve_analyzer_config(
     config: AnalyzerConfigInput,
     plugin_repository: PluginRepository,
+    connection_repository: ConnectionRepository,
     actor: AuthContext | None = None,
 ) -> AnalyzerConfig:
     """Resolve an analyzer config to a concrete plugin version.
@@ -39,12 +46,14 @@ async def resolve_analyzer_config(
     Args:
         config: Analyzer config awaiting resolution.
         plugin_repository: Plugin repository, queried for the analyzer kind.
+        connection_repository: Connection repository.
         actor: Caller context, unused, ownership is provenance only.
 
     Raises:
         PluginNotFound: No analyzer plugin has this name.
         PluginVersionNotFound: The resolved version has no matching plugin
             version.
+        ConnectionNotFound: No connection has the named id.
 
     Returns:
         Resolved analyzer config carrying the concrete version and its id.
@@ -56,17 +65,23 @@ async def resolve_analyzer_config(
     plugin_version = await resolve_plugin_version(
         plugin, config.version, plugin_repository
     )
+    connection_id = await resolve_connection_id(
+        config.connection_id, plugin.provider, connection_repository
+    )
     return AnalyzerConfig(
         analyzer=config.analyzer,
         version=plugin_version.version,
         params=config.params,
         analyzer_version_id=plugin_version.id,
+        provider=plugin.provider,
+        connection_id=connection_id,
     )
 
 
 async def validate_analyzers(
     configs: list[AnalyzerConfigInput],
     plugin_repository: PluginRepository,
+    connection_repository: ConnectionRepository,
     actor: AuthContext | None = None,
 ) -> list[AnalyzerConfig]:
     """Resolve every analyzer config, rejecting a repeated resolved version.
@@ -74,18 +89,22 @@ async def validate_analyzers(
     Args:
         configs: Analyzer configs awaiting resolution.
         plugin_repository: Plugin repository, queried for the analyzer kind.
+        connection_repository: Connection repository.
         actor: Caller context, unused, ownership is provenance only.
 
     Raises:
         PluginNotFound: A config names an unknown analyzer.
         PluginVersionNotFound: A config names an unknown version.
+        ConnectionNotFound: A config names an unknown connection.
         ValidationError: Two configs resolve to the same analyzer version.
 
     Returns:
         Resolved analyzer configs.
     """
     resolved = [
-        await resolve_analyzer_config(config, plugin_repository, actor)
+        await resolve_analyzer_config(
+            config, plugin_repository, connection_repository, actor
+        )
         for config in configs
     ]
     seen_ids: set[uuid.UUID] = set()

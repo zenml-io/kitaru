@@ -62,6 +62,7 @@ class AnalyzerFilter(PluginFilter):
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "name": FilterField(value_type=str, ops=STRING_OPS),
+        "provider": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
     }
 
 

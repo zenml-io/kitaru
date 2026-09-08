@@ -36,6 +36,7 @@ async def create_connection(
     name: str,
     *,
     importer: str | None,
+    analyzer: str | None = None,
     provider: str | None,
     values: list[str] | None,
     secret_values: list[str] | None,
@@ -46,27 +47,34 @@ async def create_connection(
     secret_prompt: Callable[[str], str] = getpass.getpass,
 ) -> CommandResult:
     """Create a connection from a schema prompt or from direct values."""
-    if (importer is None) == (provider is None):
+    sources = [value for value in (importer, analyzer, provider) if value is not None]
+    if len(sources) != 1:
         raise CLIError(
-            "invalid_arguments", "Provide exactly one of --importer or --provider."
+            "invalid_arguments",
+            "Provide exactly one of --importer, --analyzer, or --provider.",
         )
     env = parse_env(values or [])
     secrets = parse_env(secret_values or [])
-    if importer is None:
+    if importer is None and analyzer is None:
         assert provider is not None
         resolved_provider = provider
     else:
-        parent = await resolve_asset(client.importers, importer, "Importer")
+        kind = "Importer" if importer is not None else "Analyzer"
+        resource = client.importers if importer is not None else client.analyzers
+        reference = importer if importer is not None else analyzer
+        assert reference is not None
+        parent = await resolve_asset(resource, reference, kind)
         if parent.provider is None:
             raise CLIError(
-                "invalid_arguments", f"Importer {parent.name!r} has no provider."
+                "invalid_arguments", f"{kind} {parent.name!r} has no provider."
             )
         resolved_provider = parent.provider
         _collect_schema_values(
             parent.connection_schema,
             env,
             secrets,
-            importer_name=parent.name,
+            plugin_kind=kind,
+            plugin_name=parent.name,
             non_interactive=non_interactive,
             value_prompt=value_prompt,
             secret_prompt=secret_prompt,
@@ -162,18 +170,19 @@ def _collect_schema_values(
     env: dict[str, str],
     secrets: dict[str, str],
     *,
-    importer_name: str,
+    plugin_kind: str,
+    plugin_name: str,
     non_interactive: bool,
     value_prompt: Callable[[str], str],
     secret_prompt: Callable[[str], str],
 ) -> None:
-    """Fill env and secrets from an importer connection schema."""
+    """Fill env and secrets from a plugin connection schema."""
     properties = schema.get("properties") if isinstance(schema, dict) else None
     if not isinstance(properties, dict):
         if not env and not secrets:
             raise CLIError(
                 "invalid_arguments",
-                f"Importer {importer_name!r} has no connection schema. "
+                f"{plugin_kind} {plugin_name!r} has no connection schema. "
                 "Use --set or --set-secret.",
             )
         return

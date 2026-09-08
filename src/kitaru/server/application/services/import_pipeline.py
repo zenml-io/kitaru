@@ -106,8 +106,9 @@ async def record_import_outcome(
                     plugin_version_id=analyzer.analyzer_version_id,
                     agent_id=import_.agent_id,
                     import_id=import_.id,
+                    connection_id=analyzer.connection_id,
                     params=analyzer.params,
-                    labels=get_plugin_task_labels(analyzer.analyzer),
+                    labels=get_plugin_task_labels(analyzer.analyzer, analyzer.provider),
                     on_failure=TaskOnFailure.CONTINUE,
                 )
             )

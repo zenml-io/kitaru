@@ -678,6 +678,7 @@ class AnalysisTask(Task):
     plugin_version_id: uuid.UUID
     agent_id: uuid.UUID
     import_id: uuid.UUID
+    connection_id: uuid.UUID | None = None
     params: dict[str, Any] = Field(default_factory=dict)
 
     @property

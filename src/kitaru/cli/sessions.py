@@ -328,6 +328,7 @@ async def import_sessions(
     evaluator_params: Sequence[str] | None = None,
     analyzers: Sequence[str] | None = None,
     analyzer_params: Sequence[str] | None = None,
+    analyzer_connections: Sequence[str] | None = None,
     media_type: str | None,
     wait: bool,
     interval: float | None,
@@ -351,6 +352,11 @@ async def import_sessions(
         raise CLIError(
             "invalid_arguments",
             "--analyzer-params requires at least one --analyzer.",
+        )
+    if analyzer_connections and not analyzers:
+        raise CLIError(
+            "invalid_arguments",
+            "--analyzer-connection requires at least one --analyzer.",
         )
     wait_settings = receipts.get_wait_settings(
         wait=wait, interval=interval, timeout=timeout
@@ -425,7 +431,7 @@ async def import_sessions(
     analyzer_identity: list[dict[str, Any]] = []
     if analyzers:
         analyzer_configs, analyzer_identity, _ = await resolve_analyzer_configs(
-            client, analyzers, analyzer_params or []
+            client, analyzers, analyzer_params or [], analyzer_connections or []
         )
 
     identity = {

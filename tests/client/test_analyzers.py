@@ -69,10 +69,17 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
 async def test_create(api_client: KitaruAPIClient) -> None:
     """Create an analyzer through the SDK."""
     analyzer = await api_client.analyzers.create(
-        AnalyzerCreateRequest(name="drift", metadata={"a": 1})
+        AnalyzerCreateRequest(
+            name="drift",
+            provider="langfuse",
+            metadata={"a": 1},
+            connection_schema={"type": "object"},
+        )
     )
     assert analyzer.name == "drift"
+    assert analyzer.provider == "langfuse"
     assert analyzer.metadata == {"a": 1}
+    assert analyzer.connection_schema == {"type": "object"}
 
 
 async def test_create_duplicate_name(api_client: KitaruAPIClient) -> None:
@@ -112,9 +119,14 @@ async def test_update(api_client: KitaruAPIClient) -> None:
     """Update an analyzer through the SDK."""
     created = await api_client.analyzers.create(AnalyzerCreateRequest(name="drift"))
     updated = await api_client.analyzers.update(
-        created.id, AnalyzerUpdateRequest(description="Flags topic drift")
+        created.id,
+        AnalyzerUpdateRequest(
+            description="Flags topic drift",
+            connection_schema={"type": "object"},
+        ),
     )
     assert updated.description == "Flags topic drift"
+    assert updated.connection_schema == {"type": "object"}
 
 
 async def test_delete(api_client: KitaruAPIClient) -> None:

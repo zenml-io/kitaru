@@ -58,7 +58,7 @@ Every insight also has a `name`, a `title`, an optional `description`, and free-
 
 ## Running analyzers
 
-An import names its analyzers next to its evaluators. Each named analyzer runs as one task in the import job, in parallel with the evaluator tasks, over every session the import created. The full option shape, including `--analyzer-params` and the SDK and REST equivalents, is in [Importing sessions](../guides/importing-sessions.md).
+An import names its analyzers next to its evaluators. Each named analyzer runs as one task in the import job, in parallel with the evaluator tasks, over every session the import created. An analyzer can use its provider's default [connection](../guides/provider-connections.md) or select one explicitly. The full option shape, including `--analyzer-params`, `--analyzer-connection`, and the SDK and REST equivalents, is in [Importing sessions](../guides/importing-sessions.md).
 
 Every insight a completed analysis task writes records the analyzer version, the task, and the params that produced it, the same provenance an evaluation keeps for the evaluator that wrote it. An insight created directly with `client.insights.create(...)` carries none of that provenance.
 

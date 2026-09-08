@@ -40,6 +40,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
+    AnalysisTask,
     AnalysisTaskDetails,
     ApiImportSourceSpec,
     BlobImportSourceSpec,
@@ -182,6 +183,114 @@ async def test_analysis_spec_is_built_from_the_task(
     assert spec.details.agent_id == agent.id
     assert spec.details.import_id == import_id
     assert spec.details.params == {"focus": "errors"}
+
+
+async def test_analysis_spec_uses_the_recorded_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """An analysis task injects its recorded connection's env and secrets."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.ANALYZER, name="trends"
+    )
+    code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
+        display_version=None,
+    )
+    connection_id = await store_connection(
+        services,
+        env={"LANGFUSE_BASE_URL": "https://cloud", "REGION": "eu"},
+    )
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    task = await create_analysis_task(
+        services.tasks,
+        job.id,
+        plugin_version_id=version.id,
+        agent_id=agent.id,
+        connection_id=connection_id,
+    )
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert spec.env == {
+        "LANGFUSE_BASE_URL": "https://cloud",
+        "REGION": "eu",
+    }
+    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk"}
+
+
+async def test_analysis_spec_task_env_wins_over_the_connection_env(
+    services: JobAndTaskServices,
+) -> None:
+    """The analysis task's env overrides connection values of the same key."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.ANALYZER, name="trends"
+    )
+    code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
+        display_version=None,
+    )
+    connection_id = await store_connection(
+        services,
+        env={"LANGFUSE_BASE_URL": "https://cloud", "REGION": "eu"},
+    )
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    task = await services.tasks.create(
+        AnalysisTask(
+            job_id=job.id,
+            plugin_version_id=version.id,
+            agent_id=agent.id,
+            import_id=uuid.uuid4(),
+            connection_id=connection_id,
+            env={"LANGFUSE_BASE_URL": "https://self-hosted"},
+        )
+    )
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert spec.env == {
+        "LANGFUSE_BASE_URL": "https://self-hosted",
+        "REGION": "eu",
+    }
+
+
+async def test_analysis_spec_ignores_a_deleted_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """A deleted analysis connection contributes no environment values."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.ANALYZER, name="trends"
+    )
+    code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
+        display_version=None,
+    )
+    connection_id = await store_connection(services)
+    await services.connections.delete(connection_id)
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    task = await services.tasks.create(
+        AnalysisTask(
+            job_id=job.id,
+            plugin_version_id=version.id,
+            agent_id=agent.id,
+            import_id=uuid.uuid4(),
+            connection_id=connection_id,
+            env={"REGION": "eu"},
+        )
+    )
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert spec.env == {"REGION": "eu"}
+    assert spec.secret_env == {}
 
 
 async def test_missing_import_row_cancels_the_task_at_claim(

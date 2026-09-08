@@ -142,6 +142,24 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert importer_scaffold["side_effects"]["writes_local_file"] is True
     assert importer_scaffold["side_effects"]["creates_remote_state"] is False
 
+    [analyzer_register] = describe_schema(("analyzer", "register"))
+    analyzer_register_names = {
+        parameter["name"] for parameter in analyzer_register["parameters"]
+    }
+    assert {"--provider", "--connection-schema"} <= analyzer_register_names
+
+    [connection_create] = describe_schema(("connection", "create"))
+    connection_create_names = {
+        parameter["name"] for parameter in connection_create["parameters"]
+    }
+    assert "--analyzer" in connection_create_names
+
+    [session_import] = describe_schema(("session", "import"))
+    session_import_names = {
+        parameter["name"] for parameter in session_import["parameters"]
+    }
+    assert "--analyzer-connection" in session_import_names
+
     [version] = describe_schema(("version",))
     assert version["offline"] is True
 

@@ -9,11 +9,13 @@ import json
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from kitaru.api_models.v1.analyzer import AnalyzerCreateRequest
 from kitaru.cli import app as app_module
 from kitaru.cli.output import CLIError
 from kitaru.cli.registration import plugin_parent_request, resolve_analyzer_configs
@@ -121,11 +123,12 @@ class StubClient:
     def __init__(self) -> None:
         """Initialize the analyzer resource and its blob dependency."""
         self.analyzers = StubResource()
+        self.connections = StubResource()
         self.blobs = StubBlobs()
 
 
-def test_analyzer_parent_request_rejects_agent_id_and_provider() -> None:
-    """Analyzer parents accept neither agent scoping nor a source provider."""
+def test_analyzer_parent_request_rejects_agent_id() -> None:
+    """Analyzer parents do not accept agent scoping."""
     with pytest.raises(CLIError, match="only valid for evaluators"):
         plugin_parent_request(
             "analyzer",
@@ -135,15 +138,31 @@ def test_analyzer_parent_request_rejects_agent_id_and_provider() -> None:
             metadata=None,
             agent_id=uuid.uuid4(),
         )
-    with pytest.raises(CLIError, match="only valid for importers"):
-        plugin_parent_request(
-            "analyzer",
-            "demo",
-            description=None,
-            provider="demo-provider",
-            metadata=None,
-            agent_id=None,
-        )
+
+
+def test_analyzer_parent_request_accepts_provider_connection_schema(
+    tmp_path: Path,
+) -> None:
+    """Analyzer parents carry provider connection metadata."""
+    schema = tmp_path / "connection.json"
+    schema.write_text('{"type":"object","properties":{"API_KEY":{}}}')
+
+    request = plugin_parent_request(
+        "analyzer",
+        "demo",
+        description=None,
+        provider="demo-provider",
+        metadata=None,
+        agent_id=None,
+        connection_schema=schema,
+    )
+
+    assert isinstance(request, AnalyzerCreateRequest)
+    assert request.provider == "demo-provider"
+    assert request.connection_schema == {
+        "type": "object",
+        "properties": {"API_KEY": {}},
+    }
 
 
 async def test_resolve_analyzer_configs_reads_selected_versions_and_params() -> None:
@@ -183,6 +202,30 @@ async def test_resolve_analyzer_configs_rejects_unselected_params_token() -> Non
         )
 
 
+async def test_resolve_analyzer_configs_carries_a_named_connection() -> None:
+    """A selected analyzer connection resolves into the analyzer config."""
+    analyzer = StubModel("quality")
+    version = StubModel("quality-version", version=3)
+    connection = StubModel("model-provider-prod")
+    client = StubClient()
+    client.analyzers.items = [analyzer]
+    client.analyzers.versions = [version]
+    client.connections.items = [connection]
+
+    configs, identities, _ = await resolve_analyzer_configs(
+        client,
+        ["quality@3"],
+        [],
+        ["quality@3=model-provider-prod"],
+    )
+
+    assert configs[0].connection_id == connection.id
+    assert identities[0]["connection"] == {
+        "id": str(connection.id),
+        "name": "model-provider-prod",
+    }
+
+
 def test_cli_analyzer_register_uses_shared_runner_and_output_contract(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path
 ) -> None:
@@ -190,6 +233,8 @@ def test_cli_analyzer_register_uses_shared_runner_and_output_contract(
     client = StubClient()
     script = tmp_path / "analyzer.py"
     script.write_text("def analyze(sessions, **params):\n    return []\n")
+    schema = tmp_path / "connection.json"
+    schema.write_text('{"type":"object","properties":{"API_KEY":{}}}')
 
     @asynccontextmanager
     async def fake_open_client():
@@ -207,6 +252,10 @@ def test_cli_analyzer_register_uses_shared_runner_and_output_contract(
                 str(script),
                 "--entrypoint",
                 "analyze",
+                "--provider",
+                "model-provider",
+                "--connection-schema",
+                str(schema),
             ]
         )
         == 0
@@ -216,6 +265,11 @@ def test_cli_analyzer_register_uses_shared_runner_and_output_contract(
     assert payload["command"] == "analyzer.register"
     assert len(client.analyzers.created_requests) == 1
     assert client.analyzers.created_requests[0].name == "demo"
+    assert client.analyzers.created_requests[0].provider == "model-provider"
+    assert client.analyzers.created_requests[0].connection_schema == {
+        "type": "object",
+        "properties": {"API_KEY": {}},
+    }
 
 
 def test_cli_analyzer_agent_id_option_is_rejected(

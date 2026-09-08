@@ -39,6 +39,7 @@ from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.task import TaskFilter, TaskUpdate
+from kitaru.server.application.services.plugin_resolution import PLUGIN_PROVIDER_LABEL
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
@@ -76,9 +77,18 @@ async def _evaluator(services: ReplayServices, name: str) -> EvaluatorConfig:
     )
 
 
-async def _analyzer(services: ReplayServices, name: str) -> AnalyzerConfig:
+async def _analyzer(
+    services: ReplayServices,
+    name: str,
+    connection_id: uuid.UUID | None = None,
+    provider: str | None = None,
+) -> AnalyzerConfig:
     plugin = await create_plugin(
-        services.plugins, ACTOR.account.id, kind=PluginKind.ANALYZER, name=name
+        services.plugins,
+        ACTOR.account.id,
+        kind=PluginKind.ANALYZER,
+        name=name,
+        provider=provider,
     )
     blob = await create_blob(services.blobs, ACTOR.account.id, content=name.encode())
     version = await services.plugins.create_version(
@@ -91,6 +101,8 @@ async def _analyzer(services: ReplayServices, name: str) -> AnalyzerConfig:
         version=version.version,
         params={"focus": "errors"},
         analyzer_version_id=version.id,
+        provider=plugin.provider,
+        connection_id=connection_id,
     )
 
 
@@ -407,8 +419,18 @@ async def test_completed_import_appends_one_task_per_analyzer(
 ) -> None:
     """Three sessions and two analyzers fan out into two continue analysis tasks."""
     analyzers = [
-        await _analyzer(services, "trends"),
-        await _analyzer(services, "risks"),
+        await _analyzer(
+            services,
+            "trends",
+            connection_id=uuid.uuid4(),
+            provider="langfuse",
+        ),
+        await _analyzer(
+            services,
+            "risks",
+            connection_id=uuid.uuid4(),
+            provider="langfuse",
+        ),
     ]
     import_, import_task = await _import_with_task(services, [], analyzers)
     for _ in range(3):
@@ -431,6 +453,12 @@ async def test_completed_import_appends_one_task_per_analyzer(
     assert {task.plugin_version_id for task in analysis_tasks} == {
         analyzer.analyzer_version_id for analyzer in analyzers
     }
+    assert {task.connection_id for task in analysis_tasks} == {
+        analyzer.connection_id for analyzer in analyzers
+    }
+    assert all(
+        task.labels[PLUGIN_PROVIDER_LABEL] == "langfuse" for task in analysis_tasks
+    )
     assert all(task.import_id == import_.id for task in analysis_tasks)
 
 

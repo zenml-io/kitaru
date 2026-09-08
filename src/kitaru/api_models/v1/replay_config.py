@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Replay configuration API models, shared by experiments, replays, and evaluations."""
 
+import uuid
 from enum import StrEnum
 from typing import Annotated, Literal
 
@@ -85,6 +86,13 @@ class AnalyzerConfig(RequestModel):
     )
     params: dict[str, JsonValue] = Field(
         default_factory=dict, description="Parameters passed to the analyzer."
+    )
+    connection_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Connection supplying provider credentials, an omitted value "
+            "resolves to the provider's default."
+        ),
     )
 
 
