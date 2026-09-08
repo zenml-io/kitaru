@@ -57,7 +57,11 @@ Each generated insight stores its `import_id` directly, so task cleanup does not
 
 ## Run both analyzers
 
-To also produce OpenAI insights, configure an OpenAI [provider connection](provider-connections.md) containing `OPENAI_API_KEY`, or supply that key in the worker's environment and configure its credential selector for `openai`. Setting it only in the importing terminal is not sufficient. Select both analyzers and pass a model available to your OpenAI account:
+Kitaru Pro (hosted Kitaru) supports GPT-5.6 Luna (`gpt-5.6-luna`) for OpenAI post-import analysis funded by Kitaru. Set the analyzer's `model` parameter explicitly as shown below; other models are not supported for Kitaru-funded analysis.
+
+For local or self-hosted analysis, or analysis using your own OpenAI credentials, configure an OpenAI [provider connection](provider-connections.md) containing `OPENAI_API_KEY`, or supply that key in the worker's environment and configure its credential selector for `openai`. Setting it only in the importing terminal is not sufficient. With your own credentials, you can replace `gpt-5.6-luna` with a compatible model available to your OpenAI project; its usage is billed to your account.
+
+Select both analyzers and pass the model:
 
 ```bash
 uv run kitaru session import sessions.jsonl \
@@ -65,7 +69,7 @@ uv run kitaru session import sessions.jsonl \
   --agent customer-service@latest \
   --analyzer kitaru/post-import-insights@latest \
   --analyzer kitaru/openai-post-import-insights@latest \
-  --analyzer-params 'kitaru/openai-post-import-insights@latest={"model":"YOUR_MODEL"}' \
+  --analyzer-params 'kitaru/openai-post-import-insights@latest={"model":"gpt-5.6-luna"}' \
   --wait
 ```
 
