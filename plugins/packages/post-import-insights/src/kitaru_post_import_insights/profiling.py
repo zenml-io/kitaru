@@ -59,7 +59,7 @@ from kitaru_post_import_insights.profiling_state import (
     SessionReferences,
 )
 
-ANALYSIS_VERSION = "2026-09-07.1"
+ANALYSIS_VERSION = "2026-09-08.1"
 MAX_LABEL_LENGTH = 120
 MAX_ROLE_LENGTH = 32
 MAX_SELECTOR_LENGTH = 1_024
@@ -206,7 +206,7 @@ class CandidateFinding(_ProfilingModel):
 class ProfilingResult(_ProfilingModel):
     """Stable candidate envelope produced without a model or evaluations."""
 
-    analysis_version: Literal["2026-09-07.1"] = ANALYSIS_VERSION
+    analysis_version: Literal["2026-09-08.1"] = ANALYSIS_VERSION
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     coverage: Coverage
     candidates: list[CandidateFinding]
@@ -1059,15 +1059,367 @@ def _get_contributions(
     return ordered[: state.config.max_contributing_sessions]
 
 
-def _build_prompt(subject: str) -> str:
-    """Build a deterministic inspect-to-experiment prompt."""
+_BRIEFING_CAUTION = (
+    "This pattern is a lead, not proof of a bad result. The finding data at the "
+    "end of this prompt carries the exact session IDs, the chart, and any "
+    "evidence locators; use those, not this summary, when choosing sessions."
+)
+
+
+def _format_briefing(
+    *,
+    odd: str,
+    look_first: str,
+    cohort: str,
+    hypothesis: str,
+    held: str,
+) -> str:
+    """Lay out one finding briefing in the fixed section order."""
     return (
-        f"Use Kitaru to investigate {subject}. Inspect representative affected "
-        "sessions and a comparable unaffected set. Define or refine a cohort that "
-        "captures the pattern. Form a concrete hypothesis, then propose one or more "
-        "controlled experiments that change one factor at a time. Compare outcome "
-        "quality, recurrence, latency, cost, and tool use. Treat this pattern as a "
-        "lead, not proof of a bad result."
+        f"What is odd: {odd}\n"
+        f"Where to look first: {look_first}\n"
+        f"Candidate cohort: {cohort}\n"
+        f"One hypothesis to test: {hypothesis}\n"
+        f"The hypothesis held if: {held}\n"
+        f"{_BRIEFING_CAUTION}"
+    )
+
+
+def _pluralize(count: int, singular: str, plural: str | None = None) -> str:
+    """Return the count with the matching noun form."""
+    noun = singular if count == 1 else (plural or f"{singular}s")
+    return f"{count} {noun}"
+
+
+def _format_ratio(numerator: int, denominator: int) -> str:
+    """Format a per-session average with at most one decimal place."""
+    if not denominator:
+        return "0"
+    return f"{numerator / denominator:.1f}".removesuffix(".0")
+
+
+def _build_signal_briefing(
+    *,
+    family: str,
+    subject: str,
+    affected: int,
+    analyzed: int,
+    share: int | float,
+    occurrences: int,
+    chart_groups: int,
+    leading_category_count: int,
+    excluded_sessions: int,
+) -> str:
+    """Build the briefing for a trajectory, tool-health, or language signal."""
+    odd = (
+        f"{_pluralize(occurrences, 'occurrence')} of {subject} across "
+        f"{_pluralize(affected, 'session')}, which is {share}% of the "
+        f"{_pluralize(analyzed, 'session')} analyzed for this marker."
+    )
+    if chart_groups > 1:
+        odd += (
+            f" The chart splits them into {chart_groups} groups; the leading group "
+            f"alone accounts for {leading_category_count} occurrences."
+        )
+    else:
+        odd += (
+            " All occurrences fall in one group, so the chart only compares "
+            "matching sessions with the other sessions."
+        )
+    if excluded_sessions:
+        odd += (
+            f" {_pluralize(excluded_sessions, 'session was', 'sessions were')} left "
+            "out because their user text was missing or not fully inspected."
+        )
+    marker_look_first = (
+        "Open the sessions named in evidence_locators; each locator points at "
+        "the node where the marker was recorded. Compare them with sessions "
+        "from the same import that have no occurrence"
+    )
+    if family == "language":
+        look_first = (
+            "Open the sessions named in evidence_locators; when a locator's node_id "
+            "is null the matching text is in the session's recorded inputs, "
+            "otherwise it is in that node's inputs. Compare them with sessions from "
+            "the same import that have no occurrence, and read the agent turn "
+            "immediately before each flagged user message."
+        )
+        cohort = (
+            f"sessions with at least one user message matching this marker (the "
+            f"{affected} listed), versus sessions with fully inspected user text and "
+            "no match."
+        )
+        hypothesis = (
+            "Check whether the flagged messages follow one recognizable agent turn, "
+            "such as an unanswered question, a wrong tool result, or a repeated "
+            "clarification request. If they do, one agent change aimed at that turn "
+            "is the candidate to replay."
+        )
+        held = (
+            "the marker recurs in fewer replayed sessions than the "
+            f"{_pluralize(affected, 'session')} it appears in now, and the "
+            "failed-session rate for the cohort does not rise."
+        )
+    elif family == "tool_health":
+        look_first = marker_look_first + (
+            ", starting with the chart's leading group when it dominates the count."
+            if chart_groups > 1
+            else "."
+        )
+        cohort = (
+            f"sessions with at least one recorded occurrence of {subject} (the "
+            f"{affected} listed)"
+        )
+        cohort += (
+            ", optionally narrowed to the chart's leading group."
+            if chart_groups > 1
+            else "."
+        )
+        hypothesis = (
+            "Check whether the affected calls fail or come back empty for the same "
+            "inputs every time. If they do, the tool contract or the way the agent "
+            "builds its arguments is the single factor to change and replay."
+        )
+        held = (
+            f"recorded occurrences per session fall below the current average of "
+            f"{_format_ratio(occurrences, affected)}, the affected share drops below "
+            f"{share}%, and the failed-session rate does not rise."
+        )
+    else:
+        look_first = (
+            marker_look_first
+            + ", and check what the agent saw between one call and its repeat."
+        )
+        cohort = (
+            f"sessions with at least one recorded occurrence of {subject} (the "
+            f"{affected} listed), versus sessions with tool calls and no repeat."
+        )
+        hypothesis = (
+            "Check whether the repeat follows a tool result the agent could not act "
+            "on, such as an error with no guidance or an unchanged answer. If it "
+            "does, the tool's error message or the agent's retry instruction is the "
+            "single factor to change and replay."
+        )
+        held = (
+            f"repeated calls per affected session fall below the current average of "
+            f"{_format_ratio(occurrences, affected)}, tool calls per session drop, "
+            "and the failed-session rate does not rise."
+        )
+    return _format_briefing(
+        odd=odd,
+        look_first=look_first,
+        cohort=cohort,
+        hypothesis=hypothesis,
+        held=held,
+    )
+
+
+def _build_outcome_briefing(
+    *,
+    failed: int,
+    completed: int,
+    analyzed: int,
+    failed_percent: int | float,
+    statuses: int,
+) -> str:
+    """Build the briefing for the recorded session outcome finding."""
+    odd = (
+        f"{_pluralize(failed, 'session')} out of {analyzed} analyzed "
+        f"({failed_percent}%) {'carries' if failed == 1 else 'carry'} the recorded "
+        "status failed."
+    )
+    if completed:
+        odd += f" {completed} are recorded completed."
+    if statuses > 2:
+        odd += f" The chart shows {statuses} distinct recorded statuses in total."
+    if completed:
+        look_first = (
+            "Open the failed sessions listed in contributing_session_ids and read "
+            "their last recorded node. Compare each with a completed session from "
+            "the same import that starts with a similar input."
+        )
+    else:
+        look_first = (
+            "Open the failed sessions listed in contributing_session_ids and read "
+            "their last recorded node. No completed session exists in this import, "
+            "so pick the comparison set from another import or agent version."
+        )
+    return _format_briefing(
+        odd=odd,
+        look_first=look_first,
+        cohort=f"sessions whose recorded status is failed (the {failed} listed).",
+        hypothesis=(
+            "Check whether the failed sessions share the same final step, such as "
+            "one tool name and one error, right before the status flips to failed. "
+            "If they do, that step is the single factor to change and replay."
+        ),
+        held=(
+            f"the failed share of the replayed cohort falls below {failed_percent}% "
+            "without a rise in duration or cost per session."
+        ),
+    )
+
+
+def _build_flat_distribution_briefing(
+    *, family: str, values: Histogram, unit: str, quantity: str
+) -> str:
+    """Build the briefing for a distribution whose observations share one value."""
+    observations = len(values)
+    minimum = f"{values.minimum:g}"
+    recorded = "a recorded duration" if family == "timing" else f"recorded {unit}"
+    return _format_briefing(
+        odd=(
+            f"All {observations} observations have exactly {minimum} {unit}; there "
+            "is no tail to compare against the middle."
+        ),
+        look_first=(
+            "Open a few of the sessions in contributing_session_ids to confirm the "
+            "value is real rather than a fixed instrumentation default."
+        ),
+        cohort=f"every session with {recorded} (the {observations} listed).",
+        hypothesis=(
+            "Treat this as a baseline: check that one intended agent change moves "
+            f"{quantity} away from {minimum} {unit} in the direction you expect."
+        ),
+        held=(
+            f"the replayed cohort's {quantity} differs from {minimum} {unit} in the "
+            "expected direction while the failed-session rate does not rise."
+        ),
+    )
+
+
+def _build_distribution_briefing(
+    *,
+    family: str,
+    values: Histogram,
+    sessions_analyzed: int,
+    unit: str,
+) -> str:
+    """Build the briefing for an activity or timing distribution finding."""
+    quantity = "recorded duration" if family == "timing" else f"{unit} per session"
+    reading = "recorded duration" if family == "timing" else f"{unit} count"
+    observations = len(values)
+    minimum = f"{values.minimum:g}"
+    maximum = f"{values.maximum:g}"
+    if values.minimum == values.maximum:
+        return _build_flat_distribution_briefing(
+            family=family, values=values, unit=unit, quantity=quantity
+        )
+
+    tail_index = max(index for index, count in enumerate(values.bins) if count)
+    tail_count = values.bins[tail_index]
+    tail_lower = f"{values.bounds[tail_index - 1]:g}" if tail_index else minimum
+    # Name the bin the way the chart labels it: the last bin is open-ended, a
+    # lower occupied bin has an upper bound and empty bins above it.
+    if tail_index == len(values.bounds):
+        bin_name, bin_adjective = "top bin", "top-bin"
+        bin_label = f"{tail_lower} or more {unit}"
+    else:
+        bin_name, bin_adjective = "highest occupied bin", "highest-bin"
+        bin_label = f"{tail_lower} to {values.bounds[tail_index]:g} {unit}"
+    rest = observations - tail_count
+    odd = (
+        f"{observations} sessions range from {minimum} to {maximum} {unit}. "
+        f"{_pluralize(tail_count, 'session sits', 'sessions sit')} in the "
+        f"{bin_name} ({bin_label}); the other {rest} sit below it."
+    )
+    if observations < sessions_analyzed:
+        odd += (
+            f" Of the {sessions_analyzed} sessions analyzed, "
+            f"{sessions_analyzed - observations} had no {reading}."
+        )
+    look_first = (
+        f"Open the {bin_adjective} sessions first and compare them with sessions from "
+        "the middle of the chart. The finding data lists sessions, not bins, so "
+        f"read each session's {reading} to place it."
+    )
+    if family == "timing":
+        cohort = (
+            f"sessions whose recorded duration is at least {tail_lower} seconds "
+            f"(the {bin_name})."
+        )
+        hypothesis = (
+            "Check whether the long sessions spend their time in a few slow nodes, "
+            "such as one tool wait or one model call, rather than in more steps. "
+            "If they do, that node is the single factor to change and replay."
+        )
+        held = (
+            f"the {bin_adjective} cohort's recorded duration falls below {tail_lower} "
+            "seconds for most sessions while the failed-session rate and cost per "
+            "session do not rise."
+        )
+    else:
+        cohort = f"sessions with at least {tail_lower} {unit} (the {bin_name})."
+        hypothesis = (
+            f"Check whether the {bin_adjective} sessions reach the same outcome as the "
+            f"middle or whether the extra {unit} are repeats and retries. If they are "
+            "repeats, the step that triggers them is the single factor to change "
+            "and replay."
+        )
+        held = (
+            f"the {bin_adjective} cohort's {unit} per session fall below {tail_lower} "
+            "for most sessions while the failed-session rate does not rise."
+        )
+    return _format_briefing(
+        odd=odd,
+        look_first=look_first,
+        cohort=cohort,
+        hypothesis=hypothesis,
+        held=held,
+    )
+
+
+def _build_model_mix_briefing(
+    *,
+    models: int,
+    model_calls: int,
+    leading_model_calls: int,
+    affected: int,
+    analyzed: int,
+) -> str:
+    """Build the briefing for the recorded model mix finding."""
+    leading_share = _calculate_percent(leading_model_calls, model_calls)
+    odd = (
+        f"{_pluralize(models, 'distinct recorded model label')} across "
+        f"{_pluralize(model_calls, 'model call')} in {affected} of {analyzed} "
+        f"sessions. The most frequent label accounts for "
+        f"{_pluralize(leading_model_calls, 'call')} ({leading_share}%)."
+    )
+    if models == 1:
+        look_first = (
+            "Open a few sessions from contributing_session_ids and read the model "
+            "label on their model-call nodes. With a single label there is no "
+            "in-import comparison; the comparison is one candidate replacement "
+            "model on replay."
+        )
+        cohort = (
+            f"sessions with a recorded model label (all {affected} listed), since "
+            "every recorded call uses the same label."
+        )
+    else:
+        look_first = (
+            "Open sessions from contributing_session_ids and group them by the model "
+            "label on their model-call nodes. Compare sessions with at least one "
+            "model-call node recording the chart's leading label against sessions "
+            "with none."
+        )
+        cohort = (
+            "sessions with at least one model-call node recording the chart's "
+            f"leading label ({leading_model_calls} of {model_calls} calls)."
+        )
+    return _format_briefing(
+        odd=odd,
+        look_first=look_first,
+        cohort=cohort,
+        hypothesis=(
+            "Check whether swapping the leading model for one candidate changes "
+            "outcome or cost. Run one replay with a single model override and no "
+            "other change."
+        ),
+        held=(
+            "cost per session or the failed-session rate falls on the replayed "
+            "cohort while the other one does not rise."
+        ),
     )
 
 
@@ -1150,6 +1502,18 @@ def _build_signal_candidate(
             f"{candidate_caveat} {excluded_sessions} analyzed {noun} excluded "
             "because user text was missing or not fully inspected."
         )
+    leading = aggregate.categories.top(1)
+    briefing = _build_signal_briefing(
+        family=family,
+        subject=subject,
+        affected=len(aggregate.sessions),
+        analyzed=len(eligible_session_ids),
+        share=share,
+        occurrences=aggregate.count,
+        chart_groups=len(aggregate.categories.top()),
+        leading_category_count=leading[0][1] if leading else 0,
+        excluded_sessions=excluded_sessions if family == "language" else 0,
+    )
     return CandidateFinding(
         id=candidate_id,
         family=family,
@@ -1184,7 +1548,7 @@ def _build_signal_candidate(
             for locator in aggregate.evidence
             if locator.session_id in contribution_ids
         ],
-        investigation_prompt=_build_prompt(subject),
+        investigation_prompt=briefing,
     )
 
 
@@ -1253,7 +1617,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             "Recorded tool errors affect {affected} sessions",
             "The profiler found {count} recorded errors across {affected} sessions. "
             "Compare the chart groups to choose a starting point.",
-            "recorded tool errors grouped by exact tool name",
+            "tool errors",
             "A recorded tool error may be recovered later and is not the same as a "
             "failed session.",
         ),
@@ -1397,7 +1761,13 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 ),
                 contributing_session_ids=contributions,
                 evidence=status_evidence,
-                investigation_prompt=_build_prompt("recorded failed session outcomes"),
+                investigation_prompt=_build_outcome_briefing(
+                    failed=len(affected_ids),
+                    completed=completed_sessions,
+                    analyzed=analyzed_sessions,
+                    failed_percent=failed_percent,
+                    statuses=len(state.statuses),
+                ),
             )
         )
 
@@ -1496,6 +1866,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 data=_build_binned(spec.values, unit=spec.unit),
                 facts=[
                     DeterministicFact(name="observations", value=len(spec.values)),
+                    DeterministicFact(name="minimum", value=spec.values.minimum),
                     DeterministicFact(name="maximum", value=spec.values.maximum),
                 ],
                 coverage=CandidateCoverage(
@@ -1509,7 +1880,12 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 ),
                 contributing_session_ids=contributing,
                 evidence=[],
-                investigation_prompt=_build_prompt(title.lower()),
+                investigation_prompt=_build_distribution_briefing(
+                    family=spec.family,
+                    values=spec.values,
+                    sessions_analyzed=spec.sessions_analyzed,
+                    unit=spec.unit,
+                ),
             )
         )
 
@@ -1523,9 +1899,9 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 rank=160,
                 eyebrow="MODEL MIX",
                 title=(
-                    f"{len(state.models)} recorded model "
-                    f"{'appears' if len(state.models) == 1 else 'appear'} in these "
-                    "sessions"
+                    f"{len(state.models)} recorded model"
+                    f"{' appears' if len(state.models) == 1 else 's appear'} in "
+                    "these sessions"
                 ),
                 fallback_description=(
                     "This exact model mix can seed a cohort for cost, latency, or "
@@ -1557,7 +1933,13 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 ),
                 contributing_session_ids=contributions,
                 evidence=[],
-                investigation_prompt=_build_prompt("the recorded model mix"),
+                investigation_prompt=_build_model_mix_briefing(
+                    models=len(state.models),
+                    model_calls=state.models.total,
+                    leading_model_calls=state.models.top(1)[0][1],
+                    affected=len(model_sessions),
+                    analyzed=len(state.node_session_ids),
+                ),
             )
         )
     candidates.sort(key=lambda candidate: (candidate.rank, candidate.id))

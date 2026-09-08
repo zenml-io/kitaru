@@ -31,6 +31,7 @@ MAX_INSIGHTS = 6
 MAX_EVIDENCE_LOCATORS = 20
 MAX_CONTRIBUTING_SESSIONS = 1000
 MAX_NAME_LENGTH = 255
+MAX_SERVER_URL_LENGTH = 2048
 MAX_INVESTIGATION_PROMPT_LENGTH = 16_000
 
 _NAME_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$")
@@ -87,10 +88,16 @@ class InsightGenerationContext(_InsightGenerationModel):
     source_import: SourceImportContext = Field(
         description="Import scope whose normalized sessions were analyzed."
     )
-
-    _validate_agent_name_utf8 = field_validator("agent_name", mode="before")(
-        _require_utf8
+    server_url: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_SERVER_URL_LENGTH,
+        description="Kitaru server holding the analyzed sessions, when known.",
     )
+
+    _validate_text_fields_utf8 = field_validator(
+        "agent_name", "server_url", mode="before"
+    )(_require_utf8)
 
 
 class CoverageTruncation(_InsightGenerationModel):

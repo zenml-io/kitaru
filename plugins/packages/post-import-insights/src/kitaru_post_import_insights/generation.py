@@ -24,7 +24,75 @@ from kitaru_post_import_insights.profiling import (
     ProfilingResult,
 )
 
-_NUMERIC_TOKEN = re.compile(r"\d+(?:[.,]\d+)*(?:%|[A-Za-z]+)?")
+# A numeric token is a number plus an optional unit, so the number parser can
+# read the leading number of any token the numeric scan produces.
+# Digits with optional separators, or a leading-dot decimal such as ".5".
+_NUMBER_PATTERN = r"-?(?:\d+(?:[.,]\d+)*|\.\d+)"
+_NUMBER = re.compile(_NUMBER_PATTERN)
+# A token starts only where no word character or dot precedes it, so a range
+# such as "3-6" reads as two positive numbers and "1332.029" is not rescanned
+# from its fractional part; ".5" is still reached because the dot itself is
+# where that token begins.
+_NUMERIC_TOKEN = re.compile(rf"(?<![\w.]){_NUMBER_PATTERN}(?:%|[A-Za-z]+)?")
+_UNIT_WORD = re.compile(r"\s*(%|[A-Za-z]+)")
+_CURRENCY_PREFIX = re.compile(r"[$€£]\s*$")
+_PERCENT_UNITS = {"%", "percent", "percentage", "pct", "share"}
+# Written units that name something the profiler never measures.
+_NON_COUNT_UNITS = {
+    "x",
+    "times",
+    "dollar",
+    "dollars",
+    "cent",
+    "cents",
+    "usd",
+    "eur",
+    "euro",
+    "euros",
+    "gbp",
+    "pound",
+    "pounds",
+    "byte",
+    "bytes",
+    "kb",
+    "mb",
+    "gb",
+    "tb",
+    "token",
+    "tokens",
+}
+# Facts named as a statistic of the chart's values share the chart's unit.
+_CHART_STATISTIC_FACTS = {
+    "maximum",
+    "minimum",
+    "median",
+    "mean",
+    "average",
+    "p50",
+    "p90",
+    "p95",
+    "p99",
+}
+# Written time units normalized to seconds, so "500 ms" can ground on 0.5 s.
+_TIME_UNIT_SECONDS = {
+    "ms": 0.001,
+    "millisecond": 0.001,
+    "milliseconds": 0.001,
+    "s": 1.0,
+    "sec": 1.0,
+    "secs": 1.0,
+    "second": 1.0,
+    "seconds": 1.0,
+    "min": 60.0,
+    "mins": 60.0,
+    "minute": 60.0,
+    "minutes": 60.0,
+    "h": 3600.0,
+    "hr": 3600.0,
+    "hrs": 3600.0,
+    "hour": 3600.0,
+    "hours": 3600.0,
+}
 _QUANTITY_TOKEN = re.compile(
     r"\b(?:no|none|zero|one|two|three|four|five|six|seven|eight|nine|ten|"
     r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
@@ -66,7 +134,10 @@ _UNSUPPORTED_CLAIM = re.compile(
     r"(?:stems?|stemmed|stemming)\s+from|"
     r"produc(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|"
     r"trigger(?:s|ed|ing)?|responsible\s+for|attributable\s+to|"
-    r"(?:account|accounts|accounted|accounting)\s+for|"
+    r"(?:account|accounts|accounted|accounting)\s+for\s+"
+    r"(?!(?:(?:the|about|around|roughly|nearly|almost|over|under)\s+)*"
+    r"(?:\d|most\b|half\b|larger|largest|smaller|smallest|bulk\b|"
+    r"majority\b|rest\b|remaining|remainder))|"
     r"(?:contributes?|contributed|contributing)\s+to|"
     r"(?:give|gives|gave|given|giving)\s+rise\s+to|"
     r"(?:bring|brings|brought|bringing)\s+about|"
@@ -74,14 +145,7 @@ _UNSUPPORTED_CLAIM = re.compile(
     r"originate|originates|originated|originating)\s+from|"
     r"explains?|explained|explaining|determines?|determined|determining|"
     r"improv(?:e|es|ed|ing|ements?)|outperform(?:s|ed|ing)?|"
-    r"more|most|less|fewer|higher|lower|increase[ds]?|decrease[ds]?|"
-    r"slower|slowest|faster|fastest|better|best|worse|worst|"
-    r"longer|longest|shorter|shortest|larger|largest|smaller|smallest|"
-    r"greater|greatest|bigger|biggest|quicker|quickest|easier|easiest|"
-    r"harder|hardest|cheaper|cheapest|costlier|costliest|"
-    r"stronger|strongest|weaker|weakest|newer|newest|older|oldest|"
-    r"earlier|earliest|later|latest|"
-    r"healthy|correct|incorrect)\b",
+    r"better|best|worse|worst|healthy|correct|incorrect)\b",
     flags=re.IGNORECASE,
 )
 _OUTCOME_TOKEN = re.compile(
@@ -114,7 +178,8 @@ _SESSION_OUTCOME_CLAIM = re.compile(
     flags=re.IGNORECASE,
 )
 _NEGATION_TOKEN = re.compile(
-    r"\b(?:no|not|never|none|neither|nor|without|cannot|absent)\b|n['\u2019]t\b",
+    r"\b(?:no|not|never|none|zero|neither|nor|without|cannot|absent)\b|"
+    r"n['\u2019]t\b",
     flags=re.IGNORECASE,
 )
 _SESSION_STATUS_OUTCOMES = {
@@ -159,6 +224,40 @@ _NON_IDENTITY_LABEL_WORDS = {
     "tool",
     "tools",
 }
+
+# A number followed by one of these nouns counts things, so it cannot borrow
+# a duration such as a chart maximum that happens to have the same digits.
+_COUNT_NOUNS = {
+    word
+    for word in _NON_IDENTITY_LABEL_WORDS
+    if len(word) > 3 and word not in {"time", "times"}
+} | {
+    "label",
+    "labels",
+    "model",
+    "models",
+    "node",
+    "nodes",
+    "observation",
+    "observations",
+    "pair",
+    "pairs",
+    "turn",
+    "turns",
+}
+
+
+# A chart label directly before or after a number, with at most one short
+# connector word between them and no punctuation other than a colon, an
+# equals sign, or a parenthesis.
+_PRECEDING_LABEL = re.compile(
+    r"(?<![\w./:-])([A-Za-z_][\w./:-]*)"
+    r"(?:\s+(?:at|with|of|is|was|has|had|shows))?[\s:(=]*$"
+)
+_FOLLOWING_LABEL = re.compile(
+    r"^[\s):,]*(?:(?P<connector>for|in|on|of|from|at|by|per|to)\s+)?"
+    r"(?P<label>[A-Za-z_][\w./:-]*)"
+)
 
 
 class _GenerationModel(BaseModel):
@@ -235,15 +334,39 @@ class EditorialCardCopy(_GenerationModel):
     description: str = Field(min_length=1, max_length=1000)
 
 
-class EditorialPlan(_GenerationModel):
-    """Provider-neutral page and card copy returned by the editor."""
+class EditorialCardPlan(_GenerationModel):
+    """Provider-neutral card copy returned by the editor."""
 
-    intro_eyebrow: str = Field(min_length=1, max_length=80)
-    intro_title: str = Field(min_length=1, max_length=255)
-    intro_description: str = Field(min_length=1, max_length=1000)
-    recommendation_title: str = Field(min_length=1, max_length=255)
-    recommendation_description: str = Field(min_length=1, max_length=1000)
     insights: list[EditorialCardCopy] = Field(min_length=1, max_length=MAX_INSIGHTS)
+
+
+DEFAULT_INTRO_EYEBROW = "What to look at first"
+DEFAULT_INTRO_TITLE = "A few patterns are worth a closer look"
+DEFAULT_INTRO_DESCRIPTION = (
+    "These evidence-backed leads can guide your first investigation."
+)
+DEFAULT_RECOMMENDATION_TITLE = "Recommended next step"
+DEFAULT_RECOMMENDATION_DESCRIPTION = (
+    "Start with this pattern, define a focused cohort, and test a change."
+)
+
+
+class EditorialPlan(EditorialCardPlan):
+    """Card copy combined with deterministic page framing."""
+
+    intro_eyebrow: str = Field(
+        default=DEFAULT_INTRO_EYEBROW, min_length=1, max_length=80
+    )
+    intro_title: str = Field(default=DEFAULT_INTRO_TITLE, min_length=1, max_length=255)
+    intro_description: str = Field(
+        default=DEFAULT_INTRO_DESCRIPTION, min_length=1, max_length=1000
+    )
+    recommendation_title: str = Field(
+        default=DEFAULT_RECOMMENDATION_TITLE, min_length=1, max_length=255
+    )
+    recommendation_description: str = Field(
+        default=DEFAULT_RECOMMENDATION_DESCRIPTION, min_length=1, max_length=1000
+    )
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -274,8 +397,8 @@ class InsightModelGenerator(Protocol):
         projection: EditorialProjection,
         config: ModelGenerationConfig,
         timeout_seconds: float,
-    ) -> ModelStageResponse[EditorialPlan]:
-        """Edit the validated selection without changing its facts."""
+    ) -> ModelStageResponse[EditorialCardPlan]:
+        """Write card copy for the validated selection without changing its facts."""
 
 
 class ModelGenerationPlan(_GenerationModel):
@@ -315,7 +438,11 @@ def build_analyst_projection(profiling: ProfilingResult) -> AnalystProjection:
 def validate_analyst_plan(
     plan: AnalystPlan, candidates: list[CandidateFinding]
 ) -> AnalystPlan:
-    """Require one to six distinct known IDs and an in-selection recommendation."""
+    """Require one to six distinct known IDs and an in-selection recommendation.
+
+    The rationale is neither persisted nor rendered, so its wording is not
+    checked; rejecting it would fail the whole run over text nobody sees.
+    """
     selected = plan.selected_candidate_ids
     if len(selected) != len(set(selected)):
         raise ValueError("analyst candidate IDs must be unique")
@@ -324,10 +451,6 @@ def validate_analyst_plan(
         raise ValueError("analyst selected an unknown candidate ID")
     if plan.recommended_candidate_id not in selected:
         raise ValueError("analyst recommendation must be in the selection")
-    if _CONTROL.search(plan.rationale) or _LINK.search(plan.rationale):
-        raise ValueError("analyst rationale contains unsafe content")
-    if _MARKUP.search(plan.rationale):
-        raise ValueError("analyst rationale contains markup")
     return plan
 
 
@@ -381,16 +504,6 @@ def build_editorial_projection(
             for position, candidate_id in enumerate(selection.selected_candidate_ids)
         ],
     )
-
-
-def _collect_page_copy(plan: EditorialPlan) -> list[str]:
-    return [
-        plan.intro_eyebrow,
-        plan.intro_title,
-        plan.intro_description,
-        plan.recommendation_title,
-        plan.recommendation_description,
-    ]
 
 
 def _validate_copy_safety(value: str) -> None:
@@ -495,6 +608,7 @@ def _get_supported_outcome_categories(candidate: CandidateFinding) -> set[str]:
         candidate.eyebrow,
         candidate.title,
         candidate.fallback_description,
+        candidate.caveat or "",
     ):
         categories.update(_get_outcome_categories(value))
     return categories
@@ -535,78 +649,344 @@ def _has_negated_outcome(value: str) -> bool:
     )
 
 
-def _validate_page_copy(
-    value: str,
-    allowed_outcomes: set[str],
-    *,
-    allowed_session_outcomes: set[str],
-) -> None:
-    """Validate friendly page framing separately from candidate facts."""
-    _validate_copy_safety(value)
-    if _has_negated_outcome(value):
-        raise ValueError("editor page copy contains a negated outcome claim")
-    if _NUMERIC_TOKEN.search(value) or _QUANTITY_TOKEN.search(value):
-        raise ValueError("editor page copy contains a numeric or quantitative claim")
-    if not _get_session_outcome_claims(value).issubset(allowed_session_outcomes):
-        raise ValueError(
-            "editor page copy contains an unsupported outcome claim about sessions"
+def _parse_number(token: str) -> float | None:
+    """Parse the leading number of a numeric token, tolerating separators."""
+    match = _NUMBER.match(token)
+    if match is None:
+        return None
+    raw = match.group(0)
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", raw):
+        raw = raw.replace(",", "")
+    else:
+        raw = raw.replace(",", ".")
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _classify_unit(unit: str | None) -> tuple[str, float]:
+    """Map a fact name or chart unit to a quantity kind and a scale to seconds."""
+    lowered = (unit or "").lower()
+    if lowered in _PERCENT_UNITS or "percent" in lowered or "share" in lowered:
+        return "percent", 1.0
+    for word, scale in _TIME_UNIT_SECONDS.items():
+        if lowered == word or lowered.endswith(f"_{word}"):
+            return "seconds", scale
+    if "duration" in lowered or "latency" in lowered:
+        return "seconds", 1.0
+    return "count", 1.0
+
+
+def _get_grounded_numbers(candidate: CandidateFinding) -> dict[str, set[float]]:
+    """Return every quantity the candidate states about itself, by kind.
+
+    Kinds are ``count``, ``percent``, and ``seconds`` so that a count of three
+    occurrences cannot ground "3 seconds" or "3%".
+    """
+    numbers: dict[str, set[float]] = {
+        "count": set(),
+        "percent": set(),
+        "seconds": set(),
+    }
+    data = candidate.data
+    chart_kind, chart_scale = _classify_unit(data.unit)
+    for fact in candidate.facts:
+        # A statistic of the chart's values, such as "maximum", is measured in
+        # the chart's unit; every other fact keeps the unit its name declares.
+        if fact.name.lower() in _CHART_STATISTIC_FACTS:
+            kind, scale = chart_kind, chart_scale
+        else:
+            kind, scale = _classify_unit(fact.name)
+        if isinstance(fact.value, str):
+            values = [
+                parsed
+                for match in _NUMBER.finditer(fact.value)
+                if (parsed := _parse_number(match.group(0))) is not None
+            ]
+        else:
+            values = [float(fact.value)]
+        numbers[kind].update(value * scale for value in values)
+    kind, scale = chart_kind, chart_scale
+    if isinstance(data, CategoricalInsightData):
+        numbers[kind].update(float(item.value) * scale for item in data.values)
+    else:
+        for bin_ in data.bins:
+            numbers["count"].add(float(bin_.count))
+            numbers[kind].update(
+                float(bound) * scale
+                for bound in (bin_.lower_bound, bin_.upper_bound)
+                if bound is not None
+            )
+    coverage = candidate.coverage
+    numbers["count"].update(
+        float(count)
+        for count in (
+            coverage.sessions_analyzed,
+            coverage.affected_sessions,
+            coverage.occurrences,
+            coverage.contributing_sessions_available,
+            len(candidate.contributing_session_ids),
         )
-    if not _get_outcome_categories(value).issubset(allowed_outcomes):
-        raise ValueError("editor page copy contains an unsupported outcome claim")
+    )
+    if coverage.sessions_analyzed:
+        numbers["percent"].add(
+            100.0 * coverage.affected_sessions / coverage.sessions_analyzed
+        )
+    return numbers
+
+
+def _matches_grounded(value: float, decimals: int, grounded: set[float]) -> bool:
+    return any(known == value or round(known, decimals) == value for known in grounded)
+
+
+def _get_label_values(candidate: CandidateFinding) -> dict[str, float]:
+    """Map each categorical label, and its outcome category, to its own value."""
+    if not isinstance(candidate.data, CategoricalInsightData):
+        return {}
+    values: dict[str, float] = {}
+    for item in candidate.data.values:
+        values[item.label.lower()] = float(item.value)
+        outcome = _SESSION_STATUS_OUTCOMES.get(item.label)
+        if outcome is not None:
+            values[outcome] = float(item.value)
+    return values
+
+
+def _lookup_label_value(
+    word: str, label_values: dict[str, float], *, outcomes: bool
+) -> float | None:
+    lowered = word.lower().strip("./:-")
+    for key in (lowered, lowered.rstrip("s")):
+        if key in label_values:
+            return label_values[key]
+    if outcomes:
+        for outcome in _get_outcome_categories(word):
+            if outcome in label_values:
+                return label_values[outcome]
+    return None
+
+
+def _get_bound_label_value(
+    *, preceding: str, following: str, label_values: dict[str, float]
+) -> float | None:
+    """Return the value a number must equal when a chart label is adjacent to it.
+
+    "runner at 39" and "39 for runner" bind 39 to the runner's value. A label
+    further away, as in "39 and runner at 16" or "runner, with 14 sessions",
+    does not bind, because the number belongs to whatever label sits next to
+    it, not to the nearest label mentioned.
+    """
+    before = _PRECEDING_LABEL.search(preceding)
+    if before is not None:
+        bound = _lookup_label_value(before.group(1), label_values, outcomes=False)
+        if bound is not None:
+            return bound
+    after = _FOLLOWING_LABEL.match(following)
+    if after is None:
+        return None
+    return _lookup_label_value(
+        after.group("label"), label_values, outcomes=after.group("connector") is None
+    )
+
+
+def _is_grounded_number(
+    token: str,
+    *,
+    preceding: str,
+    following: str,
+    grounded: dict[str, set[float]],
+    chart_unit: str | None,
+    label_values: dict[str, float],
+) -> bool:
+    """Accept a written number that equals or rounds a grounded quantity.
+
+    A percent sign or time unit, attached to the token or as the next word,
+    selects the kind the number must ground on; a bare number may ground on
+    a count or a time value but never on a percentage. A currency prefix, a
+    letter suffix outside the known units, or a unit word the profiler never
+    measures rejects the number outright. A number followed by a chart label
+    or its outcome word must equal that label's own value.
+    """
+    match = _NUMBER.match(token)
+    if match is None:
+        return False
+    raw = match.group(0)
+    value = _parse_number(raw)
+    if value is None:
+        return False
+    decimals = len(raw.rsplit(".", 1)[1]) if "." in raw else 0
+    if _CURRENCY_PREFIX.search(preceding):
+        return False
+    attached = token[match.end() :].lower()
+    if attached and attached not in _PERCENT_UNITS | set(_TIME_UNIT_SECONDS):
+        return False
+    unit = attached
+    if not unit and (next_word := _UNIT_WORD.match(following)):
+        unit = next_word.group(1).lower()
+    if unit in _NON_COUNT_UNITS and unit != (chart_unit or "").lower():
+        return False
+    if (
+        not attached
+        and (
+            bound := _get_bound_label_value(
+                preceding=preceding, following=following, label_values=label_values
+            )
+        )
+        is not None
+    ):
+        return _matches_grounded(value, decimals, {bound})
+    if unit in _PERCENT_UNITS:
+        return _matches_grounded(value, decimals, grounded["percent"])
+    if unit in _COUNT_NOUNS:
+        return _matches_grounded(value, decimals, grounded["count"])
+    if unit in _TIME_UNIT_SECONDS:
+        scaled = value * _TIME_UNIT_SECONDS[unit]
+        # Compare at the written precision after scaling to seconds.
+        scaled_decimals = decimals + max(
+            0, -int(f"{_TIME_UNIT_SECONDS[unit]:e}".split("e")[1])
+        )
+        return _matches_grounded(scaled, scaled_decimals, grounded["seconds"])
+    return _matches_grounded(value, decimals, grounded["count"]) or _matches_grounded(
+        value, decimals, grounded["seconds"]
+    )
+
+
+def _negates_candidate_phrase(value: str, candidate: CandidateFinding) -> bool:
+    """Return whether a sentence negates a quoted candidate outcome phrase."""
+    for clause in re.split(r"[.;!?\n]+", value):
+        masked = _remove_candidate_phrases(clause, candidate)
+        if (
+            masked != clause
+            and _has_outcome_wording(clause)
+            and _NEGATION_TOKEN.search(masked)
+        ):
+            return True
+    return False
+
+
+def _remove_candidate_phrases(value: str, candidate: CandidateFinding) -> str:
+    """Mask clauses quoted from the candidate's own title, description, or caveat.
+
+    The editor is asked to carry the caveat into its copy, so a quoted clause
+    such as "is not the same as a failed session" is grounded wording rather
+    than a claim the model made up.
+    """
+    clauses = {
+        clause.strip().lower()
+        for text in (candidate.title, candidate.fallback_description, candidate.caveat)
+        if text
+        for clause in re.split(r"[.;!?\n,]+|\s(?:and|but)\s", text)
+        if len(clause.strip()) >= 12
+    }
+    for clause in sorted(clauses, key=len, reverse=True):
+        value = re.sub(re.escape(clause), " ", value, flags=re.IGNORECASE)
+    return value
 
 
 def _validate_card_copy(value: str, candidate: CandidateFinding) -> None:
     """Validate one card only against the deterministic candidate it explains."""
     _validate_copy_safety(value)
-    allowed_outcomes = _get_supported_outcome_categories(candidate)
     remaining = _remove_known_labels(value, _get_quantified_labels(candidate))
-    if _has_negated_outcome(value):
+    claims = _remove_candidate_phrases(value, candidate)
+    if _has_negated_outcome(claims) or _negates_candidate_phrase(value, candidate):
         raise ValueError("editor card copy contains a negated outcome claim")
-    if _NUMERIC_TOKEN.search(remaining) or _QUANTITY_TOKEN.search(remaining):
-        raise ValueError("editor card copy contains a numeric or quantitative claim")
-    if not _get_session_outcome_claims(value).issubset(
+    grounded = _get_grounded_numbers(candidate)
+    label_values = _get_label_values(candidate)
+    for match in _NUMERIC_TOKEN.finditer(remaining):
+        if not _is_grounded_number(
+            match.group(0),
+            preceding=remaining[: match.start()],
+            following=remaining[match.end() :],
+            grounded=grounded,
+            chart_unit=candidate.data.unit,
+            label_values=label_values,
+        ):
+            raise ValueError(
+                "editor card copy contains a numeric claim absent from the "
+                "candidate facts"
+            )
+    if not _get_session_outcome_claims(claims).issubset(
         _get_supported_session_outcome_categories(candidate)
     ):
         raise ValueError(
             "editor card copy contains an unsupported outcome claim about sessions"
         )
-    output_outcomes = _get_outcome_categories(value)
-    if not output_outcomes.issubset(allowed_outcomes):
+    if not _get_outcome_categories(claims).issubset(
+        _get_supported_outcome_categories(candidate)
+    ):
         raise ValueError("editor card copy contains an unsupported outcome claim")
 
 
+def _validate_selection_order(cards: EditorialCardPlan, selection: AnalystPlan) -> None:
+    """Reject card copy that drops, adds, or reorders the selected candidates."""
+    if [item.id for item in cards.insights] != selection.selected_candidate_ids:
+        raise ValueError("editor must preserve selection membership and order")
+
+
+def _validate_card(item: EditorialCardCopy, candidate: CandidateFinding) -> None:
+    for value in (item.eyebrow, item.description):
+        _validate_card_copy(value, candidate)
+
+
+def _is_valid_card(item: EditorialCardCopy, candidate: CandidateFinding) -> bool:
+    """Return whether both strings of one card pass candidate-grounded checks."""
+    try:
+        _validate_card(item, candidate)
+    except ValueError:
+        return False
+    return True
+
+
 def validate_editorial_plan(
-    plan: EditorialPlan,
+    plan: EditorialCardPlan,
     selection: AnalystPlan,
     candidates: list[CandidateFinding],
 ) -> EditorialPlan:
     """Reject copy that changes selection or introduces unsupported claims."""
-    actual = [item.id for item in plan.insights]
-    if actual != selection.selected_candidate_ids:
-        raise ValueError("editor must preserve selection membership and order")
-
-    selected = {
-        item.id: item
-        for item in candidates
-        if item.id in selection.selected_candidate_ids
-    }
-    page_outcomes: set[str] = set()
-    page_session_outcomes: set[str] = set()
-    for candidate in selected.values():
-        page_outcomes.update(_get_supported_outcome_categories(candidate))
-        page_session_outcomes.update(
-            _get_supported_session_outcome_categories(candidate)
-        )
-    for value in _collect_page_copy(plan):
-        _validate_page_copy(
-            value,
-            page_outcomes,
-            allowed_session_outcomes=page_session_outcomes,
-        )
+    _validate_selection_order(plan, selection)
+    by_id = {item.id: item for item in candidates}
     for item in plan.insights:
-        for value in (item.eyebrow, item.description):
-            _validate_card_copy(value, selected[item.id])
-    return plan
+        _validate_card(item, by_id[item.id])
+    if isinstance(plan, EditorialPlan):
+        return plan
+    return EditorialPlan(**plan.model_dump())
+
+
+def apply_editorial_copy(
+    cards: EditorialCardPlan,
+    selection: AnalystPlan,
+    candidates: list[CandidateFinding],
+) -> tuple[EditorialPlan, list[str]]:
+    """Keep validated card copy and use deterministic copy for the rest.
+
+    The selection fixes which cards exist and in what order. A selected card
+    the editor skipped, or whose copy fails validation, uses deterministic
+    copy; cards the editor added are ignored.
+
+    Returns:
+        Plan with deterministic page framing, and the IDs of the cards using
+        deterministic copy.
+    """
+    by_id = {item.id: item for item in candidates}
+    copy_by_id = {item.id: item for item in cards.insights}
+    accepted: list[EditorialCardCopy] = []
+    rejected: list[str] = []
+    for candidate_id in selection.selected_candidate_ids:
+        candidate = by_id[candidate_id]
+        item = copy_by_id.get(candidate_id)
+        if item is not None and _is_valid_card(item, candidate):
+            accepted.append(item)
+            continue
+        rejected.append(candidate_id)
+        accepted.append(
+            EditorialCardCopy(
+                id=candidate_id,
+                eyebrow=candidate.eyebrow,
+                description=candidate.fallback_description,
+            )
+        )
+    return EditorialPlan(insights=accepted), rejected
 
 
 def deterministic_selection(candidates: list[CandidateFinding]) -> AnalystPlan:
@@ -635,15 +1015,6 @@ def deterministic_editorial(
     """Return stable page and card copy without a model request."""
     by_id = {candidate.id: candidate for candidate in candidates}
     return EditorialPlan(
-        intro_eyebrow="What to look at first",
-        intro_title="A few patterns are worth a closer look",
-        intro_description=(
-            "These evidence-backed leads can guide your first investigation."
-        ),
-        recommendation_title="Recommended next step",
-        recommendation_description=(
-            "Start with this pattern, define a focused cohort, and test a change."
-        ),
         insights=[
             EditorialCardCopy(
                 id=candidate_id,
@@ -740,7 +1111,7 @@ async def generate_model_plan(
             receipts=receipts,
             reason="analyst_timed_out",
         )
-    except Exception:
+    except Exception as error:
         receipts.append(
             ProviderReceipt(
                 stage="analyst",
@@ -752,7 +1123,7 @@ async def generate_model_plan(
             profiling,
             selection=None,
             receipts=receipts,
-            reason="analyst_failed",
+            reason=f"analyst_failed: {type(error).__name__}",
         )
 
     editorial_projection = build_editorial_projection(profiling, selection)
@@ -790,7 +1161,7 @@ async def generate_model_plan(
             receipts=receipts,
             reason="editor_timed_out",
         )
-    except Exception:
+    except Exception as error:
         receipts.append(
             ProviderReceipt(
                 stage="editor",
@@ -802,24 +1173,23 @@ async def generate_model_plan(
             profiling,
             selection=selection,
             receipts=receipts,
-            reason="editor_failed",
+            reason=f"editor_failed: {type(error).__name__}",
         )
 
     receipts.append(editor_response.receipt)
-    try:
-        editorial = validate_editorial_plan(
-            editor_response.value, selection, profiling.candidates
-        )
-    except ValueError:
-        return _build_fallback(
-            profiling,
-            selection=selection,
-            receipts=receipts,
-            reason="editor_validation_failed",
-        )
+    editorial, rejected_ids = apply_editorial_copy(
+        editor_response.value, selection, profiling.candidates
+    )
     return ModelGenerationPlan(
         selection=selection,
         editorial=editorial,
         mode=GenerationMode.MODEL_BACKED,
-        diagnostics=GenerationDiagnostics(provider_receipts=receipts),
+        diagnostics=GenerationDiagnostics(
+            provider_receipts=receipts,
+            warnings=[
+                f"Card copy for {candidate_id} failed validation and uses "
+                "deterministic text."
+                for candidate_id in rejected_ids
+            ],
+        ),
     )

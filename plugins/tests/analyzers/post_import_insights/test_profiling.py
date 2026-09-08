@@ -104,6 +104,7 @@ def test_full_import_profiles_more_than_25000_nodes() -> None:
     assert distribution.coverage.occurrences == 261
     assert {fact.name: fact.value for fact in distribution.facts} == {
         "observations": 261,
+        "minimum": 1,
         "maximum": 100,
     }
 
@@ -1649,12 +1650,12 @@ def test_projection_byte_bound_drops_lower_ranked_candidates() -> None:
 
     result = profile_sessions(
         [session],
-        config=ProfilingConfig(max_projection_bytes=2_500),
+        config=ProfilingConfig(max_projection_bytes=4_000),
     )
 
     assert result.candidates
     assert len(result.candidates) < len(unrestricted.candidates)
-    assert len(result.model_dump_json().encode()) <= 2_500
+    assert len(result.model_dump_json().encode()) <= 4_000
     assert any(
         item.dimension == "projection_bytes" for item in result.coverage.truncations
     )
@@ -1773,3 +1774,210 @@ def test_prompt_injection_source_text_is_never_exported() -> None:
     assert attack.lower() not in exported
     assert "ignore all instructions" not in exported
     assert all(candidate.id != attack for candidate in result.candidates)
+
+
+def _briefing_sections(prompt: str) -> dict[str, str]:
+    sections: dict[str, str] = {}
+    for line in prompt.splitlines():
+        label, separator, text = line.partition(": ")
+        if separator:
+            sections[label] = text
+    return sections
+
+
+@pytest.mark.parametrize(
+    ("candidate_id", "family", "cohort_phrase"),
+    [
+        (
+            "failed-identical-retries",
+            "trajectory",
+            "sessions with at least one recorded occurrence",
+        ),
+        (
+            "adjacent-same-tool-failures",
+            "tool_health",
+            "sessions with at least one recorded occurrence",
+        ),
+        (
+            "correction-language",
+            "language",
+            "sessions with at least one user message matching this marker",
+        ),
+    ],
+)
+def test_signal_briefing_states_numbers_and_cohort(
+    candidate_id: str, family: str, cohort_phrase: str
+) -> None:
+    """Each signal briefing carries its own counts, share, and cohort boundary."""
+    failing: list[tuple[str, object, NodeStatus, object]] = [
+        ("lookup", {"id": 1}, NodeStatus.FAILED, None)
+    ] * 3
+    sessions = [
+        _calls(1, failing),
+        _calls(2, failing),
+        _session(3, inputs={"messages": [{"role": "user", "content": "try again"}]}),
+        _session(4, inputs={"messages": [{"role": "user", "content": "thanks"}]}),
+    ]
+
+    candidate = _candidate(profile_sessions(sessions), candidate_id)
+    sections = _briefing_sections(candidate.investigation_prompt)
+
+    assert candidate.family == family
+    coverage = candidate.coverage
+    assert f"{coverage.occurrences} occurrence" in sections["What is odd"]
+    assert f"{coverage.affected_sessions} session" in sections["What is odd"]
+    assert f"{coverage.sessions_analyzed} session" in sections["What is odd"]
+    assert (
+        f"{candidate.facts[2].value}% of the {coverage.sessions_analyzed}"
+        in sections["What is odd"]
+    )
+    assert sections["Candidate cohort"].startswith(cohort_phrase)
+    assert f"(the {coverage.affected_sessions} listed)" in sections["Candidate cohort"]
+    assert "evidence_locators" in sections["Where to look first"]
+    assert sections["One hypothesis to test"].startswith("Check whether")
+    assert "failed-session rate" in sections["The hypothesis held if"]
+    assert candidate.investigation_prompt.count("a lead, not proof") == 1
+    assert "controlled experiments" not in candidate.investigation_prompt
+    if family == "language":
+        assert "2 sessions were left out" in sections["What is odd"]
+
+
+def test_outcome_briefing_states_failed_share_and_cohort() -> None:
+    sessions = [
+        _session(1, status=SessionStatus.FAILED),
+        _session(2, status=SessionStatus.FAILED),
+        _session(3, status=SessionStatus.COMPLETED),
+        _session(4, status=SessionStatus.IN_PROGRESS),
+    ]
+
+    candidate = _candidate(profile_sessions(sessions), "session-outcomes")
+    sections = _briefing_sections(candidate.investigation_prompt)
+
+    assert sections["What is odd"].startswith("2 sessions out of 4 analyzed (50%)")
+    assert "1 are recorded completed" in sections["What is odd"]
+    assert "3 distinct recorded statuses" in sections["What is odd"]
+    assert "completed session from the same import" in sections["Where to look first"]
+    assert sections["Candidate cohort"] == (
+        "sessions whose recorded status is failed (the 2 listed)."
+    )
+    assert "falls below 50%" in sections["The hypothesis held if"]
+
+
+def test_all_failed_outcome_briefing_asks_for_an_external_comparison() -> None:
+    candidate = _candidate(
+        profile_sessions(
+            [
+                _session(1, status=SessionStatus.FAILED),
+                _session(2, status=SessionStatus.FAILED),
+            ]
+        ),
+        "session-outcomes",
+    )
+    sections = _briefing_sections(candidate.investigation_prompt)
+
+    assert "No completed session exists" in sections["Where to look first"]
+    assert (
+        "completed session from the same import" not in sections["Where to look first"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("candidate_id", "cohort"),
+    [
+        (
+            "tool-call-distribution",
+            "sessions with at least 6 calls (the highest occupied bin).",
+        ),
+        (
+            "recorded-duration-distribution",
+            "sessions whose recorded duration is at least 60 seconds (the top bin).",
+        ),
+    ],
+)
+def test_distribution_briefing_points_at_the_top_bin(
+    candidate_id: str, cohort: str
+) -> None:
+    busy: list[tuple[str, object, NodeStatus, object]] = [
+        ("lookup", {"id": number}, NodeStatus.COMPLETED, "ok") for number in range(7)
+    ]
+    sessions = [
+        _calls(1, busy),
+        _session(2, ended_at=NOW + timedelta(seconds=65)),
+        _session(3, ended_at=NOW + timedelta(seconds=8)),
+        _session(4, ended_at=NOW + timedelta(seconds=9)),
+    ]
+    sessions[0].session.ended_at = NOW + timedelta(seconds=70)
+
+    candidate = _candidate(profile_sessions(sessions), candidate_id)
+    sections = _briefing_sections(candidate.investigation_prompt)
+
+    if candidate_id == "tool-call-distribution":
+        assert sections["What is odd"].startswith("4 sessions range from 0 to 7 calls.")
+        assert (
+            "1 session sits in the highest occupied bin (6 to 10 calls)"
+            in sections["What is odd"]
+        )
+        assert "the other 3 sit below it" in sections["What is odd"]
+        assert "had no" not in sections["What is odd"]
+    else:
+        assert sections["What is odd"].startswith(
+            "4 sessions range from 8 to 70 seconds."
+        )
+        assert (
+            "2 sessions sit in the top bin (60 or more seconds)"
+            in sections["What is odd"]
+        )
+        assert "had no" not in sections["What is odd"]
+    assert "middle of the chart" in sections["Where to look first"]
+    assert sections["Candidate cohort"] == cohort
+
+
+def test_uniform_distribution_briefing_describes_a_baseline() -> None:
+    sessions = [
+        _session(1, ended_at=NOW + timedelta(seconds=5)),
+        _session(2, ended_at=NOW + timedelta(seconds=5)),
+    ]
+
+    candidate = _candidate(profile_sessions(sessions), "recorded-duration-distribution")
+    sections = _briefing_sections(candidate.investigation_prompt)
+
+    assert sections["What is odd"].startswith(
+        "All 2 observations have exactly 5 seconds; there is no tail"
+    )
+    assert sections["Candidate cohort"] == (
+        "every session with a recorded duration (the 2 listed)."
+    )
+    assert "baseline" in sections["One hypothesis to test"]
+
+
+def test_model_mix_briefing_states_label_counts_without_naming_labels() -> None:
+    def llm(index: int, session: int, model: str) -> SessionNodeResponse:
+        return _node(
+            index,
+            session_id=_id(100 + session),
+            node_type=NodeType.LLM_CALL,
+            tool_name=None,
+            model=model,
+        )
+
+    sessions = [
+        _session(1, [llm(0, 1, "gpt-4o"), llm(1, 1, "gpt-4o")]),
+        _session(2, [llm(0, 2, "gpt-4o"), llm(1, 2, "claude-sonnet")]),
+        _session(3),
+    ]
+
+    candidate = _candidate(profile_sessions(sessions), "model-mix")
+    sections = _briefing_sections(candidate.investigation_prompt)
+
+    assert sections["What is odd"] == (
+        "2 distinct recorded model labels across 4 model calls in 2 of 3 sessions. "
+        "The most frequent label accounts for 3 calls (75%)."
+    )
+    assert sections["Candidate cohort"] == (
+        "sessions with at least one model-call node recording the chart's leading "
+        "label (3 of 4 calls)."
+    )
+    assert "at least one model-call node" in sections["Where to look first"]
+    assert "single model override" in sections["One hypothesis to test"]
+    assert "gpt-4o" not in candidate.investigation_prompt
+    assert "claude-sonnet" not in candidate.investigation_prompt
