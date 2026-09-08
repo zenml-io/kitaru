@@ -670,8 +670,7 @@ async def test_run_registers_and_drains_a_claimed_task(
     assert len(client.workers.created) == 1
     created = client.workers.created[0]
     assert created.name == "worker-under-test"
-    assert created.scope == scope.with_requires_credentials_selector()
-    assert created.scope != scope
+    assert created.scope == scope
     assert created.metadata == {"pool": "test"}
     assert created.runtime == detect_runtime()
     assert [call.status for _, call in client.tasks.update_calls] == [

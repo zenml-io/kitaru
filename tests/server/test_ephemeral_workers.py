@@ -177,7 +177,6 @@ async def test_start_registers_and_starts_a_worker_pinned_to_the_job(
             LabelSelector(
                 key="kitaru/plugin_namespace", values=["kitaru"], required=True
             ),
-            LabelSelector(key="kitaru/requires-credentials", values=[]),
         ],
         job_id=job.id,
     )

@@ -271,7 +271,11 @@ from kitaru.server.domain.task import (
     Task,
     TaskNotFound,
 )
-from kitaru.server.domain.worker import Worker, WorkerNotFound
+from kitaru.server.domain.worker import (
+    Worker,
+    WorkerNotFound,
+    get_effective_selectors,
+)
 from kitaru.server.filtering import (
     AndExpression,
     FilterCondition,
@@ -6317,7 +6321,7 @@ class FakeTaskRepository:
         """
         if scope.job_id is not None and task.job_id != scope.job_id:
             return False
-        for selector in scope.selectors or []:
+        for selector in get_effective_selectors(scope):
             if selector.key not in task.labels:
                 if selector.required:
                     return False

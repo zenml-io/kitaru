@@ -66,7 +66,7 @@ def get_ephemeral_scope(
             *selectors,
         ],
         job_id=job_id,
-    ).with_requires_credentials_selector()
+    )
 
 
 class WorkerService:
