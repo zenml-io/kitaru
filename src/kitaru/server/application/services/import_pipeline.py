@@ -18,6 +18,7 @@ from kitaru.api_models.v1.imports import ImportStats
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
 from kitaru.server.application.events import TaskTerminal
 from kitaru.server.application.interfaces.import_repository import ImportRepository
+from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.session import SessionFilter
@@ -25,6 +26,7 @@ from kitaru.server.application.services.plugin_resolution import (
     get_plugin_task_labels,
 )
 from kitaru.server.domain.imports import ImportNotFound
+from kitaru.server.domain.plugin import PluginKind, PluginNotFound
 from kitaru.server.domain.session import SessionNotEvaluatable
 from kitaru.server.domain.task import AnalysisTask, EvaluationTask, ImportTask, Task
 from kitaru.server.filtering import FilterCondition
@@ -36,6 +38,7 @@ async def record_import_outcome(
     import_repository: ImportRepository,
     session_repository: SessionRepository,
     task_repository: TaskRepository,
+    plugin_repository: PluginRepository,
 ) -> None:
     """Record the import's outcome and append its evaluator and analyzer tasks.
 
@@ -56,6 +59,8 @@ async def record_import_outcome(
         import_repository: Import repository.
         session_repository: Session repository, for the imported sessions.
         task_repository: Task repository.
+        plugin_repository: Plugin repository, for the analyzers' connection
+            schemas.
     """
     task = event.task
     if not isinstance(task, ImportTask):
@@ -108,9 +113,36 @@ async def record_import_outcome(
                     import_id=import_.id,
                     connection_id=analyzer.connection_id,
                     params=analyzer.params,
-                    labels=get_plugin_task_labels(analyzer.analyzer, analyzer.provider),
+                    labels=get_plugin_task_labels(
+                        analyzer.analyzer,
+                        analyzer.provider,
+                        analyzer.connection_id is None
+                        and await _has_connection_schema(
+                            analyzer.analyzer, plugin_repository
+                        ),
+                    ),
                     on_failure=TaskOnFailure.CONTINUE,
                 )
             )
     if fan_out_tasks:
         await task_repository.create_many(fan_out_tasks)
+
+
+async def _has_connection_schema(
+    name: str, plugin_repository: PluginRepository
+) -> bool:
+    """Report whether the named analyzer declares a connection schema.
+
+    Args:
+        name: Analyzer name.
+        plugin_repository: Plugin repository.
+
+    Returns:
+        Whether the analyzer declares a connection schema, False once the
+        analyzer is deleted.
+    """
+    try:
+        plugin = await plugin_repository.get_by_name(PluginKind.ANALYZER, name)
+    except PluginNotFound:
+        return False
+    return plugin.connection_schema is not None

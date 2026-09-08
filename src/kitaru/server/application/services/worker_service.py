@@ -40,15 +40,18 @@ from kitaru.server.domain.task import Task
 from kitaru.server.domain.worker import Worker, WorkerAccessDenied
 
 
-def get_ephemeral_scope(job_id: uuid.UUID) -> WorkerScope:
+def get_ephemeral_scope(
+    job_id: uuid.UUID, selectors: list[LabelSelector]
+) -> WorkerScope:
     """Build the scope of an ephemeral worker pinned to a job.
 
     Args:
         job_id: Id of the job the worker drains.
+        selectors: Configured label selectors.
 
     Returns:
         Scope claiming the job's import, evaluation, and analysis tasks of
-        plugins in the reserved namespace.
+        plugins in the reserved namespace matching the selectors.
     """
     return WorkerScope(
         claims=[
@@ -59,10 +62,11 @@ def get_ephemeral_scope(job_id: uuid.UUID) -> WorkerScope:
         selectors=[
             LabelSelector(
                 key=PLUGIN_NAMESPACE_LABEL, values=[RESERVED_NAMESPACE], required=True
-            )
+            ),
+            *selectors,
         ],
         job_id=job_id,
-    )
+    ).with_requires_credentials_selector()
 
 
 class WorkerService:
@@ -144,13 +148,18 @@ class WorkerService:
         return all(any(worker.covers(task) for worker in workers) for task in tasks)
 
     async def register_ephemeral_worker(
-        self, job_id: uuid.UUID, runtime: WorkerRuntime, actor: AuthContext
+        self,
+        job_id: uuid.UUID,
+        runtime: WorkerRuntime,
+        selectors: list[LabelSelector],
+        actor: AuthContext,
     ) -> Worker:
         """Register a worker with the ephemeral scope of one job.
 
         Args:
             job_id: Id of the job the worker drains.
             runtime: Runtime the backend reports.
+            selectors: Configured label selectors.
             actor: Caller context.
 
         Returns:
@@ -158,7 +167,7 @@ class WorkerService:
         """
         return await self.register_worker(
             name=f"job-{job_id}",
-            scope=get_ephemeral_scope(job_id),
+            scope=get_ephemeral_scope(job_id, selectors),
             runtime=runtime,
             metadata={"ephemeral": "true"},
             actor=actor,

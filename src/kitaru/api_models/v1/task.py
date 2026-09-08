@@ -31,6 +31,9 @@ from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.hook import TaskHook
 from kitaru.api_models.v1.imports import ImportQuery
 
+# Label naming the provider whose credentials the claiming worker must hold.
+REQUIRES_CREDENTIALS_LABEL = "kitaru/requires-credentials"
+
 
 class TaskKind(StrEnum):
     """Kind of work a task runs."""

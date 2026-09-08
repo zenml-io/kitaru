@@ -26,7 +26,7 @@ from kitaru.api_models.v1.base import (
     ResponseModel,
 )
 from kitaru.api_models.v1.filter import FilterableListParams
-from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL, TaskKind
 from kitaru.base import FrozenModel
 
 _ALL_TASK_KINDS = frozenset(TaskKind)
@@ -36,7 +36,7 @@ class LabelSelector(FrozenModel):
     """Label selector."""
 
     key: str = Field(description="Label key.")
-    values: list[str] = Field(min_length=1, description="Values the label may take.")
+    values: list[str] = Field(description="Values the label may take.")
     required: bool = Field(
         default=False, description="Whether a task lacking the key fails the match."
     )
@@ -91,6 +91,22 @@ class WorkerScope(FrozenModel):
         """
         return {claim.kind for claim in self.claims} == _ALL_TASK_KINDS and all(
             claim.agent_version_id is None for claim in self.claims
+        )
+
+    def with_requires_credentials_selector(self) -> "WorkerScope":
+        """Add an empty requires-credentials selector unless one is set.
+
+        Returns:
+            Scope carrying a requires-credentials selector.
+        """
+        if any(
+            selector.key == REQUIRES_CREDENTIALS_LABEL
+            for selector in self.selectors or []
+        ):
+            return self
+        selector = LabelSelector(key=REQUIRES_CREDENTIALS_LABEL, values=[])
+        return self.model_copy(
+            update={"selectors": [*(self.selectors or []), selector]}
         )
 
     @model_validator(mode="after")

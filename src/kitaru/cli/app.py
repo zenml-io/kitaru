@@ -4706,7 +4706,7 @@ _WORKER_START_PARAMETERS = (
     ),
     ParameterSpec(
         "--selector",
-        "KEY=VALUE[,VALUE][]|JSON[]",
+        "KEY=[VALUE[,VALUE]][]|JSON[]",
         "option",
         False,
         "Task label selectors, combined by conjunction.",
@@ -4788,7 +4788,7 @@ async def worker_start(
     ] = None,
     selectors: Annotated[
         list[str] | None,
-        Parameter(name="--selector", help="KEY=VALUE[,VALUE] or selector JSON."),
+        Parameter(name="--selector", help="KEY=[VALUE[,VALUE]] or selector JSON."),
     ] = None,
     job_id: uuid.UUID | None = None,
     concurrency: int | None = None,

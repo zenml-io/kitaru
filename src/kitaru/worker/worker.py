@@ -227,7 +227,7 @@ class Worker:
         name = self._config.name or default_worker_name()
         registration = WorkerCreateRequest(
             name=name,
-            scope=self._config.scope,
+            scope=self._config.scope.with_requires_credentials_selector(),
             runtime=detect_runtime(),
             metadata=self._config.metadata,
         )

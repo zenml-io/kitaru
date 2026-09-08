@@ -35,7 +35,11 @@ from conftest import (
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
-from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
+from kitaru.api_models.v1.task import (
+    REQUIRES_CREDENTIALS_LABEL,
+    TaskOnFailure,
+    TaskStatus,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.task import TaskFilter, TaskUpdate
@@ -82,6 +86,7 @@ async def _analyzer(
     name: str,
     connection_id: uuid.UUID | None = None,
     provider: str | None = None,
+    connection_schema: dict[str, Any] | None = None,
 ) -> AnalyzerConfig:
     plugin = await create_plugin(
         services.plugins,
@@ -89,6 +94,7 @@ async def _analyzer(
         kind=PluginKind.ANALYZER,
         name=name,
         provider=provider,
+        connection_schema=connection_schema,
     )
     blob = await create_blob(services.blobs, ACTOR.account.id, content=name.encode())
     version = await services.plugins.create_version(
@@ -459,7 +465,67 @@ async def test_completed_import_appends_one_task_per_analyzer(
     assert all(
         task.labels[PLUGIN_PROVIDER_LABEL] == "langfuse" for task in analysis_tasks
     )
+    assert all(REQUIRES_CREDENTIALS_LABEL not in task.labels for task in analysis_tasks)
     assert all(task.import_id == import_.id for task in analysis_tasks)
+
+
+async def _single_analysis_task_labels(
+    services: ReplayServices, analyzer: AnalyzerConfig
+) -> dict[str, str]:
+    """Complete an import naming one analyzer and return its task's labels."""
+    import_, import_task = await _import_with_task(services, [], [analyzer])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+    (task,) = await _analysis_tasks(services, import_task.job_id)
+    return task.labels
+
+
+async def test_analysis_task_requires_credentials_without_a_connection(
+    services: ReplayServices,
+) -> None:
+    """An analyzer with a connection schema and no connection needs the worker's."""
+    analyzer = await _analyzer(
+        services, "trends", provider="openai", connection_schema={"type": "object"}
+    )
+
+    labels = await _single_analysis_task_labels(services, analyzer)
+
+    assert labels[REQUIRES_CREDENTIALS_LABEL] == "openai"
+
+
+async def test_analysis_task_with_a_connection_requires_no_credentials(
+    services: ReplayServices,
+) -> None:
+    """An analyzer resolving a connection carries its credentials itself."""
+    analyzer = await _analyzer(
+        services,
+        "trends",
+        connection_id=uuid.uuid4(),
+        provider="openai",
+        connection_schema={"type": "object"},
+    )
+
+    labels = await _single_analysis_task_labels(services, analyzer)
+
+    assert REQUIRES_CREDENTIALS_LABEL not in labels
+
+
+async def test_analysis_task_without_a_schema_requires_no_credentials(
+    services: ReplayServices,
+) -> None:
+    """An analyzer declaring no connection schema stamps no requires label."""
+    analyzer = await _analyzer(services, "trends", provider="openai")
+
+    labels = await _single_analysis_task_labels(services, analyzer)
+
+    assert REQUIRES_CREDENTIALS_LABEL not in labels
 
 
 async def test_in_progress_session_does_not_block_the_analysis_task(

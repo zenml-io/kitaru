@@ -4644,6 +4644,7 @@ async def create_plugin(
     provider: str | None = None,
     metadata: dict[str, Any] | None = None,
     agent_id: uuid.UUID | None = None,
+    connection_schema: dict[str, Any] | None = None,
 ) -> Plugin:
     """Store a plugin in the fake repository.
 
@@ -4658,6 +4659,7 @@ async def create_plugin(
         metadata: Arbitrary metadata.
         agent_id: Agent the plugin is scoped to, importers and analyzers
             must leave this unset.
+        connection_schema: Connection schema.
 
     Returns:
         Stored plugin.
@@ -4671,6 +4673,7 @@ async def create_plugin(
             provider=provider,
             metadata=metadata or {},
             agent_id=agent_id,
+            connection_schema=connection_schema,
         )
     )
 
@@ -7163,6 +7166,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_repository=sessions,
         import_repository=imports,
         insight_repository=insights,
+        plugin_repository=plugins,
     )
     transitions = TaskTransitions(
         task_repository=tasks,

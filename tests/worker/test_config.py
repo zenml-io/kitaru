@@ -18,7 +18,7 @@ import uuid
 import pytest
 from pydantic import ValidationError
 
-from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL, TaskKind
 from kitaru.api_models.v1.worker import LabelSelector, WorkerClaim, WorkerScope
 from kitaru.worker.config import DEFAULT_CONCURRENCY, WorkerConfig
 from kitaru.worker.worker import default_worker_name
@@ -89,6 +89,37 @@ def test_scope_selectors_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.scope.selectors == [
         LabelSelector(key="agent_version", values=["v1"], required=False)
     ]
+
+
+def test_registration_scope_requires_no_credentials_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scope without a requires-credentials selector registers an empty one."""
+    monkeypatch.setenv("KITARU_WORKER_SCOPE__CLAIMS", '[{"kind": "importer"}]')
+    monkeypatch.setenv(
+        "KITARU_WORKER_SCOPE__SELECTORS", '[{"key": "pool", "values": ["cpu"]}]'
+    )
+    config = WorkerConfig()
+    assert config.scope.with_requires_credentials_selector() == WorkerScope(
+        claims=[WorkerClaim(kind=TaskKind.IMPORTER)],
+        selectors=[
+            LabelSelector(key="pool", values=["cpu"]),
+            LabelSelector(key=REQUIRES_CREDENTIALS_LABEL, values=[]),
+        ],
+    )
+
+
+def test_registration_scope_keeps_a_requires_credentials_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configured requires-credentials selector registers as is."""
+    monkeypatch.setenv("KITARU_WORKER_SCOPE__CLAIMS", '[{"kind": "importer"}]')
+    monkeypatch.setenv(
+        "KITARU_WORKER_SCOPE__SELECTORS",
+        f'[{{"key": "{REQUIRES_CREDENTIALS_LABEL}", "values": ["langfuse"]}}]',
+    )
+    config = WorkerConfig()
+    assert config.scope.with_requires_credentials_selector() == config.scope
 
 
 def test_scope_job_id_from_env(monkeypatch: pytest.MonkeyPatch) -> None:

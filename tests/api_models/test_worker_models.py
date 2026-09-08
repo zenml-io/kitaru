@@ -112,7 +112,7 @@ def test_unique_selector_keys_accepted() -> None:
     assert len(scope.selectors) == 2
 
 
-def test_empty_selector_values_rejected() -> None:
-    """Reject a selector with an empty values list."""
-    with pytest.raises(ValidationError):
-        LabelSelector(key="team", values=[])
+def test_empty_selector_values_accepted() -> None:
+    """Accept a selector with an empty values list."""
+    selector = LabelSelector(key="team", values=[])
+    assert selector.values == []

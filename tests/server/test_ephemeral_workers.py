@@ -37,6 +37,7 @@ from kitaru.api_models.v1.worker import LabelSelector, WorkerClaim, WorkerScope
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.jwt import JWTToken
 from kitaru.server.adapters.rest.ephemeral_workers import start_ephemeral_worker
+from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
 from kitaru.server.application.models.imports import ImportCreate
 from kitaru.server.application.models.worker import WorkerFilter
@@ -85,7 +86,9 @@ async def stored_auth_service(
     return auth_service
 
 
-async def _create_import(services: JobAndTaskServices, builtin: bool = False) -> Job:
+async def _create_import(
+    services: JobAndTaskServices, builtin: bool = False, fetch: bool = False
+) -> Job:
     """Create an import job for a user or a reserved namespace importer."""
     name = "kitaru/csv" if builtin else "csv"
     plugin = await create_plugin(
@@ -93,18 +96,25 @@ async def _create_import(services: JobAndTaskServices, builtin: bool = False) ->
         None if builtin else ACCOUNT.id,
         PluginKind.IMPORTER,
         name=name,
+        provider="langfuse",
+        connection_schema={"type": "object"},
     )
     await services.plugins.create_version(
         plugin.id,
         ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
         display_version=None,
     )
-    payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
     agent = await create_agent(services.agents, ACCOUNT.id)
-    import_ = await services.import_service.create_import(
-        ImportCreate(importer=name, agent_id=agent.id, payload_blob_id=payload.id),
-        actor=ACTOR,
-    )
+    if fetch:
+        command = ImportCreate(
+            importer=name, agent_id=agent.id, fetch_query={"since": "2026-08-01"}
+        )
+    else:
+        payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
+        command = ImportCreate(
+            importer=name, agent_id=agent.id, payload_blob_id=payload.id
+        )
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
     assert import_.job_id is not None
     return await services.jobs.get(import_.job_id)
 
@@ -114,6 +124,7 @@ async def _start(
     services: JobAndTaskServices,
     ephemeral_workers: FakeEphemeralWorkers,
     auth_service: AuthService,
+    settings: APISettings = SETTINGS,
 ) -> None:
     """Schedule the start for a job and run the background tasks."""
     background_tasks = BackgroundTasks()
@@ -123,7 +134,7 @@ async def _start(
         WorkerService(repository=services.workers, liveness_timeout_seconds=60),
         auth_service,
         ephemeral_workers,
-        SETTINGS,
+        settings,
         SERVER_ID,
         background_tasks,
         ACTOR,
@@ -165,7 +176,8 @@ async def test_start_registers_and_starts_a_worker_pinned_to_the_job(
         selectors=[
             LabelSelector(
                 key="kitaru/plugin_namespace", values=["kitaru"], required=True
-            )
+            ),
+            LabelSelector(key="kitaru/requires-credentials", values=[]),
         ],
         job_id=job.id,
     )
@@ -201,6 +213,52 @@ async def test_start_skips_when_a_live_worker_covers_the_task(
     assert ephemeral_workers.starts == []
     workers, _ = await services.workers.query(WorkerFilter(), None)
     assert [worker.id for worker in workers] == [live_worker.id]
+
+
+async def test_start_skips_a_task_needing_credentials_the_worker_lacks(
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+    stored_auth_service: AuthService,
+) -> None:
+    """Skip a task needing a provider's credentials the settings do not name."""
+    job = await _create_import(services, builtin=True, fetch=True)
+
+    await _start(job, services, ephemeral_workers, stored_auth_service)
+
+    assert ephemeral_workers.starts == []
+    workers, _ = await services.workers.query(WorkerFilter(include_stale=True), None)
+    assert workers == []
+
+
+async def test_start_covers_a_task_needing_a_configured_provider(
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+    stored_auth_service: AuthService,
+) -> None:
+    """Register a worker with the selectors the settings carry."""
+    settings = local_settings(
+        SERVER_URL="https://kitaru.example.com",
+        EPHEMERAL_WORKER=EphemeralWorkerSettings(
+            backend=EphemeralWorkerBackend.MODAL,
+            image="zenmldocker/kitaru-worker:1.0.0",
+            selectors=[
+                LabelSelector(key="kitaru/requires-credentials", values=["langfuse"])
+            ],
+            modal=ModalEphemeralWorkerSettings(
+                token_id="ak-test", token_secret="as-test"
+            ),
+        ),
+    )
+    job = await _create_import(services, builtin=True, fetch=True)
+
+    await _start(job, services, ephemeral_workers, stored_auth_service, settings)
+
+    assert len(ephemeral_workers.starts) == 1
+    worker = await services.workers.get(ephemeral_workers.starts[0].worker_id)
+    assert worker.scope.selectors is not None
+    assert worker.scope.selectors[-1] == LabelSelector(
+        key="kitaru/requires-credentials", values=["langfuse"]
+    )
 
 
 async def test_start_skips_a_user_plugin(

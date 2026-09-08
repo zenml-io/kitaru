@@ -91,9 +91,9 @@ Each importer and analyzer connection resolves when the import is created, in th
 
 1. The connection the importer or analyzer named.
 2. Otherwise, the default connection for that plugin's `provider`.
-3. Otherwise, nothing is injected, and the package falls back to reading the worker's own environment, exactly as it did before connections existed.
+3. Otherwise, nothing is injected, and the package reads the worker's own environment, exactly as it did before connections existed. Only a worker that declares the provider claims such a task, see [Worker credentials](#worker-credentials).
 
-Self-hosted, single-tenant deployments can keep doing that. A connection overrides the worker's environment, it is never required.
+Self-hosted, single-tenant deployments can keep doing that. A connection overrides the worker's environment, it is never required. A file import resolves no connection at all, since only an API import talks to the provider.
 
 The resolved importer connection is recorded on the import as `connection_id`. Each resolved analyzer connection is recorded in its analyzer config and copied to the analysis task. A default connection created after the import only applies to later imports. If a resolved connection is deleted before a worker claims the task, that task runs with nothing injected.
 
@@ -109,15 +109,19 @@ A connection's values land in the task process environment alongside everything 
 
 Only step 2 is new. Creating or updating a connection rejects a `KITARU_*` key outright, and rejects a key set as both an `env` value and a secret, since the merge order can't express "this key wins" for a collision that shouldn't exist in the first place.
 
-## The worker-routing escape hatch
+## Worker credentials
 
-Some customers won't hand a Kitaru server their provider credentials at all, and a connection doesn't change that: it still means putting a secret on the server. For that case, importer and analyzer tasks carry a `kitaru/provider=<provider>` label alongside their usual [task labels](../deploy/workers.md), so a worker can be pinned to it with a selector:
+Some customers won't hand a Kitaru server their provider credentials at all, and a connection doesn't change that: it still means putting a secret on the server. For that case, the credentials stay in the worker's environment. An API import or analysis task whose plugin declares a `connection_schema` but resolved no connection carries the label `kitaru/requires-credentials=<provider>` alongside its usual [task labels](../deploy/workers.md), and a worker selects the providers it holds credentials for:
 
 ```bash
-kitaru worker start --claim importer --selector kitaru/provider=langfuse
+kitaru worker start --claim importer --selector kitaru/requires-credentials=langfuse
 ```
 
-That worker only claims Langfuse tasks, and reads `LANGFUSE_SECRET_KEY` and friends from its own environment. No connection is created, and none is needed.
+That worker claims Langfuse API imports and reads `LANGFUSE_SECRET_KEY` and friends from its own environment, and it skips API imports and analyzers that need any other provider's credentials. List several providers as `kitaru/requires-credentials=langfuse,openai`. No connection is created, and none is needed.
+
+A worker that sets no such selector registers with an empty one, `kitaru/requires-credentials=`, so it skips every task that needs provider credentials it would have to bring itself. Tasks whose credentials arrive through a connection, and tasks that need none, such as file imports and evaluations, carry no label and are claimed by any worker as before. A plugin that declares no schema stamps no label either. Every importer and analyzer task also carries `kitaru/provider=<provider>` whether or not a connection resolved, so `--selector kitaru/provider=langfuse` still pins a worker to one provider's tasks.
+
+Ephemeral workers register under the same rule. Set `KITARU_SERVER_EPHEMERAL_WORKER__SELECTORS`, or `server.ephemeralWorker.selectors` in the Helm chart, to a list of selectors, such as a `kitaru/requires-credentials` selector naming the providers whose credentials `KITARU_SERVER_EPHEMERAL_WORKER__ENV` carries.
 
 ## SDK and MCP
 

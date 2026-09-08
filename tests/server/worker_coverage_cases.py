@@ -174,6 +174,24 @@ COVERAGE_CASES: list[CoverageCase] = [
         covered=False,
     ),
     CoverageCase(
+        name="empty_selector_missing_key",
+        scope=lambda ids: WorkerScope(
+            claims=[WorkerClaim(kind=TaskKind.AGENT)],
+            selectors=[LabelSelector(key="env", values=[])],
+        ),
+        task=_agent_task,
+        covered=True,
+    ),
+    CoverageCase(
+        name="empty_selector_any_value",
+        scope=lambda ids: WorkerScope(
+            claims=[WorkerClaim(kind=TaskKind.AGENT)],
+            selectors=[LabelSelector(key="env", values=[])],
+        ),
+        task=lambda ids: _agent_task(ids, labels={"env": "prod"}),
+        covered=False,
+    ),
+    CoverageCase(
         name="full_scope_covers_evaluation_task",
         scope=lambda ids: UNSCOPED_WORKER_SCOPE,
         task=_evaluation_task,

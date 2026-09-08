@@ -14,6 +14,7 @@
 """Tests for the import service."""
 
 import uuid
+from typing import Any
 
 import pytest
 
@@ -29,6 +30,7 @@ from conftest import (
 )
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
+from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.imports import ImportCreate, ImportFilter
 from kitaru.server.application.models.replay_config import (
@@ -62,7 +64,9 @@ def services() -> JobAndTaskServices:
 
 
 async def _importer_version(
-    services: JobAndTaskServices, provider: str | None = None
+    services: JobAndTaskServices,
+    provider: str | None = None,
+    connection_schema: dict[str, Any] | None = None,
 ) -> PluginVersion:
     """Register the csv importer with one version."""
     plugin = await create_plugin(
@@ -71,6 +75,7 @@ async def _importer_version(
         PluginKind.IMPORTER,
         name="csv",
         provider=provider,
+        connection_schema=connection_schema,
     )
     return await services.plugins.create_version(
         plugin.id,
@@ -122,9 +127,16 @@ async def _import_command(
     evaluators: list[EvaluatorConfigInput] | None = None,
     analyzers: list[AnalyzerConfigInput] | None = None,
     connection_id: uuid.UUID | None = None,
+    fetch: bool = False,
 ) -> ImportCreate:
-    """Build a create command naming a stored payload and agent."""
-    payload = await create_blob(services.blobs, ACTOR.account.id, content=b"csv-data")
+    """Build a create command naming a stored payload or a query, and an agent."""
+    if fetch:
+        payload_blob_id, fetch_query = None, {"since": "2026-08-01T00:00:00Z"}
+    else:
+        payload = await create_blob(
+            services.blobs, ACTOR.account.id, content=b"csv-data"
+        )
+        payload_blob_id, fetch_query = payload.id, None
     if agent is None:
         agent = await create_agent(services.agents, ACTOR.account.id)
     return ImportCreate(
@@ -132,7 +144,8 @@ async def _import_command(
         agent_id=agent.id,
         agent_version_id=agent_version_id,
         connection_id=connection_id,
-        payload_blob_id=payload.id,
+        payload_blob_id=payload_blob_id,
+        fetch_query=fetch_query,
         params={"delimiter": ","},
         evaluators=evaluators if evaluators is not None else [],
         analyzers=analyzers if analyzers is not None else [],
@@ -504,7 +517,7 @@ async def test_create_import_stores_the_named_connection(
     connection = await create_connection(
         services.connections, ACTOR.account.id, secret.id
     )
-    command = await _import_command(services, connection_id=connection.id)
+    command = await _import_command(services, connection_id=connection.id, fetch=True)
 
     import_ = await services.import_service.create_import(command, actor=ACTOR)
 
@@ -525,7 +538,7 @@ async def test_create_import_uses_the_provider_default(
     default = await create_connection(
         services.connections, ACTOR.account.id, secret.id, name="main", default=True
     )
-    command = await _import_command(services)
+    command = await _import_command(services, fetch=True)
 
     import_ = await services.import_service.create_import(command, actor=ACTOR)
 
@@ -537,6 +550,24 @@ async def test_create_import_without_a_default_connection(
 ) -> None:
     """An import naming no connection records none when the provider has no default."""
     await _importer_version(services, provider="langfuse")
+    command = await _import_command(services, fetch=True)
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.connection_id is None
+
+
+async def test_create_import_from_a_file_resolves_no_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """A file import records no connection even when the provider has a default."""
+    await _importer_version(services, provider="langfuse")
+    secret = await create_secret(
+        services.secrets, ACTOR.account.id, name="values", internal=True
+    )
+    await create_connection(
+        services.connections, ACTOR.account.id, secret.id, name="main", default=True
+    )
     command = await _import_command(services)
 
     import_ = await services.import_service.create_import(command, actor=ACTOR)
@@ -549,7 +580,83 @@ async def test_create_import_rejects_an_unknown_connection(
 ) -> None:
     """Reject a command naming a connection that does not exist."""
     await _importer_version(services)
-    command = await _import_command(services, connection_id=uuid.uuid4())
+    command = await _import_command(services, connection_id=uuid.uuid4(), fetch=True)
 
     with pytest.raises(ConnectionNotFound):
         await services.import_service.create_import(command, actor=ACTOR)
+
+
+async def _import_task_labels(
+    services: JobAndTaskServices, command: ImportCreate
+) -> dict[str, str]:
+    """Create the import and return its importer task's labels."""
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+    assert import_.job_id is not None
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=import_.job_id), actor=ACTOR
+    )
+    return tasks[0].labels
+
+
+async def test_create_import_stamps_the_requires_credentials_label(
+    services: JobAndTaskServices,
+) -> None:
+    """An API import with a connection schema and no connection needs the worker's."""
+    await _importer_version(
+        services, provider="langfuse", connection_schema={"type": "object"}
+    )
+
+    labels = await _import_task_labels(
+        services, await _import_command(services, fetch=True)
+    )
+
+    assert labels[REQUIRES_CREDENTIALS_LABEL] == "langfuse"
+    assert labels[PLUGIN_PROVIDER_LABEL] == "langfuse"
+
+
+async def test_create_import_omits_the_requires_credentials_label_with_a_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """An API import resolving a connection carries its credentials itself."""
+    await _importer_version(
+        services, provider="langfuse", connection_schema={"type": "object"}
+    )
+    secret = await create_secret(
+        services.secrets, ACTOR.account.id, name="values", internal=True
+    )
+    await create_connection(
+        services.connections, ACTOR.account.id, secret.id, name="main", default=True
+    )
+
+    labels = await _import_task_labels(
+        services, await _import_command(services, fetch=True)
+    )
+
+    assert REQUIRES_CREDENTIALS_LABEL not in labels
+    assert labels[PLUGIN_PROVIDER_LABEL] == "langfuse"
+
+
+async def test_create_import_omits_the_requires_credentials_label_without_a_schema(
+    services: JobAndTaskServices,
+) -> None:
+    """An importer declaring no connection schema stamps no requires label."""
+    await _importer_version(services, provider="langfuse")
+
+    labels = await _import_task_labels(
+        services, await _import_command(services, fetch=True)
+    )
+
+    assert REQUIRES_CREDENTIALS_LABEL not in labels
+
+
+async def test_create_import_from_a_file_omits_the_requires_credentials_label(
+    services: JobAndTaskServices,
+) -> None:
+    """A file import never talks to the provider."""
+    await _importer_version(
+        services, provider="langfuse", connection_schema={"type": "object"}
+    )
+
+    labels = await _import_task_labels(services, await _import_command(services))
+
+    assert REQUIRES_CREDENTIALS_LABEL not in labels

@@ -126,8 +126,19 @@ class ImportService:
             assert command.payload_blob_id is not None
             payload = await self._blobs.get(command.payload_blob_id)
             payload_blob_id = payload.id
-        connection_id = await resolve_connection_id(
-            command.connection_id, plugin.provider, self._connections
+        # Only fetch talks to the provider, so a file import resolves no
+        # connection and never needs the worker's credentials.
+        connection_id = (
+            await resolve_connection_id(
+                command.connection_id, plugin.provider, self._connections
+            )
+            if command.fetch_query is not None
+            else None
+        )
+        requires_credentials = (
+            command.fetch_query is not None
+            and plugin.connection_schema is not None
+            and connection_id is None
         )
         agent = await self._agents.get(command.agent_id)
         if command.agent_version_id is not None:
@@ -164,7 +175,9 @@ class ImportService:
             ImportTask(
                 job_id=job.id,
                 import_id=import_.id,
-                labels=get_plugin_task_labels(plugin.name, plugin.provider),
+                labels=get_plugin_task_labels(
+                    plugin.name, plugin.provider, requires_credentials
+                ),
             )
         )
         return import_

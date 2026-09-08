@@ -68,7 +68,7 @@ async def start_ephemeral_worker(
         actor: Caller context.
     """
     tasks, _ = await job_service.list_job_tasks(job.id, TaskFilter(), actor=actor)
-    scope = get_ephemeral_scope(job.id)
+    scope = get_ephemeral_scope(job.id, settings.EPHEMERAL_WORKER.selectors)
     if not all(scope_covers(scope, task) for task in tasks):
         return
     if await worker_service.is_covered(tasks):
@@ -76,6 +76,7 @@ async def start_ephemeral_worker(
     worker = await worker_service.register_ephemeral_worker(
         job.id,
         WorkerRuntime(platform=settings.EPHEMERAL_WORKER.backend.value),
+        settings.EPHEMERAL_WORKER.selectors,
         actor=actor,
     )
     issued_token = auth_service.issue_worker_token(

@@ -7,7 +7,7 @@ icon: gears
 
 [Workers](../concepts/workers.md) are where everything executes. In production you run them as ordinary long-lived processes (a systemd unit, a container where the published `zenmldocker/kitaru-worker` image works out of the box, or a Kubernetes Deployment), one per environment your agents' code needs.
 
-The rule of thumb: **a worker must be able to run what it claims.** An agent replay needs your agent's virtualenv and provider keys; an evaluator or importer brings its own dependencies and needs only Python, `uv`, and network access to the server.
+The rule of thumb: **a worker must be able to run what it claims.** An agent replay needs your agent's virtualenv and provider keys; an evaluator or importer brings its own dependencies and needs only Python, `uv`, and network access to the server. An API import or analyzer whose credentials come from the worker's environment rather than a [connection](../guides/provider-connections.md) is only claimed by a worker whose `kitaru/requires-credentials` selector names that provider.
 
 ## Configuration
 
@@ -27,7 +27,7 @@ kitaru worker start
 | `KITARU_WORKER_NAME` | hostname-pid | Label shown in worker listings. Every start registers a new worker, names need not be unique. |
 | `KITARU_WORKER_CONCURRENCY` | 10 | Tasks run in parallel |
 | `KITARU_WORKER_SCOPE__CLAIMS` | all | JSON list of claims, such as `{"kind":"agent"}` or `{"kind":"agent","agent_version_id":"<UUID>"}` |
-| `KITARU_WORKER_SCOPE__SELECTORS` | none | JSON label selectors (e.g. limit to one agent version's environment) |
+| `KITARU_WORKER_SCOPE__SELECTORS` | none | JSON label selectors (e.g. limit to one agent version's environment, or name the providers whose [credentials](../guides/provider-connections.md#worker-credentials) the environment holds) |
 | `KITARU_WORKER_SCOPE__JOB_ID` | none | Claim one job's tasks, drain, exit |
 | `KITARU_WORKER_TIMEOUT` | none | Wall-clock lifetime; unset runs until stopped |
 | `KITARU_WORKER_POLL_INTERVAL` | 2s | Sleep after an empty claim |
