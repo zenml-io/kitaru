@@ -10,7 +10,12 @@ from typing import Literal
 
 import pytest
 
-from kitaru.api_models.v1.insight import CategoricalInsightData, CategoryValue
+from kitaru.api_models.v1.insight import (
+    Bin,
+    BinnedInsightData,
+    CategoricalInsightData,
+    CategoryValue,
+)
 from kitaru_post_import_insights.generation import (
     DEFAULT_INTRO_TITLE,
     AnalystPlan,
@@ -1176,6 +1181,9 @@ def _card(candidate: CandidateFinding, description: str) -> EditorialPlan:
         "Several sessions retry twice.",
         "This group has more retries than the rest.",
         "Look at the sessions with the longer durations first.",
+        "It takes 500 ms on average.",
+        "This affects 50% of the analyzed sessions.",
+        "One label accounts for 3 of the results.",
     ],
 )
 def test_card_copy_may_restate_grounded_numbers_and_plain_quantities(
@@ -1580,10 +1588,6 @@ def test_editor_validates_numbers_against_each_card_only(
         ("This pattern triggered retries.", "unsupported claim"),
         ("This pattern is responsible for retries.", "unsupported claim"),
         ("Retries are attributable to this pattern.", "unsupported claim"),
-        ("This pattern accounts for retries.", "unsupported claim"),
-        ("This pattern may account for retries.", "unsupported claim"),
-        ("This pattern accounted for retries.", "unsupported claim"),
-        ("This pattern is accounting for retries.", "unsupported claim"),
         ("This pattern contributes to retries.", "unsupported claim"),
         ("This pattern gives rise to retries.", "unsupported claim"),
         ("This pattern is giving rise to retries.", "unsupported claim"),
@@ -1600,6 +1604,10 @@ def test_editor_validates_numbers_against_each_card_only(
         ("This pattern is improving quality.", "unsupported claim"),
         ("Quality improvements appeared.", "unsupported claim"),
         ("It outperformed the alternative.", "unsupported claim"),
+        ("This result is better.", "unsupported claim"),
+        ("This result is best.", "unsupported claim"),
+        ("This result is worse.", "unsupported claim"),
+        ("This result is worst.", "unsupported claim"),
         ("It outperforms the alternative.", "unsupported claim"),
         ("It is outperforming the alternative.", "unsupported claim"),
         ("These paths outperform the alternative.", "unsupported claim"),
@@ -1629,3 +1637,82 @@ def test_editor_rejects_fabricated_or_unsafe_card_copy(
     )
     with pytest.raises(ValueError, match=message):
         validate_editorial_plan(copy, selection, [candidate])
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "It takes 3 seconds to respond.",
+        "It takes 3s to respond.",
+        "It takes 3 ms to respond.",
+        "This affects 3% of sessions.",
+        "This affects 3 percent of sessions.",
+        "This affects 14.29 seconds of work.",
+        "This affects 2% of sessions.",
+    ],
+)
+def test_card_copy_numbers_must_keep_their_unit(
+    profiling_result: ProfilingResult, description: str
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "facts": [
+                DeterministicFact(name="occurrences", value=3),
+                DeterministicFact(name="affected_share_percent", value=14.29),
+            ],
+            "coverage": profiling_result.candidates[0].coverage.model_copy(
+                update={"occurrences": 3}
+            ),
+        }
+    )
+    with pytest.raises(ValueError, match="numeric claim absent"):
+        validate_editorial_plan(
+            _card(candidate, description), _single_selection(candidate), [candidate]
+        )
+
+
+def test_card_copy_grounds_time_units_on_the_chart_unit(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "data": BinnedInsightData(
+                unit="seconds",
+                bins=[
+                    Bin(lower_bound=None, upper_bound=0.5, count=1),
+                    Bin(lower_bound=0.5, upper_bound=None, count=1),
+                ],
+            )
+        }
+    )
+    candidate = candidate.model_copy(
+        update={"facts": [DeterministicFact(name="maximum", value=1332.029)]}
+    )
+    selection = _single_selection(candidate)
+    for description in (
+        "Calls take under 500 ms.",
+        "The split is at 0.5 seconds.",
+        "The longest call took 1332.029 seconds.",
+    ):
+        copy = _card(candidate, description)
+        assert validate_editorial_plan(copy, selection, [candidate]) == copy
+    with pytest.raises(ValueError, match="numeric claim absent"):
+        validate_editorial_plan(
+            _card(candidate, "The split is at 500 seconds."), selection, [candidate]
+        )
+
+
+def test_card_copy_cannot_negate_a_quoted_candidate_phrase(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={"fallback_description": "Recorded tool errors affect 1 sessions."}
+    )
+    with pytest.raises(ValueError, match="negated outcome"):
+        validate_editorial_plan(
+            _card(
+                candidate, "It is not true that recorded tool errors affect 1 sessions."
+            ),
+            _single_selection(candidate),
+            [candidate],
+        )

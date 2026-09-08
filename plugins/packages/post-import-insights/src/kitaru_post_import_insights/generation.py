@@ -29,6 +29,28 @@ from kitaru_post_import_insights.profiling import (
 _NUMBER_PATTERN = r"\d+(?:[.,]\d+)*"
 _NUMBER = re.compile(_NUMBER_PATTERN)
 _NUMERIC_TOKEN = re.compile(rf"{_NUMBER_PATTERN}(?:%|[A-Za-z]+)?")
+_UNIT_WORD = re.compile(r"\s*(%|[A-Za-z]+)")
+_PERCENT_UNITS = {"%", "percent", "pct"}
+# Written time units normalized to seconds, so "500 ms" can ground on 0.5 s.
+_TIME_UNIT_SECONDS = {
+    "ms": 0.001,
+    "millisecond": 0.001,
+    "milliseconds": 0.001,
+    "s": 1.0,
+    "sec": 1.0,
+    "secs": 1.0,
+    "second": 1.0,
+    "seconds": 1.0,
+    "min": 60.0,
+    "mins": 60.0,
+    "minute": 60.0,
+    "minutes": 60.0,
+    "h": 3600.0,
+    "hr": 3600.0,
+    "hrs": 3600.0,
+    "hour": 3600.0,
+    "hours": 3600.0,
+}
 _QUANTITY_TOKEN = re.compile(
     r"\b(?:no|none|zero|one|two|three|four|five|six|seven|eight|nine|ten|"
     r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
@@ -70,7 +92,6 @@ _UNSUPPORTED_CLAIM = re.compile(
     r"(?:stems?|stemmed|stemming)\s+from|"
     r"produc(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|"
     r"trigger(?:s|ed|ing)?|responsible\s+for|attributable\s+to|"
-    r"(?:account|accounts|accounted|accounting)\s+for|"
     r"(?:contributes?|contributed|contributing)\s+to|"
     r"(?:give|gives|gave|given|giving)\s+rise\s+to|"
     r"(?:bring|brings|brought|bringing)\s+about|"
@@ -78,7 +99,7 @@ _UNSUPPORTED_CLAIM = re.compile(
     r"originate|originates|originated|originating)\s+from|"
     r"explains?|explained|explaining|determines?|determined|determining|"
     r"improv(?:e|es|ed|ing|ements?)|outperform(?:s|ed|ing)?|"
-    r"healthy|correct|incorrect)\b",
+    r"better|best|worse|worst|healthy|correct|incorrect)\b",
     flags=re.IGNORECASE,
 )
 _OUTCOME_TOKEN = re.compile(
@@ -562,31 +583,60 @@ def _parse_number(token: str) -> float | None:
         return None
 
 
-def _get_grounded_numbers(candidate: CandidateFinding) -> set[float]:
-    """Return every quantity the deterministic candidate states about itself."""
-    numbers: set[float] = set()
+def _classify_unit(unit: str | None) -> tuple[str, float]:
+    """Map a fact name or chart unit to a quantity kind and a scale to seconds."""
+    lowered = (unit or "").lower()
+    if lowered in _PERCENT_UNITS or "percent" in lowered or "share" in lowered:
+        return "percent", 1.0
+    for word, scale in _TIME_UNIT_SECONDS.items():
+        if lowered == word or lowered.endswith(f"_{word}"):
+            return "seconds", scale
+    if "duration" in lowered or "latency" in lowered:
+        return "seconds", 1.0
+    return "count", 1.0
+
+
+def _get_grounded_numbers(candidate: CandidateFinding) -> dict[str, set[float]]:
+    """Return every quantity the candidate states about itself, by kind.
+
+    Kinds are ``count``, ``percent``, and ``seconds`` so that a count of three
+    occurrences cannot ground "3 seconds" or "3%".
+    """
+    numbers: dict[str, set[float]] = {
+        "count": set(),
+        "percent": set(),
+        "seconds": set(),
+    }
+    data = candidate.data
+    chart_kind, chart_scale = _classify_unit(data.unit)
     for fact in candidate.facts:
+        kind, scale = _classify_unit(fact.name)
         if isinstance(fact.value, str):
-            numbers.update(
+            values = [
                 parsed
                 for match in _NUMBER.finditer(fact.value)
                 if (parsed := _parse_number(match.group(0))) is not None
-            )
+            ]
         else:
-            numbers.add(float(fact.value))
-    data = candidate.data
+            values = [float(fact.value)]
+        numbers[kind].update(value * scale for value in values)
+        # A fact named without a unit, such as a distribution's "maximum",
+        # measures the same thing as the chart, so it also grounds that unit.
+        if kind == "count" and chart_kind != "count":
+            numbers[chart_kind].update(value * chart_scale for value in values)
+    kind, scale = chart_kind, chart_scale
     if isinstance(data, CategoricalInsightData):
-        numbers.update(float(item.value) for item in data.values)
+        numbers[kind].update(float(item.value) * scale for item in data.values)
     else:
         for bin_ in data.bins:
-            numbers.add(float(bin_.count))
-            numbers.update(
-                float(bound)
+            numbers["count"].add(float(bin_.count))
+            numbers[kind].update(
+                float(bound) * scale
                 for bound in (bin_.lower_bound, bin_.upper_bound)
                 if bound is not None
             )
     coverage = candidate.coverage
-    numbers.update(
+    numbers["count"].update(
         float(count)
         for count in (
             coverage.sessions_analyzed,
@@ -596,11 +646,26 @@ def _get_grounded_numbers(candidate: CandidateFinding) -> set[float]:
             len(candidate.contributing_session_ids),
         )
     )
+    if coverage.sessions_analyzed:
+        numbers["percent"].add(
+            100.0 * coverage.affected_sessions / coverage.sessions_analyzed
+        )
     return numbers
 
 
-def _is_grounded_number(token: str, grounded: set[float]) -> bool:
-    """Accept a written number that equals or rounds a grounded quantity."""
+def _matches_grounded(value: float, decimals: int, grounded: set[float]) -> bool:
+    return any(known == value or round(known, decimals) == value for known in grounded)
+
+
+def _is_grounded_number(
+    token: str, following: str, grounded: dict[str, set[float]]
+) -> bool:
+    """Accept a written number that equals or rounds a grounded quantity.
+
+    A percent sign or time unit, attached to the token or as the next word,
+    selects the kind the number must ground on; a bare number may ground on
+    a count or a time value but never on a percentage.
+    """
     match = _NUMBER.match(token)
     if match is None:
         return False
@@ -609,7 +674,34 @@ def _is_grounded_number(token: str, grounded: set[float]) -> bool:
     if value is None:
         return False
     decimals = len(raw.rsplit(".", 1)[1]) if "." in raw else 0
-    return any(known == value or round(known, decimals) == value for known in grounded)
+    unit = token[match.end() :].lower()
+    if not unit and (next_word := _UNIT_WORD.match(following)):
+        unit = next_word.group(1).lower()
+    if unit in _PERCENT_UNITS:
+        return _matches_grounded(value, decimals, grounded["percent"])
+    if unit in _TIME_UNIT_SECONDS:
+        scaled = value * _TIME_UNIT_SECONDS[unit]
+        # Compare at the written precision after scaling to seconds.
+        scaled_decimals = decimals + max(
+            0, -int(f"{_TIME_UNIT_SECONDS[unit]:e}".split("e")[1])
+        )
+        return _matches_grounded(scaled, scaled_decimals, grounded["seconds"])
+    return _matches_grounded(value, decimals, grounded["count"]) or _matches_grounded(
+        value, decimals, grounded["seconds"]
+    )
+
+
+def _negates_candidate_phrase(value: str, candidate: CandidateFinding) -> bool:
+    """Return whether a sentence negates a quoted candidate outcome phrase."""
+    for clause in re.split(r"[.;!?\n]+", value):
+        masked = _remove_candidate_phrases(clause, candidate)
+        if (
+            masked != clause
+            and _has_outcome_wording(clause)
+            and _NEGATION_TOKEN.search(masked)
+        ):
+            return True
+    return False
 
 
 def _remove_candidate_phrases(value: str, candidate: CandidateFinding) -> str:
@@ -636,11 +728,11 @@ def _validate_card_copy(value: str, candidate: CandidateFinding) -> None:
     _validate_copy_safety(value)
     remaining = _remove_known_labels(value, _get_quantified_labels(candidate))
     claims = _remove_candidate_phrases(value, candidate)
-    if _has_negated_outcome(claims):
+    if _has_negated_outcome(claims) or _negates_candidate_phrase(value, candidate):
         raise ValueError("editor card copy contains a negated outcome claim")
     grounded = _get_grounded_numbers(candidate)
     for match in _NUMERIC_TOKEN.finditer(remaining):
-        if not _is_grounded_number(match.group(0), grounded):
+        if not _is_grounded_number(match.group(0), remaining[match.end() :], grounded):
             raise ValueError(
                 "editor card copy contains a numeric claim absent from the "
                 "candidate facts"
