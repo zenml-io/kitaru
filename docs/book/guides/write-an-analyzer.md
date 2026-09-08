@@ -45,7 +45,14 @@ async def analyzer(session_ids: list[UUID], **params) -> InsightInput:
 
 The first argument is `list[UUID]`. `KitaruAPIClient()` uses the server URL and credentials supplied to the task process. `client.sessions.get(session_id)` returns [session](../concepts/agents-and-sessions.md) metadata; `client.sessions.get_with_nodes(session_id)` includes its model and tool calls with payloads. Fetch only what the analysis needs, and process traces one at a time to avoid retaining the whole import in memory. Return one `InsightInput` or a list, including an empty list when there are no findings. Each returned item becomes one stored insight. Both synchronous and asynchronous callables are supported. `params` are per-run knobs, passed when you name the analyzer on an import.
 
-This example needs no provider credentials: it reads session status through Kitaru's task credentials. An analyzer that judges the set instead of just counting it, for example one that reads every node and summarizes what went wrong across the batch, calls a model inside `analyzer` the same way an [LLM judge](write-an-evaluator.md) does inside `evaluate`.
+This example needs no provider credentials: it reads session status through Kitaru's task credentials. An analyzer that judges the set instead of just counting it, for example one that reads every node and summarizes what went wrong across the batch, calls a model inside `analyzer` the same way an [LLM judge](write-an-evaluator.md) does inside `evaluate`. Such an analyzer can declare its provider and a [connection schema](provider-connections.md) when registered:
+
+```bash
+kitaru analyzer register model-judge \
+  --script model_judge.py --entrypoint analyzer \
+  --provider model-provider \
+  --connection-schema model-provider-connection.json
+```
 
 ## Register it
 
@@ -58,7 +65,7 @@ Analyzers are versioned like evaluators: registering the next version with `kita
 
 ## Run it on an import
 
-Name the analyzer on an import the same way you name an evaluator, with `--analyzer` and `--analyzer-params`:
+Name the analyzer on an import the same way you name an evaluator, with `--analyzer` and `--analyzer-params`. Add `--analyzer-connection ANALYZER@VERSION=CONNECTION` when it should use a connection other than its provider's default:
 
 ```bash
 kitaru session import sessions.jsonl \
@@ -86,6 +93,6 @@ created_import = await client.imports.create(
 )
 ```
 
-The REST request carries the same `analyzers` list on `POST /api/v1/imports`, each entry naming an analyzer, an optional `version` that resolves to the latest version when omitted, and `params`. Read the resulting insights back with `client.insights.list(...)`, filtered by agent.
+The REST request carries the same `analyzers` list on `POST /api/v1/imports`, each entry naming an analyzer, an optional `version` that resolves to the latest version when omitted, `params`, and an optional `connection_id`. Read the resulting insights back with `client.insights.list(...)`, filtered by agent.
 
 There is no path to run an analyzer over sessions outside an import yet. Naming it on an import is the only way to run one.

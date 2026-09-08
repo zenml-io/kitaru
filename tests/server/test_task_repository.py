@@ -284,6 +284,7 @@ async def test_analysis_task_round_trips_its_fields(setup: Setup) -> None:
         plugin_version_id=setup.plugin_version_id,
         agent_id=setup.agent_id,
         import_id=import_id,
+        connection_id=uuid.uuid4(),
         params={"threshold": 0.5},
     )
     created = await setup.tasks.create(task)
@@ -291,6 +292,7 @@ async def test_analysis_task_round_trips_its_fields(setup: Setup) -> None:
     assert created.plugin_version_id == setup.plugin_version_id
     assert created.agent_id == setup.agent_id
     assert created.import_id == import_id
+    assert created.connection_id == task.connection_id
     assert created.params == {"threshold": 0.5}
 
     loaded = await setup.tasks.get(created.id)

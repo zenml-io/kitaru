@@ -43,7 +43,7 @@ class OpenAIInsightGenerator:
             ModuleNotFoundError: The OpenAI dependency is absent.
         """
         credential = api_key or os.environ.get("OPENAI_API_KEY")
-        if not credential:
+        if not credential or not credential.strip():
             raise MissingOpenAICredential(
                 "OpenAI credentials are required for model-backed insights"
             )

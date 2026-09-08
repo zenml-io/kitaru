@@ -5,9 +5,9 @@ icon: chart-pie
 
 # Post-import insights
 
-Kitaru automatically runs `kitaru/post-import-insights` after a session import. It looks for patterns in the normalized sessions, such as failed tool calls, repeated calls, and outcome distributions, then stores insight cards with supporting session references and investigation prompts. This is available to open-source users: it runs on your worker, including with a local or self-hosted server.
+Select post-import analyzers to find patterns in normalized sessions, such as failed tool calls, repeated calls, and outcome distributions. They store insight cards with supporting session references and investigation prompts. They run on your worker, including with a local or self-hosted server.
 
-The implementation is the independently versioned `kitaru-post-import-insights` plugin. The server registers its exact package requirement; the worker installs it when executing the analysis task. The default analysis is deterministic. It does not require an OpenAI account or send traces to a model. Optional model-assisted wording is configured separately.
+The independently versioned `kitaru-post-import-insights` package supplies two analyzers: `kitaru/post-import-insights` uses deterministic checks without a model or API key; `kitaru/openai-post-import-insights` uses OpenAI to select findings and customize their wording. The server registers both package entrypoints; the worker installs the package when executing an analysis task. Imports run only the analyzers explicitly selected by the caller.
 
 ## Set up a worker and import
 
@@ -34,10 +34,11 @@ In another terminal, import your file for an existing agent, replacing `customer
 uv run kitaru session import sessions.jsonl \
   --importer kitaru/kitaru-jsonl@latest \
   --agent customer-service@latest \
+  --analyzer kitaru/post-import-insights@latest \
   --wait
 ```
 
-The server adds the built-in analyzer automatically. You do not need to register it or pass `--analyzer` for the default analysis. An analyzer failure fails the import job but does not undo the imported sessions; the import record retains its parsing counts.
+The built-in analyzers are already registered, but you must select them with `--analyzer`. Imports with no completed or failed sessions do not launch analysis. An analyzer failure fails the import job but does not undo the imported sessions or insights already produced by another analyzer; the import record retains its parsing counts.
 
 ## Read the results
 
@@ -52,22 +53,25 @@ SDK and REST consumers can read the same records through `client.insights` and `
 
 There is no separate command or MCP tool to regenerate these cards over arbitrary existing sessions. `kitaru insight create` stores a supplied insight; it does not run analysis. Analyzers currently run as part of an import.
 
-The `import_id` insight filter follows the analyzer task back to its import job. Deleting that job deletes its tasks, so retained insights no longer match the import filter; they remain available through direct agent filtering. Analyzer provenance normally survives deletion of an analyzer version. One downgrade is necessarily lossy: if an analyzer version was deleted after schema revision `017_insight_analyzer_provenance` was installed, downgrading to revision `016_analyzer` clears that deleted version ID from retained insights so the older foreign key can be restored.
+Each generated insight stores its `import_id` directly, so task cleanup does not remove its import association. Deleting the import itself clears that reference. Deleting an analyzer version clears the insight's analyzer-version reference without deleting the insight.
 
-## Optional OpenAI assistance
+## Run both analyzers
 
-To enable model-assisted selection and wording, set `OPENAI_API_KEY` in the environment that starts the worker. Setting it only in the importing terminal or on the server is not sufficient. Select the built-in analyzer explicitly and pass a model available to your OpenAI account:
+To also produce OpenAI insights, configure an OpenAI [provider connection](provider-connections.md) containing `OPENAI_API_KEY`, or supply that key in the worker's environment and configure its credential selector for `openai`. Setting it only in the importing terminal is not sufficient. Select both analyzers and pass a model available to your OpenAI account:
 
 ```bash
 uv run kitaru session import sessions.jsonl \
   --importer kitaru/kitaru-jsonl@latest \
   --agent customer-service@latest \
   --analyzer kitaru/post-import-insights@latest \
-  --analyzer-params 'kitaru/post-import-insights@latest={"model":"YOUR_MODEL"}' \
+  --analyzer kitaru/openai-post-import-insights@latest \
+  --analyzer-params 'kitaru/openai-post-import-insights@latest={"model":"YOUR_MODEL"}' \
   --wait
 ```
 
-The plugin package includes its model and observability dependencies. Model calls receive a bounded projection of computed candidates, facts, sanitized labels, and evidence references, not the complete raw traces. The deterministic code computes the counts and charts. Model assistance can incur OpenAI charges; leaving out `model` keeps analysis deterministic.
+Both analyzers run independently and retain their results, even when findings overlap. The OpenAI analyzer requires credentials and a model; it does not switch to deterministic generation when credentials are missing. Without a connection or an eligible credential-equipped worker, its task stays queued; select only the deterministic analyzer if you want the import job to finish without OpenAI credentials.
+
+The plugin package includes its model and observability dependencies. Model calls receive a bounded projection of computed candidates, facts, sanitized labels, and evidence references, not the complete raw traces. Deterministic code computes the counts and charts in both analyzers. OpenAI analysis can incur charges.
 
 ## Coverage and large imports
 

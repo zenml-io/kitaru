@@ -17,13 +17,19 @@ import uuid
 
 import pytest
 
-from conftest import FakePluginRepository, create_plugin
+from conftest import (
+    FakeConnectionRepository,
+    FakePluginRepository,
+    create_connection,
+    create_plugin,
+)
 from kitaru.server.application.models.replay_config import AnalyzerConfigInput
 from kitaru.server.application.services.analyzer_resolution import (
     resolve_analyzer_config,
     validate_analyzers,
 )
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.domain.connection import ConnectionNotFound
 from kitaru.server.domain.plugin import (
     PackagePluginSource,
     PluginKind,
@@ -42,7 +48,15 @@ def repository() -> FakePluginRepository:
     return FakePluginRepository()
 
 
-async def test_resolve_latest_version(repository: FakePluginRepository) -> None:
+@pytest.fixture
+def connections() -> FakeConnectionRepository:
+    """Provide a fake connection repository."""
+    return FakeConnectionRepository()
+
+
+async def test_resolve_latest_version(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
     """Resolve an omitted version to the analyzer's latest version."""
     plugin = await create_plugin(
         repository, OWNER_ID, kind=PluginKind.ANALYZER, name="trends"
@@ -51,13 +65,15 @@ async def test_resolve_latest_version(repository: FakePluginRepository) -> None:
     second = await repository.create_version(plugin.id, SOURCE, display_version="v2")
 
     config = AnalyzerConfigInput(analyzer="trends")
-    resolved = await resolve_analyzer_config(config, repository)
+    resolved = await resolve_analyzer_config(config, repository, connections)
     assert resolved.analyzer == "trends"
     assert resolved.version == 2
     assert resolved.analyzer_version_id == second.id
 
 
-async def test_resolve_explicit_version(repository: FakePluginRepository) -> None:
+async def test_resolve_explicit_version(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
     """Resolve to the explicitly named version, not the latest."""
     plugin = await create_plugin(
         repository, OWNER_ID, kind=PluginKind.ANALYZER, name="trends"
@@ -66,36 +82,42 @@ async def test_resolve_explicit_version(repository: FakePluginRepository) -> Non
     await repository.create_version(plugin.id, SOURCE, display_version="v2")
 
     config = AnalyzerConfigInput(analyzer="trends", version=1)
-    resolved = await resolve_analyzer_config(config, repository)
+    resolved = await resolve_analyzer_config(config, repository, connections)
     assert resolved.version == 1
     assert resolved.analyzer_version_id == first.id
 
 
-async def test_resolve_missing_analyzer(repository: FakePluginRepository) -> None:
+async def test_resolve_missing_analyzer(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
     """Raise when no analyzer plugin has the config's name."""
     config = AnalyzerConfigInput(analyzer="missing")
     with pytest.raises(PluginNotFound, match="Plugin missing was not found"):
-        await resolve_analyzer_config(config, repository)
+        await resolve_analyzer_config(config, repository, connections)
 
 
-async def test_resolve_missing_version(repository: FakePluginRepository) -> None:
+async def test_resolve_missing_version(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
     """Raise when the explicit version has no matching plugin version."""
     await create_plugin(repository, OWNER_ID, kind=PluginKind.ANALYZER, name="trends")
     config = AnalyzerConfigInput(analyzer="trends", version=5)
     with pytest.raises(PluginVersionNotFound):
-        await resolve_analyzer_config(config, repository)
+        await resolve_analyzer_config(config, repository, connections)
 
 
-async def test_resolve_no_versions_yet(repository: FakePluginRepository) -> None:
+async def test_resolve_no_versions_yet(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
     """Raise when the analyzer plugin has no versions at all."""
     await create_plugin(repository, OWNER_ID, kind=PluginKind.ANALYZER, name="fresh")
     config = AnalyzerConfigInput(analyzer="fresh")
     with pytest.raises(PluginVersionNotFound):
-        await resolve_analyzer_config(config, repository)
+        await resolve_analyzer_config(config, repository, connections)
 
 
 async def test_validate_analyzers_resolves_every_config(
-    repository: FakePluginRepository,
+    repository: FakePluginRepository, connections: FakeConnectionRepository
 ) -> None:
     """Resolve every config in the list."""
     trends = await create_plugin(
@@ -113,12 +135,13 @@ async def test_validate_analyzers_resolves_every_config(
             AnalyzerConfigInput(analyzer="outliers"),
         ],
         repository,
+        connections,
     )
     assert {config.analyzer for config in resolved} == {"trends", "outliers"}
 
 
 async def test_validate_analyzers_rejects_duplicate_version(
-    repository: FakePluginRepository,
+    repository: FakePluginRepository, connections: FakeConnectionRepository
 ) -> None:
     """Reject two configs resolving to the same analyzer version."""
     plugin = await create_plugin(
@@ -133,4 +156,87 @@ async def test_validate_analyzers_rejects_duplicate_version(
                 AnalyzerConfigInput(analyzer="trends"),
             ],
             repository,
+            connections,
+        )
+
+
+async def test_resolve_named_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Resolve the connection explicitly named by the analyzer config."""
+    plugin = await create_plugin(
+        repository,
+        OWNER_ID,
+        kind=PluginKind.ANALYZER,
+        name="trends",
+        provider="langfuse",
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version=None)
+    connection = await create_connection(
+        connections, OWNER_ID, uuid.uuid4(), name="named"
+    )
+
+    resolved = await resolve_analyzer_config(
+        AnalyzerConfigInput(analyzer="trends", connection_id=connection.id),
+        repository,
+        connections,
+    )
+
+    assert resolved.connection_id == connection.id
+    assert resolved.provider == "langfuse"
+
+
+async def test_resolve_default_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Resolve the analyzer provider's default connection when none is named."""
+    plugin = await create_plugin(
+        repository,
+        OWNER_ID,
+        kind=PluginKind.ANALYZER,
+        name="trends",
+        provider="langfuse",
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version=None)
+    connection = await create_connection(
+        connections, OWNER_ID, uuid.uuid4(), default=True
+    )
+
+    resolved = await resolve_analyzer_config(
+        AnalyzerConfigInput(analyzer="trends"), repository, connections
+    )
+
+    assert resolved.connection_id == connection.id
+
+
+async def test_resolve_analyzer_without_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Record no connection when the analyzer has no provider."""
+    plugin = await create_plugin(
+        repository, OWNER_ID, kind=PluginKind.ANALYZER, name="trends"
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version=None)
+
+    resolved = await resolve_analyzer_config(
+        AnalyzerConfigInput(analyzer="trends"), repository, connections
+    )
+
+    assert resolved.connection_id is None
+
+
+async def test_resolve_missing_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Raise when the analyzer config names an unknown connection."""
+    plugin = await create_plugin(
+        repository, OWNER_ID, kind=PluginKind.ANALYZER, name="trends"
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version=None)
+
+    with pytest.raises(ConnectionNotFound):
+        await resolve_analyzer_config(
+            AnalyzerConfigInput(analyzer="trends", connection_id=uuid.uuid4()),
+            repository,
+            connections,
         )

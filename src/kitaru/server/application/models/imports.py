@@ -45,6 +45,7 @@ class ImportCreate(FrozenModel):
     agent_id: uuid.UUID
     agent_version_id: uuid.UUID | None = None
     version: int | None = None
+    connection_id: uuid.UUID | None = None
     payload_blob_id: uuid.UUID | None = None
     fetch_query: dict[str, Any] | None = None
     params: dict[str, Any] = Field(default_factory=dict)

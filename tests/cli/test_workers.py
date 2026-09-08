@@ -251,15 +251,17 @@ def test_selector_shorthand_and_json_cover_required_behavior() -> None:
     config = workers.build_worker_config(
         selectors=[
             "pool=cpu,gpu",
+            "kitaru/requires-credentials=",
             '{"key":"tenant","values":["prod"],"required":true}',
         ]
     )
     assert config.scope.selectors == [
         LabelSelector(key="pool", values=["cpu", "gpu"]),
+        LabelSelector(key="kitaru/requires-credentials", values=[]),
         LabelSelector(key="tenant", values=["prod"], required=True),
     ]
     with pytest.raises(CLIError, match="Invalid --selector"):
-        workers.build_worker_config(selectors=["missing-values="])
+        workers.build_worker_config(selectors=["missing-separator"])
     with pytest.raises(ValueError, match="greater than or equal to 1"):
         workers.build_worker_config(concurrency=0)
 

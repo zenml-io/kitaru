@@ -1,10 +1,15 @@
 # Kitaru post-import insights
 
-Generate evidence-backed insight cards from imported Kitaru sessions. This independent analyzer package profiles every selected session, builds deterministic candidates, and optionally uses OpenAI to select and edit the resulting cards.
+Generate evidence-backed insight cards from imported Kitaru sessions. This distribution provides two independently selectable analyzers. Both profile every selected session and build deterministic candidates; the OpenAI analyzer then uses bounded analyst and editor calls to select candidates and write their descriptions.
 
-The analyzer entrypoint is `kitaru_post_import_insights.analyzer:analyze_post_import_sessions`. It accepts a list of session UUIDs for one agent and import, fetches each session with its nodes through `KitaruAPIClient`, and returns `list[InsightInput]` for the task runner to persist. Each fetched trace is processed and released before the next fetch.
+| Catalog name | Entrypoint in `kitaru_post_import_insights.analyzer` | Required configuration |
+|---|---|---|
+| `kitaru/post-import-insights` | `analyze_post_import_sessions` | None |
+| `kitaru/openai-post-import-insights` | `analyze_openai_post_import_sessions` | `model` parameter and an OpenAI connection supplying `OPENAI_API_KEY` |
 
-The API client uses `KITARU_API_URL` and `KITARU_API_TOKEN`. Optional analyzer parameters are `agent_name` for display context, `model` for OpenAI generation, and `observe` for metadata-only Langfuse telemetry. Without a model, generation is deterministic. Model-backed generation requires `OPENAI_API_KEY`. Telemetry uses the dedicated `KITARU_INSIGHTS_LANGFUSE_PUBLIC_KEY`, `KITARU_INSIGHTS_LANGFUSE_SECRET_KEY`, and `KITARU_INSIGHTS_LANGFUSE_BASE_URL` settings and is best effort.
+Both entrypoints accept a list of session UUIDs for one agent and import, fetch each session with its nodes through `KitaruAPIClient`, and return `list[InsightInput]` for the task runner to persist. Each fetched trace is processed and released before the next fetch. Select either analyzer or both for an import. Each invocation persists its own cards; matching candidate names do not replace another analyzer's results.
+
+The API client uses `KITARU_API_URL` and `KITARU_API_TOKEN`. Both analyzers accept `agent_name` for display context and `observe` for metadata-only Langfuse telemetry. The deterministic analyzer does not accept a `model` parameter or call OpenAI. The OpenAI analyzer requires an explicit `model` parameter and fails when its credential is missing. Telemetry uses the dedicated `KITARU_INSIGHTS_LANGFUSE_PUBLIC_KEY`, `KITARU_INSIGHTS_LANGFUSE_SECRET_KEY`, and `KITARU_INSIGHTS_LANGFUSE_BASE_URL` settings and is best effort.
 
 ## Release context
 

@@ -118,7 +118,7 @@ kitaru session import sessions.jsonl \
   --wait
 ```
 
-Use `--tag` with `--wait` to tag every created session. Use `--join-on` to group provider traces by a source value. Use `--params` for other provider-specific settings. Use `--evaluator` to score every imported session once the import finishes, and `--evaluator-params` to pass parameters to a selected evaluator. Use `--analyzer` to run an [analyzer](../concepts/analyzers.md) over every imported session once the import finishes, and `--analyzer-params` to pass parameters to a selected analyzer:
+Use `--tag` with `--wait` to tag every created session. Use `--join-on` to group provider traces by a source value. Use `--params` for other provider-specific settings. Use `--evaluator` to score every imported session once the import finishes, and `--evaluator-params` to pass parameters to a selected evaluator. Use `--analyzer` to run an [analyzer](../concepts/analyzers.md) over every imported session once the import finishes, `--analyzer-params` to pass parameters to a selected analyzer, and `--analyzer-connection` to select credentials for it:
 
 ```bash
 kitaru session import sessions.jsonl \
@@ -128,6 +128,7 @@ kitaru session import sessions.jsonl \
   --evaluator-params 'accuracy@latest={"threshold": 0.8}' \
   --analyzer session-outcomes@latest \
   --analyzer-params 'session-outcomes@latest={"min_count": 5}' \
+  --analyzer-connection session-outcomes@latest=model-provider-prod \
   --wait
 ```
 
@@ -165,7 +166,7 @@ The selected value must be a non-empty string, number, or boolean. A missing, co
 
 ### SDK and REST
 
-The CLI validates `--join-on` and adds it to the importer parameter object, resolves each `--evaluator` into an entry of the `evaluators` list, and resolves each `--analyzer` into an entry of the `analyzers` list. SDK callers pass the same `join_on` parameter, evaluator configs, and analyzer configs directly:
+The CLI validates `--join-on` and adds it to the importer parameter object, resolves each `--evaluator` into an entry of the `evaluators` list, and resolves each `--analyzer` plus any matching `--analyzer-connection` into an entry of the `analyzers` list. SDK callers pass the same `join_on` parameter, evaluator configs, and analyzer configs directly:
 
 ```python
 from kitaru.api_models.v1.imports import ImportCreateRequest
@@ -180,7 +181,11 @@ created_import = await client.imports.create(
         payload_blob_id=blob_id,
         params={"join_on": "/metadata/customer/case_id"},
         evaluators=[EvaluatorConfig(evaluator="accuracy", params={"threshold": 0.8})],
-        analyzers=[AnalyzerConfig(analyzer="session-outcomes")],
+        analyzers=[
+            AnalyzerConfig(
+                analyzer="session-outcomes", connection_id=analyzer_connection_id
+            )
+        ],
     )
 )
 ```
@@ -196,11 +201,16 @@ The REST request uses the same structure:
   "payload_blob_id": "00000000-0000-0000-0000-000000000002",
   "params": {"join_on": "/metadata/customer/case_id"},
   "evaluators": [{"evaluator": "accuracy", "params": {"threshold": 0.8}}],
-  "analyzers": [{"analyzer": "session-outcomes"}]
+  "analyzers": [
+    {
+      "analyzer": "session-outcomes",
+      "connection_id": "00000000-0000-0000-0000-000000000003"
+    }
+  ]
 }
 ```
 
-Send this object to `POST /api/v1/imports`. Each `evaluators` entry names an evaluator, an optional `version` that resolves to the latest version when omitted, and `params`. Each `analyzers` entry does the same for an analyzer. The response is the import, whose `job_id` names the job running it. The server stores `params` and the resolved evaluators and analyzers on the import, the worker includes the params in `ImportTaskDetails`, and the task process calls the selected importer as `parse(payload, params)`. Once the import finishes, every listed evaluator scores every imported session and every listed analyzer runs once over the sessions the import created.
+Send this object to `POST /api/v1/imports`. Each `evaluators` entry names an evaluator, an optional `version` that resolves to the latest version when omitted, and `params`. Each `analyzers` entry does the same for an analyzer and can select a `connection_id`. Without one, the analyzer uses the default connection for its provider when available. The response is the import, whose `job_id` names the job running it. The server stores `params` and the resolved evaluators and analyzers on the import, the worker includes the params in `ImportTaskDetails`, and the task process calls the selected importer as `parse(payload, params)`. Once the import finishes, every listed evaluator scores every imported session and every listed analyzer runs once over the sessions the import created.
 
 Read an import back with `GET /api/v1/imports/{import_id}` or `client.imports.get(import_id)`, and list imports with `GET /api/v1/imports` or `client.imports.list(...)`, filterable on `id`, `agent_id`, and `job_id`.
 
@@ -213,7 +223,7 @@ Existing integrations can continue to send `params.join_on` as a dotted path. Th
 
 ## What provider importers normalize
 
-Imports also run the built-in [post-import insights](post-import-insights.md) analyzer automatically. It needs a worker that claims analyzer tasks and produces deterministic insight cards without an OpenAI key. The linked guide covers local and self-hosted setup, reading results, and optional model assistance.
+Select the built-in [post-import insights](post-import-insights.md) analyzers explicitly to produce deterministic cards, OpenAI-backed cards, or both. They need a worker that claims analyzer tasks; only the OpenAI analyzer requires model credentials. The linked guide covers local and self-hosted setup and reading results.
 
 Provider importers apply the same output contract to different source formats:
 

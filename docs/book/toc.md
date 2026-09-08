@@ -50,6 +50,7 @@
 - [Arize Phoenix](guides/import-phoenix-traces.md)
 - [Kitaru JSONL](guides/importing-sessions.md)
 - [No importer for your format](guides/custom-importer.md)
+- [Provider connections](guides/provider-connections.md)
 
 ## Adapters
 

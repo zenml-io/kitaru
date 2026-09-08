@@ -60,6 +60,7 @@ from kitaru.server.adapters.rest.routers import (
     blobs,
     cohort_versions,
     cohorts,
+    connections,
     devices,
     evaluations,
     evaluators,
@@ -441,6 +442,12 @@ def create_app(settings: APISettings) -> FastAPI:
         cohort_versions.router,
         prefix="/api/v1/cohort-versions",
         tags=["cohort-versions"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        connections.router,
+        prefix="/api/v1/connections",
+        tags=["connections"],
         responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(

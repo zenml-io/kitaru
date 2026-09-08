@@ -80,6 +80,7 @@ EXPECTED_IDEMPOTENT_ROUTES = {
     ("POST", "/api/v1/analyzers/{analyzer_id}/versions"),
     ("POST", "/api/v1/tags"),
     ("POST", "/api/v1/secrets"),
+    ("POST", "/api/v1/connections"),
     ("POST", "/api/v1/service-accounts"),
     ("POST", "/api/v1/users"),
 }

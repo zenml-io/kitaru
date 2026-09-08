@@ -282,8 +282,7 @@ async def update_evaluator_version(
         service,
         evaluator_id,
         version,
-        body.display_version,
-        "display_version" in body.model_fields_set,
+        body,
         EvaluatorVersionResponse,
         actor=actor,
     )

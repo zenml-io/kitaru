@@ -4,7 +4,7 @@ This guide explains how to test and publish the plugin distributions in `plugins
 
 ## Understand the package model
 
-Each adapter, importer, and analyzer is an independent Python distribution. All built-in evaluators share the `kitaru-evaluator` distribution. The post-import analyzer is packaged as `kitaru-post-import-insights`. Adapter distributions are installed directly in agent environments and are not registered in the server's default plugin catalog.
+Each directory under `plugins/packages/` is an independent Python distribution. All built-in evaluators share the `kitaru-evaluator` distribution. The deterministic and OpenAI post-import analyzers share `kitaru-post-import-insights`, with separate catalog names and entrypoints. Adapter distributions are installed directly in agent environments and are not registered in the server's default plugin catalog.
 
 The default catalog lives in `src/kitaru/server/api/bootstrap.py`. Server startup stores one package source for each definition. The source contains an exact requirement and a `module:callable` entrypoint. The server does not install or import the plugin package.
 
@@ -107,7 +107,7 @@ docker run --rm kitaru-plugin-e2e:local \
   python -c 'from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS; print(f"definitions={len(DEFAULT_PLUGIN_DEFINITIONS)}"); [print(d.kind.value, d.name, d.requirement, d.entrypoint) for d in DEFAULT_PLUGIN_DEFINITIONS]'
 ```
 
-The catalog includes importers, evaluators, and the post-import insights analyzer. Adapter distributions are installed directly by agent projects and are not registered in this catalog.
+The catalog includes importers, evaluators, and both post-import insights analyzers. Adapter distributions are installed directly by agent projects and are not registered in this catalog.
 
 ## Start the candidate server
 

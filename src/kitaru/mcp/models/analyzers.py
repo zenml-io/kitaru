@@ -23,7 +23,9 @@ class AnalyzerCreate(MCPModel):
     operation: Literal["create"]
     name: str = Field(min_length=1)
     description: str | None = None
+    provider: str | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    connection_schema: dict[str, JsonValue] | None = None
     idempotency_key: str | None = Field(
         default=None,
         description=IDEMPOTENCY_KEY_DESCRIPTION,
@@ -38,6 +40,8 @@ class AnalyzerUpdate(MCPModel):
     description: str | None = None
     clear_description: bool = False
     metadata: dict[str, JsonValue] | None = None
+    connection_schema: dict[str, JsonValue] | None = None
+    clear_connection_schema: bool = False
 
     @model_validator(mode="after")
     def _validate_update(self) -> "AnalyzerUpdate":
@@ -51,9 +55,19 @@ class AnalyzerUpdate(MCPModel):
             raise ValueError("description and clear_description conflict")
         if "metadata" in self.model_fields_set and self.metadata is None:
             raise ValueError("metadata cannot be null")
-        if not ({"description", "metadata"} & self.model_fields_set) and not (
-            self.clear_description
+        if (
+            "connection_schema" in self.model_fields_set
+            and self.connection_schema is None
+            and not self.clear_connection_schema
         ):
+            raise ValueError(
+                "connection_schema cannot be null without clear_connection_schema"
+            )
+        if self.connection_schema is not None and self.clear_connection_schema:
+            raise ValueError("connection_schema and clear_connection_schema conflict")
+        if not (
+            {"description", "metadata", "connection_schema"} & self.model_fields_set
+        ) and not (self.clear_description or self.clear_connection_schema):
             raise ValueError("analyzer update must change at least one field")
         return self
 

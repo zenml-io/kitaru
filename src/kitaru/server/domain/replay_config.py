@@ -85,6 +85,8 @@ class AnalyzerConfig(FrozenModel):
     version: int
     params: dict[str, Any] = Field(default_factory=dict)
     analyzer_version_id: uuid.UUID
+    provider: str | None = None
+    connection_id: uuid.UUID | None = None
 
 
 class StaticCase(FrozenModel):

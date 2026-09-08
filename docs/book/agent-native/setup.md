@@ -59,14 +59,16 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_registry_read` | read-only | Read agents, cohorts, experiments, importers, evaluators, and their versions; list and filter tags; list workers or get one by exact UUID |
 | `kitaru_activity_read` | read-only | Read sessions, replays, evaluations, runs, jobs, and their children |
 | `kitaru_review_read` | read-only | Read [investigations and annotations](../concepts/investigations.md) |
+| `kitaru_connection_read` | read-only | Read [provider connections](../guides/provider-connections.md) without their secret values |
 | `kitaru_cohorts_manage` | standard | Create or update cohorts and cohort versions |
 | `kitaru_experiments_manage` | standard | Create or update experiments |
 | `kitaru_session_import` | standard | Import sessions from an already-uploaded blob |
 | `kitaru_review_manage` | standard | Manage investigations and annotations; create or rename tags and link them to resources |
 | `kitaru_workflow_start` | standard | Start a session evaluation or experiment run, return immediately |
 | `kitaru_evaluators_manage` | standard | Create or update evaluators from an existing blob or pinned package |
+| `kitaru_connections_manage` | standard | Create or update [provider connections](../guides/provider-connections.md) and select provider defaults |
 | `kitaru_workflow_cancel` | destructive | Cancel a job or experiment run |
-| `kitaru_delete` | destructive | Delete a cohort, experiment, investigation, annotation, evaluator, version, run, or tag; unlink an exact tag-resource tuple |
+| `kitaru_delete` | destructive | Delete a cohort, experiment, investigation, annotation, evaluator, version, connection, run, or tag; unlink an exact tag-resource tuple |
 
 Start assistants in `read-only`, move to `standard` when you want them building cohorts and starting runs, and reserve `destructive` for sessions where you are watching closely.
 

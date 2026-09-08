@@ -37,6 +37,9 @@ from kitaru.server.adapters.db.repositories.agent_version_repository import (
     SQLAgentVersionRepository,
 )
 from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.connection_repository import (
+    SQLConnectionRepository,
+)
 from kitaru.server.adapters.db.repositories.import_repository import (
     SQLImportRepository,
 )
@@ -95,6 +98,7 @@ def _build_task_service(
         ),
         replay_repository=SQLReplayRepository(session),
         import_repository=SQLImportRepository(session),
+        connection_repository=SQLConnectionRepository(session),
         policy=policy,
     )
     transitions = TaskTransitions(

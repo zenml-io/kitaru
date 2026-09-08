@@ -22,6 +22,8 @@ from kitaru.server.adapters.db.orm.base import Base
 EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("api_key", "owner_id"): None,
     ("secret", "owner_id"): None,
+    ("connection", "owner_id"): None,
+    ("connection", "secret_id"): None,
     ("device", "account_id"): None,
     ("idempotency_key", "account_id"): None,
     ("agent", "owner_id"): None,
@@ -99,11 +101,12 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("annotation", "session_id"): "CASCADE",
     ("insight", "agent_id"): "CASCADE",
     ("insight", "owner_id"): None,
-    # analyzer_version_id carries no constraint, an analyzer-born row keeps
-    # this id forever, even after the plugin version it references is deleted.
+    ("insight", "analyzer_version_id"): "SET NULL",
+    ("insight", "import_id"): "SET NULL",
     ("insight", "task_id"): "SET NULL",
     ("import", "agent_id"): "CASCADE",
     ("import", "agent_version_id"): "SET NULL",
+    ("import", "connection_id"): "SET NULL",
     ("import", "importer_version_id"): "SET NULL",
     ("import", "job_id"): "SET NULL",
     ("import", "owner_id"): None,

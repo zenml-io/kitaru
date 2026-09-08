@@ -132,6 +132,7 @@ class StubImportClient:
         self.blob = SimpleNamespace(
             id=uuid.uuid4(), sha256="a" * 64, size=7, media_type="application/jsonl"
         )
+        self.connection = SimpleNamespace(id=uuid.uuid4(), name="langfuse-prod")
         self.job = _job()
         now = datetime(2026, 8, 3, tzinfo=UTC)
         self.import_response = ImportResponse(
@@ -159,6 +160,7 @@ class StubImportClient:
         self.evaluators = self._Evaluators(self)
         self.analyzers = self._Analyzers(self)
         self.blobs = self._Blobs(self)
+        self.connections = self._Connections(self)
         self.imports = self._Imports(self)
         self.jobs = self._Jobs(self)
 
@@ -179,6 +181,15 @@ class StubImportClient:
             assert parent_id == self.owner.importer.id
             assert version == self.owner.importer_version.version
             return self.owner.importer_version
+
+    class _Connections:
+        def __init__(self, owner: "StubImportClient") -> None:
+            self.owner = owner
+
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            self.owner.lookup_calls.append("connection")
+            return SimpleNamespace(items=[self.owner.connection], next_cursor=None)
 
     class _Agents:
         def __init__(self, owner: "StubImportClient") -> None:
@@ -664,7 +675,12 @@ async def test_session_import_forwards_analyzers(tmp_path: Path) -> None:
 
     [request] = client.requests
     assert request.model_dump(mode="json")["analyzers"] == [
-        {"analyzer": "clustering", "version": 2, "params": {"min_size": 5}}
+        {
+            "analyzer": "clustering",
+            "version": 2,
+            "params": {"min_size": 5},
+            "connection_id": None,
+        }
     ]
     assert result.item["analyzers"] == [
         {
@@ -674,6 +690,34 @@ async def test_session_import_forwards_analyzers(tmp_path: Path) -> None:
             "version": 2,
         }
     ]
+
+
+async def test_session_import_forwards_analyzer_connections(tmp_path: Path) -> None:
+    """Import resolves a connection for each selected analyzer token."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    result = await sessions.import_sessions(
+        client,
+        payload,
+        importer="jsonl@2",
+        agent="assistant@3",
+        params=None,
+        analyzers=["clustering@2"],
+        analyzer_connections=["clustering@2=langfuse-prod"],
+        media_type="application/jsonl",
+        wait=False,
+        interval=None,
+        timeout=None,
+    )
+
+    [request] = client.requests
+    assert request.analyzers[0].connection_id == client.connection.id
+    assert result.item["analyzers"][0]["connection"] == {
+        "id": str(client.connection.id),
+        "name": "langfuse-prod",
+    }
 
 
 async def test_session_import_rejects_evaluator_params_without_evaluator(
@@ -718,6 +762,32 @@ async def test_session_import_rejects_analyzer_params_without_analyzer(
             agent="assistant@3",
             params=None,
             analyzer_params=['clustering@2={"min_size": 5}'],
+            media_type="application/jsonl",
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.uploads == []
+
+
+async def test_session_import_rejects_analyzer_connection_without_analyzer(
+    tmp_path: Path,
+) -> None:
+    """Analyzer connections require a selected analyzer token."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            analyzer_connections=["clustering@2=langfuse-prod"],
             media_type="application/jsonl",
             wait=False,
             interval=None,
@@ -1130,6 +1200,8 @@ def test_session_import_argv_registers_streaming_created_receipt(
                 "quality@3",
                 "--analyzer",
                 "clustering@2",
+                "--analyzer-connection",
+                "clustering@2=langfuse-prod",
                 "--media-type",
                 "application/jsonl",
             ]
@@ -1149,6 +1221,7 @@ def test_session_import_argv_registers_streaming_created_receipt(
     assert [config.analyzer for config in client.requests[0].analyzers] == [
         "clustering"
     ]
+    assert client.requests[0].analyzers[0].connection_id == client.connection.id
 
 
 @pytest.mark.parametrize("join_on", ["metadata.case_id", "/metadata/case~2id"])
@@ -1314,6 +1387,60 @@ async def test_session_import_api_query_merges_options_and_uploads_nothing() -> 
     )
     assert result.item["query"] == expected_query
     assert "blob" not in result.item
+
+
+async def test_session_import_carries_a_resolved_connection() -> None:
+    """A named connection resolves to the id sent on the API source."""
+    client = StubImportClient()
+
+    result = await sessions.import_sessions(
+        client,
+        None,
+        importer="jsonl@2",
+        agent="assistant@3",
+        params=None,
+        media_type=None,
+        wait=False,
+        interval=None,
+        timeout=None,
+        since="2026-08-01T00:00:00Z",
+        connection="langfuse-prod",
+    )
+
+    [request] = client.requests
+    assert isinstance(request.source, ApiImportSource)
+    assert request.source.connection_id == client.connection.id
+    assert result.item["connection"] == {
+        "id": str(client.connection.id),
+        "name": "langfuse-prod",
+    }
+
+
+async def test_session_import_rejects_a_connection_with_a_payload_file(
+    tmp_path: Path,
+) -> None:
+    """A blob import carries no connection."""
+    client = StubImportClient()
+    payload = tmp_path / "traces.jsonl"
+    payload.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type=None,
+            wait=False,
+            interval=None,
+            timeout=None,
+            connection="langfuse-prod",
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.lookup_calls == []
+    assert client.uploads == []
 
 
 async def test_session_import_query_clash_rejected_before_remote_call() -> None:

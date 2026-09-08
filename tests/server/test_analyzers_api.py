@@ -96,7 +96,9 @@ async def test_create_analyzer(client: httpx.AsyncClient) -> None:
         json={
             "name": "trends",
             "description": "Surfaces usage trends",
+            "provider": "langfuse",
             "metadata": {"a": 1},
+            "connection_schema": {"type": "object"},
         },
     )
     assert response.status_code == 201
@@ -104,9 +106,10 @@ async def test_create_analyzer(client: httpx.AsyncClient) -> None:
     assert body["name"] == "trends"
     assert body["owner_id"] == str(ACCOUNT.id)
     assert body["description"] == "Surfaces usage trends"
+    assert body["provider"] == "langfuse"
     assert body["metadata"] == {"a": 1}
+    assert body["connection_schema"] == {"type": "object"}
     assert body["latest_version"] == 0
-    assert "provider" not in body
     assert "agent_id" not in body
 
 
@@ -125,12 +128,29 @@ async def test_create_analyzer_reserved_name(client: httpx.AsyncClient) -> None:
     assert response.status_code == 422
 
 
-async def test_create_analyzer_rejects_provider(client: httpx.AsyncClient) -> None:
-    """Observe HTTP 422 when the request carries a provider field."""
+async def test_list_analyzers_filter_by_provider(client: httpx.AsyncClient) -> None:
+    """List analyzers filtered by provider."""
+    await client.post(
+        "/api/v1/analyzers", json={"name": "trends", "provider": "langfuse"}
+    )
+    await client.post(
+        "/api/v1/analyzers", json={"name": "clusters", "provider": "braintrust"}
+    )
+    filter_expression = {"field": "provider", "op": "eq", "value": "langfuse"}
+    response = await client.get(
+        "/api/v1/analyzers", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["items"]] == ["trends"]
+
+
+async def test_create_analyzer_allows_provider(client: httpx.AsyncClient) -> None:
+    """Create an analyzer carrying a provider."""
     response = await client.post(
         "/api/v1/analyzers", json={"name": "trends", "provider": "langfuse"}
     )
-    assert response.status_code == 422
+    assert response.status_code == 201
+    assert response.json()["provider"] == "langfuse"
 
 
 async def test_create_analyzer_rejects_agent_id(client: httpx.AsyncClient) -> None:
@@ -182,12 +202,17 @@ async def test_update_analyzer(client: httpx.AsyncClient) -> None:
     created = (await client.post("/api/v1/analyzers", json={"name": "trends"})).json()
     response = await client.patch(
         f"/api/v1/analyzers/{created['id']}",
-        json={"description": "Surfaces usage trends", "metadata": {"a": 1}},
+        json={
+            "description": "Surfaces usage trends",
+            "metadata": {"a": 1},
+            "connection_schema": {"type": "object"},
+        },
     )
     assert response.status_code == 200
     body = response.json()
     assert body["description"] == "Surfaces usage trends"
     assert body["metadata"] == {"a": 1}
+    assert body["connection_schema"] == {"type": "object"}
 
 
 async def test_update_analyzer_not_found(client: httpx.AsyncClient) -> None:

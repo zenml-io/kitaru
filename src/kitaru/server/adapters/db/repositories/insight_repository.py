@@ -16,25 +16,26 @@
 import uuid
 from collections.abc import Mapping
 
-from sqlalchemy import select
+from sqlalchemy import false, func, select
 
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
-    build_scope_condition_binding,
+    compile_column_condition,
     compile_filter_expression,
 )
 from kitaru.server.adapters.db.orm.insight import (
     INSIGHT_AGENT_ID_FOREIGN_KEY,
+    INSIGHT_ANALYZER_VERSION_ID_FOREIGN_KEY,
+    INSIGHT_IMPORT_ID_FOREIGN_KEY,
     INSIGHT_TASK_ID_FOREIGN_KEY,
     InsightORM,
 )
-from kitaru.server.adapters.db.orm.plugin import PluginVersionORM
-from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.insight import InsightFilter
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.imports import ImportNotFound
 from kitaru.server.domain.insight import Insight, InsightNotFound
 from kitaru.server.domain.plugin import PluginVersionIdNotFound
 from kitaru.server.domain.task import TaskNotFound
@@ -42,10 +43,8 @@ from kitaru.server.domain.task import TaskNotFound
 INSIGHT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": InsightORM.id,
     "agent_id": InsightORM.agent_id,
-    "import_id": build_scope_condition_binding(
-        local_column=InsightORM.task_id,
-        related_key=TaskORM.id,
-        scope_column=TaskORM.import_id,
+    "import_id": lambda condition: func.coalesce(
+        compile_column_condition(InsightORM.import_id, condition), false()
     ),
     "name": InsightORM.name,
     "type": InsightORM.type,
@@ -79,22 +78,24 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
             PluginVersionIdNotFound: No plugin version has the analyzer
                 version id.
             TaskNotFound: No task has the task id.
+            ImportNotFound: No import has the import id.
 
         Returns:
             Stored insights in input order, with timestamps set.
         """
         if not insights:
             return []
-        analyzer_version_id = insights[0].analyzer_version_id
-        if analyzer_version_id is not None:
-            exists = await self._session.scalar(
-                select(PluginVersionORM.id).where(
-                    PluginVersionORM.id == analyzer_version_id
-                )
-            )
-            if exists is None:
-                raise PluginVersionIdNotFound(analyzer_version_id)
         rows = [InsightORM.from_domain(insight) for insight in insights]
+
+        def _analyzer_not_found() -> PluginVersionIdNotFound:
+            analyzer_version_id = insights[0].analyzer_version_id
+            assert analyzer_version_id is not None
+            return PluginVersionIdNotFound(analyzer_version_id)
+
+        def _import_not_found() -> ImportNotFound:
+            import_id = insights[0].import_id
+            assert import_id is not None
+            return ImportNotFound(import_id)
 
         def _task_not_found() -> TaskNotFound:
             task_id = insights[0].task_id
@@ -108,6 +109,8 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
                     insights[0].agent_id
                 ),
                 INSIGHT_TASK_ID_FOREIGN_KEY: _task_not_found,
+                INSIGHT_ANALYZER_VERSION_ID_FOREIGN_KEY: _analyzer_not_found,
+                INSIGHT_IMPORT_ID_FOREIGN_KEY: _import_not_found,
             },
         )
         return [row.to_domain() for row in rows]

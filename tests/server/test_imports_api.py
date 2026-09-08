@@ -26,6 +26,7 @@ from conftest import (
     build_job_and_task_services,
     create_agent,
     create_blob,
+    create_connection,
     create_plugin,
     override_idempotency,
 )
@@ -155,9 +156,7 @@ async def test_create_import(
     assert created["source"] == {"type": "blob", "blob_id": body["payload_blob_id"]}
     assert created["params"] == body["params"]
     assert created["evaluators"] == []
-    assert created["analyzers"] == [
-        {"analyzer": "kitaru/post-import-insights", "version": 1, "params": {}}
-    ]
+    assert created["analyzers"] == []
     assert created["stats"] is None
     assert created["error"] is None
 
@@ -204,6 +203,7 @@ async def test_create_api_import(
             "until": None,
             "concurrency": 4,
         },
+        "connection_id": None,
     }
 
 
@@ -247,6 +247,80 @@ async def test_create_api_import_round_trips_provider_extras(
     assert response.status_code == 201
     created = response.json()
     assert created["source"]["query"]["project_id"] == "proj-1"
+
+
+async def test_create_api_import_with_a_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """An API source naming a connection records it on the import."""
+    await _importer_version(services)
+    connection = await create_connection(
+        services.connections, ACCOUNT.id, secret_id=uuid.uuid4()
+    )
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {
+            "type": "api",
+            "query": {"trace_ids": ["t1"]},
+            "connection_id": str(connection.id),
+        },
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    assert response.json()["connection_id"] == str(connection.id)
+
+
+async def test_create_api_import_with_an_unknown_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """An API source naming a missing connection is rejected with HTTP 404."""
+    await _importer_version(services)
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    missing_id = uuid.uuid4()
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {
+            "type": "api",
+            "query": {"trace_ids": ["t1"]},
+            "connection_id": str(missing_id),
+        },
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 404
+    assert response.json() == {"detail": f"Connection {missing_id} was not found"}
+
+
+async def test_create_blob_import_carries_no_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """A blob source cannot name a connection and records none."""
+    await _importer_version(services)
+    body = await _import_request(services)
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    assert response.json()["connection_id"] is None
+
+
+async def test_blob_import_source_rejects_a_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """A blob source carries no connection_id field."""
+    await _importer_version(services)
+    body = await _import_request(services)
+    body["source"] = {
+        "type": "blob",
+        "blob_id": body.pop("payload_blob_id"),
+        "connection_id": str(uuid.uuid4()),
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
 
 
 async def test_create_import_accepts_the_deprecated_payload_blob_id(
@@ -350,8 +424,7 @@ async def test_create_import_with_analyzers(
     assert response.status_code == 201
     created = response.json()
     assert created["analyzers"] == [
-        {"analyzer": "trends", "version": 1, "params": {"k": 1}},
-        {"analyzer": "kitaru/post-import-insights", "version": 1, "params": {}},
+        {"analyzer": "trends", "version": 1, "params": {"k": 1}, "connection_id": None}
     ]
     assert created["stats"] is None
     assert created["error"] is None

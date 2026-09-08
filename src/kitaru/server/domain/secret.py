@@ -58,7 +58,7 @@ class DuplicateSecretName(ConflictError):
 
 
 class SecretInUse(ConflictError):
-    """Raised when a secret is referenced by an agent version."""
+    """Raised when a secret is referenced by another resource."""
 
     def __init__(self, secret_id: uuid.UUID) -> None:
         """Initialize the error.
@@ -66,7 +66,7 @@ class SecretInUse(ConflictError):
         Args:
             secret_id: Id of the secret in use.
         """
-        super().__init__(f"Secret {secret_id} is in use by an agent version")
+        super().__init__(f"Secret {secret_id} is in use")
 
 
 class InvalidSecretType(ValidationError):

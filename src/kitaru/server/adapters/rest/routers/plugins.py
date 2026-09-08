@@ -22,14 +22,23 @@ instead of duplicating them.
 import uuid
 from typing import TypeVar
 
-from kitaru.api_models.v1.analyzer import AnalyzerCreateRequest, AnalyzerUpdateRequest
+from kitaru.api_models.v1.analyzer import (
+    AnalyzerCreateRequest,
+    AnalyzerUpdateRequest,
+    AnalyzerVersionUpdateRequest,
+)
 from kitaru.api_models.v1.base import ListParams, Page, TimestampedResponseModel
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
     EvaluatorUpdateRequest,
+    EvaluatorVersionUpdateRequest,
 )
 from kitaru.api_models.v1.filter import Filter
-from kitaru.api_models.v1.importer import ImporterCreateRequest, ImporterUpdateRequest
+from kitaru.api_models.v1.importer import (
+    ImporterCreateRequest,
+    ImporterUpdateRequest,
+    ImporterVersionUpdateRequest,
+)
 from kitaru.api_models.v1.plugin import PluginSource as WirePluginSource
 from kitaru.server.adapters.rest.mapping.plugins import (
     plugin_create_to_command,
@@ -38,6 +47,7 @@ from kitaru.server.adapters.rest.mapping.plugins import (
     plugin_to_response,
     plugin_update_to_command,
     plugin_version_to_response,
+    plugin_version_update_to_command,
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.plugin import PluginVersionFilter
@@ -251,8 +261,9 @@ async def update_version(
     service: PluginService,
     plugin_id: uuid.UUID,
     version: int,
-    display_version: str | None,
-    update_display_version: bool,
+    body: EvaluatorVersionUpdateRequest
+    | ImporterVersionUpdateRequest
+    | AnalyzerVersionUpdateRequest,
     response_class: type[PluginVersionResponseT],
     actor: AuthContext,
 ) -> PluginVersionResponseT:
@@ -262,8 +273,7 @@ async def update_version(
         service: Plugin service bound to the resource's kind.
         plugin_id: Id of the plugin.
         version: Version number.
-        display_version: New display version, including ``None`` to clear it.
-        update_display_version: Whether the request included ``display_version``.
+        body: Plugin version update request.
         response_class: ``EvaluatorVersionResponse`` or
             ``ImporterVersionResponse``.
         actor: Caller context.
@@ -274,8 +284,7 @@ async def update_version(
     plugin_version = await service.update_version(
         plugin_id,
         version,
-        display_version=display_version,
-        update_display_version=update_display_version,
+        command=plugin_version_update_to_command(body),
         actor=actor,
     )
     return plugin_version_to_response(plugin_version, response_class)

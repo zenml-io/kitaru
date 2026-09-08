@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Evaluator and analyzer config input models."""
 
+import uuid
 from typing import Any
 
 from pydantic import Field
@@ -34,3 +35,4 @@ class AnalyzerConfigInput(FrozenModel):
     analyzer: str
     version: int | None = None
     params: dict[str, Any] = Field(default_factory=dict)
+    connection_id: uuid.UUID | None = None

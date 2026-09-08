@@ -36,10 +36,15 @@ from conftest import (
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
-from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
+from kitaru.api_models.v1.task import (
+    REQUIRES_CREDENTIALS_LABEL,
+    TaskOnFailure,
+    TaskStatus,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.task import TaskFilter, TaskUpdate
+from kitaru.server.application.services.plugin_resolution import PLUGIN_PROVIDER_LABEL
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
@@ -77,9 +82,20 @@ async def _evaluator(services: ReplayServices, name: str) -> EvaluatorConfig:
     )
 
 
-async def _analyzer(services: ReplayServices, name: str) -> AnalyzerConfig:
+async def _analyzer(
+    services: ReplayServices,
+    name: str,
+    connection_id: uuid.UUID | None = None,
+    provider: str | None = None,
+    connection_schema: dict[str, Any] | None = None,
+) -> AnalyzerConfig:
     plugin = await create_plugin(
-        services.plugins, ACTOR.account.id, kind=PluginKind.ANALYZER, name=name
+        services.plugins,
+        ACTOR.account.id,
+        kind=PluginKind.ANALYZER,
+        name=name,
+        provider=provider,
+        connection_schema=connection_schema,
     )
     blob = await create_blob(services.blobs, ACTOR.account.id, content=name.encode())
     version = await services.plugins.create_version(
@@ -92,6 +108,8 @@ async def _analyzer(services: ReplayServices, name: str) -> AnalyzerConfig:
         version=version.version,
         params={"focus": "errors"},
         analyzer_version_id=version.id,
+        provider=plugin.provider,
+        connection_id=connection_id,
     )
 
 
@@ -408,8 +426,18 @@ async def test_completed_import_appends_one_task_per_analyzer(
 ) -> None:
     """Three sessions and two analyzers fan out into two continue analysis tasks."""
     analyzers = [
-        await _analyzer(services, "trends"),
-        await _analyzer(services, "risks"),
+        await _analyzer(
+            services,
+            "trends",
+            connection_id=uuid.uuid4(),
+            provider="langfuse",
+        ),
+        await _analyzer(
+            services,
+            "risks",
+            connection_id=uuid.uuid4(),
+            provider="langfuse",
+        ),
     ]
     import_, import_task = await _import_with_task(services, [], analyzers)
     for _ in range(3):
@@ -432,7 +460,73 @@ async def test_completed_import_appends_one_task_per_analyzer(
     assert {task.plugin_version_id for task in analysis_tasks} == {
         analyzer.analyzer_version_id for analyzer in analyzers
     }
+    assert {task.connection_id for task in analysis_tasks} == {
+        analyzer.connection_id for analyzer in analyzers
+    }
+    assert all(
+        task.labels[PLUGIN_PROVIDER_LABEL] == "langfuse" for task in analysis_tasks
+    )
+    assert all(REQUIRES_CREDENTIALS_LABEL not in task.labels for task in analysis_tasks)
     assert all(task.import_id == import_.id for task in analysis_tasks)
+
+
+async def _single_analysis_task_labels(
+    services: ReplayServices, analyzer: AnalyzerConfig
+) -> dict[str, str]:
+    """Complete an import naming one analyzer and return its task's labels."""
+    import_, import_task = await _import_with_task(services, [], [analyzer])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+    (task,) = await _analysis_tasks(services, import_task.job_id)
+    return task.labels
+
+
+async def test_analysis_task_requires_credentials_without_a_connection(
+    services: ReplayServices,
+) -> None:
+    """An analyzer with a connection schema and no connection needs the worker's."""
+    analyzer = await _analyzer(
+        services, "trends", provider="openai", connection_schema={"type": "object"}
+    )
+
+    labels = await _single_analysis_task_labels(services, analyzer)
+
+    assert labels[REQUIRES_CREDENTIALS_LABEL] == "openai"
+
+
+async def test_analysis_task_with_a_connection_requires_no_credentials(
+    services: ReplayServices,
+) -> None:
+    """An analyzer resolving a connection carries its credentials itself."""
+    analyzer = await _analyzer(
+        services,
+        "trends",
+        connection_id=uuid.uuid4(),
+        provider="openai",
+        connection_schema={"type": "object"},
+    )
+
+    labels = await _single_analysis_task_labels(services, analyzer)
+
+    assert REQUIRES_CREDENTIALS_LABEL not in labels
+
+
+async def test_analysis_task_without_a_schema_requires_no_credentials(
+    services: ReplayServices,
+) -> None:
+    """An analyzer declaring no connection schema stamps no requires label."""
+    analyzer = await _analyzer(services, "trends", provider="openai")
+
+    labels = await _single_analysis_task_labels(services, analyzer)
+
+    assert REQUIRES_CREDENTIALS_LABEL not in labels
 
 
 async def test_in_progress_session_does_not_block_the_analysis_task(
@@ -458,11 +552,11 @@ async def test_in_progress_session_does_not_block_the_analysis_task(
 
 
 @pytest.mark.parametrize("in_progress", [False, True])
-async def test_all_analyzers_run_without_eligible_sessions(
+async def test_all_analyzers_skip_without_eligible_sessions(
     services: ReplayServices,
     in_progress: bool,
 ) -> None:
-    """Every analyzer can complete without findings when no sessions are finished."""
+    """Empty and unfinished-only imports do not launch analysis tasks."""
     analyzer = await _analyzer(services, "kitaru/post-import-insights")
     custom = await _analyzer(services, "trends")
     import_, import_task = await _import_with_task(services, [], [analyzer, custom])
@@ -477,26 +571,15 @@ async def test_all_analyzers_run_without_eligible_sessions(
         TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
     )
     analysis_tasks = await _analysis_tasks(services, import_task.job_id)
-    assert {task.plugin_version_id for task in analysis_tasks} == {
-        analyzer.analyzer_version_id,
-        custom.analyzer_version_id,
-    }
-    assert all(task.import_id == import_.id for task in analysis_tasks)
-    for task in await _claim_and_start(services, worker, 2):
-        await _finish(
-            services,
-            worker,
-            task,
-            TaskUpdate(status=TaskStatus.COMPLETED, result=[]),
-        )
+    assert analysis_tasks == []
     assert (await services.jobs.get(import_task.job_id)).status is JobStatus.COMPLETED
 
 
 @pytest.mark.parametrize("name", ["kitaru/post-import-insights", "trends"])
-async def test_analyzer_only_import_skips_session_listing(
+async def test_analyzer_only_import_checks_session_eligibility(
     services: ReplayServices, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    """Analysis scheduling needs no scan of imported sessions."""
+    """Analysis scheduling checks eligibility even without evaluators."""
     analyzer = await _analyzer(services, name)
     import_, import_task = await _import_with_task(services, [], [analyzer])
     await _imported_session(services, import_)
@@ -512,7 +595,7 @@ async def test_analyzer_only_import_skips_session_listing(
         TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
     )
 
-    query.assert_not_awaited()
+    query.assert_awaited_once()
     (analysis_task,) = await _analysis_tasks(services, import_task.job_id)
     assert analysis_task.plugin_version_id == analyzer.analyzer_version_id
 

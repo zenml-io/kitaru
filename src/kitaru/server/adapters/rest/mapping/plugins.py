@@ -25,18 +25,21 @@ from kitaru.api_models.v1.analyzer import (
     AnalyzerCreateRequest,
     AnalyzerUpdateRequest,
     AnalyzerVersionResponse,
+    AnalyzerVersionUpdateRequest,
 )
 from kitaru.api_models.v1.base import ListParams, TimestampedResponseModel
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
     EvaluatorUpdateRequest,
     EvaluatorVersionResponse,
+    EvaluatorVersionUpdateRequest,
 )
 from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.importer import (
     ImporterCreateRequest,
     ImporterUpdateRequest,
     ImporterVersionResponse,
+    ImporterVersionUpdateRequest,
 )
 from kitaru.api_models.v1.plugin import PackagePluginSource as WirePackagePluginSource
 from kitaru.api_models.v1.plugin import PluginSource as WirePluginSource
@@ -49,6 +52,7 @@ from kitaru.server.application.models.plugin import (
     PluginCreate,
     PluginFilter,
     PluginUpdate,
+    PluginVersionUpdate,
 )
 from kitaru.server.domain.plugin import (
     PackagePluginSource as DomainPackagePluginSource,
@@ -143,8 +147,9 @@ def plugin_to_response(
         "created": plugin.created,
         "updated": plugin.updated,
     }
-    if plugin.kind is PluginKind.IMPORTER:
+    if plugin.kind in (PluginKind.IMPORTER, PluginKind.ANALYZER):
         fields["provider"] = plugin.provider
+        fields["connection_schema"] = plugin.connection_schema
     if plugin.kind is PluginKind.EVALUATOR:
         fields["agent_id"] = plugin.agent_id
     return response_class(**fields)
@@ -213,9 +218,18 @@ def plugin_create_to_command(
     Returns:
         Create command.
     """
-    # Read the provider off importer requests only, evaluators reject one.
-    provider = body.provider if isinstance(body, ImporterCreateRequest) else None
-    # Read agent_id off evaluator requests only, importers are not scopeable.
+    # Read the provider and connection schema off importer and analyzer requests.
+    provider = (
+        body.provider
+        if isinstance(body, (ImporterCreateRequest, AnalyzerCreateRequest))
+        else None
+    )
+    connection_schema = (
+        body.connection_schema
+        if isinstance(body, (ImporterCreateRequest, AnalyzerCreateRequest))
+        else None
+    )
+    # Read agent_id off evaluator requests only.
     agent_id = body.agent_id if isinstance(body, EvaluatorCreateRequest) else None
     return PluginCreate(
         name=body.name,
@@ -223,8 +237,25 @@ def plugin_create_to_command(
         provider=provider,
         logo_url=body.logo_url,
         metadata=body.metadata,
+        connection_schema=connection_schema,
         agent_id=agent_id,
     )
+
+
+def plugin_version_update_to_command(
+    body: EvaluatorVersionUpdateRequest
+    | ImporterVersionUpdateRequest
+    | AnalyzerVersionUpdateRequest,
+) -> PluginVersionUpdate:
+    """Convert a plugin version update request, preserving omitted fields.
+
+    Args:
+        body: Evaluator, importer, or analyzer version update request.
+
+    Returns:
+        Plugin version update command.
+    """
+    return PluginVersionUpdate(**body.model_dump(exclude_unset=True))
 
 
 def plugin_update_to_command(

@@ -256,6 +256,7 @@ UNPUBLISHED_RESOURCE_CLASSES = frozenset(
         "ApiKeysResource",
         "AuthResource",
         "BlobsResource",
+        "ConnectionsResource",
         "DevicesResource",
         "ImportersResource",
         "ImportsResource",

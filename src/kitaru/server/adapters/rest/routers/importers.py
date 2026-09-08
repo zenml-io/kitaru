@@ -280,8 +280,7 @@ async def update_importer_version(
         service,
         importer_id,
         version,
-        body.display_version,
-        "display_version" in body.model_fields_set,
+        body,
         ImporterVersionResponse,
         actor=actor,
     )

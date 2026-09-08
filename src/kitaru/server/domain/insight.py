@@ -67,6 +67,7 @@ class Insight(DomainModel):
     agent_id: uuid.UUID
     analyzer_version_id: uuid.UUID | None = None
     task_id: uuid.UUID | None = None
+    import_id: uuid.UUID | None = None
     invocation_id: uuid.UUID | None = None
     name: Name
     title: Title

@@ -170,6 +170,9 @@ class InsightResponse(OwnedResponseModel):
 
     id: uuid.UUID = Field(description="Insight id.")
     agent_id: uuid.UUID = Field(description="Agent the insight belongs to.")
+    import_id: uuid.UUID | None = Field(
+        default=None, description="Import whose sessions produced the insight."
+    )
     analyzer_version_id: uuid.UUID | None = Field(
         default=None, description="Analyzer version that produced the insight."
     )

@@ -78,20 +78,60 @@ async def analyze_post_import_sessions(
     session_ids: list[UUID],
     *,
     agent_name: str | None = None,
-    model: str | None = None,
     observe: bool = False,
 ) -> list[InsightInput]:
-    """Generate persistable insight cards from normalized imported sessions.
+    """Generate deterministic insight cards without provider credentials.
 
     Args:
         session_ids: IDs of imported sessions for one agent and import.
         agent_name: Optional display name included in copied prompt context.
-        model: Optional OpenAI model for the bounded analyst and editor calls.
         observe: Whether to emit metadata-only events to a dedicated Langfuse project.
 
     Returns:
         Insight inputs ready for the analyzer task to persist.
     """
+    return await _analyze_sessions(
+        session_ids, agent_name=agent_name, observe=observe, model=None
+    )
+
+
+async def analyze_openai_post_import_sessions(
+    session_ids: list[UUID],
+    *,
+    model: str,
+    agent_name: str | None = None,
+    observe: bool = False,
+) -> list[InsightInput]:
+    """Generate insight cards selected and edited by OpenAI.
+
+    Args:
+        session_ids: IDs of imported sessions for one agent and import.
+        model: OpenAI model for the bounded analyst and editor calls.
+        agent_name: Optional display name included in copied prompt context.
+        observe: Whether to emit metadata-only events to a dedicated Langfuse project.
+
+    Returns:
+        Insight inputs ready for the analyzer task to persist.
+
+    Raises:
+        MissingOpenAICredential: OPENAI_API_KEY is unavailable.
+    """
+    return await _analyze_sessions(
+        session_ids,
+        agent_name=agent_name,
+        observe=observe,
+        model=ModelGenerationConfig(model=model),
+    )
+
+
+async def _analyze_sessions(
+    session_ids: list[UUID],
+    *,
+    agent_name: str | None,
+    observe: bool,
+    model: ModelGenerationConfig | None,
+) -> list[InsightInput]:
+    """Profile normalized sessions and generate cards using the selected analyzer."""
     if not session_ids:
         return []
     context: InsightGenerationContext | None = None
@@ -126,13 +166,11 @@ async def analyze_post_import_sessions(
     result = await generate_insights_from_profile(
         profiling,
         context=context,
-        config=InsightGenerationConfig(
-            model=ModelGenerationConfig(model=model) if model is not None else None
-        ),
+        config=InsightGenerationConfig(model=model),
         generator=generator,
         observer=_get_observer(observe),
     )
     return result.insights
 
 
-__all__ = ["analyze_post_import_sessions"]
+__all__ = ["analyze_openai_post_import_sessions", "analyze_post_import_sessions"]

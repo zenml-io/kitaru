@@ -97,6 +97,7 @@ from kitaru.server.application.models.auth import (
     WorkerPrincipal,
 )
 from kitaru.server.application.models.cohort import CohortFilter, CohortVersionFilter
+from kitaru.server.application.models.connection import ConnectionFilter
 from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.experiment import ExperimentFilter
@@ -176,6 +177,11 @@ from kitaru.server.domain.cohort_version import (
     CohortVersionIdNotFound,
     CohortVersionInUse,
     CohortVersionNotFound,
+)
+from kitaru.server.domain.connection import (
+    Connection,
+    ConnectionNotFound,
+    DuplicateConnectionName,
 )
 from kitaru.server.domain.device import Device, DeviceNotFound, DeviceStatus
 from kitaru.server.domain.evaluation import (
@@ -265,7 +271,11 @@ from kitaru.server.domain.task import (
     Task,
     TaskNotFound,
 )
-from kitaru.server.domain.worker import Worker, WorkerNotFound
+from kitaru.server.domain.worker import (
+    Worker,
+    WorkerNotFound,
+    get_effective_selectors,
+)
 from kitaru.server.filtering import (
     AndExpression,
     FilterCondition,
@@ -1674,16 +1684,21 @@ class FakeSecretRepository:
     """In-memory secret repository."""
 
     def __init__(
-        self, agent_versions: "FakeAgentVersionRepository | None" = None
+        self,
+        agent_versions: "FakeAgentVersionRepository | None" = None,
+        connections: "FakeConnectionRepository | None" = None,
     ) -> None:
         """Initialize the repository.
 
         Args:
             agent_versions: Fake agent version repository, consulted by
                 delete to check for an in-use secret.
+            connections: Fake connection repository, consulted by delete to
+                check for an in-use secret.
         """
         self._secrets: dict[uuid.UUID, Secret] = {}
         self._agent_versions = agent_versions
+        self._connections = connections
 
     def _check_duplicate_name(self, secret: Secret) -> None:
         for other in self._secrets.values():
@@ -1724,6 +1739,24 @@ class FakeSecretRepository:
         if secret is None:
             raise SecretNotFound(secret_id)
         return secret.model_copy()
+
+    async def get_many(
+        self, secret_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Secret]:
+        """Bulk-load secrets by id, keyed by id, missing ids omitted.
+
+        Args:
+            secret_ids: Ids of the secrets to load.
+
+        Returns:
+            Stored secrets keyed by id.
+        """
+        wanted = set(secret_ids)
+        return {
+            secret_id: secret.model_copy(deep=True)
+            for secret_id, secret in self._secrets.items()
+            if secret_id in wanted
+        }
 
     async def query(
         self, secret_filter: SecretFilter
@@ -1788,13 +1821,19 @@ class FakeSecretRepository:
 
         Raises:
             SecretNotFound: No secret has this id.
-            SecretInUse: An agent version references the secret.
+            SecretInUse: An agent version or a connection references the
+                secret.
         """
         if secret_id not in self._secrets:
             raise SecretNotFound(secret_id)
         if self._agent_versions is not None and any(
             version.run_spec is not None and secret_id in version.run_spec.secret_ids
             for version in self._agent_versions._versions.values()
+        ):
+            raise SecretInUse(secret_id)
+        if self._connections is not None and any(
+            connection.secret_id == secret_id
+            for connection in self._connections._connections.values()
         ):
             raise SecretInUse(secret_id)
         del self._secrets[secret_id]
@@ -1823,6 +1862,178 @@ async def create_secret(
         values = {"password": SecretStr("hunter2")}
     return await repository.create(
         Secret(owner_id=owner_id, name=name, internal=internal, values=values)
+    )
+
+
+class FakeConnectionRepository:
+    """In-memory connection repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._connections: dict[uuid.UUID, Connection] = {}
+
+    def _check_duplicate_name(self, connection: Connection) -> None:
+        for other in self._connections.values():
+            if other.id != connection.id and other.name == connection.name:
+                raise DuplicateConnectionName(connection.name)
+
+    def _clear_default(self, connection: Connection) -> None:
+        for other_id, other in self._connections.items():
+            if (
+                other_id != connection.id
+                and other.provider == connection.provider
+                and other.default
+            ):
+                self._connections[other_id] = other.model_copy(
+                    update={"default": False}
+                )
+
+    async def create(self, connection: Connection) -> Connection:
+        """Persist a new connection, clearing the provider's previous default.
+
+        Args:
+            connection: Connection to store.
+
+        Raises:
+            DuplicateConnectionName: The connection name is already
+                registered.
+
+        Returns:
+            Stored connection with timestamps set.
+        """
+        self._check_duplicate_name(connection)
+        if connection.default:
+            self._clear_default(connection)
+        now = datetime.now(UTC)
+        stored = connection.model_copy(update={"created": now, "updated": now})
+        self._connections[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, connection_id: uuid.UUID) -> Connection:
+        """Load a connection by id.
+
+        Args:
+            connection_id: Id of the connection.
+
+        Raises:
+            ConnectionNotFound: No connection has this id.
+
+        Returns:
+            Stored connection.
+        """
+        connection = self._connections.get(connection_id)
+        if connection is None:
+            raise ConnectionNotFound(connection_id)
+        return connection.model_copy()
+
+    async def get_default(self, provider: str) -> Connection | None:
+        """Load the default connection of a provider, if any.
+
+        Args:
+            provider: Provider the connection addresses.
+
+        Returns:
+            Stored connection, or ``None`` when the provider has no default.
+        """
+        for connection in self._connections.values():
+            if connection.provider == provider and connection.default:
+                return connection.model_copy()
+        return None
+
+    async def query(
+        self, connection_filter: ConnectionFilter
+    ) -> tuple[list[Connection], str | None]:
+        """Query connections matching a filter.
+
+        Args:
+            connection_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching connections and the next cursor.
+        """
+        connections = list(self._connections.values())
+        if connection_filter.expression is not None:
+            connections = [
+                connection
+                for connection in connections
+                if _evaluate_filter_expression(connection, connection_filter.expression)
+            ]
+        page, next_cursor = _paginate_fake(connections, connection_filter)
+        return [connection.model_copy() for connection in page], next_cursor
+
+    async def update(self, connection: Connection) -> Connection:
+        """Persist changes to an existing connection.
+
+        Args:
+            connection: Connection with modified fields.
+
+        Raises:
+            ConnectionNotFound: No connection has this id.
+            DuplicateConnectionName: The connection name is already
+                registered.
+
+        Returns:
+            Stored connection with the updated timestamp renewed.
+        """
+        stored = self._connections.get(connection.id)
+        if stored is None:
+            raise ConnectionNotFound(connection.id)
+        self._check_duplicate_name(connection)
+        if connection.default:
+            self._clear_default(connection)
+        now = _renewed_timestamp(stored.updated)
+        updated = connection.model_copy(
+            update={"created": stored.created, "updated": now}
+        )
+        self._connections[connection.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, connection_id: uuid.UUID) -> None:
+        """Delete a connection by id.
+
+        Args:
+            connection_id: Id of the connection.
+
+        Raises:
+            ConnectionNotFound: No connection has this id.
+        """
+        if connection_id not in self._connections:
+            raise ConnectionNotFound(connection_id)
+        del self._connections[connection_id]
+
+
+async def create_connection(
+    repository: FakeConnectionRepository,
+    owner_id: uuid.UUID,
+    secret_id: uuid.UUID,
+    name: str = "langfuse-prod",
+    provider: str = "langfuse",
+    env: dict[str, str] | None = None,
+    default: bool = False,
+) -> Connection:
+    """Store a connection in the fake repository.
+
+    Args:
+        repository: Fake connection repository.
+        owner_id: Id of the owning account.
+        secret_id: Secret holding the sensitive values.
+        name: Connection name.
+        provider: Provider the connection addresses.
+        env: Non-secret values.
+        default: Whether the connection is the provider's default.
+
+    Returns:
+        Stored connection.
+    """
+    return await repository.create(
+        Connection(
+            owner_id=owner_id,
+            name=name,
+            provider=provider,
+            env=env if env is not None else {},
+            secret_id=secret_id,
+            default=default,
+        )
     )
 
 
@@ -4437,6 +4648,7 @@ async def create_plugin(
     provider: str | None = None,
     metadata: dict[str, Any] | None = None,
     agent_id: uuid.UUID | None = None,
+    connection_schema: dict[str, Any] | None = None,
 ) -> Plugin:
     """Store a plugin in the fake repository.
 
@@ -4451,6 +4663,7 @@ async def create_plugin(
         metadata: Arbitrary metadata.
         agent_id: Agent the plugin is scoped to, importers and analyzers
             must leave this unset.
+        connection_schema: Connection schema.
 
     Returns:
         Stored plugin.
@@ -4464,6 +4677,7 @@ async def create_plugin(
             provider=provider,
             metadata=metadata or {},
             agent_id=agent_id,
+            connection_schema=connection_schema,
         )
     )
 
@@ -5174,6 +5388,7 @@ async def create_import(
     job_id: uuid.UUID | None = None,
     agent_version_id: uuid.UUID | None = None,
     importer_version_id: uuid.UUID | None = None,
+    connection_id: uuid.UUID | None = None,
     payload_blob_id: uuid.UUID | None = None,
     params: dict[str, Any] | None = None,
     evaluators: list[EvaluatorConfig] | None = None,
@@ -5188,6 +5403,7 @@ async def create_import(
         job_id: Id of the job running the import.
         agent_version_id: Agent version recorded on the imported sessions.
         importer_version_id: Importer version the import runs.
+        connection_id: Connection the import runs with.
         payload_blob_id: Blob holding the payload.
         params: Parameters passed to the importer.
         evaluators: Evaluators run against every imported session.
@@ -5205,6 +5421,7 @@ async def create_import(
             importer_version_id=(
                 importer_version_id if importer_version_id is not None else uuid.uuid4()
             ),
+            connection_id=connection_id,
             payload_blob_id=(
                 payload_blob_id if payload_blob_id is not None else uuid.uuid4()
             ),
@@ -6104,7 +6321,7 @@ class FakeTaskRepository:
         """
         if scope.job_id is not None and task.job_id != scope.job_id:
             return False
-        for selector in scope.selectors or []:
+        for selector in get_effective_selectors(scope):
             if selector.key not in task.labels:
                 if selector.required:
                     return False
@@ -6514,6 +6731,7 @@ async def create_analysis_task(
     plugin_version_id: uuid.UUID | None = None,
     agent_id: uuid.UUID | None = None,
     import_id: uuid.UUID | None = None,
+    connection_id: uuid.UUID | None = None,
     params: dict[str, Any] | None = None,
     labels: dict[str, str] | None = None,
     on_failure: TaskOnFailure = TaskOnFailure.CONTINUE,
@@ -6526,6 +6744,7 @@ async def create_analysis_task(
         plugin_version_id: Analyzer version the task runs.
         agent_id: Agent the produced insights belong to.
         import_id: Import whose sessions are analyzed.
+        connection_id: Connection injected into the task environment.
         params: Parameters passed to the analyzer.
         labels: Labels matched by worker scope selectors.
         on_failure: Effect of a hard failure on the job.
@@ -6540,6 +6759,7 @@ async def create_analysis_task(
         ),
         agent_id=agent_id if agent_id is not None else uuid.uuid4(),
         import_id=import_id if import_id is not None else uuid.uuid4(),
+        connection_id=connection_id,
         params=params if params is not None else {},
         labels=labels if labels is not None else {},
         on_failure=on_failure,
@@ -6582,18 +6802,15 @@ class FakeInsightRepository:
     def __init__(
         self,
         plugin_repository: FakePluginRepository | None = None,
-        task_repository: FakeTaskRepository | None = None,
     ) -> None:
         """Initialize the repository.
 
         Args:
             plugin_repository: Fake plugin repository, consulted to mirror
                 the analyzer version foreign key.
-            task_repository: Fake task repository for import scope filters.
         """
         self._insights: dict[uuid.UUID, Insight] = {}
         self._plugin_repository = plugin_repository
-        self._task_repository = task_repository
 
     async def create_many(self, insights: list[Insight]) -> list[Insight]:
         """Persist a batch of new insights in one transaction.
@@ -6657,17 +6874,6 @@ class FakeInsightRepository:
         """
         return _matches_condition(insight.data.type, condition)
 
-    def _evaluate_import_condition(
-        self, insight: Insight, condition: FilterCondition
-    ) -> bool:
-        """Match an import through the insight's retained task."""
-        if self._task_repository is None or insight.task_id is None:
-            return False
-        task = self._task_repository._tasks.get(insight.task_id)
-        return isinstance(task, (AnalysisTask, ImportTask)) and _matches_condition(
-            task.import_id, condition
-        )
-
     async def query(
         self, insight_filter: InsightFilter
     ) -> tuple[list[Insight], str | None]:
@@ -6683,7 +6889,6 @@ class FakeInsightRepository:
         if insight_filter.expression is not None:
             resolvers = {
                 "type": self._evaluate_type_condition,
-                "import_id": self._evaluate_import_condition,
             }
             insights = [
                 insight
@@ -6743,6 +6948,7 @@ class TaskSubstrate(NamedTuple):
     jobs: FakeJobRepository
     imports: FakeImportRepository
     insights: FakeInsightRepository
+    connections: FakeConnectionRepository
 
 
 def _build_task_substrate() -> TaskSubstrate:
@@ -6763,6 +6969,7 @@ def _build_task_substrate() -> TaskSubstrate:
     tasks.jobs = jobs
     imports = FakeImportRepository()
     insights = FakeInsightRepository(plugin_repository=plugins)
+    connections = FakeConnectionRepository()
     return TaskSubstrate(
         sessions=sessions,
         agents=agents,
@@ -6775,6 +6982,7 @@ def _build_task_substrate() -> TaskSubstrate:
         jobs=jobs,
         imports=imports,
         insights=insights,
+        connections=connections,
     )
 
 
@@ -6794,6 +7002,7 @@ class JobAndTaskServices(NamedTuple):
     secrets: FakeSecretRepository
     workers: FakeWorkerRepository
     imports: FakeImportRepository
+    connections: FakeConnectionRepository
 
 
 def build_job_and_task_services(
@@ -6827,6 +7036,7 @@ def build_job_and_task_services(
         secret_repository=substrate.secrets,
         replay_repository=replays,
         import_repository=substrate.imports,
+        connection_repository=substrate.connections,
         policy=task_policy,
     )
     task_service = TaskService(
@@ -6856,6 +7066,7 @@ def build_job_and_task_services(
         agent_version_repository=substrate.agent_versions,
         plugin_repository=substrate.plugins,
         blob_repository=substrate.blobs,
+        connection_repository=substrate.connections,
     )
     return JobAndTaskServices(
         job_service=job_service,
@@ -6871,6 +7082,7 @@ def build_job_and_task_services(
         secrets=substrate.secrets,
         workers=substrate.workers,
         imports=substrate.imports,
+        connections=substrate.connections,
     )
 
 
@@ -6933,6 +7145,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     jobs = substrate.jobs
     imports = substrate.imports
     insights = substrate.insights
+    connections = substrate.connections
     tags = FakeTagRepository()
     cohorts = FakeCohortRepository(tags=tags)
     experiment_runs = FakeExperimentRunRepository(tag_repository=tags)
@@ -6962,6 +7175,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_repository=sessions,
         import_repository=imports,
         insight_repository=insights,
+        plugin_repository=plugins,
     )
     transitions = TaskTransitions(
         task_repository=tasks,
@@ -6977,6 +7191,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         secret_repository=secrets,
         replay_repository=replays,
         import_repository=imports,
+        connection_repository=connections,
         policy=task_policy,
     )
     task_service = TaskService(

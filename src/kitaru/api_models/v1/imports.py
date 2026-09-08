@@ -100,6 +100,13 @@ class ApiImportSource(DiscriminatedRequestModel):
     query: ImportQuery = Field(
         description="Importer-defined selection of what to fetch."
     )
+    connection_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Connection supplying provider credentials, an omitted value "
+            "resolves to the provider's default."
+        ),
+    )
 
 
 ImportSource = Annotated[
@@ -139,10 +146,7 @@ class ImportCreateRequest(RequestModel):
     )
     analyzers: list[AnalyzerConfig] = Field(
         default_factory=list,
-        description=(
-            "Analyzers run across the imported sessions. The server adds "
-            "kitaru/post-import-insights when it is not explicitly configured."
-        ),
+        description="Analyzers selected to run across the imported sessions.",
     )
 
     @model_validator(mode="after")
@@ -221,6 +225,9 @@ class ImportResponse(OwnedResponseModel):
     )
     importer_version_id: uuid.UUID | None = Field(
         default=None, description="Importer version run."
+    )
+    connection_id: uuid.UUID | None = Field(
+        default=None, description="Connection resolved for the import."
     )
     source: ImportSource = Field(description="Where the payload comes from.")
     params: dict[str, JsonValue] = Field(

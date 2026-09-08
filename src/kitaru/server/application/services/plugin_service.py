@@ -24,6 +24,7 @@ from kitaru.server.application.models.plugin import (
     PluginFilter,
     PluginUpdate,
     PluginVersionFilter,
+    PluginVersionUpdate,
 )
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.server_analytics import ServerAnalytics
@@ -90,6 +91,7 @@ class PluginService:
             provider=command.provider,
             logo_url=command.logo_url,
             metadata=command.metadata,
+            connection_schema=command.connection_schema,
             agent_id=command.agent_id,
         )
         return await self._repository.create(plugin)
@@ -151,6 +153,8 @@ class PluginService:
         if "metadata" in update.model_fields_set:
             assert update.metadata is not None
             plugin.update_metadata(update.metadata)
+        if "connection_schema" in update.model_fields_set:
+            plugin.update_connection_schema(update.connection_schema)
         return await self._repository.update(plugin)
 
     async def delete_plugin(self, plugin_id: uuid.UUID, actor: AuthContext) -> None:
@@ -246,9 +250,7 @@ class PluginService:
         self,
         plugin_id: uuid.UUID,
         version: int,
-        display_version: str | None,
-        update_display_version: bool = True,
-        *,
+        command: PluginVersionUpdate,
         actor: AuthContext,
     ) -> PluginVersion:
         """Partially update a plugin version.
@@ -256,8 +258,7 @@ class PluginService:
         Args:
             plugin_id: Id of the plugin.
             version: Version number.
-            display_version: New display version, including ``None`` to clear it.
-            update_display_version: Whether to apply ``display_version``.
+            command: Fields to change, omitted fields stay unchanged.
             actor: Caller context.
 
         Raises:
@@ -271,6 +272,6 @@ class PluginService:
         plugin = await self._repository.get(plugin_id)
         plugin.check_modify()
         plugin_version = await self._repository.get_version(plugin_id, version)
-        if update_display_version:
-            plugin_version.update_display_version(display_version)
+        if "display_version" in command.model_fields_set:
+            plugin_version.update_display_version(command.display_version)
         return await self._repository.update_version(plugin_version)

@@ -44,7 +44,17 @@ from kitaru.client.exceptions import AuthenticationError, NotFoundError
 from kitaru.task import analyzer as task_analyzer
 from kitaru_post_import_insights import InsightGenerationResult
 from kitaru_post_import_insights import analyzer as analyzer_module
-from kitaru_post_import_insights.analyzer import analyze_post_import_sessions
+from kitaru_post_import_insights.analyzer import (
+    analyze_openai_post_import_sessions,
+    analyze_post_import_sessions,
+)
+from kitaru_post_import_insights.generation import (
+    AnalystPlan,
+    AnalystProjection,
+    EditorialCardCopy,
+    EditorialPlan,
+)
+from kitaru_post_import_insights.openai_generator import MissingOpenAICredential
 from kitaru_post_import_insights.profiling import SessionProfiler
 
 NOW = datetime(2026, 9, 4, tzinfo=UTC)
@@ -228,7 +238,7 @@ async def test_analyzer_fetches_full_sessions_using_task_credentials(
     assert len(requests) == 2
 
 
-async def test_analyzer_builds_the_optional_model_path(
+async def test_openai_analyzer_uses_the_selected_model(
     client: StubClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -250,7 +260,7 @@ async def test_analyzer_builds_the_optional_model_path(
         analyzer_module, "generate_insights_from_profile", fake_generate_insights
     )
 
-    result = await analyze_post_import_sessions(
+    result = await analyze_openai_post_import_sessions(
         client.add([_view(1)]), model="gpt-test"
     )
 
@@ -259,6 +269,124 @@ async def test_analyzer_builds_the_optional_model_path(
     assert captured["config"].model.model == "gpt-test"
     assert captured["profiling"].coverage.sessions_analyzed == 1
     assert captured["context"].source_import.import_id == IMPORT_ID
+
+
+async def test_deterministic_analyzer_does_not_initialize_openai(
+    client: StubClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Generate deterministic cards even when OpenAI credentials are present."""
+    monkeypatch.setenv("OPENAI_API_KEY", "unused-key")
+
+    def unexpected_model() -> None:
+        raise AssertionError("the deterministic analyzer must not initialize OpenAI")
+
+    monkeypatch.setattr(
+        "kitaru_post_import_insights.openai_generator.OpenAIInsightGenerator",
+        unexpected_model,
+    )
+    assert await analyze_post_import_sessions(client.add([_view(1)]))
+
+
+async def test_both_analyzers_generate_independent_cards_for_the_same_import(
+    client: StubClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep numeric evidence stable while OpenAI selects and edits its own cards."""
+    requests: list[dict[str, Any]] = []
+
+    async def parse(**kwargs: Any) -> SimpleNamespace:
+        requests.append(kwargs)
+        if kwargs["text_format"] is AnalystPlan:
+            projection = AnalystProjection.model_validate_json(kwargs["input"])
+            selected = projection.candidates[0].id
+            value = AnalystPlan(
+                selected_candidate_ids=[selected],
+                recommended_candidate_id=selected,
+                rationale="Specific and actionable.",
+            )
+        else:
+            selected = json.loads(kwargs["input"])["candidates"][0]["id"]
+            value = EditorialPlan(
+                intro_eyebrow="Worth looking at first",
+                intro_title="A pattern deserves attention",
+                intro_description="Start with a focused investigation.",
+                recommendation_title="Recommended next step",
+                recommendation_description="Compare a focused cohort.",
+                insights=[
+                    EditorialCardCopy(
+                        id=selected,
+                        eyebrow="Agent behavior",
+                        description="This pattern is worth a closer look.",
+                    )
+                ],
+            )
+        return SimpleNamespace(
+            id="response", model="gpt-test", usage=None, output_parsed=value
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "openai.AsyncOpenAI",
+        lambda **kwargs: SimpleNamespace(responses=SimpleNamespace(parse=parse)),
+    )
+    session_ids = client.add([_view(1, failed_tool=True), _view(2)])
+    deterministic = await analyze_post_import_sessions(session_ids)
+    assert not requests
+    openai = await analyze_openai_post_import_sessions(session_ids, model="gpt-test")
+
+    assert len(requests) == 2
+    assert all(request["model"] == "gpt-test" for request in requests)
+    assert len(openai) == 1
+    original = next(card for card in deterministic if card.name == openai[0].name)
+    assert original is not openai[0]
+    assert original.data == openai[0].data
+    assert openai[0].description == "This pattern is worth a closer look."
+    assert original.description != openai[0].description
+    assert InsightGenerationResult.card_metadata(original).evidence == (
+        InsightGenerationResult.card_metadata(openai[0]).evidence
+    )
+
+
+async def test_deterministic_analyzer_rejects_model_parameter(
+    client: StubClient,
+) -> None:
+    """Selecting the deterministic plugin cannot enable provider calls."""
+    with pytest.raises(task_analyzer.AnalysisError, match="model"):
+        await task_analyzer.call_analyzer(
+            "post-import-insights",
+            analyze_post_import_sessions,
+            client.add([_view(1)]),
+            {"model": "gpt-test"},
+        )
+
+
+async def test_openai_analyzer_requires_explicit_model(client: StubClient) -> None:
+    """Reject an OpenAI task whose model was not selected."""
+    with pytest.raises(task_analyzer.AnalysisError, match="model"):
+        await task_analyzer.call_analyzer(
+            "openai-post-import-insights",
+            analyze_openai_post_import_sessions,
+            client.add([_view(1)]),
+            {},
+        )
+
+
+@pytest.mark.parametrize("credential", [None, "", "   "])
+@pytest.mark.parametrize("session_number", [1, 2])
+async def test_openai_analyzer_requires_credentials_without_fallback(
+    client: StubClient,
+    monkeypatch: pytest.MonkeyPatch,
+    credential: str | None,
+    session_number: int,
+) -> None:
+    """Missing credentials fail even when profiling finds no eligible pattern."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    if credential is not None:
+        monkeypatch.setenv("OPENAI_API_KEY", credential)
+    with pytest.raises(MissingOpenAICredential):
+        await analyze_openai_post_import_sessions(
+            client.add([_view(session_number)]), model="gpt-test"
+        )
 
 
 async def test_analyzer_returns_no_cards_when_no_pattern_is_eligible(
@@ -368,7 +496,10 @@ async def test_empty_ids_return_without_client_or_model_initialization(
         unexpected_model,
     )
     monkeypatch.setattr(analyzer_module, "KitaruAPIClient", unexpected_model)
-    assert await analyze_post_import_sessions([], model="gpt-test", observe=True) == []
+    assert (
+        await analyze_openai_post_import_sessions([], model="gpt-test", observe=True)
+        == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -409,7 +540,7 @@ async def test_late_invalid_session_prevents_model_initialization(
         unexpected_model,
     )
     with pytest.raises(ValueError):
-        await analyze_post_import_sessions(ids, model="gpt-test")
+        await analyze_openai_post_import_sessions(ids, model="gpt-test")
     assert not initialized
     assert client.closed
 
@@ -429,7 +560,7 @@ async def test_fetch_failure_closes_client_before_model_generation(
         unexpected_model,
     )
     with pytest.raises(KeyError):
-        await analyze_post_import_sessions([*ids, missing_id], model="gpt-test")
+        await analyze_openai_post_import_sessions([*ids, missing_id], model="gpt-test")
 
     assert client.fetched == [*ids, missing_id]
     assert client.closed

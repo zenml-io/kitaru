@@ -81,7 +81,7 @@ Omitting FILE and setting `--since` selects an API import: the worker calls the 
 | `concurrency` | Traces fetched at once. Defaults to 4. |
 | `project_name` | LangSmith project to fetch from. Defaults to the SDK's tracer project, read from `LANGSMITH_PROJECT` (or `LANGCHAIN_PROJECT`) in the environment. |
 
-Pass `project_name` through `--query '{"project_name": "my-project"}'`. The worker installs the package's `api` extra for an API import, which carries the provider client, and needs `LANGSMITH_API_KEY` in its environment, plus `LANGSMITH_ENDPOINT` for a self-hosted instance. Each fetched trace is parsed the same way an uploaded export would be, so the mapping, dedup, and limitations below apply the same way.
+Pass `project_name` through `--query '{"project_name": "my-project"}'`. The worker installs the package's `api` extra for an API import, which carries the provider client. A [connection](provider-connections.md) you name with `--connection`, or the provider's default connection, supplies `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT` for a self-hosted instance. Without either, the worker's own environment does, and only a worker started with `--selector kitaru/requires-credentials=langsmith` claims the task. Each fetched trace is parsed the same way an uploaded export would be, so the mapping, dedup, and limitations below apply the same way.
 
 ## What a LangSmith trace becomes
 

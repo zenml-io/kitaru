@@ -280,8 +280,7 @@ async def update_analyzer_version(
         service,
         analyzer_id,
         version,
-        body.display_version,
-        "display_version" in body.model_fields_set,
+        body,
         AnalyzerVersionResponse,
         actor=actor,
     )

@@ -21,6 +21,7 @@ from typing import Any
 from kitaru.api_models.v1.agent import AgentListParams
 from kitaru.api_models.v1.analyzer import AnalyzerListParams
 from kitaru.api_models.v1.cohort import CohortListParams
+from kitaru.api_models.v1.connection import ConnectionListParams
 from kitaru.api_models.v1.evaluator import EvaluatorListParams
 from kitaru.api_models.v1.experiment import ExperimentListParams
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
@@ -33,6 +34,7 @@ class ParentKind(StrEnum):
     AGENT = "agent"
     ANALYZER = "analyzer"
     COHORT = "cohort"
+    CONNECTION = "connection"
     EXPERIMENT = "experiment"
     IMPORTER = "importer"
     EVALUATOR = "evaluator"
@@ -77,6 +79,7 @@ async def resolve_parent_resource(
         ParentKind.AGENT: AgentListParams,
         ParentKind.ANALYZER: AnalyzerListParams,
         ParentKind.COHORT: CohortListParams,
+        ParentKind.CONNECTION: ConnectionListParams,
         ParentKind.EXPERIMENT: ExperimentListParams,
         ParentKind.IMPORTER: ImporterListParams,
         ParentKind.EVALUATOR: EvaluatorListParams,

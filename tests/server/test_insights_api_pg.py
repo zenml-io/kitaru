@@ -20,12 +20,14 @@ from contextlib import asynccontextmanager
 
 import httpx
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from conftest import db_settings, lifespan_client
 from kitaru.api_models.v1.insight import TextInsightData
 from kitaru.api_models.v1.job import JobKind
 from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.import_repository import SQLImportRepository
 from kitaru.server.adapters.db.repositories.insight_repository import (
     SQLInsightRepository,
 )
@@ -37,6 +39,7 @@ from kitaru.server.adapters.db.repositories.task_repository import SQLTaskReposi
 from kitaru.server.api.config import APISettings
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.blob import Blob, BlobStorageBackend
+from kitaru.server.domain.imports import Import
 from kitaru.server.domain.insight import Insight
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
@@ -215,7 +218,12 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
                 ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
                 display_version=None,
             )
-            import_id = uuid.uuid4()
+            import_ = await SQLImportRepository(session).create(
+                Import(
+                    owner_id=owner_id, agent_id=uuid.UUID(agent["id"]), fetch_query={}
+                )
+            )
+            import_id = import_.id
             job = await SQLJobRepository(session).create(
                 Job(owner_id=owner_id, kind=JobKind.IMPORT)
             )
@@ -237,6 +245,7 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
                         data=TextInsightData(content="Latency regressed."),
                         analyzer_version_id=version.id,
                         task_id=task.id,
+                        import_id=import_id,
                         analyzer_params={"window_days": 7},
                     )
                 ]
@@ -248,6 +257,15 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
         body = response.json()
         assert body["analyzer_version_id"] == str(version.id)
         assert body["analyzer_params"] == {"window_days": 7}
+        assert body["import_id"] == str(import_id)
+        # Job cleanup cascades to the analysis task, but leaves its insights.
+        async with _raw_session(settings) as session:
+            await SQLJobRepository(session).delete(job.id)
+            await session.commit()
+        async with _raw_session(settings) as session:
+            retained = await SQLInsightRepository(session).get(stored[0].id)
+            assert retained.task_id is None
+            assert retained.import_id == import_id
         await _create_insights(client, agent["id"])
         response = await client.get(
             "/api/v1/insights",
@@ -259,3 +277,13 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
         )
         assert response.status_code == 200
         assert [item["id"] for item in response.json()["items"]] == [str(stored[0].id)]
+        async with _raw_session(settings) as session:
+            await session.execute(
+                text('DELETE FROM "import" WHERE id = :import_id'),
+                {"import_id": import_id},
+            )
+            await session.commit()
+        response = await client.get(f"/api/v1/insights/{stored[0].id}")
+        assert response.status_code == 200
+        assert response.json()["import_id"] is None
+        assert response.json()["analyzer_params"] == {"window_days": 7}

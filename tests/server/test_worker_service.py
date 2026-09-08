@@ -223,7 +223,12 @@ async def test_register_ephemeral_worker(service: WorkerService) -> None:
     job_id = uuid.uuid4()
     runtime = WorkerRuntime(platform="bare")
     worker = await service.register_ephemeral_worker(
-        job_id=job_id, runtime=runtime, actor=ACTOR
+        job_id=job_id,
+        runtime=runtime,
+        selectors=[
+            LabelSelector(key="kitaru/requires-credentials", values=["langfuse"])
+        ],
+        actor=ACTOR,
     )
     assert worker.name == f"job-{job_id}"
     assert worker.scope == WorkerScope(
@@ -235,7 +240,8 @@ async def test_register_ephemeral_worker(service: WorkerService) -> None:
         selectors=[
             LabelSelector(
                 key="kitaru/plugin_namespace", values=["kitaru"], required=True
-            )
+            ),
+            LabelSelector(key="kitaru/requires-credentials", values=["langfuse"]),
         ],
         job_id=job_id,
     )
@@ -259,7 +265,7 @@ async def test_ephemeral_analyzer_scope(
     """Only reserved analyzers belonging to this job can use its worker."""
     job_id = uuid.uuid4()
     worker = await service.register_ephemeral_worker(
-        job_id, WorkerRuntime(platform="modal"), actor=ACTOR
+        job_id, WorkerRuntime(platform="modal"), [], actor=ACTOR
     )
     task = AnalysisTask(
         job_id=job_id if same_job else uuid.uuid4(),

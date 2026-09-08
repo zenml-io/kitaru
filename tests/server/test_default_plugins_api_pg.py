@@ -45,13 +45,14 @@ async def test_default_plugins_are_registered_at_startup(
     assert matches[0]["owner_id"] is None
 
 
-async def test_builtin_analyzer_cannot_be_replaced_or_deleted() -> None:
+@pytest.mark.parametrize(
+    "name", ["kitaru/post-import-insights", "kitaru/openai-post-import-insights"]
+)
+async def test_builtin_analyzer_cannot_be_replaced_or_deleted(name: str) -> None:
     """Keep the analyzer executed by hosted workers controlled by the server."""
     async with lifespan_client(db_settings()) as client:
         analyzers = (await client.get("/api/v1/analyzers")).json()["items"]
-        analyzer = next(
-            item for item in analyzers if item["name"] == "kitaru/post-import-insights"
-        )
+        analyzer = next(item for item in analyzers if item["name"] == name)
         path = f"/api/v1/analyzers/{analyzer['id']}"
         original = (await client.get(f"{path}/versions/1")).json()
         replaced = await client.post(

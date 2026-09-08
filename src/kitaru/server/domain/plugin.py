@@ -31,6 +31,7 @@ from kitaru.server.domain.base import (
 )
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import (
+    NAMESPACE_SEPARATOR,
     RESERVED_NAMESPACE,
     NamespacedName,
     VersionName,
@@ -292,6 +293,7 @@ class Plugin(DomainModel):
     provider: str | None = None
     logo_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    connection_schema: dict[str, Any] | None = None
     latest_version: int = 0
     agent_id: uuid.UUID | None = None
     created: datetime | None = None
@@ -301,26 +303,22 @@ class Plugin(DomainModel):
         """Reject changes to plugins provided by server bootstrap.
 
         Raises:
-            DefaultPluginReadOnly: The plugin has no owning account.
+            DefaultPluginReadOnly: The plugin uses the reserved namespace.
         """
-        if self.owner_id is None:
+        if self.name.startswith(RESERVED_NAMESPACE + NAMESPACE_SEPARATOR):
             raise DefaultPluginReadOnly(self.name)
 
     @model_validator(mode="after")
     def _check_provider(self) -> "Plugin":
-        """Reject a provider on an evaluator or analyzer plugin.
+        """Reject a provider on an evaluator plugin.
 
         Raises:
-            InvalidPluginProvider: The kind is evaluator or analyzer and
-                provider is set.
+            InvalidPluginProvider: The kind is evaluator and provider is set.
 
         Returns:
             The validated plugin.
         """
-        if (
-            self.kind in (PluginKind.EVALUATOR, PluginKind.ANALYZER)
-            and self.provider is not None
-        ):
+        if self.kind is PluginKind.EVALUATOR and self.provider is not None:
             raise InvalidPluginProvider(self.kind)
         return self
 
@@ -365,6 +363,16 @@ class Plugin(DomainModel):
             metadata: New metadata.
         """
         self.metadata = metadata
+
+    def update_connection_schema(
+        self, connection_schema: dict[str, Any] | None
+    ) -> None:
+        """Set a new plugin connection schema.
+
+        Args:
+            connection_schema: New connection schema.
+        """
+        self.connection_schema = connection_schema
 
 
 class PluginVersion(DomainModel):

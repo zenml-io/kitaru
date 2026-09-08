@@ -7,7 +7,7 @@ icon: chart-pie
 
 An [evaluator](evaluators.md) reads one session and writes a verdict about it. An **analyzer** reads a set of sessions at once and writes one or more **insights**: named, typed observations about the set as a whole, such as how sessions split by outcome or how a metric is distributed across them.
 
-Analyzers are global plugins: no agent scoping, no provider. They can use deterministic checks, a model, or both. The built-in [post-import insights](../guides/post-import-insights.md) analyzer runs automatically after imports and does not require a model by default.
+Analyzers are global plugins without agent scoping. They can declare a provider and connection schema, and can use deterministic checks, a model, or both. The built-in [post-import insights](../guides/post-import-insights.md) analyzers offer deterministic and OpenAI-backed analysis as separate choices; imports run only explicitly selected analyzers.
 
 ## The analyzer contract
 
@@ -47,7 +47,7 @@ async def analyzer(session_ids: list[UUID], **params) -> InsightInput:
 
 The first argument is `list[UUID]`. `KitaruAPIClient()` uses the server URL and credentials supplied to the task process. Fetch session metadata with `client.sessions.get(session_id)`, or the complete trace with `client.sessions.get_with_nodes(session_id)`. The analyzer decides which sessions to fetch and can process them one at a time. Return one `InsightInput` or a list, including an empty list when there are no findings. Each returned item becomes one stored insight. `params` are per-run knobs, set on the import that names the analyzer.
 
-Analyzers are versioned like evaluators: registering again under the same name creates the next version, and every insight remembers exactly which version wrote it. The walkthrough from a question about a batch of sessions to a registered analyzer is in [Write an analyzer](../guides/write-an-analyzer.md).
+Analyzers are versioned like evaluators: registering again under the same name creates the next version, and every generated insight records which version wrote it. Deleting that version clears the reference without deleting the insight. The walkthrough from a question about a batch of sessions to a registered analyzer is in [Write an analyzer](../guides/write-an-analyzer.md).
 
 ## The insight row
 
@@ -63,7 +63,7 @@ Every insight also has a `name`, a `title`, an optional `description`, and free-
 
 ## Running analyzers
 
-An import names its analyzers next to its evaluators. Each named analyzer runs as one task in the import job, in parallel with the evaluator tasks, over every session the import created. The full option shape, including `--analyzer-params` and the SDK and REST equivalents, is in [Importing sessions](../guides/importing-sessions.md).
+An import names its analyzers next to its evaluators. Each named analyzer runs as one task in the import job, in parallel with the evaluator tasks, over every session the import created. An analyzer can use its provider's default [connection](../guides/provider-connections.md) or select one explicitly. The full option shape, including `--analyzer-params`, `--analyzer-connection`, and the SDK and REST equivalents, is in [Importing sessions](../guides/importing-sessions.md).
 
 Every insight a completed analysis task writes records the analyzer version, the task, and the params that produced it, the same provenance an evaluation keeps for the evaluator that wrote it. An insight created directly with `client.insights.create(...)` carries none of that provenance.
 
