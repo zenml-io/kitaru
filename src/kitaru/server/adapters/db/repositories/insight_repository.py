@@ -16,11 +16,10 @@
 import uuid
 from collections.abc import Mapping
 
-from sqlalchemy import false, func, select
+from sqlalchemy import select
 
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
-    compile_column_condition,
     compile_filter_expression,
 )
 from kitaru.server.adapters.db.orm.insight import (
@@ -43,9 +42,7 @@ from kitaru.server.domain.task import TaskNotFound
 INSIGHT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": InsightORM.id,
     "agent_id": InsightORM.agent_id,
-    "import_id": lambda condition: func.coalesce(
-        compile_column_condition(InsightORM.import_id, condition), false()
-    ),
+    "import_id": InsightORM.import_id,
     "name": InsightORM.name,
     "type": InsightORM.type,
 }

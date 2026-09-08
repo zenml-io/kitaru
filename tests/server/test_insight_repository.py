@@ -414,7 +414,6 @@ async def test_query_filters_by_import_with_pagination_and_negation(
         task_id=other_task_id,
         import_id=other_import_id,
     )
-    manual = await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
     condition = {"field": "import_id", "op": "eq", "value": str(import_id)}
     collected: list[uuid.UUID] = []
     cursor = None
@@ -433,7 +432,8 @@ async def test_query_filters_by_import_with_pagination_and_negation(
             expression=NotExpression(operand=FilterCondition.model_validate(condition))
         )
     )
-    assert {item.id for item in negated} == {other.id, manual.id}
+    assert {item.id for item in negated} == {other.id}
+    await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
     both, _ = await setup.insights.query(
         InsightFilter.model_validate(
             {
@@ -454,6 +454,22 @@ async def test_query_filters_by_import_with_pagination_and_negation(
         )
     )
     assert missing == []
+
+
+@pytest.mark.parametrize("setup", ["postgres"], indirect=True)
+async def test_negated_import_filter_excludes_null_imports(setup: Setup) -> None:
+    """Use SQL null semantics when negating a direct import column filter."""
+    await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
+    insights, _ = await setup.insights.query(
+        InsightFilter(
+            expression=NotExpression(
+                operand=FilterCondition(
+                    field="import_id", op=FilterOp.EQ, value=uuid.uuid4()
+                )
+            )
+        )
+    )
+    assert insights == []
 
 
 async def test_query_filters_by_name(setup: Setup) -> None:
