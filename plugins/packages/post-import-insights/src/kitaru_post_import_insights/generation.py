@@ -30,7 +30,11 @@ from kitaru_post_import_insights.profiling import (
     ProfilingResult,
 )
 
-_NUMERIC_TOKEN = re.compile(r"\d+(?:[.,]\d+)*(?:%|[A-Za-z]+)?")
+# A numeric token is a number plus an optional unit, so the number parser can
+# read the leading number of any token the numeric scan produces.
+_NUMBER_PATTERN = r"\d+(?:[.,]\d+)*"
+_NUMBER = re.compile(_NUMBER_PATTERN)
+_NUMERIC_TOKEN = re.compile(rf"{_NUMBER_PATTERN}(?:%|[A-Za-z]+)?")
 _QUANTITY_TOKEN = re.compile(
     r"\b(?:no|none|zero|one|two|three|four|five|six|seven|eight|nine|ten|"
     r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
@@ -80,13 +84,6 @@ _UNSUPPORTED_CLAIM = re.compile(
     r"originate|originates|originated|originating)\s+from|"
     r"explains?|explained|explaining|determines?|determined|determining|"
     r"improv(?:e|es|ed|ing|ements?)|outperform(?:s|ed|ing)?|"
-    r"more|most|less|fewer|higher|lower|increase[ds]?|decrease[ds]?|"
-    r"slower|slowest|faster|fastest|better|best|worse|worst|"
-    r"longer|longest|shorter|shortest|larger|largest|smaller|smallest|"
-    r"greater|greatest|bigger|biggest|quicker|quickest|easier|easiest|"
-    r"harder|hardest|cheaper|cheapest|costlier|costliest|"
-    r"stronger|strongest|weaker|weakest|newer|newest|older|oldest|"
-    r"earlier|earliest|later|latest|"
     r"healthy|correct|incorrect)\b",
     flags=re.IGNORECASE,
 )
@@ -241,15 +238,39 @@ class EditorialCardCopy(_GenerationModel):
     description: str = Field(min_length=1, max_length=1000)
 
 
-class EditorialPlan(_GenerationModel):
-    """Provider-neutral page and card copy returned by the editor."""
+class EditorialCardPlan(_GenerationModel):
+    """Provider-neutral card copy returned by the editor."""
 
-    intro_eyebrow: str = Field(min_length=1, max_length=80)
-    intro_title: str = Field(min_length=1, max_length=255)
-    intro_description: str = Field(min_length=1, max_length=1000)
-    recommendation_title: str = Field(min_length=1, max_length=255)
-    recommendation_description: str = Field(min_length=1, max_length=1000)
     insights: list[EditorialCardCopy] = Field(min_length=1, max_length=MAX_INSIGHTS)
+
+
+DEFAULT_INTRO_EYEBROW = "What to look at first"
+DEFAULT_INTRO_TITLE = "A few patterns are worth a closer look"
+DEFAULT_INTRO_DESCRIPTION = (
+    "These evidence-backed leads can guide your first investigation."
+)
+DEFAULT_RECOMMENDATION_TITLE = "Recommended next step"
+DEFAULT_RECOMMENDATION_DESCRIPTION = (
+    "Start with this pattern, define a focused cohort, and test a change."
+)
+
+
+class EditorialPlan(EditorialCardPlan):
+    """Card copy combined with deterministic page framing."""
+
+    intro_eyebrow: str = Field(
+        default=DEFAULT_INTRO_EYEBROW, min_length=1, max_length=80
+    )
+    intro_title: str = Field(default=DEFAULT_INTRO_TITLE, min_length=1, max_length=255)
+    intro_description: str = Field(
+        default=DEFAULT_INTRO_DESCRIPTION, min_length=1, max_length=1000
+    )
+    recommendation_title: str = Field(
+        default=DEFAULT_RECOMMENDATION_TITLE, min_length=1, max_length=255
+    )
+    recommendation_description: str = Field(
+        default=DEFAULT_RECOMMENDATION_DESCRIPTION, min_length=1, max_length=1000
+    )
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -280,8 +301,8 @@ class InsightModelGenerator(Protocol):
         projection: EditorialProjection,
         config: ModelGenerationConfig,
         timeout_seconds: float,
-    ) -> ModelStageResponse[EditorialPlan]:
-        """Edit the validated selection without changing its facts."""
+    ) -> ModelStageResponse[EditorialCardPlan]:
+        """Write card copy for the validated selection without changing its facts."""
 
 
 class ModelGenerationPlan(_GenerationModel):
@@ -387,16 +408,6 @@ def build_editorial_projection(
             for position, candidate_id in enumerate(selection.selected_candidate_ids)
         ],
     )
-
-
-def _collect_page_copy(plan: EditorialPlan) -> list[str]:
-    return [
-        plan.intro_eyebrow,
-        plan.intro_title,
-        plan.intro_description,
-        plan.recommendation_title,
-        plan.recommendation_description,
-    ]
 
 
 def _validate_copy_safety(value: str) -> None:
@@ -541,78 +552,186 @@ def _has_negated_outcome(value: str) -> bool:
     )
 
 
-def _validate_page_copy(
-    value: str,
-    allowed_outcomes: set[str],
-    *,
-    allowed_session_outcomes: set[str],
-) -> None:
-    """Validate friendly page framing separately from candidate facts."""
-    _validate_copy_safety(value)
-    if _has_negated_outcome(value):
-        raise ValueError("editor page copy contains a negated outcome claim")
-    if _NUMERIC_TOKEN.search(value) or _QUANTITY_TOKEN.search(value):
-        raise ValueError("editor page copy contains a numeric or quantitative claim")
-    if not _get_session_outcome_claims(value).issubset(allowed_session_outcomes):
-        raise ValueError(
-            "editor page copy contains an unsupported outcome claim about sessions"
+def _parse_number(token: str) -> float | None:
+    """Parse the leading number of a numeric token, tolerating separators."""
+    match = _NUMBER.match(token)
+    if match is None:
+        return None
+    raw = match.group(0)
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", raw):
+        raw = raw.replace(",", "")
+    else:
+        raw = raw.replace(",", ".")
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _get_grounded_numbers(candidate: CandidateFinding) -> set[float]:
+    """Return every quantity the deterministic candidate states about itself."""
+    numbers: set[float] = set()
+    for fact in candidate.facts:
+        if isinstance(fact.value, str):
+            numbers.update(
+                parsed
+                for match in _NUMBER.finditer(fact.value)
+                if (parsed := _parse_number(match.group(0))) is not None
+            )
+        else:
+            numbers.add(float(fact.value))
+    data = candidate.data
+    if isinstance(data, CategoricalInsightData):
+        numbers.update(float(item.value) for item in data.values)
+    else:
+        for bin_ in data.bins:
+            numbers.add(float(bin_.count))
+            numbers.update(
+                float(bound)
+                for bound in (bin_.lower_bound, bin_.upper_bound)
+                if bound is not None
+            )
+    coverage = candidate.coverage
+    numbers.update(
+        float(count)
+        for count in (
+            coverage.sessions_analyzed,
+            coverage.affected_sessions,
+            coverage.occurrences,
+            coverage.contributing_sessions_available,
+            len(candidate.contributing_session_ids),
         )
-    if not _get_outcome_categories(value).issubset(allowed_outcomes):
-        raise ValueError("editor page copy contains an unsupported outcome claim")
+    )
+    return numbers
+
+
+def _is_grounded_number(token: str, grounded: set[float]) -> bool:
+    """Accept a written number that equals or rounds a grounded quantity."""
+    match = _NUMBER.match(token)
+    if match is None:
+        return False
+    raw = match.group(0)
+    value = _parse_number(raw)
+    if value is None:
+        return False
+    decimals = len(raw.rsplit(".", 1)[1]) if "." in raw else 0
+    return any(known == value or round(known, decimals) == value for known in grounded)
+
+
+def _remove_candidate_phrases(value: str, candidate: CandidateFinding) -> str:
+    """Mask clauses quoted from the candidate's own title, description, or caveat.
+
+    The editor is asked to carry the caveat into its copy, so a quoted clause
+    such as "is not the same as a failed session" is grounded wording rather
+    than a claim the model made up.
+    """
+    clauses = {
+        clause.strip().lower()
+        for text in (candidate.title, candidate.fallback_description, candidate.caveat)
+        if text
+        for clause in re.split(r"[.;!?\n]+", text)
+        if len(clause.strip()) >= 12
+    }
+    for clause in sorted(clauses, key=len, reverse=True):
+        value = re.sub(re.escape(clause), " ", value, flags=re.IGNORECASE)
+    return value
 
 
 def _validate_card_copy(value: str, candidate: CandidateFinding) -> None:
     """Validate one card only against the deterministic candidate it explains."""
     _validate_copy_safety(value)
-    allowed_outcomes = _get_supported_outcome_categories(candidate)
     remaining = _remove_known_labels(value, _get_quantified_labels(candidate))
-    if _has_negated_outcome(value):
+    claims = _remove_candidate_phrases(value, candidate)
+    if _has_negated_outcome(claims):
         raise ValueError("editor card copy contains a negated outcome claim")
-    if _NUMERIC_TOKEN.search(remaining) or _QUANTITY_TOKEN.search(remaining):
-        raise ValueError("editor card copy contains a numeric or quantitative claim")
-    if not _get_session_outcome_claims(value).issubset(
+    grounded = _get_grounded_numbers(candidate)
+    for match in _NUMERIC_TOKEN.finditer(remaining):
+        if not _is_grounded_number(match.group(0), grounded):
+            raise ValueError(
+                "editor card copy contains a numeric claim absent from the "
+                "candidate facts"
+            )
+    if not _get_session_outcome_claims(claims).issubset(
         _get_supported_session_outcome_categories(candidate)
     ):
         raise ValueError(
             "editor card copy contains an unsupported outcome claim about sessions"
         )
-    output_outcomes = _get_outcome_categories(value)
-    if not output_outcomes.issubset(allowed_outcomes):
+    if not _get_outcome_categories(claims).issubset(
+        _get_supported_outcome_categories(candidate)
+    ):
         raise ValueError("editor card copy contains an unsupported outcome claim")
 
 
+def _validate_selection_order(cards: EditorialCardPlan, selection: AnalystPlan) -> None:
+    """Reject card copy that drops, adds, or reorders the selected candidates."""
+    if [item.id for item in cards.insights] != selection.selected_candidate_ids:
+        raise ValueError("editor must preserve selection membership and order")
+
+
+def _validate_card(item: EditorialCardCopy, candidate: CandidateFinding) -> None:
+    for value in (item.eyebrow, item.description):
+        _validate_card_copy(value, candidate)
+
+
+def _is_valid_card(item: EditorialCardCopy, candidate: CandidateFinding) -> bool:
+    """Return whether both strings of one card pass candidate-grounded checks."""
+    try:
+        _validate_card(item, candidate)
+    except ValueError:
+        return False
+    return True
+
+
 def validate_editorial_plan(
-    plan: EditorialPlan,
+    plan: EditorialCardPlan,
     selection: AnalystPlan,
     candidates: list[CandidateFinding],
 ) -> EditorialPlan:
     """Reject copy that changes selection or introduces unsupported claims."""
-    actual = [item.id for item in plan.insights]
-    if actual != selection.selected_candidate_ids:
-        raise ValueError("editor must preserve selection membership and order")
-
-    selected = {
-        item.id: item
-        for item in candidates
-        if item.id in selection.selected_candidate_ids
-    }
-    page_outcomes: set[str] = set()
-    page_session_outcomes: set[str] = set()
-    for candidate in selected.values():
-        page_outcomes.update(_get_supported_outcome_categories(candidate))
-        page_session_outcomes.update(
-            _get_supported_session_outcome_categories(candidate)
-        )
-    for value in _collect_page_copy(plan):
-        _validate_page_copy(
-            value,
-            page_outcomes,
-            allowed_session_outcomes=page_session_outcomes,
-        )
+    _validate_selection_order(plan, selection)
+    by_id = {item.id: item for item in candidates}
     for item in plan.insights:
-        for value in (item.eyebrow, item.description):
-            _validate_card_copy(value, selected[item.id])
-    return plan
+        _validate_card(item, by_id[item.id])
+    if isinstance(plan, EditorialPlan):
+        return plan
+    return EditorialPlan(**plan.model_dump())
+
+
+def apply_editorial_copy(
+    cards: EditorialCardPlan,
+    selection: AnalystPlan,
+    candidates: list[CandidateFinding],
+) -> tuple[EditorialPlan, list[str]]:
+    """Keep validated card copy and use deterministic copy for the rest.
+
+    The selection fixes which cards exist and in what order. A selected card
+    the editor skipped, or whose copy fails validation, uses deterministic
+    copy; cards the editor added are ignored.
+
+    Returns:
+        Plan with deterministic page framing, and the IDs of the cards using
+        deterministic copy.
+    """
+    by_id = {item.id: item for item in candidates}
+    copy_by_id = {item.id: item for item in cards.insights}
+    accepted: list[EditorialCardCopy] = []
+    rejected: list[str] = []
+    for candidate_id in selection.selected_candidate_ids:
+        candidate = by_id[candidate_id]
+        item = copy_by_id.get(candidate_id)
+        if item is not None and _is_valid_card(item, candidate):
+            accepted.append(item)
+            continue
+        rejected.append(candidate_id)
+        accepted.append(
+            EditorialCardCopy(
+                id=candidate_id,
+                eyebrow=candidate.eyebrow,
+                description=candidate.fallback_description,
+            )
+        )
+    return EditorialPlan(insights=accepted), rejected
 
 
 def deterministic_selection(candidates: list[CandidateFinding]) -> AnalystPlan:
@@ -641,15 +760,6 @@ def deterministic_editorial(
     """Return stable page and card copy without a model request."""
     by_id = {candidate.id: candidate for candidate in candidates}
     return EditorialPlan(
-        intro_eyebrow="What to look at first",
-        intro_title="A few patterns are worth a closer look",
-        intro_description=(
-            "These evidence-backed leads can guide your first investigation."
-        ),
-        recommendation_title="Recommended next step",
-        recommendation_description=(
-            "Start with this pattern, define a focused cohort, and test a change."
-        ),
         insights=[
             EditorialCardCopy(
                 id=candidate_id,
@@ -865,26 +975,9 @@ async def generate_model_plan(
         )
 
     receipts.append(editor_response.receipt)
-    try:
-        editorial = validate_editorial_plan(
-            editor_response.value, selection, profiling.candidates
-        )
-    except ValueError:
-        await observe_safely(
-            observer,
-            GenerationEvent(
-                name="editor",
-                run_id=effective_run_id,
-                stage="editor",
-                metadata={"outcome": "validation_failed"},
-            ),
-        )
-        return _build_fallback(
-            profiling,
-            selection=selection,
-            receipts=receipts,
-            reason="editor_validation_failed",
-        )
+    editorial, rejected_ids = apply_editorial_copy(
+        editor_response.value, selection, profiling.candidates
+    )
     await observe_safely(
         observer,
         GenerationEvent(
@@ -894,6 +987,7 @@ async def generate_model_plan(
             metadata={
                 "outcome": "succeeded",
                 "copy_count": len(editorial.insights),
+                "deterministic_copy_count": len(rejected_ids),
             },
         ),
     )
@@ -901,5 +995,12 @@ async def generate_model_plan(
         selection=selection,
         editorial=editorial,
         mode=GenerationMode.MODEL_BACKED,
-        diagnostics=GenerationDiagnostics(provider_receipts=receipts),
+        diagnostics=GenerationDiagnostics(
+            provider_receipts=receipts,
+            warnings=[
+                f"Card copy for {candidate_id} failed validation and uses "
+                "deterministic text."
+                for candidate_id in rejected_ids
+            ],
+        ),
     )

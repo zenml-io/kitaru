@@ -54,6 +54,7 @@ from kitaru_post_import_insights.generation import (
     EditorialCardCopy,
     EditorialPlan,
 )
+from kitaru_post_import_insights.models import GenerationMode
 from kitaru_post_import_insights.openai_generator import MissingOpenAICredential
 from kitaru_post_import_insights.profiling import SessionProfiler
 
@@ -254,7 +255,7 @@ async def test_openai_analyzer_uses_the_selected_model(
     async def fake_generate_insights(profiling, **kwargs):
         captured["profiling"] = profiling
         captured.update(kwargs)
-        return SimpleNamespace(insights=[])
+        return SimpleNamespace(insights=[], mode=GenerationMode.MODEL_BACKED)
 
     monkeypatch.setattr(
         analyzer_module, "generate_insights_from_profile", fake_generate_insights
@@ -347,6 +348,36 @@ async def test_both_analyzers_generate_independent_cards_for_the_same_import(
     )
 
 
+async def test_openai_analyzer_fails_instead_of_falling_back(
+    client: StubClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A model-backed run that cannot use the model fails the task."""
+
+    async def parse(**kwargs: Any) -> SimpleNamespace:
+        if kwargs["text_format"] is AnalystPlan:
+            projection = AnalystProjection.model_validate_json(kwargs["input"])
+            selected = projection.candidates[0].id
+            value = AnalystPlan(
+                selected_candidate_ids=[selected],
+                recommended_candidate_id=selected,
+                rationale="Specific and actionable.",
+            )
+            return SimpleNamespace(
+                id="response", model="gpt-test", usage=None, output_parsed=value
+            )
+        raise RuntimeError("provider detail that must not escape")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "openai.AsyncOpenAI",
+        lambda **kwargs: SimpleNamespace(responses=SimpleNamespace(parse=parse)),
+    )
+    session_ids = client.add([_view(1, failed_tool=True), _view(2)])
+    with pytest.raises(RuntimeError, match="editor_failed") as error:
+        await analyze_openai_post_import_sessions(session_ids, model="gpt-test")
+    assert "provider detail" not in str(error.value)
+
+
 async def test_deterministic_analyzer_rejects_model_parameter(
     client: StubClient,
 ) -> None:
@@ -409,7 +440,7 @@ async def test_analyzer_forwards_enabled_observer(
 
     async def fake_generate_insights(profiling: Any, **kwargs: Any) -> SimpleNamespace:
         captured.update(kwargs)
-        return SimpleNamespace(insights=[])
+        return SimpleNamespace(insights=[], mode=GenerationMode.MODEL_BACKED)
 
     monkeypatch.setattr(
         analyzer_module, "generate_insights_from_profile", fake_generate_insights
@@ -438,7 +469,7 @@ async def test_analyzer_generates_when_observer_initialization_fails(
 
     async def fake_generate_insights(profiling: Any, **kwargs: Any) -> SimpleNamespace:
         captured.update(kwargs)
-        return SimpleNamespace(insights=[])
+        return SimpleNamespace(insights=[], mode=GenerationMode.MODEL_BACKED)
 
     monkeypatch.setattr(
         analyzer_module, "generate_insights_from_profile", fake_generate_insights

@@ -1523,9 +1523,9 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 rank=160,
                 eyebrow="MODEL MIX",
                 title=(
-                    f"{len(state.models)} recorded model "
-                    f"{'appears' if len(state.models) == 1 else 'appear'} in these "
-                    "sessions"
+                    f"{len(state.models)} recorded model"
+                    f"{' appears' if len(state.models) == 1 else 's appear'} in "
+                    "these sessions"
                 ),
                 fallback_description=(
                     "This exact model mix can seed a cohort for cost, latency, or "

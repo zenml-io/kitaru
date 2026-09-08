@@ -21,6 +21,7 @@ from kitaru.client import KitaruAPIClient
 from kitaru_post_import_insights.generation import ModelGenerationConfig
 from kitaru_post_import_insights.models import (
     MAX_NAME_LENGTH,
+    GenerationMode,
     InsightGenerationContext,
     SourceImportContext,
 )
@@ -170,6 +171,14 @@ async def _analyze_sessions(
         generator=generator,
         observer=_get_observer(observe),
     )
+    if model is not None and result.mode is GenerationMode.DETERMINISTIC_FALLBACK:
+        # The deterministic analyzer already covers the no-model case, so a
+        # model-backed run that could not use the model fails the task instead
+        # of silently returning deterministic cards under the OpenAI analyzer.
+        raise RuntimeError(
+            "OpenAI insight generation could not use the model: "
+            f"{result.diagnostics.fallback_reason or 'unknown reason'}"
+        )
     return result.insights
 
 
