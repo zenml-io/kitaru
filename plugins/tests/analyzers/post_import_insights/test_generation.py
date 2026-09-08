@@ -1707,12 +1707,14 @@ def test_card_copy_grounds_time_units_on_the_chart_unit(
     for description in (
         "Calls take under 500 ms.",
         "The split is at 0.5 seconds.",
+        "The split is at .5 seconds.",
         "The longest call took 1332.029 seconds.",
     ):
         copy = _card(candidate, description)
         assert validate_editorial_plan(copy, selection, [candidate]) == copy
     for description in (
         "The split is at 500 seconds.",
+        "The split is at .7 seconds.",
         "It covers 10 seconds.",
         "It covers 1332 sessions.",
     ):
