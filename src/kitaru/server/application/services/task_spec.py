@@ -30,9 +30,8 @@ from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
-from kitaru.server.domain.connection import Connection
 from kitaru.server.domain.imports import Import, ImportWithoutImporterVersion
-from kitaru.server.domain.plugin import Plugin, PluginVersion, ScriptPluginSource
+from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
     AgentTaskDetails,
@@ -210,7 +209,9 @@ class TaskSpecBuilder:
         )
         plugin = await self._plugins.get(plugin_version.plugin_id)
         source = await self._import_source_spec(import_, plugin_version)
-        connection = await self._resolve_connection(import_, plugin)
+        connection = None
+        if import_.connection_id is not None:
+            connection = await self._connections.get(import_.connection_id)
         env = task.env
         secret_env: dict[str, str] = {}
         if connection is not None:
@@ -233,32 +234,6 @@ class TaskSpecBuilder:
                 params=import_.params,
             ),
         )
-
-    async def _resolve_connection(
-        self, import_: Import, plugin: Plugin
-    ) -> Connection | None:
-        """Resolve the connection an import runs with, recording it on the import.
-
-        Args:
-            import_: Import.
-            plugin: Importer the import runs.
-
-        Raises:
-            ConnectionNotFound: The import names an unknown connection.
-
-        Returns:
-            Resolved connection, or ``None`` when nothing resolves.
-        """
-        if import_.connection_id is not None:
-            return await self._connections.get(import_.connection_id)
-        if plugin.provider is None:
-            return None
-        connection = await self._connections.get_default(plugin.provider)
-        if connection is None:
-            return None
-        import_.record_connection_id(connection.id)
-        await self._imports.update(import_)
-        return connection
 
     async def _import_source_spec(
         self, import_: Import, plugin_version: PluginVersion

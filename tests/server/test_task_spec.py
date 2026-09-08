@@ -318,12 +318,12 @@ async def test_import_spec_uses_the_named_connection(
     assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk"}
 
 
-async def test_import_spec_falls_back_to_the_provider_default(
+async def test_import_spec_ignores_an_unrecorded_default(
     services: JobAndTaskServices,
 ) -> None:
-    """An import naming no connection uses the provider's default and records it."""
+    """An import that recorded no connection injects nothing, whatever the default."""
     version_id = await build_import_plugin_version(services)
-    connection_id = await store_connection(services, name="fallback", default=True)
+    await store_connection(services, name="fallback", default=True)
     agent = await create_agent(services.agents, ACTOR.account.id)
     job = await create_job(services.jobs, ACTOR.account.id)
     payload = await create_blob(services.blobs, ACTOR.account.id, content=b"payload")
@@ -339,9 +339,10 @@ async def test_import_spec_falls_back_to_the_provider_default(
 
     spec = await services.task_service.get_spec(task.id, actor=ACTOR)
 
-    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk"}
+    assert spec.env == {}
+    assert spec.secret_env == {}
     stored = await services.imports.get(import_.id)
-    assert stored.connection_id == connection_id
+    assert stored.connection_id is None
 
 
 async def test_import_spec_without_a_connection(
@@ -375,7 +376,7 @@ async def test_import_spec_task_env_wins_over_the_connection_env(
 ) -> None:
     """The task's own env overrides the connection env of the same key."""
     version_id = await build_import_plugin_version(services)
-    await store_connection(
+    connection_id = await store_connection(
         services,
         name="fallback",
         env={"LANGFUSE_BASE_URL": "https://cloud", "REGION": "eu"},
@@ -391,6 +392,7 @@ async def test_import_spec_task_env_wins_over_the_connection_env(
         job_id=job.id,
         importer_version_id=version_id,
         payload_blob_id=payload.id,
+        connection_id=connection_id,
     )
     stored_task = await services.tasks.create(
         ImportTask(

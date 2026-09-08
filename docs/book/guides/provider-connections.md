@@ -68,7 +68,7 @@ kitaru session import \
 
 ## Resolution
 
-An import resolves its connection at the moment a worker claims the task, in this order:
+An import resolves its connection when it is created, in this order:
 
 1. The connection the import named.
 2. Otherwise, the default connection for the importer's `provider`.
@@ -76,7 +76,7 @@ An import resolves its connection at the moment a worker claims the task, in thi
 
 Self-hosted, single-tenant deployments can keep doing that. A connection overrides the worker's environment, it is never required.
 
-The resolved connection is recorded on the import, so a later look at an import shows which credentials it ran with. If the connection is deleted before a worker claims the task, the import resolves again from step 2.
+The resolved connection is recorded on the import as `connection_id`, so a later look at an import shows which credentials it ran with. A default connection created after the import only applies to later imports. If the connection is deleted before a worker claims the task, the import runs with nothing injected.
 
 ## Merge order
 

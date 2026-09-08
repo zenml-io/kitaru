@@ -458,6 +458,39 @@ async def test_create_import_stores_the_named_connection(
     assert import_.connection_id == connection.id
 
 
+async def test_create_import_uses_the_provider_default(
+    services: JobAndTaskServices,
+) -> None:
+    """An import naming no connection records the provider's default."""
+    await _importer_version(services, provider="langfuse")
+    secret = await create_secret(
+        services.secrets, ACTOR.account.id, name="values", internal=True
+    )
+    await create_connection(
+        services.connections, ACTOR.account.id, secret.id, name="other"
+    )
+    default = await create_connection(
+        services.connections, ACTOR.account.id, secret.id, name="main", default=True
+    )
+    command = await _import_command(services)
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.connection_id == default.id
+
+
+async def test_create_import_without_a_default_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """An import naming no connection records none when the provider has no default."""
+    await _importer_version(services, provider="langfuse")
+    command = await _import_command(services)
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.connection_id is None
+
+
 async def test_create_import_rejects_an_unknown_connection(
     services: JobAndTaskServices,
 ) -> None:

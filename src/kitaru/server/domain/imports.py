@@ -97,14 +97,6 @@ class Import(DomainModel):
             raise InvalidImportSource(self.id)
         return self
 
-    def record_connection_id(self, connection_id: uuid.UUID) -> None:
-        """Set the connection resolved for the import.
-
-        Args:
-            connection_id: Id of the resolved connection.
-        """
-        self.connection_id = connection_id
-
     def record_stats(self, stats: ImportStats) -> None:
         """Set the stats of a completed import.
 

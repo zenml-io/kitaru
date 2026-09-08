@@ -123,8 +123,9 @@ class ImportService:
             assert command.payload_blob_id is not None
             payload = await self._blobs.get(command.payload_blob_id)
             payload_blob_id = payload.id
-        if command.connection_id is not None:
-            await self._connections.get(command.connection_id)
+        connection_id = await self._resolve_connection_id(
+            command.connection_id, plugin.provider
+        )
         agent = await self._agents.get(command.agent_id)
         if command.agent_version_id is not None:
             await resolve_agent_id(
@@ -144,7 +145,7 @@ class ImportService:
                 agent_id=agent.id,
                 agent_version_id=command.agent_version_id,
                 importer_version_id=plugin_version.id,
-                connection_id=command.connection_id,
+                connection_id=connection_id,
                 payload_blob_id=payload_blob_id,
                 fetch_query=command.fetch_query,
                 params=command.params,
@@ -162,6 +163,29 @@ class ImportService:
             )
         )
         return import_
+
+    async def _resolve_connection_id(
+        self, connection_id: uuid.UUID | None, provider: str | None
+    ) -> uuid.UUID | None:
+        """Resolve the connection an import runs with.
+
+        Args:
+            connection_id: Connection the import names.
+            provider: Provider of the importer the import runs.
+
+        Raises:
+            ConnectionNotFound: No connection has this id.
+
+        Returns:
+            Named connection, otherwise the provider's default, otherwise
+            ``None``.
+        """
+        if connection_id is not None:
+            return (await self._connections.get(connection_id)).id
+        if provider is None:
+            return None
+        default = await self._connections.get_default(provider)
+        return None if default is None else default.id
 
     async def get_import(self, import_id: uuid.UUID, actor: AuthContext) -> Import:
         """Get an import by id.
