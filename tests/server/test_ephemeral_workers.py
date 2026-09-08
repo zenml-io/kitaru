@@ -129,7 +129,7 @@ async def _start(
     """Schedule the start for a job and run the background tasks."""
     background_tasks = BackgroundTasks()
     await start_ephemeral_worker(
-        job,
+        job.id,
         services.job_service,
         WorkerService(repository=services.workers, liveness_timeout_seconds=60),
         auth_service,

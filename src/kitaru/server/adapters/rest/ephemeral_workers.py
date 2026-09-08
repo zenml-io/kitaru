@@ -32,7 +32,6 @@ from kitaru.server.application.services.worker_service import (
     WorkerService,
     get_ephemeral_scope,
 )
-from kitaru.server.domain.job import Job
 from kitaru.server.domain.worker import Worker, scope_covers
 
 logger = logging.getLogger(__name__)
@@ -41,7 +40,7 @@ SANDBOX_TAG_PREFIX = "kitaru/"
 
 
 async def start_ephemeral_worker(
-    job: Job,
+    job_id: uuid.UUID,
     job_service: JobService,
     worker_service: WorkerService,
     auth_service: AuthService,
@@ -57,7 +56,7 @@ async def start_ephemeral_worker(
     does any task the ephemeral scope would not claim.
 
     Args:
-        job: Created job.
+        job_id: Id of the job the worker drains.
         job_service: Job service.
         worker_service: Worker service.
         auth_service: Authentication service for the current request.
@@ -67,14 +66,14 @@ async def start_ephemeral_worker(
         background_tasks: Tasks run after the response is sent.
         actor: Caller context.
     """
-    tasks, _ = await job_service.list_job_tasks(job.id, TaskFilter(), actor=actor)
-    scope = get_ephemeral_scope(job.id, settings.EPHEMERAL_WORKER.selectors)
+    tasks, _ = await job_service.list_job_tasks(job_id, TaskFilter(), actor=actor)
+    scope = get_ephemeral_scope(job_id, settings.EPHEMERAL_WORKER.selectors)
     if not all(scope_covers(scope, task) for task in tasks):
         return
     if await worker_service.is_covered(tasks):
         return
     worker = await worker_service.register_ephemeral_worker(
-        job.id,
+        job_id,
         WorkerRuntime(platform=settings.EPHEMERAL_WORKER.backend.value),
         settings.EPHEMERAL_WORKER.selectors,
         actor=actor,
@@ -89,7 +88,7 @@ async def start_ephemeral_worker(
         name=worker.name,
         worker_token=SecretStr(issued_token.token),
         server_url=settings.SERVER_URL,
-        job_id=job.id,
+        job_id=job_id,
         tags=_get_tags(worker, actor, server_id),
     )
     # Background tasks run after the route commits, so the worker is persisted
