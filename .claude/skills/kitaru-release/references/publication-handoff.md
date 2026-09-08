@@ -32,7 +32,7 @@ For multiple tags in one repository and branch, check out the branch once, then 
 
 A maintenance release uses its matching `release/<unit>/<major.minor>` branch and maintenance PR. Check that the tag is unused before offering its creation command. For an existing tag, give its status and the recovery handoff; do not recreate or move it.
 
-Push one tag per command. Confirm the matching workflow run exists after each push. For plugins in the same release set, subsequent tag pushes need not wait for the preceding plugin workflow to finish.
+Push one tag per command: GitHub does not create push events when more than three tags are pushed at once, which leaves immutable tags without release workflow runs, so never batch tags into one push even when they point to the same commit. Confirm the matching workflow run exists after each push. For plugins in the same release set, subsequent tag pushes need not wait for the preceding plugin workflow to finish.
 
 ## Core publication status
 

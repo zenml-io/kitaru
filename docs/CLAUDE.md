@@ -2,7 +2,7 @@
 
 FumaDocs-specific instructions for AI-assisted development in the docs app.
 
-## Where the docs live now (read this first)
+## Where the docs live
 
 Kitaru documentation is split across three surfaces:
 
@@ -11,10 +11,10 @@ Kitaru documentation is split across three surfaces:
   (GitBook Git Sync, plain Markdown). Edit those `.md` files directly.
 - **Generated SDK reference** is served by **this FumaDocs app** at
   **`sdkdocs.kitaru.ai`** (mirrors `sdkdocs.zenml.io`).
-- **`kitaru.ai/docs/*`** is now a **redirect** to those new homes
+- **`kitaru.ai/docs/*`** redirects to those two surfaces
   (`docs/worker/redirect.mjs` + `wrangler.redirect.toml`, worker `kitaru-site`).
 
-So **this app is reference-only** — its content is the generated
+**This app is reference-only** — its content is the generated
 `content/docs/reference/python/` and `content/docs/cli/` plus a landing
 `index.mdx`.
 Do not add hand-written pages here; those belong in `docs/book/` (GitBook).
@@ -115,7 +115,7 @@ pnpm run format     # Biome format
 
 The `SDK Reference Docs` workflow runs `pnpm run lint` on every PR that touches `docs/`, and root `just check` does not cover it, so run `just docs-lint` before pushing. `pnpm exec biome check --write` applies the safe fixes (formatting, import order). Rule exceptions live in `biome.jsonc` with a comment explaining each one.
 
-**Important:** Generated content (the local/reference changelog page and SDK reference) is gitignored. On a fresh clone, run `uv sync --extra cli` (the CLI generator runs `kitaru schema` in-process), `pnpm install` in `docs/`, then `uv pip install ./docs/node_modules/fumadocs-python`, then `just generate-docs` to materialize the reference before `just docs` shows the full sidebar. The deployed public changelog still lives at `docs.zenml.io/changelog`; the generated `changelog.mdx` here is not the public changelog source.
+**Important:** Generated content (the local/reference changelog page and SDK reference) is gitignored. On a fresh clone, run `uv sync --extra cli` (the CLI generator runs `kitaru schema` in-process), `pnpm install` in `docs/`, then `uv pip install ./docs/node_modules/fumadocs-python`, then `just generate-docs` to materialize the reference before `just docs` shows the full sidebar.
 
 ## File Responsibilities
 
