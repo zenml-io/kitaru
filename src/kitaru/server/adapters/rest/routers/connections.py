@@ -66,10 +66,8 @@ async def create_connection(
         Created connection without secret values.
     """
     command = connection_create_to_command(body)
-    connection = await service.create_connection(command, actor=actor)
-    return connection_to_response(
-        connection, (await service.get_secret_keys([connection]))[connection.id]
-    )
+    connection, secret_keys = await service.create_connection(command, actor=actor)
+    return connection_to_response(connection, secret_keys)
 
 
 @router.get("")
@@ -92,14 +90,11 @@ async def list_connections(
         Page of connections without secret values.
     """
     connection_filter = connection_list_params_to_filter(params)
-    connections, next_cursor = await service.list_connections(
-        connection_filter, actor=actor
-    )
-    secret_keys = await service.get_secret_keys(connections)
+    items, next_cursor = await service.list_connections(connection_filter, actor=actor)
     return Page[ConnectionResponse](
         items=[
-            connection_to_response(connection, secret_keys[connection.id])
-            for connection in connections
+            connection_to_response(connection, secret_keys)
+            for connection, secret_keys in items
         ],
         next_cursor=next_cursor,
     )
@@ -124,10 +119,8 @@ async def get_connection(
     Returns:
         Stored connection without secret values.
     """
-    connection = await service.get_connection(connection_id, actor=actor)
-    return connection_to_response(
-        connection, (await service.get_secret_keys([connection]))[connection.id]
-    )
+    connection, secret_keys = await service.get_connection(connection_id, actor=actor)
+    return connection_to_response(connection, secret_keys)
 
 
 @router.patch("/{connection_id}", responses=error_responses(404))
@@ -152,16 +145,14 @@ async def update_connection(
     Returns:
         Updated connection without secret values.
     """
-    connection = await service.update_connection(
+    connection, secret_keys = await service.update_connection(
         connection_id,
         env=body.env,
         secrets=body.secrets,
         default=body.default,
         actor=actor,
     )
-    return connection_to_response(
-        connection, (await service.get_secret_keys([connection]))[connection.id]
-    )
+    return connection_to_response(connection, secret_keys)
 
 
 @router.delete(

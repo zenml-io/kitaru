@@ -66,7 +66,7 @@ class ConnectionService:
 
     async def create_connection(
         self, command: ConnectionCreate, actor: AuthContext
-    ) -> Connection:
+    ) -> tuple[Connection, list[str]]:
         """Create a connection and the internal secret holding its values.
 
         Args:
@@ -80,7 +80,7 @@ class ConnectionService:
                 as both an env value and a secret.
 
         Returns:
-            Created connection.
+            Created connection and the key names of its secret values.
         """
         owner_id = actor.account.id
         secret_id = uuid7()
@@ -102,11 +102,11 @@ class ConnectionService:
                 values=command.secrets,
             )
         )
-        return await self._repository.create(connection)
+        return await self._repository.create(connection), list(command.secrets)
 
     async def get_connection(
         self, connection_id: uuid.UUID, actor: AuthContext
-    ) -> Connection:
+    ) -> tuple[Connection, list[str]]:
         """Get a connection by id.
 
         Args:
@@ -115,32 +115,40 @@ class ConnectionService:
 
         Raises:
             ConnectionNotFound: No connection has this id.
+            SecretNotFound: The connection's internal secret is gone.
 
         Returns:
-            Stored connection.
+            Stored connection and the key names of its secret values.
         """
         _ = actor
-        return await self._repository.get(connection_id)
+        connection = await self._repository.get(connection_id)
+        [item] = await self._with_secret_keys([connection])
+        return item
 
     async def list_connections(
         self, connection_filter: ConnectionFilter, actor: AuthContext
-    ) -> tuple[list[Connection], str | None]:
+    ) -> tuple[list[tuple[Connection, list[str]]], str | None]:
         """List connections matching a filter.
 
         Args:
             connection_filter: Filter and pagination parameters.
             actor: Caller context.
 
+        Raises:
+            SecretNotFound: A connection's internal secret is gone.
+
         Returns:
-            Page of matching connections and the next cursor.
+            Page of matching connections, each with the key names of its
+            secret values, and the next cursor.
         """
         _ = actor
-        return await self._repository.query(connection_filter)
+        connections, next_cursor = await self._repository.query(connection_filter)
+        return await self._with_secret_keys(connections), next_cursor
 
-    async def get_secret_keys(
+    async def _with_secret_keys(
         self, connections: Sequence[Connection]
-    ) -> dict[uuid.UUID, list[str]]:
-        """Get the key names held by each connection's internal secret.
+    ) -> list[tuple[Connection, list[str]]]:
+        """Pair each connection with the key names of its secret values.
 
         Args:
             connections: Stored connections.
@@ -149,17 +157,17 @@ class ConnectionService:
             SecretNotFound: A connection's internal secret is gone.
 
         Returns:
-            Sorted key names without their values, keyed by connection id.
+            Connections and their secret key names.
         """
         secrets = await self._secrets.get_many(
             [connection.secret_id for connection in connections]
         )
-        keys: dict[uuid.UUID, list[str]] = {}
+        items: list[tuple[Connection, list[str]]] = []
         for connection in connections:
             if connection.secret_id not in secrets:
                 raise SecretNotFound(connection.secret_id)
-            keys[connection.id] = sorted(secrets[connection.secret_id].values)
-        return keys
+            items.append((connection, list(secrets[connection.secret_id].values)))
+        return items
 
     async def update_connection(
         self,
@@ -168,7 +176,7 @@ class ConnectionService:
         secrets: dict[str, SecretStr] | None,
         default: bool | None,
         actor: AuthContext,
-    ) -> Connection:
+    ) -> tuple[Connection, list[str]]:
         """Partially update a connection.
 
         Args:
@@ -185,7 +193,7 @@ class ConnectionService:
                 as both an env value and a secret.
 
         Returns:
-            Updated connection.
+            Updated connection and the key names of its secret values.
         """
         _ = actor
         connection = await self._repository.get(connection_id)
@@ -199,7 +207,7 @@ class ConnectionService:
         connection.check_secret_keys(secret.values)
         if secrets is not None:
             await self._secrets.update(secret)
-        return await self._repository.update(connection)
+        return await self._repository.update(connection), list(secret.values)
 
     async def delete_connection(
         self, connection_id: uuid.UUID, actor: AuthContext
