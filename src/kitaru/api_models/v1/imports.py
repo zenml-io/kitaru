@@ -100,6 +100,13 @@ class ApiImportSource(DiscriminatedRequestModel):
     query: ImportQuery = Field(
         description="Importer-defined selection of what to fetch."
     )
+    connection_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Connection supplying provider credentials, an omitted value "
+            "resolves to the provider's default."
+        ),
+    )
 
 
 ImportSource = Annotated[
@@ -218,6 +225,9 @@ class ImportResponse(OwnedResponseModel):
     )
     importer_version_id: uuid.UUID | None = Field(
         default=None, description="Importer version run."
+    )
+    connection_id: uuid.UUID | None = Field(
+        default=None, description="Connection resolved for the import."
     )
     source: ImportSource = Field(description="Where the payload comes from.")
     params: dict[str, JsonValue] = Field(

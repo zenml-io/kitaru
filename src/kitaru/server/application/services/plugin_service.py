@@ -90,6 +90,7 @@ class PluginService:
             provider=command.provider,
             logo_url=command.logo_url,
             metadata=command.metadata,
+            connection_schema=command.connection_schema,
             agent_id=command.agent_id,
         )
         return await self._repository.create(plugin)
@@ -150,6 +151,8 @@ class PluginService:
         if "metadata" in update.model_fields_set:
             assert update.metadata is not None
             plugin.update_metadata(update.metadata)
+        if "connection_schema" in update.model_fields_set:
+            plugin.update_connection_schema(update.connection_schema)
         return await self._repository.update(plugin)
 
     async def delete_plugin(self, plugin_id: uuid.UUID, actor: AuthContext) -> None:

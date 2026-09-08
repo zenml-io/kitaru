@@ -84,6 +84,9 @@ class PluginORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     provider: Mapped[str | None] = mapped_column(String(MAX_NAME_LENGTH))
     logo_url: Mapped[str | None] = mapped_column(Text)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB)
+    connection_schema: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     latest_version: Mapped[int]
     agent_id: Mapped[uuid.UUID | None]
 
@@ -106,6 +109,7 @@ class PluginORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             provider=plugin.provider,
             logo_url=plugin.logo_url,
             metadata_=plugin.metadata,
+            connection_schema=plugin.connection_schema,
             latest_version=plugin.latest_version,
             agent_id=plugin.agent_id,
         )
@@ -125,6 +129,7 @@ class PluginORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             provider=self.provider,
             logo_url=self.logo_url,
             metadata=self.metadata_,
+            connection_schema=self.connection_schema,
             latest_version=self.latest_version,
             agent_id=self.agent_id,
             created=self.created,

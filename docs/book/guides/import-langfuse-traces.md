@@ -75,7 +75,7 @@ Omitting FILE and setting `--since` selects an API import: the worker calls the 
 | `until` | Timezone-aware ISO 8601 datetime, upper bound of trace start time. Defaults to now. |
 | `concurrency` | Traces fetched at once. Defaults to 4. |
 
-The worker installs the package's `api` extra for an API import, which carries the provider client, and needs the Langfuse client credentials in its environment: `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` (or the older `LANGFUSE_HOST`) for a self-hosted instance. Each fetched trace is parsed the same way an uploaded export would be, so the `params` table above, and the dedup rules below, apply the same way.
+The worker installs the package's `api` extra for an API import, which carries the provider client. A [connection](provider-connections.md) you name with `--connection`, or the provider's default connection, supplies `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` (or the older `LANGFUSE_HOST` for a self-hosted instance). Without either, the worker's own environment does, and only a worker started with `--selector kitaru/requires-credentials=langfuse` claims the task. Each fetched trace is parsed the same way an uploaded export would be, so the `params` table above, and the dedup rules below, apply the same way.
 
 ## Dedup: one session per (imported_from, external_id)
 

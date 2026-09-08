@@ -217,17 +217,15 @@ async def test_create_plugin_importer_allows_provider(
     assert plugin.provider == "langfuse"
 
 
-async def test_create_plugin_analyzer_rejects_provider(
+async def test_create_plugin_analyzer_allows_provider(
     analyzer_service: PluginService,
 ) -> None:
-    """Reject a provider on an analyzer plugin."""
-    with pytest.raises(InvalidPluginProvider):
-        await analyzer_service.create_plugin(
-            PluginCreate(
-                name="trends", description=None, provider="langfuse", metadata={}
-            ),
-            actor=ACTOR,
-        )
+    """Store the provider on an analyzer plugin."""
+    plugin = await analyzer_service.create_plugin(
+        PluginCreate(name="trends", description=None, provider="langfuse", metadata={}),
+        actor=ACTOR,
+    )
+    assert plugin.provider == "langfuse"
 
 
 async def test_evaluator_and_importer_share_a_name(

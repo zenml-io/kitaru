@@ -18,6 +18,7 @@ from typing import Self
 
 from pydantic import BaseModel, SecretStr, model_validator
 
+from kitaru.api_models.v1.worker import LabelSelector
 from kitaru.images import WORKER_IMAGE_REPOSITORY, get_image
 
 DEFAULT_WORKER_COMMAND = "python -m kitaru.worker"
@@ -49,6 +50,7 @@ class EphemeralWorkerSettings(BaseModel):
     command: str = DEFAULT_WORKER_COMMAND
     timeout_seconds: int = 3600
     env: dict[str, SecretStr] = {}
+    selectors: list[LabelSelector] = []
     modal: ModalEphemeralWorkerSettings | None = None
 
     @model_validator(mode="after")

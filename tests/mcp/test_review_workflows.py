@@ -1441,6 +1441,17 @@ def test_analyzer_updates_require_explicit_non_conflicting_changes() -> None:
         AnalyzerUpdate(operation="update", analyzer_id=analyzer_id)
     with pytest.raises(ValidationError, match="metadata cannot be null"):
         AnalyzerUpdate(operation="update", analyzer_id=analyzer_id, metadata=None)
+    with pytest.raises(ValidationError, match="cannot be null without"):
+        AnalyzerUpdate(
+            operation="update", analyzer_id=analyzer_id, connection_schema=None
+        )
+    with pytest.raises(ValidationError, match="conflict"):
+        AnalyzerUpdate(
+            operation="update",
+            analyzer_id=analyzer_id,
+            connection_schema={"type": "object"},
+            clear_connection_schema=True,
+        )
     with pytest.raises(ValidationError, match="exactly one"):
         AnalyzerVersionUpdate(
             operation="update_version", analyzer_id=analyzer_id, version=1
@@ -1492,7 +1503,11 @@ async def test_analyzer_management_uses_only_typed_sdk_mutations() -> None:
     await handle_analyzers_manage(
         state,
         AnalyzerCreate(
-            operation="create", name="clustering", idempotency_key="retry-analyzer-1"
+            operation="create",
+            name="clustering",
+            provider="langfuse",
+            connection_schema={"type": "object"},
+            idempotency_key="retry-analyzer-1",
         ),
     )
     await handle_analyzers_manage(
@@ -1503,6 +1518,15 @@ async def test_analyzer_management_uses_only_typed_sdk_mutations() -> None:
             description=None,
             clear_description=True,
             metadata={"team": "insights"},
+            connection_schema={"type": "object"},
+        ),
+    )
+    await handle_analyzers_manage(
+        state,
+        AnalyzerUpdate(
+            operation="update",
+            analyzer_id=uuid.uuid4(),
+            clear_connection_schema=True,
         ),
     )
     await handle_analyzers_manage(
@@ -1531,19 +1555,31 @@ async def test_analyzer_management_uses_only_typed_sdk_mutations() -> None:
     assert [name for name, _ in calls] == [
         "create",
         "update",
+        "update",
         "create_version",
         "update_version",
     ]
+    assert cast(Any, calls[0][1]).model_dump(exclude_unset=True) == {
+        "name": "clustering",
+        "description": None,
+        "provider": "langfuse",
+        "metadata": {},
+        "connection_schema": {"type": "object"},
+    }
     assert cast(Any, calls[1][1]).model_dump(exclude_unset=True) == {
         "description": None,
         "metadata": {"team": "insights"},
+        "connection_schema": {"type": "object"},
     }
-    assert cast(Any, calls[2][1]).source.model_dump(mode="json") == {
+    assert cast(Any, calls[2][1]).model_dump(exclude_unset=True) == {
+        "connection_schema": None,
+    }
+    assert cast(Any, calls[3][1]).source.model_dump(mode="json") == {
         "type": "package",
         "requirement": "example==1.2.3",
         "entrypoint": "example:analyze",
     }
-    assert cast(Any, calls[3][1]).model_dump(exclude_unset=True) == {
+    assert cast(Any, calls[4][1]).model_dump(exclude_unset=True) == {
         "display_version": None
     }
     assert create_idempotency_keys == ["retry-analyzer-1"]
@@ -1683,6 +1719,7 @@ async def test_script_analyzer_version_rejects_mismatched_blob() -> None:
     [
         "cohort",
         "cohort_version",
+        "connection",
         "experiment",
         "experiment_run",
         "insight",
@@ -1703,6 +1740,7 @@ async def test_existing_delete_payloads_keep_exact_resource_behavior(kind: str) 
     client = SimpleNamespace(
         cohorts=SimpleNamespace(delete=delete_resource("cohort")),
         cohort_versions=SimpleNamespace(delete=delete_resource("cohort_version")),
+        connections=SimpleNamespace(delete=delete_resource("connection")),
         experiments=SimpleNamespace(delete=delete_resource("experiment")),
         experiment_runs=SimpleNamespace(delete=delete_resource("experiment_run")),
         insights=SimpleNamespace(delete=delete_resource("insight")),

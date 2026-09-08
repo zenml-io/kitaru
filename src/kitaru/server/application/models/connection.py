@@ -1,0 +1,50 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""Connection filter and command models."""
+
+import uuid
+from collections.abc import Mapping
+from typing import ClassVar
+
+from pydantic import Field, SecretStr
+
+from kitaru.base import FrozenModel
+from kitaru.server.base import ListFilter
+from kitaru.server.filtering import (
+    BOOLEAN_OPS,
+    EQUALITY_OPS,
+    STRING_OPS,
+    FilterField,
+)
+
+
+class ConnectionFilter(ListFilter):
+    """Connection list filter."""
+
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "name": FilterField(value_type=str, ops=STRING_OPS),
+        "provider": FilterField(value_type=str, ops=STRING_OPS),
+        "default": FilterField(value_type=bool, ops=BOOLEAN_OPS),
+    }
+
+
+class ConnectionCreate(FrozenModel):
+    """Connection create command."""
+
+    name: str
+    provider: str
+    env: dict[str, str] = Field(default_factory=dict)
+    secrets: dict[str, SecretStr] = Field(default_factory=dict)
+    default: bool = False

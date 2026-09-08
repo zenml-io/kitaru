@@ -172,6 +172,7 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
         row.description = plugin.description
         row.provider = plugin.provider
         row.metadata_ = plugin.metadata
+        row.connection_schema = plugin.connection_schema
         await self._flush(
             {
                 PLUGIN_KIND_NAME_UNIQUE_CONSTRAINT: lambda: DuplicatePluginName(

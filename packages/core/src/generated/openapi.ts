@@ -1077,6 +1077,113 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Connections
+         * @description List connections.
+         *
+         *     Clients observe HTTP 200 on success and 422 on invalid pagination
+         *     parameters. List responses never include secret values.
+         *
+         *     Args:
+         *         service: Connection service.
+         *         actor: Caller context.
+         *         params: Connection list params.
+         *
+         *     Returns:
+         *         Page of connections without secret values.
+         */
+        get: operations["list_connections_api_v1_connections_get"];
+        put?: never;
+        /**
+         * Create Connection
+         * @description Create a connection.
+         *
+         *     Clients observe HTTP 201 on success, 409 when the name is already
+         *     registered, and 422 when a key uses the reserved prefix or is set as
+         *     both an env value and a secret. The response omits the secret values.
+         *
+         *     Args:
+         *         body: Connection create request.
+         *         service: Connection service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Created connection without secret values.
+         */
+        post: operations["create_connection_api_v1_connections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connections/{connection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Connection
+         * @description Get a connection by id.
+         *
+         *     Clients observe HTTP 200 on success and 404 when no connection has this
+         *     id.
+         *
+         *     Args:
+         *         connection_id: Id of the connection.
+         *         service: Connection service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Stored connection without secret values.
+         */
+        get: operations["get_connection_api_v1_connections__connection_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Connection
+         * @description Delete a connection and the secret holding its values.
+         *
+         *     Clients observe HTTP 204 on success and 404 when no connection has this
+         *     id.
+         *
+         *     Args:
+         *         connection_id: Id of the connection.
+         *         service: Connection service.
+         *         actor: Caller context.
+         */
+        delete: operations["delete_connection_api_v1_connections__connection_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Connection
+         * @description Update a connection.
+         *
+         *     Clients observe HTTP 200 on success, 404 when no connection has this id,
+         *     and 422 when a key uses the reserved prefix or is set as both an env
+         *     value and a secret.
+         *
+         *     Args:
+         *         connection_id: Id of the connection.
+         *         body: Connection update request.
+         *         service: Connection service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Updated connection without secret values.
+         */
+        patch: operations["update_connection_api_v1_connections__connection_id__patch"];
+        trace?: never;
+    };
     "/api/v1/device_authorization": {
         parameters: {
             query?: never;
@@ -4269,6 +4376,11 @@ export interface components {
              */
             analyzer: string;
             /**
+             * Connection Id
+             * @description Connection supplying provider credentials, an omitted value resolves to the provider's default.
+             */
+            connection_id?: string | null;
+            /**
              * Params
              * @description Parameters passed to the analyzer.
              */
@@ -4286,6 +4398,13 @@ export interface components {
          * @description Analyzer create request.
          */
         AnalyzerCreateRequest: {
+            /**
+             * Connection Schema
+             * @description JSON Schema of the connection values this analyzer reads.
+             */
+            connection_schema?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Description
              * @description Analyzer description.
@@ -4308,12 +4427,24 @@ export interface components {
              * @description Analyzer name.
              */
             name: string;
+            /**
+             * Provider
+             * @description External service this analyzer calls.
+             */
+            provider?: string | null;
         };
         /**
          * AnalyzerResponse
          * @description Analyzer response.
          */
         AnalyzerResponse: {
+            /**
+             * Connection Schema
+             * @description JSON Schema of the connection values this analyzer reads.
+             */
+            connection_schema: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Created
              * Format: date-time
@@ -4359,6 +4490,11 @@ export interface components {
              */
             owner_id: string | null;
             /**
+             * Provider
+             * @description External service this analyzer calls.
+             */
+            provider: string | null;
+            /**
              * Updated
              * Format: date-time
              * @description Last modification time.
@@ -4370,6 +4506,13 @@ export interface components {
          * @description Analyzer update request.
          */
         AnalyzerUpdateRequest: {
+            /**
+             * Connection Schema
+             * @description New connection schema.
+             */
+            connection_schema?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Description
              * @description New analyzer description.
@@ -4574,6 +4717,11 @@ export interface components {
          * @description API import source.
          */
         ApiImportSource: {
+            /**
+             * Connection Id
+             * @description Connection supplying provider credentials, an omitted value resolves to the provider's default.
+             */
+            connection_id?: string | null;
             /** @description Importer-defined selection of what to fetch. */
             query: components["schemas"]["ImportQuery"];
             /**
@@ -5123,6 +5271,130 @@ export interface components {
              * @description New human-readable designator.
              */
             display_version?: string | null;
+        };
+        /**
+         * ConnectionCreateRequest
+         * @description Connection create request.
+         */
+        ConnectionCreateRequest: {
+            /**
+             * Default
+             * @description Whether this is the provider's default connection.
+             * @default false
+             */
+            default: boolean;
+            /**
+             * Env
+             * @description Non-secret environment values.
+             */
+            env?: {
+                [key: string]: string;
+            };
+            /**
+             * Name
+             * @description Connection name.
+             */
+            name: string;
+            /**
+             * Provider
+             * @description Provider the connection addresses.
+             */
+            provider: string;
+            /**
+             * Secrets
+             * @description Sensitive environment values.
+             */
+            secrets?: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * ConnectionResponse
+         * @description Connection response.
+         */
+        ConnectionResponse: {
+            /**
+             * Created
+             * Format: date-time
+             * @description Creation time.
+             */
+            created: string;
+            /**
+             * Default
+             * @description Whether this is the provider's default connection.
+             */
+            default: boolean;
+            /**
+             * Env
+             * @description Non-secret environment values.
+             */
+            env: {
+                [key: string]: string;
+            };
+            /**
+             * Id
+             * Format: uuid
+             * @description Connection id.
+             */
+            id: string;
+            /**
+             * Name
+             * @description Connection name.
+             */
+            name: string;
+            /**
+             * Owner Id
+             * Format: uuid
+             * @description Id of the owning account.
+             */
+            owner_id: string;
+            /**
+             * Provider
+             * @description Provider the connection addresses.
+             */
+            provider: string;
+            /**
+             * Secret Id
+             * Format: uuid
+             * @description Secret holding the sensitive values.
+             */
+            secret_id: string;
+            /**
+             * Secret Keys
+             * @description Key names of the sensitive values.
+             */
+            secret_keys: string[];
+            /**
+             * Updated
+             * Format: date-time
+             * @description Last modification time.
+             */
+            updated: string;
+        };
+        /**
+         * ConnectionUpdateRequest
+         * @description Connection update request.
+         */
+        ConnectionUpdateRequest: {
+            /**
+             * Default
+             * @description Whether this is the provider's default connection.
+             */
+            default?: boolean | null;
+            /**
+             * Env
+             * @description New non-secret environment values.
+             */
+            env?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Secrets
+             * @description New sensitive environment values.
+             */
+            secrets?: {
+                [key: string]: string;
+            } | null;
         };
         /**
          * CopyWorkdirHook
@@ -6275,6 +6547,11 @@ export interface components {
              */
             analyzers: components["schemas"]["AnalyzerConfig"][];
             /**
+             * Connection Id
+             * @description Connection resolved for the import.
+             */
+            connection_id?: string | null;
+            /**
              * Created
              * Format: date-time
              * @description Creation time.
@@ -6404,6 +6681,13 @@ export interface components {
          */
         ImporterCreateRequest: {
             /**
+             * Connection Schema
+             * @description JSON Schema of the connection values this importer reads.
+             */
+            connection_schema?: {
+                [key: string]: unknown;
+            } | null;
+            /**
              * Description
              * @description Importer description.
              */
@@ -6436,6 +6720,13 @@ export interface components {
          * @description Importer response.
          */
         ImporterResponse: {
+            /**
+             * Connection Schema
+             * @description JSON Schema of the connection values this importer reads.
+             */
+            connection_schema: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Created
              * Format: date-time
@@ -6497,6 +6788,13 @@ export interface components {
          * @description Importer update request.
          */
         ImporterUpdateRequest: {
+            /**
+             * Connection Schema
+             * @description New connection schema.
+             */
+            connection_schema?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Description
              * @description New importer description.
@@ -7304,6 +7602,19 @@ export interface components {
              * @description Items on this page.
              */
             items: components["schemas"]["CohortVersionResponse"][];
+            /**
+             * Next Cursor
+             * @description Cursor for the next page, null on the last page.
+             */
+            next_cursor: string | null;
+        };
+        /** Page[ConnectionResponse] */
+        Page_ConnectionResponse_: {
+            /**
+             * Items
+             * @description Items on this page.
+             */
+            items: components["schemas"]["ConnectionResponse"][];
             /**
              * Next Cursor
              * @description Cursor for the next page, null on the last page.
@@ -13256,6 +13567,354 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_connections_api_v1_connections_get: {
+        parameters: {
+            query?: {
+                /** @description Cursor from the previous page. */
+                cursor?: string | null;
+                /** @description Items per page. */
+                size?: number;
+                /** @description Sort field and direction, as field:asc or field:desc. */
+                sort?: string;
+                /** @description Filter expression, JSON-encoded in the query string. */
+                filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ConnectionResponse_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_connection_api_v1_connections_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_connection_api_v1_connections__connection_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_connection_api_v1_connections__connection_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_connection_api_v1_connections__connection_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -31,9 +31,16 @@ class AnalyzerCreateRequest(RequestModel):
 
     name: str = Field(description="Analyzer name.")
     description: str | None = Field(default=None, description="Analyzer description.")
+    provider: str | None = Field(
+        default=None, description="External service this analyzer calls."
+    )
     logo_url: str | None = Field(default=None, description="Analyzer logo URL.")
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict, description="Arbitrary metadata."
+    )
+    connection_schema: dict[str, JsonValue] | None = Field(
+        default=None,
+        description="JSON Schema of the connection values this analyzer reads.",
     )
 
 
@@ -46,6 +53,9 @@ class AnalyzerUpdateRequest(RequestModel):
     logo_url: str | None = Field(default=None, description="New logo URL.")
     metadata: dict[str, JsonValue] | None = Field(
         default=None, description="New metadata."
+    )
+    connection_schema: dict[str, JsonValue] | None = Field(
+        default=None, description="New connection schema."
     )
 
 
@@ -62,8 +72,12 @@ class AnalyzerResponse(TimestampedResponseModel):
     id: uuid.UUID = Field(description="Analyzer id.")
     name: str = Field(description="Analyzer name.")
     description: str | None = Field(description="Analyzer description.")
+    provider: str | None = Field(description="External service this analyzer calls.")
     logo_url: str | None = Field(description="Analyzer logo URL.")
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
+    connection_schema: dict[str, JsonValue] | None = Field(
+        description="JSON Schema of the connection values this analyzer reads."
+    )
     latest_version: int = Field(
         description="Highest version number created for this analyzer."
     )

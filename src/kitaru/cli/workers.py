@@ -151,7 +151,7 @@ def build_worker_config(
 
 
 def _parse_selectors(values: list[str]) -> list[LabelSelector]:
-    """Parse JSON selector objects or compact ``KEY=VALUE[,VALUE]`` forms."""
+    """Parse JSON selector objects or compact ``KEY=[VALUE[,VALUE]]`` forms."""
     selectors: list[LabelSelector] = []
     for value in values:
         try:
@@ -162,8 +162,8 @@ def _parse_selectors(values: list[str]) -> list[LabelSelector]:
                 selected = [
                     item.strip() for item in raw_values.split(",") if item.strip()
                 ]
-                if not separator or not key.strip() or not selected:
-                    raise ValueError("expected KEY=VALUE[,VALUE] or a JSON object")
+                if not separator or not key.strip():
+                    raise ValueError("expected KEY=[VALUE[,VALUE]] or a JSON object")
                 selector = LabelSelector(key=key.strip(), values=selected)
         except (json.JSONDecodeError, ValidationError, ValueError) as error:
             raise CLIError(

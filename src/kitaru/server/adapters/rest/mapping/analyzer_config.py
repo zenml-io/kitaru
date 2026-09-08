@@ -28,7 +28,10 @@ def analyzer_config_to_wire(config: DomainAnalyzerConfig) -> WireAnalyzerConfig:
         Wire analyzer config, echoing the resolved name, version, and params.
     """
     return WireAnalyzerConfig(
-        analyzer=config.analyzer, version=config.version, params=config.params
+        analyzer=config.analyzer,
+        version=config.version,
+        params=config.params,
+        connection_id=config.connection_id,
     )
 
 
@@ -42,5 +45,8 @@ def analyzer_config_input(config: WireAnalyzerConfig) -> AnalyzerConfigInput:
         Analyzer config awaiting resolution.
     """
     return AnalyzerConfigInput(
-        analyzer=config.analyzer, version=config.version, params=config.params
+        analyzer=config.analyzer,
+        version=config.version,
+        params=config.params,
+        connection_id=config.connection_id,
     )

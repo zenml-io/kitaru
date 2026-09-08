@@ -62,6 +62,7 @@ class AnalyzerFilter(PluginFilter):
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "name": FilterField(value_type=str, ops=STRING_OPS),
+        "provider": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
     }
 
 
@@ -79,6 +80,7 @@ class PluginCreate(FrozenModel):
     provider: str | None = None
     logo_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    connection_schema: dict[str, Any] | None = None
     agent_id: uuid.UUID | None = None
 
 
@@ -88,3 +90,4 @@ class PluginUpdate(FrozenModel):
     description: str | None = None
     logo_url: str | None = None
     metadata: dict[str, Any] | None = None
+    connection_schema: dict[str, Any] | None = None

@@ -93,6 +93,8 @@ kitaru importer register my-format \
 
 A script importer may declare dependencies as PEP 723 inline metadata (a `# /// script` block); the worker builds it an isolated environment. An importer that outgrows one file ships as a package instead: `--package "my-importer==1.0.0"` with `--entrypoint "my_importer:parse"`. Importers are versioned like evaluators and agents; imports name the importer and pin to its latest version unless you pass one.
 
+If your format's `fetch` reads provider credentials from the environment, declare them as a `--connection-schema FILE` on `register`, a JSON Schema whose properties are the environment variable names, with `writeOnly: true` marking a property as secret. `kitaru connection create --importer my-format` then prompts for those properties instead of requiring `--set`/`--set-secret` for keys you'd otherwise have to remember. See [Provider connections](provider-connections.md).
+
 Once registered, your format imports exactly like the built-in ones:
 
 ```bash

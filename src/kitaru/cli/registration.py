@@ -447,6 +447,13 @@ def parse_json_object(value: str | None, *, option: str) -> dict[str, Any]:
     return parsed
 
 
+def read_json_object(path: Path | None, *, option: str) -> dict[str, Any] | None:
+    """Read a JSON object from a local file."""
+    if path is None:
+        return None
+    return _load_document(path, label=option)
+
+
 def parse_replay_override(value: str, *, option: str) -> ReplayOverride:
     """Parse an inline replay override using the existing API model."""
     return ReplayOverride.model_validate(parse_json_object(value, option=option))
@@ -527,6 +534,7 @@ async def resolve_analyzer_configs(
     client: Any,
     analyzer_tokens: Sequence[str],
     parameter_entries: Sequence[str],
+    connection_entries: Sequence[str] = (),
 ) -> tuple[list[AnalyzerConfig], list[dict[str, Any]], list[uuid.UUID]]:
     """Resolve exact analyzer configurations and bounded identities."""
     if not analyzer_tokens:
@@ -556,6 +564,28 @@ async def resolve_analyzer_configs(
             )
         params_by_token[token] = parse_json_object(value, option="--analyzer-params")
 
+    connections_by_token: dict[str, Any] = {}
+    for entry in connection_entries:
+        token, separator, reference = entry.partition("=")
+        if not separator or not token or not reference:
+            raise CLIError(
+                "invalid_arguments",
+                "--analyzer-connection must be ANALYZER@VERSION=CONNECTION.",
+            )
+        if token not in selected:
+            raise CLIError(
+                "invalid_arguments",
+                f"--analyzer-connection token {token!r} is not a selected analyzer.",
+            )
+        if token in connections_by_token:
+            raise CLIError(
+                "invalid_arguments",
+                f"Connection for analyzer token {token!r} was provided more than once.",
+            )
+        connections_by_token[token] = await resolve_asset(
+            client.connections, reference, "Connection"
+        )
+
     configs: list[AnalyzerConfig] = []
     identities: list[dict[str, Any]] = []
     version_ids: list[uuid.UUID] = []
@@ -569,21 +599,27 @@ async def resolve_analyzer_configs(
             )
         seen_versions.add(version.id)
         version_ids.append(version.id)
+        connection = connections_by_token.get(token)
         configs.append(
             AnalyzerConfig(
                 analyzer=parent.name,
                 version=version.version,
                 params=params_by_token.get(token, {}),
+                connection_id=None if connection is None else connection.id,
             )
         )
-        identities.append(
-            {
-                "id": str(parent.id),
-                "name": parent.name,
-                "version_id": str(version.id),
-                "version": version.version,
+        identity = {
+            "id": str(parent.id),
+            "name": parent.name,
+            "version_id": str(version.id),
+            "version": version.version,
+        }
+        if connection is not None:
+            identity["connection"] = {
+                "id": str(connection.id),
+                "name": connection.name,
             }
-        )
+        identities.append(identity)
     return configs, identities, version_ids
 
 
@@ -718,34 +754,36 @@ def plugin_parent_request(
     provider: str | None,
     metadata: str | None,
     agent_id: uuid.UUID | None,
+    connection_schema: Path | None = None,
 ) -> ImporterCreateRequest | EvaluatorCreateRequest | AnalyzerCreateRequest:
     """Build one kind-specific plugin parent request."""
     parsed_metadata = parse_json_object(metadata, option="--metadata")
-    if kind == "importer":
+    if kind in {"importer", "analyzer"}:
         if agent_id is not None:
             raise CLIError(
                 "invalid_arguments", "--agent-id is only valid for evaluators."
             )
-        return ImporterCreateRequest(
+        request_type = (
+            ImporterCreateRequest if kind == "importer" else AnalyzerCreateRequest
+        )
+        return request_type(
             name=name,
             description=description,
             provider=provider,
             metadata=parsed_metadata,
-        )
-    if kind == "analyzer":
-        if agent_id is not None:
-            raise CLIError(
-                "invalid_arguments", "--agent-id is only valid for evaluators."
-            )
-        if provider is not None:
-            raise CLIError(
-                "invalid_arguments", "--provider is only valid for importers."
-            )
-        return AnalyzerCreateRequest(
-            name=name, description=description, metadata=parsed_metadata
+            connection_schema=read_json_object(
+                connection_schema, option="--connection-schema"
+            ),
         )
     if provider is not None:
-        raise CLIError("invalid_arguments", "--provider is only valid for importers.")
+        raise CLIError(
+            "invalid_arguments", "--provider is only valid for importers and analyzers."
+        )
+    if connection_schema is not None:
+        raise CLIError(
+            "invalid_arguments",
+            "--connection-schema is only valid for importers and analyzers.",
+        )
     return EvaluatorCreateRequest(
         name=name, description=description, metadata=parsed_metadata, agent_id=agent_id
     )
@@ -857,20 +895,22 @@ def _list_validation_error(error: ValidationError) -> CLIError:
     return CLIError("invalid_arguments", message)
 
 
-def _load_document(path: Path) -> dict[str, Any]:
+def _load_document(path: Path, label: str = "Spec") -> dict[str, Any]:
     """Read one YAML or JSON mapping."""
     if not path.exists() or not path.is_file():
         raise CLIError(
-            "invalid_arguments", f"Spec {str(path)!r} is not a regular file."
+            "invalid_arguments", f"{label} {str(path)!r} is not a regular file."
         )
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError) as error:
         raise CLIError(
-            "invalid_arguments", f"Could not read spec {str(path)!r}: {error}"
+            "invalid_arguments", f"Could not read {label} {str(path)!r}: {error}"
         ) from error
     if not isinstance(data, dict):
-        raise CLIError("invalid_arguments", "Spec must contain one mapping document.")
+        raise CLIError(
+            "invalid_arguments", f"{label} must contain one mapping document."
+        )
     return data
 
 

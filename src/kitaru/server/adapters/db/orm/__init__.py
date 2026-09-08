@@ -26,6 +26,7 @@ from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
 from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
+from kitaru.server.adapters.db.orm.connection import ConnectionORM
 from kitaru.server.adapters.db.orm.device import DeviceORM
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.experiment import ExperimentORM, ReplayConfigORM
@@ -61,6 +62,7 @@ __all__ = [
     "CohortORM",
     "CohortVersionORM",
     "CohortVersionSessionORM",
+    "ConnectionORM",
     "DeviceORM",
     "EvaluationORM",
     "ExperimentORM",

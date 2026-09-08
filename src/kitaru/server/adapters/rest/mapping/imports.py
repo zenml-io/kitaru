@@ -48,13 +48,16 @@ def import_create_to_command(body: ImportCreateRequest) -> ImportCreate:
     if isinstance(source, ApiImportSource):
         payload_blob_id = None
         fetch_query = source.query.model_dump(mode="json", exclude_unset=True)
+        connection_id = source.connection_id
     else:
         payload_blob_id, fetch_query = source.blob_id, None
+        connection_id = None
     return ImportCreate(
         importer=body.importer,
         agent_id=body.agent_id,
         agent_version_id=body.agent_version_id,
         version=body.version,
+        connection_id=connection_id,
         payload_blob_id=payload_blob_id,
         fetch_query=fetch_query,
         params=body.params,
@@ -87,6 +90,7 @@ def import_to_response(import_: Import) -> ImportResponse:
         agent_id=import_.agent_id,
         agent_version_id=import_.agent_version_id,
         importer_version_id=import_.importer_version_id,
+        connection_id=import_.connection_id,
         source=source,
         params=import_.params,
         evaluators=[

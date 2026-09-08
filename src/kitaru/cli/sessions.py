@@ -61,6 +61,7 @@ from kitaru.cli.registration import (
     page_result,
     parse_json_object,
     resolve_analyzer_configs,
+    resolve_asset,
     resolve_evaluator_configs,
 )
 from kitaru.cli.session_selection import get_cohort_version
@@ -327,6 +328,7 @@ async def import_sessions(
     evaluator_params: Sequence[str] | None = None,
     analyzers: Sequence[str] | None = None,
     analyzer_params: Sequence[str] | None = None,
+    analyzer_connections: Sequence[str] | None = None,
     media_type: str | None,
     wait: bool,
     interval: float | None,
@@ -336,6 +338,7 @@ async def import_sessions(
     until: str | None = None,
     trace_ids: list[str] | None = None,
     query: str | None = None,
+    connection: str | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Upload a local payload or an API selection, then create one import job."""
@@ -349,6 +352,11 @@ async def import_sessions(
         raise CLIError(
             "invalid_arguments",
             "--analyzer-params requires at least one --analyzer.",
+        )
+    if analyzer_connections and not analyzers:
+        raise CLIError(
+            "invalid_arguments",
+            "--analyzer-connection requires at least one --analyzer.",
         )
     wait_settings = receipts.get_wait_settings(
         wait=wait, interval=interval, timeout=timeout
@@ -387,6 +395,11 @@ async def import_sessions(
             "invalid_arguments",
             "FILE cannot be combined with --since, --until, --trace-id, or --query.",
         )
+    if path is not None and connection is not None:
+        raise CLIError(
+            "invalid_arguments",
+            "FILE cannot be combined with --connection.",
+        )
     if path is None and media_type is not None:
         raise CLIError(
             "invalid_arguments",
@@ -403,6 +416,11 @@ async def import_sessions(
         client.importers, importer, "Importer"
     )
     agent_parent, agent_version = await get_agent_version(client, agent)
+    resolved_connection = None
+    if connection is not None:
+        resolved_connection = await resolve_asset(
+            client.connections, connection, "Connection"
+        )
     configs: list[EvaluatorConfig] = []
     evaluator_identity: list[dict[str, Any]] = []
     if evaluators:
@@ -413,7 +431,7 @@ async def import_sessions(
     analyzer_identity: list[dict[str, Any]] = []
     if analyzers:
         analyzer_configs, analyzer_identity, _ = await resolve_analyzer_configs(
-            client, analyzers, analyzer_params or []
+            client, analyzers, analyzer_params or [], analyzer_connections or []
         )
 
     identity = {
@@ -445,7 +463,14 @@ async def import_sessions(
     else:
         assert api_query is not None
         identity["query"] = api_query.model_dump(mode="json", exclude_unset=True)
-        source = ApiImportSource(query=api_query)
+        connection_id = None
+        if resolved_connection is not None:
+            connection_id = resolved_connection.id
+            identity["connection"] = {
+                "id": str(resolved_connection.id),
+                "name": resolved_connection.name,
+            }
+        source = ApiImportSource(query=api_query, connection_id=connection_id)
     if tags:
         identity["tags"] = tags
     if evaluator_identity:

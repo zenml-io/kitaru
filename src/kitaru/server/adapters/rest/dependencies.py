@@ -55,6 +55,9 @@ from kitaru.server.adapters.db.repositories.cohort_repository import (
 from kitaru.server.adapters.db.repositories.cohort_version_repository import (
     SQLCohortVersionRepository,
 )
+from kitaru.server.adapters.db.repositories.connection_repository import (
+    SQLConnectionRepository,
+)
 from kitaru.server.adapters.db.repositories.device_repository import (
     SQLDeviceRepository,
 )
@@ -137,6 +140,9 @@ from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.cohort_service import CohortService
 from kitaru.server.application.services.cohort_version_service import (
     CohortVersionService,
+)
+from kitaru.server.application.services.connection_service import (
+    ConnectionService,
 )
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.application.services.evaluation_service import EvaluationService
@@ -423,6 +429,27 @@ def get_secret_service(
     )
 
 
+def get_connection_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> ConnectionService:
+    """Return a connection service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Connection service bound to the SQL repositories.
+    """
+    return ConnectionService(
+        repository=SQLConnectionRepository(session),
+        secret_repository=SQLSecretRepository(
+            session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
+        ),
+    )
+
+
 def get_blob_data_stores(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -686,6 +713,7 @@ def get_import_service(
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
         blob_repository=SQLBlobRepository(session),
+        connection_repository=SQLConnectionRepository(session),
     )
 
 
@@ -717,6 +745,7 @@ def get_task_service(
         ),
         replay_repository=replay_repository,
         import_repository=SQLImportRepository(session),
+        connection_repository=SQLConnectionRepository(session),
         policy=policy,
     )
     return TaskService(

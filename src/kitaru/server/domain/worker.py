@@ -18,7 +18,13 @@ from datetime import datetime
 
 from pydantic import Field
 
-from kitaru.api_models.v1.worker import WorkerClaim, WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL
+from kitaru.api_models.v1.worker import (
+    LabelSelector,
+    WorkerClaim,
+    WorkerRuntime,
+    WorkerScope,
+)
 from kitaru.server.domain.base import (
     DomainModel,
     ForbiddenError,
@@ -97,6 +103,24 @@ def _claim_matches(claim: WorkerClaim, task: Task) -> bool:
     return task.kind is claim.kind
 
 
+def get_effective_selectors(scope: WorkerScope) -> list[LabelSelector]:
+    """Return the scope's selectors with the credential default applied.
+
+    A scope without a requires-credentials selector claims no task that
+    needs credentials from the worker, so it is read as an empty one.
+
+    Args:
+        scope: Worker scope.
+
+    Returns:
+        Selectors the claim conditions apply.
+    """
+    selectors = list(scope.selectors or [])
+    if all(selector.key != REQUIRES_CREDENTIALS_LABEL for selector in selectors):
+        selectors.append(LabelSelector(key=REQUIRES_CREDENTIALS_LABEL, values=[]))
+    return selectors
+
+
 def scope_covers(scope: WorkerScope, task: Task) -> bool:
     """Report whether a scope claims the task.
 
@@ -112,7 +136,7 @@ def scope_covers(scope: WorkerScope, task: Task) -> bool:
     """
     if scope.job_id is not None and task.job_id != scope.job_id:
         return False
-    for selector in scope.selectors or []:
+    for selector in get_effective_selectors(scope):
         if selector.key not in task.labels:
             if selector.required:
                 return False

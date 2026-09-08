@@ -283,6 +283,7 @@ class Plugin(DomainModel):
     provider: str | None = None
     logo_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    connection_schema: dict[str, Any] | None = None
     latest_version: int = 0
     agent_id: uuid.UUID | None = None
     created: datetime | None = None
@@ -290,19 +291,15 @@ class Plugin(DomainModel):
 
     @model_validator(mode="after")
     def _check_provider(self) -> "Plugin":
-        """Reject a provider on an evaluator or analyzer plugin.
+        """Reject a provider on an evaluator plugin.
 
         Raises:
-            InvalidPluginProvider: The kind is evaluator or analyzer and
-                provider is set.
+            InvalidPluginProvider: The kind is evaluator and provider is set.
 
         Returns:
             The validated plugin.
         """
-        if (
-            self.kind in (PluginKind.EVALUATOR, PluginKind.ANALYZER)
-            and self.provider is not None
-        ):
+        if self.kind is PluginKind.EVALUATOR and self.provider is not None:
             raise InvalidPluginProvider(self.kind)
         return self
 
@@ -347,6 +344,16 @@ class Plugin(DomainModel):
             metadata: New metadata.
         """
         self.metadata = metadata
+
+    def update_connection_schema(
+        self, connection_schema: dict[str, Any] | None
+    ) -> None:
+        """Set a new plugin connection schema.
+
+        Args:
+            connection_schema: New connection schema.
+        """
+        self.connection_schema = connection_schema
 
 
 class PluginVersion(DomainModel):

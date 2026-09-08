@@ -106,7 +106,7 @@ Omitting FILE and setting `--since` selects an API import: the worker calls the 
 | `until` | Timezone-aware ISO 8601 datetime, upper bound of root span start time. Defaults to now. |
 | `concurrency` | Traces fetched at once. Defaults to 4. |
 
-The worker installs the package's `api` extra for an API import, which carries the provider client, and needs `BRAINTRUST_API_KEY` in its environment, plus `BRAINTRUST_API_URL` for a self-hosted instance. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way.
+The worker installs the package's `api` extra for an API import, which carries the provider client. A [connection](provider-connections.md) you name with `--connection`, or the provider's default connection, supplies `BRAINTRUST_API_KEY` and `BRAINTRUST_API_URL` for a self-hosted instance. Without either, the worker's own environment does, and only a worker started with `--selector kitaru/requires-credentials=braintrust` claims the task. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way.
 
 ## What a trace becomes
 

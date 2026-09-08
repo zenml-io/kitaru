@@ -13,12 +13,17 @@
 #  permissions and limitations under the License.
 """Task execution spec building."""
 
+import uuid
+
 from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
+from kitaru.server.application.interfaces.connection_repository import (
+    ConnectionRepository,
+)
 from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
@@ -27,6 +32,7 @@ from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
+from kitaru.server.domain.connection import ConnectionNotFound
 from kitaru.server.domain.imports import Import, ImportWithoutImporterVersion
 from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import (
@@ -61,6 +67,7 @@ class TaskSpecBuilder:
         secret_repository: SecretRepository,
         replay_repository: ReplayRepository,
         import_repository: ImportRepository,
+        connection_repository: ConnectionRepository,
         policy: TaskPolicy,
     ) -> None:
         """Initialize the builder.
@@ -72,6 +79,7 @@ class TaskSpecBuilder:
             secret_repository: Secret repository.
             replay_repository: Replay repository.
             import_repository: Import repository.
+            connection_repository: Connection repository.
             policy: Task execution policy.
         """
         self._agent_versions = agent_version_repository
@@ -80,6 +88,7 @@ class TaskSpecBuilder:
         self._secrets = secret_repository
         self._replays = replay_repository
         self._imports = import_repository
+        self._connections = connection_repository
         self._policy = policy
 
     async def build_spec(self, task: Task) -> TaskSpec:
@@ -187,6 +196,8 @@ class TaskSpecBuilder:
                 deleted.
             PluginVersionIdNotFound: The import names an unknown plugin
                 version.
+            ConnectionNotFound: The import names an unknown connection.
+            SecretNotFound: The connection names an unknown secret.
             BlobNotFound: The script plugin or the payload names an unknown
                 blob.
 
@@ -201,11 +212,15 @@ class TaskSpecBuilder:
         )
         plugin = await self._plugins.get(plugin_version.plugin_id)
         source = await self._import_source_spec(import_, plugin_version)
+        env, secret_env = await self._get_connection_env(
+            import_.connection_id, task.env
+        )
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.IMPORTER,
             timeout_seconds=self._policy.importer_timeout_seconds,
-            env=task.env,
+            env=env,
+            secret_env=secret_env,
             details=ImportTaskDetails(
                 plugin=await self._plugin_spec(plugin_version),
                 source=source,
@@ -253,11 +268,18 @@ class TaskSpecBuilder:
         """
         plugin_version = await self._plugins.get_version_by_id(task.plugin_version_id)
         plugin = await self._plugins.get(plugin_version.plugin_id)
+        try:
+            env, secret_env = await self._get_connection_env(
+                task.connection_id, task.env
+            )
+        except ConnectionNotFound:
+            env, secret_env = task.env, {}
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.ANALYZER,
             timeout_seconds=self._policy.analyzer_timeout_seconds,
-            env=task.env,
+            env=env,
+            secret_env=secret_env,
             details=AnalysisTaskDetails(
                 analyzer_name=plugin.name,
                 params=task.params,
@@ -266,6 +288,31 @@ class TaskSpecBuilder:
                 import_id=task.import_id,
             ),
         )
+
+    async def _get_connection_env(
+        self, connection_id: uuid.UUID | None, task_env: dict[str, str]
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Load the environment carried by a connection.
+
+        Args:
+            connection_id: Connection to load.
+            task_env: Task environment values.
+
+        Raises:
+            ConnectionNotFound: No connection has the named id.
+            SecretNotFound: The connection names an unknown secret.
+
+        Returns:
+            Non-secret and secret environment values.
+        """
+        if connection_id is None:
+            return task_env, {}
+        connection = await self._connections.get(connection_id)
+        secret = await self._secrets.get(connection.secret_id)
+        secret_env = {
+            key: value.get_secret_value() for key, value in secret.values.items()
+        }
+        return {**connection.env, **task_env}, secret_env
 
     async def _plugin_spec(self, plugin_version: PluginVersion) -> PluginSpec:
         """Convert a plugin version's code source into its spec form.

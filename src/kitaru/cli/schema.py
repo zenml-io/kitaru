@@ -77,6 +77,7 @@ GROUP_DESCRIPTIONS = {
     "annotation": "Create and manage session annotations.",
     "cohort": "Manage cohort namespaces and immutable membership versions.",
     "config": "Manage allowlisted CLI preferences.",
+    "connection": "Create and manage provider connections.",
     "evaluation": "Inspect stored evaluations.",
     "evaluator": "Develop, register, and inspect evaluators.",
     "experiment": "Configure experiments and manage asynchronous runs.",
