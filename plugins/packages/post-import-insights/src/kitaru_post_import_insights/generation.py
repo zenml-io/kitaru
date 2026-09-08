@@ -36,7 +36,7 @@ _NUMBER = re.compile(_NUMBER_PATTERN)
 _NUMERIC_TOKEN = re.compile(rf"(?<![\w.]){_NUMBER_PATTERN}(?:%|[A-Za-z]+)?")
 _UNIT_WORD = re.compile(r"\s*(%|[A-Za-z]+)")
 _CURRENCY_PREFIX = re.compile(r"[$€£]\s*$")
-_PERCENT_UNITS = {"%", "percent", "pct"}
+_PERCENT_UNITS = {"%", "percent", "percentage", "pct"}
 # Written units that name something the profiler never measures.
 _NON_COUNT_UNITS = {
     "x",
@@ -175,7 +175,8 @@ _SESSION_OUTCOME_CLAIM = re.compile(
     flags=re.IGNORECASE,
 )
 _NEGATION_TOKEN = re.compile(
-    r"\b(?:no|not|never|none|neither|nor|without|cannot|absent)\b|n['\u2019]t\b",
+    r"\b(?:no|not|never|none|zero|neither|nor|without|cannot|absent)\b|"
+    r"n['\u2019]t\b",
     flags=re.IGNORECASE,
 )
 _SESSION_STATUS_OUTCOMES = {
@@ -722,6 +723,35 @@ def _matches_grounded(value: float, decimals: int, grounded: set[float]) -> bool
     return any(known == value or round(known, decimals) == value for known in grounded)
 
 
+def _get_label_values(candidate: CandidateFinding) -> dict[str, float]:
+    """Map each categorical label, and its outcome category, to its own value."""
+    if not isinstance(candidate.data, CategoricalInsightData):
+        return {}
+    values: dict[str, float] = {}
+    for item in candidate.data.values:
+        values[item.label.lower()] = float(item.value)
+        outcome = _SESSION_STATUS_OUTCOMES.get(item.label)
+        if outcome is not None:
+            values[outcome] = float(item.value)
+    return values
+
+
+def _get_bound_label_value(
+    following: str, label_values: dict[str, float]
+) -> float | None:
+    """Return the value a number must equal when a chart label follows it."""
+    words = re.findall(r"[A-Za-z_][\w-]*", following[:80])[:2]
+    for word in words:
+        lowered = word.lower()
+        for key in (lowered, lowered.rstrip("s")):
+            if key in label_values:
+                return label_values[key]
+        for outcome in _get_outcome_categories(word):
+            if outcome in label_values:
+                return label_values[outcome]
+    return None
+
+
 def _is_grounded_number(
     token: str,
     *,
@@ -729,6 +759,7 @@ def _is_grounded_number(
     following: str,
     grounded: dict[str, set[float]],
     chart_unit: str | None,
+    label_values: dict[str, float],
 ) -> bool:
     """Accept a written number that equals or rounds a grounded quantity.
 
@@ -736,7 +767,8 @@ def _is_grounded_number(
     selects the kind the number must ground on; a bare number may ground on
     a count or a time value but never on a percentage. A currency prefix, a
     letter suffix outside the known units, or a unit word the profiler never
-    measures rejects the number outright.
+    measures rejects the number outright. A number followed by a chart label
+    or its outcome word must equal that label's own value.
     """
     match = _NUMBER.match(token)
     if match is None:
@@ -756,6 +788,11 @@ def _is_grounded_number(
         unit = next_word.group(1).lower()
     if unit in _NON_COUNT_UNITS and unit != (chart_unit or "").lower():
         return False
+    if (
+        not attached
+        and (bound := _get_bound_label_value(following, label_values)) is not None
+    ):
+        return _matches_grounded(value, decimals, {bound})
     if unit in _PERCENT_UNITS:
         return _matches_grounded(value, decimals, grounded["percent"])
     if unit in _COUNT_NOUNS:
@@ -812,6 +849,7 @@ def _validate_card_copy(value: str, candidate: CandidateFinding) -> None:
     if _has_negated_outcome(claims) or _negates_candidate_phrase(value, candidate):
         raise ValueError("editor card copy contains a negated outcome claim")
     grounded = _get_grounded_numbers(candidate)
+    label_values = _get_label_values(candidate)
     for match in _NUMERIC_TOKEN.finditer(remaining):
         if not _is_grounded_number(
             match.group(0),
@@ -819,6 +857,7 @@ def _validate_card_copy(value: str, candidate: CandidateFinding) -> None:
             following=remaining[match.end() :],
             grounded=grounded,
             chart_unit=candidate.data.unit,
+            label_values=label_values,
         ):
             raise ValueError(
                 "editor card copy contains a numeric claim absent from the "

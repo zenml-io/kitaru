@@ -1659,6 +1659,7 @@ def test_editor_rejects_fabricated_or_unsafe_card_copy(
         "This costs $3.",
         "Latency is 3x the baseline.",
         "It used 3k tokens.",
+        "There is a 3 percentage-point gap.",
     ],
 )
 def test_card_copy_numbers_must_keep_their_unit(
@@ -1737,4 +1738,34 @@ def test_card_copy_cannot_negate_a_quoted_candidate_phrase(
             ),
             _single_selection(candidate),
             [candidate],
+        )
+
+
+def test_card_copy_binds_numbers_to_the_outcome_label_that_follows(
+    profiling_result: ProfilingResult,
+) -> None:
+    candidate = profiling_result.candidates[0].model_copy(
+        update={
+            "id": "session-outcomes",
+            "family": "outcome",
+            "title": "Sessions are recorded failed and completed",
+            "data": CategoricalInsightData(
+                values=[
+                    CategoryValue(label="failed", value=1),
+                    CategoryValue(label="completed", value=3),
+                ]
+            ),
+        }
+    )
+    selection = _single_selection(candidate)
+    for description in ("1 failed session stands out.", "3 completed sessions."):
+        copy = _card(candidate, description)
+        assert validate_editorial_plan(copy, selection, [candidate]) == copy
+    with pytest.raises(ValueError, match="numeric claim absent"):
+        validate_editorial_plan(
+            _card(candidate, "There were 3 failed sessions."), selection, [candidate]
+        )
+    with pytest.raises(ValueError, match="negated outcome"):
+        validate_editorial_plan(
+            _card(candidate, "Zero sessions failed."), selection, [candidate]
         )
