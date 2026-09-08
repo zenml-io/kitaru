@@ -251,6 +251,9 @@ blob_storage__s3__secret_access_key: {{ .Kitaru.blobStorage.s3.secretAccessKey |
 {{- if and (eq .Kitaru.ephemeralWorker.backend "modal") .Kitaru.ephemeralWorker.modal.tokenSecret }}
 ephemeral_worker__modal__token_secret: {{ .Kitaru.ephemeralWorker.modal.tokenSecret | quote }}
 {{- end }}
+{{- if and (ne .Kitaru.ephemeralWorker.backend "none") .Kitaru.ephemeralWorker.env }}
+ephemeral_worker__env: {{ .Kitaru.ephemeralWorker.env | toJson | quote }}
+{{- end }}
 {{- end }}
 
 
