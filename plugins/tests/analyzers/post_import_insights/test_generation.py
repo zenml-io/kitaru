@@ -11,7 +11,7 @@ from typing import Literal
 import pytest
 
 from kitaru.api_models.v1.insight import CategoricalInsightData, CategoryValue
-from kitaru.insights.generation import (
+from kitaru_post_import_insights.generation import (
     AnalystPlan,
     EditorialCardCopy,
     EditorialPlan,
@@ -25,13 +25,13 @@ from kitaru.insights.generation import (
     validate_analyst_plan,
     validate_editorial_plan,
 )
-from kitaru.insights.models import (
+from kitaru_post_import_insights.models import (
     Coverage,
     EvidenceLocator,
     GenerationMode,
     ProviderReceipt,
 )
-from kitaru.insights.profiling import (
+from kitaru_post_import_insights.profiling import (
     CandidateCoverage,
     CandidateFinding,
     DeterministicFact,

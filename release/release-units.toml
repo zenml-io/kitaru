@@ -25,7 +25,7 @@ registry = "pypi"
 version-source = "pyproject.toml"
 changelog = "CHANGELOG.md"
 lock-source = "uv.lock"
-default-catalog = true
+default-catalog = false
 release-label = "requires:core"
 impact-paths = [
     "pyproject.toml",
@@ -199,6 +199,21 @@ release-label = "requires:plugin:phoenix"
 impact-paths = ["plugins/packages/phoenix-importer/**"]
 tag-prefix = "python/kitaru-phoenix-importer/v"
 maintenance-branch-prefix = "release/phoenix/"
+checks = []
+
+[[units]]
+slug = "post-import-insights"
+path = "plugins/packages/post-import-insights"
+distribution = "kitaru-post-import-insights"
+registry = "pypi"
+version-source = "plugins/packages/post-import-insights/pyproject.toml"
+changelog = "plugins/packages/post-import-insights/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = true
+release-label = "requires:plugin:post-import-insights"
+impact-paths = ["plugins/packages/post-import-insights/**"]
+tag-prefix = "python/kitaru-post-import-insights/v"
+maintenance-branch-prefix = "release/post-import-insights/"
 checks = []
 
 [[units]]

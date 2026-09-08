@@ -12,19 +12,19 @@ from typing import Generic, Protocol, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.insight import BinnedInsightData, CategoricalInsightData
-from kitaru.insights.models import (
+from kitaru_post_import_insights.models import (
     MAX_INSIGHTS,
     EvidenceLocator,
     GenerationDiagnostics,
     GenerationMode,
     ProviderReceipt,
 )
-from kitaru.insights.observability import (
+from kitaru_post_import_insights.observability import (
     GenerationEvent,
     GenerationObserver,
     observe_safely,
 )
-from kitaru.insights.profiling import (
+from kitaru_post_import_insights.profiling import (
     CandidateFinding,
     DeterministicFact,
     ProfilingResult,

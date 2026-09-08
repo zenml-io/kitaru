@@ -26,6 +26,7 @@ members = [
     "kitaru-logfire-importer",
     "kitaru-openai-agents",
     "kitaru-phoenix-importer",
+    "kitaru-post-import-insights",
     "kitaru-pydantic-ai",
 ]
 
@@ -41,6 +42,7 @@ dev = [
     { name = "kitaru-logfire-importer", extras = ["adapter"], editable = "packages/logfire-importer" },
     { name = "kitaru-openai-agents", editable = "packages/openai-agents" },
     { name = "kitaru-phoenix-importer", extras = ["adapter"], editable = "packages/phoenix-importer" },
+    { name = "kitaru-post-import-insights", editable = "packages/post-import-insights" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], editable = "packages/pydantic-ai" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
@@ -1211,11 +1213,9 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.139" },
     { name = "httpx", specifier = ">=0.27,<1" },
     { name = "langfuse", marker = "extra == 'examples'", specifier = ">=4.14,<5" },
-    { name = "langfuse", marker = "extra == 'insights'", specifier = ">=4.14,<5" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0,<3" },
     { name = "modal", marker = "extra == 'modal'", specifier = ">=1.5,<2" },
     { name = "obstore", marker = "extra == 's3'", specifier = ">=0.11.1" },
-    { name = "openai", marker = "extra == 'insights'", specifier = ">=2.15,<4" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.44" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'otel'", specifier = ">=0.65b0" },
     { name = "opentelemetry-instrumentation-httpx", marker = "extra == 'otel'", specifier = ">=0.65b0" },
@@ -1237,7 +1237,7 @@ requires-dist = [
     { name = "uuid-utils", marker = "extra == 'server'", specifier = ">=0.10" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.51" },
 ]
-provides-extras = ["mcp", "cli", "examples", "insights", "server", "worker", "otel", "s3", "modal"]
+provides-extras = ["mcp", "cli", "examples", "server", "worker", "otel", "s3", "modal"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1465,6 +1465,23 @@ requires-dist = [
     { name = "opentelemetry-sdk", marker = "extra == 'adapter'", specifier = ">=1.12" },
 ]
 provides-extras = ["api", "adapter"]
+
+[[package]]
+name = "kitaru-post-import-insights"
+version = "0.1.0"
+source = { editable = "packages/post-import-insights" }
+dependencies = [
+    { name = "kitaru" },
+    { name = "langfuse" },
+    { name = "openai" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "kitaru", editable = "../" },
+    { name = "langfuse", specifier = ">=4.14,<5" },
+    { name = "openai", specifier = ">=2.15,<4" },
+]
 
 [[package]]
 name = "kitaru-pydantic-ai"

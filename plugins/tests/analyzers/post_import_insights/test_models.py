@@ -27,7 +27,7 @@ from kitaru.api_models.v1.insight import (
     InsightInput,
     TextInsightData,
 )
-from kitaru.insights import (
+from kitaru_post_import_insights import (
     INSIGHT_METADATA_KEY,
     Coverage,
     CoverageTruncation,

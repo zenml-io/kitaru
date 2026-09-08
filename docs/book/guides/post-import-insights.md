@@ -7,7 +7,7 @@ icon: chart-pie
 
 Kitaru automatically runs `kitaru/post-import-insights` after a session import. It looks for patterns in the normalized sessions, such as failed tool calls, repeated calls, and outcome distributions, then stores insight cards with supporting session references and investigation prompts. This is available to open-source users: it runs on your worker, including with a local or self-hosted server.
 
-The default analysis is deterministic. It does not require an OpenAI account or send traces to a model. Optional model-assisted wording is configured separately.
+The implementation is the independently versioned `kitaru-post-import-insights` plugin. The server registers its exact package requirement; the worker installs it when executing the analysis task. The default analysis is deterministic. It does not require an OpenAI account or send traces to a model. Optional model-assisted wording is configured separately.
 
 ## Set up a worker and import
 
@@ -67,11 +67,11 @@ uv run kitaru session import sessions.jsonl \
   --wait
 ```
 
-The worker resolves the optional model dependencies. Model calls receive a bounded projection of computed candidates, facts, sanitized labels, and evidence references, not the complete raw traces. The deterministic code computes the counts and charts. Model assistance can incur OpenAI charges; leaving out `model` keeps analysis deterministic.
+The plugin package includes its model and observability dependencies. Model calls receive a bounded projection of computed candidates, facts, sanitized labels, and evidence references, not the complete raw traces. The deterministic code computes the counts and charts. Model assistance can incur OpenAI charges; leaving out `model` keeps analysis deterministic.
 
 ## Coverage and large imports
 
-The built-in analyzer reads one complete session at a time and runs its deterministic checks across every imported session, including sessions marked in progress. It does not stop after a fixed number of sessions or nodes. Custom analyzers retain the ordinary list-based [analyzer contract](../concepts/analyzers.md).
+Every analyzer receives session IDs through the same [analyzer contract](../concepts/analyzers.md). The post-import plugin fetches one complete session at a time and runs its deterministic checks across every imported session, including sessions marked in progress. It does not stop after a fixed number of sessions or nodes.
 
 Evidence references, chart categories, and model input are bounded independently of the scan. Large category sets retain the leading categories and combine the remainder without dropping their counts. Payload traversal and text inspection have per-session limits, so an unusually large payload cannot consume the inspection budget for later sessions. Read the coverage and caveats before treating a text-dependent finding as exhaustive.
 

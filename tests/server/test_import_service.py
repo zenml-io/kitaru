@@ -14,7 +14,6 @@
 """Tests for the import service."""
 
 import uuid
-from importlib.metadata import version
 
 import pytest
 
@@ -63,8 +62,8 @@ async def services() -> JobAndTaskServices:
     await services.plugins.create_version(
         plugin.id,
         PackagePluginSource(
-            requirement=f"kitaru=={version('kitaru')}",
-            entrypoint="kitaru.insights.analyzer:analyze_post_import_sessions",
+            requirement="kitaru-post-import-insights==0.1.0",
+            entrypoint="kitaru_post_import_insights.analyzer:analyze_post_import_sessions",
         ),
         display_version=None,
     )

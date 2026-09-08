@@ -9,7 +9,7 @@ import os
 import time
 from typing import Any, Literal
 
-from kitaru.insights.generation import (
+from kitaru_post_import_insights.generation import (
     AnalystPlan,
     AnalystProjection,
     EditorialPlan,
@@ -17,7 +17,7 @@ from kitaru.insights.generation import (
     ModelGenerationConfig,
     ModelStageResponse,
 )
-from kitaru.insights.models import ProviderReceipt
+from kitaru_post_import_insights.models import ProviderReceipt
 
 
 class MissingOpenAICredential(RuntimeError):
@@ -32,7 +32,7 @@ class OpenAIInsightGenerator:
     """Run the fixed analyst and editor operations through OpenAI Responses."""
 
     def __init__(self, *, api_key: str | None = None) -> None:
-        """Construct the lazy optional client with SDK retries disabled.
+        """Construct the lazy client with SDK retries disabled.
 
         Args:
             api_key: Optional caller-supplied credential. When omitted, the
@@ -40,7 +40,7 @@ class OpenAIInsightGenerator:
 
         Raises:
             MissingOpenAICredential: No credential is available.
-            ModuleNotFoundError: The `insights` dependency extra is absent.
+            ModuleNotFoundError: The OpenAI dependency is absent.
         """
         credential = api_key or os.environ.get("OPENAI_API_KEY")
         if not credential:

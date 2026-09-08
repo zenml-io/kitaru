@@ -37,11 +37,12 @@ EXPECTED_UNITS = {
     "langsmith-importer": "kitaru-langsmith-importer",
     "openai-agents": "kitaru-openai-agents",
     "phoenix-importer": "kitaru-phoenix-importer",
+    "post-import-insights": "kitaru-post-import-insights",
     "pydantic-ai": "kitaru-pydantic-ai",
 }
 
 EXPECTED_DEFAULT_DISTRIBUTIONS = {
-    "kitaru",
+    "kitaru-post-import-insights",
     "kitaru-braintrust-importer",
     "kitaru-evaluator",
     "kitaru-jsonl-importer",
@@ -120,7 +121,7 @@ def core_release_repo(
     return tmp_path, version
 
 
-def test_inventory_describes_core_and_eleven_plugin_distributions() -> None:
+def test_inventory_describes_core_and_plugin_distributions() -> None:
     inventory = load_inventory()
 
     assert {unit.slug: unit.distribution for unit in inventory.units} == EXPECTED_UNITS
@@ -141,9 +142,8 @@ def test_inventory_describes_core_and_eleven_plugin_distributions() -> None:
 
 def test_default_requirements_are_derived_from_release_units() -> None:
     inventory = load_inventory()
-    core = next(unit for unit in inventory.units if unit.slug == "kitaru")
     assert set(default_requirements(inventory).values()) == {
-        f"kitaru=={core.version}",
+        "kitaru-post-import-insights==0.1.0",
         "kitaru-braintrust-importer==0.2.0",
         "kitaru-evaluator==0.1.3",
         "kitaru-jsonl-importer==0.1.1",
@@ -653,7 +653,7 @@ def test_plugin_matrix_is_generated_from_the_plugin_units_in_three_shards() -> N
 
     shards = matrix["include"]
     assert [shard["shard"] for shard in shards] == ["1/3", "2/3", "3/3"]
-    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [4, 4, 3]
+    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [4, 4, 4]
     assert [
         package_path
         for shard in shards
@@ -898,7 +898,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 12 release units."),
+        (["validate"], "Validated 13 release units."),
         (
             [
                 "propose-core-version",

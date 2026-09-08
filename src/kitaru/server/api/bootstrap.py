@@ -15,7 +15,6 @@
 
 import logging
 import uuid
-from importlib.metadata import version
 
 from kitaru.base import FrozenModel
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
@@ -39,7 +38,6 @@ from kitaru.server.domain.plugin import (
 )
 
 logger = logging.getLogger(__name__)
-KITARU_VERSION = version("kitaru")
 
 
 async def ensure_server_id(
@@ -99,9 +97,9 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         name="kitaru/post-import-insights",
         description="Generate deterministic insights from imported sessions.",
         provider=None,
-        entrypoint="kitaru.insights.analyzer:analyze_post_import_sessions",
-        requirement=f"kitaru=={KITARU_VERSION}",
-        display_version=KITARU_VERSION,
+        entrypoint="kitaru_post_import_insights.analyzer:analyze_post_import_sessions",
+        requirement="kitaru-post-import-insights==0.1.0",
+        display_version="0.1.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,

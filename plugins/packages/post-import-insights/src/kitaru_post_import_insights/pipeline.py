@@ -23,14 +23,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from kitaru.api_models.v1.insight import InsightInput
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
-from kitaru.insights.generation import (
+from kitaru_post_import_insights.generation import (
     InsightModelGenerator,
     ModelGenerationConfig,
     ModelGenerationPlan,
     generate_deterministic_plan,
     generate_model_plan,
 )
-from kitaru.insights.models import (
+from kitaru_post_import_insights.models import (
     INSIGHT_METADATA_KEY,
     MAX_INVESTIGATION_PROMPT_LENGTH,
     Coverage,
@@ -45,12 +45,12 @@ from kitaru.insights.models import (
     PageIntro,
     PageRecommendation,
 )
-from kitaru.insights.observability import (
+from kitaru_post_import_insights.observability import (
     GenerationEvent,
     GenerationObserver,
     observe_safely,
 )
-from kitaru.insights.profiling import (
+from kitaru_post_import_insights.profiling import (
     ANALYSIS_VERSION,
     CandidateFinding,
     ProfilingConfig,

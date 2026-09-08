@@ -42,7 +42,7 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
     SessionWithNodesResponse,
 )
-from kitaru.insights.profiling import (
+from kitaru_post_import_insights.profiling import (
     ProfilingConfig,
     ProfilingResult,
     SessionProfiler,
@@ -856,8 +856,8 @@ def test_imported_tool_labels_stay_in_chart_data(candidate_id: str) -> None:
     other_label = "lookup_order"
     assert sanitize_label(malicious_label) == malicious_label
     sessions = []
+    calls: list[tuple[str, object, NodeStatus, object]]
     for number, label in enumerate((malicious_label, other_label), start=1):
-        calls: list[tuple[str, object, NodeStatus, object]]
         if candidate_id == "short-tool-cycles":
             calls = [
                 (name, {}, NodeStatus.FAILED, "")

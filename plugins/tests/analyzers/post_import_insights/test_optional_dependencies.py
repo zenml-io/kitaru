@@ -10,9 +10,9 @@ import sys
 def test_base_insight_import_does_not_load_provider_dependencies() -> None:
     script = """
 import sys
-import kitaru.insights
-import kitaru.insights.generation
-from kitaru.insights import (
+import kitaru_post_import_insights
+import kitaru_post_import_insights.generation
+from kitaru_post_import_insights import (
     GenerationObserver,
     InsightModelGenerator,
     ModelGenerationConfig,

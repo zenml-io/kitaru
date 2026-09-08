@@ -11,23 +11,28 @@ Analyzers are global plugins: no agent scoping, no provider. They can use determ
 
 ## The analyzer contract
 
-An analyzer is a callable that receives every session in the set and returns one or more insights:
+An analyzer is a callable that receives the IDs of every session in the set, fetches the data it needs, and returns insights:
 
 ```python
 """session_outcomes.py: how did this batch of sessions turn out?"""
 
 from collections import Counter
+from uuid import UUID
 
 from kitaru.api_models.v1.insight import (
     CategoricalInsightData,
     CategoryValue,
     InsightInput,
 )
-from kitaru.task.evaluator import SessionView
+from kitaru.client.api_client import KitaruAPIClient
 
 
-def analyzer(sessions: list[SessionView], **params) -> InsightInput:
-    counts = Counter(view.session.status for view in sessions)
+async def analyzer(session_ids: list[UUID], **params) -> InsightInput:
+    counts: Counter[str] = Counter()
+    async with KitaruAPIClient() as client:
+        for session_id in session_ids:
+            session = await client.sessions.get(session_id)
+            counts[session.status] += 1
     return InsightInput(
         name="session_outcomes",
         title="Session outcomes",
@@ -40,7 +45,7 @@ def analyzer(sessions: list[SessionView], **params) -> InsightInput:
     )
 ```
 
-`SessionView` is the same type an evaluator receives, one per session in the set: `session.session` is the session with its inputs, outputs, and rollups, and `session.nodes` is every model call and tool call with payloads. Return one `InsightInput` or a list. Each becomes one stored insight. `params` are per-run knobs, set on the import that names the analyzer.
+The first argument is `list[UUID]`. `KitaruAPIClient()` uses the server URL and credentials supplied to the task process. Fetch session metadata with `client.sessions.get(session_id)`, or the complete trace with `client.sessions.get_with_nodes(session_id)`. The analyzer decides which sessions to fetch and can process them one at a time. Return one `InsightInput` or a list, including an empty list when there are no findings. Each returned item becomes one stored insight. `params` are per-run knobs, set on the import that names the analyzer.
 
 Analyzers are versioned like evaluators: registering again under the same name creates the next version, and every insight remembers exactly which version wrote it. The walkthrough from a question about a batch of sessions to a registered analyzer is in [Write an analyzer](../guides/write-an-analyzer.md).
 

@@ -22,13 +22,13 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
     SessionWithNodesResponse,
 )
-from kitaru.insights import (
+from kitaru_post_import_insights import (
     INSIGHT_METADATA_KEY,
     InsightGenerationContext,
     SourceImportContext,
 )
-from kitaru.insights import pipeline as insight_pipeline
-from kitaru.insights.generation import (
+from kitaru_post_import_insights import pipeline as insight_pipeline
+from kitaru_post_import_insights.generation import (
     AnalystPlan,
     EditorialCardCopy,
     EditorialPlan,
@@ -37,15 +37,15 @@ from kitaru.insights.generation import (
     ModelStageResponse,
     generate_deterministic_plan,
 )
-from kitaru.insights.models import GenerationMode, ProviderReceipt
-from kitaru.insights.observability import GenerationEvent
-from kitaru.insights.pipeline import (
+from kitaru_post_import_insights.models import GenerationMode, ProviderReceipt
+from kitaru_post_import_insights.observability import GenerationEvent
+from kitaru_post_import_insights.pipeline import (
     InsightGenerationConfig,
     InsightResultSizeError,
     generate_insights,
     generate_insights_from_profile,
 )
-from kitaru.insights.profiling import profile_sessions
+from kitaru_post_import_insights.profiling import profile_sessions
 
 NOW = datetime(2026, 9, 4, tzinfo=UTC)
 OWNER_ID = uuid.UUID("01990000-0000-7000-8000-000000000001")
@@ -148,8 +148,8 @@ class FailingEditor(InsightModelGenerator):
         self.selected: str | None = None
 
     async def analyze(self, *, projection, config, timeout_seconds):
-        from kitaru.insights.generation import ModelStageResponse
-        from kitaru.insights.models import ProviderReceipt
+        from kitaru_post_import_insights.generation import ModelStageResponse
+        from kitaru_post_import_insights.models import ProviderReceipt
 
         selected = projection.candidates[-1].id
         self.selected = selected

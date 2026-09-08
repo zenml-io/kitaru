@@ -9,14 +9,14 @@ from types import SimpleNamespace
 import pytest
 
 from kitaru.api_models.v1.insight import CategoricalInsightData, CategoryValue
-from kitaru.insights.generation import (
+from kitaru_post_import_insights.generation import (
     AnalystPlan,
     AnalystProjection,
     CandidateProjection,
     ModelGenerationConfig,
 )
-from kitaru.insights.models import EvidenceLocator
-from kitaru.insights.openai_generator import (
+from kitaru_post_import_insights.models import EvidenceLocator
+from kitaru_post_import_insights.openai_generator import (
     MissingOpenAICredential,
     OpenAIInsightGenerator,
 )
@@ -99,7 +99,7 @@ async def test_openai_request_is_bounded_and_not_stored(monkeypatch, has_usage) 
             self.responses = responses
 
     monkeypatch.setattr(
-        "kitaru.insights.openai_generator.importlib.import_module",
+        "kitaru_post_import_insights.openai_generator.importlib.import_module",
         lambda name: SimpleNamespace(
             AsyncOpenAI=FakeAsyncOpenAI, APITimeoutError=TimeoutError
         ),
@@ -155,7 +155,7 @@ async def test_malformed_provider_receipt_strings_are_omitted(
             self.responses = responses
 
     monkeypatch.setattr(
-        "kitaru.insights.openai_generator.importlib.import_module",
+        "kitaru_post_import_insights.openai_generator.importlib.import_module",
         lambda name: SimpleNamespace(
             AsyncOpenAI=FakeAsyncOpenAI, APITimeoutError=TimeoutError
         ),
@@ -193,7 +193,7 @@ async def test_valid_unicode_provider_receipt_strings_are_preserved(
             self.responses = responses
 
     monkeypatch.setattr(
-        "kitaru.insights.openai_generator.importlib.import_module",
+        "kitaru_post_import_insights.openai_generator.importlib.import_module",
         lambda name: SimpleNamespace(
             AsyncOpenAI=FakeAsyncOpenAI, APITimeoutError=TimeoutError
         ),
@@ -224,7 +224,7 @@ async def test_openai_sdk_timeout_remains_a_timeout(monkeypatch) -> None:
             self.responses = TimeoutResponses()
 
     monkeypatch.setattr(
-        "kitaru.insights.openai_generator.importlib.import_module",
+        "kitaru_post_import_insights.openai_generator.importlib.import_module",
         lambda name: SimpleNamespace(
             APITimeoutError=FakeAPITimeoutError,
             AsyncOpenAI=FakeAsyncOpenAI,

@@ -406,7 +406,6 @@ PUBLIC_API: dict[str, ModuleSpec] = {
         ),
         reexports={
             "InsightInput": "kitaru.api_models.v1.insight",
-            "SessionView": "kitaru.task.evaluator",
         },
     ),
     "kitaru.task.importer": ModuleSpec(

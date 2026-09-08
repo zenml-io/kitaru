@@ -13,11 +13,11 @@
 #  permissions and limitations under the License.
 """Post-import insight generation."""
 
-from kitaru.insights.generation import (
+from kitaru_post_import_insights.generation import (
     InsightModelGenerator,
     ModelGenerationConfig,
 )
-from kitaru.insights.models import (
+from kitaru_post_import_insights.models import (
     INSIGHT_METADATA_KEY,
     Coverage,
     CoverageTruncation,
@@ -33,8 +33,8 @@ from kitaru.insights.models import (
     ProviderReceipt,
     SourceImportContext,
 )
-from kitaru.insights.observability import GenerationObserver
-from kitaru.insights.pipeline import (
+from kitaru_post_import_insights.observability import GenerationObserver
+from kitaru_post_import_insights.pipeline import (
     InsightGenerationConfig,
     InsightResultSizeError,
     generate_insights,

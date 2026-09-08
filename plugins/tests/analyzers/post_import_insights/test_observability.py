@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kitaru.insights.observability import (
+from kitaru_post_import_insights.observability import (
     GenerationEvent,
     LangfuseGenerationObserver,
     observe_safely,
@@ -99,7 +99,7 @@ async def test_langfuse_observer_uses_dedicated_config_and_metadata_only(
             return FakeObservation()
 
     monkeypatch.setattr(
-        "kitaru.insights.observability.importlib.import_module",
+        "kitaru_post_import_insights.observability.importlib.import_module",
         lambda name: SimpleNamespace(Langfuse=FakeLangfuse),
     )
     monkeypatch.setenv("KITARU_INSIGHTS_LANGFUSE_PUBLIC_KEY", "insight-public")
@@ -158,7 +158,7 @@ def test_blocking_langfuse_call_does_not_delay_event_loop_shutdown() -> None:
 import asyncio
 import threading
 import time
-from kitaru.insights.observability import (
+from kitaru_post_import_insights.observability import (
     GenerationEvent,
     LangfuseGenerationObserver,
     observe_safely,

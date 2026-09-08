@@ -43,7 +43,8 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
     SessionWithNodesResponse,
 )
-from kitaru.insights.models import (
+from kitaru.redaction import redact_data
+from kitaru_post_import_insights.models import (
     MAX_CONTRIBUTING_SESSIONS,
     MAX_EVIDENCE_LOCATORS,
     MAX_INVESTIGATION_PROMPT_LENGTH,
@@ -51,13 +52,12 @@ from kitaru.insights.models import (
     CoverageTruncation,
     EvidenceLocator,
 )
-from kitaru.insights.profiling_state import (
+from kitaru_post_import_insights.profiling_state import (
     CountsStore,
     Histogram,
     LabelCounts,
     SessionReferences,
 )
-from kitaru.redaction import redact_data
 
 ANALYSIS_VERSION = "2026-09-07.1"
 MAX_LABEL_LENGTH = 120

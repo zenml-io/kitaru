@@ -389,27 +389,6 @@ def _load_bootstrap_requirements(
             f"invalid server plugin catalog: {error}"
         ) from error
 
-    # Core-owned plugins follow the installed server version. Resolve only this
-    # explicit expression from project metadata; never execute bootstrap code.
-    core_version = _get_string(
-        _read_toml(repo_root / "pyproject.toml")["project"],
-        "version",
-        "core project",
-    )
-    core_version_bindings = [
-        node.value
-        for node in module.body
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "KITARU_VERSION"
-            for target in node.targets
-        )
-    ]
-    expected_binding = ast.parse('version("kitaru")', mode="eval").body
-    has_core_version = len(core_version_bindings) == 1 and ast.dump(
-        core_version_bindings[0]
-    ) == ast.dump(expected_binding)
-    core_requirement = ast.parse('f"kitaru=={KITARU_VERSION}"', mode="eval").body
     requirements: dict[str, set[tuple[str, str]]] = {}
     for node in ast.walk(module):
         if not (
@@ -426,20 +405,15 @@ def _load_bootstrap_requirements(
                 "server plugin catalog entries must declare one requirement"
             )
         requirement_value = requirement_keywords[0].value
-        if has_core_version and ast.dump(requirement_value) == ast.dump(
-            core_requirement
-        ):
-            requirement_text = f"kitaru=={core_version}"
-        elif isinstance(requirement_value, ast.Constant) and isinstance(
+        if not isinstance(requirement_value, ast.Constant) or not isinstance(
             requirement_value.value, str
         ):
-            requirement_text = requirement_value.value
-        else:
             raise ReleaseInventoryError(
-                "server plugin catalog requirements must be string literals "
-                "or the installed Kitaru version pin"
+                "server plugin catalog requirements must be string literals"
             )
-        requirement = _parse_requirement(requirement_text, "server plugin catalog")
+        requirement = _parse_requirement(
+            requirement_value.value, "server plugin catalog"
+        )
         display_version_keywords = [
             keyword for keyword in node.keywords if keyword.arg == "display_version"
         ]
@@ -448,24 +422,15 @@ def _load_bootstrap_requirements(
                 "server plugin catalog entries must declare one display version"
             )
         display_version_value = display_version_keywords[0].value
-        if (
-            has_core_version
-            and requirement.name == "kitaru"
-            and isinstance(display_version_value, ast.Name)
-            and display_version_value.id == "KITARU_VERSION"
-        ):
-            display_version = core_version
-        elif isinstance(display_version_value, ast.Constant) and isinstance(
+        if not isinstance(display_version_value, ast.Constant) or not isinstance(
             display_version_value.value, str
         ):
-            display_version = display_version_value.value
-        else:
             raise ReleaseInventoryError(
                 "server plugin catalog display versions must be string literals"
             )
         name = str(canonicalize_name(requirement.name))
         requirements.setdefault(name, set()).add(
-            (str(requirement.specifier), display_version)
+            (str(requirement.specifier), display_version_value.value)
         )
     return requirements
 
@@ -511,7 +476,7 @@ def default_requirements(inventory: ReleaseInventory) -> dict[str, str]:
         str(canonicalize_name(unit.distribution)): (
             f"{unit.distribution}=={unit.version}"
         )
-        for unit in inventory.units
+        for unit in inventory.plugin_units
         if unit.default_catalog
     }
 

@@ -17,11 +17,13 @@ import json
 import uuid
 import weakref
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 from kitaru.api_models.v1.insight import InsightInput
@@ -38,12 +40,12 @@ from kitaru.api_models.v1.session_node import (
     SessionWithNodesResponse,
 )
 from kitaru.api_models.v1.task import AnalysisTaskDetails, PackagePluginSpec
-from kitaru.insights import InsightGenerationResult
-from kitaru.insights import analyzer as analyzer_module
-from kitaru.insights.analyzer import analyze_post_import_sessions
-from kitaru.insights.profiling import SessionProfiler
+from kitaru.client.exceptions import AuthenticationError, NotFoundError
 from kitaru.task import analyzer as task_analyzer
-from kitaru.task.analyzer import SessionView
+from kitaru_post_import_insights import InsightGenerationResult
+from kitaru_post_import_insights import analyzer as analyzer_module
+from kitaru_post_import_insights.analyzer import analyze_post_import_sessions
+from kitaru_post_import_insights.profiling import SessionProfiler
 
 NOW = datetime(2026, 9, 4, tzinfo=UTC)
 OWNER_ID = uuid.UUID("01990000-0000-7000-8000-000000000001")
@@ -56,9 +58,9 @@ def _view(
     *,
     agent_id: uuid.UUID = AGENT_ID,
     failed_tool: bool = False,
-) -> SessionView:
+) -> SessionWithNodesResponse:
     session_id = uuid.UUID(f"01990000-0000-7000-8000-{100 + number:012d}")
-    return SessionView(
+    return SessionWithNodesResponse(
         session=SessionDetailResponse(
             id=session_id,
             owner_id=OWNER_ID,
@@ -102,11 +104,46 @@ def _view(
     )
 
 
-async def test_analyzer_returns_self_contained_insight_inputs() -> None:
+class StubClient:
+    def __init__(self) -> None:
+        self.sessions = self
+        self.responses: dict[uuid.UUID, SessionWithNodesResponse] = {}
+        self.fetched: list[uuid.UUID] = []
+        self.entered = False
+        self.closed = False
+
+    def add(self, responses: list[SessionWithNodesResponse]) -> list[uuid.UUID]:
+        self.responses.update({response.session.id: response for response in responses})
+        return [response.session.id for response in responses]
+
+    async def __aenter__(self) -> "StubClient":
+        self.entered = True
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        self.closed = True
+
+    async def get_with_nodes(self, session_id: uuid.UUID) -> SessionWithNodesResponse:
+        self.fetched.append(session_id)
+        return self.responses[session_id]
+
+
+@pytest.fixture
+def client(monkeypatch: pytest.MonkeyPatch) -> StubClient:
+    client = StubClient()
+    monkeypatch.setattr(analyzer_module, "KitaruAPIClient", lambda: client)
+    return client
+
+
+async def test_analyzer_returns_self_contained_insight_inputs(
+    client: StubClient,
+) -> None:
     """Return cards that retain evidence and copy-prompt context after persistence."""
     views = [_view(1, failed_tool=True), _view(2)]
 
-    insights = await analyze_post_import_sessions(views, agent_name="returns-agent")
+    insights = await analyze_post_import_sessions(
+        client.add(views), agent_name="returns-agent"
+    )
 
     assert insights
     metadata = [InsightGenerationResult.card_metadata(item) for item in insights]
@@ -126,9 +163,73 @@ async def test_analyzer_returns_self_contained_insight_inputs() -> None:
     assert any(
         evidence.node_id is not None for item in metadata for evidence in item.evidence
     )
+    assert client.fetched == [view.session.id for view in views]
+    assert client.closed
+
+
+@pytest.mark.parametrize("last_status", [200, 401, 404])
+async def test_analyzer_fetches_full_sessions_using_task_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    last_status: int,
+) -> None:
+    """Use the real SDK with task credentials and reject incomplete API reads."""
+    monkeypatch.setenv("KITARU_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("KITARU_API_URL", "https://task-api.example.test")
+    monkeypatch.setenv("KITARU_API_TOKEN", "task-scoped-token")
+    monkeypatch.setenv("KITARU_API_KEY", "stale-ambient-key")
+    views = [_view(1, failed_tool=True), _view(2)]
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        view = views[len(requests) - 1]
+        assert request.method == "GET"
+        assert str(request.url) == (
+            f"https://task-api.example.test/api/v1/sessions/{view.session.id}/full"
+        )
+        assert request.headers["Authorization"] == "Bearer task-scoped-token"
+        if len(requests) == len(views) and last_status != 200:
+            return httpx.Response(last_status, json={"detail": "trace unavailable"})
+        return httpx.Response(200, json=view.model_dump(mode="json"))
+
+    def build_mock_http_client(
+        base_url: str, headers: dict[str, str], **kwargs: Any
+    ) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            base_url=base_url,
+            headers=headers,
+            transport=httpx.MockTransport(respond),
+        )
+
+    monkeypatch.setattr(
+        "kitaru.client.api_client.build_async_client", build_mock_http_client
+    )
+    session_ids = [view.session.id for view in views]
+    if last_status != 200:
+        error = AuthenticationError if last_status == 401 else NotFoundError
+        with pytest.raises(error, match="trace unavailable"):
+            await analyze_post_import_sessions(session_ids)
+    else:
+        insights = await analyze_post_import_sessions(session_ids)
+        assert insights
+        metadata = [InsightGenerationResult.card_metadata(item) for item in insights]
+        assert all(item.coverage.sessions_analyzed == 2 for item in metadata)
+        assert all(item.context.agent_id == AGENT_ID for item in metadata)
+        assert all(
+            item.context.source_import.import_id == IMPORT_ID for item in metadata
+        )
+        assert any(
+            evidence.node_id == views[0].nodes[0].id
+            and evidence.session_id == views[0].session.id
+            for item in metadata
+            for evidence in item.evidence
+        )
+    assert len(requests) == 2
 
 
 async def test_analyzer_builds_the_optional_model_path(
+    client: StubClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Forward the selected model and provider-neutral generator to the pipeline."""
@@ -136,7 +237,7 @@ async def test_analyzer_builds_the_optional_model_path(
     captured: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        "kitaru.insights.openai_generator.OpenAIInsightGenerator",
+        "kitaru_post_import_insights.openai_generator.OpenAIInsightGenerator",
         lambda: sentinel_generator,
     )
 
@@ -149,7 +250,9 @@ async def test_analyzer_builds_the_optional_model_path(
         analyzer_module, "generate_insights_from_profile", fake_generate_insights
     )
 
-    result = await analyze_post_import_sessions([_view(1)], model="gpt-test")
+    result = await analyze_post_import_sessions(
+        client.add([_view(1)]), model="gpt-test"
+    )
 
     assert result == []
     assert captured["generator"] is sentinel_generator
@@ -158,12 +261,15 @@ async def test_analyzer_builds_the_optional_model_path(
     assert captured["context"].source_import.import_id == IMPORT_ID
 
 
-async def test_analyzer_returns_no_cards_when_no_pattern_is_eligible() -> None:
+async def test_analyzer_returns_no_cards_when_no_pattern_is_eligible(
+    client: StubClient,
+) -> None:
     """Preserve the pipeline's honest empty result at the plugin boundary."""
-    assert await analyze_post_import_sessions([_view(2)]) == []
+    assert await analyze_post_import_sessions(client.add([_view(2)])) == []
 
 
 async def test_analyzer_forwards_enabled_observer(
+    client: StubClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Pass the initialized observer to insight generation."""
@@ -181,11 +287,14 @@ async def test_analyzer_forwards_enabled_observer(
         analyzer_module, "generate_insights_from_profile", fake_generate_insights
     )
 
-    assert await analyze_post_import_sessions([_view(1)], observe=True) == []
+    assert (
+        await analyze_post_import_sessions(client.add([_view(1)]), observe=True) == []
+    )
     assert captured["observer"] is sentinel_observer
 
 
 async def test_analyzer_generates_when_observer_initialization_fails(
+    client: StubClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Continue generation without telemetry when its setup fails."""
@@ -207,53 +316,59 @@ async def test_analyzer_generates_when_observer_initialization_fails(
         analyzer_module, "generate_insights_from_profile", fake_generate_insights
     )
 
-    assert await analyze_post_import_sessions([_view(1)], observe=True) == []
+    assert (
+        await analyze_post_import_sessions(client.add([_view(1)]), observe=True) == []
+    )
     assert initialization_attempts == 1
     assert captured["observer"] is None
 
 
-async def test_analyzer_rejects_caller_controlled_source_session_count() -> None:
+async def test_analyzer_rejects_caller_controlled_source_session_count(
+    client: StubClient,
+) -> None:
     """Do not let task parameters falsify coverage for a complete import scan."""
     with pytest.raises(task_analyzer.AnalysisError, match="source_session_count"):
         await task_analyzer.call_analyzer(
             "post-import-insights",
             analyze_post_import_sessions,
-            [_view(1, failed_tool=True), _view(2)],
+            client.add([_view(1, failed_tool=True), _view(2)]),
             {"source_session_count": 5},
         )
 
 
-async def test_analyzer_returns_no_cards_for_empty_input() -> None:
+async def test_analyzer_returns_no_cards_for_empty_input(
+    client: StubClient,
+) -> None:
     """An import without eligible sessions completes without findings."""
     assert await analyze_post_import_sessions([]) == []
+    assert not client.entered
 
 
-async def test_analyzer_async_and_sync_iterables_match_list_results() -> None:
+async def test_analyzer_scans_all_ids_regardless_of_order(
+    client: StubClient,
+) -> None:
     views = [_view(number, failed_tool=number == 301) for number in range(1, 302)]
-    expected = await analyze_post_import_sessions(views)
+    expected = await analyze_post_import_sessions(client.add(views))
 
-    async def stream() -> AsyncIterator[SessionView]:
-        for view in reversed(views):
-            yield view
-
-    assert await analyze_post_import_sessions(iter(views)) == expected
-    assert await analyze_post_import_sessions(stream()) == expected
+    assert (
+        await analyze_post_import_sessions(client.add(list(reversed(views))))
+        == expected
+    )
 
 
-async def test_empty_async_input_returns_without_model_initialization(
+async def test_empty_ids_return_without_client_or_model_initialization(
+    client: StubClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def stream() -> AsyncIterator[SessionView]:
-        for _ in range(0):
-            yield _view(1)
-
     def unexpected_model() -> None:
         raise AssertionError("empty input must not initialize a model")
 
     monkeypatch.setattr(
-        "kitaru.insights.openai_generator.OpenAIInsightGenerator", unexpected_model
+        "kitaru_post_import_insights.openai_generator.OpenAIInsightGenerator",
+        unexpected_model,
     )
-    assert await analyze_post_import_sessions(stream(), model="gpt-test") == []
+    monkeypatch.setattr(analyzer_module, "KitaruAPIClient", unexpected_model)
+    assert await analyze_post_import_sessions([], model="gpt-test", observe=True) == []
 
 
 @pytest.mark.parametrize(
@@ -261,7 +376,7 @@ async def test_empty_async_input_returns_without_model_initialization(
     ["agent", "import", "origin", "duplicate", "node_session", "node_id", "node_index"],
 )
 async def test_late_invalid_session_prevents_model_initialization(
-    monkeypatch: pytest.MonkeyPatch, invalid: str
+    client: StubClient, monkeypatch: pytest.MonkeyPatch, invalid: str
 ) -> None:
     late = _view(302, failed_tool=True)
     if invalid == "agent":
@@ -280,10 +395,7 @@ async def test_late_invalid_session_prevents_model_initialization(
         )
         late.nodes.append(second)
 
-    async def stream() -> AsyncIterator[SessionView]:
-        for number in range(1, 302):
-            yield _view(number)
-        yield late
+    ids = client.add([_view(number) for number in range(1, 302)] + [late])
 
     initialized = False
 
@@ -293,23 +405,43 @@ async def test_late_invalid_session_prevents_model_initialization(
         raise AssertionError("invalid input must not initialize a model")
 
     monkeypatch.setattr(
-        "kitaru.insights.openai_generator.OpenAIInsightGenerator", unexpected_model
+        "kitaru_post_import_insights.openai_generator.OpenAIInsightGenerator",
+        unexpected_model,
     )
     with pytest.raises(ValueError):
-        await analyze_post_import_sessions(stream(), model="gpt-test")
+        await analyze_post_import_sessions(ids, model="gpt-test")
     assert not initialized
+    assert client.closed
 
 
-async def test_provider_must_match_across_the_full_stream() -> None:
-    async def stream() -> AsyncIterator[SessionView]:
-        yield _view(1, failed_tool=True)
-        for number in range(2, 302):
-            view = _view(number)
-            if number == 301:
-                view.session.imported_from = "another-provider"
-            yield view
+async def test_fetch_failure_closes_client_before_model_generation(
+    client: StubClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail an incomplete import scan and release the API connection."""
+    ids = client.add([_view(1)])
+    missing_id = uuid.uuid4()
 
-    cards = await analyze_post_import_sessions(stream())
+    def unexpected_model() -> None:
+        raise AssertionError("an incomplete scan must not initialize a model")
+
+    monkeypatch.setattr(
+        "kitaru_post_import_insights.openai_generator.OpenAIInsightGenerator",
+        unexpected_model,
+    )
+    with pytest.raises(KeyError):
+        await analyze_post_import_sessions([*ids, missing_id], model="gpt-test")
+
+    assert client.fetched == [*ids, missing_id]
+    assert client.closed
+
+
+async def test_provider_must_match_across_the_full_stream(
+    client: StubClient,
+) -> None:
+    views = [_view(number, failed_tool=number == 1) for number in range(1, 302)]
+    views[-1].session.imported_from = "another-provider"
+
+    cards = await analyze_post_import_sessions(client.add(views))
     assert cards
     assert all(
         InsightGenerationResult.card_metadata(card).context.source_import.provider
@@ -319,35 +451,43 @@ async def test_provider_must_match_across_the_full_stream() -> None:
 
 
 @pytest.mark.parametrize("provider", ["", "p" * 256, "broken-\ud800-provider"])
-async def test_analyzer_omits_invalid_optional_provider(provider: str) -> None:
+async def test_analyzer_omits_invalid_optional_provider(
+    client: StubClient, provider: str
+) -> None:
     """Do not fail insight generation because an optional source label is invalid."""
     view = _view(1)
     view.session = view.session.model_copy(update={"imported_from": provider})
 
-    insights = await analyze_post_import_sessions([view])
+    insights = await analyze_post_import_sessions(client.add([view]))
 
     assert insights
     metadata = InsightGenerationResult.card_metadata(insights[0])
     assert metadata.context.source_import.provider is None
 
 
-async def test_analyzer_rejects_sessions_from_multiple_agents() -> None:
+async def test_analyzer_rejects_sessions_from_multiple_agents(
+    client: StubClient,
+) -> None:
     """Reject an analyzer task whose sessions do not have one agent identity."""
     with pytest.raises(ValueError, match="context agent"):
-        await analyze_post_import_sessions([_view(1), _view(2, agent_id=uuid.uuid4())])
+        await analyze_post_import_sessions(
+            client.add([_view(1), _view(2, agent_id=uuid.uuid4())])
+        )
 
 
-async def test_analyzer_requires_an_import_identity() -> None:
+async def test_analyzer_requires_an_import_identity(
+    client: StubClient,
+) -> None:
     """Reject imported sessions that cannot be tied back to an import."""
     view = _view(1)
     view.session = view.session.model_copy(update={"import_id": None})
 
     with pytest.raises(ValueError, match="import ID"):
-        await analyze_post_import_sessions([view])
+        await analyze_post_import_sessions(client.add([view]))
 
 
 async def test_task_runner_loads_analyzer_and_writes_cards(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    client: StubClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Exercise plugin loading, async invocation, and the JSON task receipt."""
     views = [_view(number, failed_tool=number == 301) for number in range(301, 0, -1)]
@@ -363,8 +503,8 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
         analyzer_name="post-import-insights",
         params={"agent_name": "returns-agent"},
         plugin=PackagePluginSpec(
-            entrypoint="kitaru.insights.analyzer:analyze_post_import_sessions",
-            requirement="kitaru",
+            entrypoint="kitaru_post_import_insights.analyzer:analyze_post_import_sessions",
+            requirement="kitaru-post-import-insights==0.1.0",
         ),
         agent_id=AGENT_ID,
         import_id=IMPORT_ID,
@@ -415,9 +555,14 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
 
     result_path = tmp_path / "result.json"
     monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
-    client: Any = SimpleNamespace(tasks=Tasks(), sessions=Sessions())
+    task_client: Any = SimpleNamespace(tasks=Tasks(), sessions=Sessions())
 
-    await task_analyzer.run(client, str(task_id))
+    @asynccontextmanager
+    async def plugin_client():
+        yield task_client
+
+    monkeypatch.setattr(analyzer_module, "KitaruAPIClient", plugin_client)
+    await task_analyzer.run(task_client, str(task_id))
 
     cards = [
         InsightInput.model_validate(item)
@@ -446,11 +591,16 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
     )
 
 
-async def test_task_runner_accepts_no_eligible_findings() -> None:
+async def test_task_runner_accepts_no_eligible_findings(
+    client: StubClient,
+) -> None:
     """Allow an honest empty analysis through the plugin contract."""
     assert (
         await task_analyzer.call_analyzer(
-            "post-import-insights", analyze_post_import_sessions, [_view(2)], {}
+            "post-import-insights",
+            analyze_post_import_sessions,
+            client.add([_view(2)]),
+            {},
         )
         == []
     )

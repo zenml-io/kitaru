@@ -15,8 +15,7 @@
 
 import inspect
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable
-from contextlib import aclosing
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +24,6 @@ from kitaru.api_models.v1.insight import InsightInput
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.task import AnalysisTaskDetails, ScriptPluginSpec
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.task.evaluator import SessionView
 from kitaru.task.plugins import PluginLoadError, load_plugin_entrypoint, load_source_ref
 from kitaru.task.task_io import get_required_env, write_task_result
 
@@ -33,7 +31,6 @@ __all__ = [
     "AnalysisError",
     "AnalyzerReturn",
     "InsightInput",
-    "SessionView",
     "call_analyzer",
     "run",
 ]
@@ -51,7 +48,7 @@ AnalyzerReturn = InsightInput | list[InsightInput]
 async def call_analyzer(
     name: str,
     analyzer: Callable[..., AnalyzerReturn | Awaitable[AnalyzerReturn]],
-    sessions: list[SessionView] | AsyncIterable[SessionView],
+    session_ids: list[uuid.UUID],
     params: dict[str, Any],
 ) -> list[InsightInput]:
     """Invoke an analyzer and validate its results.
@@ -59,7 +56,8 @@ async def call_analyzer(
     Args:
         name: Analyzer name, named in error messages.
         analyzer: Analyzer callable, sync or returning an awaitable.
-        sessions: Session views passed to the analyzer.
+        session_ids: Imported session IDs passed to the analyzer. Analyzers
+            fetch any session details they need through the API client.
         params: Parameters passed to the analyzer.
 
     Raises:
@@ -70,7 +68,7 @@ async def call_analyzer(
         Insight inputs.
     """
     try:
-        result = analyzer(sessions, **params)
+        result = analyzer(session_ids, **params)
         if inspect.isawaitable(result):
             result = await result
     except Exception as exc:
@@ -108,18 +106,6 @@ def _resolve_analyzer(
         raise AnalysisError(str(exc)) from exc
 
 
-async def _load_session_views(
-    client: KitaruAPIClient, params: SessionListParams
-) -> AsyncGenerator[SessionView, None]:
-    """Load a full trace only when the analyzer requests its next session."""
-    async for session in client.sessions.iter(params):
-        full = await client.sessions.get_with_nodes(session.id)
-        view = SessionView(session=full.session, nodes=full.nodes)
-        del full
-        yield view
-        del view
-
-
 async def run(client: KitaruAPIClient, task_id: str) -> None:
     """Run the analysis flow: analyze the import's sessions and write the result.
 
@@ -136,9 +122,6 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
     if not isinstance(details, AnalysisTaskDetails):
         raise AnalysisError(f"Task {task_id} is not an analyzer task")
     analyzer = _resolve_analyzer(details)
-    from kitaru.insights.analyzer import analyze_post_import_sessions
-
-    builtin = analyzer is analyze_post_import_sessions
 
     params = SessionListParams(
         filter=FilterCondition(
@@ -146,16 +129,8 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
         ),
         size=1000,
     )
-    analyzer_params = dict(details.params)
-    async with aclosing(_load_session_views(client, params)) as stream:
-        if builtin:
-            results = await call_analyzer(
-                details.analyzer_name, analyzer, stream, analyzer_params
-            )
-        else:
-            # Third-party plugins keep their established list contract.
-            views = [view async for view in stream]
-            results = await call_analyzer(
-                details.analyzer_name, analyzer, views, analyzer_params
-            )
+    session_ids = [session.id async for session in client.sessions.iter(params)]
+    results = await call_analyzer(
+        details.analyzer_name, analyzer, session_ids, details.params
+    )
     write_task_result(results)

@@ -441,7 +441,7 @@ def main() -> int:
                 environment,
             )
             plugin_wheels: list[Path] = []
-            requirements: list[str] = [defaults["kitaru"]]
+            requirements: list[str] = []
             import_modules: list[str] = []
             for project in projects:
                 name, version = _project_metadata(project)
