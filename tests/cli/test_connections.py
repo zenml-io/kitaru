@@ -351,7 +351,7 @@ async def test_create_rejects_malformed_values_before_any_lookup() -> None:
 
 
 async def test_update_sends_only_the_selected_fields() -> None:
-    """Only explicitly selected fields reach the merge request."""
+    """Only explicitly selected fields reach the update request."""
     client = StubConnectionClient(connection_schema=_SCHEMA)
 
     await connections.update_connection(
@@ -366,8 +366,29 @@ async def test_update_sends_only_the_selected_fields() -> None:
     assert connection_id == client.connection.id
     assert set(request.model_dump(exclude_unset=True)) == {"secrets", "default"}
     assert request.secrets is not None
+    assert set(request.secrets) == {"LANGFUSE_SECRET_KEY"}
     assert request.secrets["LANGFUSE_SECRET_KEY"].get_secret_value() == "sk-rotated"
     assert request.default is False
+
+
+async def test_update_set_sends_the_stored_env_with_the_new_key() -> None:
+    """A --set key lands on top of the stored env the request replaces."""
+    client = StubConnectionClient(connection_schema=_SCHEMA)
+
+    await connections.update_connection(
+        client,
+        "langfuse-prod",
+        values=["LANGFUSE_PROJECT=proj"],
+        secret_values=None,
+        default=None,
+    )
+
+    [(_, request)] = client.update_calls
+    assert set(request.model_dump(exclude_unset=True)) == {"env"}
+    assert request.env == {
+        "LANGFUSE_BASE_URL": "https://cloud.langfuse.com",
+        "LANGFUSE_PROJECT": "proj",
+    }
 
 
 async def test_update_requires_at_least_one_field() -> None:

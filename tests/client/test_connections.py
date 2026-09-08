@@ -150,7 +150,7 @@ async def test_iter(api_client: KitaruAPIClient) -> None:
 
 
 async def test_update(api_client: KitaruAPIClient) -> None:
-    """Update a connection, merging env and secrets, through the SDK."""
+    """Update a connection, replacing env and secrets, through the SDK."""
     created = await api_client.connections.create(_create_request())
     updated = await api_client.connections.update(
         created.id,
@@ -160,11 +160,8 @@ async def test_update(api_client: KitaruAPIClient) -> None:
             default=True,
         ),
     )
-    assert updated.env == {
-        "LANGFUSE_BASE_URL": "https://cloud.langfuse.com",
-        "LANGFUSE_PROJECT": "proj",
-    }
-    assert updated.secret_keys == ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"]
+    assert updated.env == {"LANGFUSE_PROJECT": "proj"}
+    assert updated.secret_keys == ["LANGFUSE_SECRET_KEY"]
     assert updated.default is True
 
 

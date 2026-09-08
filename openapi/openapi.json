@@ -2172,7 +2172,7 @@
                 "type": "null"
               }
             ],
-            "description": "Non-secret environment values, merged by key.",
+            "description": "New non-secret environment values.",
             "title": "Env"
           },
           "secrets": {
@@ -2189,7 +2189,7 @@
                 "type": "null"
               }
             ],
-            "description": "Sensitive environment values, merged by key.",
+            "description": "New sensitive environment values.",
             "title": "Secrets"
           }
         },
@@ -16347,7 +16347,7 @@
         ]
       },
       "patch": {
-        "description": "Update a connection, merging env and secrets by key.\n\nClients observe HTTP 200 on success, 404 when no connection has this id,\nand 422 when a key uses the reserved prefix or is set as both an env\nvalue and a secret.\n\nArgs:\n    connection_id: Id of the connection.\n    body: Connection update request.\n    service: Connection service.\n    actor: Caller context.\n\nReturns:\n    Updated connection without secret values.",
+        "description": "Update a connection.\n\nClients observe HTTP 200 on success, 404 when no connection has this id,\nand 422 when a key uses the reserved prefix or is set as both an env\nvalue and a secret.\n\nArgs:\n    connection_id: Id of the connection.\n    body: Connection update request.\n    service: Connection service.\n    actor: Caller context.\n\nReturns:\n    Updated connection without secret values.",
         "operationId": "update_connection_api_v1_connections__connection_id__patch",
         "parameters": [
           {

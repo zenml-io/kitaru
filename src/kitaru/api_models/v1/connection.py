@@ -45,10 +45,10 @@ class ConnectionUpdateRequest(RequestModel):
     """Connection update request."""
 
     env: dict[str, str] | None = Field(
-        default=None, description="Non-secret environment values, merged by key."
+        default=None, description="New non-secret environment values."
     )
     secrets: dict[str, PlainSerializedSecretStr] | None = Field(
-        default=None, description="Sensitive environment values, merged by key."
+        default=None, description="New sensitive environment values."
     )
     default: bool | None = Field(
         default=None,

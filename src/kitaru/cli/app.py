@@ -1962,6 +1962,23 @@ _CONNECTION_VALUE_PARAMETERS = (
     ),
 )
 
+_CONNECTION_UPDATE_VALUE_PARAMETERS = (
+    ParameterSpec(
+        "--set",
+        "KEY=VALUE[]",
+        "option",
+        False,
+        "Non-secret environment value. Keeps the other stored values.",
+    ),
+    ParameterSpec(
+        "--set-secret",
+        "KEY=VALUE[]",
+        "option",
+        False,
+        "Sensitive environment value. Replaces all stored secret values.",
+    ),
+)
+
 
 @_register(
     connection_app,
@@ -2066,10 +2083,10 @@ async def connection_get(connection: str, /) -> CommandResult:
     connection_app,
     _spec(
         ("connection", "update"),
-        "Merge values into an exact connection by key.",
+        "Update values on an exact connection.",
         parameters=(
             _CONNECTION_REFERENCE_PARAMETER,
-            *_CONNECTION_VALUE_PARAMETERS,
+            *_CONNECTION_UPDATE_VALUE_PARAMETERS,
             ParameterSpec(
                 "--default/--no-default",
                 "boolean",
@@ -2080,7 +2097,7 @@ async def connection_get(connection: str, /) -> CommandResult:
         ),
         read_only=False,
         side_effects=("mutates_remote_state",),
-        idempotency="idempotent merge by key",
+        idempotency="idempotent replacement",
         errors=_ASSET_WRITE_ERRORS,
     ),
 )

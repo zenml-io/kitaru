@@ -149,13 +149,13 @@ class Connection(DomainModel):
                     f"Key '{key}' is set as both an env value and a secret"
                 )
 
-    def merge_env(self, env: dict[str, str]) -> None:
-        """Merge env entries into the connection env by key.
+    def update_env(self, env: dict[str, str]) -> None:
+        """Set new env values.
 
         Args:
-            env: Env entries to upsert.
+            env: New env values.
         """
-        self.env = {**self.env, **env}
+        self.env = env
 
     def update_default(self, default: bool) -> None:
         """Set whether the connection is the default of its provider.

@@ -87,7 +87,7 @@ async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
 
 
 async def test_update_persists_across_requests(client: httpx.AsyncClient) -> None:
-    """Persist a merged update across requests."""
+    """Persist a replacing update across requests."""
     created = await _create(client)
     response = await client.patch(
         f"/api/v1/connections/{created['id']}",
@@ -101,11 +101,8 @@ async def test_update_persists_across_requests(client: httpx.AsyncClient) -> Non
     response = await client.get(f"/api/v1/connections/{created['id']}")
     assert response.status_code == 200
     body = response.json()
-    assert body["env"] == {
-        "LANGFUSE_BASE_URL": "https://cloud.langfuse.com",
-        "LANGFUSE_PROJECT": "proj",
-    }
-    assert body["secret_keys"] == ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"]
+    assert body["env"] == {"LANGFUSE_PROJECT": "proj"}
+    assert body["secret_keys"] == ["LANGFUSE_SECRET_KEY"]
     assert body["updated"] > created["updated"]
 
 

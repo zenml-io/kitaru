@@ -169,12 +169,12 @@ class ConnectionService:
         default: bool | None,
         actor: AuthContext,
     ) -> Connection:
-        """Partially update a connection, merging env and secrets by key.
+        """Partially update a connection.
 
         Args:
             connection_id: Id of the connection.
-            env: Env entries to upsert, unchanged when ``None``.
-            secrets: Secret entries to upsert, unchanged when ``None``.
+            env: New env values, unchanged when ``None``.
+            secrets: New secret values, unchanged when ``None``.
             default: New default state, unchanged when ``None``.
             actor: Caller context.
 
@@ -191,9 +191,9 @@ class ConnectionService:
         connection = await self._repository.get(connection_id)
         secret = await self._secrets.get(connection.secret_id)
         if env is not None:
-            connection.merge_env(env)
+            connection.update_env(env)
         if secrets is not None:
-            secret.update_values({**secret.values, **secrets})
+            secret.update_values(secrets)
         if default is not None:
             connection.update_default(default)
         connection.check_secret_keys(secret.values)

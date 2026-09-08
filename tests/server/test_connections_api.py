@@ -289,10 +289,10 @@ async def test_get_connection_not_found(client: httpx.AsyncClient) -> None:
     assert response.json() == {"detail": f"Connection {missing_id} was not found"}
 
 
-async def test_update_connection_merges_env_and_secrets(
+async def test_update_connection_replaces_env_and_secrets(
     client: httpx.AsyncClient,
 ) -> None:
-    """Merge env and secret entries by key rather than replacing them."""
+    """Replace the whole env and secret maps rather than merging by key."""
     created = await _create(client)
     response = await client.patch(
         f"/api/v1/connections/{created['id']}",
@@ -303,11 +303,8 @@ async def test_update_connection_merges_env_and_secrets(
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["env"] == {
-        "LANGFUSE_BASE_URL": "https://cloud.langfuse.com",
-        "LANGFUSE_PROJECT": "proj",
-    }
-    assert body["secret_keys"] == ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"]
+    assert body["env"] == {"LANGFUSE_PROJECT": "proj"}
+    assert body["secret_keys"] == ["LANGFUSE_SECRET_KEY"]
     assert "rotated" not in json.dumps(body)
 
 

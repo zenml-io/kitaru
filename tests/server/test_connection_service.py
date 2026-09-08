@@ -232,29 +232,23 @@ async def test_list_connections(service: ConnectionService) -> None:
     assert [connection.name for connection in connections] == ["second"]
 
 
-async def test_update_connection_merges_env_and_secrets(
+async def test_update_connection_replaces_env_and_secrets(
     service: ConnectionService, secret_repository: FakeSecretRepository
 ) -> None:
-    """Upsert env and secret entries by key instead of replacing them."""
+    """Replace the whole env and secret maps instead of merging by key."""
     created = await service.create_connection(build_command(), actor=ACTOR)
 
     updated = await service.update_connection(
         created.id,
-        env={"LANGFUSE_BASE_URL": "https://eu.langfuse.com", "EXTRA": "1"},
+        env={"EXTRA": "1"},
         secrets={"LANGFUSE_SECRET_KEY": SecretStr("rotated")},
         default=None,
         actor=ACTOR,
     )
 
-    assert updated.env == {
-        "LANGFUSE_BASE_URL": "https://eu.langfuse.com",
-        "EXTRA": "1",
-    }
+    assert updated.env == {"EXTRA": "1"}
     secret = await secret_repository.get(updated.secret_id)
-    assert secret.values == {
-        "LANGFUSE_PUBLIC_KEY": SecretStr("pk"),
-        "LANGFUSE_SECRET_KEY": SecretStr("rotated"),
-    }
+    assert secret.values == {"LANGFUSE_SECRET_KEY": SecretStr("rotated")}
 
 
 async def test_update_connection_rejects_overlapping_key(

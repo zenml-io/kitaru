@@ -240,7 +240,7 @@ async def test_connection_update_requires_at_least_one_field() -> None:
 
 
 async def test_connection_update_rejects_explicit_nulls() -> None:
-    """A merge cannot clear env, secrets, or the default flag with null."""
+    """An update cannot clear env, secrets, or the default flag with null."""
     with pytest.raises(ValueError, match="env cannot be null"):
         ConnectionUpdate(
             operation="update", connection_id=uuid.uuid4(), env=cast(Any, None)

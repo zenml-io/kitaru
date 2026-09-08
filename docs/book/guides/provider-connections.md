@@ -50,7 +50,7 @@ kitaru connection set-default langfuse-prod
 
 A provider has at most one default connection. Setting a new one clears the previous default for that provider in the same request, there's nothing to unset by hand. `kitaru connection update CONNECTION --no-default` clears a connection's default status without setting another.
 
-`kitaru connection list`, `get CONNECTION`, and `update CONNECTION [--set ...] [--set-secret ...]` round out management. An update merges the given keys into the existing `env` and secret values by key, it does not replace either map wholesale. Responses never carry secret values, only a `secret_keys` list naming which keys are set. Deleting a connection also deletes the secret holding its values, so `delete CONNECTION` requires `--force`.
+`kitaru connection list`, `get CONNECTION`, and `update CONNECTION [--set ...] [--set-secret ...]` round out management. An update replaces the whole `env` and secret maps, so `--set` sends the stored `env` with the keys you name applied on top and keeps the other values, while `--set-secret` sends exactly the secret values you name and replaces every stored one. Responses never carry secret values, only a `secret_keys` list naming which keys are set. Deleting a connection also deletes the secret holding its values, so `delete CONNECTION` requires `--force`.
 
 ## Use one on an import
 

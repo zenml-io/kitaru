@@ -48,7 +48,7 @@ class ConnectionCreate(MCPModel):
 
 
 class ConnectionUpdate(MCPModel):
-    """Merge environment values, secret values, or the default flag by key."""
+    """Replace environment values, secret values, or the default flag."""
 
     operation: Literal["update"]
     connection_id: uuid.UUID

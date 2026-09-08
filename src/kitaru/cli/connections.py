@@ -124,6 +124,10 @@ async def update_connection(
     if not fields:
         raise CLIError("invalid_arguments", "Select at least one connection update.")
     connection = await resolve_asset(client.connections, reference, "Connection")
+    # Send the full env because the server replaces the map, while --set names
+    # only the keys to change.
+    if "env" in fields:
+        fields["env"] = {**connection.env, **fields["env"]}
     updated = await client.connections.update(
         connection.id, ConnectionUpdateRequest(**fields)
     )

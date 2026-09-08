@@ -127,7 +127,7 @@ class ConnectionsResource:
     async def update(
         self, connection_id: uuid.UUID, request: ConnectionUpdateRequest
     ) -> ConnectionResponse:
-        """Update a connection, merging env and secrets by key.
+        """Update a connection.
 
         Args:
             connection_id: Id of the connection.

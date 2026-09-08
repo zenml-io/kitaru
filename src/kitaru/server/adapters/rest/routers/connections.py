@@ -137,7 +137,7 @@ async def update_connection(
     service: Annotated[ConnectionService, Depends(get_connection_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> ConnectionResponse:
-    """Update a connection, merging env and secrets by key.
+    """Update a connection.
 
     Clients observe HTTP 200 on success, 404 when no connection has this id,
     and 422 when a key uses the reserved prefix or is set as both an env

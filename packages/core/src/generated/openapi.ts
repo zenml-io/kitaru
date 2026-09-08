@@ -1166,7 +1166,7 @@ export interface paths {
         head?: never;
         /**
          * Update Connection
-         * @description Update a connection, merging env and secrets by key.
+         * @description Update a connection.
          *
          *     Clients observe HTTP 200 on success, 404 when no connection has this id,
          *     and 422 when a key uses the reserved prefix or is set as both an env
@@ -5347,14 +5347,14 @@ export interface components {
             default?: boolean | null;
             /**
              * Env
-             * @description Non-secret environment values, merged by key.
+             * @description New non-secret environment values.
              */
             env?: {
                 [key: string]: string;
             } | null;
             /**
              * Secrets
-             * @description Sensitive environment values, merged by key.
+             * @description New sensitive environment values.
              */
             secrets?: {
                 [key: string]: string;
