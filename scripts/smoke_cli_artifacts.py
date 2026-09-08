@@ -251,6 +251,15 @@ def _smoke_wheel_cli(uv: str, root: Path, wheel: Path) -> None:
     _expect_error_kind("wheel cli worker start", result, "invalid_configuration")
 
 
+def _smoke_wheel_worker_only(uv: str, root: Path, artifact: Path) -> None:
+    """Verify worker imports without other extras supplying dependencies."""
+    python, _, environment = _create_environment(uv, root, artifact, extras="worker")
+    _expect_success(
+        "wheel worker-only imports",
+        _run([python, "-c", _WORKER_IMPORTS], environment=environment, cwd=root),
+    )
+
+
 def _smoke_worker_artifact(uv: str, root: Path, artifact: Path, label: str) -> None:
     """Smoke-test one artifact installed with CLI and worker extras."""
     python, console, environment = _create_environment(
@@ -294,6 +303,7 @@ def main() -> int:
             )
             _smoke_wheel_base(uv, temporary_root / "wheel-base", wheel)
             _smoke_wheel_cli(uv, temporary_root / "wheel-cli", wheel)
+            _smoke_wheel_worker_only(uv, temporary_root / "wheel-worker-only", wheel)
             _smoke_worker_artifact(uv, temporary_root / "wheel-worker", wheel, "wheel")
             _smoke_worker_artifact(uv, temporary_root / "sdist-worker", sdist, "sdist")
     except SmokeFailure as error:

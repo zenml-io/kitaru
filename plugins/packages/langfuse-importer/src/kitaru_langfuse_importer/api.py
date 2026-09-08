@@ -205,15 +205,11 @@ async def _list_traces(
         page += 1
 
 
-async def _list_observations(
-    trace_id: str, since: datetime | None, until: datetime | None
-) -> list[dict[str, Any]]:
+async def _list_observations(trace_id: str) -> list[dict[str, Any]]:
     """List every observation of one trace through the bulk v2 endpoint.
 
     Args:
         trace_id: Langfuse trace id.
-        since: Lower bound of observation start time, or None for no bound.
-        until: Upper bound of observation start time, or None for no bound.
 
     Returns:
         Observation payload dicts, in listing order.
@@ -226,8 +222,6 @@ async def _list_observations(
             partial(
                 api.observations.get_many,
                 trace_id=trace_id,
-                from_start_time=since,
-                to_start_time=until,
                 fields=_OBSERVATION_FIELDS,
                 expand_metadata=_EXPAND_METADATA,
                 limit=_OBSERVATION_LIMIT,
@@ -246,21 +240,18 @@ async def _list_observations(
 
 async def _assemble_trace_payload(
     trace: TraceWithDetails | TraceWithFullDetails,
-    since: datetime | None,
-    until: datetime | None,
 ) -> dict[str, Any]:
     """Assemble one trace row and its observations into a parser payload record.
 
     Args:
         trace: Trace row from listing or a single trace fetch.
-        since: Lower bound of observation start time, or None for no bound.
-        until: Upper bound of observation start time, or None for no bound.
 
     Returns:
         Trace payload dict with a populated observations list.
     """
     payload = trace.model_dump(mode="json", by_alias=True)
-    payload["observations"] = await _list_observations(trace.id, since, until)
+    # The window selects trace starts; children may start outside those bounds.
+    payload["observations"] = await _list_observations(trace.id)
     return payload
 
 
@@ -291,11 +282,8 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     """
     parsed = LangfuseImportQuery.model_validate(query)
 
-    since: datetime | None
-    until: datetime | None
     trace_rows: Sequence[TraceWithDetails | TraceWithFullDetails]
     if parsed.trace_ids is not None:
-        since = until = None
         trace_rows = await gather_bounded(
             (
                 retry_rate_limited(partial(fetch_trace, trace_id), _get_retry_after)
@@ -308,7 +296,7 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         trace_rows = [trace async for trace in _list_traces(since, until)]
 
     payloads = await gather_bounded(
-        (_assemble_trace_payload(trace, since, until) for trace in trace_rows),
+        (_assemble_trace_payload(trace) for trace in trace_rows),
         parsed.concurrency,
     )
     if payloads:

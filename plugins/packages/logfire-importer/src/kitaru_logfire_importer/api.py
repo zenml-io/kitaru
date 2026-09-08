@@ -146,6 +146,8 @@ async def _post_query(
         return response
 
     response = await retry_rate_limited(_post, _get_retry_after)
+    # HTTP success can contain a stream error after zero or more data rows.
+    _rows_from_ndjson(response.content)
     return response.content
 
 
@@ -187,12 +189,18 @@ def _rows_from_ndjson(content: bytes) -> list[dict[str, Any]]:
 
     Returns:
         Rows from the data messages, in encounter order.
+
+    Raises:
+        RuntimeError: The provider reports a query execution error.
     """
     rows: list[dict[str, Any]] = []
     for line in content.splitlines():
         if not line.strip():
             continue
         message = json.loads(line)
+        if message.get("type") == "error":
+            detail = message.get("message") or "Unknown query error"
+            raise RuntimeError(f"Logfire query failed: {detail}")
         if message.get("type") == "data":
             rows.extend(message.get("rows", []))
     return rows

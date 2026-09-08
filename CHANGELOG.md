@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Worker-only installations now include the packaging dependency, and `kitaru importer test` accepts importer objects exposing `parse` and `fetch`.
 - `kitaru doctor` no longer prints "Kitaru is needs attention", and its missing-skills hint points at `kitaru setup`. The one-line installer prints `uvx kitaru ...` for its next steps when the tool directory is not on the current shell's PATH yet, so they work without opening a new terminal.
 - `if_missing` baseline scoring now adopts every evaluation an evaluator call produced instead of only one of them, so a rerun's baseline aggregates no longer lose metrics from an evaluator that returns multiple results.
 

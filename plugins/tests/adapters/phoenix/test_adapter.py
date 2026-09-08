@@ -106,7 +106,6 @@ def test_run_imports_the_phoenix_trace_around_the_function(
     trace_id = format_trace_id(recorded.context.trace_id)
     assert fake_phoenix.requested == [trace_id] * 2
     assert fake_phoenix.project_identifiers == [PROJECT] * 2
-    assert fake_phoenix.limits == [1000] * 2
     assert len(client.sessions.created) == 1
     request = client.sessions.created[0]
     assert request.agent_id is None

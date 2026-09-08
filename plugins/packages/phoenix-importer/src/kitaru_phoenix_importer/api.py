@@ -16,6 +16,7 @@
 import asyncio
 import functools
 import json
+import sys
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -32,7 +33,9 @@ from kitaru.task.importer import gather_bounded, retry_rate_limited
 __all__ = ["fetch", "fetch_spans", "serialize_spans", "wait_for_spans"]
 
 _POLL_INTERVAL = 2.0
-_SPAN_LIMIT = 1000
+# The SDK pages in batches of at most 100, but limit caps the total returned.
+# Use the largest representable list size so its cursor pagination runs to the end.
+_SPAN_LIMIT = sys.maxsize
 
 
 def _parse_retry_after(value: str | None) -> float:
@@ -193,36 +196,23 @@ async def _list_root_trace_ids(
     # get_spans has no ordering parameter, so sort the root spans here
     # before collecting trace ids.
     starts: dict[str, datetime] = {}
-    window_start = since
-    while True:
-        spans = await retry_rate_limited(
-            functools.partial(
-                client.spans.get_spans,
-                project_identifier=project,
-                start_time=window_start,
-                end_time=until,
-                limit=_SPAN_LIMIT,
-            ),
-            _get_retry_after,
+    spans = await retry_rate_limited(
+        functools.partial(
+            client.spans.get_spans,
+            project_identifier=project,
+            start_time=since,
+            end_time=until,
+            limit=_SPAN_LIMIT,
+        ),
+        _get_retry_after,
+    )
+    for span in spans:
+        if span.get("parent_id") is not None:
+            continue
+        trace_id = span["context"]["trace_id"]
+        starts.setdefault(
+            trace_id, _span_start_time(span) or datetime.min.replace(tzinfo=UTC)
         )
-        if not spans:
-            break
-        for span in spans:
-            if span.get("parent_id") is not None:
-                continue
-            trace_id = span["context"]["trace_id"]
-            starts.setdefault(
-                trace_id, _span_start_time(span) or datetime.min.replace(tzinfo=UTC)
-            )
-        if len(spans) < _SPAN_LIMIT:
-            break
-        next_start = max(
-            (start for span in spans if (start := _span_start_time(span))),
-            default=None,
-        )
-        if next_start is None or next_start <= window_start:
-            break
-        window_start = next_start
     return sorted(starts, key=lambda trace_id: (starts[trace_id], trace_id))
 
 
