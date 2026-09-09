@@ -24,3 +24,9 @@ The exact `kitaru==0.25.0+dev` dependency requires the unreleased analyzer contr
 - [Issue tracker](https://github.com/zenml-io/kitaru/issues)
 
 Licensed under Apache-2.0.
+
+## Investigation button labels
+
+New cards persist `cta_label` beside `investigation_prompt` in `metadata["kitaru.insights/v1"]`. Both analyzers use a reviewed finding-type catalog, such as "Copy tool retry prompt" and "Copy session duration prompt", with "Copy investigation prompt" for unknown finding types. Labels describe copying, not running an investigation or fixing a problem; they use `Copy [topic] prompt` and stay within 40 characters. No additional model requests are made.
+
+The field is optional for historical records and accepts nonblank strings up to 40 characters. Consumers should render it as text, fall back to "Copy investigation prompt" when the label is missing or unusable, and copy the existing prompt unchanged. A missing prompt should disable the action. Frontend wiring is separate from this backend contract. Older strict metadata readers reject the new field, so update any independently deployed readers before enabling new writers; retain reader compatibility on rollback.
