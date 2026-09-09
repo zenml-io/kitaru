@@ -27,6 +27,9 @@ from kitaru.api_models.v1.insight import (
 )
 
 INSIGHT_METADATA_KEY = "kitaru.insights/v1"
+DISTRIBUTION_TOP_BIN_SIGNAL = "distribution-highest-occupied-bin"
+MAX_CTA_LABEL_LENGTH = 40
+DEFAULT_CTA_LABEL = "Copy investigation prompt"
 MAX_INSIGHTS = 6
 MAX_EVIDENCE_LOCATORS = 20
 MAX_CONTRIBUTING_SESSIONS = 1000
@@ -178,8 +181,20 @@ class InsightCardMetadata(_InsightGenerationModel):
     investigation_prompt: str = Field(
         min_length=1, max_length=MAX_INVESTIGATION_PROMPT_LENGTH
     )
+    cta_label: str | None = Field(
+        default=None, strict=True, min_length=1, max_length=MAX_CTA_LABEL_LENGTH
+    )
     context: InsightGenerationContext
     generation: GenerationVersions
+
+    @field_validator("cta_label")
+    @classmethod
+    def _validate_cta_label(cls, value: str | None) -> str | None:
+        if value is not None:
+            _require_utf8(value)
+            if not value.strip():
+                raise ValueError("CTA label must not be blank")
+        return value
 
     @model_validator(mode="after")
     def _validate_contributions(self) -> Self:

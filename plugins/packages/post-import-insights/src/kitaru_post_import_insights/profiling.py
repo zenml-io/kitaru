@@ -45,6 +45,7 @@ from kitaru.api_models.v1.session_node import (
 )
 from kitaru.redaction import redact_data
 from kitaru_post_import_insights.models import (
+    DISTRIBUTION_TOP_BIN_SIGNAL,
     MAX_CONTRIBUTING_SESSIONS,
     MAX_EVIDENCE_LOCATORS,
     MAX_INVESTIGATION_PROMPT_LENGTH,
@@ -54,12 +55,14 @@ from kitaru_post_import_insights.models import (
 )
 from kitaru_post_import_insights.profiling_state import (
     CountsStore,
+    HighestValueSessions,
     Histogram,
     LabelCounts,
     SessionReferences,
 )
 
-ANALYSIS_VERSION = "2026-09-08.1"
+ANALYSIS_VERSION = "2026-09-09.1"
+MAX_DISTRIBUTION_EXAMPLES = 5
 MAX_LABEL_LENGTH = 120
 MAX_ROLE_LENGTH = 32
 MAX_SELECTOR_LENGTH = 1_024
@@ -206,7 +209,7 @@ class CandidateFinding(_ProfilingModel):
 class ProfilingResult(_ProfilingModel):
     """Stable candidate envelope produced without a model or evaluations."""
 
-    analysis_version: Literal["2026-09-08.1"] = ANALYSIS_VERSION
+    analysis_version: Literal["2026-09-09.1"] = ANALYSIS_VERSION
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     coverage: Coverage
     candidates: list[CandidateFinding]
@@ -403,6 +406,7 @@ class _DistributionSpec:
     title: str
     description: str
     values: Histogram
+    highest_values: HighestValueSessions
     session_ids: SessionReferences
     sessions_analyzed: int
     unit: str
@@ -426,6 +430,10 @@ class _State:
         default_factory=lambda: Histogram((10, 20, 30, 50))
     )
     durations: Histogram = field(default_factory=lambda: Histogram((5, 15, 30, 60)))
+    highest_tool_counts: HighestValueSessions = field(init=False)
+    highest_model_counts: HighestValueSessions = field(init=False)
+    highest_activity_counts: HighestValueSessions = field(init=False)
+    highest_durations: HighestValueSessions = field(init=False)
     duration_session_ids: SessionReferences = field(init=False)
     models: LabelCounts = field(init=False)
     model_sessions: SessionReferences = field(init=False)
@@ -457,6 +465,15 @@ class _State:
         self.text_inspected_session_ids = SessionReferences(
             self.config.max_contributing_sessions
         )
+        evidence_limit = min(
+            MAX_DISTRIBUTION_EXAMPLES,
+            self.config.max_evidence_per_candidate,
+            self.config.max_contributing_sessions,
+        )
+        self.highest_tool_counts = HighestValueSessions(evidence_limit)
+        self.highest_model_counts = HighestValueSessions(evidence_limit)
+        self.highest_activity_counts = HighestValueSessions(evidence_limit)
+        self.highest_durations = HighestValueSessions(evidence_limit)
         self.models = LabelCounts(self.counts_store, "models")
         self.reset_payload_budget()
 
@@ -871,8 +888,11 @@ def _scan_session(
     state.node_session_ids.add(session_id)
     state.tool_calls += len(calls)
     state.tool_counts.add(len(calls))
+    state.highest_tool_counts.add(session_id, len(calls))
     state.model_counts.add(len(llm_calls))
+    state.highest_model_counts.add(session_id, len(llm_calls))
     state.activity_counts.add(len(nodes))
+    state.highest_activity_counts.add(session_id, len(nodes))
 
     started_at = session.session.started_at
     ended_at = session.session.ended_at
@@ -885,6 +905,7 @@ def _scan_session(
             duration = (ended_at - started_at).total_seconds()
             if duration >= 0:
                 state.durations.add(duration)
+                state.highest_durations.add(session_id, duration)
                 state.duration_session_ids.add(session_id)
                 state.timing_available += 1
 
@@ -1047,7 +1068,10 @@ def _calculate_percent(numerator: int, denominator: int) -> int | float:
 
 
 def _get_contributions(
-    state: _State, session_ids: SessionReferences
+    state: _State,
+    session_ids: SessionReferences,
+    *,
+    reserved_ids: Sequence[uuid.UUID] = (),
 ) -> list[uuid.UUID]:
     """Return a bounded stable contribution set."""
     ordered = list(session_ids)
@@ -1056,7 +1080,14 @@ def _get_contributions(
     )
     if len(session_ids) > state.config.max_contributing_sessions:
         state.contribution_truncated = True
-    return ordered[: state.config.max_contributing_sessions]
+    reserved = set(reserved_ids)
+    remaining = [session_id for session_id in ordered if session_id not in reserved]
+    return sorted(
+        [
+            *reserved,
+            *remaining[: state.config.max_contributing_sessions - len(reserved)],
+        ]
+    )
 
 
 _BRIEFING_CAUTION = (
@@ -1306,9 +1337,10 @@ def _build_distribution_briefing(
             family=family, values=values, unit=unit, quantity=quantity
         )
 
-    tail_index = max(index for index, count in enumerate(values.bins) if count)
+    tail_index = values.get_highest_occupied_bin()
+    assert tail_index is not None
     tail_count = values.bins[tail_index]
-    tail_lower = f"{values.bounds[tail_index - 1]:g}" if tail_index else minimum
+    tail_lower = f"{values.bounds[tail_index - 1]:g}" if tail_index else None
     # Name the bin the way the chart labels it: the last bin is open-ended, a
     # lower occupied bin has an upper bound and empty bins above it.
     if tail_index == len(values.bounds):
@@ -1316,12 +1348,19 @@ def _build_distribution_briefing(
         bin_label = f"{tail_lower} or more {unit}"
     else:
         bin_name, bin_adjective = "highest occupied bin", "highest-bin"
-        bin_label = f"{tail_lower} to {values.bounds[tail_index]:g} {unit}"
+        bin_label = (
+            f"at least {tail_lower} and " if tail_lower is not None else ""
+        ) + f"less than {values.bounds[tail_index]:g} {unit}"
     rest = observations - tail_count
     odd = (
         f"{observations} sessions range from {minimum} to {maximum} {unit}. "
         f"{_pluralize(tail_count, 'session sits', 'sessions sit')} in the "
-        f"{bin_name} ({bin_label}); the other {rest} sit below it."
+        f"{bin_name} ({bin_label})"
+        + (
+            f"; the other {rest} sit below it."
+            if rest
+            else "; all observations share this bin despite their different values."
+        )
     )
     if observations < sessions_analyzed:
         odd += (
@@ -1329,14 +1368,27 @@ def _build_distribution_briefing(
             f"{sessions_analyzed - observations} had no {reading}."
         )
     look_first = (
-        f"Open the {bin_adjective} sessions first and compare them with sessions from "
-        "the middle of the chart. The finding data lists sessions, not bins, so "
-        f"read each session's {reading} to place it."
+        "Open evidence_locators in their listed order: they point to sessions with "
+        f"the highest recorded values in the {bin_name}, ranked by value descending "
+        "and session UUID ascending for ties. Check evidence_scope for available "
+        "versus retained counts and truncation. Other contributing_session_ids "
+        "describe the wider distribution; they are not guaranteed to belong to "
+        "this bin or form a comparison group. "
+        + (
+            "Compare them with sessions from lower occupied bins; read each "
+            f"comparison session's {reading} to place it."
+            if rest
+            else "All observations share one bin; compare their actual recorded values."
+        )
     )
+    interval = f"at least {tail_lower}" if tail_lower is not None else ""
+    if tail_index < len(values.bounds):
+        interval += (" and " if interval else "") + (
+            f"less than {values.bounds[tail_index]:g}"
+        )
     if family == "timing":
         cohort = (
-            f"sessions whose recorded duration is at least {tail_lower} seconds "
-            f"(the {bin_name})."
+            f"sessions whose recorded duration is {interval} seconds (the {bin_name})."
         )
         hypothesis = (
             "Check whether the long sessions spend their time in a few slow nodes, "
@@ -1349,16 +1401,26 @@ def _build_distribution_briefing(
             "session do not rise."
         )
     else:
-        cohort = f"sessions with at least {tail_lower} {unit} (the {bin_name})."
+        cohort = f"sessions with {interval} {unit} (the {bin_name})."
         hypothesis = (
             f"Check whether the {bin_adjective} sessions reach the same outcome as the "
-            f"middle or whether the extra {unit} are repeats and retries. If they are "
-            "repeats, the step that triggers them is the single factor to change "
-            "and replay."
+            f"lower-value sessions or whether the extra {unit} are repeats and "
+            "retries. If they are repeats, the step that triggers them is the "
+            "single factor to change and replay."
         )
         held = (
             f"the {bin_adjective} cohort's {unit} per session fall below {tail_lower} "
             "for most sessions while the failed-session rate does not rise."
+        )
+    if not rest:
+        hypothesis = (
+            f"Check whether sessions with higher {quantity} contain avoidable waits "
+            "or repeated steps. If confirmed, change that one factor and replay "
+            "the cohort against its recorded baseline."
+        )
+        held = (
+            f"the cohort's {quantity} decreases against its recorded baseline while "
+            "the failed-session rate does not rise."
         )
     return _format_briefing(
         odd=odd,
@@ -1783,6 +1845,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 "closer inspection."
             ),
             values=state.tool_counts,
+            highest_values=state.highest_tool_counts,
             session_ids=state.node_session_ids,
             sessions_analyzed=len(state.node_session_ids),
             unit="calls",
@@ -1798,6 +1861,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 "imported sessions."
             ),
             values=state.model_counts,
+            highest_values=state.highest_model_counts,
             session_ids=state.node_session_ids,
             sessions_analyzed=len(state.node_session_ids),
             unit="calls",
@@ -1813,6 +1877,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 "activity as outcome quality."
             ),
             values=state.activity_counts,
+            highest_values=state.highest_activity_counts,
             session_ids=state.node_session_ids,
             sessions_analyzed=len(state.node_session_ids),
             unit="nodes",
@@ -1828,6 +1893,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 "omit uninstrumented work."
             ),
             values=state.durations,
+            highest_values=state.highest_durations,
             session_ids=state.duration_session_ids,
             sessions_analyzed=analyzed_sessions,
             unit="seconds",
@@ -1836,10 +1902,25 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
     for spec in distribution_specs:
         if len(spec.values) < 2:
             continue
-        contributing = _get_contributions(state, spec.session_ids)
+        uniform = spec.values.minimum == spec.values.maximum
+        highest_bin = spec.values.get_highest_occupied_bin()
+        assert highest_bin is not None
+        evidence = (
+            []
+            if uniform
+            else [
+                EvidenceLocator(
+                    session_id=session_id, signal=DISTRIBUTION_TOP_BIN_SIGNAL
+                )
+                for session_id, value in spec.highest_values.get_entries()
+                if spec.values.get_bin_index(value) == highest_bin
+            ]
+        )
+        contributing = _get_contributions(
+            state, spec.session_ids, reserved_ids=[item.session_id for item in evidence]
+        )
         if not contributing:
             continue
-        uniform = spec.values.minimum == spec.values.maximum
         title = (
             f"All recorded observations have {spec.values.minimum:g} {spec.unit}"
             if uniform
@@ -1873,13 +1954,13 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                     sessions_analyzed=spec.sessions_analyzed,
                     affected_sessions=len(spec.session_ids),
                     occurrences=len(spec.values),
-                    evidence_available=len(spec.values),
-                    evidence_retained=0,
+                    evidence_available=spec.values.bins[highest_bin],
+                    evidence_retained=len(evidence),
                     contributing_sessions_available=len(spec.session_ids),
                     contributing_sessions_retained=len(contributing),
                 ),
                 contributing_session_ids=contributing,
-                evidence=[],
+                evidence=evidence,
                 investigation_prompt=_build_distribution_briefing(
                     family=spec.family,
                     values=spec.values,
