@@ -17,7 +17,8 @@ import asyncio
 import functools
 import json
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -28,7 +29,7 @@ from phoenix.client.utils.config import get_env_project_name
 from pydantic import ConfigDict
 
 from kitaru.api_models.v1.imports import ImportQuery
-from kitaru.task.importer import gather_bounded, retry_rate_limited
+from kitaru.task.importer import retry_rate_limited, stream_bounded
 
 __all__ = ["fetch", "fetch_spans", "serialize_spans", "wait_for_spans"]
 
@@ -228,15 +229,30 @@ async def _list_root_trace_ids(
     return sorted(starts, key=lambda trace_id: (starts[trace_id], trace_id))
 
 
-async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    """Fetch one parser payload holding every span matching a query.
+async def _fetch_trace_payload(
+    trace_id: str, project: str, client: AsyncClient
+) -> bytes | None:
+    """Fetch one trace's spans and serialize them into a parser payload.
 
-    Every fetched trace's spans land in a single payload, oldest trace
-    first, so the parser groups them into Kitaru sessions itself instead
-    of seeing one trace at a time. Traces are fetched concurrently, up to
-    the query's concurrency, and merged back into that order. A request
-    that hits the Phoenix rate limit waits out the reported delay and
-    retries instead of failing the fetch.
+    Args:
+        trace_id: Phoenix trace id.
+        project: Phoenix project identifier.
+        client: Phoenix client.
+
+    Returns:
+        Trace payload bytes, or None when the trace has no spans.
+    """
+    spans = await fetch_spans(trace_id, project, client)
+    return serialize_spans(spans, project=project) if spans else None
+
+
+async def fetch(query: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+    """Fetch one parser payload per matching trace, oldest trace first.
+
+    Traces are fetched concurrently, up to the query's concurrency, and
+    yielded back in listing order. A request that hits the Phoenix rate
+    limit waits out the reported delay and retries instead of failing the
+    fetch.
 
     Args:
         query: Fetch query with `project`, `trace_ids`, `since`, and `until`
@@ -246,8 +262,8 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         ValueError: The query is invalid.
 
     Yields:
-        One payload with every fetched trace's spans, oldest first, or
-        nothing when no trace matches.
+        One payload per fetched trace, oldest first, skipping a trace whose
+        spans are empty.
     """
     parsed = PhoenixImportQuery.model_validate(query)
     client = AsyncClient()
@@ -261,10 +277,13 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         since, until = parsed.get_window()
         trace_ids = await _list_root_trace_ids(client, project, since, until)
 
-    span_batches = await gather_bounded(
-        (fetch_spans(trace_id, project, client) for trace_id in trace_ids),
-        parsed.concurrency,
-    )
-    spans = [span for batch in span_batches for span in batch]
-    if spans:
-        yield serialize_spans(spans, project=project)
+    # Close the stream explicitly so an early stop cancels in-flight fetches.
+    async with aclosing(
+        stream_bounded(
+            (_fetch_trace_payload(trace_id, project, client) for trace_id in trace_ids),
+            parsed.concurrency,
+        )
+    ) as payloads:
+        async for payload in payloads:
+            if payload is not None:
+                yield payload

@@ -15,7 +15,8 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from datetime import datetime
 from typing import Any
 
@@ -25,7 +26,9 @@ from langsmith.utils import LangSmithRateLimitError, get_tracer_project
 from pydantic import ConfigDict
 
 from kitaru.api_models.v1.imports import ImportQuery
-from kitaru.task.importer import gather_bounded, retry_rate_limited
+from kitaru.task.importer import gather_bounded, retry_rate_limited, stream_bounded
+
+from .importer import get_default_join_value
 
 __all__ = ["fetch", "fetch_runs", "serialize_runs", "wait_for_runs"]
 
@@ -129,13 +132,13 @@ class LangSmithImportQuery(ImportQuery):
     project_name: str | None = None
 
 
-def _list_root_trace_ids(
+def _list_root_runs(
     client: Client,
     project_name: str | None,
     since: datetime,
     until: datetime,
-) -> list[str]:
-    """List distinct trace ids of root runs started in a time window, oldest first.
+) -> list[tuple[str, str]]:
+    """List root runs started in a time window, oldest first, with their group key.
 
     Args:
         client: LangSmith client.
@@ -144,7 +147,9 @@ def _list_root_trace_ids(
         until: Upper bound of trace end time.
 
     Returns:
-        Distinct trace ids ordered by ascending root run start time.
+        Distinct (trace id, group key) pairs ordered by ascending root run
+        start time. The group key is the parser's default thread or session
+        key read from the root run, the trace id when none resolves.
     """
     # Client.list_runs has no ordering parameter, so sort the root runs
     # here before collecting trace ids.
@@ -157,26 +162,69 @@ def _list_root_trace_ids(
         ),
         key=lambda run: (run.start_time, str(run.trace_id)),
     )
-    trace_ids: list[str] = []
+    listed: list[tuple[str, str]] = []
     seen: set[str] = set()
     for run in runs:
         trace_id = str(run.trace_id)
-        if trace_id not in seen:
-            seen.add(trace_id)
-            trace_ids.append(trace_id)
-    return trace_ids
+        if trace_id in seen:
+            continue
+        seen.add(trace_id)
+        key = get_default_join_value(run.model_dump(mode="json")) or trace_id
+        listed.append((trace_id, key))
+    return listed
 
 
-async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    """Fetch LangSmith traces as one parser payload, oldest trace first.
+async def _fetch_trace_runs(
+    client: Client, trace_id: str, semaphore: asyncio.Semaphore
+) -> list[Run]:
+    """Fetch one trace's runs, bounded by a semaphore shared across traces.
 
-    The parser groups traces into Kitaru sessions by thread or session key,
-    so every fetched trace must reach it in a single payload. Yielding one
-    payload per trace would let the first trace of a thread create the
-    session and leave every later trace of that thread parsing to the same
-    external id, which the importer then drops as a duplicate. Traces are
-    fetched concurrently, up to the query's concurrency, and merged back
-    into that order. A request that hits the LangSmith rate limit waits
+    Args:
+        client: LangSmith client.
+        trace_id: LangSmith trace id.
+        semaphore: Semaphore bounding total in-flight provider requests.
+
+    Returns:
+        Fetched trace runs.
+    """
+    async with semaphore:
+        return await fetch_runs(client, trace_id)
+
+
+async def _fetch_group(
+    client: Client, trace_ids: list[str], semaphore: asyncio.Semaphore
+) -> bytes:
+    """Fetch and serialize the runs of every trace of one thread group.
+
+    Args:
+        client: LangSmith client.
+        trace_ids: Group's trace ids, in listing order.
+        semaphore: Semaphore bounding total in-flight provider requests.
+
+    Returns:
+        Group payload bytes.
+    """
+    run_batches = await asyncio.gather(
+        *(_fetch_trace_runs(client, trace_id, semaphore) for trace_id in trace_ids)
+    )
+    return serialize_runs([run for batch in run_batches for run in batch])
+
+
+async def fetch(query: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+    """Fetch LangSmith traces, yielding one payload per thread group.
+
+    Given exact trace ids, every trace is fetched into one payload, since
+    there is no cheap listing step to group them by first. Given a time
+    window, root runs are listed and grouped by the parser's default thread
+    or session key, and each group is fetched into its own payload, oldest
+    group first. The parser groups traces into one Kitaru session by that
+    same key, so every trace of one thread must still reach it in a single
+    payload. Yielding one payload per trace would let the first trace of a
+    thread create the session and leave every later trace of that thread
+    parsing to the same external id, which the importer then drops as a
+    duplicate. Traces are fetched concurrently, up to the query's
+    concurrency shared across groups, and merged back into listing order
+    within each group. A request that hits the LangSmith rate limit waits
     out a fixed delay and retries instead of failing the fetch.
 
     Args:
@@ -186,26 +234,42 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         ValueError: The query is invalid.
 
     Yields:
-        A single payload with every fetched trace's runs, in fetch order.
-        Nothing when no trace matches the query.
+        One payload per thread group in the time window case, oldest group
+        first, or one payload with every fetched trace's runs in the
+        trace_ids case. Nothing when no trace matches the query.
     """
     parsed = LangSmithImportQuery.model_validate(query)
     client = Client()
 
     if parsed.trace_ids is not None:
-        trace_ids = parsed.trace_ids
-    else:
-        since, until = parsed.get_window()
-        trace_ids = await retry_rate_limited(
-            lambda: asyncio.to_thread(
-                _list_root_trace_ids, client, parsed.project_name, since, until
-            ),
-            _get_retry_after,
+        run_batches = await gather_bounded(
+            (fetch_runs(client, trace_id) for trace_id in parsed.trace_ids),
+            parsed.concurrency,
         )
+        all_runs = [run for batch in run_batches for run in batch]
+        if all_runs:
+            yield serialize_runs(all_runs)
+        return
 
-    run_batches = await gather_bounded(
-        (fetch_runs(client, trace_id) for trace_id in trace_ids), parsed.concurrency
+    since, until = parsed.get_window()
+    listed = await retry_rate_limited(
+        lambda: asyncio.to_thread(
+            _list_root_runs, client, parsed.project_name, since, until
+        ),
+        _get_retry_after,
     )
-    all_runs = [run for batch in run_batches for run in batch]
-    if all_runs:
-        yield serialize_runs(all_runs)
+
+    groups: dict[str, list[str]] = {}
+    for trace_id, key in listed:
+        groups.setdefault(key, []).append(trace_id)
+
+    semaphore = asyncio.Semaphore(parsed.concurrency)
+    group_awaitables = (
+        _fetch_group(client, trace_ids, semaphore) for trace_ids in groups.values()
+    )
+    # Close the stream explicitly so an early stop cancels in-flight fetches.
+    async with aclosing(
+        stream_bounded(group_awaitables, parsed.concurrency)
+    ) as payloads:
+        async for payload in payloads:
+            yield payload

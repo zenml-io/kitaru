@@ -116,7 +116,7 @@ async def test_importer_fetch_matches_api_fetch(
     assert actual == expected
 
 
-async def test_fetch_bounds_concurrency_and_preserves_order(
+async def test_fetch_by_trace_ids_bounds_concurrency_and_preserves_order(
     fake_langsmith_api: FakeLangSmith,
 ) -> None:
     """Fetch at most the configured concurrency of traces at once, oldest first."""
@@ -147,10 +147,53 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
     assert len(payloads) == 1
 
 
+async def test_fetch_time_window_bounds_concurrency_across_groups(
+    fake_langsmith_api: FakeLangSmith,
+) -> None:
+    """Fetch at most the configured concurrency of traces at once, across groups."""
+    trace_ids = [str(uuid.uuid4()) for _ in range(4)]
+    root_runs = [
+        build_run(
+            trace_id, trace_id, start_time=datetime(2026, 7, 24, 10, index, tzinfo=UTC)
+        )
+        for index, trace_id in enumerate(trace_ids)
+    ]
+    # None of the traces carry thread metadata, so each is its own group and
+    # the shared semaphore is the only thing bounding total in-flight fetches.
+    fake_langsmith_api.root_run_listings = [root_runs]
+    fake_langsmith_api.runs_builders = [build_complete_runs] * len(trace_ids)
+    # Delays scramble completion order relative to submission order, so the
+    # merged result proves the concurrency bound restores it rather than
+    # happening to already match it.
+    fake_langsmith_api.fetch_delays = [0.03, 0.01, 0.02, 0.0]
+
+    payloads = await collect_payloads(
+        fetch(
+            {
+                "since": "2026-07-01T00:00:00Z",
+                "until": "2026-08-01T00:00:00Z",
+                "concurrency": 2,
+            }
+        )
+    )
+
+    assert fake_langsmith_api.peak_in_flight == 2
+    assert len(payloads) == len(trace_ids)
+    sessions = [
+        session
+        for payload in payloads
+        for session in parse(payload, {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [session.external_id for session in sessions] == [
+        f"{PROJECT_ID}:{trace_id}" for trace_id in trace_ids
+    ]
+
+
 async def test_fetch_time_window_lists_root_runs_oldest_first_and_dedupes(
     fake_langsmith_api: FakeLangSmith,
 ) -> None:
-    """List root runs oldest first and fetch each distinct trace once."""
+    """List root runs oldest first and yield one payload per group, oldest first."""
     trace_id_1 = str(uuid.uuid4())
     trace_id_2 = str(uuid.uuid4())
     root_run_1 = build_run(
@@ -174,13 +217,18 @@ async def test_fetch_time_window_lists_root_runs_oldest_first_and_dedupes(
         )
     )
 
-    assert len(payloads) == 1
+    # Neither trace carries thread metadata, so each is its own group and
+    # gets its own payload, oldest group first.
+    assert len(payloads) == 2
     # Fetches run concurrently across threads, so dispatch order is not
     # guaranteed, but each distinct trace is still fetched exactly once.
     assert sorted(fake_langsmith_api.requested) == sorted([trace_id_1, trace_id_2])
-    # root_run_2 started earlier than root_run_1, so it is merged first.
+    # root_run_2 started earlier than root_run_1, so its payload is yielded first.
     sessions = [
-        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+        session
+        for payload in payloads
+        for session in parse(payload, {})
+        if isinstance(session, ImportedSession)
     ]
     assert [session.external_id for session in sessions] == [
         f"{PROJECT_ID}:{trace_id_2}",
@@ -192,6 +240,57 @@ async def test_fetch_time_window_lists_root_runs_oldest_first_and_dedupes(
     assert call["is_root"] is True
     assert call["start_time"] == datetime(2026, 7, 1, tzinfo=UTC)
     assert call["filter"] == 'lt(end_time, "2026-08-01T00:00:00+00:00")'
+
+
+async def test_fetch_time_window_yields_one_payload_per_thread(
+    fake_langsmith_api: FakeLangSmith,
+) -> None:
+    """Yield one payload per thread, in listing order, each its own session."""
+    trace_id_1 = str(uuid.uuid4())
+    trace_id_2 = str(uuid.uuid4())
+    thread_1 = "thread-1"
+    thread_2 = "thread-2"
+    root_run_1 = build_run(
+        trace_id_1,
+        trace_id_1,
+        start_time=datetime(2026, 7, 24, 10, tzinfo=UTC),
+        extra={"metadata": {"thread_id": thread_1}},
+    )
+    root_run_2 = build_run(
+        trace_id_2,
+        trace_id_2,
+        start_time=datetime(2026, 7, 24, 11, tzinfo=UTC),
+        extra={"metadata": {"thread_id": thread_2}},
+    )
+    fake_langsmith_api.root_run_listings = [[root_run_1, root_run_2]]
+    # The fetched root runs carry the same thread metadata as their listing
+    # rows, so the parser re-derives the same grouping when each payload is
+    # parsed on its own.
+    builder = _threaded_trace_runs(
+        {trace_id_1: thread_1, trace_id_2: thread_2},
+        {
+            trace_id_1: datetime(2026, 7, 24, 10, tzinfo=UTC),
+            trace_id_2: datetime(2026, 7, 24, 11, tzinfo=UTC),
+        },
+    )
+    fake_langsmith_api.runs_builders = [builder, builder]
+
+    payloads = await collect_payloads(
+        fetch({"since": "2026-07-01T00:00:00Z", "until": "2026-08-01T00:00:00Z"})
+    )
+
+    assert len(payloads) == 2
+    sessions_per_payload = [
+        [
+            session
+            for session in parse(payload, {})
+            if isinstance(session, ImportedSession)
+        ]
+        for payload in payloads
+    ]
+    assert [len(sessions) for sessions in sessions_per_payload] == [1, 1]
+    assert sessions_per_payload[0][0].external_id == f"{PROJECT_ID}:{thread_1}"
+    assert sessions_per_payload[1][0].external_id == f"{PROJECT_ID}:{thread_2}"
 
 
 async def test_fetch_time_window_groups_shared_thread_traces_into_one_session(
@@ -207,15 +306,23 @@ async def test_fetch_time_window_groups_shared_thread_traces_into_one_session(
         trace_id_3, trace_id_3, start_time=datetime(2026, 7, 24, 9, tzinfo=UTC)
     )
     root_run_1 = build_run(
-        trace_id_1, trace_id_1, start_time=datetime(2026, 7, 24, 10, tzinfo=UTC)
+        trace_id_1,
+        trace_id_1,
+        start_time=datetime(2026, 7, 24, 10, tzinfo=UTC),
+        extra={"metadata": {"thread_id": thread_id}},
     )
     root_run_2 = build_run(
-        trace_id_2, trace_id_2, start_time=datetime(2026, 7, 24, 11, tzinfo=UTC)
+        trace_id_2,
+        trace_id_2,
+        start_time=datetime(2026, 7, 24, 11, tzinfo=UTC),
+        extra={"metadata": {"thread_id": thread_id}},
     )
     fake_langsmith_api.root_run_listings = [[root_run_2, root_run_3, root_run_1]]
-    # The fetched root runs carry the same start times as their listing rows,
-    # so the parser's turn ordering, which sorts by started_at, resolves
-    # unambiguously instead of tying on identical default timestamps.
+    # The fetched root runs carry the same start times and thread metadata as
+    # their listing rows, so the parser re-derives the same grouping when the
+    # payload is parsed on its own, and turn ordering, which sorts by
+    # started_at, resolves unambiguously instead of tying on identical
+    # default timestamps.
     builder = _threaded_trace_runs(
         {trace_id_3: None, trace_id_1: thread_id, trace_id_2: thread_id},
         {
@@ -230,34 +337,38 @@ async def test_fetch_time_window_groups_shared_thread_traces_into_one_session(
         fetch({"since": "2026-07-01T00:00:00Z", "until": "2026-08-01T00:00:00Z"})
     )
 
-    assert len(payloads) == 1
+    # trace_3 has no thread metadata and starts earliest, so its solo payload
+    # is yielded first, then the shared thread's payload.
+    assert len(payloads) == 2
     # Fetches run concurrently across threads, so dispatch order is not
     # guaranteed, but each distinct trace is still fetched exactly once.
     assert sorted(fake_langsmith_api.requested) == sorted(
         [trace_id_3, trace_id_1, trace_id_2]
     )
 
-    sessions = [
-        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
-    ]
-    assert len(sessions) == 2
-    shared_session = next(
+    solo_sessions = [
         session
-        for session in sessions
-        if session.external_id == f"{PROJECT_ID}:{thread_id}"
-    )
+        for session in parse(payloads[0], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert len(solo_sessions) == 1
+    solo_session = solo_sessions[0]
+    assert solo_session.external_id == f"{PROJECT_ID}:{trace_id_3}"
+    assert solo_session.inputs["turns"][0]["source_trace_id"] == trace_id_3
+
+    shared_sessions = [
+        session
+        for session in parse(payloads[1], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert len(shared_sessions) == 1
+    shared_session = shared_sessions[0]
+    assert shared_session.external_id == f"{PROJECT_ID}:{thread_id}"
     assert [turn["source_trace_id"] for turn in shared_session.inputs["turns"]] == [
         trace_id_1,
         trace_id_2,
     ]
     assert {node.trace_id for node in shared_session.nodes} == {trace_id_1, trace_id_2}
-
-    solo_session = next(
-        session
-        for session in sessions
-        if session.external_id == f"{PROJECT_ID}:{trace_id_3}"
-    )
-    assert solo_session.inputs["turns"][0]["source_trace_id"] == trace_id_3
 
 
 async def test_fetch_time_window_falls_back_to_the_default_project(

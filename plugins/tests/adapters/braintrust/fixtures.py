@@ -36,7 +36,7 @@ _QUERY_PATTERN = re.compile(
 )
 
 _LIST_QUERY_PATTERN = re.compile(
-    r"select: root_span_id, created"
+    r"select: root_span_id, created, metadata"
     r" \| from: project_logs\('(?P<project_id>[^']+)'\) spans"
     r" \| filter: is_root AND"
     r" \(\(created >= '(?P<since>[^']+)' AND created <= '(?P<until>[^']+)'\)"
@@ -176,13 +176,18 @@ class FakeBraintrust:
 
     def __init__(self) -> None:
         self.rows_builders: list[RowsBuilder] = []
+        # Preferred over rows_builders when a root span id needs a fixed
+        # builder regardless of the order concurrent group fetches reach it.
+        self.rows_builders_by_root_span_id: dict[str, RowsBuilder] = {}
         self.requested: list[str] = []
         self.events: list[str] = []
         self.spans: list[FakeSpan] = []
         self.no_active_logger = False
         self.project_id = "project-1"
-        # Each list page is (root_span_ids, cursor_for_next_page).
-        self.list_pages: list[tuple[list[str], str | None]] = []
+        # Each list page is (root_span_id_entries, cursor_for_next_page). An
+        # entry is a root_span_id, or a (root_span_id, session_id) pair
+        # supplying the metadata.session_id field the listing query returns.
+        self.list_pages: list[tuple[list[str | tuple[str, str]], str | None]] = []
         self.list_queries: list[dict[str, str]] = []
         self.list_cursors_received: list[str | None] = []
         self.fetch_delays: list[float] = []
@@ -217,11 +222,16 @@ class FakeBraintrust:
             self.list_cursors_received.append(list_match["cursor"])
             self.events.append("list")
             assert self.list_pages, "unexpected BTQL list query"
-            root_span_ids, cursor = self.list_pages.pop(0)
-            return _FakeResponse(
-                [{"root_span_id": root_span_id} for root_span_id in root_span_ids],
-                cursor=cursor,
-            )
+            entries, cursor = self.list_pages.pop(0)
+            rows = []
+            for entry in entries:
+                if isinstance(entry, tuple):
+                    root_span_id, session_id = entry
+                    metadata = {"session_id": session_id}
+                else:
+                    root_span_id, metadata = entry, {}
+                rows.append({"root_span_id": root_span_id, "metadata": metadata})
+            return _FakeResponse(rows, cursor=cursor)
         match = _QUERY_PATTERN.fullmatch(json["query"])
         assert match is not None, f"unexpected BTQL query: {json['query']}"
         assert match["project_id"] == self.project_id
@@ -231,8 +241,12 @@ class FakeBraintrust:
             return _FakeResponse([], error=error)
         self.requested.append(match["root_span_id"])
         self.events.append("poll")
-        assert self.rows_builders, "unexpected BTQL poll"
-        return _FakeResponse(self.rows_builders.pop(0)(match["root_span_id"]))
+        root_span_id = match["root_span_id"]
+        builder = self.rows_builders_by_root_span_id.get(root_span_id)
+        if builder is None:
+            assert self.rows_builders, "unexpected BTQL poll"
+            builder = self.rows_builders.pop(0)
+        return _FakeResponse(builder(root_span_id))
 
 
 @pytest.fixture(autouse=True)

@@ -17,7 +17,8 @@ import asyncio
 import functools
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -27,7 +28,9 @@ from pydantic import ConfigDict
 
 from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.env import get_required_env
-from kitaru.task.importer import gather_bounded, retry_rate_limited
+from kitaru.task.importer import gather_bounded, retry_rate_limited, stream_bounded
+
+from .importer import get_session_id
 
 __all__ = ["fetch", "fetch_spans", "serialize_spans", "wait_for_spans"]
 
@@ -146,10 +149,10 @@ async def _query_spans(
     return await _query_rows(client, query)
 
 
-async def _list_root_span_ids(
+async def _list_root_spans(
     client: httpx.AsyncClient, project_id: str, since: datetime, until: datetime
-) -> AsyncIterator[str]:
-    """List root span ids of a project in ascending creation-time order.
+) -> AsyncIterator[dict[str, Any]]:
+    """List root span rows of a project in ascending creation-time order.
 
     Args:
         client: HTTP client.
@@ -158,11 +161,13 @@ async def _list_root_span_ids(
         until: Upper bound of root span start time.
 
     Yields:
-        Root span ids, ordered after collecting every BTQL page.
+        Root span rows with root_span_id and metadata, ordered after
+        collecting every BTQL page.
     """
     since_ts, until_ts = since.timestamp(), until.timestamp()
     query = (
-        f"select: root_span_id, created | from: project_logs('{project_id}') spans"
+        f"select: root_span_id, created, metadata"
+        f" | from: project_logs('{project_id}') spans"
         f" | filter: is_root AND"
         f" ((created >= '{since.isoformat()}' AND created <= '{until.isoformat()}')"
         f" OR (metrics.start >= {since_ts} AND metrics.start <= {until_ts}))"
@@ -173,7 +178,7 @@ async def _list_root_span_ids(
     # Sorting by created on the server suppresses its pagination cursor.
     for row in sorted(rows, key=lambda row: row.get("created") or ""):
         if row.get("root_span_id"):
-            yield str(row["root_span_id"])
+            yield row
 
 
 def _roots_have_ended(rows: list[dict[str, Any]]) -> bool:
@@ -251,15 +256,68 @@ class BraintrustImportQuery(ImportQuery):
     project_id: str
 
 
-async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    """Fetch one parser payload holding every span row matching a query.
+def _group_roots_by_session(
+    roots: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Group listed root span rows by the parser's default session key.
 
-    Every fetched trace's rows land in a single payload, oldest trace
-    first, so the parser groups them into Kitaru sessions itself instead
-    of seeing one trace at a time. Traces are fetched concurrently, up to
-    the query's concurrency, and merged back into that order. A request
-    that hits the Braintrust rate limit waits out the reported delay and
-    retries instead of failing the fetch.
+    Args:
+        roots: Root span rows, in listing order.
+
+    Returns:
+        Root row groups keyed by session id, in first-appearance order.
+    """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for root in roots:
+        key = get_session_id(root) or str(root["root_span_id"])
+        groups.setdefault(key, []).append(root)
+    return groups
+
+
+async def _fetch_group(
+    client: httpx.AsyncClient,
+    project_id: str,
+    roots: list[dict[str, Any]],
+    semaphore: asyncio.Semaphore,
+) -> bytes:
+    """Fetch every trace of one session group and serialize its spans.
+
+    Args:
+        client: HTTP client.
+        project_id: Braintrust project id.
+        roots: Root span rows of the group, in listing order.
+        semaphore: Bound shared across groups on in-flight trace fetches.
+
+    Returns:
+        Trace payload bytes for the group.
+    """
+
+    async def _fetch_one(root_span_id: str) -> list[dict[str, Any]]:
+        async with semaphore:
+            return await fetch_spans(project_id, root_span_id, client)
+
+    row_batches = await asyncio.gather(
+        *(_fetch_one(str(root["root_span_id"])) for root in roots)
+    )
+    return serialize_spans([row for batch in row_batches for row in batch])
+
+
+async def fetch(query: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+    """Fetch one parser payload per Braintrust session matching a query.
+
+    In time-window mode, root spans are listed cheaply, grouped by the
+    same session key the parser resolves by default, and each group's
+    traces are fetched and yielded as one payload, oldest session first.
+    Every trace of one session still lands in a single payload because
+    the parser assigns each fetched trace to a Kitaru session by its
+    session id, and a session split across payloads would import its
+    second trace as a duplicate external id and get it rejected. An
+    explicit trace_ids query has no cheap listing step to group by, so
+    it still fetches every requested trace into one payload. Traces are
+    fetched concurrently, up to the query's concurrency, and merged back
+    into listing order. A request that hits the Braintrust rate limit
+    waits out the reported delay and retries instead of failing the
+    fetch.
 
     Args:
         query: Fetch query.
@@ -268,27 +326,37 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         ValueError: The query is invalid.
 
     Yields:
-        The trace payload bytes, or nothing when no trace matches.
+        Trace payload bytes, one per session group, or nothing when no
+        trace matches.
     """
     parsed = BraintrustImportQuery.model_validate(query)
     async with httpx.AsyncClient() as client:
         if parsed.trace_ids is not None:
-            trace_ids = parsed.trace_ids
-        else:
-            since, until = parsed.get_window()
-            trace_ids = [
-                trace_id
-                async for trace_id in _list_root_span_ids(
-                    client, parsed.project_id, since, until
-                )
-            ]
-        row_batches = await gather_bounded(
-            (
-                fetch_spans(parsed.project_id, trace_id, client)
-                for trace_id in trace_ids
-            ),
-            parsed.concurrency,
+            row_batches = await gather_bounded(
+                (
+                    fetch_spans(parsed.project_id, trace_id, client)
+                    for trace_id in parsed.trace_ids
+                ),
+                parsed.concurrency,
+            )
+            rows = [row for batch in row_batches for row in batch]
+            if rows:
+                yield serialize_spans(rows)
+            return
+        since, until = parsed.get_window()
+        roots = [
+            root
+            async for root in _list_root_spans(client, parsed.project_id, since, until)
+        ]
+        groups = _group_roots_by_session(roots)
+        semaphore = asyncio.Semaphore(parsed.concurrency)
+        group_awaitables = (
+            _fetch_group(client, parsed.project_id, group_roots, semaphore)
+            for group_roots in groups.values()
         )
-    rows = [row for batch in row_batches for row in batch]
-    if rows:
-        yield serialize_spans(rows)
+        # Close the stream explicitly so an early stop cancels in-flight fetches.
+        async with aclosing(
+            stream_bounded(group_awaitables, parsed.concurrency)
+        ) as payloads:
+            async for payload in payloads:
+                yield payload
