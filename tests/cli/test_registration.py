@@ -76,6 +76,7 @@ class StubResource:
         self.version_error: Exception | None = None
         self.parent = StubModel("created")
         self.version = StubModel("version", version=2)
+        self.deleted: list[uuid.UUID] = []
 
     async def iter(self):
         """Yield configured parents."""
@@ -94,6 +95,10 @@ class StubResource:
             if item.id == item_id:
                 return item
         raise AssertionError("unexpected UUID")
+
+    async def delete(self, item_id: uuid.UUID) -> None:
+        """Record one deletion."""
+        self.deleted.append(item_id)
 
     async def iter_versions(self, parent_id: uuid.UUID):
         """Yield configured versions for one parent."""
@@ -369,6 +374,33 @@ def test_cli_agent_entrypoint_is_rejected_before_api_mutation(
     assert payload["error"]["kind"] == "invalid_arguments"
     assert client.agents.created_requests == []
     assert client.agents.version_requests == []
+
+
+def test_cli_agent_delete_requires_force_before_network_access(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Agent deletion is force-gated before exact resolution."""
+    client = StubClient()
+    parent = StubModel("demo")
+    client.agents.items = [parent]
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield client
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+
+    assert app_module.main(["agent", "delete", "demo"]) == 2
+    error = json.loads(capsys.readouterr().err)
+    assert error["command"] == "agent.delete"
+    assert error["error"]["kind"] == "invalid_arguments"
+    assert client.agents.deleted == []
+
+    assert app_module.main(["agent", "delete", str(parent.id), "--force"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "agent.delete"
+    assert payload["item"] == {"id": str(parent.id), "deleted": True}
+    assert client.agents.deleted == [parent.id]
 
 
 def test_page_result_preserves_server_order_and_cursor() -> None:

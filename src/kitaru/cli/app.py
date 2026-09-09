@@ -1399,6 +1399,35 @@ async def agent_get(agent: str, /) -> CommandResult:
 
 
 @_register(
+    agent_app,
+    _spec(
+        ("agent", "delete"),
+        "Soft delete an agent.",
+        parameters=(
+            ParameterSpec(
+                "AGENT", "reference", "argument", True, "Agent UUID or name."
+            ),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def agent_delete(agent: str, /, *, force: bool = False) -> CommandResult:
+    """Soft delete one exact agent."""
+    if not force:
+        raise CLIError("invalid_arguments", "Deleting an agent requires --force.")
+    async with _open_asset_client() as client:
+        item = await registration.resolve_asset(client.agents, agent, "Agent")
+        await client.agents.delete(item.id)
+        return CommandResult(item={"id": str(item.id), "deleted": True})
+
+
+@_register(
     agent_version_app,
     _spec(
         ("agent", "version", "register"),
