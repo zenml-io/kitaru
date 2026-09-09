@@ -27,6 +27,7 @@ from kitaru.api_models.v1.insight import (
 )
 
 INSIGHT_METADATA_KEY = "kitaru.insights/v1"
+DISTRIBUTION_TOP_BIN_SIGNAL = "distribution-highest-occupied-bin"
 MAX_INSIGHTS = 6
 MAX_EVIDENCE_LOCATORS = 20
 MAX_CONTRIBUTING_SESSIONS = 1000

@@ -20,7 +20,7 @@ from itertools import combinations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from kitaru.api_models.v1.insight import InsightInput
+from kitaru.api_models.v1.insight import BinnedInsightData, InsightInput
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from kitaru_post_import_insights.generation import (
@@ -31,6 +31,7 @@ from kitaru_post_import_insights.generation import (
     generate_model_plan,
 )
 from kitaru_post_import_insights.models import (
+    DISTRIBUTION_TOP_BIN_SIGNAL,
     INSIGHT_METADATA_KEY,
     MAX_INVESTIGATION_PROMPT_LENGTH,
     Coverage,
@@ -53,7 +54,7 @@ from kitaru_post_import_insights.profiling import (
     SessionProfiler,
 )
 
-PROMPT_VERSION = "2026-09-08.2"
+PROMPT_VERSION = "2026-09-09.1"
 _MAX_COVERAGE_CAVEATS = 10
 INVESTIGATION_SKILL = "kitaru-investigation"
 _UNTRUSTED_DATA_NOTICE = (
@@ -126,14 +127,42 @@ def _get_bounded_references(
     candidate: CandidateFinding, *, maximum: int
 ) -> tuple[list[uuid.UUID], list[EvidenceLocator]]:
     """Retain stable contribution IDs while preserving every evidence reference."""
-    evidence_ids = {item.session_id for item in candidate.evidence}
+    evidence_ids = dict.fromkeys(item.session_id for item in candidate.evidence)
     ordered = sorted(candidate.contributing_session_ids, key=str)
-    selected = [item for item in ordered if item in evidence_ids]
+    selected = list(evidence_ids)
     selected.extend(item for item in ordered if item not in evidence_ids)
     retained_ids = selected[:maximum]
     retained = set(retained_ids)
     evidence = [item for item in candidate.evidence if item.session_id in retained]
     return retained_ids, evidence
+
+
+def _get_distribution_evidence_scope(
+    candidate: CandidateFinding, evidence: Sequence[EvidenceLocator]
+) -> dict[str, object] | None:
+    """Describe the highlighted subset of the highest occupied chart bin."""
+    if not isinstance(candidate.data, BinnedInsightData) or not any(
+        item.signal == DISTRIBUTION_TOP_BIN_SIGNAL for item in candidate.evidence
+    ):
+        return None
+    bin_index = max(
+        index for index, item in enumerate(candidate.data.bins) if item.count
+    )
+    population = candidate.data.bins[bin_index].count
+    supplied = len(
+        {
+            item.session_id
+            for item in evidence
+            if item.signal == DISTRIBUTION_TOP_BIN_SIGNAL
+        }
+    )
+    return {
+        "kind": "highest_values_in_highest_occupied_bin",
+        "bin_index": bin_index,
+        "bin_session_count": population,
+        "supplied_session_count": supplied,
+        "truncated": supplied < population,
+    }
 
 
 def _build_setup_preamble(server_url: str | None) -> str:
@@ -216,6 +245,9 @@ def _build_investigation_prompt(
         "contributing_session_ids": [str(item) for item in contributing_session_ids],
         "evidence_locators": [item.model_dump(mode="json") for item in evidence],
     }
+    evidence_scope = _get_distribution_evidence_scope(candidate, evidence)
+    if evidence_scope is not None:
+        finding["evidence_scope"] = evidence_scope
     if candidate.caveat is not None:
         finding["check_first"] = candidate.caveat
     finding_data = json.dumps(

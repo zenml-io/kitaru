@@ -33,6 +33,7 @@ from kitaru_post_import_insights.generation import (
     validate_editorial_plan,
 )
 from kitaru_post_import_insights.models import (
+    DISTRIBUTION_TOP_BIN_SIGNAL,
     Coverage,
     EvidenceLocator,
     GenerationMode,
@@ -1343,11 +1344,12 @@ def test_card_copy_may_quote_the_candidate_caveat(
 
 
 @pytest.mark.parametrize("stage", ["analyst", "editor"])
+@pytest.mark.parametrize("signal", ["test", DISTRIBUTION_TOP_BIN_SIGNAL])
 def test_model_projection_preserves_exact_count_with_bounded_references(
-    profiling_result: ProfilingResult, stage: str
+    profiling_result: ProfilingResult, stage: str, signal: str
 ) -> None:
     candidate = profiling_result.candidates[0]
-    session_ids = [uuid.uuid4(), uuid.uuid4()]
+    session_ids = [uuid.UUID(int=2), uuid.UUID(int=1)]
     candidate = candidate.model_copy(
         update={
             "coverage": CandidateCoverage(
@@ -1361,7 +1363,7 @@ def test_model_projection_preserves_exact_count_with_bounded_references(
             ),
             "contributing_session_ids": session_ids,
             "evidence": [
-                EvidenceLocator(session_id=session_id, signal="test")
+                EvidenceLocator(session_id=session_id, signal=signal)
                 for session_id in session_ids
             ],
         }

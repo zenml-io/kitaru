@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from kitaru.api_models.v1.insight import BinnedInsightData
 from kitaru.api_models.v1.session import (
     SessionDetailResponse,
     SessionOrigin,
@@ -37,14 +38,19 @@ from kitaru_post_import_insights.generation import (
     ModelStageResponse,
     generate_deterministic_plan,
 )
-from kitaru_post_import_insights.models import GenerationMode, ProviderReceipt
+from kitaru_post_import_insights.models import (
+    DISTRIBUTION_TOP_BIN_SIGNAL,
+    EvidenceLocator,
+    GenerationMode,
+    ProviderReceipt,
+)
 from kitaru_post_import_insights.pipeline import (
     InsightGenerationConfig,
     InsightResultSizeError,
     generate_insights,
     generate_insights_from_profile,
 )
-from kitaru_post_import_insights.profiling import profile_sessions
+from kitaru_post_import_insights.profiling import ProfilingConfig, profile_sessions
 
 NOW = datetime(2026, 9, 4, tzinfo=UTC)
 OWNER_ID = uuid.UUID("01990000-0000-7000-8000-000000000001")
@@ -122,6 +128,35 @@ def _node(
         tool_name="lookup_order",
         metadata={},
     )
+
+
+def _distribution_sessions(
+    candidate_id: str, values: list[int]
+) -> list[SessionWithNodesResponse]:
+    sessions = []
+    for number, value in enumerate(values, start=1):
+        session = _session(number, status=SessionStatus.COMPLETED)
+        if candidate_id == "recorded-duration-distribution":
+            session.session.ended_at = NOW + timedelta(seconds=value)
+        else:
+            session.nodes = [
+                _node(
+                    session_id=session.session.id,
+                    node_id=uuid.UUID(int=number * 1000 + index),
+                    index=index,
+                ).model_copy(
+                    update={
+                        "node_type": (
+                            NodeType.LLM_CALL
+                            if candidate_id == "model-call-distribution"
+                            else NodeType.TOOL_CALL
+                        )
+                    }
+                )
+                for index in range(value)
+            ]
+        sessions.append(session)
+    return sessions
 
 
 class FailingEditor(InsightModelGenerator):
@@ -265,7 +300,7 @@ async def test_deterministic_result_is_canonical_and_byte_stable() -> None:
             metadata.investigation_prompt
         ) == _context().model_dump(mode="json")
         assert metadata.check_first == candidate.caveat
-        assert metadata.generation.prompt == "2026-09-08.2"
+        assert metadata.generation.prompt == "2026-09-09.1"
         assert finding["card_description"] == insight.description
         assert finding["deterministic_description"] == candidate.fallback_description
         assert finding["facts"] == [
@@ -494,18 +529,18 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
         assert finding["overall_coverage"] == bounded.coverage.model_dump(mode="json")
 
 
-async def test_result_byte_bound_tries_lower_priority_individual_cards(
-    monkeypatch,
-) -> None:
-    sessions = [
-        _session(1, status=SessionStatus.FAILED),
-        _session(2, status=SessionStatus.COMPLETED),
-    ]
+async def test_result_byte_bound_tries_lower_priority_individual_cards() -> None:
+    sessions = _distribution_sessions("recorded-duration-distribution", [1, 61, 62])
     profiling = profile_sessions(sessions)
-    first_candidate = profiling.candidates[0].model_copy(
+    candidate = next(
+        item
+        for item in profiling.candidates
+        if item.id == "recorded-duration-distribution"
+    )
+    first_candidate = candidate.model_copy(
         update={"investigation_prompt": "x" * 10_000}
     )
-    second_candidate = profiling.candidates[0].model_copy(
+    second_candidate = candidate.model_copy(
         update={
             "id": "second-candidate",
             "family": "second-family",
@@ -513,15 +548,24 @@ async def test_result_byte_bound_tries_lower_priority_individual_cards(
             "title": "A second deterministic pattern",
         }
     )
-    profiling = profiling.model_copy(
-        update={"candidates": [first_candidate, second_candidate]}
-    )
-
-    bounded = await generate_insights_from_profile(
-        profiling,
+    config = InsightGenerationConfig(max_contributing_sessions_per_insight=1)
+    single = await generate_insights_from_profile(
+        profiling.model_copy(update={"candidates": [second_candidate]}),
         context=_context(),
-        config=InsightGenerationConfig(max_result_bytes=8_000),
+        config=config,
     )
+    bounded = await generate_insights_from_profile(
+        profiling.model_copy(
+            update={"candidates": [first_candidate, second_candidate]}
+        ),
+        context=_context(),
+        config=config.model_copy(
+            update={
+                "max_result_bytes": len(single.model_dump_json().encode("utf-8")) + 1000
+            }
+        ),
+    )
+    bounded = bounded.model_validate_json(bounded.model_dump_json())
 
     assert [insight.name for insight in bounded.insights] == [second_candidate.id]
     assert any(
@@ -529,6 +573,28 @@ async def test_result_byte_bound_tries_lower_priority_individual_cards(
         for item in bounded.coverage.truncations
     )
     assert "Cards were omitted" in bounded.coverage.caveats[-1]
+    metadata = bounded.card_metadata(bounded.insights[0])
+    expected = single.card_metadata(single.insights[0])
+    assert metadata.contributing_session_ids == [sessions[-1].session.id]
+    assert metadata.evidence == expected.evidence
+    assert [item.session_id for item in metadata.evidence] == [sessions[-1].session.id]
+    finding = _get_finding_data(metadata.investigation_prompt)
+    original = _get_finding_data(expected.investigation_prompt)
+    for key in (
+        "contributing_session_ids",
+        "evidence_locators",
+        "session_id_scope",
+        "evidence_scope",
+    ):
+        assert finding[key] == original[key]
+    assert finding["evidence_scope"] == {
+        "kind": "highest_values_in_highest_occupied_bin",
+        "bin_index": 4,
+        "bin_session_count": 2,
+        "supplied_session_count": 1,
+        "truncated": True,
+    }
+    assert finding["overall_coverage"] == bounded.coverage.model_dump(mode="json")
 
 
 async def test_result_byte_bound_neutralizes_removed_recommendation(
@@ -756,6 +822,104 @@ async def test_reports_bounded_card_contribution_references(monkeypatch) -> None
         }
 
 
+@pytest.mark.parametrize(
+    "candidate_id",
+    [
+        "tool-call-distribution",
+        "model-call-distribution",
+        "total-activity-distribution",
+        "recorded-duration-distribution",
+    ],
+)
+@pytest.mark.parametrize(
+    ("values", "profile_cap", "output_cap"),
+    [
+        ([1, 61, 62, 63, 64, 65, 66, 67], 2, 1),
+        ([1, 61, 62, 63, 64, 65, 66, 67], 5, 1),
+        ([1, 61, 62], 5, 5),
+    ],
+)
+async def test_distribution_evidence_survives_reference_caps_and_roundtrip(
+    candidate_id: str, values: list[int], profile_cap: int, output_cap: int
+) -> None:
+    sessions = _distribution_sessions(candidate_id, values)
+    profiling = profile_sessions(
+        sessions, config=ProfilingConfig(max_contributing_sessions=profile_cap)
+    )
+    candidate = next(item for item in profiling.candidates if item.id == candidate_id)
+    ranked_ids = [item.session.id for item in reversed(sessions[1:])]
+    profile_ids = ranked_ids[:profile_cap]
+    assert [item.session_id for item in candidate.evidence] == profile_ids
+    assert set(profile_ids) <= set(candidate.contributing_session_ids)
+    assert len(candidate.contributing_session_ids) == min(profile_cap, len(sessions))
+    assert candidate.coverage.evidence_available == len(ranked_ids)
+    assert candidate.coverage.evidence_retained == len(profile_ids)
+
+    result = await generate_insights_from_profile(
+        profiling.model_copy(update={"candidates": [candidate]}),
+        context=_context(),
+        config=InsightGenerationConfig(
+            max_contributing_sessions_per_insight=output_cap
+        ),
+    )
+    restored = result.model_validate_json(result.model_dump_json())
+    assert len(restored.insights) == 1
+    metadata = restored.card_metadata(restored.insights[0])
+    finding = _get_finding_data(metadata.investigation_prompt)
+    supplied_ids = ranked_ids[: min(profile_cap, output_cap)]
+    expected_evidence = [
+        EvidenceLocator(session_id=session_id, signal=DISTRIBUTION_TOP_BIN_SIGNAL)
+        for session_id in supplied_ids
+    ]
+    expected_contributors = supplied_ids + (
+        [sessions[0].session.id] if output_cap >= len(sessions) else []
+    )
+    assert metadata.evidence == expected_evidence
+    assert metadata.contributing_session_ids == expected_contributors
+    assert finding["evidence_locators"] == [
+        item.model_dump(mode="json") for item in expected_evidence
+    ]
+    assert finding["contributing_session_ids"] == [
+        str(session_id) for session_id in expected_contributors
+    ]
+    assert isinstance(candidate.data, BinnedInsightData)
+    assert finding["evidence_scope"] == {
+        "kind": "highest_values_in_highest_occupied_bin",
+        "bin_index": len(candidate.data.bins) - 1,
+        "bin_session_count": len(ranked_ids),
+        "supplied_session_count": len(supplied_ids),
+        "truncated": len(supplied_ids) < len(ranked_ids),
+    }
+    assert finding["session_id_scope"] == {
+        "kind": (
+            "full_affected_population"
+            if len(expected_contributors) == len(sessions)
+            else "retained_subset"
+        ),
+        "supplied_session_count": len(expected_contributors),
+        "affected_session_count": len(sessions),
+    }
+
+
+def test_bounded_references_counts_sessions_and_preserves_locator_order() -> None:
+    sessions = [_session(number, status=SessionStatus.FAILED) for number in range(1, 5)]
+    candidate = profile_sessions(sessions).candidates[0]
+    evidence = [
+        EvidenceLocator(
+            session_id=sessions[number].session.id,
+            node_id=uuid.UUID(int=index + 1),
+            signal="tool-error",
+        )
+        for index, number in enumerate([3, 3, 2, 1])
+    ]
+    candidate = candidate.model_copy(update={"evidence": evidence})
+
+    ids, retained = insight_pipeline._get_bounded_references(candidate, maximum=2)
+
+    assert ids == [sessions[3].session.id, sessions[2].session.id]
+    assert retained == evidence[:3]
+
+
 async def test_rejects_sessions_from_another_agent() -> None:
     context = _context().model_copy(update={"agent_id": uuid.uuid4()})
 
@@ -952,22 +1116,25 @@ async def test_full_contribution_prompts_fit_the_length_bound() -> None:
                     "nodes": [
                         _node(
                             session_id=session_id,
-                            node_id=uuid.UUID(int=5000 + number * 10 + index),
+                            node_id=uuid.UUID(int=5000 + number * 100 + index),
                             index=index,
                         )
-                        for index in range(3)
+                        for index in range(3 + number // 30)
                     ]
                     + [
                         _node(
                             session_id=session_id,
-                            node_id=uuid.UUID(int=5000 + number * 10 + 3),
-                            index=3,
+                            node_id=uuid.UUID(int=5000 + number * 100 + index),
+                            index=index,
                         ).model_copy(
                             update={
                                 "node_type": NodeType.LLM_CALL,
                                 "tool_name": None,
                                 "model": "gpt-4o" if number % 2 else "claude-sonnet",
                             }
+                        )
+                        for index in range(
+                            3 + number // 30, 4 + number // 30 + number // 60
                         )
                     ],
                 }
@@ -1001,3 +1168,36 @@ async def test_full_contribution_prompts_fit_the_length_bound() -> None:
             item.dimension != "investigation_prompt_chars"
             for item in result.coverage.truncations
         )
+
+        expected_numbers = {
+            "tool-call-distribution": [300, 270, 271, 272, 273],
+            "model-call-distribution": [300, 240, 241, 242, 243],
+            "total-activity-distribution": [300, 270, 271, 272, 273],
+            "recorded-duration-distribution": [300, 299, 298, 297, 296],
+        }.get(candidate.id)
+        if expected_numbers is not None:
+            expected_ids = [
+                sessions[number - 1].session.id for number in expected_numbers
+            ]
+            assert [item.session_id for item in metadata.evidence] == expected_ids
+            assert metadata.contributing_session_ids[:5] == expected_ids
+            finding = _get_finding_data(metadata.investigation_prompt)
+            assert finding["evidence_locators"] == [
+                EvidenceLocator(
+                    session_id=session_id, signal=DISTRIBUTION_TOP_BIN_SIGNAL
+                ).model_dump(mode="json")
+                for session_id in expected_ids
+            ]
+            bin_index, population = {
+                "tool-call-distribution": (3, 91),
+                "model-call-distribution": (3, 61),
+                "total-activity-distribution": (1, 181),
+                "recorded-duration-distribution": (4, 241),
+            }[candidate.id]
+            assert finding["evidence_scope"] == {
+                "kind": "highest_values_in_highest_occupied_bin",
+                "bin_index": bin_index,
+                "bin_session_count": population,
+                "supplied_session_count": 5,
+                "truncated": True,
+            }

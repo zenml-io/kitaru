@@ -42,6 +42,7 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
     SessionWithNodesResponse,
 )
+from kitaru_post_import_insights.models import DISTRIBUTION_TOP_BIN_SIGNAL
 from kitaru_post_import_insights.profiling import (
     ProfilingConfig,
     ProfilingResult,
@@ -49,6 +50,7 @@ from kitaru_post_import_insights.profiling import (
     profile_sessions,
     sanitize_label,
 )
+from kitaru_post_import_insights.profiling_state import HighestValueSessions, Histogram
 
 NOW = datetime(2026, 9, 4, tzinfo=UTC)
 OWNER_ID = uuid.UUID("01990000-0000-7000-8000-000000000001")
@@ -1886,7 +1888,8 @@ def test_all_failed_outcome_briefing_asks_for_an_external_comparison() -> None:
     [
         (
             "tool-call-distribution",
-            "sessions with at least 6 calls (the highest occupied bin).",
+            "sessions with at least 6 and less than 10 calls "
+            "(the highest occupied bin).",
         ),
         (
             "recorded-duration-distribution",
@@ -1914,8 +1917,8 @@ def test_distribution_briefing_points_at_the_top_bin(
     if candidate_id == "tool-call-distribution":
         assert sections["What is odd"].startswith("4 sessions range from 0 to 7 calls.")
         assert (
-            "1 session sits in the highest occupied bin (6 to 10 calls)"
-            in sections["What is odd"]
+            "1 session sits in the highest occupied bin "
+            "(at least 6 and less than 10 calls)" in sections["What is odd"]
         )
         assert "the other 3 sit below it" in sections["What is odd"]
         assert "had no" not in sections["What is odd"]
@@ -1928,7 +1931,9 @@ def test_distribution_briefing_points_at_the_top_bin(
             in sections["What is odd"]
         )
         assert "had no" not in sections["What is odd"]
-    assert "middle of the chart" in sections["Where to look first"]
+    assert "evidence_locators" in sections["Where to look first"]
+    assert "evidence_scope" in sections["Where to look first"]
+    assert "lower occupied bins" in sections["Where to look first"]
     assert sections["Candidate cohort"] == cohort
 
 
@@ -1981,3 +1986,161 @@ def test_model_mix_briefing_states_label_counts_without_naming_labels() -> None:
     assert "single model override" in sections["One hypothesis to test"]
     assert "gpt-4o" not in candidate.investigation_prompt
     assert "claude-sonnet" not in candidate.investigation_prompt
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_highest_values_are_bounded_ranked_and_filtered_to_final_bin(
+    reverse: bool,
+) -> None:
+    histogram = Histogram((3, 6, 10, 15))
+    highest = HighestValueSessions(5)
+    observations = [(1, 14), (4, 20), (3, 20), (2, 15), (5, 9), (6, 0)]
+    assert histogram.get_highest_occupied_bin() is None
+    for number, value in reversed(observations) if reverse else observations:
+        histogram.add(value)
+        highest.add(_id(number), value)
+        assert len(highest.retained) <= 5
+    assert [
+        session_id
+        for session_id, value in highest.get_entries()
+        if histogram.get_bin_index(value) == histogram.get_highest_occupied_bin()
+    ] == [_id(3), _id(4), _id(2)]
+    assert histogram.get_bin_index(14) == 3
+    assert histogram.get_bin_index(15) == 4
+    highest_bin = histogram.get_highest_occupied_bin()
+    assert highest_bin is not None
+    assert histogram.bins[highest_bin] == 3
+
+
+def test_distribution_evidence_uses_each_metrics_own_maximum() -> None:
+    sessions = []
+    for number, tool_count, model_count, duration in [
+        (1, 16, 0, 1),
+        (2, 0, 6, 2),
+        (3, 14, 4, 3),
+        (4, 0, 0, 70),
+    ]:
+        nodes = [
+            _node(index, session_id=_id(100 + number), node_type=node_type)
+            for index, node_type in enumerate(
+                [NodeType.TOOL_CALL] * tool_count + [NodeType.LLM_CALL] * model_count
+            )
+        ]
+        sessions.append(
+            _session(number, nodes, ended_at=NOW + timedelta(seconds=duration))
+        )
+    config = ProfilingConfig(max_contributing_sessions=1)
+    result = profile_sessions(sessions, config=config)
+    assert result.analysis_version == "2026-09-09.1"
+    assert profile_sessions(reversed(sessions), config=config) == result
+    for candidate_id, number in [
+        ("tool-call-distribution", 1),
+        ("model-call-distribution", 2),
+        ("total-activity-distribution", 3),
+        ("recorded-duration-distribution", 4),
+    ]:
+        candidate = _candidate(result, candidate_id)
+        assert [item.session_id for item in candidate.evidence] == [_id(100 + number)]
+        assert candidate.evidence[0].signal == DISTRIBUTION_TOP_BIN_SIGNAL
+        assert candidate.evidence[0].node_id is None
+        assert candidate.contributing_session_ids == [_id(100 + number)]
+        assert candidate.coverage.contributing_sessions_available == 4
+        assert candidate.coverage.evidence_retained == 1
+
+
+@pytest.mark.parametrize(
+    ("evidence_cap", "contributor_cap", "expected_count"),
+    [(20, 1000, 5), (2, 1000, 2), (20, 3, 3), (1, 1, 1)],
+)
+def test_distribution_evidence_caps_reserve_ranked_sessions(
+    evidence_cap: int, contributor_cap: int, expected_count: int
+) -> None:
+    sessions = [_session(1, ended_at=NOW)] + [
+        _session(number, ended_at=NOW + timedelta(seconds=60 + number // 2))
+        for number in range(2, 12)
+    ]
+    config = ProfilingConfig(
+        max_evidence_per_candidate=evidence_cap,
+        max_contributing_sessions=contributor_cap,
+    )
+    result = profile_sessions(sessions, config=config)
+    candidate = _candidate(result, "recorded-duration-distribution")
+    assert [item.session_id for item in candidate.evidence] == [
+        _id(100 + number) for number in [10, 11, 8, 9, 6][:expected_count]
+    ]
+    assert candidate.coverage.evidence_available == 10
+    assert candidate.coverage.evidence_retained == expected_count
+    assert candidate.coverage.contributing_sessions_available == 11
+    assert candidate.coverage.contributing_sessions_retained == min(contributor_cap, 11)
+    assert set(item.session_id for item in candidate.evidence) <= set(
+        candidate.contributing_session_ids
+    )
+    assert candidate.contributing_session_ids == sorted(
+        candidate.contributing_session_ids
+    )
+    assert profile_sessions(reversed(sessions), config=config) == result
+
+
+def test_ranked_duration_evidence_excludes_ineligible_timing() -> None:
+    sessions = [
+        _session(1, ended_at=NOW + timedelta(seconds=10)),
+        _session(2, ended_at=NOW + timedelta(seconds=60)),
+        _session(3, started_at=None, ended_at=NOW + timedelta(seconds=1000)),
+        _session(4, ended_at=NOW - timedelta(seconds=1000)),
+        _session(5, ended_at=(NOW + timedelta(seconds=1000)).replace(tzinfo=None)),
+        _session(
+            6,
+            started_at=NOW.replace(tzinfo=None),
+            ended_at=(NOW + timedelta(seconds=65)).replace(tzinfo=None),
+        ),
+    ]
+    candidate = _candidate(profile_sessions(sessions), "recorded-duration-distribution")
+    assert [item.session_id for item in candidate.evidence] == [_id(106), _id(102)]
+    assert candidate.coverage.occurrences == 3
+    assert candidate.coverage.evidence_available == 2
+    assert candidate.contributing_session_ids == [_id(101), _id(102), _id(106)]
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "cohort"),
+    [
+        (0, 2, "less than 5 seconds"),
+        (5, 14, "at least 5 and less than 15 seconds"),
+        (60, 70, "at least 60 seconds"),
+    ],
+)
+def test_nonuniform_single_bin_briefing_compares_actual_values(
+    low: int, high: int, cohort: str
+) -> None:
+    candidate = _candidate(
+        profile_sessions(
+            [
+                _session(1, ended_at=NOW + timedelta(seconds=low)),
+                _session(2, ended_at=NOW + timedelta(seconds=high)),
+            ]
+        ),
+        "recorded-duration-distribution",
+    )
+    sections = _briefing_sections(candidate.investigation_prompt)
+    assert cohort in sections["Candidate cohort"]
+    assert "all observations share this bin" in sections["What is odd"]
+    assert "middle" not in candidate.investigation_prompt
+    assert "below" not in sections["The hypothesis held if"]
+    assert "recorded baseline" in sections["The hypothesis held if"]
+    assert [item.session_id for item in candidate.evidence] == [_id(102), _id(101)]
+
+
+def test_uniform_distribution_retains_baseline_without_ranked_evidence() -> None:
+    candidate = _candidate(
+        profile_sessions(
+            [
+                _session(1, ended_at=NOW),
+                _session(2, ended_at=NOW),
+            ]
+        ),
+        "recorded-duration-distribution",
+    )
+    assert candidate.evidence == []
+    assert candidate.coverage.evidence_available == 2
+    assert "evidence_scope" not in candidate.investigation_prompt
+    assert "baseline" in candidate.investigation_prompt

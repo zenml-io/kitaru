@@ -158,6 +158,26 @@ class SessionReferences:
 
 
 @dataclass
+class HighestValueSessions:
+    """Retain bounded session values, descending by value then ascending by ID."""
+
+    limit: int
+    retained: list[tuple[float, uuid.UUID]] = field(default_factory=list)
+
+    def add(self, session_id: uuid.UUID, value: float) -> None:
+        """Record one eligible observation per session."""
+        insort(self.retained, (-value, session_id))
+        del self.retained[self.limit :]
+
+    def get_entries(self) -> list[tuple[uuid.UUID, float]]:
+        """Return session IDs and values in retained rank order."""
+        return [
+            (session_id, -negative_value)
+            for negative_value, session_id in self.retained
+        ]
+
+
+@dataclass
 class Histogram:
     """Count observations in fixed bins without retaining individual values."""
 
@@ -176,7 +196,18 @@ class Histogram:
         self.count += 1
         self.minimum = min(self.minimum, value)
         self.maximum = max(self.maximum, value)
-        self.bins[bisect_right(self.bounds, value)] += 1
+        self.bins[self.get_bin_index(value)] += 1
+
+    def get_bin_index(self, value: float) -> int:
+        """Locate a value using inclusive lower and exclusive upper bounds."""
+        return bisect_right(self.bounds, value)
+
+    def get_highest_occupied_bin(self) -> int | None:
+        """Return the highest occupied bin index, or None for no observations."""
+        return next(
+            (index for index in reversed(range(len(self.bins))) if self.bins[index]),
+            None,
+        )
 
     def __len__(self) -> int:
         """Return the total number of observations."""
