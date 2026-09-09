@@ -2214,8 +2214,9 @@ export interface paths {
          * @description Run analyzers over the sessions of an import, as one job.
          *
          *     Clients observe HTTP 201 on success, 404 when the import, an analyzer,
-         *     a version, or a connection does not exist, 409 when the import has no
-         *     completed or failed session, and 422 when an analyzer version repeats.
+         *     a version, or a connection does not exist, and 422 when an analyzer
+         *     version repeats or its minimum session count is invalid. Below the
+         *     minimum, the job records a skipped analysis without launching a worker.
          *
          *     Args:
          *         import_id: Id of the import.
@@ -4418,19 +4419,24 @@ export interface components {
             analyzer: string;
             /**
              * Connection Id
-             * @description Connection supplying provider credentials, an omitted value resolves to the provider's default.
+             * @description Credential connection; defaults to the provider's default.
              */
             connection_id?: string | null;
             /**
+             * Min Sessions
+             * @description Session minimum (built-in insights: 5; others: 1).
+             */
+            min_sessions?: number | null;
+            /**
              * Params
-             * @description Parameters passed to the analyzer.
+             * @description Plugin arguments.
              */
             params?: {
                 [key: string]: unknown;
             };
             /**
              * Version
-             * @description Analyzer version, an omitted value resolves to latest.
+             * @description Analyzer version; defaults to latest.
              */
             version?: number | null;
         };

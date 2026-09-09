@@ -113,10 +113,7 @@ class TaskResponse(TimestampedResponseModel):
     ended_at: datetime | None = Field(default=None, description="Time execution ended.")
     error: str | None = Field(default=None, description="Error from a failed task.")
     result: JsonValue = Field(
-        description=(
-            "Result or diagnostics; skipped analysis: status, reason, "
-            "eligible_sessions, min_sessions."
-        )
+        description="Task result, diagnostic output on a non-completed task."
     )
 
 

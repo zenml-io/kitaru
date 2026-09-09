@@ -9967,7 +9967,7 @@
             "title": "Plugin Version Id"
           },
           "result": {
-            "description": "Result or diagnostics; skipped analysis: status, reason, eligible_sessions, min_sessions.",
+            "description": "Task result, diagnostic output on a non-completed task.",
             "title": "Result"
           },
           "started_at": {
