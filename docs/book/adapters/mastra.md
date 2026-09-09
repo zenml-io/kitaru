@@ -1,5 +1,5 @@
 ---
-description: Record and replay non-streaming Mastra 1.51 agent runs with the Kitaru TypeScript adapter
+description: Record and replay non-streaming Mastra agent runs with the Kitaru TypeScript adapter
 icon: robot
 ---
 
@@ -8,7 +8,7 @@ icon: robot
 The Kitaru Mastra adapter wraps an existing Mastra `Agent` and records each non-streaming `generate()` call as a Kitaru [session](../concepts/agents-and-sessions.md). Mastra still runs the agent and Kitaru returns the native Mastra result unchanged.
 
 {% hint style="warning" %}
-`@zenml-io/kitaru-mastra` 0.1.0 is the initial stable package release for Node `>=22.22.0 <23` and `@mastra/core >=1.51.0 <1.52.0`. It supports non-streaming `Agent.generate()` only.
+`@zenml-io/kitaru-mastra` supports Node `>=22.22.0 <23` and `@mastra/core >=1.51.0 <1.65.0`. It supports non-streaming `Agent.generate()` only.
 {% endhint %}
 
 ## Install
@@ -16,13 +16,13 @@ The Kitaru Mastra adapter wraps an existing Mastra `Agent` and records each non-
 {% tabs %}
 {% tab title="pnpm" %}
 ```bash
-pnpm add @zenml-io/kitaru-mastra @mastra/core@1.51.0
+pnpm add @zenml-io/kitaru-mastra @mastra/core@1.64.0
 ```
 {% endtab %}
 
 {% tab title="npm" %}
 ```bash
-npm install @zenml-io/kitaru-mastra @mastra/core@1.51.0
+npm install @zenml-io/kitaru-mastra @mastra/core@1.64.0
 ```
 {% endtab %}
 {% endtabs %}
@@ -143,7 +143,20 @@ const result = await recordedAgent.generate(messages, {
 console.log(result.object);
 ```
 
-`structuredOutput.model` is rejected before execution. Mastra 1.51 implements that option with a second internal model call which is not exposed through the parent agent's public callbacks, so Kitaru cannot record it completely.
+A separate structuring model can be supplied in the per-run options:
+
+```ts
+const result = await recordedAgent.generate(messages, {
+  structuredOutput: {
+    schema: supportDecisionSchema,
+    model: "openai/gpt-5-nano",
+  },
+});
+```
+
+Kitaru records each secondary provider attempt as a separate model node with its own model identity, bounded input and output, usage, and failure status. Mastra still validates the schema and returns its native `result.object`. A successful provider call can be followed by a schema validation failure, in which case the model node contains the returned text and the run is marked failed.
+
+Replay model and model-setting overrides affect the parent agent only. The secondary model stays configured in the entrypoint and executes again against the parent's new output. Agent-default secondary models, `useAgent: true`, and `errorStrategy: "warn"` or `"fallback"` remain unsupported and are rejected before execution. Move a default secondary model into the per-run options and use the default strict error strategy.
 
 ## Worker setup
 
@@ -153,13 +166,13 @@ The same entrypoint records a baseline session and executes replay jobs. Do not 
 
 ## Supported boundary
 
-Version 0.1.0 supports:
+The adapter supports:
 
 - Non-streaming `Agent.generate()` calls.
 - Local function tools, including function-valued tools resolved from the run's `requestContext`.
 - Per-run model, system-instruction, model-setting, and input overrides.
 - Passthrough, static, and same-adapter history tool policies.
-- Schema-only structured output.
+- Schema-only structured output and per-run secondary structuring models with strict validation.
 
 It does not support streaming, workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, `prepareStep`, input processors, LLM tool policy, or TypeScript evaluators. `prepareStep` and input processors are rejected during replay because they can replace the model, prompt, or tools after policy preflight.
 

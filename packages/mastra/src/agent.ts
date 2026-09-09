@@ -1,4 +1,6 @@
 import { createRequire } from "node:module";
+import type { Agent } from "@mastra/core/agent";
+import type { MastraModelConfig } from "@mastra/core/llm";
 import { KitaruClient } from "@zenml-io/kitaru";
 import {
   boundedRecorderJson,
@@ -21,6 +23,7 @@ import {
   stripLiveMemoryOptions,
 } from "./replay-guards.js";
 import { type RecordedStep, recordStep } from "./step-recorder.js";
+import { prepareStructuredOutputModel } from "./structured-output-model.js";
 import { createToolHooks } from "./tool-policies.js";
 import type {
   GenerateCapable,
@@ -111,9 +114,46 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
     callerOptions: RuntimeGenerateOptions = {},
   ): Promise<unknown> {
     const startedAt = new Date().toISOString();
-    if (structuredOutputUsesModel(callerOptions)) {
+    const defaults =
+      "getDefaultOptions" in this.#agent &&
+      typeof this.#agent.getDefaultOptions === "function"
+        ? ((await this.#agent.getDefaultOptions({
+            requestContext: callerOptions.requestContext,
+          })) as RuntimeGenerateOptions)
+        : {};
+    if (structuredOutputUsesModel(defaults)) {
       throw new TypeError(
-        "Kitaru cannot record Mastra structuredOutput.model because Mastra does not expose the internal model call to adapter instrumentation",
+        "Kitaru cannot record agent-default structuredOutput.model. Move the secondary model configuration to the per-run generate options.",
+      );
+    }
+    const hasSecondaryModel = structuredOutputUsesModel(callerOptions);
+    if (
+      hasSecondaryModel &&
+      (!("getModel" in this.#agent) ||
+        typeof this.#agent.getModel !== "function")
+    ) {
+      throw new TypeError(
+        "Kitaru structuredOutput.model requires an agent with the public getModel() method",
+      );
+    }
+    const structuredOutput = {
+      ...(isRecord(defaults.structuredOutput) ? defaults.structuredOutput : {}),
+      ...(isRecord(callerOptions.structuredOutput)
+        ? Object.fromEntries(
+            Object.entries(callerOptions.structuredOutput).filter(
+              ([, value]) => value !== undefined,
+            ),
+          )
+        : {}),
+    };
+    if (
+      hasSecondaryModel &&
+      (structuredOutput.useAgent === true ||
+        (structuredOutput.errorStrategy !== undefined &&
+          structuredOutput.errorStrategy !== "strict"))
+    ) {
+      throw new TypeError(
+        "Kitaru secondary structured output requires useAgent: false and errorStrategy: strict. Conversation-aware structuring and suppressed validation failures are unsupported.",
       );
     }
     const requestedModelId =
@@ -124,13 +164,6 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       client: this.#client,
       requestedModelId,
     });
-    const defaults =
-      "getDefaultOptions" in this.#agent &&
-      typeof this.#agent.getDefaultOptions === "function"
-        ? ((await this.#agent.getDefaultOptions({
-            requestContext: callerOptions.requestContext,
-          })) as RuntimeGenerateOptions)
-        : {};
     const needsContext =
       hasMemoryOptions(callerOptions) || hasMemoryOptions(defaults);
     const contextMessages = restoreConversationContext(replay.effectiveInput);
@@ -245,6 +278,28 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       return recorderPromise;
     };
     const captureContext = needsContext && !replay.spec;
+    let secondaryFailure: Error | undefined;
+    if (hasSecondaryModel) {
+      const getModel = (
+        this.#agent as unknown as Pick<Agent, "getModel">
+      ).getModel.bind(this.#agent);
+      effectiveOptions.structuredOutput = {
+        ...structuredOutput,
+        model: await prepareStructuredOutputModel({
+          modelConfig: structuredOutput.model as MastraModelConfig,
+          resolveModel: (modelConfig) =>
+            getModel({
+              modelConfig,
+              requestContext: callerOptions.requestContext,
+            }),
+          getState: async () => (await initializeRecorder()).state,
+          costCalculator: this.#options.costCalculator,
+          onAttemptFinish: (error) => {
+            secondaryFailure = error;
+          },
+        }),
+      };
+    }
     if (captureContext) {
       const configuredProcessors =
         callerOptions.inputProcessors ??
@@ -336,11 +391,16 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
         await activeRecorder.fail(new Error(tripwire));
         return result;
       }
+      if (secondaryFailure !== undefined) {
+        await activeRecorder.fail(secondaryFailure);
+        return result;
+      }
       await activeRecorder.complete(
         boundedRecorderJson(
           runResultSummary(result, {
             structuredOutputField:
-              effectiveOptions.structuredOutput === undefined
+              (effectiveOptions.structuredOutput ??
+                defaults.structuredOutput) === undefined
                 ? undefined
                 : "object",
           }),
