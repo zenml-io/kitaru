@@ -548,26 +548,41 @@ def _run_id(record: dict[str, Any]) -> str:
     return str(value)
 
 
-def _source_instance(record: dict[str, Any], params: dict[str, Any]) -> str:
-    """Resolve the LangSmith project identity used for deduplication."""
-    selected = params.get("source_instance")
-    if selected in (None, ""):
-        selected = params.get("project_name")
-    if selected not in (None, ""):
-        return str(selected)
-    value = (
-        record.get("session_id")
-        or record.get("project_id")
-        or record.get("session_name")
-        or record.get("project_name")
-    )
-    if value in (None, ""):
+def _normalize_identity(value: Any, field: str) -> str | None:
+    """Validate and trim a project identity without coercing other types."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise InvalidImport(f"{field} must be a string")
+    return value.strip() or None
+
+
+def _get_project_identities(records: list[dict[str, Any]]) -> set[str]:
+    """Prefer embedded project IDs over names, validating both kinds."""
+    project_ids: set[str] = set()
+    project_names: set[str] = set()
+    for record in records:
+        for field in ("session_id", "project_id"):
+            if identity := _normalize_identity(record.get(field), field):
+                project_ids.add(identity)
+        for field in ("session_name", "project_name"):
+            if identity := _normalize_identity(record.get(field), field):
+                project_names.add(identity)
+    return project_ids or project_names
+
+
+def _get_source_instance(projects: set[str], params: dict[str, Any]) -> str:
+    """Resolve explicit identity, its provider alias, then embedded identity."""
+    selected = _normalize_identity(params.get("source_instance"), "source_instance")
+    alias = _normalize_identity(params.get("project_name"), "project_name")
+    source = selected or alias or next(iter(projects), None)
+    if source is None:
         raise InvalidImport(
             "LangSmith export has no project identity; provide source_instance "
             "or project_name in import params, for example "
             '--params \'{"source_instance":"my-project"}\'.'
         )
-    return str(value)
+    return source
 
 
 def _join_value(
@@ -838,12 +853,12 @@ class LangSmithRunImporter:
                         f"Trace '{trace_id}' contains duplicate run ids"
                     )
                 roots = self._get_roots(rows, trace_id)
-                source_instances = {_source_instance(row, params) for row in rows}
-                if len(source_instances) != 1:
+                source_instances = _get_project_identities(rows)
+                if len(source_instances) > 1:
                     raise InvalidImport(
                         f"Trace '{trace_id}' contains conflicting project identities"
                     )
-                source_instance = next(iter(source_instances))
+                source_instance = _get_source_instance(source_instances, params)
                 join_values = {_join_value(row, params, trace_id) for row in roots}
                 values = {value for value, _, _ in join_values}
                 if len(values) != 1:
@@ -870,6 +885,13 @@ class LangSmithRunImporter:
         # grouping traces, so ingestion follows payload order.
         for key, traces in grouped.items():
             try:
+                projects = _get_project_identities(
+                    [row for _, rows in traces for row in rows]
+                )
+                if len(projects) > 1:
+                    raise InvalidImport(
+                        f"Session '{key[1]}' contains conflicting project identities"
+                    )
                 session = self._parse_session(
                     key[0],
                     key[1],

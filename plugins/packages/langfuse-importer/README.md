@@ -49,3 +49,5 @@ The adapter runs the function inside a Langfuse trace, waits for Langfuse to fin
 - [Issue tracker](https://github.com/zenml-io/kitaru/issues)
 
 Licensed under Apache-2.0.
+
+Project identity values must be strings. Leading and trailing whitespace is removed; null, empty, and whitespace-only values are absent. Invalid identity types and conflicting embedded projects are rejected even when an explicit parameter would override them. API query fields select what to fetch; import params select the identity used by the parser. File and API imports use the same identity rules.

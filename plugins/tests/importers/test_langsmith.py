@@ -608,3 +608,59 @@ def test_valid_unicode_survives() -> None:
     assert result[0].nodes[0].outputs == "你好 🌍"
     assert result[0].nodes[0].model == "模型 🌍"
     result[0].model_dump_json()
+
+
+@pytest.mark.parametrize("same_trace", [False, True])
+def test_override_does_not_hide_embedded_project_conflicts(same_trace: bool) -> None:
+    """Reject conflicting embedded projects within a trace or grouped session."""
+    content = jsonl(
+        run("root-a", "trace-a", project_id="first"),
+        run("root-b", "trace-a" if same_trace else "trace-b", project_id="second"),
+    )
+    result = list(parse(content, {"source_instance": "explicit"}))
+    assert len(result) == 1
+    assert isinstance(result[0], ImportFailure)
+    assert "conflicting project identities" in result[0].error
+
+
+def test_embedded_project_id_takes_priority_over_name() -> None:
+    """A record can contain both a project ID and its different display name."""
+    [session] = sessions(jsonl(run("root", "trace", session_name="display-name")))
+    assert session.external_id == "project-1:thread-1"
+
+
+def test_project_on_one_run_supplies_identity_for_trace() -> None:
+    """A child without project identity inherits the trace's embedded project."""
+    [session] = sessions(
+        jsonl(
+            run("root", "trace"),
+            run("child", "trace", parent_run_id="root", project_id=None),
+        )
+    )
+    assert session.external_id == "project-1:thread-1"
+
+
+def test_embedded_project_id_aliases_cannot_conflict_in_one_run() -> None:
+    """Different values for project ID aliases are conflicting embedded identity."""
+    record = run("root", "trace")
+    record["project_id"] = "other-project"
+    [failure] = list(parse(jsonl(record), {"source_instance": "explicit"}))
+    assert isinstance(failure, ImportFailure)
+    assert "conflicting project identities" in failure.error
+
+
+def test_project_id_on_one_run_takes_priority_over_child_project_name() -> None:
+    """Do not compare a project's display name with its ID across related runs."""
+    [session] = sessions(
+        jsonl(
+            run("root", "trace"),
+            run(
+                "child",
+                "trace",
+                parent_run_id="root",
+                project_id=None,
+                project_name="display-name",
+            ),
+        )
+    )
+    assert session.external_id == "project-1:thread-1"

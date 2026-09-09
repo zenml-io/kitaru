@@ -26,7 +26,6 @@ from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any
 
 from pydantic_core import PydanticSerializationError
@@ -591,26 +590,36 @@ def _join_value(record: dict[str, Any], params: dict[str, Any], trace_id: str) -
     return str(value)
 
 
-def _source_instance(record: dict[str, Any], params: dict[str, Any]) -> str:
-    """Resolve project identity with a stable filename fallback."""
-    project_id = record.get("project_id")
-    if project_id not in (None, ""):
-        return str(project_id)
-    selected_source = params.get("source_instance")
-    if selected_source in (None, ""):
-        selected_source = params.get("project_id")
-    if selected_source not in (None, ""):
-        return str(selected_source)
-    filename = params.get("filename")
-    if isinstance(filename, str):
-        stem = Path(filename).stem.strip()
-        if stem:
-            return stem
-    raise InvalidImport(
-        "Braintrust export has no project id or usable filename; provide "
-        "source_instance or project_id in import params, for example "
-        '--params \'{"source_instance":"my-project"}\'.'
-    )
+def _normalize_identity(value: Any, field: str) -> str | None:
+    """Validate and trim a project identity without coercing other types."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise InvalidImport(f"{field} must be a string")
+    return value.strip() or None
+
+
+def _get_project_identities(records: list[dict[str, Any]]) -> set[str]:
+    """Read embedded identity before applying import parameter overrides."""
+    identities: set[str] = set()
+    for record in records:
+        if identity := _normalize_identity(record.get("project_id"), "project_id"):
+            identities.add(identity)
+    return identities
+
+
+def _get_source_instance(projects: set[str], params: dict[str, Any]) -> str:
+    """Resolve explicit identity, its provider alias, then embedded identity."""
+    selected = _normalize_identity(params.get("source_instance"), "source_instance")
+    alias = _normalize_identity(params.get("project_id"), "project_id")
+    source = selected or alias or next(iter(projects), None)
+    if source is None:
+        raise InvalidImport(
+            "Braintrust export has no project identity; provide source_instance "
+            "or project_id in import params, for example "
+            '--params \'{"source_instance":"my-project"}\'.'
+        )
+    return source
 
 
 def _metrics(record: dict[str, Any]) -> dict[str, Any]:
@@ -815,18 +824,12 @@ class BraintrustProjectLogImporter:
         for trace_id, rows in trace_records.items():
             try:
                 root = _root_record(rows, trace_id)
-                projects = {
-                    str(row["project_id"])
-                    for row in rows
-                    if row.get("project_id") not in (None, "")
-                }
+                projects = _get_project_identities(rows)
                 if len(projects) > 1:
                     raise InvalidImport(
                         f"Trace '{trace_id}' contains conflicting project identities"
                     )
-                source_instance = (
-                    next(iter(projects)) if projects else _source_instance(root, params)
-                )
+                source_instance = _get_source_instance(projects, params)
                 session_id = _join_value(root, params, trace_id)
             except InvalidImport as exc:
                 failures.append(
@@ -841,6 +844,10 @@ class BraintrustProjectLogImporter:
 
         for (source_instance, source_id), session_records in grouped.items():
             try:
+                if len(_get_project_identities(session_records)) > 1:
+                    raise InvalidImport(
+                        f"Session '{source_id}' contains conflicting project identities"
+                    )
                 session = self._parse_session(
                     source_instance,
                     source_id,

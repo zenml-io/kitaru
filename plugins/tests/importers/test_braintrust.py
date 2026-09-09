@@ -297,7 +297,7 @@ def test_groups_traces_by_json_pointer() -> None:
 
 
 def test_accepts_flat_ui_export_as_partial() -> None:
-    """Accept Braintrust UI JSON with filename-based project identity."""
+    """Accept Braintrust UI JSON with explicit project identity."""
     rows = [
         {
             "created": "2026-07-24T10:00:00Z",
@@ -332,7 +332,7 @@ def test_accepts_flat_ui_export_as_partial() -> None:
         },
     ]
 
-    session = sessions(json.dumps(rows).encode())[0]
+    session = sessions(json.dumps(rows).encode(), params(source_instance="litellm"))[0]
 
     assert session.external_id == "litellm:conversation-1"
     warnings = session.metadata["normalization_warnings"]
@@ -642,19 +642,19 @@ def test_conflicting_project_rejects_trace(reverse: bool) -> None:
     )
     assert [
         item.external_id for item in result if isinstance(item, ImportedSession)
-    ] == ["project:good"]
+    ] == ["fallback:good"]
     assert len([item for item in result if isinstance(item, ImportFailure)]) == 1
 
 
 @pytest.mark.parametrize("reverse", [False, True])
-def test_explicit_project_on_any_row_wins(reverse: bool) -> None:
+def test_source_instance_overrides_project_on_any_row(reverse: bool) -> None:
     rows = [boundary_event(span_id="a", project_id=None), boundary_event(span_id="b")]
     if reverse:
         rows.reverse()
     result = list(parse(json.dumps(rows).encode(), {"source_instance": "fallback"}))
     assert len(result) == 1
     assert isinstance(result[0], ImportedSession)
-    assert result[0].external_id == "project:bad"
+    assert result[0].external_id == "fallback:bad"
 
 
 @pytest.mark.parametrize(
@@ -670,15 +670,14 @@ def test_explicit_project_on_any_row_wins(reverse: bool) -> None:
         (
             "embedded",
             {"source_instance": "explicit", "project_id": "selected"},
-            "embedded",
+            "explicit",
         ),
-        (None, {"filename": "export.jsonl"}, "export"),
     ],
 )
 def test_project_id_alias_preserves_identity_precedence(
     project_id: str | None, params: dict[str, Any], expected: str
 ) -> None:
-    """Embedded identity wins, followed by explicit params and filename fallback."""
+    """Explicit source identity wins over alias and embedded project identity."""
     [session] = list(
         parse(json.dumps([boundary_event(project_id=project_id)]).encode(), params)
     )
@@ -749,3 +748,33 @@ def test_rootless_trace_chooses_stable_join_identity(reverse: bool) -> None:
     if reverse:
         rows.reverse()
     assert sessions(json.dumps(rows).encode())[0].external_id == expected
+
+
+@pytest.mark.parametrize(
+    "override", [{"source_instance": "explicit"}, {"project_id": "alias"}]
+)
+def test_override_does_not_hide_grouped_project_conflicts(
+    override: dict[str, Any],
+) -> None:
+    """Two traces cannot merge across projects through an identity override."""
+    rows = [
+        boundary_event("first", project_id="first", metadata={"session_id": "shared"}),
+        boundary_event(
+            "second", project_id="second", metadata={"session_id": "shared"}
+        ),
+    ]
+    [failure] = list(parse(json.dumps(rows).encode(), override))
+    assert isinstance(failure, ImportFailure)
+    assert "Session 'shared' contains conflicting project identities" in failure.error
+
+
+def test_filename_does_not_supply_project_identity() -> None:
+    """Renaming an export cannot change the project's deduplication identity."""
+    [failure] = list(
+        parse(
+            json.dumps([boundary_event(project_id=None)]).encode(),
+            {"filename": "export.jsonl"},
+        )
+    )
+    assert isinstance(failure, ImportFailure)
+    assert "source_instance" in failure.error

@@ -1387,3 +1387,87 @@ def test_parent_validation_does_not_repeat_shared_ancestor_walks() -> None:
     # A fresh 63-ancestor walk for each leaf needs far more than this generous
     # per-node budget. Cached walks visit each parent relationship once.
     assert lookups < 20 * len(ids)
+
+
+@pytest.mark.parametrize("project", ["other-project", 42, False, [], {}])
+def test_trace_project_cannot_be_hidden_by_observation_or_override(
+    project: Any,
+) -> None:
+    """Validate trace identity before observation flattening discards context."""
+    payload = {
+        "id": "trace-1",
+        "projectId": project,
+        "observations": [observation("root", "trace-1")],
+    }
+    [failure] = list(
+        parse(json.dumps(payload).encode(), {"source_instance": "explicit"})
+    )
+    assert isinstance(failure, ImportFailure)
+    assert "project" in failure.error
+
+
+@pytest.mark.parametrize("initial_project", ["other-project", 42])
+def test_event_updates_cannot_hide_project_identity(initial_project: Any) -> None:
+    """Check every ingestion event before later updates overwrite its identity."""
+    events = [
+        {
+            "type": "trace-create",
+            "body": {"id": "trace-1", "projectId": initial_project},
+        },
+        {"type": "trace-update", "body": {"id": "trace-1", "projectId": "project-1"}},
+        {"type": "span-create", "body": observation("root", "trace-1")},
+        {
+            "type": "span-create",
+            "body": observation("healthy", "healthy-trace", session_id="healthy"),
+        },
+    ]
+    results = list(parse(json.dumps(events).encode(), {"source_instance": "explicit"}))
+    assert [
+        item.external_id for item in results if isinstance(item, ImportedSession)
+    ] == ["explicit:healthy"]
+    assert len([item for item in results if isinstance(item, ImportFailure)]) == 1
+
+
+@pytest.mark.parametrize("empty_project", [None, "", "  "])
+def test_empty_observation_project_inherits_trace_project(empty_project: Any) -> None:
+    """Empty observation fields do not hide the trace's project identity."""
+    row = observation("root", "trace-1")
+    row["projectId"] = empty_project
+    payload = {"id": "trace-1", "projectId": " parent ", "observations": [row]}
+    [session] = list(parse(json.dumps(payload).encode(), {}))
+    assert isinstance(session, ImportedSession)
+    assert session.external_id == "parent:conversation-1"
+
+
+def test_empty_camelcase_trace_project_does_not_hide_snakecase_identity() -> None:
+    """Use the populated trace alias when the higher-priority field is null."""
+    payload = {
+        "id": "trace-1",
+        "projectId": None,
+        "project_id": " parent ",
+        "observations": [observation("root", "trace-1", project_id=None)],
+    }
+    [session] = list(parse(json.dumps(payload).encode(), {}))
+    assert isinstance(session, ImportedSession)
+    assert session.external_id == "parent:conversation-1"
+
+
+@pytest.mark.parametrize("cleared_project", [None, "", "  "])
+def test_event_update_cannot_clear_recorded_project_identity(
+    cleared_project: Any,
+) -> None:
+    """An empty update preserves the project identity recorded by an earlier event."""
+    events = [
+        {"type": "trace-create", "body": {"id": "trace-1", "projectId": " original "}},
+        {
+            "type": "trace-update",
+            "body": {"id": "trace-1", "projectId": cleared_project},
+        },
+        {
+            "type": "span-create",
+            "body": observation("root", "trace-1", project_id=None),
+        },
+    ]
+    [session] = list(parse(json.dumps(events).encode(), {}))
+    assert isinstance(session, ImportedSession)
+    assert session.external_id == "original:conversation-1"

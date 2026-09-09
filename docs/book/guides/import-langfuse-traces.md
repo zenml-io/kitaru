@@ -54,6 +54,8 @@ The Langfuse importer parses **Langfuse JSONL exports**, with uploads capped by 
 
 For UI and events exports without project IDs, pass `--params '{"source_instance":"my-langfuse-project"}'` or `--params '{"project_id":"my-langfuse-project"}'`. SDK and REST callers supply the same parameters on import creation. Keep the value stable across exports of the same project; filenames do not determine identity. If earlier imports used a filename stem as their identity, supply that same value explicitly to preserve deduplication.
 
+Identity values are trimmed strings. Conflicting embedded project IDs fail the affected session even with an explicit override. See [Import your traces](../getting-started/import-your-traces.md) for the shared identity rules and guidance for existing imports.
+
 ## Fetch traces from the Langfuse API
 
 Skip the export and upload, and let the import task fetch traces from Langfuse directly:

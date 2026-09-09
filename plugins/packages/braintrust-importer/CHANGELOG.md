@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Accept `project_id` as an alias for `source_instance` when embedded project identity is absent, and include an actionable import parameter example when identity is missing.
+- Standardize source identity precedence as `source_instance`, then `project_id`, then embedded project identity; trim strings, reject other types, and reject embedded conflicts even with overrides. Remove filename-derived identity.
 - Remove the importer payload size cap. Uploads are bounded by the server blob limit only.
 - Use supported Braintrust root filtering and cursor pagination so window imports succeed and complete traces are fetched beyond the first page.
 - Fetch traces directly from the Braintrust API through the `api` extra.

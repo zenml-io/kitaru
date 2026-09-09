@@ -77,12 +77,13 @@ kitaru session list --agent support-agent --origin imported --imported-from brai
 
 | Param | Meaning |
 | --- | --- |
-| `source_instance` | Project identity fallback. The importer prefers each record's `project_id`; `source_instance` is used when the export carries none. |
-| `project_id` | Provider-native alias for `source_instance`, used when `source_instance` is absent or empty. Embedded project IDs take precedence over both parameters. |
-| `filename` | Optional label. When neither an embedded project ID nor either identity parameter is available, the filename stem becomes the project identity. If identity is still missing, the error includes the `--params` remedy. |
+| `source_instance` | Explicit project identity, preferred over the `project_id` parameter and embedded project IDs. Keep it stable across imports from the same project. |
+| `project_id` | Provider-native alias for `source_instance`, used when `source_instance` is absent or blank. Either parameter takes precedence over embedded project IDs. |
 | `join_on` | Dotted path or RFC 6901 JSON Pointer selecting the value that groups traces into one session. Defaults to the session id found in metadata. See [Grouping traces into sessions](#grouping-traces-into-sessions). |
 
 Pass them with `--params '{"source_instance": "my-braintrust-project"}'`, or use the dedicated `--join-on` flag, which accepts a JSON Pointer only (it must start with `/`) and cannot be combined with `join_on` inside `--params`.
+
+If the export contains no project ID, supply one of the identity parameters; filenames do not determine identity. Values are trimmed strings, and conflicting embedded project IDs fail the affected trace or session even with an override. See [Import your traces](../getting-started/import-your-traces.md) for the shared identity rules and guidance for existing imports.
 
 ## 3. Or fetch from the Braintrust API
 
@@ -146,7 +147,7 @@ Session metadata records the provenance you'll want when reading the import back
 
 ## Re-runs skip what is already there
 
-Every imported session records its source identity: `imported_from` (`braintrust`) and an `external_id` of `<project>:<session>`. That pair is unique on the server, so re-importing an overlapping export **skips** what is already stored and reports it as `skipped`, not as an error. Exporting the last 24 hours every night is safe; it will not duplicate earlier sessions.
+Every imported session records its source identity: `imported_from` (`braintrust`) and an `external_id` of `<source_instance>:<session>`. That pair is unique per destination agent, so re-importing an overlapping export with the same identity **skips** what is already stored and reports it as `skipped`, not as an error. Skipped sessions are not refreshed with new nodes.
 
 ## Limitations
 

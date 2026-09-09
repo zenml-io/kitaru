@@ -46,7 +46,10 @@ async def test_trace_ids_fetches_exactly_those_traces_in_order(
         for session in parse(payload, {})
         if isinstance(session, ImportedSession)
     ]
-    assert [session.external_id for session in sessions] == ["trace-b", "trace-a"]
+    assert [session.external_id for session in sessions] == [
+        f"{PROJECT}:trace-b",
+        f"{PROJECT}:trace-a",
+    ]
     assert sessions[0].status == SessionStatus.COMPLETED
     assert [node.name for node in sessions[0].nodes] == ["kitaru-run"]
 
@@ -83,7 +86,9 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
         for session in parse(payloads[0], {})
         if isinstance(session, ImportedSession)
     ]
-    assert [session.external_id for session in sessions] == trace_ids
+    assert [session.external_id for session in sessions] == [
+        f"{PROJECT}:{trace_id}" for trace_id in trace_ids
+    ]
 
     # The default query still works at the default concurrency.
     fake_phoenix.span_builders = [build_complete_spans, build_complete_spans]
@@ -205,9 +210,9 @@ async def test_time_window_fetch_yields_one_oldest_first_payload(
         if isinstance(session, ImportedSession)
     ]
     assert [session.external_id for session in sessions] == [
-        "trace-c",
-        "trace-a",
-        "trace-b",
+        f"{PROJECT}:trace-c",
+        f"{PROJECT}:trace-a",
+        f"{PROJECT}:trace-b",
     ]
 
 
@@ -264,13 +269,13 @@ async def test_fetch_payload_round_trips_through_the_real_parser(
 
     [payload] = await collect_payloads(fetch({"trace_ids": ["trace-1"]}))
 
-    spans = json.loads(payload)
+    spans = [span for trace in json.loads(payload) for span in trace["spans"]]
     assert [span["name"] for span in spans] == ["kitaru-run", "llm-call"]
     sessions = list(parse(payload, {}))
     assert len(sessions) == 1
     [session] = sessions
     assert isinstance(session, ImportedSession)
-    assert session.external_id == "trace-1"
+    assert session.external_id == f"{PROJECT}:trace-1"
 
 
 async def test_fetch_waits_out_a_rate_limit_and_succeeds(
@@ -299,7 +304,9 @@ async def test_fetch_waits_out_a_rate_limit_and_succeeds(
     payloads = await collect_payloads(fetch({"trace_ids": ["trace-1"]}))
 
     assert sleeps == [5.0]
-    assert payloads == [serialize_spans(build_complete_spans("trace-1"))]
+    assert payloads == [
+        serialize_spans(build_complete_spans("trace-1"), project=PROJECT)
+    ]
 
 
 async def test_fetch_propagates_a_non_rate_limit_error(
@@ -318,3 +325,24 @@ async def test_fetch_propagates_a_non_rate_limit_error(
 
     with pytest.raises(httpx.HTTPStatusError):
         await collect_payloads(fetch({"trace_ids": ["trace-1"]}))
+
+
+@pytest.mark.parametrize("project", [None, " customer-project ", " \t"])
+async def test_api_and_file_imports_use_the_same_project_namespace(
+    fake_phoenix: FakePhoenix, project: str | None
+) -> None:
+    """Carry the actual fetch project through serialization into the parser."""
+    fake_phoenix.span_builders = [build_complete_spans]
+    [payload] = await collect_payloads(
+        fetch({"trace_ids": ["trace-1"], "project": project})
+    )
+    selected = (project or "").strip() or PROJECT
+    api_sessions = list(parse(payload, {}))
+    file_sessions = list(
+        parse(serialize_spans(build_complete_spans("trace-1")), {"project": selected})
+    )
+    assert fake_phoenix.project_identifiers == [selected]
+    assert len(api_sessions) == 1
+    assert isinstance(api_sessions[0], ImportedSession)
+    assert api_sessions[0].external_id == f"{selected}:trace-1"
+    assert api_sessions == file_sessions
