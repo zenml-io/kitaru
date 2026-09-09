@@ -95,6 +95,7 @@ class Import(DomainModel):
     params: dict[str, Any] = Field(default_factory=dict)
     evaluators: list[EvaluatorConfig] = Field(default_factory=list)
     analyzers: list[AnalyzerConfig] = Field(default_factory=list)
+    max_sessions: int | None = None
     stats: ImportStats | None = None
     error: str | None = None
     created: datetime | None = None

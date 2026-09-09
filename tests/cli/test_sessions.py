@@ -592,6 +592,7 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
         },
         "evaluators": [],
         "analyzers": [],
+        "max_sessions": None,
     }
     assert client.job_get_calls == [client.job.id]
     assert result.event == "created"
@@ -1044,6 +1045,7 @@ async def test_waited_session_import_returns_validated_stats_and_task_action(
         "skipped": 2,
         "failed": 0,
         "failures": [],
+        "limit_reached": False,
     }
     assert result.item["tags"] == ["baseline", "discovery"]
     assert result.item["tagged_session_count"] == 4
@@ -1129,6 +1131,35 @@ def test_terminal_import_warns_about_failed_items(
         "2 item(s) failed to import.",
         "line 3 (trace-3): missing sessionId",
         "line 5: missing sessionId",
+    ]
+    assert str(task.id) in receipt["next_actions"][0]
+
+
+def test_terminal_import_warns_about_reaching_the_session_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reaching the session limit in a completed import is a warning, not a failure."""
+    job = _job(JobStatus.COMPLETED)
+    task = _task(
+        job,
+        result={
+            "created": 2,
+            "skipped": 0,
+            "failed": 0,
+            "failures": [],
+            "limit_reached": True,
+        },
+    )
+    exit_code, receipt = _run_terminal_import(
+        tmp_path, monkeypatch, capsys, job, [task]
+    )
+
+    assert exit_code == 0
+    assert receipt["item"]["stats"]["limit_reached"] is True
+    assert receipt["warnings"] == [
+        "Import stopped after reaching the limit of 2 session(s)."
     ]
     assert str(task.id) in receipt["next_actions"][0]
 
@@ -1231,6 +1262,8 @@ def test_session_import_argv_registers_streaming_created_receipt(
                 "clustering@2=langfuse-prod",
                 "--media-type",
                 "application/jsonl",
+                "--max-sessions",
+                "5",
             ]
         )
         == 0
@@ -1249,6 +1282,7 @@ def test_session_import_argv_registers_streaming_created_receipt(
         "clustering"
     ]
     assert client.requests[0].analyzers[0].connection_id == client.connection.id
+    assert client.requests[0].max_sessions == 5
 
 
 @pytest.mark.parametrize("join_on", ["metadata.case_id", "/metadata/case~2id"])

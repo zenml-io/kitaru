@@ -314,6 +314,10 @@ def _terminal_import_result(
         warnings.extend(_format_import_failure(failure) for failure in stats.failures)
     if stats.skipped:
         warnings.append(f"{stats.skipped} duplicate session(s) were skipped.")
+    if stats.limit_reached:
+        warnings.append(
+            f"Import stopped after reaching the limit of {stats.created} session(s)."
+        )
     return CommandResult(
         item=receipt,
         warnings=warnings,
@@ -336,6 +340,7 @@ async def import_sessions(
     analyzer_params: Sequence[str] | None = None,
     analyzer_connections: Sequence[str] | None = None,
     media_type: str | None,
+    max_sessions: int | None = None,
     wait: bool,
     interval: float | None,
     timeout: float | None,
@@ -492,6 +497,7 @@ async def import_sessions(
         params=parsed_params,
         evaluators=configs,
         analyzers=analyzer_configs,
+        max_sessions=max_sessions,
     )
     try:
         created_import = await client.imports.create(

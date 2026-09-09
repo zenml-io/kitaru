@@ -6504,6 +6504,11 @@ export interface components {
              */
             importer: string;
             /**
+             * Max Sessions
+             * @description Maximum number of sessions created by the import.
+             */
+            max_sessions?: number | null;
+            /**
              * Params
              * @description Parameters passed to the importer.
              */
@@ -6636,6 +6641,11 @@ export interface components {
              */
             job_id?: string | null;
             /**
+             * Max Sessions
+             * @description Maximum number of sessions created by the import.
+             */
+            max_sessions?: number | null;
+            /**
              * Owner Id
              * Format: uuid
              * @description Id of the owning account.
@@ -6683,6 +6693,12 @@ export interface components {
              */
             failures?: components["schemas"]["ImportFailure"][];
             /**
+             * Limit Reached
+             * @description Whether the import stopped at its session limit.
+             * @default false
+             */
+            limit_reached: boolean;
+            /**
              * Skipped
              * @description Sessions skipped as duplicates.
              */
@@ -6704,6 +6720,11 @@ export interface components {
              * @enum {string}
              */
             kind: "importer";
+            /**
+             * Max Sessions
+             * @description Maximum number of sessions created by the import.
+             */
+            max_sessions?: number | null;
             /**
              * Params
              * @description Parameters passed to the importer.

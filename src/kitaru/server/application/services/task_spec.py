@@ -227,6 +227,7 @@ class TaskSpecBuilder:
                 provider=plugin.provider,
                 agent_id=import_.agent_id,
                 params=import_.params,
+                max_sessions=import_.max_sessions,
             ),
         )
 

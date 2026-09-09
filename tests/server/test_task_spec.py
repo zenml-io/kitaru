@@ -144,6 +144,41 @@ async def test_import_spec_carries_the_api_source(
     )
 
 
+async def test_import_spec_carries_max_sessions(
+    services: JobAndTaskServices,
+) -> None:
+    """The importer spec takes its session cap off the import."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.IMPORTER, name="csv-importer"
+    )
+    code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="run"),
+        display_version=None,
+    )
+    payload = await create_blob(
+        services.blobs, ACTOR.account.id, content=b"payload-data"
+    )
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    import_ = await create_import(
+        services.imports,
+        ACTOR.account.id,
+        agent.id,
+        job_id=job.id,
+        importer_version_id=version.id,
+        payload_blob_id=payload.id,
+        max_sessions=5,
+    )
+    task = await create_import_task(services.tasks, job.id, import_id=import_.id)
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert isinstance(spec.details, ImportTaskDetails)
+    assert spec.details.max_sessions == 5
+
+
 async def test_analysis_spec_is_built_from_the_task(
     services: JobAndTaskServices,
 ) -> None:
