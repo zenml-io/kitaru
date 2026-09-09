@@ -15,7 +15,7 @@
 - Fetch sessions sequentially from the IDs supplied by analyzer tasks, preserving bounded trace memory and complete import coverage.
 - Make OpenAI generation available through the optional `openai` extra, selected by the OpenAI analyzer's default package requirement.
 - Remove Langfuse telemetry and its dependency from insight generation.
-- Register separate deterministic and OpenAI analyzers so callers can select either or both for an import. Require a model and OpenAI credentials for the OpenAI analyzer.
+- Register separate deterministic and OpenAI analyzers so callers can select either or both for an import. The OpenAI analyzer defaults to `gpt-5.6-luna` with low reasoning effort; callers can override its `model` parameter and must provide OpenAI credentials.
 
 ### Release context
 

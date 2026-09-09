@@ -146,14 +146,19 @@ class OpenAIInsightGenerator:
             raise OpenAIInsightGenerationError(f"{stage} input exceeds its bound")
         started = time.monotonic()
         try:
+            request = {
+                "model": config.model,
+                "instructions": instructions,
+                "input": payload,
+                "text_format": output_type,
+                "max_output_tokens": max_output_tokens,
+                "store": False,
+                "timeout": timeout_seconds,
+            }
+            if config.reasoning_effort is not None:
+                request["reasoning"] = {"effort": config.reasoning_effort}
             response = await self._client.responses.parse(
-                model=config.model,
-                instructions=instructions,
-                input=payload,
-                text_format=output_type,
-                max_output_tokens=max_output_tokens,
-                store=False,
-                timeout=timeout_seconds,
+                **request,
             )
         except Exception as error:
             if isinstance(error, self._timeout_errors):

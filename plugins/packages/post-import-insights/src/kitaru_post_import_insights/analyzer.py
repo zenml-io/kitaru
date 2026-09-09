@@ -34,6 +34,9 @@ from kitaru_post_import_insights.pipeline import (
 )
 from kitaru_post_import_insights.profiling import SessionProfiler
 
+DEFAULT_OPENAI_MODEL = "gpt-5.6-luna"
+DEFAULT_OPENAI_REASONING_EFFORT = "low"
+
 
 def _get_context(
     first: SessionWithNodesResponse,
@@ -105,14 +108,15 @@ async def analyze_post_import_sessions(
 async def analyze_openai_post_import_sessions(
     session_ids: list[UUID],
     *,
-    model: str,
+    model: str | None = None,
     agent_name: str | None = None,
 ) -> list[InsightInput]:
     """Generate insight cards selected and edited by OpenAI.
 
     Args:
         session_ids: IDs of imported sessions for one agent and import.
-        model: OpenAI model for the bounded analyst and editor calls.
+        model: OpenAI model for the bounded analyst and editor calls. Defaults
+            to `gpt-5.6-luna` with low reasoning effort.
         agent_name: Optional display name included in copied prompt context.
 
     Returns:
@@ -121,10 +125,16 @@ async def analyze_openai_post_import_sessions(
     Raises:
         MissingOpenAICredential: OPENAI_API_KEY is unavailable.
     """
+    selected_model = DEFAULT_OPENAI_MODEL if model is None else model
     return await _analyze_sessions(
         session_ids,
         agent_name=agent_name,
-        model=ModelGenerationConfig(model=model),
+        model=ModelGenerationConfig(
+            model=selected_model,
+            reasoning_effort=(
+                DEFAULT_OPENAI_REASONING_EFFORT if model is None else None
+            ),
+        ),
     )
 
 

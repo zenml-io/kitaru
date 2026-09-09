@@ -53,7 +53,7 @@ SDK and REST consumers can read the same records through `client.insights` and `
 
 ## Rerun an analyzer
 
-An analyzer that failed, for example because the OpenAI analyzer was missing its `model` parameter, can be run again over the sessions an import already created. Pass the import id from the import receipt or `kitaru import list`:
+An analyzer that failed, for example because the OpenAI analyzer was missing credentials, can be run again over the sessions an import already created. Pass the import id from the import receipt or `kitaru import list`:
 
 ```bash
 uv run kitaru import analyze <import-id> \
@@ -70,7 +70,11 @@ Each generated insight stores its `import_id` directly, so task cleanup does not
 
 ## Run both analyzers
 
-To also produce OpenAI insights, configure an OpenAI [provider connection](provider-connections.md) containing `OPENAI_API_KEY`, or supply that key in the worker's environment and configure its credential selector for `openai`. Setting it only in the importing terminal is not sufficient. Select both analyzers and pass a model available to your OpenAI account:
+The OpenAI analyzer uses GPT-5.6 Luna (`gpt-5.6-luna`) with low reasoning effort by default.
+
+To run OpenAI analysis, configure an OpenAI [provider connection](provider-connections.md) containing `OPENAI_API_KEY`, or supply that key in the worker's environment and configure its credential selector for `openai`. Setting it only in the importing terminal is not sufficient. To use a compatible model available to your OpenAI project instead, pass `--analyzer-params 'kitaru/openai-post-import-insights@latest={"model":"YOUR_MODEL"}'`. When you supply your own OpenAI key, model usage is billed to your account.
+
+Select both analyzers:
 
 ```bash
 uv run kitaru session import sessions.jsonl \
@@ -78,11 +82,10 @@ uv run kitaru session import sessions.jsonl \
   --agent customer-service@latest \
   --analyzer kitaru/post-import-insights@latest \
   --analyzer kitaru/openai-post-import-insights@latest \
-  --analyzer-params 'kitaru/openai-post-import-insights@latest={"model":"YOUR_MODEL"}' \
   --wait
 ```
 
-Both analyzers run independently and retain their results, even when findings overlap. The OpenAI analyzer requires credentials and a model; it does not switch to deterministic generation when credentials are missing. The model selects the cards and writes each card's eyebrow and description; titles, charts, counts, and caveats stay deterministic. A card's copy may restate only numbers that appear in that card's facts or chart, and must not add causes, outcomes, links, or markup. A card whose copy fails that check keeps the deterministic wording while the other cards keep the model's. If a model request fails or times out, the OpenAI analyzer task fails instead of returning deterministic cards. Without a connection or an eligible credential-equipped worker, its task stays queued; select only the deterministic analyzer if you want the import job to finish without OpenAI credentials.
+Both analyzers run independently and retain their results, even when findings overlap. The OpenAI analyzer requires credentials and uses Luna when no model parameter is provided; it does not switch to deterministic generation when credentials are missing. The model selects the cards and writes each card's eyebrow and description; titles, charts, counts, and caveats stay deterministic. A card's copy may restate only numbers that appear in that card's facts or chart, and must not add causes, outcomes, links, or markup. A card whose copy fails that check keeps the deterministic wording while the other cards keep the model's. If a model request fails or times out, the OpenAI analyzer task fails instead of returning deterministic cards. Without a connection or an eligible credential-equipped worker, its task stays queued; select only the deterministic analyzer if you want the import job to finish without OpenAI credentials.
 
 The plugin package includes its model and observability dependencies. Model calls receive a bounded projection of computed candidates, facts, sanitized labels, and evidence references, not the complete raw traces. Deterministic code computes the counts and charts in both analyzers. OpenAI analysis can incur charges.
 

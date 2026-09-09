@@ -141,10 +141,42 @@ async def test_openai_request_is_bounded_and_not_stored(monkeypatch, has_usage) 
     assert responses.kwargs["max_output_tokens"] == 1000
     assert responses.kwargs["timeout"] == 4.0
     assert responses.kwargs["text_format"] is AnalystPlan
+    assert "reasoning" not in responses.kwargs
     assert "test-secret" not in repr(generator)
     assert result.receipt.request_id == "resp_1"
     assert result.receipt.input_tokens == (10 if has_usage else None)
     assert result.receipt.output_tokens == (5 if has_usage else None)
+
+
+async def test_openai_request_uses_configured_reasoning_effort(monkeypatch) -> None:
+    """Pass an explicitly configured reasoning effort to OpenAI."""
+    plan = AnalystPlan(
+        selected_candidate_ids=["candidate"],
+        recommended_candidate_id="candidate",
+        rationale="Useful.",
+    )
+    responses = FakeResponses(plan)
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs) -> None:
+            self.responses = responses
+
+    monkeypatch.setattr(
+        "kitaru_post_import_insights.openai_generator.importlib.import_module",
+        lambda name: SimpleNamespace(
+            AsyncOpenAI=FakeAsyncOpenAI, APITimeoutError=TimeoutError
+        ),
+    )
+    generator = OpenAIInsightGenerator(api_key="test-secret")
+
+    await generator.analyze(
+        projection=_projection(),
+        config=ModelGenerationConfig(model="gpt-test", reasoning_effort="low"),
+        timeout_seconds=4.0,
+    )
+
+    assert responses.kwargs is not None
+    assert responses.kwargs["reasoning"] == {"effort": "low"}
 
 
 @pytest.mark.parametrize(

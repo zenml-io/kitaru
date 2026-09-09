@@ -6,7 +6,7 @@
 import asyncio
 import re
 import time
-from typing import Generic, Protocol, TypeVar
+from typing import Generic, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -270,6 +270,7 @@ class ModelGenerationConfig(_GenerationModel):
     """Credential-free hard limits for one model-backed run."""
 
     model: str = Field(min_length=1, max_length=255)
+    reasoning_effort: Literal["low", "medium", "high"] | None = None
     total_timeout_seconds: float = Field(default=25.0, gt=0, le=120)
     analyst_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     editor_timeout_seconds: float = Field(default=12.0, gt=0, le=120)
