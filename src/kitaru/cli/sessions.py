@@ -13,16 +13,27 @@
 #  permissions and limitations under the License.
 """Session import and inspection commands."""
 
+import re
 import uuid
-from datetime import datetime
+from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
-from kitaru.api_models.v1.imports import ImportCreateRequest, ImportStats
+from kitaru.api_models.v1.imports import (
+    ApiImportSource,
+    BlobImportSource,
+    ImportCreateRequest,
+    ImportFailure,
+    ImportQuery,
+    ImportSource,
+    ImportStats,
+)
 from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
 from kitaru.api_models.v1.session import (
     SessionListParams,
     SessionOrigin,
@@ -50,6 +61,9 @@ from kitaru.cli.registration import (
     list_params,
     page_result,
     parse_json_object,
+    resolve_analyzer_configs,
+    resolve_asset,
+    resolve_evaluator_configs,
 )
 from kitaru.cli.session_selection import get_cohort_version
 from kitaru.client.exceptions import APIError
@@ -66,6 +80,73 @@ def _read_payload(path: Path) -> bytes:
         raise CLIError(
             "invalid_arguments", f"FILE could not be read: {reason}."
         ) from None
+
+
+_RELATIVE_DURATION = re.compile(r"(?P<amount>\d+)(?P<unit>[dhm])")
+_DURATION_UNITS = {"d": "days", "h": "hours", "m": "minutes"}
+
+
+def _resolve_time_option(value: str | None, option: str) -> str | None:
+    """Resolve an absolute or relative --since/--until value to an ISO timestamp."""
+    if value is None:
+        return None
+    match = _RELATIVE_DURATION.fullmatch(value)
+    if match is not None:
+        unit = _DURATION_UNITS[match["unit"]]
+        resolved = datetime.now(UTC) - timedelta(**{unit: int(match["amount"])})
+        return resolved.isoformat()
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise CLIError(
+            "invalid_arguments",
+            f"{option} must be an ISO 8601 timestamp or a relative duration "
+            "like 7d, 12h, or 30m.",
+        ) from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise CLIError(
+            "invalid_arguments",
+            f"{option} must include a timezone, such as Z or +02:00.",
+        )
+    return value
+
+
+def _build_api_query(
+    since: str | None,
+    until: str | None,
+    trace_ids: list[str] | None,
+    query: str | None,
+) -> ImportQuery | None:
+    """Merge --since, --until, and --trace-id into --query, rejecting overlaps."""
+    resolved_since = _resolve_time_option(since, "--since")
+    resolved_until = _resolve_time_option(until, "--until")
+    if (
+        resolved_since is None
+        and resolved_until is None
+        and not trace_ids
+        and query is None
+    ):
+        return None
+    parsed_query = parse_json_object(query, option="--query")
+    collected: dict[str, Any] = {}
+    if resolved_since is not None:
+        collected["since"] = resolved_since
+    if resolved_until is not None:
+        collected["until"] = resolved_until
+    if trace_ids:
+        collected["trace_ids"] = trace_ids
+    overlap = sorted(set(collected) & set(parsed_query))
+    if overlap:
+        keys = ", ".join(overlap)
+        raise CLIError(
+            "invalid_arguments",
+            f"--query cannot set {keys}. Already set by --since, --until, "
+            "or --trace-id.",
+        )
+    try:
+        return ImportQuery.model_validate({**parsed_query, **collected})
+    except ValidationError as error:
+        raise CLIError("invalid_arguments", f"Invalid --query: {error}") from error
 
 
 def _normalize_import_tags(tags: list[str] | None, *, wait: bool) -> list[str]:
@@ -162,12 +243,14 @@ def _get_import_stats(
     job: JobResponse, tasks: list[TaskResponse]
 ) -> tuple[TaskResponse, ImportStats | None]:
     """Validate the single importer task and its optional diagnostic result."""
-    if len(tasks) != 1 or tasks[0].kind is not TaskKind.IMPORTER:
+    # Evaluator and analyzer tasks named on the import share its job.
+    importer_tasks = [task for task in tasks if task.kind is TaskKind.IMPORTER]
+    if len(importer_tasks) != 1:
         raise _internal_receipt_error(
             "An import job must contain exactly one importer task.", job, tasks
         )
 
-    task = tasks[0]
+    task = importer_tasks[0]
     stats = None
     if task.result is not None:
         try:
@@ -190,6 +273,14 @@ def _get_import_stats(
             tasks,
         )
     return task, stats
+
+
+def _format_import_failure(failure: ImportFailure) -> str:
+    """Render one import failure as a warning line."""
+    item = f"line {failure.line}"
+    if failure.external_id is not None:
+        item += f" ({failure.external_id})"
+    return f"{item}: {failure.error}"
 
 
 def _terminal_import_result(
@@ -217,17 +308,16 @@ def _terminal_import_result(
         raise error
 
     assert stats is not None
-    if stats.failed:
-        emit_event("terminal", receipt)
-        raise CLIError(
-            "partial_failure",
-            f"The import completed with {stats.failed} failed item(s).",
-            details={"receipt": receipt, "next_actions": [task_action]},
-        )
-
     warnings = []
+    if stats.failed:
+        warnings.append(f"{stats.failed} item(s) failed to import.")
+        warnings.extend(_format_import_failure(failure) for failure in stats.failures)
     if stats.skipped:
         warnings.append(f"{stats.skipped} duplicate session(s) were skipped.")
+    if stats.limit_reached:
+        warnings.append(
+            f"Import stopped after reaching the limit of {stats.created} session(s)."
+        )
     return CommandResult(
         item=receipt,
         warnings=warnings,
@@ -238,21 +328,47 @@ def _terminal_import_result(
 
 async def import_sessions(
     client: Any,
-    path: Path,
+    path: Path | None,
     *,
     importer: str,
     agent: str,
     params: str | None,
     tags: list[str] | None = None,
-    media_type: str,
+    evaluators: Sequence[str] | None = None,
+    evaluator_params: Sequence[str] | None = None,
+    analyzers: Sequence[str] | None = None,
+    analyzer_params: Sequence[str] | None = None,
+    analyzer_connections: Sequence[str] | None = None,
+    media_type: str | None,
+    max_sessions: int | None = None,
     wait: bool,
     interval: float | None,
     timeout: float | None,
     join_on: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    trace_ids: list[str] | None = None,
+    query: str | None = None,
+    connection: str | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
-    """Upload a local payload and create one import job."""
+    """Upload a local payload or an API selection, then create one import job."""
     tags = _normalize_import_tags(tags, wait=wait)
+    if evaluator_params and not evaluators:
+        raise CLIError(
+            "invalid_arguments",
+            "--evaluator-params requires at least one --evaluator.",
+        )
+    if analyzer_params and not analyzers:
+        raise CLIError(
+            "invalid_arguments",
+            "--analyzer-params requires at least one --analyzer.",
+        )
+    if analyzer_connections and not analyzers:
+        raise CLIError(
+            "invalid_arguments",
+            "--analyzer-connection requires at least one --analyzer.",
+        )
     wait_settings = receipts.get_wait_settings(
         wait=wait, interval=interval, timeout=timeout
     )
@@ -281,14 +397,54 @@ async def import_sessions(
                 "--join-on cannot be combined with join_on in --params.",
             )
         parsed_params["join_on"] = join_on
-    content = _read_payload(path)
+
+    api_query = _build_api_query(
+        since=since, until=until, trace_ids=trace_ids, query=query
+    )
+    if path is not None and api_query is not None:
+        raise CLIError(
+            "invalid_arguments",
+            "FILE cannot be combined with --since, --until, --trace-id, or --query.",
+        )
+    if path is not None and connection is not None:
+        raise CLIError(
+            "invalid_arguments",
+            "FILE cannot be combined with --connection.",
+        )
+    if path is None and media_type is not None:
+        raise CLIError(
+            "invalid_arguments",
+            "--media-type requires FILE.",
+        )
+    if path is None and api_query is None:
+        raise CLIError(
+            "invalid_arguments",
+            "Provide FILE or one of --since, --until, --trace-id, --query.",
+        )
+    content = _read_payload(path) if path is not None else None
+
     importer_parent, importer_version = await get_plugin_version(
         client.importers, importer, "Importer"
     )
     agent_parent, agent_version = await get_agent_version(client, agent)
+    resolved_connection = None
+    if connection is not None:
+        resolved_connection = await resolve_asset(
+            client.connections, connection, "Connection"
+        )
+    configs: list[EvaluatorConfig] = []
+    evaluator_identity: list[dict[str, Any]] = []
+    if evaluators:
+        configs, evaluator_identity, _ = await resolve_evaluator_configs(
+            client, evaluators, evaluator_params or []
+        )
+    analyzer_configs: list[AnalyzerConfig] = []
+    analyzer_identity: list[dict[str, Any]] = []
+    if analyzers:
+        analyzer_configs, analyzer_identity, _ = await resolve_analyzer_configs(
+            client, analyzers, analyzer_params or [], analyzer_connections or []
+        )
 
-    blob = await client.blobs.upload(content, media_type=media_type, filename=path.name)
-    blob_identity = _blob_metadata(blob)
     identity = {
         "importer": {
             "id": str(importer_parent.id),
@@ -302,21 +458,54 @@ async def import_sessions(
             "version_id": str(agent_version.id),
             "version": agent_version.version,
         },
-        "blob": blob_identity,
     }
+
+    blob_identity: dict[str, Any] | None = None
+    if path is not None:
+        assert content is not None
+        blob = await client.blobs.upload(
+            content,
+            media_type=media_type or "application/octet-stream",
+            filename=path.name,
+        )
+        blob_identity = _blob_metadata(blob)
+        identity["blob"] = blob_identity
+        source: ImportSource = BlobImportSource(blob_id=blob.id)
+    else:
+        assert api_query is not None
+        identity["query"] = api_query.model_dump(mode="json", exclude_unset=True)
+        connection_id = None
+        if resolved_connection is not None:
+            connection_id = resolved_connection.id
+            identity["connection"] = {
+                "id": str(resolved_connection.id),
+                "name": resolved_connection.name,
+            }
+        source = ApiImportSource(query=api_query, connection_id=connection_id)
     if tags:
         identity["tags"] = tags
+    if evaluator_identity:
+        identity["evaluators"] = evaluator_identity
+    if analyzer_identity:
+        identity["analyzers"] = analyzer_identity
     request = ImportCreateRequest(
         importer=importer_parent.name,
         version=importer_version.version,
         agent_id=agent_parent.id,
         agent_version_id=agent_version.id,
-        payload_blob_id=blob.id,
+        source=source,
         params=parsed_params,
+        evaluators=configs,
+        analyzers=analyzer_configs,
+        max_sessions=max_sessions,
     )
     try:
-        job = await client.imports.create(request, idempotency_key=idempotency_key)
+        created_import = await client.imports.create(
+            request, idempotency_key=idempotency_key
+        )
     except APIError as error:
+        if blob_identity is None:
+            raise
         raise CLIError(
             "partial_failure",
             "The payload was uploaded, but the import job could not be created.",
@@ -329,9 +518,11 @@ async def import_sessions(
                     "detail": error.detail,
                 },
             },
-            hint=f"The uploaded blob {blob.id} was not deleted.",
+            hint=f"The uploaded blob {blob_identity['id']} was not deleted.",
         ) from error
     except Exception as error:
+        if blob_identity is None:
+            raise
         raise CLIError(
             "partial_failure",
             "The payload was uploaded, but the import job could not be created.",
@@ -341,9 +532,12 @@ async def import_sessions(
                 "blob": blob_identity,
                 "error": {"type": type(error).__name__},
             },
-            hint=f"The uploaded blob {blob.id} was not deleted.",
+            hint=f"The uploaded blob {blob_identity['id']} was not deleted.",
         ) from error
 
+    identity["import_id"] = str(created_import.id)
+    assert created_import.job_id is not None
+    job = await client.jobs.get(created_import.job_id)
     created = receipts.created_job_result(
         "session_import",
         job,
@@ -489,9 +683,15 @@ async def list_session_nodes(
     size: int,
     cursor: str | None,
     include_payloads: bool,
+    filter: str | None = None,
 ) -> CommandResult:
     """List one bounded server page of session nodes in index order."""
-    params = SessionNodeListParams(
-        size=size, cursor=cursor, include_payloads=include_payloads
+    params = SessionNodeListParams.model_validate(
+        {
+            "size": size,
+            "cursor": cursor,
+            "include_payloads": include_payloads,
+            "filter": filter,
+        }
     )
     return page_result(await client.sessions.list_nodes(session_id, params), size=size)

@@ -10,15 +10,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.agent_version import AgentVersionResponse
+from kitaru.api_models.v1.analyzer import AnalyzerResponse, AnalyzerVersionResponse
 from kitaru.api_models.v1.annotation import AnnotationResponse
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.cohort import CohortResponse
 from kitaru.api_models.v1.cohort_version import CohortVersionResponse
+from kitaru.api_models.v1.connection import ConnectionResponse
 from kitaru.api_models.v1.evaluation import EvaluationResponse
 from kitaru.api_models.v1.evaluator import EvaluatorResponse, EvaluatorVersionResponse
 from kitaru.api_models.v1.experiment import ExperimentResponse
 from kitaru.api_models.v1.experiment_run import ExperimentRunResponse
 from kitaru.api_models.v1.importer import ImporterResponse, ImporterVersionResponse
+from kitaru.api_models.v1.imports import ImportResponse
+from kitaru.api_models.v1.insight import InsightResponse
 from kitaru.api_models.v1.investigation import (
     InvestigationResponse,
     InvestigationSessionResponse,
@@ -104,10 +108,12 @@ RegistryItem = (
     | ExperimentResponse
     | ImporterResponse
     | EvaluatorResponse
+    | AnalyzerResponse
     | AgentVersionResponse
     | CohortVersionResponse
     | ImporterVersionResponse
     | EvaluatorVersionResponse
+    | AnalyzerVersionResponse
     | AgentResponse
     | TagResponse
     | WorkerResponse
@@ -132,6 +138,7 @@ ActivityItem = (
     SessionDetailResponse
     | SessionResponse
     | ReplayResponse
+    | ImportResponse
     | EvaluationResponse
     | ExperimentRunResponse
     | SessionNodeResponse
@@ -146,20 +153,39 @@ class ActivityReadResult(ToolResult):
     data: ActivityItem | PageData[ActivityItem] | None = None
 
 
-ReviewItem = InvestigationResponse | InvestigationSessionResponse | AnnotationResponse
+ReviewItem = (
+    InvestigationResponse
+    | InvestigationSessionResponse
+    | AnnotationResponse
+    | InsightResponse
+)
 
 
 class ReviewReadResult(ToolResult):
-    """Typed investigation and annotation read result."""
+    """Typed investigation, annotation, and insight read result."""
 
     data: ReviewItem | PageData[ReviewItem] | None = None
 
 
 class ReviewManageResult(ToolResult):
-    """Typed investigation and annotation management result."""
+    """Typed investigation, annotation, and insight management result."""
 
-    data: ReviewItem | TagResponse | TagLinkResponse | None = None
+    data: ReviewItem | TagResponse | TagLinkResponse | list[InsightResponse] | None = (
+        None
+    )
     links: dict[Literal["review"], str] = Field(default_factory=dict)
+
+
+class ConnectionReadResult(ToolResult):
+    """Typed connection read result."""
+
+    data: ConnectionResponse | PageData[ConnectionResponse] | None = None
+
+
+class ConnectionsManageResult(ToolResult):
+    """Connection management result."""
+
+    data: ConnectionResponse | None = None
 
 
 class CohortsManageResult(ToolResult):
@@ -180,6 +206,12 @@ class EvaluatorsManageResult(ToolResult):
     data: EvaluatorResponse | EvaluatorVersionResponse | None = None
 
 
+class AnalyzersManageResult(ToolResult):
+    """Analyzer parent or version management result."""
+
+    data: AnalyzerResponse | AnalyzerVersionResponse | None = None
+
+
 class SessionImportReceipt(MCPModel):
     """Receipt for a blob-backed import workflow."""
 
@@ -190,6 +222,7 @@ class SessionImportReceipt(MCPModel):
     importer_version_id: uuid.UUID
     agent_id: uuid.UUID
     agent_version_id: uuid.UUID
+    import_id: uuid.UUID
     result: JobResponse
 
 
@@ -251,8 +284,10 @@ class WorkflowCancelResult(ToolResult):
 DeleteKind = Literal[
     "cohort",
     "cohort_version",
+    "connection",
     "experiment",
     "experiment_run",
+    "insight",
     "investigation",
     "annotation",
     "evaluator",

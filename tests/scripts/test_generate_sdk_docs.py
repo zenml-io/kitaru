@@ -217,9 +217,19 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
     "kitaru.api_models.v1.evaluation": frozenset(
         {"EvaluationResult", "EvaluationName", "MAX_NAME_LENGTH"}
     ),
-    # Published under kitaru.task.importer (reexports).
+    # Published under kitaru.task.importer (reexports). ImportSource is an
+    # annotated discriminated-union alias; the two concrete sources are the
+    # developer-facing entry points. DEFAULT_FETCH_CONCURRENCY backs
+    # ImportQuery.concurrency's default and is not meant to be imported on
+    # its own.
     "kitaru.api_models.v1.imports": frozenset(
-        {"ImportFailure", "ImportStats", "MAX_IMPORT_FAILURES"}
+        {
+            "ImportFailure",
+            "ImportStats",
+            "MAX_IMPORT_FAILURES",
+            "ImportSource",
+            "DEFAULT_FETCH_CONCURRENCY",
+        }
     ),
     # Validation helper shared by the two requests carrying the deprecated
     # evaluate_baselines bool.
@@ -229,6 +239,10 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
     "kitaru.api_models.v1.replay_config": frozenset({"ToolConfig"}),
     # Annotated union aliases; the concrete filter models are published.
     "kitaru.api_models.v1.filter": frozenset({"Filter", "FilterParam"}),
+    # Annotated discriminated-union alias plus the batch size cap.
+    "kitaru.api_models.v1.insight": frozenset(
+        {"InsightData", "MAX_INSIGHT_BATCH_SIZE"}
+    ),
 }
 
 # Resource classes that exist in kitaru.client.resources but are deliberately
@@ -242,6 +256,7 @@ UNPUBLISHED_RESOURCE_CLASSES = frozenset(
         "ApiKeysResource",
         "AuthResource",
         "BlobsResource",
+        "ConnectionsResource",
         "DevicesResource",
         "ImportersResource",
         "ImportsResource",
@@ -312,6 +327,7 @@ class TestAllowlistConfiguration:
             "kitaru.client",
             "kitaru.client.resources",
             "kitaru.task",
+            "kitaru.task.analyzer",
             "kitaru.task.evaluator",
             "kitaru.task.importer",
         }
@@ -372,6 +388,7 @@ class TestAllowlistConfiguration:
         # A symbol newly added to a published module's __all__ must show up
         # here too, or it silently never reaches the reference site.
         import kitaru.client
+        import kitaru.task.analyzer
         import kitaru.task.evaluator
         import kitaru.task.importer
 
@@ -380,6 +397,7 @@ class TestAllowlistConfiguration:
         worker_entrypoints = {"run"}
         for module_path, module in [
             ("kitaru.client", kitaru.client),
+            ("kitaru.task.analyzer", kitaru.task.analyzer),
             ("kitaru.task.evaluator", kitaru.task.evaluator),
             ("kitaru.task.importer", kitaru.task.importer),
         ]:

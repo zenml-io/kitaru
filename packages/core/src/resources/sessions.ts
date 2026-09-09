@@ -39,9 +39,8 @@ function encodeSessionListParams(params: SessionListParams): QueryParameters {
 
 function encodeNodeListParams(params: SessionNodeListParams): QueryParameters {
   return {
-    cursor: params.cursor,
+    ...encodeListParams(params),
     include_payloads: params.includePayloads,
-    size: params.size,
   };
 }
 

@@ -18,6 +18,8 @@ check:
     @just lint
     @printf '\n─── OpenAPI ────────────────────────────────────\n'
     @just openapi-check
+    @printf '\n─── Changelog ──────────────────────────────────\n'
+    @just changelog-check
     @printf '\n─── Type Check ─────────────────────────────────\n'
     @just typecheck
     @printf '\n─── Typos ──────────────────────────────────────\n'
@@ -42,6 +44,10 @@ lint:
 # Verify the committed OpenAPI specification matches the application schema
 openapi-check:
     uv run bash scripts/check_openapi.sh
+
+# Validate the changelog fragments under changelog.d
+changelog-check:
+    uv run python scripts/changelog_fragments.py check
 
 # Run type checker
 typecheck:

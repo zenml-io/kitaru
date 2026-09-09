@@ -36,7 +36,7 @@ class LabelSelector(FrozenModel):
     """Label selector."""
 
     key: str = Field(description="Label key.")
-    values: list[str] = Field(min_length=1, description="Values the label may take.")
+    values: list[str] = Field(description="Values the label may take.")
     required: bool = Field(
         default=False, description="Whether a task lacking the key fails the match."
     )

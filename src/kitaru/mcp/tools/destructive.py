@@ -45,10 +45,14 @@ async def handle_delete(state: MCPServerState, request: DeleteRequest) -> object
         await state.client.cohorts.delete(request.id)
     elif request.kind == "cohort_version":
         await state.client.cohort_versions.delete(request.id)
+    elif request.kind == "connection":
+        await state.client.connections.delete(request.id)
     elif request.kind == "experiment":
         await state.client.experiments.delete(request.id)
     elif request.kind == "experiment_run":
         await state.client.experiment_runs.delete(request.id)
+    elif request.kind == "insight":
+        await state.client.insights.delete(request.id)
     elif request.kind == "investigation":
         await state.client.investigations.delete(request.id)
     elif request.kind == "annotation":

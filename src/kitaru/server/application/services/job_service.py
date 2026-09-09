@@ -17,11 +17,9 @@ import uuid
 
 from kitaru.api_models.v1.job import JobKind
 from kitaru.api_models.v1.task import TaskOnFailure
-from kitaru.server.application.interfaces.agent_repository import AgentRepository
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
-from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.session_repository import SessionRepository
@@ -29,28 +27,43 @@ from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.job import (
     EvaluationBatchCreate,
-    ImportCreate,
     JobFilter,
     SessionRunCreate,
 )
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
-    resolve_agent_id,
     resolve_runnable_agent_version,
 )
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
 from kitaru.server.application.services.plugin_resolution import (
-    resolve_plugin,
-    resolve_plugin_version,
+    get_plugin_task_labels,
 )
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import Job, JobAlreadySettled, JobNotSettled
-from kitaru.server.domain.plugin import PluginKind
-from kitaru.server.domain.task import AgentTask, EvaluationTask, ImportTask, Task
+from kitaru.server.domain.task import (
+    RESERVED_LABEL_PREFIX,
+    AgentTask,
+    EvaluationTask,
+    Task,
+)
 
-AGENT_VERSION_LABEL = "agent_version"
+AGENT_VERSION_LABEL = f"{RESERVED_LABEL_PREFIX}agent_version"
+LEGACY_AGENT_VERSION_LABEL = "agent_version"
 SESSION_NAME_ENV = "KITARU_SESSION_NAME"
+
+
+def get_agent_task_labels(agent_version_id: uuid.UUID) -> dict[str, str]:
+    """Build the labels stamped on a task running an agent version.
+
+    Args:
+        agent_version_id: Id of the agent version.
+
+    Returns:
+        Labels.
+    """
+    value = str(agent_version_id)
+    return {AGENT_VERSION_LABEL: value, LEGACY_AGENT_VERSION_LABEL: value}
 
 
 async def add_tasks(
@@ -112,10 +125,8 @@ class JobService:
         repository: JobRepository,
         task_repository: TaskRepository,
         session_repository: SessionRepository,
-        agent_repository: AgentRepository,
         agent_version_repository: AgentVersionRepository,
         plugin_repository: PluginRepository,
-        blob_repository: BlobRepository,
         transitions: TaskTransitions,
         policy: TaskPolicy,
     ) -> None:
@@ -125,20 +136,16 @@ class JobService:
             repository: Job repository.
             task_repository: Task repository.
             session_repository: Session repository.
-            agent_repository: Agent repository.
             agent_version_repository: Agent version repository.
-            plugin_repository: Plugin repository.
-            blob_repository: Blob repository.
+            plugin_repository: Plugin repository, for evaluator resolution.
             transitions: Task transition dispatch.
             policy: Task execution policy.
         """
         self._repository = repository
         self._tasks = task_repository
         self._sessions = session_repository
-        self._agents = agent_repository
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
-        self._blobs = blob_repository
         self._transitions = transitions
         self._policy = policy
 
@@ -288,57 +295,8 @@ class JobService:
                 job_id=job.id,
                 agent_version_id=agent_version.id,
                 inputs=command.inputs,
-                labels={AGENT_VERSION_LABEL: str(agent_version.id)},
+                labels=get_agent_task_labels(agent_version.id),
                 env=env,
-            )
-        )
-        return job
-
-    async def create_import(self, command: ImportCreate, actor: AuthContext) -> Job:
-        """Create a job running one importer task on a payload blob.
-
-        An omitted importer version resolves to the importer's latest. An
-        agent version is stamped on every session the import creates, and
-        the sessions carry none when the command names none.
-
-        Args:
-            command: Fields for the import.
-            actor: Caller context.
-
-        Raises:
-            PluginNotFound: No importer has this name.
-            PluginVersionNotFound: The importer has no version with this
-                number.
-            BlobNotFound: No blob has the payload id.
-            AgentNotFound: No agent has this id.
-            AgentVersionNotFound: No agent version has this id.
-            AgentVersionAgentMismatch: The agent version belongs to another
-                agent.
-
-        Returns:
-            Created job.
-        """
-        plugin = await resolve_plugin(
-            command.importer, PluginKind.IMPORTER, self._plugins
-        )
-        plugin_version = await resolve_plugin_version(
-            plugin, command.version, self._plugins
-        )
-        payload = await self._blobs.get(command.payload_blob_id)
-        agent = await self._agents.get(command.agent_id)
-        if command.agent_version_id is not None:
-            await resolve_agent_id(
-                command.agent_version_id, agent.id, self._agent_versions
-            )
-        job = await self.create_job(JobKind.IMPORT, actor)
-        await self.add_task(
-            ImportTask(
-                job_id=job.id,
-                plugin_version_id=plugin_version.id,
-                payload_blob_id=payload.id,
-                agent_id=agent.id,
-                agent_version_id=command.agent_version_id,
-                params=command.params,
             )
         )
         return job
@@ -396,6 +354,7 @@ class JobService:
                         job_id=job.id,
                         plugin_version_id=evaluator.evaluator_version_id,
                         input_session_id=session_id,
+                        labels=get_plugin_task_labels(evaluator.evaluator),
                         params=evaluator.params,
                         on_failure=TaskOnFailure.CONTINUE,
                     )

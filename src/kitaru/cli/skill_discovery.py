@@ -23,7 +23,7 @@ from typing import Literal, TypedDict
 
 import yaml
 
-INSTALL_COMMAND = "npx skills add zenml-io/kitaru-skills"
+INSTALL_COMMAND = "kitaru setup"
 SKILLS_URL = "https://github.com/zenml-io/kitaru-skills"
 
 SkillHost = Literal["agents", "claude", "codex"]

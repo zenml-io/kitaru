@@ -56,15 +56,19 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
     roots = {item["name"] for item in describe_schema()}
     assert roots == {
         "agent",
+        "analyzer",
         "annotation",
         "cohort",
         "config",
+        "connection",
         "doctor",
         "evaluation",
         "evaluator",
         "experiment",
+        "import",
         "importer",
         "info",
+        "insight",
         "investigation",
         "job",
         "login",
@@ -73,23 +77,28 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "replay",
         "schema",
         "session",
+        "setup",
         "status",
         "version",
         "worker",
     }
     descriptions = {item["name"]: item["description"] for item in describe_schema()}
     assert descriptions["agent"] == "Register and inspect agents."
+    assert descriptions["analyzer"] == "Register and inspect analyzers."
     assert descriptions["annotation"] == "Create and manage session annotations."
     assert (
         descriptions["cohort"]
         == "Manage cohort namespaces and immutable membership versions."
     )
+    assert descriptions["connection"] == "Create and manage provider connections."
     assert descriptions["evaluation"] == "Inspect stored evaluations."
     assert (
         descriptions["experiment"]
         == "Configure experiments and manage asynchronous runs."
     )
+    assert descriptions["import"] == "Inspect imports and rerun analyzers over them."
     assert descriptions["importer"] == "Develop, register, and inspect importers."
+    assert descriptions["insight"] == "Create and inspect agent insights."
     assert descriptions["investigation"] == (
         "Create investigations and review their linked sessions."
     )
@@ -132,6 +141,24 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     [importer_scaffold] = describe_schema(("importer", "scaffold"))
     assert importer_scaffold["side_effects"]["writes_local_file"] is True
     assert importer_scaffold["side_effects"]["creates_remote_state"] is False
+
+    [analyzer_register] = describe_schema(("analyzer", "register"))
+    analyzer_register_names = {
+        parameter["name"] for parameter in analyzer_register["parameters"]
+    }
+    assert {"--provider", "--connection-schema"} <= analyzer_register_names
+
+    [connection_create] = describe_schema(("connection", "create"))
+    connection_create_names = {
+        parameter["name"] for parameter in connection_create["parameters"]
+    }
+    assert "--analyzer" in connection_create_names
+
+    [session_import] = describe_schema(("session", "import"))
+    session_import_names = {
+        parameter["name"] for parameter in session_import["parameters"]
+    }
+    assert "--analyzer-connection" in session_import_names
 
     [version] = describe_schema(("version",))
     assert version["offline"] is True
@@ -193,12 +220,20 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     import_parameters = {
         parameter["name"]: parameter for parameter in session_import["parameters"]
     }
-    assert import_parameters["FILE"]["required"] is True
+    assert import_parameters["FILE"]["required"] is False
     assert import_parameters["--importer"]["required"] is True
     assert import_parameters["--agent"]["required"] is True
-    assert {"--params", "--media-type", "--wait", "--interval", "--timeout"} <= set(
-        import_parameters
-    )
+    assert {
+        "--params",
+        "--media-type",
+        "--since",
+        "--until",
+        "--trace-id",
+        "--query",
+        "--wait",
+        "--interval",
+        "--timeout",
+    } <= set(import_parameters)
     import_errors = {error["kind"] for error in session_import["errors"]}
     assert {
         "partial_failure",
@@ -230,7 +265,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
         for parameter in session_commands["session.nodes"]["parameters"]
     }
     assert "--include-payloads" in node_parameters
-    assert "--filter" not in node_parameters
+    assert "--filter" in node_parameters
     assert "--sort" not in node_parameters
     session_list_errors = {
         error["kind"] for error in session_commands["session.list"]["errors"]
@@ -448,6 +483,7 @@ def test_idempotency_key_option_covers_only_single_create_commands() -> None:
     covered_paths = (
         ("cohort", "create"),
         ("cohort", "version", "create"),
+        ("insight", "create"),
         ("investigation", "create"),
         ("annotation", "create"),
         ("experiment", "create"),
@@ -458,6 +494,7 @@ def test_idempotency_key_option_covers_only_single_create_commands() -> None:
         ("agent", "version", "register"),
         ("importer", "version", "register"),
         ("evaluator", "version", "register"),
+        ("analyzer", "version", "register"),
     )
     for path in covered_paths:
         [command] = describe_schema(path)
@@ -471,6 +508,7 @@ def test_idempotency_key_option_covers_only_single_create_commands() -> None:
         ("agent", "register"),
         ("importer", "register"),
         ("evaluator", "register"),
+        ("analyzer", "register"),
     )
     for path in uncovered_paths:
         [command] = describe_schema(path)

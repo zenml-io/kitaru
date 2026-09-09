@@ -38,12 +38,14 @@ from kitaru.client.exceptions import (
 from kitaru.client.resources.accounts import AccountsResource
 from kitaru.client.resources.agent_versions import AgentVersionsResource
 from kitaru.client.resources.agents import AgentsResource
+from kitaru.client.resources.analyzers import AnalyzersResource
 from kitaru.client.resources.annotations import AnnotationsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
 from kitaru.client.resources.auth import AuthResource
 from kitaru.client.resources.blobs import BlobsResource
 from kitaru.client.resources.cohort_versions import CohortVersionsResource
 from kitaru.client.resources.cohorts import CohortsResource
+from kitaru.client.resources.connections import ConnectionsResource
 from kitaru.client.resources.devices import DevicesResource
 from kitaru.client.resources.evaluations import EvaluationsResource
 from kitaru.client.resources.evaluators import EvaluatorsResource
@@ -52,6 +54,7 @@ from kitaru.client.resources.experiments import ExperimentsResource
 from kitaru.client.resources.importers import ImportersResource
 from kitaru.client.resources.imports import ImportsResource
 from kitaru.client.resources.info import InfoResource
+from kitaru.client.resources.insights import InsightsResource
 from kitaru.client.resources.investigations import InvestigationsResource
 from kitaru.client.resources.jobs import JobsResource
 from kitaru.client.resources.replays import ReplaysResource
@@ -154,12 +157,14 @@ class KitaruAPIClient:
         self.accounts = AccountsResource(self)
         self.agents = AgentsResource(self)
         self.agent_versions = AgentVersionsResource(self)
+        self.analyzers = AnalyzersResource(self)
         self.annotations = AnnotationsResource(self)
         self.api_keys = ApiKeysResource(self)
         self.auth = AuthResource(self)
         self.blobs = BlobsResource(self)
         self.cohorts = CohortsResource(self)
         self.cohort_versions = CohortVersionsResource(self)
+        self.connections = ConnectionsResource(self)
         self.devices = DevicesResource(self)
         self.evaluations = EvaluationsResource(self)
         self.evaluators = EvaluatorsResource(self)
@@ -168,6 +173,7 @@ class KitaruAPIClient:
         self.importers = ImportersResource(self)
         self.imports = ImportsResource(self)
         self.info = InfoResource(self)
+        self.insights = InsightsResource(self)
         self.investigations = InvestigationsResource(self)
         self.jobs = JobsResource(self)
         self.replays = ReplaysResource(self)

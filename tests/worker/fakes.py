@@ -24,10 +24,11 @@ from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionResponse, SessionStatus
 from kitaru.api_models.v1.task import (
     AgentTaskDetails,
+    AnalysisTaskDetails,
     EvaluationTaskDetails,
+    ImportSourceSpec,
     ImportTaskDetails,
     PackagePluginSpec,
-    PayloadSpec,
     ScriptPluginSpec,
     TaskClaimResponse,
     TaskKind,
@@ -171,7 +172,7 @@ def make_evaluator_spec(
 def make_importer_spec(
     task_id: uuid.UUID,
     plugin: ScriptPluginSpec | PackagePluginSpec,
-    payload: PayloadSpec,
+    source: ImportSourceSpec,
     timeout_seconds: int = 30,
     agent_id: uuid.UUID | None = None,
     extra_env: dict[str, str] | None = None,
@@ -182,7 +183,7 @@ def make_importer_spec(
     Args:
         task_id: Task the spec belongs to.
         plugin: Importer plugin to load.
-        payload: Payload to parse.
+        source: Where the payload comes from.
         timeout_seconds: Process timeout.
         agent_id: Agent imported sessions are created under.
         extra_env: Creator-set environment extras.
@@ -200,9 +201,49 @@ def make_importer_spec(
         secret_env=secret_env or {},
         details=ImportTaskDetails(
             plugin=plugin,
-            payload=payload,
+            source=source,
             agent_id=agent_id or uuid.uuid4(),
             params={},
+        ),
+    )
+
+
+def make_analyzer_spec(
+    task_id: uuid.UUID,
+    plugin: ScriptPluginSpec | PackagePluginSpec,
+    timeout_seconds: int = 30,
+    agent_id: uuid.UUID | None = None,
+    import_id: uuid.UUID | None = None,
+    extra_env: dict[str, str] | None = None,
+    secret_env: dict[str, str] | None = None,
+) -> TaskSpecResponse:
+    """Build an analyzer task spec.
+
+    Args:
+        task_id: Task the spec belongs to.
+        plugin: Analyzer plugin to load.
+        timeout_seconds: Process timeout.
+        agent_id: Agent the insights belong to.
+        import_id: Import whose sessions are analyzed.
+        extra_env: Creator-set environment extras.
+        secret_env: Secrets merged into the process environment.
+
+    Returns:
+        Analyzer task spec.
+    """
+    return TaskSpecResponse(
+        task_id=task_id,
+        kind=TaskKind.ANALYZER,
+        timeout_seconds=timeout_seconds,
+        run=None,
+        env=extra_env or {},
+        secret_env=secret_env or {},
+        details=AnalysisTaskDetails(
+            analyzer_name="insight",
+            params={},
+            plugin=plugin,
+            agent_id=agent_id or uuid.uuid4(),
+            import_id=import_id or uuid.uuid4(),
         ),
     )
 
@@ -335,6 +376,8 @@ class FakeWorkersResource:
         """Initialize the resource with an empty call log."""
         self.created: list[Any] = []
         self.create_response = make_worker_registration_response()
+        self.get_calls: list[uuid.UUID] = []
+        self.get_response = make_worker_response()
         self.heartbeats: list[tuple[uuid.UUID, Any]] = []
         self.heartbeat_responses: deque[Any] = deque()
 
@@ -342,6 +385,11 @@ class FakeWorkersResource:
         """Record the request and return the scripted worker."""
         self.created.append(request)
         return self.create_response
+
+    async def get(self, worker_id: uuid.UUID) -> WorkerResponse:
+        """Record the call and return the scripted worker."""
+        self.get_calls.append(worker_id)
+        return self.get_response
 
     async def heartbeat(self, worker_id: uuid.UUID, request: Any) -> Any:
         """Record the request and return or raise the next scripted result."""
@@ -461,6 +509,7 @@ class FakeKitaruAPIClient:
         self.sessions = FakeSessionsResource()
         self.blobs = FakeBlobsResource()
         self.closed = False
+        self.auth_swaps: list[object] = []
 
     async def __aenter__(self) -> "FakeKitaruAPIClient":
         """Enter the context manager."""
@@ -475,7 +524,8 @@ class FakeKitaruAPIClient:
         return self
 
     def with_auth(self, auth: object) -> "FakeKitaruAPIClient":
-        """Return this fake, since it has no separate transport to view."""
+        """Record the auth and return this fake, which has no separate transport."""
+        self.auth_swaps.append(auth)
         return self
 
 

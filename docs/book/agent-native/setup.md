@@ -13,7 +13,9 @@ Kitaru observes your production agents; your coding assistant is how you talk to
 Skills and MCP work together: the skills say how to work, and the server bounds what can be touched.
 
 {% hint style="success" %}
-Used the [one-line installer](../getting-started/installation.md)? It already installed the MCP server, registered it with Claude Code (in your repo's `.mcp.json` when run inside a repository, user scope otherwise) and Codex, pointed at `http://localhost:8000` in `standard` mode, and installed the skills. Skip to [Capability modes and tools](#capability-modes-and-tools) unless you use another assistant or a different server URL.
+Used the [one-line installer](../getting-started/installation.md)? It ran `kitaru setup`, which installed the skills and registered the MCP server with every coding agent it found: Claude Code (in your repo's `.mcp.json` when run inside a repository, user scope otherwise), Codex, Cursor, and Windsurf, pointed at `http://localhost:8000` in `standard` mode. Skip to [Capability modes and tools](#capability-modes-and-tools) unless you use another assistant or a different server URL.
+
+Installed a new coding agent since, or changed servers? Run `kitaru setup` again (`uv run kitaru setup` inside a project). It replaces the previous `kitaru` entry rather than adding a second one, and rewrites each installed skill directory from the current release (local edits under `~/.agents/skills/kitaru-*` are overwritten); `--mode read-only` and the global `--server URL` change the mode and target, and `--no-skills` / `--no-mcp` limit it to one half.
 {% endhint %}
 
 ## Install the MCP server
@@ -57,14 +59,16 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_registry_read` | read-only | Read agents, cohorts, experiments, importers, evaluators, and their versions; list and filter tags; list workers or get one by exact UUID |
 | `kitaru_activity_read` | read-only | Read sessions, replays, evaluations, runs, jobs, and their children |
 | `kitaru_review_read` | read-only | Read [investigations and annotations](../concepts/investigations.md) |
+| `kitaru_connection_read` | read-only | Read [provider connections](../guides/provider-connections.md) without their secret values |
 | `kitaru_cohorts_manage` | standard | Create or update cohorts and cohort versions |
 | `kitaru_experiments_manage` | standard | Create or update experiments |
 | `kitaru_session_import` | standard | Import sessions from an already-uploaded blob |
 | `kitaru_review_manage` | standard | Manage investigations and annotations; create or rename tags and link them to resources |
 | `kitaru_workflow_start` | standard | Start a session evaluation or experiment run, return immediately |
 | `kitaru_evaluators_manage` | standard | Create or update evaluators from an existing blob or pinned package |
+| `kitaru_connections_manage` | standard | Create or update [provider connections](../guides/provider-connections.md) and select provider defaults |
 | `kitaru_workflow_cancel` | destructive | Cancel a job or experiment run |
-| `kitaru_delete` | destructive | Delete a cohort, experiment, investigation, annotation, evaluator, version, run, or tag; unlink an exact tag-resource tuple |
+| `kitaru_delete` | destructive | Delete a cohort, experiment, investigation, annotation, evaluator, version, connection, run, or tag; unlink an exact tag-resource tuple |
 
 Start assistants in `read-only`, move to `standard` when you want them building cohorts and starting runs, and reserve `destructive` for sessions where you are watching closely.
 

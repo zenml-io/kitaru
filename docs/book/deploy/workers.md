@@ -7,7 +7,7 @@ icon: gears
 
 [Workers](../concepts/workers.md) are where everything executes. In production you run them as ordinary long-lived processes (a systemd unit, a container where the published `zenmldocker/kitaru-worker` image works out of the box, or a Kubernetes Deployment), one per environment your agents' code needs.
 
-The rule of thumb: **a worker must be able to run what it claims.** An agent replay needs your agent's virtualenv and provider keys; an evaluator or importer brings its own dependencies and needs only Python, `uv`, and network access to the server.
+The rule of thumb: **a worker must be able to run what it claims.** An agent replay needs your agent's virtualenv and provider keys; an evaluator, importer, or analyzer brings its own dependencies and needs Python, `uv`, network access to the server, and any provider credentials its implementation uses. An API import or analyzer whose credentials come from the worker's environment rather than a [connection](../guides/provider-connections.md) is only claimed by a worker whose `kitaru/requires-credentials` selector names that provider.
 
 ## Configuration
 
@@ -18,7 +18,7 @@ export KITARU_API_URL="https://kitaru.internal.example.com"
 export KITARU_API_KEY="KITKEY_..."          # a service API key
 
 export KITARU_WORKER_CONCURRENCY=4
-export KITARU_WORKER_SCOPE__CLAIMS='[{"kind":"evaluator"},{"kind":"importer"}]'   # JSON
+export KITARU_WORKER_SCOPE__CLAIMS='[{"kind":"evaluator"},{"kind":"importer"},{"kind":"analyzer"}]'   # JSON
 kitaru worker start
 ```
 
@@ -27,7 +27,7 @@ kitaru worker start
 | `KITARU_WORKER_NAME` | hostname-pid | Label shown in worker listings. Every start registers a new worker, names need not be unique. |
 | `KITARU_WORKER_CONCURRENCY` | 10 | Tasks run in parallel |
 | `KITARU_WORKER_SCOPE__CLAIMS` | all | JSON list of claims, such as `{"kind":"agent"}` or `{"kind":"agent","agent_version_id":"<UUID>"}` |
-| `KITARU_WORKER_SCOPE__SELECTORS` | none | JSON label selectors (e.g. limit to one agent version's environment) |
+| `KITARU_WORKER_SCOPE__SELECTORS` | none | JSON label selectors (e.g. limit to one agent version's environment, or name the providers whose [credentials](../guides/provider-connections.md#worker-credentials) the environment holds) |
 | `KITARU_WORKER_SCOPE__JOB_ID` | none | Claim one job's tasks, drain, exit |
 | `KITARU_WORKER_TIMEOUT` | none | Wall-clock lifetime; unset runs until stopped |
 | `KITARU_WORKER_POLL_INTERVAL` | 2s | Sleep after an empty claim |
@@ -47,10 +47,12 @@ The worker retains the API key for registration and worker-token renewal. Each t
 kitaru worker start --claim agent=<AGENT_VERSION_ID>
 
 # anywhere cheap
-kitaru worker start --claim evaluator --claim importer --concurrency 8
+kitaru worker start --claim evaluator --claim importer --claim analyzer --concurrency 8
 ```
 
 The versioned `agent` claim matches the agent version attached to each agent task, so a worker only claims replays its environment can actually run.
+
+The `analyzer` claim lets this utility worker run [post-import insights](../guides/post-import-insights.md). Without an analyzer-capable worker, an import's analysis task stays queued after parsing finishes.
 
 **One-shot workers in CI.** Pin a worker to the job you just created and it drains the job (appended evaluator tasks included), then exits:
 

@@ -271,6 +271,7 @@ class Session(DomainModel):
     number: int
     agent_version_id: uuid.UUID | None = None
     task_id: uuid.UUID | None = None
+    import_id: uuid.UUID | None = None
     origin: SessionOrigin
     status: SessionStatus = SessionStatus.IN_PROGRESS
     name: str | None = None

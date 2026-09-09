@@ -1,0 +1,289 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""End-to-end insight tests against PostgreSQL."""
+
+import json
+import uuid
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
+import httpx
+import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from conftest import db_settings, lifespan_client
+from kitaru.api_models.v1.insight import TextInsightData
+from kitaru.api_models.v1.job import JobKind
+from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.import_repository import SQLImportRepository
+from kitaru.server.adapters.db.repositories.insight_repository import (
+    SQLInsightRepository,
+)
+from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
+from kitaru.server.adapters.db.repositories.plugin_repository import (
+    SQLPluginRepository,
+)
+from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
+from kitaru.server.api.config import APISettings
+from kitaru.server.database.service import DatabaseService
+from kitaru.server.domain.blob import Blob, BlobStorageBackend
+from kitaru.server.domain.imports import Import
+from kitaru.server.domain.insight import Insight
+from kitaru.server.domain.job import Job
+from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
+from kitaru.server.domain.task import AnalysisTask
+
+
+@pytest.fixture
+async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app running its full lifespan."""
+    async with lifespan_client(db_settings()) as client:
+        yield client
+
+
+@asynccontextmanager
+async def _raw_session(
+    settings: APISettings,
+) -> AsyncGenerator[AsyncSession, None]:
+    """Open a session bound to the same database a lifespan_client migrated.
+
+    Args:
+        settings: Settings naming the database, matching the ones passed to
+            lifespan_client.
+
+    Yields:
+        Session on the shared database.
+    """
+    engine = create_async_engine(DatabaseService.generate_database_uri(settings))
+    try:
+        session_factory = async_sessionmaker(
+            bind=engine, class_=AsyncSession, expire_on_commit=False
+        )
+        async with session_factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+async def agent_id(client: httpx.AsyncClient) -> str:
+    """Provide the id of an agent to own insights."""
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    return created["id"]
+
+
+async def _create_insights(
+    client: httpx.AsyncClient, agent_id: str
+) -> list[dict[str, object]]:
+    """Store two text insights on the given agent and return their responses."""
+    response = await client.post(
+        "/api/v1/insights",
+        json={
+            "agent_id": agent_id,
+            "insights": [
+                {
+                    "name": "first",
+                    "title": "first",
+                    "data": {"type": "text", "content": "Latency regressed."},
+                },
+                {
+                    "name": "second",
+                    "title": "second",
+                    "data": {"type": "text", "content": "Error rate dropped."},
+                },
+            ],
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+async def test_batch_create_persists_across_requests(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Prove the per-request commit through separate requests."""
+    created = await _create_insights(client, agent_id)
+    assert [item["title"] for item in created] == ["first", "second"]
+
+    for item in created:
+        response = await client.get(f"/api/v1/insights/{item['id']}")
+        assert response.status_code == 200
+        assert response.json() == item
+
+
+async def test_list_by_agent_persists_across_requests(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """List insights scoped to their agent through a separate request."""
+    created = await _create_insights(client, agent_id)
+
+    filter_expression = {"field": "agent_id", "op": "eq", "value": agent_id}
+    response = await client.get(
+        "/api/v1/insights", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["next_cursor"] is None
+    assert {item["id"] for item in body["items"]} == {item["id"] for item in created}
+
+
+async def test_update_persists_across_requests(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Persist a title and description update across requests."""
+    created = await _create_insights(client, agent_id)
+
+    response = await client.patch(
+        f"/api/v1/insights/{created[0]['id']}",
+        json={"title": "renamed", "description": "updated rationale"},
+    )
+    assert response.status_code == 200
+
+    response = await client.get(f"/api/v1/insights/{created[0]['id']}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["title"] == "renamed"
+    assert body["description"] == "updated rationale"
+    assert body["updated"] > created[0]["updated"]
+
+
+async def test_delete_persists_across_requests(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Delete an insight and observe its absence in a separate request."""
+    created = await _create_insights(client, agent_id)
+
+    response = await client.delete(f"/api/v1/insights/{created[0]['id']}")
+    assert response.status_code == 204
+
+    response = await client.get(f"/api/v1/insights/{created[0]['id']}")
+    assert response.status_code == 404
+
+
+async def test_create_insights_missing_agent(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 when the agent does not exist."""
+    response = await client.post(
+        "/api/v1/insights",
+        json={
+            "agent_id": "00000000-0000-0000-0000-000000000000",
+            "insights": [
+                {
+                    "name": "insight",
+                    "title": "insight",
+                    "data": {"type": "text", "content": "x"},
+                }
+            ],
+        },
+    )
+    assert response.status_code == 404
+
+
+async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight() -> (
+    None
+):
+    """Carry the analyzer name and version for an insight produced by a task."""
+    settings = db_settings()
+    async with lifespan_client(settings) as client:
+        agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+
+        async with _raw_session(settings) as session:
+            owner_id = uuid.UUID(agent["owner_id"])
+            code_blob, _ = await SQLBlobRepository(session).create(
+                Blob(
+                    owner_id=owner_id,
+                    sha256="1" * 64,
+                    size=4,
+                    media_type="text/x-python",
+                    stored_in=BlobStorageBackend.DATABASE,
+                )
+            )
+            plugins = SQLPluginRepository(session)
+            plugin = await plugins.create(
+                Plugin(owner_id=owner_id, kind=PluginKind.ANALYZER, name="trends")
+            )
+            version = await plugins.create_version(
+                plugin.id,
+                ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
+                display_version=None,
+            )
+            import_ = await SQLImportRepository(session).create(
+                Import(
+                    owner_id=owner_id, agent_id=uuid.UUID(agent["id"]), fetch_query={}
+                )
+            )
+            import_id = import_.id
+            job = await SQLJobRepository(session).create(
+                Job(owner_id=owner_id, kind=JobKind.IMPORT)
+            )
+            task = await SQLTaskRepository(session).create(
+                AnalysisTask(
+                    job_id=job.id,
+                    agent_id=uuid.UUID(agent["id"]),
+                    import_id=import_id,
+                    plugin_version_id=version.id,
+                )
+            )
+            stored = await SQLInsightRepository(session).create_many(
+                [
+                    Insight(
+                        owner_id=owner_id,
+                        agent_id=uuid.UUID(agent["id"]),
+                        name="insight",
+                        title="insight",
+                        data=TextInsightData(content="Latency regressed."),
+                        analyzer_version_id=version.id,
+                        task_id=task.id,
+                        import_id=import_id,
+                        analyzer_params={"window_days": 7},
+                    )
+                ]
+            )
+            await session.commit()
+
+        response = await client.get(f"/api/v1/insights/{stored[0].id}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["analyzer_version_id"] == str(version.id)
+        assert body["analyzer_params"] == {"window_days": 7}
+        assert body["import_id"] == str(import_id)
+        # Job cleanup cascades to the analysis task, but leaves its insights.
+        async with _raw_session(settings) as session:
+            await SQLJobRepository(session).delete(job.id)
+            await session.commit()
+        async with _raw_session(settings) as session:
+            retained = await SQLInsightRepository(session).get(stored[0].id)
+            assert retained.task_id is None
+            assert retained.import_id == import_id
+        await _create_insights(client, agent["id"])
+        response = await client.get(
+            "/api/v1/insights",
+            params={
+                "filter": json.dumps(
+                    {"field": "import_id", "op": "eq", "value": str(import_id)}
+                )
+            },
+        )
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()["items"]] == [str(stored[0].id)]
+        async with _raw_session(settings) as session:
+            await session.execute(
+                text('DELETE FROM "import" WHERE id = :import_id'),
+                {"import_id": import_id},
+            )
+            await session.commit()
+        response = await client.get(f"/api/v1/insights/{stored[0].id}")
+        assert response.status_code == 200
+        assert response.json()["import_id"] is None
+        assert response.json()["analyzer_params"] == {"window_days": 7}

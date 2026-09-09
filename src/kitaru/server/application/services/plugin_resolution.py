@@ -13,8 +13,11 @@
 #  permissions and limitations under the License.
 """Generic plugin and plugin version resolution."""
 
+from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
+from kitaru.server.domain.names import get_namespace
 from kitaru.server.domain.plugin import Plugin, PluginKind, PluginVersion
+from kitaru.server.domain.task import RESERVED_LABEL_PREFIX
 
 
 async def resolve_plugin(
@@ -57,3 +60,32 @@ async def resolve_plugin_version(
     """
     number = version if version is not None else plugin.latest_version
     return await repository.get_version(plugin.id, number)
+
+
+PLUGIN_NAMESPACE_LABEL = f"{RESERVED_LABEL_PREFIX}plugin_namespace"
+PLUGIN_PROVIDER_LABEL = f"{RESERVED_LABEL_PREFIX}provider"
+
+
+def get_plugin_task_labels(
+    name: str, provider: str | None = None, requires_credentials: bool = False
+) -> dict[str, str]:
+    """Build the labels stamped on a task running a plugin.
+
+    Args:
+        name: Plugin name.
+        provider: Plugin provider, None stamps no provider label.
+        requires_credentials: Whether the claiming worker must hold the
+            provider's credentials.
+
+    Returns:
+        Plugin task labels.
+    """
+    namespace = get_namespace(name)
+    labels = {}
+    if namespace is not None:
+        labels[PLUGIN_NAMESPACE_LABEL] = namespace
+    if provider is not None:
+        labels[PLUGIN_PROVIDER_LABEL] = provider
+        if requires_credentials:
+            labels[REQUIRES_CREDENTIALS_LABEL] = provider
+    return labels

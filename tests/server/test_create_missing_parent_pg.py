@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from conftest import pg_session_with_engine, postgres_available
+from kitaru.api_models.v1.insight import TextInsightData
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -46,6 +47,9 @@ from kitaru.server.adapters.db.repositories.experiment_repository import (
 from kitaru.server.adapters.db.repositories.experiment_run_repository import (
     SQLExperimentRunRepository,
 )
+from kitaru.server.adapters.db.repositories.insight_repository import (
+    SQLInsightRepository,
+)
 from kitaru.server.adapters.db.repositories.investigation_repository import (
     SQLInvestigationRepository,
 )
@@ -70,6 +74,7 @@ from kitaru.server.domain.cohort_version import (
 )
 from kitaru.server.domain.experiment import Experiment, ExperimentNotFound
 from kitaru.server.domain.experiment_run import ExperimentRun, ExperimentRunNotFound
+from kitaru.server.domain.insight import Insight
 from kitaru.server.domain.investigation import (
     Investigation,
     InvestigationSession,
@@ -378,3 +383,16 @@ async def test_annotation_missing_investigation_session(setup: Setup) -> None:
                 value="answer",
             )
         )
+
+
+async def test_insight_missing_agent(setup: Setup) -> None:
+    """Translate the agent foreign key on insight batch create."""
+    insight = Insight(
+        owner_id=setup.owner_id,
+        agent_id=uuid.uuid4(),
+        name="insight",
+        title="insight",
+        data=TextInsightData(content="root cause"),
+    )
+    with pytest.raises(AgentNotFound):
+        await SQLInsightRepository(setup.session).create_many([insight])

@@ -54,12 +54,11 @@ def test_load_plugin_entrypoint_missing_attribute(tmp_path: Path) -> None:
         load_plugin_entrypoint(path, "evaluate", "Evaluator")
 
 
-def test_load_plugin_entrypoint_non_callable(tmp_path: Path) -> None:
-    """Raise PluginLoadError when the entrypoint attribute is not callable."""
+def test_load_plugin_entrypoint_returns_any_attribute(tmp_path: Path) -> None:
+    """Resolve a non-callable entrypoint attribute, the flows check its shape."""
     path = tmp_path / "plugin.py"
     path.write_text("evaluate = 'not callable'\n")
-    with pytest.raises(PluginLoadError, match="Evaluator entrypoint 'evaluate'"):
-        load_plugin_entrypoint(path, "evaluate", "Evaluator")
+    assert load_plugin_entrypoint(path, "evaluate", "Evaluator") == "not callable"
 
 
 def test_load_plugin_module_registers_in_sys_modules(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 from scripts.release_impact import (
     ReleaseImpactError,
     infer_release_labels,
@@ -11,6 +12,23 @@ from scripts.release_impact import (
 from scripts.release_units import load_inventory
 
 REPO_ROOT = Path(__file__).parents[2]
+
+
+def test_workflow_checks_out_the_commit_used_for_release_impact() -> None:
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github/workflows/release-impact.yml").read_text()
+    )
+    steps = workflow["jobs"]["validate"]["steps"]
+    checkout = next(
+        step for step in steps if step.get("uses", "").startswith("actions/checkout@")
+    )
+    collect = next(
+        step for step in steps if step.get("name") == "Collect changed files"
+    )
+
+    # The default checkout ref can become develop after a queued PR is merged.
+    assert checkout["with"].get("ref") == collect["env"]["HEAD_SHA"]
+    assert checkout["with"]["fetch-depth"] == 0
 
 
 @pytest.fixture(scope="module")

@@ -263,6 +263,40 @@ describe("foundation resources", () => {
     ]);
   });
 
+  it.each<{ filter?: Filter | null }>([
+    {},
+    { filter: null },
+    {
+      filter: {
+        field: "node_type",
+        op: "in",
+        value: ["llm_call", "tool_call"],
+      },
+    },
+    {
+      filter: {
+        or: [
+          { field: "node_type", op: "eq", value: "llm_call" },
+          { not: { field: "node_type", op: "eq", value: "span" } },
+        ],
+      },
+    },
+  ])("encodes session node filter $filter", async ({ filter }) => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      jsonResponse({ items: [], next_cursor: null }),
+    );
+    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
+
+    await client.sessions.listNodes(ID, { filter, sort: "index:asc" });
+
+    const url = new URL(String(fetch.mock.calls[0]?.[0]));
+    expect(url.pathname).toBe(`/api/v1/sessions/${ID}/nodes`);
+    expect(url.searchParams.get("filter")).toBe(
+      filter == null ? null : JSON.stringify(filter),
+    );
+    expect(url.searchParams.get("sort")).toBe("index:asc");
+  });
+
   it("creates a session run and validates its returned job", async () => {
     const job = {
       created: "2026-01-01T00:00:00Z",

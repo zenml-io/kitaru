@@ -158,6 +158,9 @@ class SessionResponse(OwnedResponseModel):
     task_id: uuid.UUID | None = Field(
         default=None, description="Task the session was produced by."
     )
+    import_id: uuid.UUID | None = Field(
+        default=None, description="Import the session was created by."
+    )
     origin: SessionOrigin = Field(description="How the session came to exist.")
     status: SessionStatus = Field(description="Session status.")
     name: str | None = Field(default=None, description="Session name.")

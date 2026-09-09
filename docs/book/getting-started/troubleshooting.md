@@ -22,7 +22,7 @@ The CLI and SDK read `KITARU_API_URL` and `KITARU_API_KEY` from the environment;
 A replay, import, or evaluation that sits in `pending` almost always means **no worker is claiming it**:
 
 - Is a worker running? `kitaru worker list` shows workers and liveness.
-- Can this worker claim this task? A worker started with `--claim` or `--selector` skips tasks outside its scope; a bare `kitaru worker start` claims anything.
+- Can this worker claim this task? A worker started with `--claim` or `--selector` skips tasks outside its scope; a bare `kitaru worker start` claims anything except an API import or analyzer that needs provider credentials from the worker's environment, which only a worker started with `--selector kitaru/requires-credentials=<provider>` claims.
 - Watch the job directly: `kitaru job watch <job-id>` shows tasks moving through `pending → claimed → running`.
 
 ## A replay fails

@@ -40,6 +40,7 @@ class JobKind(StrEnum):
     IMPORT = "import"
     EVALUATION = "evaluation"
     REPLAY = "replay"
+    ANALYSIS = "analysis"
 
 
 class JobResponse(OwnedResponseModel):

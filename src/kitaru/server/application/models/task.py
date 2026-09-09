@@ -75,5 +75,6 @@ class TaskPolicy(FrozenModel):
     sweep_batch_limit: int = 100
     evaluator_timeout_seconds: int = 300
     importer_timeout_seconds: int = 600
+    analyzer_timeout_seconds: int = 900
     max_result_bytes: int = 1024 * 1024
     evaluation_pair_limit: int = 100

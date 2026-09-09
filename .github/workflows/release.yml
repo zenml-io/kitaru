@@ -189,7 +189,7 @@ jobs:
         env:
           KITARU_VERSION: ${{ needs.build.outputs.version }}
         run: curl -fsS "https://pypi.org/pypi/kitaru/$KITARU_VERSION/json" >/dev/null
-      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4.3.0
         with:
           platforms: arm64
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
@@ -282,7 +282,7 @@ jobs:
           echo "### Managed image publication failed" >> "$GITHUB_STEP_SUMMARY"
           echo "The private ECR images are unavailable for this release. Public Docker Hub images and the Helm chart continue publishing." >> "$GITHUB_STEP_SUMMARY"
       - name: Configure AWS credentials for Helm
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: arn:aws:iam::715803424590:role/gh-action-role-zenml-helm
           aws-region: us-east-1
@@ -451,7 +451,7 @@ jobs:
           git config user.name "kitaru-release[bot]"
           git config user.email "kitaru-release[bot]@users.noreply.github.com"
           git switch -c "$branch"
-          git add pyproject.toml uv.lock plugins/uv.lock openapi/openapi.json CHANGELOG.md
+          git add pyproject.toml uv.lock plugins/uv.lock openapi/openapi.json
           git commit -m "Start Kitaru $VERSION development"
           gh auth setup-git
           git push origin "HEAD:refs/heads/$branch"
@@ -465,7 +465,7 @@ jobs:
           set -euo pipefail
           branch="automation/kitaru-$VERSION-development"
           # shellcheck disable=SC2016  # Markdown backticks are intentional.
-          printf -v body '## Summary\n\n- set the core development version to `%s+dev`\n- restore the `Unreleased` changelog section\n- update both core lockfile entries and generated OpenAPI version\n\n## Merge order\n\nMerge this PR only after `main` contains release commit `%s`, so `main` remains at the clean `%s` release state.\n\n## Reviewer Notes\n\nConfirm the diff contains only `pyproject.toml`, `uv.lock`, `plugins/uv.lock`, `openapi/openapi.json`, and `CHANGELOG.md`. Verify `main` contains `%s` before marking this draft ready.\n' "$VERSION" "$RELEASE_SHA" "$VERSION" "$RELEASE_SHA"
+          printf -v body '## Summary\n\n- set the core development version to `%s+dev`\n- update both core lockfile entries and generated OpenAPI version\n\n## Merge order\n\nMerge this PR only after `main` contains release commit `%s`, so `main` remains at the clean `%s` release state.\n\n## Reviewer Notes\n\nConfirm the diff contains only `pyproject.toml`, `uv.lock`, `plugins/uv.lock`, and `openapi/openapi.json`. Verify `main` contains `%s` before marking this draft ready.\n' "$VERSION" "$RELEASE_SHA" "$VERSION" "$RELEASE_SHA"
           gh pr create \
             --repo "$GITHUB_REPOSITORY" \
             --base develop \
@@ -473,3 +473,22 @@ jobs:
             --draft \
             --title "Start Kitaru $VERSION development" \
             --body "$body"
+  notify-failure:
+    # Any failed job in the release chain, including the non-gating installer
+    # smoke, pings the SRE Discord channel.
+    needs:
+      - build
+      - publish-python
+      - installer-smoke
+      - publish-deployables
+      - promote-latest
+      - create-release
+      - advance-maintenance-branch
+      - create-development-reset-pr
+    if: failure()
+    permissions: {}
+    uses: ./.github/workflows/notify-failure.yml
+    with:
+      title: Release ${{ github.ref_name }}
+    secrets:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_SRE }}

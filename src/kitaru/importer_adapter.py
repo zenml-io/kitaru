@@ -56,7 +56,8 @@ class ImporterBackedAdapter(ABC):
 
         Args:
             provider: Source system named on the imported sessions.
-            parser: Importer parser for the fetched trace payload.
+            parser: Importer parser for the fetched trace payload, sync or
+                async.
             parser_params: Params passed to the parser.
             completeness_timeout: Seconds to wait for the provider trace to
                 complete.
@@ -200,7 +201,7 @@ class ImporterBackedAdapter(ABC):
             return
         payload = await self.fetch(external_id)
         sessions: list[ImportedSession] = []
-        for item in call_parser(self._parser, payload, self._parser_params):
+        async for item in call_parser(self._parser, payload, self._parser_params):
             if isinstance(item, ImportFailure):
                 raise SessionImportError(
                     f"Parser failed on trace {external_id}: {item.error}"

@@ -275,6 +275,61 @@ def _remove_generated_ignore(candidate_directory: Path) -> None:
         generated_ignore.unlink()
 
 
+def _smoke_insight_extras(
+    uv: str,
+    root: Path,
+    kitaru_wheel: Path,
+    insight_wheel: Path,
+    environment: dict[str, str],
+) -> None:
+    """Verify the base insight wheel before installing its OpenAI extra."""
+    root.mkdir(parents=True, exist_ok=True)
+    environment_path = root / "venv"
+    _expect_success(
+        "create insight artifact environment",
+        _run(
+            [uv, "venv", "--python", sys.executable, environment_path],
+            environment=environment,
+            cwd=root,
+        ),
+    )
+    python = _environment_python(environment_path)
+    for extra, assertions in (
+        ("", 'assert find_spec("openai") is None'),
+        ("[openai]", 'assert find_spec("openai") is not None; import openai'),
+    ):
+        _expect_success(
+            f"install insight artifact{extra}",
+            _run(
+                [
+                    uv,
+                    "pip",
+                    "install",
+                    "--python",
+                    python,
+                    kitaru_wheel.as_uri(),
+                    f"kitaru-post-import-insights{extra} @ {insight_wheel.as_uri()}",
+                ],
+                environment=environment,
+                cwd=root,
+            ),
+        )
+        _expect_success(
+            f"probe insight artifact{extra}",
+            _run(
+                [
+                    python,
+                    "-c",
+                    "from importlib.util import find_spec; "
+                    "import kitaru_post_import_insights.analyzer; "
+                    'assert find_spec("langfuse") is None; ' + assertions,
+                ],
+                environment=environment,
+                cwd=root,
+            ),
+        )
+
+
 def _smoke_candidate_wheels(
     uv: str,
     repository: Path,
@@ -460,6 +515,14 @@ def main() -> int:
                 )
                 _validate_wheel_metadata(wheel, name, version)
                 plugin_wheels.append(wheel)
+                if name == "kitaru-post-import-insights":
+                    _smoke_insight_extras(
+                        uv,
+                        temporary_root / "insight-extras",
+                        kitaru_wheel,
+                        wheel,
+                        environment,
+                    )
                 if requirement is not None:
                     requirements.append(requirement)
                 if import_module is not None:

@@ -38,6 +38,19 @@ from kitaru.server.domain.plugin import PluginKind
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
+CONNECTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "LANGFUSE_SECRET_KEY": {
+            "type": "string",
+            "format": "password",
+            "writeOnly": True,
+        },
+        "LANGFUSE_BASE_URL": {"type": "string", "description": "Langfuse host."},
+    },
+    "required": ["LANGFUSE_SECRET_KEY"],
+}
+
 
 @pytest.fixture
 def blob_repository() -> FakeBlobRepository:
@@ -88,6 +101,40 @@ async def test_create_importer(client: httpx.AsyncClient) -> None:
     assert body["provider"] == "langfuse"
     assert body["latest_version"] == 0
     assert "agent_id" not in body
+
+
+async def test_create_importer_with_a_connection_schema(
+    client: httpx.AsyncClient,
+) -> None:
+    """Carry a connection schema through create, get, and list."""
+    response = await client.post(
+        "/api/v1/importers",
+        json={
+            "name": "langfuse-import",
+            "provider": "langfuse",
+            "connection_schema": CONNECTION_SCHEMA,
+        },
+    )
+    assert response.status_code == 201
+    created = response.json()
+    assert created["connection_schema"] == CONNECTION_SCHEMA
+
+    response = await client.get(f"/api/v1/importers/{created['id']}")
+    assert response.status_code == 200
+    assert response.json()["connection_schema"] == CONNECTION_SCHEMA
+
+    response = await client.get("/api/v1/importers")
+    assert response.status_code == 200
+    assert response.json()["items"][0]["connection_schema"] == CONNECTION_SCHEMA
+
+
+async def test_create_importer_without_a_connection_schema(
+    client: httpx.AsyncClient,
+) -> None:
+    """Leave the connection schema null when the request omits it."""
+    response = await client.post("/api/v1/importers", json={"name": "langfuse-import"})
+    assert response.status_code == 201
+    assert response.json()["connection_schema"] is None
 
 
 async def test_create_importer_duplicate_name(client: httpx.AsyncClient) -> None:
@@ -160,6 +207,31 @@ async def test_update_importer(client: httpx.AsyncClient) -> None:
     assert body["description"] == "Imports from Langfuse"
     assert body["metadata"] == {"a": 1}
     assert body["provider"] is None
+
+
+async def test_update_importer_connection_schema(client: httpx.AsyncClient) -> None:
+    """Replace and then clear an importer's connection schema."""
+    created = (
+        await client.post("/api/v1/importers", json={"name": "langfuse-import"})
+    ).json()
+    response = await client.patch(
+        f"/api/v1/importers/{created['id']}",
+        json={"connection_schema": CONNECTION_SCHEMA},
+    )
+    assert response.status_code == 200
+    assert response.json()["connection_schema"] == CONNECTION_SCHEMA
+
+    response = await client.patch(
+        f"/api/v1/importers/{created['id']}", json={"description": "x"}
+    )
+    assert response.status_code == 200
+    assert response.json()["connection_schema"] == CONNECTION_SCHEMA
+
+    response = await client.patch(
+        f"/api/v1/importers/{created['id']}", json={"connection_schema": None}
+    )
+    assert response.status_code == 200
+    assert response.json()["connection_schema"] is None
 
 
 async def test_update_importer_not_found(client: httpx.AsyncClient) -> None:

@@ -1,0 +1,792 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""End-to-end tests for the import pipeline and its evaluator and analyzer fan-out."""
+
+import uuid
+from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
+
+from conftest import (
+    ReplayServices,
+    build_replay_services,
+    build_task_actor,
+    build_worker_actor,
+    create_agent,
+    create_blob,
+    create_import,
+    create_import_task,
+    create_job,
+    create_plugin,
+    create_session,
+    create_worker,
+)
+from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.job import JobKind, JobStatus
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
+from kitaru.api_models.v1.task import (
+    REQUIRES_CREDENTIALS_LABEL,
+    TaskOnFailure,
+    TaskStatus,
+)
+from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.evaluation import EvaluationFilter
+from kitaru.server.application.models.task import TaskFilter, TaskUpdate
+from kitaru.server.application.services.plugin_resolution import (
+    PLUGIN_NAMESPACE_LABEL,
+    PLUGIN_PROVIDER_LABEL,
+)
+from kitaru.server.domain.account import Account
+from kitaru.server.domain.imports import Import
+from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
+from kitaru.server.domain.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.server.domain.session import Session
+from kitaru.server.domain.task import AnalysisTask, EvaluationTask, ImportTask, Task
+from kitaru.server.domain.worker import Worker
+from kitaru.server.filtering import FilterCondition
+
+ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+STATS = {"created": 3, "skipped": 0, "failed": 0}
+
+
+@pytest.fixture
+def services() -> ReplayServices:
+    """Provide fake-backed services sharing the production subscribers."""
+    return build_replay_services()
+
+
+async def _evaluator(services: ReplayServices, name: str) -> EvaluatorConfig:
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, kind=PluginKind.EVALUATOR, name=name
+    )
+    blob = await create_blob(services.blobs, ACTOR.account.id, content=name.encode())
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=blob.id, entrypoint="score"),
+        display_version=None,
+    )
+    return EvaluatorConfig(
+        evaluator=plugin.name,
+        version=version.version,
+        params={"threshold": 0.5},
+        evaluator_version_id=version.id,
+    )
+
+
+async def _analyzer(
+    services: ReplayServices,
+    name: str,
+    connection_id: uuid.UUID | None = None,
+    provider: str | None = None,
+    connection_schema: dict[str, Any] | None = None,
+    min_sessions: int | None = None,
+) -> AnalyzerConfig:
+    plugin = await create_plugin(
+        services.plugins,
+        ACTOR.account.id,
+        kind=PluginKind.ANALYZER,
+        name=name,
+        provider=provider,
+        connection_schema=connection_schema,
+    )
+    blob = await create_blob(services.blobs, ACTOR.account.id, content=name.encode())
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=blob.id, entrypoint="analyze"),
+        display_version=None,
+    )
+    return AnalyzerConfig(
+        analyzer=plugin.name,
+        version=version.version,
+        params={"focus": "errors"},
+        min_sessions=min_sessions,
+        analyzer_version_id=version.id,
+        provider=plugin.provider,
+        connection_id=connection_id,
+    )
+
+
+async def _import_with_task(
+    services: ReplayServices,
+    evaluators: list[EvaluatorConfig],
+    analyzers: list[AnalyzerConfig] | None = None,
+) -> tuple[Import, ImportTask]:
+    plugin = await create_plugin(
+        services.plugins,
+        ACTOR.account.id,
+        PluginKind.IMPORTER,
+        name=f"imp{uuid.uuid4().hex[:8]}",
+    )
+    code_blob = await create_blob(
+        services.blobs, ACTOR.account.id, content=uuid.uuid4().bytes
+    )
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="parse"),
+        display_version=None,
+    )
+    payload = await create_blob(
+        services.blobs, ACTOR.account.id, content=uuid.uuid4().bytes
+    )
+    agent = await create_agent(
+        services.agents, ACTOR.account.id, name=f"a{uuid.uuid4().hex[:8]}"
+    )
+    job = await create_job(services.jobs, ACTOR.account.id, kind=JobKind.IMPORT)
+    import_ = await create_import(
+        services.imports,
+        ACTOR.account.id,
+        agent.id,
+        job_id=job.id,
+        importer_version_id=version.id,
+        payload_blob_id=payload.id,
+        evaluators=evaluators,
+        analyzers=analyzers if analyzers is not None else [],
+    )
+    task = await create_import_task(services.tasks, job.id, import_id=import_.id)
+    return import_, task
+
+
+async def _imported_session(
+    services: ReplayServices,
+    import_: Import,
+    status: SessionStatus = SessionStatus.COMPLETED,
+) -> Session:
+    return await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=import_.agent_id,
+        origin=SessionOrigin.IMPORTED,
+        status=status,
+        import_id=import_.id,
+    )
+
+
+async def _claim_and_start(
+    services: ReplayServices, worker: Worker, expected: int
+) -> list[Task]:
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    assert len(claimed) == expected
+    tasks = [item.task for item in claimed]
+    for task in tasks:
+        await services.task_service.update_task(
+            task.id,
+            TaskUpdate(status=TaskStatus.RUNNING),
+            actor=build_task_actor(ACTOR.account, task.id, task.attempt, worker.id),
+        )
+    return tasks
+
+
+async def _finish(
+    services: ReplayServices, worker: Worker, task: Task, command: TaskUpdate
+) -> None:
+    await services.task_service.update_task(
+        task.id,
+        command,
+        actor=build_task_actor(ACTOR.account, task.id, task.attempt, worker.id),
+    )
+
+
+async def _evaluator_tasks(
+    services: ReplayServices, job_id: uuid.UUID
+) -> list[EvaluationTask]:
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=job_id), actor=ACTOR
+    )
+    return [task for task in tasks if isinstance(task, EvaluationTask)]
+
+
+async def _analysis_tasks(
+    services: ReplayServices, job_id: uuid.UUID
+) -> list[AnalysisTask]:
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=job_id), actor=ACTOR
+    )
+    return [task for task in tasks if isinstance(task, AnalysisTask)]
+
+
+def _result(name: str) -> list[dict[str, Any]]:
+    return [{"name": name, "score": 1.0}]
+
+
+async def test_completed_import_appends_one_task_per_session_and_evaluator(
+    services: ReplayServices,
+) -> None:
+    """Three sessions and two evaluators fan out into six continue tasks."""
+    evaluators = [
+        await _evaluator(services, "kitaru/accuracy"),
+        await _evaluator(services, "kitaru/tone"),
+    ]
+    import_, import_task = await _import_with_task(services, evaluators)
+    sessions = [await _imported_session(services, import_) for _ in range(3)]
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+
+    stored = await services.imports.get(import_.id)
+    assert stored.stats is not None
+    assert stored.stats.created == 3
+    assert stored.error is None
+    evaluator_tasks = await _evaluator_tasks(services, import_task.job_id)
+    assert len(evaluator_tasks) == 6
+    assert all(task.on_failure is TaskOnFailure.CONTINUE for task in evaluator_tasks)
+    assert all(
+        task.labels[PLUGIN_NAMESPACE_LABEL] == "kitaru" for task in evaluator_tasks
+    )
+    assert all(task.params == {"threshold": 0.5} for task in evaluator_tasks)
+    assert {
+        (task.input_session_id, task.plugin_version_id) for task in evaluator_tasks
+    } == {
+        (session.id, evaluator.evaluator_version_id)
+        for session in sessions
+        for evaluator in evaluators
+    }
+
+
+async def test_in_progress_session_is_skipped(services: ReplayServices) -> None:
+    """A session still in progress receives no evaluator task."""
+    evaluator = await _evaluator(services, "accuracy")
+    import_, import_task = await _import_with_task(services, [evaluator])
+    completed = await _imported_session(services, import_)
+    await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+
+    evaluator_tasks = await _evaluator_tasks(services, import_task.job_id)
+    assert [task.input_session_id for task in evaluator_tasks] == [completed.id]
+
+
+async def test_import_without_evaluators_stamps_stats_and_appends_nothing(
+    services: ReplayServices,
+) -> None:
+    """An import naming no evaluators records its stats and settles the job."""
+    import_, import_task = await _import_with_task(services, [])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+
+    stored = await services.imports.get(import_.id)
+    assert stored.stats is not None
+    assert stored.stats.created == 3
+    assert await _evaluator_tasks(services, import_task.job_id) == []
+    job = await services.jobs.get(import_task.job_id)
+    assert job.status is JobStatus.COMPLETED
+
+
+async def test_import_creating_no_sessions_records_analysis_skip(
+    services: ReplayServices,
+) -> None:
+    """An empty import records a skipped analyzer and no evaluator tasks."""
+    evaluator = await _evaluator(services, "accuracy")
+    analyzer = await _analyzer(services, "trends", connection_id=uuid.uuid4())
+    import_, import_task = await _import_with_task(services, [evaluator], [analyzer])
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            result={"created": 0, "skipped": 26, "failed": 9},
+        ),
+    )
+
+    stored = await services.imports.get(import_.id)
+    assert stored.stats is not None
+    assert stored.stats.created == 0
+    assert await _evaluator_tasks(services, import_task.job_id) == []
+    (analysis_task,) = await _analysis_tasks(services, import_task.job_id)
+    assert analysis_task.status is TaskStatus.COMPLETED
+    assert analysis_task.result == {
+        "status": "skipped",
+        "reason": "insufficient_sessions",
+        "eligible_sessions": 0,
+        "min_sessions": 1,
+    }
+    job = await services.jobs.get(import_task.job_id)
+    assert job.status is JobStatus.COMPLETED
+
+
+async def test_failed_import_stamps_error_and_appends_nothing(
+    services: ReplayServices,
+) -> None:
+    """A failed import records the task error and fans out no evaluators."""
+    evaluator = await _evaluator(services, "accuracy")
+    analyzer = await _analyzer(services, "trends")
+    import_, import_task = await _import_with_task(services, [evaluator], [analyzer])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.FAILED, error="parse failed"),
+    )
+
+    stored = await services.imports.get(import_.id)
+    assert stored.stats is None
+    assert stored.error == "parse failed"
+    assert await _evaluator_tasks(services, import_task.job_id) == []
+    assert await _analysis_tasks(services, import_task.job_id) == []
+    job = await services.jobs.get(import_task.job_id)
+    assert job.status is JobStatus.FAILED
+
+
+async def test_task_without_import_row_is_ignored(services: ReplayServices) -> None:
+    """A terminal import task whose import row is gone changes nothing."""
+    job = await create_job(services.jobs, ACTOR.account.id, kind=JobKind.IMPORT)
+    import_task = await create_import_task(services.tasks, job.id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    # The claim cancels a task whose import row does not resolve, which is
+    # the terminal transition the handler observes.
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    assert claimed == []
+
+    stored = await services.tasks.get(import_task.id)
+    assert stored.status is TaskStatus.CANCELED
+    assert await _evaluator_tasks(services, job.id) == []
+
+
+async def test_job_settles_only_after_evaluator_tasks_drain(
+    services: ReplayServices,
+) -> None:
+    """The import's job stays running until every appended evaluator task ends."""
+    evaluator = await _evaluator(services, "accuracy")
+    import_, import_task = await _import_with_task(services, [evaluator])
+    await _imported_session(services, import_)
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+    job = await services.jobs.get(import_task.job_id)
+    assert job.status is JobStatus.RUNNING
+
+    first, second = await _claim_and_start(services, worker, 2)
+    await _finish(
+        services,
+        worker,
+        first,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=_result("accuracy")),
+    )
+    job = await services.jobs.get(import_task.job_id)
+    assert job.status is JobStatus.RUNNING
+
+    await _finish(
+        services,
+        worker,
+        second,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=_result("accuracy")),
+    )
+    job = await services.jobs.get(import_task.job_id)
+    assert job.status is JobStatus.COMPLETED
+
+
+async def test_evaluation_rows_land_on_the_imported_sessions(
+    services: ReplayServices,
+) -> None:
+    """Completing the evaluator tasks writes evaluation rows on each session."""
+    evaluator = await _evaluator(services, "accuracy")
+    import_, _ = await _import_with_task(services, [evaluator])
+    sessions = [await _imported_session(services, import_) for _ in range(2)]
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+    for task in await _claim_and_start(services, worker, 2):
+        await _finish(
+            services,
+            worker,
+            task,
+            TaskUpdate(status=TaskStatus.COMPLETED, result=_result("accuracy")),
+        )
+
+    for session in sessions:
+        evaluations, _ = await services.evaluations.query(
+            EvaluationFilter(
+                expression=FilterCondition(
+                    field="session_id", op=FilterOp.EQ, value=session.id
+                )
+            )
+        )
+        assert len(evaluations) == 1
+        assert evaluations[0].evaluation.name == "accuracy"
+        assert evaluations[0].evaluation.score == 1.0
+        assert evaluations[0].evaluation.evaluator_version_id == (
+            evaluator.evaluator_version_id
+        )
+
+
+async def test_completed_import_appends_one_task_per_analyzer(
+    services: ReplayServices,
+) -> None:
+    """Three sessions and two analyzers fan out into two continue analysis tasks."""
+    analyzers = [
+        await _analyzer(
+            services,
+            "trends",
+            connection_id=uuid.uuid4(),
+            provider="langfuse",
+        ),
+        await _analyzer(
+            services,
+            "risks",
+            connection_id=uuid.uuid4(),
+            provider="langfuse",
+        ),
+    ]
+    import_, import_task = await _import_with_task(services, [], analyzers)
+    for _ in range(3):
+        await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+
+    analysis_tasks = await _analysis_tasks(services, import_task.job_id)
+    assert len(analysis_tasks) == 2
+    assert all(task.on_failure is TaskOnFailure.CONTINUE for task in analysis_tasks)
+    assert all(task.agent_id == import_.agent_id for task in analysis_tasks)
+    assert all(task.params == {"focus": "errors"} for task in analysis_tasks)
+    assert {task.plugin_version_id for task in analysis_tasks} == {
+        analyzer.analyzer_version_id for analyzer in analyzers
+    }
+    assert {task.connection_id for task in analysis_tasks} == {
+        analyzer.connection_id for analyzer in analyzers
+    }
+    assert all(
+        task.labels[PLUGIN_PROVIDER_LABEL] == "langfuse" for task in analysis_tasks
+    )
+    assert all(REQUIRES_CREDENTIALS_LABEL not in task.labels for task in analysis_tasks)
+    assert all(task.import_id == import_.id for task in analysis_tasks)
+
+
+async def _single_analysis_task_labels(
+    services: ReplayServices, analyzer: AnalyzerConfig
+) -> dict[str, str]:
+    """Complete an import naming one analyzer and return its task's labels."""
+    import_, import_task = await _import_with_task(services, [], [analyzer])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+    (task,) = await _analysis_tasks(services, import_task.job_id)
+    return task.labels
+
+
+async def test_analysis_task_requires_credentials_without_a_connection(
+    services: ReplayServices,
+) -> None:
+    """An analyzer with a connection schema and no connection needs the worker's."""
+    analyzer = await _analyzer(
+        services, "trends", provider="openai", connection_schema={"type": "object"}
+    )
+
+    labels = await _single_analysis_task_labels(services, analyzer)
+
+    assert labels[REQUIRES_CREDENTIALS_LABEL] == "openai"
+
+
+async def test_analysis_task_with_a_connection_requires_no_credentials(
+    services: ReplayServices,
+) -> None:
+    """An analyzer resolving a connection carries its credentials itself."""
+    analyzer = await _analyzer(
+        services,
+        "trends",
+        connection_id=uuid.uuid4(),
+        provider="openai",
+        connection_schema={"type": "object"},
+    )
+
+    labels = await _single_analysis_task_labels(services, analyzer)
+
+    assert REQUIRES_CREDENTIALS_LABEL not in labels
+
+
+async def test_analysis_task_without_a_schema_requires_no_credentials(
+    services: ReplayServices,
+) -> None:
+    """An analyzer declaring no connection schema stamps no requires label."""
+    analyzer = await _analyzer(services, "trends", provider="openai")
+
+    labels = await _single_analysis_task_labels(services, analyzer)
+
+    assert REQUIRES_CREDENTIALS_LABEL not in labels
+
+
+async def test_in_progress_session_does_not_block_the_analysis_task(
+    services: ReplayServices,
+) -> None:
+    """One evaluatable session is enough for the import-scoped analysis task."""
+    analyzer = await _analyzer(services, "trends")
+    import_, import_task = await _import_with_task(services, [], [analyzer])
+    await _imported_session(services, import_)
+    await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+
+    (analysis_task,) = await _analysis_tasks(services, import_task.job_id)
+    assert analysis_task.import_id == import_.id
+
+
+@pytest.mark.parametrize("in_progress", [False, True])
+async def test_all_analyzers_skip_without_eligible_sessions(
+    services: ReplayServices,
+    in_progress: bool,
+) -> None:
+    """Empty and unfinished-only imports persist unclaimable skipped tasks."""
+    analyzer = await _analyzer(services, "kitaru/post-import-insights")
+    custom = await _analyzer(services, "trends")
+    import_, import_task = await _import_with_task(services, [], [analyzer, custom])
+    if in_progress:
+        await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+    analysis_tasks = await _analysis_tasks(services, import_task.job_id)
+    assert len(analysis_tasks) == 2
+    minimum_by_version = {
+        analyzer.analyzer_version_id: 5,
+        custom.analyzer_version_id: 1,
+    }
+    for task in analysis_tasks:
+        minimum = minimum_by_version[task.plugin_version_id]
+        assert task.status is TaskStatus.COMPLETED
+        assert task.attempt == 0
+        assert task.worker_id is None
+        assert task.started_at is None
+        assert task.ended_at is not None
+        assert task.error is None
+        assert task.result == {
+            "status": "skipped",
+            "reason": "insufficient_sessions",
+            "eligible_sessions": 0,
+            "min_sessions": minimum,
+        }
+    await _claim_and_start(services, worker, 0)
+    assert (await services.jobs.get(import_task.job_id)).status is JobStatus.COMPLETED
+
+
+@pytest.mark.parametrize("name", ["kitaru/post-import-insights", "trends"])
+async def test_analyzer_only_import_checks_session_eligibility(
+    services: ReplayServices, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Analysis scheduling checks eligibility even without evaluators."""
+    analyzer = await _analyzer(services, name)
+    import_, import_task = await _import_with_task(services, [], [analyzer])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    (running,) = await _claim_and_start(services, worker, 1)
+    query = AsyncMock(wraps=services.sessions.query)
+    monkeypatch.setattr(services.sessions, "query", query)
+
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+
+    query.assert_awaited_once()
+    (analysis_task,) = await _analysis_tasks(services, import_task.job_id)
+    assert analysis_task.plugin_version_id == analyzer.analyzer_version_id
+
+
+async def test_evaluator_and_analysis_tasks_land_in_one_job(
+    services: ReplayServices,
+) -> None:
+    """An import naming both evaluators and analyzers fans both into one job."""
+    evaluator = await _evaluator(services, "accuracy")
+    analyzer = await _analyzer(services, "trends")
+    import_, import_task = await _import_with_task(services, [evaluator], [analyzer])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+
+    evaluator_tasks = await _evaluator_tasks(services, import_task.job_id)
+    analysis_tasks = await _analysis_tasks(services, import_task.job_id)
+    assert len(evaluator_tasks) == 1
+    assert len(analysis_tasks) == 1
+    assert evaluator_tasks[0].job_id == analysis_tasks[0].job_id == import_task.job_id
+
+
+async def test_job_settles_only_after_analysis_tasks_drain(
+    services: ReplayServices,
+) -> None:
+    """The import's job stays running until every appended analysis task ends."""
+    analyzer = await _analyzer(services, "trends")
+    builtin = await _analyzer(services, "kitaru/post-import-insights")
+    import_, import_task = await _import_with_task(services, [], [analyzer, builtin])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+    job = await services.jobs.get(import_task.job_id)
+    assert job.status is JobStatus.RUNNING
+    tasks = await _analysis_tasks(services, import_task.job_id)
+    assert {task.status for task in tasks} == {TaskStatus.PENDING, TaskStatus.COMPLETED}
+
+    (analysis_task,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        analysis_task,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            result=[
+                {
+                    "name": "summary",
+                    "title": "Summary",
+                    "data": {"type": "text", "content": "ok"},
+                }
+            ],
+        ),
+    )
+    job = await services.jobs.get(import_task.job_id)
+    assert job.status is JobStatus.COMPLETED
+
+
+@pytest.mark.parametrize(
+    "name", ["kitaru/post-import-insights", "kitaru/openai-post-import-insights"]
+)
+@pytest.mark.parametrize(
+    "eligible_count,minimum,created",
+    [(4, None, 4), (5, None, 5), (1, 1, 1), (5, None, 0)],
+)
+async def test_builtin_analyzer_minimum_sessions(
+    services: ReplayServices,
+    name: str,
+    eligible_count: int,
+    minimum: int | None,
+    created: int,
+) -> None:
+    """Built-ins run at five eligible sessions or at an explicit lower minimum."""
+    analyzer = await _analyzer(services, name, min_sessions=minimum)
+    import_, import_task = await _import_with_task(services, [], [analyzer])
+    for _ in range(eligible_count - 1):
+        await _imported_session(services, import_)
+    await _imported_session(services, import_, status=SessionStatus.FAILED)
+    await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
+    await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=import_.agent_id,
+        origin=SessionOrigin.IMPORTED,
+        status=SessionStatus.COMPLETED,
+        import_id=uuid.uuid4(),
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result={**STATS, "created": created}),
+    )
+
+    (task,) = await _analysis_tasks(services, import_task.job_id)
+    if eligible_count < (minimum or 5):
+        assert task.status is TaskStatus.COMPLETED
+        assert task.result == {
+            "status": "skipped",
+            "reason": "insufficient_sessions",
+            "eligible_sessions": eligible_count,
+            "min_sessions": 5,
+        }
+        await _claim_and_start(services, worker, 0)
+        assert (
+            await services.jobs.get(import_task.job_id)
+        ).status is JobStatus.COMPLETED
+    else:
+        assert task.status is TaskStatus.PENDING
+        assert task.result is None
+        assert task.params == {"focus": "errors"}
+        assert (await services.jobs.get(import_task.job_id)).status is JobStatus.RUNNING
+        (claimed,) = await _claim_and_start(services, worker, 1)
+        assert claimed.id == task.id

@@ -9,8 +9,14 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, TypeVar, cast
 
 from kitaru.api_models.v1.agent import AgentListParams, AgentResponse
+from kitaru.api_models.v1.analyzer import (
+    AnalyzerListParams,
+    AnalyzerResponse,
+    AnalyzerVersionResponse,
+)
 from kitaru.api_models.v1.base import JsonValue, Page
 from kitaru.api_models.v1.cohort import CohortListParams, CohortResponse
+from kitaru.api_models.v1.connection import ConnectionListParams, ConnectionResponse
 from kitaru.api_models.v1.evaluator import (
     EvaluatorListParams,
     EvaluatorResponse,
@@ -24,6 +30,7 @@ from kitaru.api_models.v1.importer import (
     ImporterVersionResponse,
 )
 from kitaru.client.resources.agents import AgentsResource
+from kitaru.client.resources.analyzers import AnalyzersResource
 from kitaru.client.resources.cohorts import CohortsResource
 from kitaru.client.resources.evaluators import EvaluatorsResource
 from kitaru.client.resources.experiments import ExperimentsResource
@@ -37,6 +44,7 @@ class ParentKind(StrEnum):
     """Parent resource families supporting UUID-or-name lookup."""
 
     AGENT = "agent"
+    ANALYZER = "analyzer"
     COHORT = "cohort"
     EXPERIMENT = "experiment"
     IMPORTER = "importer"
@@ -48,6 +56,7 @@ class PluginKind(StrEnum):
 
     IMPORTER = "importer"
     EVALUATOR = "evaluator"
+    ANALYZER = "analyzer"
 
 
 @dataclass(slots=True)
@@ -69,6 +78,7 @@ ParentResponse = (
     | ExperimentResponse
     | ImporterResponse
     | EvaluatorResponse
+    | AnalyzerResponse
 )
 ParentResource = (
     AgentsResource
@@ -76,9 +86,13 @@ ParentResource = (
     | ExperimentsResource
     | ImportersResource
     | EvaluatorsResource
+    | AnalyzersResource
 )
-PluginVersionResponse = ImporterVersionResponse | EvaluatorVersionResponse
-ParentT = TypeVar("ParentT", bound=ParentResponse)
+PluginVersionResponse = (
+    ImporterVersionResponse | EvaluatorVersionResponse | AnalyzerVersionResponse
+)
+NamedResponse = ParentResponse | ConnectionResponse
+NamedT = TypeVar("NamedT", bound=NamedResponse)
 
 
 async def resolve_parent(
@@ -94,9 +108,35 @@ async def resolve_parent(
         resource = client.experiments
     elif kind is ParentKind.IMPORTER:
         resource = client.importers
-    else:
+    elif kind is ParentKind.EVALUATOR:
         resource = client.evaluators
+    else:
+        resource = client.analyzers
     return await _resolve_parent_resource(resource, kind, reference)
+
+
+async def resolve_connection(
+    client: "KitaruAPIClient", reference: str
+) -> ConnectionResponse:
+    """Resolve one connection with one direct get or one bounded list."""
+    normalized = reference.strip()
+    if not normalized:
+        raise ReferenceResolutionError(
+            "invalid_arguments", "Connection reference cannot be blank."
+        )
+    try:
+        item_id = uuid.UUID(normalized)
+    except ValueError:
+        item_id = None
+    if item_id is not None:
+        return await client.connections.get(item_id)
+    page = await client.connections.list(
+        ConnectionListParams(
+            size=2,
+            filter=FilterCondition(field="name", op=FilterOp.EQ, value=normalized),
+        )
+    )
+    return _select_named(page, "connection", normalized)
 
 
 async def resolve_plugin_version(
@@ -108,7 +148,9 @@ async def resolve_plugin_version(
     """Resolve one plugin version through its direct endpoint."""
     if kind is PluginKind.IMPORTER:
         return await client.importers.get_version(parent_id, version)
-    return await client.evaluators.get_version(parent_id, version)
+    if kind is PluginKind.EVALUATOR:
+        return await client.evaluators.get_version(parent_id, version)
+    return await client.analyzers.get_version(parent_id, version)
 
 
 async def _resolve_parent_resource(
@@ -143,24 +185,28 @@ async def _resolve_parent_resource(
         page = await cast(ImportersResource, resource).list(
             ImporterListParams(size=2, filter=name_filter)
         )
-    else:
+    elif kind is ParentKind.EVALUATOR:
         page = await cast(EvaluatorsResource, resource).list(
             EvaluatorListParams(size=2, filter=name_filter)
         )
-    return _select_parent(page, kind, normalized)
+    else:
+        page = await cast(AnalyzersResource, resource).list(
+            AnalyzerListParams(size=2, filter=name_filter)
+        )
+    return _select_named(page, kind.value, normalized)
 
 
-def _select_parent(page: Page[ParentT], kind: ParentKind, normalized: str) -> ParentT:
+def _select_named(page: Page[NamedT], kind: str, normalized: str) -> NamedT:
     """Select one exact-name match from a bounded page."""
     matches = [item for item in page.items if item.name == normalized]
     if not matches:
         raise ReferenceResolutionError(
-            "not_found", f"{kind.value.title()} {normalized!r} was not found."
+            "not_found", f"{kind.title()} {normalized!r} was not found."
         )
     if len(matches) > 1:
         raise ReferenceResolutionError(
             "conflict",
-            f"More than one {kind.value} has the exact name {normalized!r}.",
+            f"More than one {kind} has the exact name {normalized!r}.",
             details={"ids": [str(item.id) for item in matches[:2]]},
         )
     return matches[0]

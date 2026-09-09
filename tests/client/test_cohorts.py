@@ -23,6 +23,7 @@ from conftest import (
     FakeAgentVersionRepository,
     FakeCohortRepository,
     FakeCohortVersionRepository,
+    FakeImportRepository,
     FakeReplayRepository,
     FakeSessionRepository,
     FakeTagRepository,
@@ -102,6 +103,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(agent_repository),
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=build_payload_store().store,
     )
     app.dependency_overrides[get_cohort_service] = lambda: CohortService(
