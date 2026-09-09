@@ -25,15 +25,19 @@ from conftest import (
     create_agent,
     create_blob,
     create_plugin,
+    create_session,
     override_idempotency,
 )
 from kitaru.api_models.v1.imports import (
     BlobImportSource,
+    ImportAnalyzeRequest,
     ImportCreateRequest,
     ImportListParams,
     ImportResponse,
 )
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
+from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import NotFoundError
 from kitaru.server.adapters.auth.auth_service import AuthService
@@ -174,3 +178,43 @@ async def test_list_and_iter(
 
     collected = [item async for item in api_client.imports.iter()]
     assert len(collected) == 1
+
+
+async def test_analyze(
+    api_client: KitaruAPIClient,
+    services: JobAndTaskServices,
+    import_request: ImportCreateRequest,
+) -> None:
+    """Analyze an import through the SDK."""
+    created = await api_client.imports.create(import_request)
+    await create_session(
+        services.sessions,
+        ACCOUNT.id,
+        agent_id=created.agent_id,
+        origin=SessionOrigin.IMPORTED,
+        status=SessionStatus.COMPLETED,
+        import_id=created.id,
+    )
+
+    job = await api_client.imports.analyze(
+        created.id,
+        ImportAnalyzeRequest(
+            analyzers=[AnalyzerConfig(analyzer="kitaru/post-import-insights")]
+        ),
+    )
+
+    assert isinstance(job, JobResponse)
+    assert job.kind is JobKind.ANALYSIS
+    assert job.status is JobStatus.PENDING
+    assert job.id != created.job_id
+
+
+async def test_analyze_not_found(api_client: KitaruAPIClient) -> None:
+    """Surface HTTP 404 as a typed error for an unknown import."""
+    with pytest.raises(NotFoundError):
+        await api_client.imports.analyze(
+            uuid.uuid4(),
+            ImportAnalyzeRequest(
+                analyzers=[AnalyzerConfig(analyzer="kitaru/post-import-insights")]
+            ),
+        )

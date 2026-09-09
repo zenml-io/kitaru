@@ -96,7 +96,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         descriptions["experiment"]
         == "Configure experiments and manage asynchronous runs."
     )
-    assert descriptions["import"] == "Inspect imports."
+    assert descriptions["import"] == "Inspect imports and rerun analyzers over them."
     assert descriptions["importer"] == "Develop, register, and inspect importers."
     assert descriptions["insight"] == "Create and inspect agent insights."
     assert descriptions["investigation"] == (

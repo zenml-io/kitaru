@@ -225,6 +225,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
     "kitaru.api_models.v1.imports": ModuleSpec(
         symbols=frozenset(
             {
+                "ImportAnalyzeRequest",
                 "ImportCreateRequest",
                 "ImportListParams",
                 "ImportResponse",

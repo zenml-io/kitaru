@@ -51,7 +51,20 @@ Insight metadata contains the analysis coverage, source import, supporting refer
 
 SDK and REST consumers can read the same records through `client.insights` and `/api/v1/insights`. In MCP, `kitaru_session_import` starts the import workflow, and `kitaru_review_read` reads insights with `kind: "insight"`. See [Set up your coding agent](../agent-native/setup.md) for MCP configuration.
 
-There is no separate command or MCP tool to regenerate these cards over arbitrary existing sessions. `kitaru insight create` stores a supplied insight; it does not run analysis. Analyzers currently run as part of an import.
+## Rerun an analyzer
+
+An analyzer that failed, for example because the OpenAI analyzer was missing its `model` parameter, can be run again over the sessions an import already created. Pass the import id from the import receipt or `kitaru import list`:
+
+```bash
+uv run kitaru import analyze <import-id> \
+  --analyzer kitaru/openai-post-import-insights@latest \
+  --analyzer-params 'kitaru/openai-post-import-insights@latest={"model":"YOUR_MODEL"}' \
+  --wait
+```
+
+This creates a new job holding one analysis task per selected analyzer, scoped to the same sessions. Re-importing the file instead would skip every session as a duplicate and give the analyzer nothing to read. An import with no completed or failed sessions is rejected. SDK and REST consumers use `client.imports.analyze(...)` and `POST /api/v1/imports/{import_id}/analyze`.
+
+There is no command or MCP tool to run analyzers over arbitrary sessions outside an import. `kitaru insight create` stores a supplied insight. It does not run analysis.
 
 Each generated insight stores its `import_id` directly, so task cleanup does not remove its import association. Deleting the import itself clears that reference. Deleting an analyzer version clears the insight's analyzer-version reference without deleting the insight.
 
