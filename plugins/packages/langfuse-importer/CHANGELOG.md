@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Require an explicit source identity when an export has no project ID instead of deriving one from the filename; accept `project_id` as an alias for `source_instance` and include a CLI remedy in the error.
 - Remove the importer payload size cap. Uploads are bounded by the server blob limit only.
 - Preserve observations outside the selection window when importing a trace that starts inside the window.
 

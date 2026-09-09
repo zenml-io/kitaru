@@ -420,6 +420,41 @@ def test_source_instance_override_supports_exports_without_project_id() -> None:
     assert session.external_id == "selected-project:thread-1"
 
 
+@pytest.mark.parametrize(
+    ("project_id", "params", "expected"),
+    [
+        (None, {"project_name": "named-project"}, "named-project"),
+        (
+            None,
+            {"source_instance": "", "project_name": "named-project"},
+            "named-project",
+        ),
+        ("embedded", {"project_name": "named-project"}, "named-project"),
+        ("embedded", {}, "embedded"),
+        (
+            "embedded",
+            {"source_instance": "selected", "project_name": "named-project"},
+            "selected",
+        ),
+    ],
+)
+def test_project_name_alias_preserves_identity_precedence(
+    project_id: str | None, params: dict[str, Any], expected: str
+) -> None:
+    """Explicit import identity takes precedence over embedded project identity."""
+    [session] = sessions(jsonl(run("root", "trace", project_id=project_id)), params)
+
+    assert session.external_id == f"{expected}:thread-1"
+
+
+def test_missing_project_identity_explains_import_params() -> None:
+    """Include a copyable remedy when the export omits its project identity."""
+    [failure] = failures(jsonl(run("root", "trace", project_id=None)))
+
+    assert '--params \'{"source_instance":"my-project"}\'' in failure.error
+    assert "project_name" in failure.error
+
+
 def test_unified_parse_yields_worker_contract_models() -> None:
     """Expose imported sessions through the standard plugin entrypoint."""
     parsed = list(parse(jsonl(run("root", "trace", inputs="hello")), {}))

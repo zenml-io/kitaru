@@ -13,6 +13,8 @@ kitaru session import braintrust-logs.jsonl \
 
 The importer accepts Braintrust JSON and JSONL export shapes, preserves source hierarchy and evidence when present, and records fidelity warnings for incomplete exports. Re-importing the same source identity skips sessions that Kitaru already stores.
 
+For exports without project identity, pass `--params '{"source_instance":"my-project"}'` or use the `project_id` alias. Embedded project identity takes precedence over import params; otherwise, `source_instance` wins over `project_id`, followed by the filename fallback. Reuse the same value for repeated exports from the same project.
+
 See the [Braintrust import guide](https://docs.zenml.io/kitaru/guides/import-braintrust-traces) for accepted formats, grouping parameters, deduplication behavior, and fidelity limits.
 
 ## Validation limits

@@ -78,7 +78,8 @@ kitaru session list --agent support-agent --origin imported --imported-from brai
 | Param | Meaning |
 | --- | --- |
 | `source_instance` | Project identity fallback. The importer prefers each record's `project_id`; `source_instance` is used when the export carries none. |
-| `filename` | Optional label. When neither `project_id` nor `source_instance` is available, the filename stem becomes the project identity. A record with none of the three fails with "Braintrust export has no project id; provide source\_instance". |
+| `project_id` | Provider-native alias for `source_instance`, used when `source_instance` is absent or empty. Embedded project IDs take precedence over both parameters. |
+| `filename` | Optional label. When neither an embedded project ID nor either identity parameter is available, the filename stem becomes the project identity. If identity is still missing, the error includes the `--params` remedy. |
 | `join_on` | Dotted path or RFC 6901 JSON Pointer selecting the value that groups traces into one session. Defaults to the session id found in metadata. See [Grouping traces into sessions](#grouping-traces-into-sessions). |
 
 Pass them with `--params '{"source_instance": "my-braintrust-project"}'`, or use the dedicated `--join-on` flag, which accepts a JSON Pointer only (it must start with `/`) and cannot be combined with `join_on` inside `--params`.

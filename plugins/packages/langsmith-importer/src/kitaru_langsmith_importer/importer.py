@@ -551,6 +551,8 @@ def _run_id(record: dict[str, Any]) -> str:
 def _source_instance(record: dict[str, Any], params: dict[str, Any]) -> str:
     """Resolve the LangSmith project identity used for deduplication."""
     selected = params.get("source_instance")
+    if selected in (None, ""):
+        selected = params.get("project_name")
     if selected not in (None, ""):
         return str(selected)
     value = (
@@ -561,7 +563,9 @@ def _source_instance(record: dict[str, Any], params: dict[str, Any]) -> str:
     )
     if value in (None, ""):
         raise InvalidImport(
-            "LangSmith export has no project identity; provide source_instance"
+            "LangSmith export has no project identity; provide source_instance "
+            "or project_name in import params, for example "
+            '--params \'{"source_instance":"my-project"}\'.'
         )
     return str(value)
 

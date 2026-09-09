@@ -798,7 +798,11 @@ def test_reports_one_invalid_group_without_losing_valid_sessions() -> None:
     ]
     assert len(parsed_failures) == 1
     assert parsed_failures[0].external_id == "invalid-session"
-    assert "provide source_instance" in parsed_failures[0].error
+    assert (
+        '--params \'{"source_instance":"my-langfuse-project"}\''
+        in parsed_failures[0].error
+    )
+    assert "Reuse the same value" in parsed_failures[0].error
 
 
 def test_source_instance_selection_handles_exports_without_project_ids() -> None:
@@ -809,6 +813,69 @@ def test_source_instance_selection_handles_exports_without_project_ids() -> None
     )
 
     assert parsed[0].external_id == "selected-project:conversation-1"
+
+
+@pytest.mark.parametrize(
+    ("project_id", "importer_params", "expected_source"),
+    [
+        (None, {"project_id": "selected-project"}, "selected-project"),
+        (
+            None,
+            {"source_instance": "", "project_id": "selected-project"},
+            "selected-project",
+        ),
+        ("embedded-project", {"filename": "export.jsonl"}, "embedded-project"),
+        ("embedded-project", {"project_id": "selected-project"}, "selected-project"),
+        (
+            "embedded-project",
+            {"project_id": "alias-project", "source_instance": "selected-project"},
+            "selected-project",
+        ),
+    ],
+)
+def test_source_identity_precedence(
+    project_id: str | None,
+    importer_params: dict[str, Any],
+    expected_source: str,
+) -> None:
+    """Prefer source_instance, then project_id params, then embedded identity."""
+    parsed = sessions(
+        jsonl(observation("root", "trace-1", project_id=project_id)),
+        importer_params,
+    )
+
+    assert parsed[0].external_id == f"{expected_source}:conversation-1"
+
+
+def test_filename_does_not_supply_source_identity() -> None:
+    """Reject a filename-only identity so renaming exports cannot change IDs."""
+    parsed = list(
+        parse(
+            jsonl(observation("root", "trace-1", project_id=None)),
+            {"filename": "customer-support.jsonl"},
+        )
+    )
+
+    assert len(parsed) == 1
+    assert isinstance(parsed[0], ImportFailure)
+    assert '--params \'{"source_instance":"my-langfuse-project"}\'' in parsed[0].error
+
+
+def test_explicit_identity_does_not_hide_conflicting_projects() -> None:
+    """Reject sessions mixing embedded projects despite explicit parameters."""
+    parsed = list(
+        parse(
+            jsonl(
+                observation("root-1", "trace-1", project_id="project-1"),
+                observation("root-2", "trace-2", project_id="project-2"),
+            ),
+            {"source_instance": "selected-project", "project_id": "alias-project"},
+        )
+    )
+
+    assert len(parsed) == 1
+    assert isinstance(parsed[0], ImportFailure)
+    assert "conflicting Langfuse project ids" in parsed[0].error
 
 
 def test_status_message_does_not_imply_failure() -> None:

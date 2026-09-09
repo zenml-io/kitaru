@@ -46,7 +46,8 @@ The import is a job with one importer task. The export is uploaded as a blob; a 
 
 | Param | Meaning |
 | --- | --- |
-| `source_instance` | The LangSmith project the export came from. Optional when the runs carry `session_id`, `project_id`, `session_name`, or `project_name`; required when they don't. It anchors the sessions' external identity, so keep it stable across imports of the same project. |
+| `source_instance` | The LangSmith project the export came from. Optional when the runs carry `session_id`, `project_id`, `session_name`, or `project_name`; otherwise supply this parameter or `project_name`. It anchors the sessions' external identity, so keep it stable across imports of the same project. |
+| `project_name` | Provider-native alias for `source_instance`, used when `source_instance` is absent or empty. Either parameter takes precedence over embedded identity. |
 | `join_on` | The path whose value groups traces into one session. Accepts a dotted path (`extra.metadata.thread_id`) or an RFC 6901 JSON Pointer (`/extra/metadata/thread_id`), resolved against each trace's root run. Omit it to use the defaults below. |
 
 Pass them with `--params '{"source_instance": "my-project"}'`. `join_on` also has its own flag, `--join-on`, which accepts JSON Pointer syntax only (it must start with `/`) and cannot be combined with a `join_on` inside `--params`:

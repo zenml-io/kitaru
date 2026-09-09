@@ -597,6 +597,8 @@ def _source_instance(record: dict[str, Any], params: dict[str, Any]) -> str:
     if project_id not in (None, ""):
         return str(project_id)
     selected_source = params.get("source_instance")
+    if selected_source in (None, ""):
+        selected_source = params.get("project_id")
     if selected_source not in (None, ""):
         return str(selected_source)
     filename = params.get("filename")
@@ -604,7 +606,11 @@ def _source_instance(record: dict[str, Any], params: dict[str, Any]) -> str:
         stem = Path(filename).stem.strip()
         if stem:
             return stem
-    raise InvalidImport("Braintrust export has no project id; provide source_instance")
+    raise InvalidImport(
+        "Braintrust export has no project id or usable filename; provide "
+        "source_instance or project_id in import params, for example "
+        '--params \'{"source_instance":"my-project"}\'.'
+    )
 
 
 def _metrics(record: dict[str, Any]) -> dict[str, Any]:

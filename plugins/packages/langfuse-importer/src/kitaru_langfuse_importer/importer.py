@@ -25,7 +25,6 @@ from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any
 
 from pydantic_core import PydanticSerializationError
@@ -1286,15 +1285,17 @@ class LangfuseJSONLImporter:
                 f"Session '{source_id}' contains conflicting Langfuse project ids"
             )
         selected_source = params.get("source_instance")
-        filename = params.get("filename")
+        if selected_source in (None, ""):
+            selected_source = params.get("project_id")
         source_instance = (
             str(selected_source) if selected_source not in (None, "") else None
         ) or next(iter(project_ids), None)
-        if not source_instance and isinstance(filename, str):
-            source_instance = Path(filename).stem.strip() or None
         if not source_instance:
             raise InvalidImport(
-                f"Session '{source_id}' has no project id; provide source_instance"
+                f"Session '{source_id}' has no project id; "
+                "provide source_instance in import params, for example "
+                '--params \'{"source_instance":"my-langfuse-project"}\'. '
+                "Reuse the same value for subsequent exports from this project."
             )
 
         warnings: list[str] = []

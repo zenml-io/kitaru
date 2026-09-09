@@ -657,6 +657,45 @@ def test_explicit_project_on_any_row_wins(reverse: bool) -> None:
     assert result[0].external_id == "project:bad"
 
 
+@pytest.mark.parametrize(
+    ("project_id", "params", "expected"),
+    [
+        (None, {"project_id": "selected"}, "selected"),
+        (None, {"source_instance": "", "project_id": "selected"}, "selected"),
+        (
+            None,
+            {"source_instance": "explicit", "project_id": "selected"},
+            "explicit",
+        ),
+        (
+            "embedded",
+            {"source_instance": "explicit", "project_id": "selected"},
+            "embedded",
+        ),
+        (None, {"filename": "export.jsonl"}, "export"),
+    ],
+)
+def test_project_id_alias_preserves_identity_precedence(
+    project_id: str | None, params: dict[str, Any], expected: str
+) -> None:
+    """Embedded identity wins, followed by explicit params and filename fallback."""
+    [session] = list(
+        parse(json.dumps([boundary_event(project_id=project_id)]).encode(), params)
+    )
+
+    assert isinstance(session, ImportedSession)
+    assert session.external_id == f"{expected}:bad"
+
+
+def test_missing_project_identity_explains_import_params() -> None:
+    """Include a copyable remedy when no project identity can be selected."""
+    [failure] = list(parse(json.dumps([boundary_event(project_id=None)]).encode(), {}))
+
+    assert isinstance(failure, ImportFailure)
+    assert '--params \'{"source_instance":"my-project"}\'' in failure.error
+    assert "project_id" in failure.error
+
+
 def test_deep_tool_payload_is_isolated() -> None:
     output: Any = "answer"
     for _ in range(66):
