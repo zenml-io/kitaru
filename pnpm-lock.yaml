@@ -38,6 +38,9 @@ importers:
       '@zenml-io/kitaru':
         specifier: workspace:*
         version: link:../../../packages/core
+      '@zenml-io/kitaru-mastra':
+        specifier: workspace:*
+        version: link:../../../packages/mastra
 
   examples/typescript/mastra_support_triage:
     dependencies:
