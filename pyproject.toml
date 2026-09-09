@@ -208,6 +208,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = ["mcp_fuzz: generated-input MCP property tests"]
 
 [tool.importlinter]
 root_packages = ["kitaru"]

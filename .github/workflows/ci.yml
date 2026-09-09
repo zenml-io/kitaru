@@ -385,6 +385,7 @@ jobs:
             python-version: '3.14'
             sync-command: uv sync --frozen --extra server --extra otel --extra modal
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
+              --durations=20
           - name: py311-cli
             python-version: '3.11'
             sync-command: uv sync --frozen --extra server --extra otel --extra cli
@@ -408,20 +409,34 @@ jobs:
           - name: py311-mcp
             python-version: '3.11'
             sync-command: uv sync --frozen --extra server --extra otel --extra mcp
-            pytest-command: uv run pytest tests/mcp
+            pytest-command: uv run pytest tests/mcp -m 'not mcp_fuzz' --durations=20
+              --hypothesis-show-statistics
           - name: py312-mcp
             python-version: '3.12'
             sync-command: uv sync --frozen --extra server --extra otel --extra mcp
-            pytest-command: uv run pytest tests/mcp
+            pytest-command: uv run pytest tests/mcp -m 'not mcp_fuzz' --durations=20
+              --hypothesis-show-statistics
           - name: py313-mcp
             python-version: '3.13'
             sync-command: uv sync --frozen --extra server --extra otel --extra mcp
-            pytest-command: uv run pytest tests/mcp
+            pytest-command: uv run pytest tests/mcp -m 'not mcp_fuzz' --durations=20
+              --hypothesis-show-statistics
           - name: py314-mcp
             python-version: '3.14'
             sync-command: uv sync --frozen --extra server --extra otel --extra mcp
-            pytest-command: uv run pytest tests/mcp
+            pytest-command: uv run pytest tests/mcp --durations=20 --hypothesis-show-statistics
     name: test (${{ matrix.name }})
+    services:
+      postgres:
+        image: ${{ matrix.name == 'py314-base' && 'postgres:16-alpine' || '' }}
+        env:
+          POSTGRES_PASSWORD: password
+        ports: [5433:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -436,3 +451,5 @@ jobs:
           uv run python -c "import importlib.util; import kitaru; import kitaru.client;
           assert importlib.util.find_spec('mcp') is None"
       - run: ${{ matrix.pytest-command }}
+        env:
+          KITARU_TEST_REQUIRE_POSTGRES: ${{ matrix.name == 'py314-base' && '1' || '' }}

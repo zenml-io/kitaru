@@ -454,6 +454,17 @@ def control_plane_settings(use_db: bool = False, **overrides: Any) -> APISetting
 _postgres_available: bool | None = None
 
 
+def pytest_sessionstart() -> None:
+    """Require PostgreSQL before collection when explicitly enabled."""
+    if os.environ.get("KITARU_TEST_REQUIRE_POSTGRES") != "1":
+        return
+    if not asyncio.run(postgres_available()):
+        raise pytest.UsageError(
+            "KITARU_TEST_REQUIRE_POSTGRES=1 but PostgreSQL is not reachable. "
+            "Start PostgreSQL and check KITARU_TEST_DB_HOST and KITARU_TEST_DB_PORT."
+        )
+
+
 async def postgres_available() -> bool:
     """Report whether the local test database accepts connections.
 

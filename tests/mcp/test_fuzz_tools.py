@@ -200,6 +200,7 @@ def _schema_strategy(name: str) -> st.SearchStrategy[Any]:
     )
 
 
+@pytest.mark.mcp_fuzz
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
 @settings(deadline=None)
@@ -275,6 +276,7 @@ def _broken_request(draw: st.DrawFn, request: dict[str, Any]) -> dict[str, Any]:
     return broken
 
 
+@pytest.mark.mcp_fuzz
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
 @settings(deadline=None)
@@ -292,6 +294,7 @@ _INTERNAL = "zenml-io/zenml-internal#139"
 
 
 @pytest.mark.xfail(strict=True, reason=_INTERNAL)
+@pytest.mark.mcp_fuzz
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
 @settings(deadline=None)
