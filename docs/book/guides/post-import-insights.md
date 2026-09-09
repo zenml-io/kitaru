@@ -57,11 +57,11 @@ Each generated insight stores its `import_id` directly, so task cleanup does not
 
 ## Run both analyzers
 
-Kitaru Pro (hosted Kitaru) supports GPT-5.6 Luna (`gpt-5.6-luna`) for OpenAI post-import analysis funded by Kitaru. Set the analyzer's `model` parameter explicitly as shown below; other models are not supported for Kitaru-funded analysis.
+The OpenAI analyzer uses GPT-5.6 Luna (`gpt-5.6-luna`) by default.
 
-For local or self-hosted analysis, or analysis using your own OpenAI credentials, configure an OpenAI [provider connection](provider-connections.md) containing `OPENAI_API_KEY`, or supply that key in the worker's environment and configure its credential selector for `openai`. Setting it only in the importing terminal is not sufficient. With your own credentials, you can replace `gpt-5.6-luna` with a compatible model available to your OpenAI project; its usage is billed to your account.
+To run OpenAI analysis, configure an OpenAI [provider connection](provider-connections.md) containing `OPENAI_API_KEY`, or supply that key in the worker's environment and configure its credential selector for `openai`. Setting it only in the importing terminal is not sufficient. To use a compatible model available to your OpenAI project instead, pass `--analyzer-params 'kitaru/openai-post-import-insights@latest={"model":"YOUR_MODEL"}'`. When you supply your own OpenAI key, model usage is billed to your account.
 
-Select both analyzers and pass the model:
+Select both analyzers:
 
 ```bash
 uv run kitaru session import sessions.jsonl \
@@ -69,11 +69,10 @@ uv run kitaru session import sessions.jsonl \
   --agent customer-service@latest \
   --analyzer kitaru/post-import-insights@latest \
   --analyzer kitaru/openai-post-import-insights@latest \
-  --analyzer-params 'kitaru/openai-post-import-insights@latest={"model":"gpt-5.6-luna"}' \
   --wait
 ```
 
-Both analyzers run independently and retain their results, even when findings overlap. The OpenAI analyzer requires credentials and a model; it does not switch to deterministic generation when credentials are missing. Without a connection or an eligible credential-equipped worker, its task stays queued; select only the deterministic analyzer if you want the import job to finish without OpenAI credentials.
+Both analyzers run independently and retain their results, even when findings overlap. The OpenAI analyzer requires credentials; it does not switch to deterministic generation when credentials are missing. Without a connection or an eligible credential-equipped worker, its task stays queued; select only the deterministic analyzer if you want the import job to finish without OpenAI credentials.
 
 The plugin package includes its model and observability dependencies. Model calls receive a bounded projection of computed candidates, facts, sanitized labels, and evidence references, not the complete raw traces. Deterministic code computes the counts and charts in both analyzers. OpenAI analysis can incur charges.
 

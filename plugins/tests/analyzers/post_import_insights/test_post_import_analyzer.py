@@ -360,15 +360,39 @@ async def test_deterministic_analyzer_rejects_model_parameter(
         )
 
 
-async def test_openai_analyzer_requires_explicit_model(client: StubClient) -> None:
-    """Reject an OpenAI task whose model was not selected."""
-    with pytest.raises(task_analyzer.AnalysisError, match="model"):
-        await task_analyzer.call_analyzer(
-            "openai-post-import-insights",
-            analyze_openai_post_import_sessions,
-            client.add([_view(1)]),
-            {},
-        )
+async def test_openai_analyzer_uses_default_model_when_task_omits_it(
+    client: StubClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pass the default model through the analyzer task contract."""
+    sentinel_generator = object()
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        "kitaru_post_import_insights.openai_generator.OpenAIInsightGenerator",
+        lambda: sentinel_generator,
+    )
+
+    async def fake_generate_insights(profiling, **kwargs):
+        captured["profiling"] = profiling
+        captured.update(kwargs)
+        return SimpleNamespace(insights=[])
+
+    monkeypatch.setattr(
+        analyzer_module, "generate_insights_from_profile", fake_generate_insights
+    )
+
+    result = await task_analyzer.call_analyzer(
+        "openai-post-import-insights",
+        analyze_openai_post_import_sessions,
+        client.add([_view(1)]),
+        {},
+    )
+
+    assert result == []
+    assert captured["generator"] is sentinel_generator
+    assert captured["config"].model.model == "gpt-5.6-luna"
+    assert captured["profiling"].coverage.sessions_analyzed == 1
 
 
 @pytest.mark.parametrize("credential", [None, "", "   "])

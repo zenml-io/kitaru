@@ -80,14 +80,15 @@ async def analyze_post_import_sessions(
 async def analyze_openai_post_import_sessions(
     session_ids: list[UUID],
     *,
-    model: str,
+    model: str = "gpt-5.6-luna",
     agent_name: str | None = None,
 ) -> list[InsightInput]:
     """Generate insight cards selected and edited by OpenAI.
 
     Args:
         session_ids: IDs of imported sessions for one agent and import.
-        model: OpenAI model for the bounded analyst and editor calls.
+        model: OpenAI model for the bounded analyst and editor calls. Defaults
+            to `gpt-5.6-luna`.
         agent_name: Optional display name included in copied prompt context.
 
     Returns:
