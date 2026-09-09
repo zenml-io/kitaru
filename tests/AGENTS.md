@@ -38,9 +38,15 @@ independent and concurrent runs never share state. A session-scoped fixture
 reaps databases left behind by a killed run, age-gated on the timestamp in
 the database name so it never drops a concurrent run's live databases.
 
-Set `KITARU_TEST_REQUIRE_POSTGRES=1` to fail before collection if PostgreSQL is unavailable. CI enables this for the Python 3.14 base job; local runs and the other Python versions keep optional database skips.
+Set `KITARU_TEST_REQUIRE_POSTGRES=1` to fail before collection if PostgreSQL is unavailable. CI enables this for both Python 3.14 base jobs; local runs and the other Python versions keep optional database skips.
 
 Repository sessions copy a session-scoped empty schema into each unique database instead of recreating every table for every test. The template has no open connections while it is copied and is dropped at session teardown. API lifespan and historical migration tests still initialize their own databases. CI stores the disposable PostgreSQL data directory in memory; it retains the normal PostgreSQL transaction and durability settings.
+
+## CI test distribution
+
+The Python 3.14 base suite runs on two independent runners, each with its own PostgreSQL service. Set both `KITARU_TEST_SHARD_INDEX` (zero-based) and `KITARU_TEST_SHARD_COUNT` to select a partition. Pytest assigns whole files using SHA-256 of their repository-relative POSIX paths modulo the count, preserving test order within each file and automatically including new files. With both variables unset or empty, pytest runs the full selection as usual. Invalid or incomplete settings fail instead of silently dropping tests.
+
+For local reproduction, prefix the normal base pytest command with `KITARU_TEST_SHARD_INDEX=0 KITARU_TEST_SHARD_COUNT=2`, then repeat with index `1`. Both partitions together must contain exactly the unpartitioned collection, with no overlap. Database-required behavior is independent of the partition settings.
 
 ## Property-based tests
 

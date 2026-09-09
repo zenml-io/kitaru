@@ -455,6 +455,37 @@ def control_plane_settings(use_db: bool = False, **overrides: Any) -> APISetting
 _postgres_available: bool | None = None
 
 
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Select a stable file-based CI shard when explicitly configured."""
+    index_value = os.environ.get("KITARU_TEST_SHARD_INDEX", "")
+    count_value = os.environ.get("KITARU_TEST_SHARD_COUNT", "")
+    if not index_value and not count_value:
+        return
+    try:
+        index = int(index_value)
+        count = int(count_value)
+    except ValueError as error:
+        raise pytest.UsageError(
+            "KITARU_TEST_SHARD_INDEX and KITARU_TEST_SHARD_COUNT must both be integers"
+        ) from error
+    if count < 1 or not 0 <= index < count:
+        raise pytest.UsageError(
+            "KITARU_TEST_SHARD_COUNT must be positive and "
+            "KITARU_TEST_SHARD_INDEX must be in [0, count)"
+        )
+
+    selected: list[pytest.Item] = []
+    deselected: list[pytest.Item] = []
+    for item in items:
+        path = item.path.relative_to(config.rootpath).as_posix()
+        shard = int(hashlib.sha256(path.encode()).hexdigest(), 16) % count
+        (selected if shard == index else deselected).append(item)
+    items[:] = selected
+    config.hook.pytest_deselected(items=deselected)
+
+
 def pytest_sessionstart() -> None:
     """Require PostgreSQL before collection when explicitly enabled."""
     if os.environ.get("KITARU_TEST_REQUIRE_POSTGRES") != "1":

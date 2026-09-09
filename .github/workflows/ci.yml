@@ -382,8 +382,19 @@ jobs:
             python-version: '3.13'
             sync-command: uv sync --frozen --extra server --extra otel --extra modal
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
-          - name: py314-base
+          - name: py314-base-1
             python-version: '3.14'
+            postgres: true
+            shard-index: '0'
+            shard-count: '2'
+            sync-command: uv sync --frozen --extra server --extra otel --extra modal
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
+              --durations=20
+          - name: py314-base-2
+            python-version: '3.14'
+            postgres: true
+            shard-index: '1'
+            shard-count: '2'
             sync-command: uv sync --frozen --extra server --extra otel --extra modal
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
               --durations=20
@@ -429,7 +440,7 @@ jobs:
     name: test (${{ matrix.name }})
     services:
       postgres:
-        image: ${{ matrix.name == 'py314-base' && 'postgres:16-alpine' || '' }}
+        image: ${{ matrix.postgres && 'postgres:16-alpine' || '' }}
         env:
           POSTGRES_PASSWORD: password
         ports: [5433:5432]
@@ -454,4 +465,6 @@ jobs:
           assert importlib.util.find_spec('mcp') is None"
       - run: ${{ matrix.pytest-command }}
         env:
-          KITARU_TEST_REQUIRE_POSTGRES: ${{ matrix.name == 'py314-base' && '1' || '' }}
+          KITARU_TEST_REQUIRE_POSTGRES: ${{ matrix.postgres && '1' || '' }}
+          KITARU_TEST_SHARD_INDEX: ${{ matrix.shard-index }}
+          KITARU_TEST_SHARD_COUNT: ${{ matrix.shard-count }}
