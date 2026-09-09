@@ -53,7 +53,7 @@ def load_fragments(directory: Path = REPO_ROOT / FRAGMENT_DIRNAME) -> list[Fragm
         raise ChangelogFragmentError(f"missing fragment directory: {directory}")
     fragments = []
     for path in sorted(directory.iterdir()):
-        if path.name in IGNORED_FRAGMENT_FILENAMES:
+        if path.name.startswith(".") or path.name in IGNORED_FRAGMENT_FILENAMES:
             continue
         match = _FRAGMENT_NAME.match(path.name)
         if not path.is_file() or match is None:
@@ -86,8 +86,6 @@ def _read_entries(path: Path) -> str:
 
 def render_section(version: str, date: datetime.date, fragments: list[Fragment]) -> str:
     """Render the release section holding the fragments."""
-    if not fragments:
-        raise ChangelogFragmentError("no changelog fragments to release")
     blocks = [f"## [{version}] - {date.isoformat()}"]
     for section, heading in SECTION_HEADINGS.items():
         entries = [

@@ -19,6 +19,7 @@ def repo(tmp_path: Path) -> Path:
     fragment_dir = tmp_path / "changelog.d"
     fragment_dir.mkdir()
     (fragment_dir / "README.md").write_text("# Changelog fragments\n")
+    (fragment_dir / ".DS_Store").write_bytes(b"\x00")
     return tmp_path
 
 
@@ -59,7 +60,10 @@ def test_build_inserts_the_section_above_the_latest_release(repo: Path) -> None:
         "## [0.2.0] - 2026-09-09\n\n### Added\n\n- New entry.\n\n"
         "## [0.1.0]\n\n### Added\n\n- Old entry.\n"
     )
-    assert [path.name for path in (repo / "changelog.d").iterdir()] == ["README.md"]
+    assert sorted(path.name for path in (repo / "changelog.d").iterdir()) == [
+        ".DS_Store",
+        "README.md",
+    ]
 
 
 def test_build_appends_the_first_release_section(repo: Path) -> None:
@@ -86,11 +90,13 @@ def test_build_rejects_an_existing_release_section_without_writes(
     assert fragment.is_file()
 
 
-def test_build_requires_a_fragment(repo: Path) -> None:
-    with pytest.raises(ChangelogFragmentError, match="no changelog fragments"):
-        build_changelog("0.2.0", RELEASE_DATE, repo)
+def test_build_writes_an_empty_release_section(repo: Path) -> None:
+    assert build_changelog("0.2.0", RELEASE_DATE, repo) == "## [0.2.0] - 2026-09-09\n"
 
-    assert (repo / "CHANGELOG.md").read_text() == CHANGELOG
+    assert (repo / "CHANGELOG.md").read_text() == (
+        "# Changelog\n\nIntro.\n\n## [0.2.0] - 2026-09-09\n\n"
+        "## [0.1.0]\n\n### Added\n\n- Old entry.\n"
+    )
 
 
 def test_missing_fragment_directory_is_rejected(tmp_path: Path) -> None:
