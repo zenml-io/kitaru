@@ -21,7 +21,6 @@ from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.imports import ImportStats
 from kitaru.server.domain.base import (
-    ConflictError,
     DomainModel,
     NotFoundError,
     ValidationError,
@@ -52,18 +51,6 @@ class ImportWithoutImporterVersion(NotFoundError):
             import_id: Id of the import.
         """
         super().__init__(f"Import {import_id} no longer names an importer version")
-
-
-class ImportNotAnalyzable(ConflictError):
-    """Raised when an import has no session an analyzer can read."""
-
-    def __init__(self, import_id: uuid.UUID) -> None:
-        """Initialize the error.
-
-        Args:
-            import_id: Id of the import.
-        """
-        super().__init__(f"Import {import_id} has no completed or failed sessions")
 
 
 class InvalidImportSource(ValidationError):

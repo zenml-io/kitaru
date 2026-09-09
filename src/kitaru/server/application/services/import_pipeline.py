@@ -14,6 +14,7 @@
 """Import outcome recording and evaluator and analyzer fan-out."""
 
 import uuid
+from datetime import UTC, datetime
 
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.imports import ImportStats
@@ -48,13 +49,13 @@ async def record_import_outcome(
     A no-op when the terminal task is not an import task or its import row
     is gone. A completed task stamps the import's stats from its result, any
     other terminal status stamps the task's error. Evaluator and analysis
-    tasks are appended only for a completed import that created at least
-    one session and names evaluators or analyzers, skipping sessions still
-    in progress: one evaluator task per imported session and evaluator, and
-    one analysis task per analyzer scoped to the import. No analysis task
-    is appended when no session is evaluatable. Inserts them without
-    locking the job row. The
-    completing task's own transition settles the job afterward, in the same
+    tasks are appended only for a completed import that names evaluators or
+    analyzers, skipping sessions still in progress: one evaluator task per
+    imported session and evaluator, and
+    one analysis task per analyzer scoped to the import. Analyzers below
+    their minimum session count are recorded as skipped without execution.
+    Inserts them without locking the job row. The completing task's own
+    transition settles the job afterward, in the same
     transaction, and its drained scan reads every task including these, so
     the job can never be judged drained before they exist.
 
@@ -80,12 +81,9 @@ async def record_import_outcome(
     else:
         import_.record_error(task.error)
     await import_repository.update(import_)
-    if (
-        stats is None
-        or stats.created == 0
-        or (not import_.evaluators and not import_.analyzers)
-    ):
+    if stats is None or (not import_.evaluators and not import_.analyzers):
         return
+    # A retry can report zero new sessions after an earlier attempt stored them.
     sessions = await query_evaluatable_sessions(import_.id, session_repository)
     fan_out_tasks: list[Task] = []
     for session in sessions:
@@ -100,13 +98,12 @@ async def record_import_outcome(
                     on_failure=TaskOnFailure.CONTINUE,
                 )
             )
-    if sessions:
-        for analyzer in import_.analyzers:
-            fan_out_tasks.append(
-                await build_analysis_task(
-                    analyzer, import_, task.job_id, plugin_repository
-                )
+    for analyzer in import_.analyzers:
+        fan_out_tasks.append(
+            await build_analysis_task(
+                analyzer, import_, task.job_id, plugin_repository, len(sessions)
             )
+        )
     if fan_out_tasks:
         await task_repository.create_many(fan_out_tasks)
 
@@ -145,6 +142,7 @@ async def build_analysis_task(
     import_: Import,
     job_id: uuid.UUID,
     plugin_repository: PluginRepository,
+    eligible_session_count: int,
 ) -> AnalysisTask:
     """Build the task running an analyzer over an import's sessions.
 
@@ -154,11 +152,12 @@ async def build_analysis_task(
         job_id: Job the task belongs to.
         plugin_repository: Plugin repository, for the analyzer's connection
             schema.
+        eligible_session_count: Number of eligible sessions in this import.
 
     Returns:
         Analysis task, not yet stored.
     """
-    return AnalysisTask(
+    task = AnalysisTask(
         job_id=job_id,
         plugin_version_id=analyzer.analyzer_version_id,
         agent_id=import_.agent_id,
@@ -173,6 +172,10 @@ async def build_analysis_task(
         ),
         on_failure=TaskOnFailure.CONTINUE,
     )
+    task.skip_if_insufficient_sessions(
+        eligible_session_count, analyzer.get_min_sessions(), datetime.now(UTC)
+    )
+    return task
 
 
 async def _has_connection_schema(

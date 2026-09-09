@@ -169,6 +169,7 @@ def _analyzer() -> AnalyzerConfig:
         analyzer="trends",
         version=1,
         params={"window_days": 7},
+        min_sessions=8,
         analyzer_version_id=uuid.uuid4(),
     )
 
@@ -211,6 +212,7 @@ async def test_create_and_get(setup: Setup) -> None:
     assert loaded.params == {"delimiter": ","}
     assert loaded.evaluators[0].params == {"threshold": 0.5}
     assert loaded.analyzers[0].params == {"window_days": 7}
+    assert loaded.analyzers[0].min_sessions == 8
 
 
 async def test_api_import_round_trips_its_fetch_query(setup: Setup) -> None:

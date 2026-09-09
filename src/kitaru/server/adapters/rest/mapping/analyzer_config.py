@@ -29,6 +29,7 @@ def analyzer_config_to_wire(config: DomainAnalyzerConfig) -> WireAnalyzerConfig:
     """
     return WireAnalyzerConfig(
         analyzer=config.analyzer,
+        min_sessions=config.get_min_sessions(),
         version=config.version,
         params=config.params,
         connection_id=config.connection_id,
@@ -46,6 +47,7 @@ def analyzer_config_input(config: WireAnalyzerConfig) -> AnalyzerConfigInput:
     """
     return AnalyzerConfigInput(
         analyzer=config.analyzer,
+        min_sessions=config.min_sessions,
         version=config.version,
         params=config.params,
         connection_id=config.connection_id,

@@ -7068,6 +7068,7 @@ def build_job_and_task_services(
         plugin_repository=substrate.plugins,
         blob_repository=substrate.blobs,
         connection_repository=substrate.connections,
+        transitions=transitions,
     )
     return JobAndTaskServices(
         job_service=job_service,

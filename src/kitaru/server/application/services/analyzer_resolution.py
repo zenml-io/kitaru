@@ -70,6 +70,7 @@ async def resolve_analyzer_config(
     )
     return AnalyzerConfig(
         analyzer=config.analyzer,
+        min_sessions=config.min_sessions,
         version=plugin_version.version,
         params=config.params,
         analyzer_version_id=plugin_version.id,

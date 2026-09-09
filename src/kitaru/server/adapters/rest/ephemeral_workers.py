@@ -33,6 +33,7 @@ from kitaru.server.application.services.worker_service import (
     get_ephemeral_scope,
 )
 from kitaru.server.domain.worker import Worker, scope_covers
+from kitaru.server.utils import paginate_all
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +86,14 @@ class EphemeralWorkerStarter:
         """
         if self._ephemeral_workers is None:
             return
-        tasks, _ = await self._job_service.list_job_tasks(
-            job_id, TaskFilter(), actor=actor
+        tasks = await paginate_all(
+            lambda cursor: self._job_service.list_job_tasks(
+                job_id, TaskFilter(cursor=cursor), actor=actor
+            )
         )
+        tasks = [task for task in tasks if not task.terminal]
+        if not tasks:
+            return
         scope = get_ephemeral_scope(job_id, self._settings.EPHEMERAL_WORKER.selectors)
         if not all(scope_covers(scope, task) for task in tasks):
             return

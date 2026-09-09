@@ -80,19 +80,21 @@ class AnalyzerConfig(RequestModel):
     """Analyzer config."""
 
     analyzer: PlainStr = Field(description="Analyzer name.")
+    min_sessions: int | None = Field(
+        default=None,
+        ge=1,
+        description="Session minimum (built-in insights: 5; others: 1).",
+    )
     version: int | None = Field(
         default=None,
-        description="Analyzer version, an omitted value resolves to latest.",
+        description="Analyzer version; defaults to latest.",
     )
     params: dict[str, JsonValue] = Field(
-        default_factory=dict, description="Parameters passed to the analyzer."
+        default_factory=dict, description="Plugin arguments."
     )
     connection_id: uuid.UUID | None = Field(
         default=None,
-        description=(
-            "Connection supplying provider credentials, an omitted value "
-            "resolves to the provider's default."
-        ),
+        description="Credential connection; defaults to the provider's default.",
     )
 
 
