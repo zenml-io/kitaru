@@ -1,0 +1,1 @@
+- Add explicit whole-transcript Mastra evaluation to the adaptive conversation example, with independent judge settings and a generated baseline/rerun validation command.
