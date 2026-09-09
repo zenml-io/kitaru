@@ -18,7 +18,7 @@ import uuid
 import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -717,6 +717,8 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
     """Exercise plugin loading, async invocation, and the JSON task receipt."""
     views = [_view(number, failed_tool=number == 301) for number in range(301, 0, -1)]
     for view in views:
+        view.session.started_at = NOW
+        view.session.ended_at = NOW + timedelta(seconds=view.session.number)
         view.session.status = (
             SessionStatus.FAILED
             if view.session.number == 301
@@ -805,6 +807,21 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
     assert all(item.coverage.sessions_available == 301 for item in metadata)
     assert all(item.coverage.sessions_analyzed == 301 for item in metadata)
     assert all(item.coverage.nodes_available == 1 for item in metadata)
+    timing = next(
+        card for card in cards if card.name == "recorded-duration-distribution"
+    )
+    timing_metadata = InsightGenerationResult.card_metadata(timing)
+    expected = [view.session.id for view in views[:5]]
+    assert [item.session_id for item in timing_metadata.evidence] == expected
+    finding = json.loads(
+        timing_metadata.investigation_prompt.split("Finding data: ", 1)[1]
+    )
+    assert finding["evidence_locators"] == [
+        item.model_dump(mode="json") for item in timing_metadata.evidence
+    ]
+    assert finding["evidence_scope"]["supplied_session_count"] == 5
+    assert finding["evidence_scope"]["bin_session_count"] == 242
+    assert finding["evidence_scope"]["truncated"] is True
     assert all(
         all(
             truncation.dimension != "sessions"

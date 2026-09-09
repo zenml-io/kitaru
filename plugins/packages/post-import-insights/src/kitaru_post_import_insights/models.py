@@ -27,6 +27,7 @@ from kitaru.api_models.v1.insight import (
 )
 
 INSIGHT_METADATA_KEY = "kitaru.insights/v1"
+DISTRIBUTION_TOP_BIN_SIGNAL = "distribution-highest-occupied-bin"
 MAX_CTA_LABEL_LENGTH = 40
 DEFAULT_CTA_LABEL = "Copy investigation prompt"
 MAX_INSIGHTS = 6
