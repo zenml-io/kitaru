@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Mastra replay preserves a recorded invocation's conversation context without reading or writing its live memory thread. Supplied messages remain distinct from recalled history; missing or incomplete context fails replay with an actionable explanation.
+
 ## [0.25.0] - 2026-09-03
 
 ### Added

@@ -473,8 +473,20 @@ describe("replay safety with a real Mastra agent", () => {
     expect(api.sessionIds).toHaveLength(0);
   });
 
-  it("keeps a replay off live memory threads", async () => {
+  it("keeps a replay with recorded context off live memory threads", async () => {
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    vi.stubEnv(
+      "KITARU_TASK_INPUTS",
+      JSON.stringify({
+        mastra_conversation_context: {
+          version: 1,
+          source: "recalled",
+          complete: true,
+          messages: [{ role: "user", content: "run" }],
+        },
+        supplied_messages: "run",
+      }),
+    );
     installTestApi({
       replaySpec: {
         ...failingStaticSpec(),
