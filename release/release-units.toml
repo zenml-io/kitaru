@@ -30,6 +30,7 @@ release-label = "requires:core"
 impact-paths = [
     "pyproject.toml",
     "CHANGELOG.md",
+    "changelog.d/**",
     "uv.lock",
     "src/kitaru/**",
     "openapi/**",

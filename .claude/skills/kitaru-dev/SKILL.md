@@ -15,8 +15,9 @@ Use this when you need the command catalog beyond the daily loop in the root `AG
 - `uv sync --extra server`: include server components
 - `uv sync --extra worker`: include worker components
 - `uv sync --extra otel`: include OpenTelemetry integrations
-- `just check`: run formatting, lint, OpenAPI freshness, typecheck, typos, YAML, actions lint, and links
+- `just check`: run formatting, lint, OpenAPI freshness, changelog fragments, typecheck, typos, YAML, actions lint, and links
 - `just openapi-check`: verify that the committed OpenAPI specification matches the application schema
+- `just changelog-check`: validate the changelog fragments under `changelog.d/`
 - `just fix`: auto-fix formatting, lint issues, and YAML
 - `just test`: run the full pytest suite
 - `just test tests/test_file.py::test_name`: run one targeted test
@@ -89,5 +90,7 @@ Analytics events live in `src/kitaru/analytics/events.py`; source attribution li
 ## Pull Requests
 
 Use a clear human-readable title without a `[Codex]` prefix. Include what changed, why it was needed, important implementation decisions, and reviewer focus areas. Link related issues when applicable.
+
+Add a `changelog.d/<pr-number>.<section>.md` fragment for user-facing changes instead of editing `CHANGELOG.md`. Any slug works in place of the number while the PR does not exist yet. See `changelog.d/README.md` for the format.
 
 Every PR description should include a `Reviewer Notes` H2 or H3 section that explains the story and risks of the change, plus a concrete `Reproduction` subsection. Keep local hygiene commands as a short note after reproduction rather than using them as a substitute for reviewer guidance.

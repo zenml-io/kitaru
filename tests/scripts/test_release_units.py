@@ -91,10 +91,6 @@ def core_release_repo(
             f'[project]\nname = "kitaru"\nversion = "{version}"\n'
             f'description = "Release {version}"\n'
         ),
-        "CHANGELOG.md": (
-            f"# Changelog\n\n## [{version}]\n\n- Current release.\n\n"
-            "## [0.1.0]\n\n- Previous release.\n"
-        ),
         "openapi/openapi.json": json.dumps(
             {
                 "openapi": "3.1.0",
@@ -231,14 +227,12 @@ def test_core_development_reset_updates_only_release_state(
     release_repo, release_version = core_release_repo
     development_version = f"{release_version}+dev"
     project = release_repo / "pyproject.toml"
-    changelog = release_repo / "CHANGELOG.md"
     openapi = release_repo / "openapi" / "openapi.json"
     root_lock = release_repo / "uv.lock"
     plugin_lock = release_repo / "plugins" / "uv.lock"
 
     originals = {
-        path: path.read_text()
-        for path in (project, openapi, root_lock, plugin_lock, changelog)
+        path: path.read_text() for path in (project, openapi, root_lock, plugin_lock)
     }
 
     assert (
@@ -257,10 +251,6 @@ def test_core_development_reset_updates_only_release_state(
             f'name = "kitaru"\nversion = "{development_version}"',
             1,
         )
-    release_heading = f"## [{release_version}]"
-    assert changelog.read_text() == originals[changelog].replace(
-        release_heading, f"## [Unreleased]\n\n{release_heading}", 1
-    )
 
 
 @pytest.mark.parametrize("version", ["0.23.0rc1", "0.23.0+dev", "1.0.post1"])
@@ -269,27 +259,6 @@ def test_core_development_reset_requires_a_stable_release(
 ) -> None:
     with pytest.raises(ReleaseInventoryError, match=r"stable X\.Y\.Z"):
         prepare_core_development_reset(version, tmp_path)
-
-
-def test_core_development_reset_fails_before_partial_writes(
-    core_release_repo: tuple[Path, str],
-) -> None:
-    release_repo, release_version = core_release_repo
-    changelog = release_repo / "CHANGELOG.md"
-    release_heading = f"## [{release_version}]"
-    changelog.write_text(
-        changelog.read_text().replace(
-            release_heading, f"## [Unreleased]\n\n{release_heading}", 1
-        )
-    )
-    originals = {
-        path: path.read_bytes() for path in release_repo.rglob("*") if path.is_file()
-    }
-
-    with pytest.raises(ReleaseInventoryError, match="already contains"):
-        prepare_core_development_reset(release_version, release_repo)
-
-    assert {path: path.read_bytes() for path in originals} == originals
 
 
 @pytest.mark.parametrize(
@@ -358,9 +327,10 @@ def test_stable_core_release_creates_a_draft_development_reset_pr() -> None:
     assert "--draft" in reset_job
     assert "main` contains release commit" in reset_job
     assert (
-        "git add pyproject.toml uv.lock plugins/uv.lock openapi/openapi.json "
-        "CHANGELOG.md" in reset_job
+        "git add pyproject.toml uv.lock plugins/uv.lock openapi/openapi.json\n"
+        in reset_job
     )
+    assert "CHANGELOG.md" not in reset_job
 
 
 def test_managed_image_failure_does_not_block_the_release() -> None:

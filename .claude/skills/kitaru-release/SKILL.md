@@ -41,7 +41,7 @@ uv run --no-project --with packaging==26.2 \
   python scripts/release_units.py list --format json
 ```
 
-For every selected unit, resolve its latest published tag. Compare that tag with `origin/develop` and inspect merged PRs in the range with `git log`, `git diff`, and `gh pr view`. Derive directly changed core and plugin units from `impact-paths` in `release/release-units.toml`. Read `requires:*` labels as release follow-up metadata, together with `Release context`, linked work, and existing changelog entries. A directly changed unit does not need a matching label when it will be published in the next applicable release. If its publication is intentionally deferred past that release, attach its exact `release-label` and record the intended timing in `Release context`.
+For every selected unit, resolve its latest published tag. Compare that tag with `origin/develop` and inspect merged PRs in the range with `git log`, `git diff`, and `gh pr view`. Derive directly changed core and plugin units from `impact-paths` in `release/release-units.toml`. Read `requires:*` labels as release follow-up metadata, together with `Release context`, linked work, and existing changelog fragments in `changelog.d/`. A directly changed unit does not need a matching label when it will be published in the next applicable release. If its publication is intentionally deferred past that release, attach its exact `release-label` and record the intended timing in `Release context`.
 
 For one plugin, start at that plugin's previous tag. For all plugins, calculate a separate range for every plugin release unit. `requires:plugins` means every unit is expected; report a unit with no implementation change as a red flag and require an explanation in the release PR.
 
@@ -131,8 +131,8 @@ If the user asks only for a preparation PR, do not push the frontend tag or disp
 Create a branch from current `origin/develop`. Preserve unrelated work in the active checkout.
 
 1. Set `[project].version` in `pyproject.toml`.
-2. Convert the current top `[Unreleased]` changelog section to the selected version and preserve all entries in the release range.
-3. Add a concise release-specific changelog entry when needed.
+2. Add a concise release-specific fragment to `changelog.d/` when needed.
+3. Preview the release section with `uv run python scripts/changelog_fragments.py build --version <version> --draft`, then run it without `--draft`. This moves every fragment into a new `CHANGELOG.md` section for the selected version and deletes the fragment files.
 4. Create `releases/python/kitaru/<version>.toml`:
 
 ```toml
@@ -322,11 +322,11 @@ The tag starts `.github/workflows/release.yml`. The workflow:
 6. moves public Docker `latest` aliases only for a stable release
 7. creates the immutable GitHub Release
 8. creates or fast-forwards the stable maintenance branch
-9. creates a draft post-release PR that restores `## [Unreleased]`, sets core to `<version>+dev`, and updates both lockfiles and the generated OpenAPI version
+9. creates a draft post-release PR that sets core to `<version>+dev` and updates both lockfiles and the generated OpenAPI version
 
 Dependent plugin tags can be pushed after step 3 succeeds and the exact core package is available on PyPI. They do not wait for the remaining jobs.
 
-For a stable release, fast-forward `main` to the tagged release commit before merging the generated development-reset PR. The reset PR must leave `main` at the clean release version and change only `pyproject.toml`, `uv.lock`, `plugins/uv.lock`, `openapi/openapi.json`, and `CHANGELOG.md` on `develop`.
+For a stable release, fast-forward `main` to the tagged release commit before merging the generated development-reset PR. The reset PR must leave `main` at the clean release version and change only `pyproject.toml`, `uv.lock`, `plugins/uv.lock`, and `openapi/openapi.json` on `develop`.
 
 Approve required environments only after checking the candidate evidence. A managed-image failure is reported as a warning and does not block public deployables.
 

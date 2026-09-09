@@ -36,6 +36,7 @@ jobs:
       - run: uv run lint-imports
       - run: uv run python scripts/report_mcp_schema.py --check
       - run: uv run bash scripts/check_openapi.sh
+      - run: uv run python scripts/changelog_fragments.py check
       - run: uv run --with pyyaml python scripts/audit-example-coverage.py
       - run: find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml
           -print0 | xargs -0 uv run yamlfix --check
