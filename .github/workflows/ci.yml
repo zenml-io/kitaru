@@ -434,6 +434,7 @@ jobs:
           POSTGRES_PASSWORD: password
         ports: [5433:5432]
         options: >-
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 5s

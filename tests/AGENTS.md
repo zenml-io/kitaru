@@ -40,6 +40,8 @@ the database name so it never drops a concurrent run's live databases.
 
 Set `KITARU_TEST_REQUIRE_POSTGRES=1` to fail before collection if PostgreSQL is unavailable. CI enables this for the Python 3.14 base job; local runs and the other Python versions keep optional database skips.
 
+Repository sessions copy a session-scoped empty schema into each unique database instead of recreating every table for every test. The template has no open connections while it is copied and is dropped at session teardown. API lifespan and historical migration tests still initialize their own databases. CI stores the disposable PostgreSQL data directory in memory; it retains the normal PostgreSQL transaction and durability settings.
+
 ## Property-based tests
 
 Hypothesis tests live next to the surface they cover: `plugins/tests/importers/test_fuzz_parse.py` (importer `parse()` contract), `tests/mcp/test_fuzz_tools.py` (MCP tool boundary, requests generated from each tool's JSON schema), `tests/cli/test_redaction_properties.py`, `tests/server/test_fuzz_filters.py` (recursive JSON list filters), and `plugins/tests/adapters/langgraph/test_capture_properties.py`.
@@ -49,6 +51,8 @@ Three profiles are registered in each root's `conftest.py` and selected with `HY
 Known bugs are pinned with `@pytest.mark.xfail(strict=True, reason="<issue>")` example tests, and the generators exclude the matching input class with a comment naming the same issue. Fixing the bug makes the xfail fail; remove the marker and the generator exclusion in the same PR. Failing examples are saved under `.hypothesis/examples` and replayed first on the next run.
 
 Mark generated-input MCP tests with `mcp_fuzz`. PR CI runs those properties on Python 3.14 only; fixed MCP regression tests continue on every supported Python version. The nightly MCP fuzz job remains on Python 3.12.
+
+The CI profile omits Hypothesis's explanation phase only for the known-failing invalid-input MCP property. It still generates and shrinks examples; local and nightly profiles retain explanation.
 
 ## API fuzzing
 

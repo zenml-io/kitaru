@@ -22,7 +22,7 @@ from functools import cache
 from typing import Any
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import Phase, given, settings
 from hypothesis import strategies as st
 from hypothesis_jsonschema import from_schema
 from mcp.server.mcpserver.exceptions import ToolError
@@ -297,7 +297,16 @@ _INTERNAL = "zenml-io/zenml-internal#139"
 @pytest.mark.mcp_fuzz
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
-@settings(deadline=None)
+@settings(
+    deadline=None,
+    # CI already tracks this failure; keep generating and shrinking examples,
+    # but leave the extra explanation work to local and nightly runs.
+    phases=tuple(
+        phase
+        for phase in settings().phases
+        if phase != Phase.explain or settings.get_current_profile_name() != "ci"
+    ),
+)
 def test_schema_invalid_request_never_raises(
     spec: ToolSpec, data: st.DataObject
 ) -> None:
