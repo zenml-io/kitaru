@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the insight generation result contract."""
 
+import json
 import uuid
 
 import pytest
@@ -419,3 +420,32 @@ def test_text_insights_are_rejected() -> None:
 
     with pytest.raises(ValidationError, match="categorical or binned"):
         InsightGenerationResult.model_validate(data)
+
+
+@pytest.mark.parametrize("label", [None, "Copy tool retry prompt", "x" * 40])
+def test_cta_label_round_trip(label: str | None) -> None:
+    payload = _result().model_dump(mode="json")
+    for insight in payload["insights"]:
+        insight["metadata"][INSIGHT_METADATA_KEY]["cta_label"] = label
+    restored = InsightGenerationResult.model_validate_json(json.dumps(payload))
+    assert all(
+        restored.card_metadata(item).cta_label == label for item in restored.insights
+    )
+
+
+def test_historical_results_without_cta_label_are_readable() -> None:
+    payload = _result().model_dump(mode="json")
+    for insight in payload["insights"]:
+        insight["metadata"][INSIGHT_METADATA_KEY].pop("cta_label", None)
+    restored = InsightGenerationResult.model_validate(payload)
+    assert all(
+        restored.card_metadata(item).cta_label is None for item in restored.insights
+    )
+
+
+@pytest.mark.parametrize("label", ["", "   ", "x" * 41, 123, "broken-\ud800"])
+def test_invalid_cta_label_is_rejected(label: object) -> None:
+    payload = _metadata(position=0, recommended=True).model_dump()
+    payload["cta_label"] = label
+    with pytest.raises(ValidationError):
+        InsightCardMetadata.model_validate(payload)

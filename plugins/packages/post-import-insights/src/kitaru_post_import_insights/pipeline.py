@@ -31,6 +31,7 @@ from kitaru_post_import_insights.generation import (
     generate_model_plan,
 )
 from kitaru_post_import_insights.models import (
+    DEFAULT_CTA_LABEL,
     DISTRIBUTION_TOP_BIN_SIGNAL,
     INSIGHT_METADATA_KEY,
     MAX_INVESTIGATION_PROMPT_LENGTH,
@@ -53,6 +54,25 @@ from kitaru_post_import_insights.profiling import (
     ProfilingResult,
     SessionProfiler,
 )
+
+_CTA_LABELS = {
+    "failed-identical-retries": "Copy tool retry prompt",
+    "short-tool-cycles": "Copy tool cycle prompt",
+    "adjacent-same-tool-failures": "Copy repeated tool failure prompt",
+    "adjacent-identical-calls": "Copy repeated tool call prompt",
+    "tool-error-mix": "Copy tool error prompt",
+    "correction-language": "Copy correction language prompt",
+    "empty-tool-results": "Copy empty tool result prompt",
+    "repeated-punctuation": "Copy repeated punctuation prompt",
+    "mostly-uppercase-messages": "Copy uppercase message prompt",
+    "possible-profanity": "Copy profanity marker prompt",
+    "session-outcomes": "Copy session status prompt",
+    "tool-call-distribution": "Copy tool call count prompt",
+    "model-call-distribution": "Copy model call count prompt",
+    "total-activity-distribution": "Copy recorded activity prompt",
+    "recorded-duration-distribution": "Copy session duration prompt",
+    "model-mix": "Copy model mix prompt",
+}
 
 PROMPT_VERSION = "2026-09-09.1"
 _MAX_COVERAGE_CAVEATS = 10
@@ -412,6 +432,7 @@ def _assemble_result(
             evidence=evidence,
             coverage=coverage,
             investigation_prompt=investigation_prompt,
+            cta_label=_CTA_LABELS.get(candidate_id, DEFAULT_CTA_LABEL),
             context=context,
             generation=GenerationVersions(
                 analysis=profiling.analysis_version,

@@ -658,6 +658,14 @@ async def test_result_byte_bound_neutralizes_removed_recommendation(
         "Start here and use the copied prompt to define a focused cohort."
     )
     assert bounded.card_metadata(bounded.insights[0]).recommended is True
+    assert (
+        bounded.card_metadata(bounded.insights[0]).cta_label
+        == full.card_metadata(
+            next(
+                item for item in full.insights if item.name == bounded.insights[0].name
+            )
+        ).cta_label
+    )
 
 
 async def test_oversized_prompt_omits_only_the_affected_card(monkeypatch) -> None:
@@ -1201,3 +1209,45 @@ async def test_full_contribution_prompts_fit_the_length_bound() -> None:
                 "supplied_session_count": 5,
                 "truncated": True,
             }
+
+
+@pytest.mark.parametrize(
+    "generator", [None, SuccessfulGenerator(), FailingEditor(), FailingAnalyst()]
+)
+async def test_generated_labels_survive_json_in_all_modes(generator) -> None:
+    result = await generate_insights(
+        [
+            _session(1, status=SessionStatus.FAILED),
+            _session(2, status=SessionStatus.COMPLETED),
+        ],
+        context=_context(),
+        config=InsightGenerationConfig(model=ModelGenerationConfig(model="test-model"))
+        if generator
+        else None,
+        generator=generator,
+    )
+    assert result.insights
+    for insight in json.loads(result.model_dump_json())["insights"]:
+        label = insight["metadata"][INSIGHT_METADATA_KEY]["cta_label"]
+        assert label.startswith("Copy ") and label.endswith(" prompt")
+        assert len(label) <= 40
+        assert label != "Copy investigation prompt"
+
+
+@pytest.mark.parametrize(
+    "candidate_id, label",
+    [
+        ("failed-identical-retries", "Copy tool retry prompt"),
+        ("adjacent-identical-calls", "Copy repeated tool call prompt"),
+        ("recorded-duration-distribution", "Copy session duration prompt"),
+        ("future-finding", "Copy investigation prompt"),
+    ],
+)
+async def test_cta_labels_follow_candidate_identity(
+    candidate_id: str, label: str
+) -> None:
+    profile = profile_sessions([_session(1, status=SessionStatus.FAILED)])
+    candidate = profile.candidates[0].model_copy(update={"id": candidate_id})
+    profile = profile.model_copy(update={"candidates": [candidate]})
+    result = await generate_insights_from_profile(profile, context=_context())
+    assert result.card_metadata(result.insights[0]).cta_label == label
