@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `kitaru session import --wait` now exits with the job status. A completed import whose stats include failed items reports them as warnings, one per failure, instead of failing with `partial_failure`.
 - An import that created no sessions no longer schedules its evaluator and analyzer tasks.
 - `kitaru setup` is now safe to re-run against Claude Code. It verifies the whole registered launch (command, `--server`, and `--mode`) when it reads the entry back, so a stale entry in another scope or a failed readback is reported instead of passing as success, and it restores the previous `kitaru` entry when the replacement cannot be added. A project whose uv environment is set through `UV_PROJECT_ENVIRONMENT` is now recognized as a project install, so Cursor gets the project file rather than the global one. A skill whose final rename fails is put back in place instead of being left in a hidden retired directory.
 - Analyzer tasks that return an empty list now complete successfully without creating insights, so an analysis with no eligible findings does not fail its import job. Insight editor copy containing Markdown formatting falls back to deterministic plain text.

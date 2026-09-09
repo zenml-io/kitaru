@@ -1100,15 +1100,42 @@ def _run_terminal_import(
     return exit_code, events[-1]
 
 
+def test_terminal_import_warns_about_failed_items(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Failed items in a completed import are warnings, not a failure."""
+    job = _job(JobStatus.COMPLETED)
+    task = _task(
+        job,
+        result={
+            "created": 1,
+            "skipped": 0,
+            "failed": 2,
+            "failures": [
+                {"line": 3, "external_id": "trace-3", "error": "missing sessionId"},
+                {"line": 5, "external_id": None, "error": "missing sessionId"},
+            ],
+        },
+    )
+    exit_code, receipt = _run_terminal_import(
+        tmp_path, monkeypatch, capsys, job, [task]
+    )
+
+    assert exit_code == 0
+    assert receipt["item"]["stats"]["failed"] == 2
+    assert receipt["warnings"] == [
+        "2 item(s) failed to import.",
+        "line 3 (trace-3): missing sessionId",
+        "line 5: missing sessionId",
+    ]
+    assert str(task.id) in receipt["next_actions"][0]
+
+
 @pytest.mark.parametrize(
     ("job_status", "task_status", "stats", "kind"),
     [
-        (
-            JobStatus.COMPLETED,
-            TaskStatus.COMPLETED,
-            {"created": 1, "skipped": 0, "failed": 1, "failures": []},
-            "partial_failure",
-        ),
         (
             JobStatus.FAILED,
             TaskStatus.FAILED,
@@ -1118,7 +1145,7 @@ def _run_terminal_import(
         (JobStatus.CANCELED, TaskStatus.CANCELED, None, "remote_canceled"),
     ],
 )
-def test_terminal_import_preserves_partial_and_remote_outcomes(
+def test_terminal_import_preserves_remote_outcomes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1127,7 +1154,7 @@ def test_terminal_import_preserves_partial_and_remote_outcomes(
     stats: dict[str, Any] | None,
     kind: str,
 ) -> None:
-    """Item failures and remote settlement retain the enriched receipt."""
+    """Remote settlement retains the enriched receipt."""
     job = _job(job_status)
     task = _task(job, status=task_status, result=stats)
     exit_code, error = _run_terminal_import(tmp_path, monkeypatch, capsys, job, [task])
