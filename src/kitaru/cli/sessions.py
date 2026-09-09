@@ -27,6 +27,7 @@ from kitaru.api_models.v1.imports import (
     ApiImportSource,
     BlobImportSource,
     ImportCreateRequest,
+    ImportFailure,
     ImportQuery,
     ImportSource,
     ImportStats,
@@ -274,6 +275,14 @@ def _get_import_stats(
     return task, stats
 
 
+def _format_import_failure(failure: ImportFailure) -> str:
+    """Render one import failure as a warning line."""
+    item = f"line {failure.line}"
+    if failure.external_id is not None:
+        item += f" ({failure.external_id})"
+    return f"{item}: {failure.error}"
+
+
 def _terminal_import_result(
     job: JobResponse,
     tasks: list[TaskResponse],
@@ -299,15 +308,10 @@ def _terminal_import_result(
         raise error
 
     assert stats is not None
-    if stats.failed:
-        emit_event("terminal", receipt)
-        raise CLIError(
-            "partial_failure",
-            f"The import completed with {stats.failed} failed item(s).",
-            details={"receipt": receipt, "next_actions": [task_action]},
-        )
-
     warnings = []
+    if stats.failed:
+        warnings.append(f"{stats.failed} item(s) failed to import.")
+        warnings.extend(_format_import_failure(failure) for failure in stats.failures)
     if stats.skipped:
         warnings.append(f"{stats.skipped} duplicate session(s) were skipped.")
     return CommandResult(
