@@ -335,3 +335,25 @@ async def test_fetch_propagates_a_non_rate_limit_error(
 
     with pytest.raises(RuntimeError, match="server error"):
         await collect_payloads(fetch({"trace_ids": [str(uuid.uuid4())]}))
+
+
+@pytest.mark.parametrize("source", [None, " explicit "])
+async def test_file_and_api_source_identity_match(
+    fake_langsmith_api: FakeLangSmith,
+    source: str | None,
+) -> None:
+    """Query selection stays separate from parser identity for API and file inputs."""
+    trace_id = "22222222-2222-4222-8222-222222222222"
+    fake_langsmith_api.runs_builders = [build_complete_runs]
+    [payload] = await collect_payloads(
+        fetch({"project_name": "query-project", "trace_ids": [trace_id]})
+    )
+    params = {"source_instance": source, "join_on": "trace_id"}
+    [api_session] = list(parse(payload, params))
+    [file_session] = list(parse(serialize_runs(build_complete_runs(trace_id)), params))
+    assert isinstance(api_session, ImportedSession)
+    assert isinstance(file_session, ImportedSession)
+    expected = source.strip() if source else "11111111-1111-4111-8111-111111111111"
+    assert (
+        api_session.external_id == file_session.external_id == f"{expected}:{trace_id}"
+    )

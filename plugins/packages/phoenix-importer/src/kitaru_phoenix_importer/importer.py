@@ -218,6 +218,43 @@ def _parent_id(span: dict[str, Any]) -> str | None:
     return str(value) if value not in (None, "") else None
 
 
+def _normalize_project(value: Any, field: str) -> str | None:
+    """Normalize a project identity without coercing other data types."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise InvalidImport(f"Phoenix {field} must be a string or null")
+    return value.strip() or None
+
+
+def _get_source_instance(
+    spans: list[dict[str, Any]],
+    trace_metadata: dict[str, Any],
+    params: dict[str, Any],
+) -> str:
+    """Resolve and validate one trace's project namespace."""
+    source = _normalize_project(params.get("source_instance"), "source_instance")
+    alias = _normalize_project(params.get("project"), "project parameter")
+    projects = {
+        project
+        for value in [
+            *trace_metadata.get("_projects", []),
+            *(span.get("project") for span in spans),
+        ]
+        if (project := _normalize_project(value, "embedded project")) is not None
+    }
+    if len(projects) > 1:
+        raise InvalidImport("Phoenix trace contains conflicting project identities")
+    selected = source or alias or next(iter(projects), None)
+    if selected is None:
+        raise InvalidImport(
+            "Phoenix export has no project identity; provide source_instance or "
+            "project in import params, for example "
+            '--params \'{"source_instance":"my-project"}\'.'
+        )
+    return selected
+
+
 def _expand_values(
     values: list[tuple[int, dict[str, Any]]],
 ) -> tuple[
@@ -267,6 +304,7 @@ def _expand_values(
             traces[trace_id].extend(spans)
             trace_lines.setdefault(trace_id, line_number)
             metadata = trace_metadata.setdefault(trace_id, {})
+            metadata.setdefault("_projects", []).append(value.get("project"))
             for key in ("annotations", "notes"):
                 new_value = value.get(key)
                 if new_value in (None, [], ""):
@@ -576,7 +614,6 @@ class PhoenixTraceImporter:
         self, content: bytes, params: dict[str, Any]
     ) -> Iterator[ImportedSession | ImportFailure]:
         """Parse Phoenix traces into one Kitaru session per trace."""
-        del params
         values, failures = _parse_values(content)
         traces, trace_metadata, trace_lines, expansion_failures = _expand_values(values)
         failures.extend(expansion_failures)
@@ -585,7 +622,7 @@ class PhoenixTraceImporter:
         for trace_id, spans in traces.items():
             try:
                 session = self._parse_trace(
-                    trace_id, spans, trace_metadata.get(trace_id, {})
+                    trace_id, spans, trace_metadata.get(trace_id, {}), params
                 )
                 session.model_dump_json()
                 yield session
@@ -602,6 +639,7 @@ class PhoenixTraceImporter:
         trace_id: str,
         spans: list[dict[str, Any]],
         trace_metadata: dict[str, Any],
+        params: dict[str, Any],
     ) -> ImportedSession:
         """Normalize one Phoenix trace."""
         if not spans:
@@ -616,6 +654,7 @@ class PhoenixTraceImporter:
             if not _span_id(span):
                 raise InvalidImport("Phoenix span lacks trace_id or span_id")
 
+        source_instance = _get_source_instance(spans, trace_metadata, params)
         ordered = sorted(
             spans,
             key=lambda span: (
@@ -649,14 +688,16 @@ class PhoenixTraceImporter:
         )
         metadata: dict[str, Any] = {
             "phoenix.trace_id": trace_id,
+            "phoenix.source_instance": source_instance,
             "source_trace_count": 1,
             "source_completeness": "full" if not warnings else "partial",
             "normalization_warnings": warnings,
         }
         for key, value in trace_metadata.items():
-            metadata[f"phoenix.{key}"] = value
+            if key != "_projects":
+                metadata[f"phoenix.{key}"] = value
         return ImportedSession(
-            external_id=trace_id,
+            external_id=f"{source_instance}:{trace_id}",
             name=str(root.get("name") or trace_id),
             status=session_status,
             inputs=(

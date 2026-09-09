@@ -505,3 +505,65 @@ def test_valid_numeric_attributes_are_preserved(value: Any) -> None:
         assert node.tokens is not None
         assert node.tokens.input_tokens == int(value)
     session.model_dump_json()
+
+
+@pytest.mark.parametrize("missing", [None, "", "   "])
+def test_requires_project_identity(missing: Any) -> None:
+    """Missing identity fails with an actionable command."""
+    [failure] = parse(jsonl(row("root", project_id=missing)))
+    assert isinstance(failure, ImportFailure)
+    assert '--params \'{"source_instance":"my-logfire-project"}\'' in failure.error
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"source_instance": " override ", "project_id": "alias"}, "override"),
+        ({"source_instance": " ", "project_id": " alias "}, "alias"),
+        ({"source_instance": None, "project_id": ""}, "project-1"),
+    ],
+)
+def test_normalizes_project_identity_precedence(
+    params: dict[str, Any], expected: str
+) -> None:
+    """Explicit identities precede normalized embedded identity."""
+    [session] = parse(jsonl(row("root", project_id=" project-1 ")), params)
+    assert isinstance(session, ImportedSession)
+    assert session.external_id == f"{expected}:conversation-1"
+    assert session.metadata["logfire.project_id"] == "project-1"
+
+
+@pytest.mark.parametrize("invalid", [42, False, [], {}])
+@pytest.mark.parametrize("field", ["source_instance", "project_id", "embedded"])
+def test_rejects_nonstring_project_identity(field: str, invalid: Any) -> None:
+    """Invalid identity types never become strings or disappear as false values."""
+    record = row("root", project_id=invalid) if field == "embedded" else row("root")
+    params = (
+        {"source_instance": "override"} if field == "embedded" else {field: invalid}
+    )
+    [failure] = parse(jsonl(record), params)
+    assert isinstance(failure, ImportFailure)
+    assert "must be a string" in failure.error
+
+
+@pytest.mark.parametrize("same_trace", [True, False])
+def test_override_preserves_embedded_project_conflicts(same_trace: bool) -> None:
+    """An override cannot combine conflicting embedded projects."""
+    records = [
+        row("root-1", trace_id="trace-1", project_id="project-1"),
+        row(
+            "root-2",
+            trace_id="trace-1" if same_trace else "trace-2",
+            project_id="project-2",
+        ),
+    ]
+    [failure] = parse(jsonl(*records), {"source_instance": "override"})
+    assert isinstance(failure, ImportFailure)
+    assert "conflicting Logfire project ids" in failure.error
+
+
+def test_missing_project_identity_isolates_trace() -> None:
+    """A rejected trace leaves valid sibling traces importable."""
+    parsed = parse(jsonl(row("bad", project_id=None), row("good", trace_id="trace-2")))
+    assert sum(isinstance(item, ImportedSession) for item in parsed) == 1
+    assert sum(isinstance(item, ImportFailure) for item in parsed) == 1

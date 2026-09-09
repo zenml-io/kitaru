@@ -67,7 +67,7 @@ def jsonl(*records: dict[str, Any]) -> bytes:
 
 def parse(content: bytes) -> list[ImportedSession | ImportFailure]:
     """Parse one test payload."""
-    return list(PhoenixTraceImporter().parse(content, {}))
+    return list(PhoenixTraceImporter().parse(content, {"project": "test-project"}))
 
 
 def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
@@ -79,7 +79,8 @@ def test_importer_instance_parse_matches_module_parse() -> None:
     """Yield the same sessions from the module-level instance as from parse."""
     content = jsonl(span("root", span_kind="AGENT"))
 
-    assert list(importer.parse(content, {})) == list(unified_parse(content, {}))
+    params = {"project": "test-project"}
+    assert list(importer.parse(content, params)) == list(unified_parse(content, params))
 
 
 def test_parses_ui_jsonl_and_reconstructs_out_of_order_graph() -> None:
@@ -129,7 +130,7 @@ def test_parses_ui_jsonl_and_reconstructs_out_of_order_graph() -> None:
     [session] = parse(content)
 
     assert isinstance(session, ImportedSession)
-    assert session.external_id == "trace-1"
+    assert session.external_id == "test-project:trace-1"
     assert session.status is SessionStatus.COMPLETED
     assert session.inputs == "Weather in Paris?"
     assert session.outputs == "It is 21 C."
@@ -221,8 +222,8 @@ def test_parses_cli_trace_envelopes_and_preserves_annotations() -> None:
     assert [
         item.external_id for item in sessions if isinstance(item, ImportedSession)
     ] == [
-        "trace-1",
-        "trace-2",
+        "test-project:trace-1",
+        "test-project:trace-2",
     ]
     first = sessions[0]
     assert isinstance(first, ImportedSession)
@@ -242,7 +243,7 @@ def test_emits_sessions_in_first_appearance_order() -> None:
 
     assert [
         item.external_id for item in sessions if isinstance(item, ImportedSession)
-    ] == ["trace-b", "trace-a"]
+    ] == ["test-project:trace-b", "test-project:trace-a"]
 
 
 def test_merges_metadata_when_a_trace_spans_cli_envelopes() -> None:
@@ -364,7 +365,7 @@ def test_isolates_invalid_trace_graphs() -> None:
     parsed = parse(payload)
 
     assert any(
-        isinstance(item, ImportedSession) and item.external_id == "valid"
+        isinstance(item, ImportedSession) and item.external_id == "test-project:valid"
         for item in parsed
     )
     [failure] = [item for item in parsed if isinstance(item, ImportFailure)]
@@ -384,7 +385,7 @@ def test_isolates_duplicate_span_ids() -> None:
     )
 
     assert any(
-        isinstance(item, ImportedSession) and item.external_id == "valid"
+        isinstance(item, ImportedSession) and item.external_id == "test-project:valid"
         for item in parsed
     )
     [failure] = [item for item in parsed if isinstance(item, ImportFailure)]
@@ -406,7 +407,7 @@ def test_isolates_a_malformed_jsonl_line() -> None:
 
     assert {
         item.external_id for item in parsed if isinstance(item, ImportedSession)
-    } == {"first", "second"}
+    } == {"test-project:first", "test-project:second"}
     [failure] = [item for item in parsed if isinstance(item, ImportFailure)]
     assert failure.line == 2
     assert failure.error == "Line 2 is not valid JSON"
@@ -511,7 +512,7 @@ def test_isolates_malformed_cli_envelopes(
     parsed = parse(payload)
 
     assert any(
-        isinstance(item, ImportedSession) and item.external_id == "valid"
+        isinstance(item, ImportedSession) and item.external_id == "test-project:valid"
         for item in parsed
     )
     [failure] = [item for item in parsed if isinstance(item, ImportFailure)]
@@ -707,3 +708,72 @@ def test_valid_numeric_attributes_are_preserved(value: Any) -> None:
         assert node.tokens is not None
         assert node.tokens.input_tokens == int(value)
     session.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    ("params", "embedded", "expected"),
+    [
+        (
+            {"source_instance": " explicit ", "project": " alias "},
+            "embedded",
+            "explicit",
+        ),
+        ({"source_instance": " \t", "project": " alias "}, "embedded", "alias"),
+        ({"source_instance": None, "project": ""}, " embedded ", "embedded"),
+        ({}, "embedded", "embedded"),
+    ],
+)
+def test_project_identity_precedence(
+    params: dict[str, Any], embedded: str, expected: str
+) -> None:
+    """Resolve a normalized project namespace without changing trace grouping."""
+    [session] = unified_parse(jsonl(span("root", project=embedded)), params)
+    assert isinstance(session, ImportedSession)
+    assert session.external_id == f"{expected}:trace-1"
+    assert session.metadata["phoenix.source_instance"] == expected
+
+
+@pytest.mark.parametrize("value", [None, "", " \t"])
+def test_missing_project_identity(value: Any) -> None:
+    """Reject filename-only exports and explain how to provide their project."""
+    [failure] = unified_parse(
+        jsonl(span("root", project=value)),
+        {"source_instance": value, "project": value, "filename": "my-project.jsonl"},
+    )
+    assert isinstance(failure, ImportFailure)
+    assert '--params \'{"source_instance":"my-project"}\'' in failure.error
+
+
+@pytest.mark.parametrize("field", ["source_instance", "project", "embedded"])
+@pytest.mark.parametrize("value", [42, False, [], {}])
+def test_nonstring_project_identity_is_rejected(field: str, value: Any) -> None:
+    """Reject malformed identities even when a higher-priority value is usable."""
+    params: dict[str, Any] = {"source_instance": "selected", "project": "alias"}
+    record = span("root", project="embedded")
+    if field == "embedded":
+        record["project"] = value
+    else:
+        params[field] = value
+    [failure] = unified_parse(jsonl(record), params)
+    assert isinstance(failure, ImportFailure)
+    assert "must be a string or null" in failure.error
+
+
+@pytest.mark.parametrize("envelopes", [False, True])
+def test_conflicting_embedded_projects_fail_only_affected_trace(
+    envelopes: bool,
+) -> None:
+    """An explicit namespace does not hide conflicting project evidence."""
+    rows = [span("root", project="first"), span("child", project="second")]
+    if envelopes:
+        rows = [
+            {"traceId": "trace-1", "project": row.pop("project"), "spans": [row]}
+            for row in rows
+        ]
+    rows.append(span("root", trace_id="healthy", project="first"))
+    results = list(unified_parse(jsonl(*rows), {"source_instance": "override"}))
+    assert len(results) == 2
+    assert isinstance(results[0], ImportFailure)
+    assert "conflicting project identities" in results[0].error
+    assert isinstance(results[1], ImportedSession)
+    assert results[1].external_id == "override:healthy"

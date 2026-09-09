@@ -11,7 +11,7 @@ kitaru session import logfire-records.jsonl \
   --wait
 ```
 
-The importer rebuilds span hierarchy and conservatively identifies model and tool calls from OpenTelemetry attributes. Supply a stable source identity when an export does not contain one, especially when importing from more than one Logfire project.
+The importer rebuilds span hierarchy and conservatively identifies model and tool calls from OpenTelemetry attributes. Source identity uses `source_instance`, then the `project_id` parameter alias, then the embedded record `project_id`. Values must be strings; surrounding whitespace is removed, and empty values are absent. If none is available, the affected trace fails: retry with `--params '{"source_instance":"my-logfire-project"}'`. Conflicting embedded project IDs remain errors even with an override. File and API imports use the same identity rules; API credentials do not supply a project identity. Keep the identity stable across imports to preserve deduplication.
 
 See the [Logfire import guide](https://docs.zenml.io/kitaru/guides/import-logfire-traces) for accepted formats, parameters, deduplication behavior, and fidelity limits.
 

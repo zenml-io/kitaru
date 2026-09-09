@@ -343,3 +343,28 @@ async def test_fetch_rejects_invalid_queries(query: dict[str, Any], match: str) 
     """Reject an invalid query before yielding any payload."""
     with pytest.raises(ValueError, match=match):
         await collect_payloads(fetch(query))
+
+
+@pytest.mark.parametrize("source", [None, " explicit "])
+async def test_file_and_api_source_identity_match(
+    fake_braintrust: FakeBraintrust,
+    source: str | None,
+) -> None:
+    """Query selection stays separate from parser identity for API and file inputs."""
+    trace_id = "root-a"
+    fake_braintrust.rows_builders = [build_complete_rows]
+    fake_braintrust.project_id = "query-project"
+    [payload] = await collect_payloads(
+        fetch({"project_id": "query-project", "trace_ids": [trace_id]})
+    )
+    params = {"source_instance": source}
+    [api_session] = list(parse(payload, params))
+    [file_session] = list(
+        parse(json.dumps(build_complete_rows(trace_id)).encode(), params)
+    )
+    assert isinstance(api_session, ImportedSession)
+    assert isinstance(file_session, ImportedSession)
+    expected = source.strip() if source else "project-1"
+    assert (
+        api_session.external_id == file_session.external_id == f"{expected}:{trace_id}"
+    )

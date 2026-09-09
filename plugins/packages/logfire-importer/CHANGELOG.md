@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Require a stable project identity instead of falling back to `logfire`; normalize string identities and reject invalid identity types.
+
 - Remove the importer payload size cap. Uploads are bounded by the server blob limit only.
 - Fail API imports visibly when a successful HTTP response contains a query stream error, including after partial results.
 

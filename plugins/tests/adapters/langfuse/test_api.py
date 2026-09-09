@@ -366,3 +366,29 @@ async def test_window_keeps_children_outside_trace_selection_bounds(
         "early-child",
         "late-child",
     }
+
+
+@pytest.mark.parametrize("source", [None, " explicit "])
+async def test_file_and_api_source_identity_match(
+    fake_langfuse: FakeLangfuseClient,
+    source: str | None,
+) -> None:
+    """Query selection stays separate from parser identity for API and file inputs."""
+    trace_id = "trace-1"
+    fake_langfuse.trace_builders = [build_complete_trace]
+    seed_default_observations(fake_langfuse, [trace_id])
+    [payload] = await collect_payloads(fetch({"trace_ids": [trace_id]}))
+    params = {"source_instance": source}
+    [api_session] = list(parse(payload, params))
+    [file_session] = list(
+        parse(
+            build_complete_trace(trace_id).model_dump_json(by_alias=True).encode(),
+            params,
+        )
+    )
+    assert isinstance(api_session, ImportedSession)
+    assert isinstance(file_session, ImportedSession)
+    expected = source.strip() if source else "project-1"
+    assert (
+        api_session.external_id == file_session.external_id == f"{expected}:{trace_id}"
+    )

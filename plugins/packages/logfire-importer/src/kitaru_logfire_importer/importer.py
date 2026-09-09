@@ -463,6 +463,15 @@ def _build_node_tree(
     return roots
 
 
+def _get_project_identity(value: Any, field: str) -> str | None:
+    """Validate and normalize a source project identity."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise InvalidImport(f"Logfire {field} must be a string")
+    return value.strip() or None
+
+
 class LogfireRecordsImporter:
     """Normalize exported rows from Logfire's records table."""
 
@@ -498,24 +507,33 @@ class LogfireRecordsImporter:
             try:
                 session_id, join_path, fallback = _join_value(rows, params, trace_id)
                 project_ids = {
-                    str(row["project_id"])
+                    identity
                     for row in rows
-                    if row.get("project_id") not in (None, "")
+                    if (
+                        identity := _get_project_identity(
+                            row.get("project_id"), "project_id"
+                        )
+                    )
+                    is not None
                 }
                 if len(project_ids) > 1:
                     raise InvalidImport(
                         f"Trace '{trace_id}' contains conflicting Logfire project ids"
                     )
-                source_instance_value = (
-                    params.get("source_instance")
-                    or params.get("project_id")
-                    or next(iter(project_ids), None)
+                source_override = _get_project_identity(
+                    params.get("source_instance"), "source_instance"
+                )
+                project_override = _get_project_identity(
+                    params.get("project_id"), "project_id parameter"
                 )
                 source_instance = (
-                    str(source_instance_value).strip()
-                    if source_instance_value
-                    else "logfire"
+                    source_override or project_override or next(iter(project_ids), None)
                 )
+                if source_instance is None:
+                    raise InvalidImport(
+                        "No Logfire project identity supplied; retry with "
+                        '--params \'{"source_instance":"my-logfire-project"}\''
+                    )
             except InvalidImport as exc:
                 failures.append(
                     ImportFailure(
@@ -566,20 +584,17 @@ class LogfireRecordsImporter:
     ) -> ImportedSession:
         """Normalize one grouped Logfire session."""
         project_ids = {
-            str(row["project_id"])
+            identity
             for _, rows in traces
             for row in rows
-            if row.get("project_id") not in (None, "")
+            if (identity := _get_project_identity(row.get("project_id"), "project_id"))
+            is not None
         }
         if len(project_ids) > 1:
             raise InvalidImport(
                 f"Session '{session_id}' contains conflicting Logfire project ids"
             )
         warnings: list[str] = []
-        if not project_ids and source_instance == "logfire":
-            warnings.append(
-                "No Logfire project identity supplied; using source_instance 'logfire'"
-            )
         if trace_fallback:
             warnings.append("No session attribute found; grouped by trace id")
 

@@ -46,7 +46,8 @@ The import is a job with one importer task. The export is uploaded as a blob; a 
 
 | Param | Meaning |
 | --- | --- |
-| `source_instance` | The LangSmith project the export came from. Optional when the runs carry `session_id`, `project_id`, `session_name`, or `project_name`; required when they don't. It anchors the sessions' external identity, so keep it stable across imports of the same project. |
+| `source_instance` | The LangSmith project the export came from. Optional when the runs carry `session_id`, `project_id`, `session_name`, or `project_name`; otherwise supply this parameter or `project_name`. It anchors the sessions' external identity, so keep it stable across imports of the same project. |
+| `project_name` | Provider-native alias for `source_instance`, used when `source_instance` is absent or empty. Either parameter takes precedence over embedded identity. |
 | `join_on` | The path whose value groups traces into one session. Accepts a dotted path (`extra.metadata.thread_id`) or an RFC 6901 JSON Pointer (`/extra/metadata/thread_id`), resolved against each trace's root run. Omit it to use the defaults below. |
 
 Pass them with `--params '{"source_instance": "my-project"}'`. `join_on` also has its own flag, `--join-on`, which accepts JSON Pointer syntax only (it must start with `/`) and cannot be combined with a `join_on` inside `--params`:
@@ -58,6 +59,8 @@ kitaru session import langsmith-runs.jsonl \
   --join-on /extra/metadata/conversation_id \
   --media-type application/x-ndjson --wait
 ```
+
+Identity values are trimmed strings. Conflicting embedded project identities fail the affected trace or session even with an explicit override. A project name and its ID are not automatically reconciled: use the same value across file and API imports. See [Import your traces](../getting-started/import-your-traces.md) for the shared identity rules and guidance for existing imports.
 
 ## Fetch traces from the LangSmith API
 
@@ -105,7 +108,7 @@ At session level you get the thread's trace ids, the join paths used, the union 
 
 ## Dedup: one session per project and thread
 
-Every imported session records `imported_from: langsmith` plus an `external_id` of `<source_instance>:<thread>`. That pair is unique on the server, so re-importing an overlapping export **skips** what is already stored and reports it as `skipped`, not as an error. Nodes upsert by index within a session, so a re-parse restates each node's full content.
+Every imported session records `imported_from: langsmith` plus an `external_id` of `<source_instance>:<thread>`. That pair is unique per destination agent, so re-importing an overlapping export with the same identity **skips** what is already stored and reports it as `skipped`, not as an error. Skipped sessions are not refreshed with new nodes.
 
 This is what makes "export the last 24 hours every night" safe. It also means the grouping key matters: if you change `source_instance` or `join_on` between imports of the same runs, the same thread lands as a second session rather than deduping against the first.
 

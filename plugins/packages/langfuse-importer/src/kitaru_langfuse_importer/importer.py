@@ -25,7 +25,6 @@ from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any
 
 from pydantic_core import PydanticSerializationError
@@ -789,11 +788,14 @@ def _parse_records(content: bytes) -> list[dict[str, Any]]:
     return records
 
 
-def _events_to_traces(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _events_to_traces(
+    records: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[ImportFailure]]:
     """Apply legacy ingestion events into trace rows."""
     traces: dict[str, dict[str, Any]] = {}
     observations: dict[tuple[str, str], dict[str, Any]] = {}
     observation_trace_ids: dict[str, set[str]] = defaultdict(set)
+    project_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for event in records:
         body = dict(event["body"])
         observation_id = _first(body, "id", "observationId")
@@ -808,6 +810,7 @@ def _events_to_traces(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             trace_id = str(_first(body, "id", "traceId", "trace_id") or "")
             if not trace_id:
                 raise InvalidImport("A Langfuse trace event has no trace id")
+            project_records[trace_id].append(body)
             traces.setdefault(trace_id, {"id": trace_id, "observations": []}).update(
                 body
             )
@@ -828,12 +831,32 @@ def _events_to_traces(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             body.setdefault("type", "EVENT")
         else:
             body.setdefault("type", "SPAN")
+        project_records[trace_id].append(body)
         key = (trace_id, observation_id)
         observations.setdefault(key, {}).update(body)
     for (trace_id, _), observation in observations.items():
         trace = traces.setdefault(trace_id, {"id": trace_id, "observations": []})
         trace["observations"].append(observation)
-    return list(traces.values())
+    failures: list[ImportFailure] = []
+    for trace_id, rows in project_records.items():
+        try:
+            project_ids = _get_project_identities(rows)
+            if len(project_ids) > 1:
+                raise InvalidImport(
+                    f"Trace '{trace_id}' contains conflicting Langfuse project ids"
+                )
+            if project_ids:
+                traces[trace_id]["projectId"] = next(iter(project_ids))
+        except InvalidImport as exc:
+            traces.pop(trace_id, None)
+            failures.append(
+                ImportFailure(
+                    line=len(failures) + 1,
+                    external_id=_safe_failure_text(trace_id),
+                    error=_safe_failure_text(str(exc)),
+                )
+            )
+    return list(traces.values()), failures
 
 
 def _trace_rows_to_observations(
@@ -845,6 +868,14 @@ def _trace_rows_to_observations(
         trace_id = str(_first(trace, "id", "traceId", "trace_id") or "")
         if not trace_id:
             raise InvalidImport("A Langfuse trace row has no trace id")
+        project_records = [
+            trace,
+            *(row for row in trace.get("observations", []) if isinstance(row, dict)),
+        ]
+        if len(_get_project_identities(project_records)) > 1:
+            raise InvalidImport(
+                f"Trace '{trace_id}' contains conflicting Langfuse project ids"
+            )
         for raw in trace.get("observations", []):
             if not isinstance(raw, dict):
                 raise InvalidImport(f"Trace '{trace_id}' has a non-object observation")
@@ -865,7 +896,12 @@ def _trace_rows_to_observations(
                 ("tags", "traceTags"),
                 ("version", "traceVersion"),
             ):
-                if source in trace and target not in observation:
+                if target == "projectId":
+                    if _normalize_identity(observation.get(target), target) is None:
+                        observation[target] = _normalize_identity(
+                            trace.get(source), source
+                        )
+                elif source in trace and target not in observation:
                     observation[target] = trace[source]
             observations.append(observation)
     return observations
@@ -1176,6 +1212,42 @@ def _build_node_tree(
     return roots
 
 
+def _normalize_identity(value: Any, field: str) -> str | None:
+    """Validate and trim a project identity without coercing other types."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise InvalidImport(f"{field} must be a string")
+    return value.strip() or None
+
+
+def _get_project_identities(records: list[dict[str, Any]]) -> set[str]:
+    """Read embedded identity before applying import parameter overrides."""
+    identities: set[str] = set()
+    for record in records:
+        values = [
+            _normalize_identity(record.get(field), field)
+            for field in ("projectId", "project_id")
+        ]
+        identities.update(value for value in values if value is not None)
+    return identities
+
+
+def _get_source_instance(projects: set[str], params: dict[str, Any]) -> str:
+    """Resolve explicit identity, its provider alias, then embedded identity."""
+    selected = _normalize_identity(params.get("source_instance"), "source_instance")
+    alias = _normalize_identity(params.get("project_id"), "project_id")
+    source = selected or alias or next(iter(projects), None)
+    if source is None:
+        raise InvalidImport(
+            "Langfuse export has no project identity; provide source_instance "
+            "or project_id in import params, for example "
+            '--params \'{"source_instance":"my-langfuse-project"}\'. '
+            "Reuse the same value for subsequent exports from this project."
+        )
+    return source
+
+
 class LangfuseJSONLImporter:
     """Parse Langfuse trace, observation, and ingestion-event records."""
 
@@ -1196,11 +1268,23 @@ class LangfuseJSONLImporter:
             raise InvalidImport("infer_tool_call_links must be a boolean")
         records = _parse_records(content)
         shape = _detect_shape(records[0])
+        failures: list[ImportFailure] = []
         if shape == _EVENT_SHAPE:
-            records = _events_to_traces(records)
+            records, failures = _events_to_traces(records)
             shape = _TRACE_SHAPE
         if shape == _TRACE_SHAPE:
-            records = _trace_rows_to_observations(records)
+            observations = []
+            for trace in records:
+                try:
+                    observations.extend(_trace_rows_to_observations([trace]))
+                except InvalidImport as exc:
+                    failures.append(
+                        ImportFailure(
+                            line=len(failures) + 1,
+                            error=_safe_failure_text(str(exc)),
+                        )
+                    )
+            records = observations
         file_framework = _detect_framework(
             [record.get("metadata") for record in records]
         )
@@ -1217,7 +1301,6 @@ class LangfuseJSONLImporter:
         )
         join_paths: dict[str, set[str]] = defaultdict(set)
         fallback_sessions: set[str] = set()
-        failures: list[ImportFailure] = []
         for trace_id, observations in trace_records.items():
             try:
                 session_id, join_path, fallback = _join_value(
@@ -1275,27 +1358,14 @@ class LangfuseJSONLImporter:
         infer_tool_call_links: bool,
     ) -> ImportedSession:
         """Parse one grouped Langfuse session."""
-        project_ids = {
-            str(value)
-            for _, observations in traces
-            for record in observations
-            if (value := _first(record, "projectId", "project_id"))
-        }
+        project_ids = _get_project_identities(
+            [record for _, observations in traces for record in observations]
+        )
         if len(project_ids) > 1:
             raise InvalidImport(
                 f"Session '{source_id}' contains conflicting Langfuse project ids"
             )
-        selected_source = params.get("source_instance")
-        filename = params.get("filename")
-        source_instance = (
-            str(selected_source) if selected_source not in (None, "") else None
-        ) or next(iter(project_ids), None)
-        if not source_instance and isinstance(filename, str):
-            source_instance = Path(filename).stem.strip() or None
-        if not source_instance:
-            raise InvalidImport(
-                f"Session '{source_id}' has no project id; provide source_instance"
-            )
+        source_instance = _get_source_instance(project_ids, params)
 
         warnings: list[str] = []
         if trace_fallback:

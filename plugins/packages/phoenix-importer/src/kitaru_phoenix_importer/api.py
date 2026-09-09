@@ -86,16 +86,17 @@ def _has_root(spans: list[Any]) -> bool:
     )
 
 
-async def wait_for_spans(trace_id: str) -> list[Any]:
+async def wait_for_spans(trace_id: str, *, project: str | None = None) -> list[Any]:
     """Poll the Phoenix span API until the trace is complete.
 
     Args:
         trace_id: Phoenix trace id.
+        project: Phoenix project identifier, the environment project when None.
 
     Returns:
         Fetched spans.
     """
-    project = get_env_project_name()
+    project = (project or get_env_project_name()).strip()
     client = AsyncClient()
     # The trace is complete when it has spans, a root span is present,
     # and the span count is stable across two consecutive polls.
@@ -147,16 +148,27 @@ async def fetch_spans(
     )
 
 
-def serialize_spans(spans: list[Any]) -> bytes:
+def serialize_spans(spans: list[Any], *, project: str | None = None) -> bytes:
     """Serialize fetched spans into the payload the parser accepts.
 
     Args:
         spans: Fetched spans.
+        project: Selected project identifier to retain in trace envelopes.
 
     Returns:
         Trace payload bytes.
     """
-    return json.dumps(spans).encode("utf-8")
+    if project is None:
+        return json.dumps(spans).encode("utf-8")
+    traces: dict[str, list[Any]] = {}
+    for span in spans:
+        traces.setdefault(span["context"]["trace_id"], []).append(span)
+    return json.dumps(
+        [
+            {"traceId": trace_id, "project": project, "spans": rows}
+            for trace_id, rows in traces.items()
+        ]
+    ).encode("utf-8")
 
 
 class PhoenixImportQuery(ImportQuery):
@@ -239,18 +251,20 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
     """
     parsed = PhoenixImportQuery.model_validate(query)
     client = AsyncClient()
+    project = (parsed.project or "").strip() or get_env_project_name().strip()
+    if not project:
+        raise ValueError("Phoenix project must be a non-empty string")
 
     if parsed.trace_ids is not None:
         trace_ids = parsed.trace_ids
     else:
         since, until = parsed.get_window()
-        project = parsed.project or get_env_project_name()
         trace_ids = await _list_root_trace_ids(client, project, since, until)
 
     span_batches = await gather_bounded(
-        (fetch_spans(trace_id, parsed.project, client) for trace_id in trace_ids),
+        (fetch_spans(trace_id, project, client) for trace_id in trace_ids),
         parsed.concurrency,
     )
     spans = [span for batch in span_batches for span in batch]
     if spans:
-        yield serialize_spans(spans)
+        yield serialize_spans(spans, project=project)

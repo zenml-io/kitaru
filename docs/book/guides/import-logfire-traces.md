@@ -102,7 +102,7 @@ kitaru session import logfire-records.jsonl \
   --media-type application/x-ndjson --wait
 ```
 
-If no project identity is available from any of those three sources, the importer falls back to `source_instance` `logfire` and says so in the session's warnings.
+If none of those sources supplies project identity, the affected trace fails with a `--params` remedy. Values are trimmed strings; conflicting embedded project IDs fail even when an override is supplied. There is no automatic `logfire` fallback. See [Import your traces](../getting-started/import-your-traces.md) for the shared identity rules and guidance for existing imports.
 
 ## 3. Or fetch from the Logfire API
 
@@ -166,7 +166,7 @@ Session metadata records the provenance you'll want when reading the import back
 
 ## Re-runs skip what is already there
 
-Every imported session records its source identity: `imported_from` (`logfire`) and an `external_id` of `<source_instance>:<session>`. That pair is unique on the server, so re-importing an overlapping export **skips** what is already stored and reports it as `skipped`, not as an error. Exporting the last 24 hours every night is safe; it will not duplicate earlier sessions.
+Every imported session records its source identity: `imported_from` (`logfire`) and an `external_id` of `<source_instance>:<session>`. That pair is unique per destination agent, so re-importing an overlapping export with the same identity **skips** what is already stored and reports it as `skipped`, not as an error. Skipped sessions are not refreshed with new nodes.
 
 It also means the grouping key matters: if you change `source_instance` or `join_on` between imports of the same records, the same conversation lands as a second session rather than deduping against the first.
 
@@ -174,7 +174,6 @@ It also means the grouping key matters: if you change `source_instance` or `join
 
 Because a records query returns exactly the rows you asked for, the importer never claims a session is complete: `source_completeness` is always `query-dependent`. What it did notice goes into `normalization_warnings` on the session:
 
-- `"No Logfire project identity supplied; using source_instance 'logfire'"` when neither the params nor the rows carry a project id.
 - `"No session attribute found; grouped by trace id"` when a trace has no conversation identity to group on.
 - `"Trace '<id>' has <n> root records"` when a trace has no single root span, usually a query that sliced through the middle of a trace.
 - `"Span '<id>' references missing parent '<id>'"` when a `parent_span_id` is not in the file. Those nodes are kept as roots.

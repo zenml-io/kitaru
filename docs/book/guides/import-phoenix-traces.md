@@ -45,6 +45,7 @@ Then import a Phoenix UI download:
 kitaru session import phoenix-traces.jsonl \
   --importer kitaru/phoenix@latest \
   --agent support-agent@latest \
+  --params '{"source_instance":"my-phoenix-project"}' \
   --media-type application/x-ndjson \
   --tag imported-baseline \
   --wait
@@ -60,6 +61,12 @@ kitaru session list \
   --origin imported \
   --imported-from phoenix
 ```
+
+### Source identity
+
+The importer chooses `params.source_instance`, then the `params.project` alias, then an embedded top-level `project` on the span or trace envelope. UI and CLI downloads without project identity require one of those parameters. Values are trimmed strings, and conflicting embedded projects fail the affected trace even with an override.
+
+Use the same project identifier for file and API imports. The API fetcher includes the selected query or configured project in its payload; a project name and its ID are not automatically reconciled. See [Import your traces](../getting-started/import-your-traces.md) for the shared identity rules and guidance for existing imports.
 
 ## 3. Or fetch from the Phoenix API
 
@@ -87,7 +94,7 @@ Pass `project` through `--query '{"project": "my-project"}'`. The worker install
 
 ## What becomes a session
 
-The safe default is one Phoenix trace per Kitaru session. The Phoenix `trace_id` becomes the session's `external_id`, so importing the same trace again skips it rather than creating a duplicate. Phoenix session or conversation attributes remain on the span, but this first importer version does not join several traces into one multi-turn session.
+Each Phoenix trace becomes one Kitaru session. Its `external_id` is `<source_instance>:<trace_id>`, so importing the same trace with the same project identity into the same agent skips it. Earlier bare trace IDs do not match these prefixed IDs; overlapping re-imports can therefore create additional sessions. Phoenix session or conversation attributes remain on the span; the importer does not join several traces into one multi-turn session.
 
 Every exported span becomes a node. The importer sorts spans by time and reconstructs their parent relationships instead of trusting export order.
 

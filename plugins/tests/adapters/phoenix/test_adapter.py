@@ -111,7 +111,7 @@ def test_run_imports_the_phoenix_trace_around_the_function(
     assert request.agent_id is None
     assert request.origin == SessionOrigin.RECORDED
     assert request.status == SessionStatus.COMPLETED
-    assert request.external_id == trace_id
+    assert request.external_id == f"{PROJECT}:{trace_id}"
     assert request.imported_from == "phoenix"
     assert request.metadata["normalization_warnings"] == []
     assert len(client.sessions.batches) == 1
@@ -259,7 +259,7 @@ async def test_fetch_round_trips_through_the_real_parser(
     assert len(items) == 1
     session = items[0]
     assert isinstance(session, ImportedSession)
-    assert session.external_id == trace_id
+    assert session.external_id == f"{PROJECT}:{trace_id}"
     assert session.status == SessionStatus.COMPLETED
     assert session.metadata["normalization_warnings"] == []
     assert [node.name for node in session.nodes] == ["kitaru-run"]
@@ -279,5 +279,5 @@ async def test_fetch_refetches_when_the_cache_is_absent(
 
     assert fake_phoenix.requested == [trace_id]
     assert fake_phoenix.project_identifiers == [PROJECT]
-    spans = json.loads(payload)
+    spans = [span for trace in json.loads(payload) for span in trace["spans"]]
     assert [span["name"] for span in spans] == ["kitaru-run", "llm-call"]

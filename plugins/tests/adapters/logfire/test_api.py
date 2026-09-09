@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Focused contract tests for the Logfire fetch entrypoint."""
 
+import json
 from datetime import UTC, datetime
 
 import httpx
@@ -315,3 +316,24 @@ async def test_trace_stream_error_fails_before_returning_payload(
             await api_module.fetch_trace(
                 TRACE_ID_1, datetime(2026, 7, 24, tzinfo=UTC), client
             )
+
+
+@pytest.mark.parametrize("params", [{}, {"source_instance": " explicit-project "}])
+async def test_api_and_file_imports_share_project_identity(
+    fake_logfire: FakeLogfire, params: dict[str, str]
+) -> None:
+    """Fetching records preserves the identity of an equivalent file export."""
+    fake_logfire.fetch_builders = [build_complete_rows]
+    [payload] = await collect_payloads(fetch({"trace_ids": [TRACE_ID_1]}))
+    file_payload = json.dumps(build_complete_rows(TRACE_ID_1)).encode()
+
+    [api_session] = list(parse(payload, params))
+    [file_session] = list(parse(file_payload, params))
+
+    assert fake_logfire.requested == [TRACE_ID_1]
+    assert isinstance(api_session, ImportedSession)
+    assert isinstance(file_session, ImportedSession)
+    assert api_session.external_id == file_session.external_id
+    expected_project = params.get("source_instance", "project-1").strip()
+    assert api_session.external_id.startswith(f"{expected_project}:")
+    assert api_session.metadata["logfire.project_id"] == "project-1"

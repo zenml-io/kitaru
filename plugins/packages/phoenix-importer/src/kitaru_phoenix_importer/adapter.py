@@ -20,6 +20,7 @@ from typing import Any
 
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import format_trace_id, get_tracer, get_tracer_provider
+from phoenix.client.utils.config import get_env_project_name
 
 from kitaru.importer_adapter import ImporterBackedAdapter
 
@@ -43,6 +44,9 @@ class PhoenixAdapter(ImporterBackedAdapter):
         """
         super().__init__("phoenix", parse, completeness_timeout=completeness_timeout)
         self._spans: dict[str, list[Any]] = {}
+        self._project = get_env_project_name().strip()
+        if not self._project:
+            raise ValueError("Phoenix project must be a non-empty string")
 
     @contextmanager
     def open_trace(self) -> Iterator[str]:
@@ -72,10 +76,12 @@ class PhoenixAdapter(ImporterBackedAdapter):
         # delivery. Only the SDK provider exposes a flush.
         if isinstance(provider, TracerProvider):
             await asyncio.to_thread(provider.force_flush)
-        self._spans[external_id] = await wait_for_spans(external_id)
+        self._spans[external_id] = await wait_for_spans(
+            external_id, project=self._project
+        )
 
     async def fetch(self, external_id: str) -> bytes:
-        """Fetch the finished trace as a Phoenix span JSON array.
+        """Fetch the finished trace with its selected Phoenix project.
 
         Args:
             external_id: Phoenix trace id.
@@ -85,5 +91,5 @@ class PhoenixAdapter(ImporterBackedAdapter):
         """
         spans = self._spans.pop(external_id, None)
         if spans is None:
-            spans = await fetch_spans(external_id)
-        return serialize_spans(spans)
+            spans = await fetch_spans(external_id, project=self._project)
+        return serialize_spans(spans, project=self._project)
