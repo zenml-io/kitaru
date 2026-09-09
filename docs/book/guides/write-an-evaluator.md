@@ -7,6 +7,8 @@ icon: chart-line
 
 Your domain expert already knows what a good run looks like. An [evaluator](../concepts/evaluators.md) is that knowledge as code: a small Python callable that reads one recorded session and writes named, typed verdicts. This guide takes you from criteria to a registered, calibrated evaluator you can trust in a release gate.
 
+For existing TypeScript evaluation code or native Mastra scorers, use the [TypeScript and Mastra evaluator guide](typescript-evaluators.md) to register a Python wrapper around a pinned Node artifact.
+
 ## From criteria to code
 
 Start from what the expert says. "A good refund resolution issues exactly one refund, quotes the amount, and does not promise anything we do not do" is three checks:

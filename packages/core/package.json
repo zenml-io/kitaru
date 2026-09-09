@@ -41,6 +41,10 @@
       "types": "./dist/node/index.d.ts",
       "import": "./dist/node/index.js"
     },
+    "./evaluator": {
+      "types": "./dist/evaluator/index.d.ts",
+      "import": "./dist/evaluator/index.js"
+    },
     "./adapter": {
       "types": "./dist/adapter/index.d.ts",
       "import": "./dist/adapter/index.js"

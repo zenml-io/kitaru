@@ -10,6 +10,7 @@ pnpm add @zenml-io/kitaru-mastra @mastra/core@1.51.0
 
 ## Links
 
+- [TypeScript and Mastra evaluator guide](https://docs.zenml.io/kitaru/guides/typescript-evaluators)
 - [Mastra adapter documentation](https://docs.zenml.io/kitaru/adapters/mastra)
 - [Install and start a Kitaru server](https://docs.zenml.io/kitaru/getting-started/installation)
 - [Run the Mastra support-triage example](https://github.com/zenml-io/kitaru/tree/main/examples/typescript/mastra_support_triage)
@@ -102,6 +103,6 @@ Recorded payloads preserve JSON values, convert dates to ISO strings, bigints to
 
 ## Current scope
 
-This experimental release supports non-streaming `Agent.generate()` with local function tools, including function-valued tools resolved from the run's `requestContext`. Replay rejects `prepareStep` and input processors because they can replace the model, prompt, or tools after preflight. Streaming, workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, LLM tool policy, and TypeScript scorers are intentionally not implemented.
+This experimental release supports non-streaming `Agent.generate()` with local function tools, including function-valued tools resolved from the run's `requestContext`. Replay rejects `prepareStep` and input processors because they can replace the model, prompt, or tools after preflight. Streaming, workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, and LLM tool policy are intentionally not implemented.
 
 Replay is execution, not a transaction. A passthrough tool can complete an external side effect before a later model or recording failure, and Kitaru cannot roll it back. Use application-level idempotency keys for side-effecting tools, or prefer static/history replay when execution must be suppressed.
