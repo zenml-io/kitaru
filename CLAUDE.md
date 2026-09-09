@@ -119,7 +119,7 @@ For adapter, importer, specialized UI API, docs, CI, and release work, load the 
 
 - **Single source of truth:** the `version` field in `pyproject.toml`. On `develop` it carries a `+dev` suffix. Only a release-preparation PR (see the `kitaru-release` skill) sets it to a release version, and the workflow's development-reset PR restores the `+dev` placeholder afterward. Do not change it in feature PRs.
 - **Never hardcode the version** in tests or application code. Use `importlib.metadata.version("kitaru")` to read it at runtime.
-- **Update `CHANGELOG.md`** when making user-facing changes. Add entries under the `[Unreleased]` heading. The release-preparation PR converts `[Unreleased]` to a versioned heading (e.g. `[0.2.0] - 2026-04-01`), and the development-reset PR restores an empty `[Unreleased]` afterward.
+- **Update `CHANGELOG.md`** when making user-facing changes. Add entries under the `[Unreleased]` heading. The release-preparation PR converts `[Unreleased]` to a versioned heading (e.g. `[0.2.0] - 2026-04-01`), and the development-reset PR restores an empty `[Unreleased]` afterward. `CHANGELOG.md` uses the `merge=union` driver (see `.gitattributes`), so a local `git merge origin/develop` keeps both sides when two PRs added lines under the same heading. GitHub's conflict check ignores merge drivers, so a PR that shows as conflicting only on the changelog is fixed by merging `develop` locally and pushing; after such a merge, check the `[Unreleased]` section for a duplicated line, which the union driver does not remove.
 - **Track deprecations in `DEPRECATIONS.md`** at the repository root, one entry per deprecated surface.
 
 ## Commits and PRs

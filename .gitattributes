@@ -5,3 +5,10 @@
 #   pnpm-lock.yaml    -> `pnpm install` (in the relevant subdir)
 uv.lock              merge=binary
 docs/pnpm-lock.yaml  merge=binary
+
+# Every PR inserts its changelog line directly under the same [Unreleased]
+# heading, so two PRs conflict on that spot even though both lines belong.
+# The union driver keeps both sides. It only applies to local merges and
+# rebases; GitHub's conflict check ignores merge drivers, so a PR can still
+# show as conflicting until `git merge origin/develop` is run and pushed.
+CHANGELOG.md         merge=union
