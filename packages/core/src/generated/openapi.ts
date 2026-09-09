@@ -2200,6 +2200,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/imports/{import_id}/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Analyze Import
+         * @description Run analyzers over the sessions of an import, as one job.
+         *
+         *     Clients observe HTTP 201 on success, 404 when the import, an analyzer,
+         *     a version, or a connection does not exist, 409 when the import has no
+         *     completed or failed session, and 422 when an analyzer version repeats.
+         *
+         *     Args:
+         *         import_id: Id of the import.
+         *         body: Import analyze request.
+         *         service: Import service.
+         *         starter: Ephemeral worker starter.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Created job.
+         */
+        post: operations["analyze_import_api_v1_imports__import_id__analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/info": {
         parameters: {
             query?: never;
@@ -6428,6 +6462,17 @@ export interface components {
          */
         HistoryScope: "baseline" | "cohort_version" | "agent";
         /**
+         * ImportAnalyzeRequest
+         * @description Import analyze request.
+         */
+        ImportAnalyzeRequest: {
+            /**
+             * Analyzers
+             * @description Analyzers run across the import's sessions.
+             */
+            analyzers: components["schemas"]["AnalyzerConfig"][];
+        };
+        /**
          * ImportCreateRequest
          * @description Import create request.
          */
@@ -7305,7 +7350,7 @@ export interface components {
          * @description Job kind.
          * @enum {string}
          */
-        JobKind: "session_run" | "import" | "evaluation" | "replay";
+        JobKind: "session_run" | "import" | "evaluation" | "replay" | "analysis";
         /**
          * JobResponse
          * @description Job response.
@@ -16864,6 +16909,97 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    analyze_import_api_v1_imports__import_id__analyze_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportAnalyzeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

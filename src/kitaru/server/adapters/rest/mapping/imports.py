@@ -16,6 +16,7 @@
 from kitaru.api_models.v1.imports import (
     ApiImportSource,
     BlobImportSource,
+    ImportAnalyzeRequest,
     ImportCreateRequest,
     ImportListParams,
     ImportQuery,
@@ -31,7 +32,11 @@ from kitaru.server.adapters.rest.mapping.evaluator_config import (
     evaluator_config_to_wire,
 )
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
-from kitaru.server.application.models.imports import ImportCreate, ImportFilter
+from kitaru.server.application.models.imports import (
+    ImportAnalyze,
+    ImportCreate,
+    ImportFilter,
+)
 from kitaru.server.domain.imports import Import
 
 
@@ -63,6 +68,20 @@ def import_create_to_command(body: ImportCreateRequest) -> ImportCreate:
         params=body.params,
         evaluators=[evaluator_config_input(config) for config in body.evaluators],
         analyzers=[analyzer_config_input(config) for config in body.analyzers],
+    )
+
+
+def import_analyze_to_command(body: ImportAnalyzeRequest) -> ImportAnalyze:
+    """Convert an import analyze request to its command.
+
+    Args:
+        body: Import analyze request.
+
+    Returns:
+        Import analyze command.
+    """
+    return ImportAnalyze(
+        analyzers=[analyzer_config_input(config) for config in body.analyzers]
     )
 
 

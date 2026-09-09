@@ -9476,7 +9476,8 @@
             "session_run",
             "import",
             "evaluation",
-            "replay"
+            "replay",
+            "analysis"
           ],
           "title": "JobKind",
           "type": "string"
@@ -12176,7 +12177,8 @@
             "session_run",
             "import",
             "evaluation",
-            "replay"
+            "replay",
+            "analysis"
           ],
           "title": "JobKind",
           "type": "string"

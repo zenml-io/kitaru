@@ -30,8 +30,10 @@ from conftest import (
     create_blob,
     create_connection,
     create_plugin,
+    create_session,
     override_idempotency,
 )
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -52,7 +54,7 @@ from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
-from kitaru.server.domain.task import ImportTask
+from kitaru.server.domain.task import AnalysisTask, ImportTask
 from kitaru.server.ephemeral_worker_settings import (
     EphemeralWorkerBackend,
     EphemeralWorkerSettings,
@@ -664,3 +666,146 @@ async def test_list_imports_filters_by_agent_id(
     assert response.status_code == 200
     items = response.json()["items"]
     assert [item["id"] for item in items] == [first["id"]]
+
+
+async def _analyzable_import(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> dict[str, Any]:
+    """Create an import that has one completed session."""
+    await _importer_version(services)
+    body = await _import_request(services)
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    await create_session(
+        services.sessions,
+        ACCOUNT.id,
+        agent_id=uuid.UUID(created["agent_id"]),
+        origin=SessionOrigin.IMPORTED,
+        status=SessionStatus.COMPLETED,
+        import_id=uuid.UUID(created["id"]),
+    )
+    return created
+
+
+async def test_analyze_import(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Analyze an import as a new job holding one task per analyzer."""
+    import_ = await _analyzable_import(client, services)
+    version = await _analyzer_version(services, "trends")
+
+    response = await client.post(
+        f"/api/v1/imports/{import_['id']}/analyze",
+        json={"analyzers": [{"analyzer": "trends", "params": {"k": 1}}]},
+    )
+    assert response.status_code == 201
+    job = response.json()
+    assert job["owner_id"] == str(ACCOUNT.id)
+    assert job["kind"] == "analysis"
+    assert job["status"] == "pending"
+    assert job["id"] != import_["job_id"]
+
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=uuid.UUID(job["id"])), actor=AuthContext(account=ACCOUNT)
+    )
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert isinstance(task, AnalysisTask)
+    assert task.import_id == uuid.UUID(import_["id"])
+    assert task.agent_id == uuid.UUID(import_["agent_id"])
+    assert task.plugin_version_id == version.id
+    assert task.params == {"k": 1}
+
+
+async def test_analyze_import_starts_an_ephemeral_worker(
+    ephemeral_client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+) -> None:
+    """Start a worker pinned to the analysis job after the response."""
+    import_ = await _analyzable_import(ephemeral_client, services)
+
+    response = await ephemeral_client.post(
+        f"/api/v1/imports/{import_['id']}/analyze",
+        json={"analyzers": [{"analyzer": "kitaru/post-import-insights"}]},
+    )
+    assert response.status_code == 201
+    job = response.json()
+
+    assert len(ephemeral_workers.starts) == 1
+    spec = ephemeral_workers.starts[0]
+    assert spec.job_id == uuid.UUID(job["id"])
+
+
+async def test_analyze_import_not_found_for_unknown_import(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Reject an unknown import id with 404."""
+    await _analyzer_version(services, "trends")
+
+    response = await client.post(
+        f"/api/v1/imports/{uuid.uuid4()}/analyze",
+        json={"analyzers": [{"analyzer": "trends"}]},
+    )
+    assert response.status_code == 404
+
+
+async def test_analyze_import_not_found_for_unknown_analyzer(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Reject an unknown analyzer with 404."""
+    import_ = await _analyzable_import(client, services)
+
+    response = await client.post(
+        f"/api/v1/imports/{import_['id']}/analyze",
+        json={"analyzers": [{"analyzer": "missing"}]},
+    )
+    assert response.status_code == 404
+
+
+async def test_analyze_import_conflicts_without_sessions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Reject an import that created no session with 409."""
+    await _importer_version(services)
+    await _analyzer_version(services, "trends")
+    body = await _import_request(services)
+    created = (await client.post("/api/v1/imports", json=body)).json()
+
+    response = await client.post(
+        f"/api/v1/imports/{created['id']}/analyze",
+        json={"analyzers": [{"analyzer": "trends"}]},
+    )
+    assert response.status_code == 409
+
+
+async def test_analyze_import_rejects_an_empty_analyzer_list(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Reject a request naming no analyzer with 422."""
+    import_ = await _analyzable_import(client, services)
+
+    response = await client.post(
+        f"/api/v1/imports/{import_['id']}/analyze", json={"analyzers": []}
+    )
+    assert response.status_code == 422
+
+
+async def test_analyze_import_rejects_duplicate_analyzer_versions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Reject two configs resolving to one analyzer version with 422."""
+    import_ = await _analyzable_import(client, services)
+    await _analyzer_version(services, "trends")
+
+    response = await client.post(
+        f"/api/v1/imports/{import_['id']}/analyze",
+        json={
+            "analyzers": [
+                {"analyzer": "trends"},
+                {"analyzer": "trends", "version": 1},
+            ]
+        },
+    )
+    assert response.status_code == 422

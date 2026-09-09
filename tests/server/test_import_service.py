@@ -27,13 +27,19 @@ from conftest import (
     create_connection,
     create_plugin,
     create_secret,
+    create_session,
 )
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
-from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
+from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL, TaskOnFailure
 from kitaru.server.api.bootstrap import register_default_plugins
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.imports import ImportCreate, ImportFilter
+from kitaru.server.application.models.imports import (
+    ImportAnalyze,
+    ImportCreate,
+    ImportFilter,
+)
 from kitaru.server.application.models.replay_config import (
     AnalyzerConfigInput,
     EvaluatorConfigInput,
@@ -45,7 +51,7 @@ from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersionAgentMismatch
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.connection import ConnectionNotFound
-from kitaru.server.domain.imports import ImportNotFound
+from kitaru.server.domain.imports import Import, ImportNotAnalyzable, ImportNotFound
 from kitaru.server.domain.plugin import (
     PackagePluginSource,
     PluginKind,
@@ -53,7 +59,7 @@ from kitaru.server.domain.plugin import (
     PluginVersion,
     ScriptPluginSource,
 )
-from kitaru.server.domain.task import ImportTask
+from kitaru.server.domain.task import AnalysisTask, ImportTask
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -722,3 +728,233 @@ async def test_create_import_from_a_file_omits_the_requires_credentials_label(
     labels = await _import_task_labels(services, await _import_command(services))
 
     assert REQUIRES_CREDENTIALS_LABEL not in labels
+
+
+async def _imported_session(
+    services: JobAndTaskServices,
+    import_: Import,
+    status: SessionStatus = SessionStatus.COMPLETED,
+) -> None:
+    """Store one session the import created."""
+    await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=import_.agent_id,
+        origin=SessionOrigin.IMPORTED,
+        status=status,
+        import_id=import_.id,
+    )
+
+
+async def _analyzable_import(services: JobAndTaskServices) -> Import:
+    """Create an import that has one completed session."""
+    await _importer_version(services)
+    command = await _import_command(services)
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+    await _imported_session(services, import_)
+    return import_
+
+
+async def _analysis_tasks(
+    services: JobAndTaskServices, job_id: uuid.UUID
+) -> list[AnalysisTask]:
+    """Return the analysis tasks of a job."""
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=job_id), actor=ACTOR
+    )
+    assert all(isinstance(task, AnalysisTask) for task in tasks)
+    return [task for task in tasks if isinstance(task, AnalysisTask)]
+
+
+async def test_analyze_import_creates_a_job_with_one_task_per_analyzer(
+    services: JobAndTaskServices,
+) -> None:
+    """An analysis job holds one task per analyzer, each scoped to the import."""
+    import_ = await _analyzable_import(services)
+    trends = await _analyzer_version(services, "trends")
+    outcomes = await _analyzer_version(services, "outcomes")
+
+    job = await services.import_service.analyze_import(
+        import_.id,
+        ImportAnalyze(
+            analyzers=[
+                AnalyzerConfigInput(analyzer="trends", params={"k": 1}),
+                AnalyzerConfigInput(analyzer="outcomes"),
+            ]
+        ),
+        actor=ACTOR,
+    )
+
+    assert job.owner_id == ACTOR.account.id
+    assert job.kind is JobKind.ANALYSIS
+    assert job.status is JobStatus.PENDING
+    assert job.id != import_.job_id
+    tasks = await _analysis_tasks(services, job.id)
+    assert {task.plugin_version_id for task in tasks} == {trends.id, outcomes.id}
+    for task in tasks:
+        assert task.import_id == import_.id
+        assert task.agent_id == import_.agent_id
+        assert task.on_failure is TaskOnFailure.CONTINUE
+    by_version = {task.plugin_version_id: task for task in tasks}
+    assert by_version[trends.id].params == {"k": 1}
+    assert by_version[outcomes.id].params == {}
+
+
+async def test_analyze_import_leaves_the_import_row_unchanged(
+    services: JobAndTaskServices,
+) -> None:
+    """A rerun does not rewrite the analyzers stored on the import."""
+    import_ = await _analyzable_import(services)
+    await _analyzer_version(services, "trends")
+
+    await services.import_service.analyze_import(
+        import_.id,
+        ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="trends")]),
+        actor=ACTOR,
+    )
+
+    stored = await services.imports.get(import_.id)
+    assert stored.analyzers == []
+    assert stored.job_id == import_.job_id
+
+
+async def test_analyze_import_stamps_the_requires_credentials_label(
+    services: JobAndTaskServices,
+) -> None:
+    """An analyzer with a connection schema and no connection needs the worker's."""
+    import_ = await _analyzable_import(services)
+    plugin = await create_plugin(
+        services.plugins,
+        ACTOR.account.id,
+        PluginKind.ANALYZER,
+        name="trends",
+        provider="openai",
+        connection_schema={"type": "object"},
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="analyze"),
+        display_version=None,
+    )
+
+    job = await services.import_service.analyze_import(
+        import_.id,
+        ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="trends")]),
+        actor=ACTOR,
+    )
+
+    [task] = await _analysis_tasks(services, job.id)
+    assert task.connection_id is None
+    assert task.labels[REQUIRES_CREDENTIALS_LABEL] == "openai"
+    assert task.labels[PLUGIN_PROVIDER_LABEL] == "openai"
+
+
+async def test_analyze_import_stores_the_named_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """The task carries the connection named on its analyzer config."""
+    import_ = await _analyzable_import(services)
+    await _analyzer_version(services, "trends", provider="openai")
+    secret = await create_secret(
+        services.secrets, ACTOR.account.id, name="analyzer-values", internal=True
+    )
+    connection = await create_connection(
+        services.connections, ACTOR.account.id, secret.id, name="analyzer"
+    )
+
+    job = await services.import_service.analyze_import(
+        import_.id,
+        ImportAnalyze(
+            analyzers=[
+                AnalyzerConfigInput(analyzer="trends", connection_id=connection.id)
+            ]
+        ),
+        actor=ACTOR,
+    )
+
+    [task] = await _analysis_tasks(services, job.id)
+    assert task.connection_id == connection.id
+    assert REQUIRES_CREDENTIALS_LABEL not in task.labels
+
+
+async def test_analyze_import_rejects_an_unknown_import(
+    services: JobAndTaskServices,
+) -> None:
+    """An unknown import id resolves to not found."""
+    await _analyzer_version(services, "trends")
+
+    with pytest.raises(ImportNotFound):
+        await services.import_service.analyze_import(
+            uuid.uuid4(),
+            ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="trends")]),
+            actor=ACTOR,
+        )
+
+
+async def test_analyze_import_rejects_an_import_without_sessions(
+    services: JobAndTaskServices,
+) -> None:
+    """An import that created no session has nothing to analyze."""
+    await _importer_version(services)
+    command = await _import_command(services)
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+    await _analyzer_version(services, "trends")
+
+    with pytest.raises(ImportNotAnalyzable):
+        await services.import_service.analyze_import(
+            import_.id,
+            ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="trends")]),
+            actor=ACTOR,
+        )
+
+
+async def test_analyze_import_rejects_an_import_with_only_in_progress_sessions(
+    services: JobAndTaskServices,
+) -> None:
+    """A session still in progress does not count as analyzable."""
+    await _importer_version(services)
+    command = await _import_command(services)
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+    await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
+    await _analyzer_version(services, "trends")
+
+    with pytest.raises(ImportNotAnalyzable):
+        await services.import_service.analyze_import(
+            import_.id,
+            ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="trends")]),
+            actor=ACTOR,
+        )
+
+
+async def test_analyze_import_rejects_an_unknown_analyzer(
+    services: JobAndTaskServices,
+) -> None:
+    """An unknown analyzer name resolves to not found."""
+    import_ = await _analyzable_import(services)
+
+    with pytest.raises(PluginNotFound):
+        await services.import_service.analyze_import(
+            import_.id,
+            ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="missing")]),
+            actor=ACTOR,
+        )
+
+
+async def test_analyze_import_rejects_duplicate_analyzer_versions(
+    services: JobAndTaskServices,
+) -> None:
+    """Two configs resolving to one analyzer version are rejected."""
+    import_ = await _analyzable_import(services)
+    await _analyzer_version(services, "trends")
+
+    with pytest.raises(ValidationError):
+        await services.import_service.analyze_import(
+            import_.id,
+            ImportAnalyze(
+                analyzers=[
+                    AnalyzerConfigInput(analyzer="trends"),
+                    AnalyzerConfigInput(analyzer="trends", version=1),
+                ]
+            ),
+            actor=ACTOR,
+        )

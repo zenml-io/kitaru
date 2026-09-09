@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Import outcome recording and evaluator and analyzer fan-out."""
 
+import uuid
+
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.imports import ImportStats
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
@@ -25,9 +27,10 @@ from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.services.plugin_resolution import (
     get_plugin_task_labels,
 )
-from kitaru.server.domain.imports import ImportNotFound
+from kitaru.server.domain.imports import Import, ImportNotFound
 from kitaru.server.domain.plugin import PluginKind, PluginNotFound
-from kitaru.server.domain.session import SessionNotEvaluatable
+from kitaru.server.domain.replay_config import AnalyzerConfig
+from kitaru.server.domain.session import Session, SessionNotEvaluatable
 from kitaru.server.domain.task import AnalysisTask, EvaluationTask, ImportTask, Task
 from kitaru.server.filtering import FilterCondition
 from kitaru.server.utils import paginate_all
@@ -45,11 +48,12 @@ async def record_import_outcome(
     A no-op when the terminal task is not an import task or its import row
     is gone. A completed task stamps the import's stats from its result, any
     other terminal status stamps the task's error. Evaluator and analysis
-    tasks are appended only for a completed import naming evaluators or
-    analyzers, skipping sessions still in progress: one evaluator task per
-    imported session and evaluator, and one analysis task per analyzer
-    scoped to the import. No analysis task is appended when no session is
-    evaluatable. Inserts them without locking the job row. The
+    tasks are appended only for a completed import that created at least
+    one session and names evaluators or analyzers, skipping sessions still
+    in progress: one evaluator task per imported session and evaluator, and
+    one analysis task per analyzer scoped to the import. No analysis task
+    is appended when no session is evaluatable. Inserts them without
+    locking the job row. The
     completing task's own transition settles the job afterward, in the same
     transaction, and its drained scan reads every task including these, so
     the job can never be judged drained before they exist.
@@ -69,30 +73,22 @@ async def record_import_outcome(
         import_ = await import_repository.get(task.import_id)
     except ImportNotFound:
         return
+    stats = None
     if task.status is TaskStatus.COMPLETED:
-        import_.record_stats(ImportStats.model_validate(task.result))
+        stats = ImportStats.model_validate(task.result)
+        import_.record_stats(stats)
     else:
         import_.record_error(task.error)
     await import_repository.update(import_)
-    if task.status is not TaskStatus.COMPLETED or (
-        not import_.evaluators and not import_.analyzers
+    if (
+        stats is None
+        or stats.created == 0
+        or (not import_.evaluators and not import_.analyzers)
     ):
         return
-    membership = FilterCondition(field="import_id", op=FilterOp.EQ, value=import_.id)
-    sessions = await paginate_all(
-        lambda cursor: session_repository.query(
-            SessionFilter(expression=membership, cursor=cursor, size=1000),
-            include_payloads=False,
-        )
-    )
-    evaluatable = False
+    sessions = await query_evaluatable_sessions(import_.id, session_repository)
     fan_out_tasks: list[Task] = []
     for session in sessions:
-        try:
-            session.check_evaluate()
-        except SessionNotEvaluatable:
-            continue
-        evaluatable = True
         for evaluator in import_.evaluators:
             fan_out_tasks.append(
                 EvaluationTask(
@@ -104,29 +100,79 @@ async def record_import_outcome(
                     on_failure=TaskOnFailure.CONTINUE,
                 )
             )
-    if evaluatable:
+    if sessions:
         for analyzer in import_.analyzers:
             fan_out_tasks.append(
-                AnalysisTask(
-                    job_id=task.job_id,
-                    plugin_version_id=analyzer.analyzer_version_id,
-                    agent_id=import_.agent_id,
-                    import_id=import_.id,
-                    connection_id=analyzer.connection_id,
-                    params=analyzer.params,
-                    labels=get_plugin_task_labels(
-                        analyzer.analyzer,
-                        analyzer.provider,
-                        analyzer.connection_id is None
-                        and await _has_connection_schema(
-                            analyzer.analyzer, plugin_repository
-                        ),
-                    ),
-                    on_failure=TaskOnFailure.CONTINUE,
+                await build_analysis_task(
+                    analyzer, import_, task.job_id, plugin_repository
                 )
             )
     if fan_out_tasks:
         await task_repository.create_many(fan_out_tasks)
+
+
+async def query_evaluatable_sessions(
+    import_id: uuid.UUID, session_repository: SessionRepository
+) -> list[Session]:
+    """Load the sessions of an import that accept evaluations.
+
+    Args:
+        import_id: Id of the import.
+        session_repository: Session repository.
+
+    Returns:
+        Sessions the import created that are not in progress.
+    """
+    membership = FilterCondition(field="import_id", op=FilterOp.EQ, value=import_id)
+    sessions = await paginate_all(
+        lambda cursor: session_repository.query(
+            SessionFilter(expression=membership, cursor=cursor, size=1000),
+            include_payloads=False,
+        )
+    )
+    evaluatable: list[Session] = []
+    for session in sessions:
+        try:
+            session.check_evaluate()
+        except SessionNotEvaluatable:
+            continue
+        evaluatable.append(session)
+    return evaluatable
+
+
+async def build_analysis_task(
+    analyzer: AnalyzerConfig,
+    import_: Import,
+    job_id: uuid.UUID,
+    plugin_repository: PluginRepository,
+) -> AnalysisTask:
+    """Build the task running an analyzer over an import's sessions.
+
+    Args:
+        analyzer: Resolved analyzer config.
+        import_: Import the analyzer reads.
+        job_id: Job the task belongs to.
+        plugin_repository: Plugin repository, for the analyzer's connection
+            schema.
+
+    Returns:
+        Analysis task, not yet stored.
+    """
+    return AnalysisTask(
+        job_id=job_id,
+        plugin_version_id=analyzer.analyzer_version_id,
+        agent_id=import_.agent_id,
+        import_id=import_.id,
+        connection_id=analyzer.connection_id,
+        params=analyzer.params,
+        labels=get_plugin_task_labels(
+            analyzer.analyzer,
+            analyzer.provider,
+            analyzer.connection_id is None
+            and await _has_connection_schema(analyzer.analyzer, plugin_repository),
+        ),
+        on_failure=TaskOnFailure.CONTINUE,
+    )
 
 
 async def _has_connection_schema(

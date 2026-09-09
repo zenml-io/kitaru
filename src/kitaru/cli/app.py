@@ -1399,6 +1399,35 @@ async def agent_get(agent: str, /) -> CommandResult:
 
 
 @_register(
+    agent_app,
+    _spec(
+        ("agent", "delete"),
+        "Soft delete an agent.",
+        parameters=(
+            ParameterSpec(
+                "AGENT", "reference", "argument", True, "Agent UUID or name."
+            ),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def agent_delete(agent: str, /, *, force: bool = False) -> CommandResult:
+    """Soft delete one exact agent."""
+    if not force:
+        raise CLIError("invalid_arguments", "Deleting an agent requires --force.")
+    async with _open_asset_client() as client:
+        item = await registration.resolve_asset(client.agents, agent, "Agent")
+        await client.agents.delete(item.id)
+        return CommandResult(item={"id": str(item.id), "deleted": True})
+
+
+@_register(
     agent_version_app,
     _spec(
         ("agent", "version", "register"),
@@ -3185,6 +3214,74 @@ async def import_get(import_id: uuid.UUID, /) -> CommandResult:
     """Get one import without remapping its status."""
     async with _open_asset_client() as client:
         return await imports.get_import(client, import_id)
+
+
+@_register(
+    import_app,
+    _spec(
+        ("import", "analyze"),
+        "Run analyzers over the sessions of an existing import as one job.",
+        parameters=(
+            ParameterSpec("IMPORT_ID", "UUID", "argument", True, "Import ID."),
+            ParameterSpec(
+                "--analyzer",
+                "ANALYZER@VERSION[]",
+                "option",
+                True,
+                "Exact analyzer version run once over the import's sessions.",
+            ),
+            ParameterSpec(
+                "--analyzer-params",
+                "ANALYZER@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected analyzer token.",
+            ),
+            ParameterSpec(
+                "--analyzer-connection",
+                "ANALYZER@VERSION=CONNECTION[]",
+                "option",
+                False,
+                "Connection for a selected analyzer token.",
+            ),
+            *_WAIT_PARAMETERS,
+            _IDEMPOTENCY_KEY_PARAMETER,
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_job_created_per_request",
+        errors=(
+            *_ASSET_READ_ERRORS,
+            *_JOB_WAIT_ERRORS,
+        ),
+        streams=True,
+    ),
+)
+async def import_analyze(
+    import_id: uuid.UUID,
+    /,
+    *,
+    analyzer: list[str],
+    analyzer_params: list[str] | None = None,
+    analyzer_connection: list[str] | None = None,
+    wait: bool = False,
+    interval: float | None = None,
+    timeout: float | None = None,
+    idempotency_key: str | None = None,
+) -> CommandResult:
+    """Create one analysis job over the sessions of an existing import."""
+    async with _open_asset_client() as client:
+        return await imports.analyze_import(
+            client,
+            import_id,
+            analyzers=analyzer,
+            analyzer_params=analyzer_params,
+            analyzer_connections=analyzer_connection,
+            wait=wait,
+            interval=interval,
+            timeout=timeout,
+            idempotency_key=idempotency_key,
+        )
 
 
 @_register(

@@ -182,6 +182,15 @@ class ImportCreateRequest(RequestModel):
         return BlobImportSource(blob_id=blob_id)
 
 
+class ImportAnalyzeRequest(RequestModel):
+    """Import analyze request."""
+
+    analyzers: list[AnalyzerConfig] = Field(
+        min_length=1,
+        description="Analyzers run across the import's sessions.",
+    )
+
+
 class ImportListParams(FilterableListParams):
     """Import list params."""
 

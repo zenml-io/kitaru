@@ -51,3 +51,9 @@ class ImportCreate(FrozenModel):
     params: dict[str, Any] = Field(default_factory=dict)
     evaluators: list[EvaluatorConfigInput] = Field(default_factory=list)
     analyzers: list[AnalyzerConfigInput] = Field(default_factory=list)
+
+
+class ImportAnalyze(FrozenModel):
+    """Import analyze command."""
+
+    analyzers: list[AnalyzerConfigInput] = Field(min_length=1)

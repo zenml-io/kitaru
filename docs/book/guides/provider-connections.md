@@ -14,8 +14,10 @@ A **connection** is the alternative: a server-side resource that holds a provide
 Importers and analyzers can declare a `connection_schema`, the set of environment variables their provider SDK reads. Naming either plugin drives the create form:
 
 ```bash
-kitaru connection create langfuse-prod --importer kitaru/langfuse@latest
+kitaru connection create langfuse-prod --importer kitaru/langfuse
 ```
+
+Name the plugin, not a version. A connection holds credentials for the plugin's provider, and every version of that plugin uses the same connection, so `--importer` and `--analyzer` take a plugin name or UUID here rather than a `NAME@VERSION` reference.
 
 For an analyzer, use `--analyzer` instead:
 
@@ -27,7 +29,7 @@ This prompts for each property in the schema, in order, hiding input for anythin
 
 ```bash
 kitaru connection create langfuse-prod \
-  --importer kitaru/langfuse@latest \
+  --importer kitaru/langfuse \
   --set-secret LANGFUSE_PUBLIC_KEY=pk-... \
   --set-secret LANGFUSE_SECRET_KEY=sk-... \
   --set LANGFUSE_BASE_URL=https://cloud.langfuse.com

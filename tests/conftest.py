@@ -7062,6 +7062,7 @@ def build_job_and_task_services(
         repository=substrate.imports,
         job_repository=substrate.jobs,
         task_repository=substrate.tasks,
+        session_repository=substrate.sessions,
         agent_repository=substrate.agents,
         agent_version_repository=substrate.agent_versions,
         plugin_repository=substrate.plugins,

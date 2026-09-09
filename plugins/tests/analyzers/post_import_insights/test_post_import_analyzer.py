@@ -26,6 +26,7 @@ from typing import Any
 import httpx
 import pytest
 
+from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.insight import InsightInput
 from kitaru.api_models.v1.session import (
     SessionDetailResponse,
@@ -40,7 +41,11 @@ from kitaru.api_models.v1.session_node import (
     SessionWithNodesResponse,
 )
 from kitaru.api_models.v1.task import AnalysisTaskDetails, PackagePluginSpec
-from kitaru.client.exceptions import AuthenticationError, NotFoundError
+from kitaru.client.exceptions import (
+    AuthenticationError,
+    NotFoundError,
+    ServerError,
+)
 from kitaru.task import analyzer as task_analyzer
 from kitaru_post_import_insights import InsightGenerationResult
 from kitaru_post_import_insights import analyzer as analyzer_module
@@ -54,6 +59,7 @@ from kitaru_post_import_insights.generation import (
     EditorialCardCopy,
     EditorialPlan,
 )
+from kitaru_post_import_insights.models import GenerationMode
 from kitaru_post_import_insights.openai_generator import MissingOpenAICredential
 from kitaru_post_import_insights.profiling import SessionProfiler
 
@@ -117,6 +123,11 @@ def _view(
 class StubClient:
     def __init__(self) -> None:
         self.sessions = self
+        self.agents = self
+        self.base_url = "https://stub-api.example.test/"
+        self.agent_name = "stub-agent"
+        self.agent_error: Exception | None = None
+        self.agent_lookups: list[uuid.UUID] = []
         self.responses: dict[uuid.UUID, SessionWithNodesResponse] = {}
         self.fetched: list[uuid.UUID] = []
         self.entered = False
@@ -136,6 +147,24 @@ class StubClient:
     async def get_with_nodes(self, session_id: uuid.UUID) -> SessionWithNodesResponse:
         self.fetched.append(session_id)
         return self.responses[session_id]
+
+    async def get(self, agent_id: uuid.UUID) -> AgentResponse:
+        self.agent_lookups.append(agent_id)
+        if self.agent_error is not None:
+            raise self.agent_error
+        return _agent(self.agent_name)
+
+
+def _agent(name: str) -> AgentResponse:
+    return AgentResponse(
+        id=AGENT_ID,
+        owner_id=OWNER_ID,
+        created=NOW,
+        updated=NOW,
+        name=name,
+        description=None,
+        latest_version=1,
+    )
 
 
 @pytest.fixture
@@ -161,6 +190,7 @@ async def test_analyzer_returns_self_contained_insight_inputs(
     for item in metadata:
         assert item.context.agent_id == AGENT_ID
         assert item.context.agent_name == "returns-agent"
+        assert item.context.server_url == "https://stub-api.example.test"
         assert item.context.source_import.import_id == IMPORT_ID
         assert item.context.source_import.provider == "langfuse"
         assert item.contributing_session_ids
@@ -174,7 +204,62 @@ async def test_analyzer_returns_self_contained_insight_inputs(
         evidence.node_id is not None for item in metadata for evidence in item.evidence
     )
     assert client.fetched == [view.session.id for view in views]
+    assert client.agent_lookups == []
     assert client.closed
+
+
+async def test_analyzer_looks_up_the_agent_name_when_not_supplied(
+    client: StubClient,
+) -> None:
+    """Fetch the agent once, after the session reads, when no name was passed."""
+    views = [_view(1, failed_tool=True), _view(2)]
+
+    insights = await analyze_post_import_sessions(client.add(views))
+
+    assert insights
+    assert client.agent_lookups == [AGENT_ID]
+    for item in insights:
+        metadata = InsightGenerationResult.card_metadata(item)
+        assert metadata.context.agent_name == "stub-agent"
+        assert "Agent: stub-agent (id " in metadata.investigation_prompt
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        NotFoundError(404, "agent missing"),
+        ServerError(503, "agent unavailable"),
+    ],
+)
+async def test_analyzer_tolerates_a_failed_agent_lookup(
+    client: StubClient, error: Exception
+) -> None:
+    """Leave the agent name empty when only the decorative lookup fails."""
+    client.agent_error = error
+
+    insights = await analyze_post_import_sessions(
+        client.add([_view(1, failed_tool=True), _view(2)])
+    )
+
+    assert insights
+    assert client.agent_lookups == [AGENT_ID]
+    for item in insights:
+        metadata = InsightGenerationResult.card_metadata(item)
+        assert metadata.context.agent_name is None
+        assert f"Agent id: {AGENT_ID}" in metadata.investigation_prompt
+        assert "Agent: " not in metadata.investigation_prompt
+
+
+async def test_analyzer_propagates_unexpected_agent_lookup_errors(
+    client: StubClient,
+) -> None:
+    """Only client errors are tolerated on the agent lookup."""
+    client.agent_error = RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await analyze_post_import_sessions(
+            client.add([_view(1, failed_tool=True), _view(2)])
+        )
 
 
 @pytest.mark.parametrize("last_status", [200, 401, 404])
@@ -193,12 +278,19 @@ async def test_analyzer_fetches_full_sessions_using_task_credentials(
 
     def respond(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        view = views[len(requests) - 1]
         assert request.method == "GET"
+        assert request.headers["Authorization"] == "Bearer task-scoped-token"
+        if len(requests) > len(views):
+            assert str(request.url) == (
+                f"https://task-api.example.test/api/v1/agents/{AGENT_ID}"
+            )
+            return httpx.Response(
+                200, json=_agent("task-agent").model_dump(mode="json")
+            )
+        view = views[len(requests) - 1]
         assert str(request.url) == (
             f"https://task-api.example.test/api/v1/sessions/{view.session.id}/full"
         )
-        assert request.headers["Authorization"] == "Bearer task-scoped-token"
         if len(requests) == len(views) and last_status != 200:
             return httpx.Response(last_status, json={"detail": "trace unavailable"})
         return httpx.Response(200, json=view.model_dump(mode="json"))
@@ -226,6 +318,11 @@ async def test_analyzer_fetches_full_sessions_using_task_credentials(
         metadata = [InsightGenerationResult.card_metadata(item) for item in insights]
         assert all(item.coverage.sessions_analyzed == 2 for item in metadata)
         assert all(item.context.agent_id == AGENT_ID for item in metadata)
+        assert all(item.context.agent_name == "task-agent" for item in metadata)
+        assert all(
+            item.context.server_url == "https://task-api.example.test"
+            for item in metadata
+        )
         assert all(
             item.context.source_import.import_id == IMPORT_ID for item in metadata
         )
@@ -235,7 +332,7 @@ async def test_analyzer_fetches_full_sessions_using_task_credentials(
             for item in metadata
             for evidence in item.evidence
         )
-    assert len(requests) == 2
+    assert len(requests) == (3 if last_status == 200 else 2)
 
 
 async def test_openai_analyzer_uses_the_selected_model(
@@ -254,7 +351,7 @@ async def test_openai_analyzer_uses_the_selected_model(
     async def fake_generate_insights(profiling, **kwargs):
         captured["profiling"] = profiling
         captured.update(kwargs)
-        return SimpleNamespace(insights=[])
+        return SimpleNamespace(insights=[], mode=GenerationMode.MODEL_BACKED)
 
     monkeypatch.setattr(
         analyzer_module, "generate_insights_from_profile", fake_generate_insights
@@ -347,6 +444,36 @@ async def test_both_analyzers_generate_independent_cards_for_the_same_import(
     )
 
 
+async def test_openai_analyzer_fails_instead_of_falling_back(
+    client: StubClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A model-backed run that cannot use the model fails the task."""
+
+    async def parse(**kwargs: Any) -> SimpleNamespace:
+        if kwargs["text_format"] is AnalystPlan:
+            projection = AnalystProjection.model_validate_json(kwargs["input"])
+            selected = projection.candidates[0].id
+            value = AnalystPlan(
+                selected_candidate_ids=[selected],
+                recommended_candidate_id=selected,
+                rationale="Specific and actionable.",
+            )
+            return SimpleNamespace(
+                id="response", model="gpt-test", usage=None, output_parsed=value
+            )
+        raise RuntimeError("provider detail that must not escape")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "openai.AsyncOpenAI",
+        lambda **kwargs: SimpleNamespace(responses=SimpleNamespace(parse=parse)),
+    )
+    session_ids = client.add([_view(1, failed_tool=True), _view(2)])
+    with pytest.raises(RuntimeError, match="editor_failed") as error:
+        await analyze_openai_post_import_sessions(session_ids, model="gpt-test")
+    assert "provider detail" not in str(error.value)
+
+
 async def test_deterministic_analyzer_rejects_model_parameter(
     client: StubClient,
 ) -> None:
@@ -376,7 +503,7 @@ async def test_openai_analyzer_uses_default_model_when_task_omits_it(
     async def fake_generate_insights(profiling, **kwargs):
         captured["profiling"] = profiling
         captured.update(kwargs)
-        return SimpleNamespace(insights=[])
+        return SimpleNamespace(insights=[], mode=GenerationMode.MODEL_BACKED)
 
     monkeypatch.setattr(
         analyzer_module, "generate_insights_from_profile", fake_generate_insights
@@ -392,6 +519,7 @@ async def test_openai_analyzer_uses_default_model_when_task_omits_it(
     assert result == []
     assert captured["generator"] is sentinel_generator
     assert captured["config"].model.model == "gpt-5.6-luna"
+    assert captured["config"].model.reasoning_effort == "low"
     assert captured["profiling"].coverage.sessions_analyzed == 1
 
 
@@ -652,7 +780,9 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
 
     result_path = tmp_path / "result.json"
     monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
-    task_client: Any = SimpleNamespace(tasks=Tasks(), sessions=Sessions())
+    task_client: Any = SimpleNamespace(
+        tasks=Tasks(), sessions=Sessions(), base_url="https://task.example.test"
+    )
 
     @asynccontextmanager
     async def plugin_client():

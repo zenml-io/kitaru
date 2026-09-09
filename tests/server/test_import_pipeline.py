@@ -304,6 +304,36 @@ async def test_import_without_evaluators_stamps_stats_and_appends_nothing(
     assert job.status is JobStatus.COMPLETED
 
 
+async def test_import_creating_no_sessions_appends_nothing(
+    services: ReplayServices,
+) -> None:
+    """An import that created no sessions fans out no evaluators or analyzers."""
+    evaluator = await _evaluator(services, "accuracy")
+    analyzer = await _analyzer(services, "trends", connection_id=uuid.uuid4())
+    import_, import_task = await _import_with_task(services, [evaluator], [analyzer])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            result={"created": 0, "skipped": 26, "failed": 9},
+        ),
+    )
+
+    stored = await services.imports.get(import_.id)
+    assert stored.stats is not None
+    assert stored.stats.created == 0
+    assert await _evaluator_tasks(services, import_task.job_id) == []
+    assert await _analysis_tasks(services, import_task.job_id) == []
+    job = await services.jobs.get(import_task.job_id)
+    assert job.status is JobStatus.COMPLETED
+
+
 async def test_failed_import_stamps_error_and_appends_nothing(
     services: ReplayServices,
 ) -> None:

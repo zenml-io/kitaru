@@ -27,24 +27,33 @@ from kitaru.server.application.interfaces.connection_repository import (
 from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
+from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.imports import ImportCreate, ImportFilter
+from kitaru.server.application.models.imports import (
+    ImportAnalyze,
+    ImportCreate,
+    ImportFilter,
+)
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
 from kitaru.server.application.services.analyzer_resolution import validate_analyzers
 from kitaru.server.application.services.connection_resolution import (
     resolve_connection_id,
 )
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
+from kitaru.server.application.services.import_pipeline import (
+    build_analysis_task,
+    query_evaluatable_sessions,
+)
 from kitaru.server.application.services.plugin_resolution import (
     get_plugin_task_labels,
     resolve_plugin,
     resolve_plugin_version,
 )
-from kitaru.server.domain.imports import Import
+from kitaru.server.domain.imports import Import, ImportNotAnalyzable
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import PluginKind
-from kitaru.server.domain.task import ImportTask
+from kitaru.server.domain.task import ImportTask, Task
 
 
 class ImportService:
@@ -55,6 +64,7 @@ class ImportService:
         repository: ImportRepository,
         job_repository: JobRepository,
         task_repository: TaskRepository,
+        session_repository: SessionRepository,
         agent_repository: AgentRepository,
         agent_version_repository: AgentVersionRepository,
         plugin_repository: PluginRepository,
@@ -67,6 +77,8 @@ class ImportService:
             repository: Import repository.
             job_repository: Job repository.
             task_repository: Task repository.
+            session_repository: Session repository, for the imported
+                sessions.
             agent_repository: Agent repository.
             agent_version_repository: Agent version repository.
             plugin_repository: Plugin repository, for importer, evaluator,
@@ -78,6 +90,7 @@ class ImportService:
         self._repository = repository
         self._jobs = job_repository
         self._tasks = task_repository
+        self._sessions = session_repository
         self._agents = agent_repository
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
@@ -181,6 +194,52 @@ class ImportService:
             )
         )
         return import_
+
+    async def analyze_import(
+        self, import_id: uuid.UUID, command: ImportAnalyze, actor: AuthContext
+    ) -> Job:
+        """Run analyzers over the sessions of an existing import, as one job.
+
+        The job holds one analysis task per analyzer, each scoped to the
+        import like the analysis tasks its own import job ran.
+
+        Args:
+            import_id: Id of the import.
+            command: Analyzers to run.
+            actor: Caller context.
+
+        Raises:
+            ImportNotFound: No import has this id.
+            PluginNotFound: An analyzer config names an unknown plugin.
+            PluginVersionNotFound: An analyzer config names an unknown
+                version.
+            ConnectionNotFound: An analyzer config names an unknown
+                connection.
+            ValidationError: Two analyzer configs resolve to the same plugin
+                version.
+            ImportNotAnalyzable: The import has no completed or failed
+                session.
+
+        Returns:
+            Created job.
+        """
+        import_ = await self._repository.get(import_id)
+        analyzers = await validate_analyzers(
+            command.analyzers, self._plugins, self._connections, actor
+        )
+        if not await query_evaluatable_sessions(import_.id, self._sessions):
+            raise ImportNotAnalyzable(import_.id)
+        job = await self._jobs.create(
+            Job(owner_id=actor.account.id, kind=JobKind.ANALYSIS)
+        )
+        # The job was just created in this call and cannot have settled yet, so
+        # the tasks skip add_tasks' settled check.
+        tasks: list[Task] = [
+            await build_analysis_task(analyzer, import_, job.id, self._plugins)
+            for analyzer in analyzers
+        ]
+        await self._tasks.create_many(tasks)
+        return job
 
     async def get_import(self, import_id: uuid.UUID, actor: AuthContext) -> Import:
         """Get an import by id.

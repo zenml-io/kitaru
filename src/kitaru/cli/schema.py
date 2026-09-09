@@ -81,7 +81,7 @@ GROUP_DESCRIPTIONS = {
     "evaluation": "Inspect stored evaluations.",
     "evaluator": "Develop, register, and inspect evaluators.",
     "experiment": "Configure experiments and manage asynchronous runs.",
-    "import": "Inspect imports.",
+    "import": "Inspect imports and rerun analyzers over them.",
     "importer": "Develop, register, and inspect importers.",
     "insight": "Create and inspect agent insights.",
     "investigation": "Create investigations and review their linked sessions.",

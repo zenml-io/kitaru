@@ -67,4 +67,4 @@ An import names its analyzers next to its evaluators. Each named analyzer runs a
 
 Every insight a completed analysis task writes records the analyzer version, the task, and the params that produced it, the same provenance an evaluation keeps for the evaluator that wrote it. An insight created directly with `client.insights.create(...)` carries none of that provenance.
 
-There is no manual run path yet. An analyzer only runs as part of an import. There is no batch endpoint or CLI command to run one over an arbitrary set of existing sessions the way `kitaru session evaluate` does for evaluators.
+An analyzer always reads the sessions of one import. To run one again over an import that already finished, for example after fixing its params or credentials, use `kitaru import analyze IMPORT_ID --analyzer ANALYZER@VERSION`, `client.imports.analyze(...)`, or `POST /api/v1/imports/{import_id}/analyze`. Each call creates a new job of kind `analysis` holding one task per analyzer. There is no batch endpoint or CLI command to run one over an arbitrary set of existing sessions the way `kitaru session evaluate` does for evaluators.

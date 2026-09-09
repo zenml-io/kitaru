@@ -697,11 +697,13 @@ def get_job_service(
 
 def get_import_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
 ) -> ImportService:
     """Return an import service for the current request.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
 
     Returns:
         Import service bound to the SQL repositories.
@@ -710,6 +712,7 @@ def get_import_service(
         repository=SQLImportRepository(session),
         job_repository=SQLJobRepository(session),
         task_repository=SQLTaskRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
         agent_repository=SQLAgentRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
