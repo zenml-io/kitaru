@@ -22,6 +22,7 @@ from pydantic import SecretStr
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeConnectionRepository,
     FakeSecretRepository,
     pg_session,
     postgres_available,
@@ -36,11 +37,17 @@ from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepo
 from kitaru.server.adapters.db.repositories.agent_version_repository import (
     SQLAgentVersionRepository,
 )
+from kitaru.server.adapters.db.repositories.connection_repository import (
+    SQLConnectionRepository,
+)
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
+)
+from kitaru.server.application.interfaces.connection_repository import (
+    ConnectionRepository,
 )
 from kitaru.server.application.interfaces.secret_repository import (
     SecretRepository,
@@ -50,6 +57,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersion, RunSpec
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.domain.connection import Connection
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
@@ -138,6 +146,18 @@ async def test_get_not_found(setup: Setup) -> None:
     missing_id = uuid.uuid4()
     with pytest.raises(SecretNotFound, match=f"Secret {missing_id} was not found"):
         await repository.get(missing_id)
+
+
+async def test_get_many(setup: Setup) -> None:
+    """Bulk-load stored secrets keyed by id, omitting unknown ids."""
+    repository, owner_id, _ = setup
+    db = await repository.create(Secret(owner_id=owner_id, name="db", values=VALUES))
+    smtp = await repository.create(
+        Secret(owner_id=owner_id, name="smtp", values=VALUES)
+    )
+    loaded = await repository.get_many([db.id, smtp.id, uuid.uuid4()])
+    assert loaded == {db.id: db, smtp.id: smtp}
+    assert loaded[db.id].values == VALUES
 
 
 async def test_query(setup: Setup) -> None:
@@ -416,6 +436,55 @@ async def test_delete_restricted_by_agent_version(
     )
 
     with pytest.raises(SecretInUse):
+        await repository.delete(secret.id)
+
+
+ConnectionRestrictionSetup = tuple[SecretRepository, ConnectionRepository, uuid.UUID]
+
+
+@pytest.fixture(params=["fake", "postgres"])
+async def connection_restriction_setup(
+    request: pytest.FixtureRequest,
+) -> AsyncGenerator[ConnectionRestrictionSetup, None]:
+    """Provide a secret repository, its connection repository, and an owner id.
+
+    Yields the repository wired to a connection repository sharing its
+    backend, and an owner id.
+    """
+    if request.param == "fake":
+        connections = FakeConnectionRepository()
+        yield FakeSecretRepository(connections=connections), connections, uuid.uuid4()
+        return
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        yield (
+            SQLSecretRepository(session, AesGcmCipher("test-encryption-key")),
+            SQLConnectionRepository(session),
+            owner.id,
+        )
+
+
+async def test_delete_restricted_by_connection(
+    connection_restriction_setup: ConnectionRestrictionSetup,
+) -> None:
+    """Reject deleting a secret referenced by a connection."""
+    repository, connections, owner_id = connection_restriction_setup
+    secret = await repository.create(
+        Secret(owner_id=owner_id, name="db", internal=True, values=VALUES)
+    )
+    await connections.create(
+        Connection(
+            owner_id=owner_id,
+            name="langfuse-prod",
+            provider="langfuse",
+            secret_id=secret.id,
+        )
+    )
+
+    with pytest.raises(SecretInUse, match=f"Secret {secret.id} is in use"):
         await repository.delete(secret.id)
 
 

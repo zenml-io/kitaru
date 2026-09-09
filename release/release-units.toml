@@ -30,6 +30,7 @@ release-label = "requires:core"
 impact-paths = [
     "pyproject.toml",
     "CHANGELOG.md",
+    "changelog.d/**",
     "uv.lock",
     "src/kitaru/**",
     "openapi/**",
@@ -64,6 +65,21 @@ release-label = "requires:plugin:braintrust"
 impact-paths = ["plugins/packages/braintrust-importer/**"]
 tag-prefix = "python/kitaru-braintrust-importer/v"
 maintenance-branch-prefix = "release/braintrust/"
+checks = []
+
+[[units]]
+slug = "claude-agent-sdk"
+path = "plugins/packages/claude-agent-sdk"
+distribution = "kitaru-claude-agent-sdk"
+registry = "pypi"
+version-source = "plugins/packages/claude-agent-sdk/pyproject.toml"
+changelog = "plugins/packages/claude-agent-sdk/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = false
+release-label = "requires:plugin:claude-agent-sdk"
+impact-paths = ["plugins/packages/claude-agent-sdk/**"]
+tag-prefix = "python/kitaru-claude-agent-sdk/v"
+maintenance-branch-prefix = "release/claude-agent-sdk/"
 checks = []
 
 [[units]]
@@ -184,6 +200,21 @@ release-label = "requires:plugin:phoenix"
 impact-paths = ["plugins/packages/phoenix-importer/**"]
 tag-prefix = "python/kitaru-phoenix-importer/v"
 maintenance-branch-prefix = "release/phoenix/"
+checks = []
+
+[[units]]
+slug = "post-import-insights"
+path = "plugins/packages/post-import-insights"
+distribution = "kitaru-post-import-insights"
+registry = "pypi"
+version-source = "plugins/packages/post-import-insights/pyproject.toml"
+changelog = "plugins/packages/post-import-insights/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = true
+release-label = "requires:plugin:post-import-insights"
+impact-paths = ["plugins/packages/post-import-insights/**"]
+tag-prefix = "python/kitaru-post-import-insights/v"
+maintenance-branch-prefix = "release/post-import-insights/"
 checks = []
 
 [[units]]

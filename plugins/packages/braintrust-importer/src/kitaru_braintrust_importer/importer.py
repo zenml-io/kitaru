@@ -22,11 +22,10 @@ import json
 import math
 import re
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any
 
 from pydantic_core import PydanticSerializationError
@@ -39,7 +38,6 @@ from kitaru.task.importer import (
     ImportedSession,
 )
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _MAX_NESTED_DEPTH = 64
 _SESSION_FIELDS = (
     "session_id",
@@ -503,8 +501,6 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 def _parse_records(content: bytes) -> tuple[list[dict[str, Any]], bool]:
     """Parse Braintrust JSON, JSONL, or API fetch output."""
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise InvalidImport("Braintrust import exceeds the 50 MiB upload limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -594,20 +590,36 @@ def _join_value(record: dict[str, Any], params: dict[str, Any], trace_id: str) -
     return str(value)
 
 
-def _source_instance(record: dict[str, Any], params: dict[str, Any]) -> str:
-    """Resolve project identity with a stable filename fallback."""
-    project_id = record.get("project_id")
-    if project_id not in (None, ""):
-        return str(project_id)
-    selected_source = params.get("source_instance")
-    if selected_source not in (None, ""):
-        return str(selected_source)
-    filename = params.get("filename")
-    if isinstance(filename, str):
-        stem = Path(filename).stem.strip()
-        if stem:
-            return stem
-    raise InvalidImport("Braintrust export has no project id; provide source_instance")
+def _normalize_identity(value: Any, field: str) -> str | None:
+    """Validate and trim a project identity without coercing other types."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise InvalidImport(f"{field} must be a string")
+    return value.strip() or None
+
+
+def _get_project_identities(records: list[dict[str, Any]]) -> set[str]:
+    """Read embedded identity before applying import parameter overrides."""
+    identities: set[str] = set()
+    for record in records:
+        if identity := _normalize_identity(record.get("project_id"), "project_id"):
+            identities.add(identity)
+    return identities
+
+
+def _get_source_instance(projects: set[str], params: dict[str, Any]) -> str:
+    """Resolve explicit identity, its provider alias, then embedded identity."""
+    selected = _normalize_identity(params.get("source_instance"), "source_instance")
+    alias = _normalize_identity(params.get("project_id"), "project_id")
+    source = selected or alias or next(iter(projects), None)
+    if source is None:
+        raise InvalidImport(
+            "Braintrust export has no project identity; provide source_instance "
+            "or project_id in import params, for example "
+            '--params \'{"source_instance":"my-project"}\'.'
+        )
+    return source
 
 
 def _metrics(record: dict[str, Any]) -> dict[str, Any]:
@@ -812,18 +824,12 @@ class BraintrustProjectLogImporter:
         for trace_id, rows in trace_records.items():
             try:
                 root = _root_record(rows, trace_id)
-                projects = {
-                    str(row["project_id"])
-                    for row in rows
-                    if row.get("project_id") not in (None, "")
-                }
+                projects = _get_project_identities(rows)
                 if len(projects) > 1:
                     raise InvalidImport(
                         f"Trace '{trace_id}' contains conflicting project identities"
                     )
-                source_instance = (
-                    next(iter(projects)) if projects else _source_instance(root, params)
-                )
+                source_instance = _get_source_instance(projects, params)
                 session_id = _join_value(root, params, trace_id)
             except InvalidImport as exc:
                 failures.append(
@@ -836,8 +842,12 @@ class BraintrustProjectLogImporter:
                 continue
             grouped[(source_instance, session_id)].extend(rows)
 
-        for (source_instance, source_id), session_records in sorted(grouped.items()):
+        for (source_instance, source_id), session_records in grouped.items():
             try:
+                if len(_get_project_identities(session_records)) > 1:
+                    raise InvalidImport(
+                        f"Session '{source_id}' contains conflicting project identities"
+                    )
                 session = self._parse_session(
                     source_instance,
                     source_id,
@@ -1138,6 +1148,16 @@ class BraintrustProjectLogImporter:
             framework=framework,
             nodes=_build_node_tree(nodes_with_parents),
         )
+
+    async def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
+        """Fetch parser payloads from the Braintrust API."""
+        from .api import fetch
+
+        async for payload in fetch(query):
+            yield payload
+
+
+importer = BraintrustProjectLogImporter()
 
 
 def parse(

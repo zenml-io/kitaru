@@ -27,9 +27,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-adapter = [
+api = [
     "arize-phoenix-client>=2.0,<4",
     "httpx>=0.27,<1",
+]
+adapter = [
+    "kitaru-phoenix-importer[api]",
     "opentelemetry-api>=1.12",
     "opentelemetry-sdk>=1.12",
 ]

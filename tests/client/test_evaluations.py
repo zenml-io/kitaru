@@ -21,8 +21,8 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
-    FakeBlobRepository,
     FakeEvaluationRepository,
+    FakeImportRepository,
     FakeJobRepository,
     FakePluginRepository,
     FakeReplayRepository,
@@ -97,6 +97,7 @@ async def api_client(
         task_repository=FakeTaskRepository(),
         agent_version_repository=agent_versions,
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=build_payload_store().store,
     )
     evaluation_service = EvaluationService(
@@ -111,10 +112,8 @@ async def api_client(
         repository=jobs,
         task_repository=tasks,
         session_repository=session_repository,
-        agent_repository=agents,
         agent_version_repository=agent_versions,
         plugin_repository=plugin_repository,
-        blob_repository=FakeBlobRepository(),
         transitions=transitions,
         policy=TaskPolicy(),
     )

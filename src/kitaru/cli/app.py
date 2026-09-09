@@ -40,10 +40,13 @@ from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.cli import (
     annotations,
     cohorts,
+    connections,
     diagnostics,
     evaluations,
     experiment_runs,
     experiments,
+    imports,
+    insights,
     investigations,
     jobs,
     local_runtime,
@@ -54,6 +57,7 @@ from kitaru.cli import (
     workers,
 )
 from kitaru.cli import auth as auth_commands
+from kitaru.cli import setup as setup_commands
 from kitaru.cli.config import (
     CONFIG_KEYS,
     ResolvedTarget,
@@ -135,9 +139,19 @@ cohort_version_app = App(
     help="Create and manage immutable cohort membership versions.",
     default_parameter=Parameter(negative=False),
 )
+connection_app = App(
+    name="connection",
+    help=GROUP_DESCRIPTIONS["connection"],
+    default_parameter=Parameter(negative=False),
+)
 annotation_app = App(
     name="annotation",
     help=GROUP_DESCRIPTIONS["annotation"],
+    default_parameter=Parameter(negative=False),
+)
+insight_app = App(
+    name="insight",
+    help=GROUP_DESCRIPTIONS["insight"],
     default_parameter=Parameter(negative=False),
 )
 investigation_app = App(
@@ -160,6 +174,11 @@ experiment_run_app = App(
     help="Start, inspect, watch, cancel, and delete experiment runs.",
     default_parameter=Parameter(negative=False),
 )
+import_app = App(
+    name="import",
+    help=GROUP_DESCRIPTIONS["import"],
+    default_parameter=Parameter(negative=False),
+)
 importer_app = App(
     name="importer",
     help=GROUP_DESCRIPTIONS["importer"],
@@ -178,6 +197,16 @@ evaluator_app = App(
 evaluator_version_app = App(
     name="version",
     help="Register and inspect evaluator versions.",
+    default_parameter=Parameter(negative=False),
+)
+analyzer_app = App(
+    name="analyzer",
+    help=GROUP_DESCRIPTIONS["analyzer"],
+    default_parameter=Parameter(negative=False),
+)
+analyzer_version_app = App(
+    name="version",
+    help="Register and inspect analyzer versions.",
     default_parameter=Parameter(negative=False),
 )
 session_app = App(
@@ -216,12 +245,17 @@ investigation_app.command(investigation_session_app, name="session")
 experiment_app.command(experiment_run_app, name="run")
 importer_app.command(importer_version_app, name="version")
 evaluator_app.command(evaluator_version_app, name="version")
+analyzer_app.command(analyzer_version_app, name="version")
 app.command(config_app, name="config")
 app.command(agent_app, name="agent")
+app.command(analyzer_app, name="analyzer")
 app.command(annotation_app, name="annotation")
 app.command(cohort_app, name="cohort")
+app.command(connection_app, name="connection")
 app.command(experiment_app, name="experiment")
+app.command(import_app, name="import")
 app.command(importer_app, name="importer")
+app.command(insight_app, name="insight")
 app.command(investigation_app, name="investigation")
 app.command(evaluator_app, name="evaluator")
 app.command(session_app, name="session")
@@ -922,6 +956,59 @@ async def doctor() -> CommandResult:
 @_register(
     app,
     _spec(
+        ("setup",),
+        "Install the agent skills and register the MCP server with every "
+        "detected coding agent. Re-run after installing a new one. The global "
+        "--server picks the server the MCP server targets.",
+        parameters=(
+            ParameterSpec(
+                "--mode",
+                "string",
+                "option",
+                False,
+                "MCP capability mode: read-only, standard (default), or destructive.",
+            ),
+            ParameterSpec(
+                "--no-skills", "boolean", "option", False, "Skip installing the skills."
+            ),
+            ParameterSpec(
+                "--no-mcp",
+                "boolean",
+                "option",
+                False,
+                "Skip registering the MCP server.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("writes_local_file", "executes_local_code"),
+        idempotency="idempotent",
+        errors=(
+            "invalid_arguments",
+            "invalid_configuration",
+            "network_error",
+            "internal_error",
+        ),
+    ),
+)
+async def setup(
+    *,
+    mode: Annotated[str, Parameter(name="--mode")] = "standard",
+    no_skills: Annotated[bool, Parameter(name="--no-skills")] = False,
+    no_mcp: Annotated[bool, Parameter(name="--no-mcp")] = False,
+) -> CommandResult:
+    """Wire skills and the MCP server into installed coding agents."""
+    invocation = _invocation()
+    return await setup_commands.setup(
+        server=invocation.server,
+        mode=mode,
+        install_skills=not no_skills,
+        register_mcp=not no_mcp,
+    )
+
+
+@_register(
+    app,
+    _spec(
         ("version",),
         "Show the installed Kitaru version.",
         offline=True,
@@ -1309,6 +1396,35 @@ async def agent_get(agent: str, /) -> CommandResult:
     async with _open_asset_client() as client:
         item = await registration.resolve_asset(client.agents, agent, "Agent")
         return CommandResult(item=item.model_dump(mode="json"))
+
+
+@_register(
+    agent_app,
+    _spec(
+        ("agent", "delete"),
+        "Soft delete an agent.",
+        parameters=(
+            ParameterSpec(
+                "AGENT", "reference", "argument", True, "Agent UUID or name."
+            ),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def agent_delete(agent: str, /, *, force: bool = False) -> CommandResult:
+    """Soft delete one exact agent."""
+    if not force:
+        raise CLIError("invalid_arguments", "Deleting an agent requires --force.")
+    async with _open_asset_client() as client:
+        item = await registration.resolve_asset(client.agents, agent, "Agent")
+        await client.agents.delete(item.id)
+        return CommandResult(item={"id": str(item.id), "deleted": True})
 
 
 @_register(
@@ -1861,6 +1977,414 @@ async def cohort_version_delete(
     """Delete one exact immutable cohort version."""
     async with _open_asset_client() as client:
         return await cohorts.delete_cohort_version(client, version, force=force)
+
+
+_CONNECTION_REFERENCE_PARAMETER = ParameterSpec(
+    "CONNECTION", "reference", "argument", True, "Connection UUID or name."
+)
+_CONNECTION_VALUE_PARAMETERS = (
+    ParameterSpec(
+        "--set", "KEY=VALUE[]", "option", False, "Non-secret environment value."
+    ),
+    ParameterSpec(
+        "--set-secret", "KEY=VALUE[]", "option", False, "Sensitive environment value."
+    ),
+)
+
+_CONNECTION_UPDATE_VALUE_PARAMETERS = (
+    ParameterSpec(
+        "--set",
+        "KEY=VALUE[]",
+        "option",
+        False,
+        "Non-secret environment value. Keeps the other stored values.",
+    ),
+    ParameterSpec(
+        "--set-secret",
+        "KEY=VALUE[]",
+        "option",
+        False,
+        "Sensitive environment value. Replaces all stored secret values.",
+    ),
+)
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "create"),
+        "Create a connection from a plugin schema or from direct values.",
+        parameters=(
+            ParameterSpec("NAME", "string", "argument", True, "New connection name."),
+            ParameterSpec(
+                "--importer",
+                "reference",
+                "option",
+                False,
+                "Importer whose connection schema drives the prompts.",
+            ),
+            ParameterSpec(
+                "--analyzer",
+                "reference",
+                "option",
+                False,
+                "Analyzer whose connection schema drives the prompts.",
+            ),
+            ParameterSpec(
+                "--provider", "string", "option", False, "Provider addressed directly."
+            ),
+            *_CONNECTION_VALUE_PARAMETERS,
+            ParameterSpec(
+                "--default",
+                "boolean",
+                "option",
+                False,
+                "Make this the provider's default connection.",
+            ),
+            _IDEMPOTENCY_KEY_PARAMETER,
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_remote_create",
+        interaction="visible and hidden schema value prompts",
+        errors=(*_ASSET_WRITE_ERRORS, "interaction_required"),
+    ),
+)
+async def connection_create(
+    name: str,
+    /,
+    *,
+    importer: str | None = None,
+    analyzer: str | None = None,
+    provider: str | None = None,
+    set: list[str] | None = None,
+    set_secret: list[str] | None = None,
+    default: bool = False,
+    idempotency_key: str | None = None,
+) -> CommandResult:
+    """Create one connection, prompting for a plugin's schema values."""
+    invocation = _invocation()
+    async with _open_asset_client() as client:
+        return await connections.create_connection(
+            client,
+            name,
+            importer=importer,
+            analyzer=analyzer,
+            provider=provider,
+            values=set,
+            secret_values=set_secret,
+            default=default,
+            non_interactive=invocation.non_interactive,
+            idempotency_key=idempotency_key,
+        )
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "list"),
+        "List connections.",
+        parameters=_LIST_PARAMETERS,
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def connection_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of connections."""
+    async with _open_asset_client() as client:
+        return await connections.list_connections(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "get"),
+        "Get a connection by exact UUID or case-sensitive name.",
+        parameters=(_CONNECTION_REFERENCE_PARAMETER,),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def connection_get(connection: str, /) -> CommandResult:
+    """Get one exact connection."""
+    async with _open_asset_client() as client:
+        return await connections.get_connection(client, connection)
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "update"),
+        "Update values on an exact connection.",
+        parameters=(
+            _CONNECTION_REFERENCE_PARAMETER,
+            *_CONNECTION_UPDATE_VALUE_PARAMETERS,
+            ParameterSpec(
+                "--default/--no-default",
+                "boolean",
+                "option",
+                False,
+                "Set or clear the provider's default connection.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def connection_update(
+    connection: str,
+    /,
+    *,
+    set: list[str] | None = None,
+    set_secret: list[str] | None = None,
+    default: Annotated[
+        bool | None, Parameter(name="--default", negative="--no-default")
+    ] = None,
+) -> CommandResult:
+    """Update only explicitly selected connection fields."""
+    async with _open_asset_client() as client:
+        return await connections.update_connection(
+            client,
+            connection,
+            values=set,
+            secret_values=set_secret,
+            default=default,
+        )
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "set-default"),
+        "Make a connection the default for its provider.",
+        parameters=(_CONNECTION_REFERENCE_PARAMETER,),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def connection_set_default(connection: str, /) -> CommandResult:
+    """Make one connection the default for its provider."""
+    async with _open_asset_client() as client:
+        return await connections.set_default_connection(client, connection)
+
+
+@_register(
+    connection_app,
+    _spec(
+        ("connection", "delete"),
+        "Delete a connection and the secret holding its values.",
+        parameters=(
+            _CONNECTION_REFERENCE_PARAMETER,
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def connection_delete(
+    connection: str, /, *, force: bool = False
+) -> CommandResult:
+    """Delete one connection and the secret holding its values."""
+    async with _open_asset_client() as client:
+        return await connections.delete_connection(client, connection, force=force)
+
+
+@_register(
+    insight_app,
+    _spec(
+        ("insight", "create"),
+        "Create a batch of insights for one agent.",
+        parameters=(
+            ParameterSpec(
+                "--agent",
+                "reference",
+                "option",
+                True,
+                "Agent UUID or case-sensitive name.",
+            ),
+            ParameterSpec(
+                "--insight",
+                "JSON[]",
+                "option",
+                True,
+                "Insight JSON object; repeat for each created insight.",
+            ),
+            _IDEMPOTENCY_KEY_PARAMETER,
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_remote_create",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def insight_create(
+    *,
+    agent: str,
+    insight: list[str],
+    idempotency_key: str | None = None,
+) -> CommandResult:
+    """Create a batch of insights for one agent."""
+    async with _open_asset_client() as client:
+        return await insights.create_insights(
+            client,
+            agent=agent,
+            insight=insight,
+            idempotency_key=idempotency_key,
+        )
+
+
+@_register(
+    insight_app,
+    _spec(
+        ("insight", "list"),
+        "List insights.",
+        parameters=(
+            *_LIST_PARAMETERS,
+            ParameterSpec(
+                "--agent",
+                "reference",
+                "option",
+                False,
+                "Only insights for this exact agent UUID or name.",
+            ),
+            ParameterSpec(
+                "--name",
+                "string",
+                "option",
+                False,
+                "Only insights with this exact name.",
+            ),
+            ParameterSpec(
+                "--type",
+                "text|categorical|binned",
+                "option",
+                False,
+                "Only insights with this data type.",
+            ),
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def insight_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+    agent: str | None = None,
+    name: str | None = None,
+    type: Literal["text", "categorical", "binned"] | None = None,
+) -> CommandResult:
+    """List one server page of insights."""
+    async with _open_asset_client() as client:
+        return await insights.list_insights(
+            client,
+            size=size,
+            cursor=cursor,
+            sort=sort,
+            filter=filter,
+            agent=agent,
+            name=name,
+            type=type,
+        )
+
+
+@_register(
+    insight_app,
+    _spec(
+        ("insight", "get"),
+        "Get an insight by exact UUID.",
+        parameters=(ParameterSpec("INSIGHT", "UUID", "argument", True, "Insight ID."),),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def insight_get(insight: uuid.UUID, /) -> CommandResult:
+    """Get one insight by UUID."""
+    async with _open_asset_client() as client:
+        return await insights.get_insight(client, insight)
+
+
+@_register(
+    insight_app,
+    _spec(
+        ("insight", "update"),
+        "Update selected insight fields.",
+        parameters=(
+            ParameterSpec("INSIGHT", "UUID", "argument", True, "Insight ID."),
+            ParameterSpec("--title", "string", "option", False, "New title."),
+            ParameterSpec(
+                "--description", "string", "option", False, "New description."
+            ),
+            ParameterSpec(
+                "--clear-description",
+                "boolean",
+                "option",
+                False,
+                "Clear the description.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def insight_update(
+    insight: uuid.UUID,
+    /,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    clear_description: bool = False,
+) -> CommandResult:
+    """Update selected fields on one insight."""
+    async with _open_asset_client() as client:
+        return await insights.update_insight(
+            client,
+            insight,
+            title=title,
+            description=description,
+            clear_description=clear_description,
+        )
+
+
+@_register(
+    insight_app,
+    _spec(
+        ("insight", "delete"),
+        "Delete an insight.",
+        parameters=(
+            ParameterSpec("INSIGHT", "UUID", "argument", True, "Insight ID."),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def insight_delete(
+    insight: uuid.UUID, /, *, force: bool = False
+) -> CommandResult:
+    """Delete one insight by UUID."""
+    async with _open_asset_client() as client:
+        return await insights.delete_insight(client, insight, force=force)
 
 
 @_register(
@@ -2653,6 +3177,114 @@ async def replay_get(replay: uuid.UUID, /) -> CommandResult:
 
 
 @_register(
+    import_app,
+    _spec(
+        ("import", "list"),
+        "List imports.",
+        parameters=_LIST_PARAMETERS,
+        errors=_COLLECTION_READ_ERRORS,
+    ),
+)
+async def import_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of imports."""
+    async with _open_asset_client() as client:
+        return await imports.list_imports(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    import_app,
+    _spec(
+        ("import", "get"),
+        "Get one import by exact UUID.",
+        parameters=(
+            ParameterSpec("IMPORT_ID", "UUID", "argument", True, "Import ID."),
+        ),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def import_get(import_id: uuid.UUID, /) -> CommandResult:
+    """Get one import without remapping its status."""
+    async with _open_asset_client() as client:
+        return await imports.get_import(client, import_id)
+
+
+@_register(
+    import_app,
+    _spec(
+        ("import", "analyze"),
+        "Run analyzers over the sessions of an existing import as one job.",
+        parameters=(
+            ParameterSpec("IMPORT_ID", "UUID", "argument", True, "Import ID."),
+            ParameterSpec(
+                "--analyzer",
+                "ANALYZER@VERSION[]",
+                "option",
+                True,
+                "Exact analyzer version run once over the import's sessions.",
+            ),
+            ParameterSpec(
+                "--analyzer-params",
+                "ANALYZER@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected analyzer token.",
+            ),
+            ParameterSpec(
+                "--analyzer-connection",
+                "ANALYZER@VERSION=CONNECTION[]",
+                "option",
+                False,
+                "Connection for a selected analyzer token.",
+            ),
+            *_WAIT_PARAMETERS,
+            _IDEMPOTENCY_KEY_PARAMETER,
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_job_created_per_request",
+        errors=(
+            *_ASSET_READ_ERRORS,
+            *_JOB_WAIT_ERRORS,
+        ),
+        streams=True,
+    ),
+)
+async def import_analyze(
+    import_id: uuid.UUID,
+    /,
+    *,
+    analyzer: list[str],
+    analyzer_params: list[str] | None = None,
+    analyzer_connection: list[str] | None = None,
+    wait: bool = False,
+    interval: float | None = None,
+    timeout: float | None = None,
+    idempotency_key: str | None = None,
+) -> CommandResult:
+    """Create one analysis job over the sessions of an existing import."""
+    async with _open_asset_client() as client:
+        return await imports.analyze_import(
+            client,
+            import_id,
+            analyzers=analyzer,
+            analyzer_params=analyzer_params,
+            analyzer_connections=analyzer_connection,
+            wait=wait,
+            interval=interval,
+            timeout=timeout,
+            idempotency_key=idempotency_key,
+        )
+
+
+@_register(
     experiment_run_app,
     _spec(
         ("experiment", "run", "start"),
@@ -2884,9 +3516,18 @@ def _plugin_register_parameters(kind: str) -> tuple[ParameterSpec, ...]:
         ),
         ParameterSpec("--metadata", "JSON object", "option", False, "Parent metadata."),
     ]
-    if kind == "importer":
+    if kind in {"importer", "analyzer"}:
         parent.append(
             ParameterSpec("--provider", "string", "option", False, "Source provider.")
+        )
+        parent.append(
+            ParameterSpec(
+                "--connection-schema",
+                "path",
+                "option",
+                False,
+                "JSON Schema file describing the connection values.",
+            )
         )
     if kind == "evaluator":
         parent.append(
@@ -2907,6 +3548,7 @@ async def _register_plugin_command(
     metadata: str | None,
     agent_id: uuid.UUID | None,
     display_version: str | None,
+    connection_schema: Path | None = None,
 ) -> CommandResult:
     """Run one kind-specific parent-plus-version registration."""
     source = registration.prepare_plugin_source(
@@ -2919,6 +3561,7 @@ async def _register_plugin_command(
         provider=provider,
         metadata=metadata,
         agent_id=agent_id,
+        connection_schema=connection_schema,
     )
     async with _open_asset_client() as client:
         return await registration.register_plugin(
@@ -2956,7 +3599,7 @@ async def _register_plugin_version_command(
 
 
 async def _list_plugin_command(
-    kind: Literal["importer", "evaluator"],
+    kind: Literal["importer", "evaluator", "analyzer"],
     *,
     size: int,
     cursor: str | None,
@@ -2968,14 +3611,14 @@ async def _list_plugin_command(
         kind, size=size, cursor=cursor, sort=sort, filter=filter
     )
     async with _open_asset_client() as client:
-        resource = client.importers if kind == "importer" else client.evaluators
+        resource = registration.get_plugin_resource(client, kind)
         return registration.page_result(await resource.list(params), size=size)
 
 
 async def _get_plugin_command(kind: str, reference: str) -> CommandResult:
-    """Get one exact importer or evaluator."""
+    """Get one exact importer, evaluator, or analyzer."""
     async with _open_asset_client() as client:
-        resource = client.importers if kind == "importer" else client.evaluators
+        resource = registration.get_plugin_resource(client, kind)
         item = await registration.resolve_asset(resource, reference, kind.title())
         return CommandResult(item=item.model_dump(mode="json"))
 
@@ -2988,10 +3631,10 @@ async def _list_plugin_versions_command(
     cursor: str | None,
     sort: str,
 ) -> CommandResult:
-    """List one server page of importer or evaluator versions."""
+    """List one server page of importer, evaluator, or analyzer versions."""
     params = registration.version_list_params(size=size, cursor=cursor, sort=sort)
     async with _open_asset_client() as client:
-        resource = client.importers if kind == "importer" else client.evaluators
+        resource = registration.get_plugin_resource(client, kind)
         parent = await registration.resolve_asset(resource, reference, kind.title())
         return registration.page_result(
             await resource.list_versions(parent.id, params), size=size
@@ -2999,9 +3642,9 @@ async def _list_plugin_versions_command(
 
 
 async def _get_plugin_version_command(kind: str, reference: str) -> CommandResult:
-    """Get one exact importer or evaluator version."""
+    """Get one exact importer, evaluator, or analyzer version."""
     async with _open_asset_client() as client:
-        resource = client.importers if kind == "importer" else client.evaluators
+        resource = registration.get_plugin_resource(client, kind)
         _, item = await registration.get_plugin_version(
             resource, reference, kind.title()
         )
@@ -3097,6 +3740,7 @@ async def importer_register(
     entrypoint: str | None = None,
     description: str | None = None,
     provider: str | None = None,
+    connection_schema: Path | None = None,
     metadata: str | None = None,
     display_version: str | None = None,
 ) -> CommandResult:
@@ -3112,6 +3756,7 @@ async def importer_register(
         metadata=metadata,
         agent_id=None,
         display_version=display_version,
+        connection_schema=connection_schema,
     )
 
 
@@ -3467,12 +4112,190 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
 
 
 @_register(
+    analyzer_app,
+    _spec(
+        ("analyzer", "register"),
+        "Create an analyzer and its first version.",
+        parameters=_plugin_register_parameters("analyzer"),
+        read_only=False,
+        side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
+        idempotency="non_idempotent_parent_then_version",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def analyzer_register(
+    name: str,
+    /,
+    *,
+    script: Path | None = None,
+    package: str | None = None,
+    entrypoint: str | None = None,
+    description: str | None = None,
+    provider: str | None = None,
+    connection_schema: Path | None = None,
+    metadata: str | None = None,
+    display_version: str | None = None,
+) -> CommandResult:
+    """Create an analyzer parent, source, and initial version."""
+    return await _register_plugin_command(
+        "analyzer",
+        name,
+        script=script,
+        package=package,
+        entrypoint=entrypoint,
+        description=description,
+        provider=provider,
+        metadata=metadata,
+        agent_id=None,
+        display_version=display_version,
+        connection_schema=connection_schema,
+    )
+
+
+@_register(
+    analyzer_app,
+    _spec(
+        ("analyzer", "list"),
+        "List analyzers.",
+        parameters=_LIST_PARAMETERS,
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def analyzer_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of analyzers."""
+    return await _list_plugin_command(
+        "analyzer", size=size, cursor=cursor, sort=sort, filter=filter
+    )
+
+
+@_register(
+    analyzer_app,
+    _spec(
+        ("analyzer", "get"),
+        "Get an analyzer by exact UUID or case-sensitive name.",
+        parameters=(
+            ParameterSpec(
+                "ANALYZER", "reference", "argument", True, "Analyzer UUID or name."
+            ),
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def analyzer_get(analyzer: str, /) -> CommandResult:
+    """Get one exact analyzer."""
+    return await _get_plugin_command("analyzer", analyzer)
+
+
+@_register(
+    analyzer_version_app,
+    _spec(
+        ("analyzer", "version", "register"),
+        "Create the next version of an existing analyzer.",
+        parameters=(
+            ParameterSpec(
+                "ANALYZER", "reference", "argument", True, "Analyzer UUID or name."
+            ),
+            *_PLUGIN_SOURCE_PARAMETERS,
+            _IDEMPOTENCY_KEY_PARAMETER,
+        ),
+        read_only=False,
+        side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
+        idempotency="non_idempotent_server_assigned_version",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def analyzer_version_register(
+    analyzer: str,
+    /,
+    *,
+    script: Path | None = None,
+    package: str | None = None,
+    entrypoint: str | None = None,
+    display_version: str | None = None,
+    idempotency_key: str | None = None,
+) -> CommandResult:
+    """Create the next analyzer version."""
+    return await _register_plugin_version_command(
+        "analyzer",
+        analyzer,
+        script=script,
+        package=package,
+        entrypoint=entrypoint,
+        display_version=display_version,
+        idempotency_key=idempotency_key,
+    )
+
+
+@_register(
+    analyzer_version_app,
+    _spec(
+        ("analyzer", "version", "list"),
+        "List versions of an exact analyzer.",
+        parameters=(
+            ParameterSpec(
+                "ANALYZER", "reference", "argument", True, "Analyzer UUID or name."
+            ),
+            *_VERSION_LIST_PARAMETERS,
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def analyzer_version_list(
+    analyzer: str,
+    /,
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+) -> CommandResult:
+    """List one server page of analyzer versions."""
+    return await _list_plugin_versions_command(
+        "analyzer", analyzer, size=size, cursor=cursor, sort=sort
+    )
+
+
+@_register(
+    analyzer_version_app,
+    _spec(
+        ("analyzer", "version", "get"),
+        "Get an analyzer version by exact PARENT@VERSION reference.",
+        parameters=(
+            ParameterSpec(
+                "ANALYZER@VERSION",
+                "reference",
+                "argument",
+                True,
+                "Exact version reference.",
+            ),
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def analyzer_version_get(analyzer_version: str, /) -> CommandResult:
+    """Get one exact analyzer version, accepting @latest for reads."""
+    return await _get_plugin_version_command("analyzer", analyzer_version)
+
+
+@_register(
     session_app,
     _spec(
         ("session", "import"),
-        "Upload a local payload and create an import job.",
+        "Upload a local payload or fetch from a provider API, and create "
+        "an import job.",
         parameters=(
-            ParameterSpec("FILE", "path", "argument", True, "Local payload file."),
+            ParameterSpec(
+                "FILE",
+                "path",
+                "argument",
+                False,
+                "Local payload file. Omit for an API import.",
+            ),
             ParameterSpec(
                 "--importer",
                 "reference",
@@ -3498,6 +4321,45 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
                 "Group source traces by the value at this RFC 6901 JSON Pointer.",
             ),
             ParameterSpec(
+                "--since",
+                "timestamp or duration",
+                "option",
+                False,
+                "For an API import, fetch traces at or after this ISO 8601 "
+                "timestamp or relative duration such as 7d, 12h, or 30m.",
+            ),
+            ParameterSpec(
+                "--until",
+                "timestamp or duration",
+                "option",
+                False,
+                "For an API import, fetch traces before this ISO 8601 "
+                "timestamp or relative duration such as 7d, 12h, or 30m.",
+            ),
+            ParameterSpec(
+                "--trace-id",
+                "text[]",
+                "option",
+                False,
+                "For an API import, fetch exactly these provider trace ids.",
+            ),
+            ParameterSpec(
+                "--query",
+                "JSON object",
+                "option",
+                False,
+                "Additional importer-defined API selection fields, merged "
+                "with --since, --until, and --trace-id.",
+            ),
+            ParameterSpec(
+                "--connection",
+                "reference",
+                "option",
+                False,
+                "For an API import, the connection UUID or name supplying "
+                "provider credentials.",
+            ),
+            ParameterSpec(
                 "--tag",
                 "text[]",
                 "option",
@@ -3505,11 +4367,53 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
                 "Tag every session created by this import; requires --wait.",
             ),
             ParameterSpec(
+                "--evaluator",
+                "EVALUATOR@VERSION[]",
+                "option",
+                False,
+                "Exact evaluator version scored against every imported session.",
+            ),
+            ParameterSpec(
+                "--evaluator-params",
+                "EVALUATOR@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected evaluator token.",
+            ),
+            ParameterSpec(
+                "--analyzer",
+                "ANALYZER@VERSION[]",
+                "option",
+                False,
+                "Exact analyzer version run once over every imported session.",
+            ),
+            ParameterSpec(
+                "--analyzer-params",
+                "ANALYZER@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected analyzer token.",
+            ),
+            ParameterSpec(
+                "--analyzer-connection",
+                "ANALYZER@VERSION=CONNECTION[]",
+                "option",
+                False,
+                "Connection for a selected analyzer token.",
+            ),
+            ParameterSpec(
                 "--media-type",
                 "string",
                 "option",
                 False,
                 "Payload media type.",
+            ),
+            ParameterSpec(
+                "--max-sessions",
+                "integer",
+                "option",
+                False,
+                "Stop the import after creating this many sessions.",
             ),
             *_WAIT_PARAMETERS,
             _IDEMPOTENCY_KEY_PARAMETER,
@@ -3525,21 +4429,32 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
     ),
 )
 async def session_import(
-    file: Path,
+    file: Path | None = None,
     /,
     *,
     importer: str,
     agent: str,
     params: str | None = None,
     join_on: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    trace_id: list[str] | None = None,
+    query: str | None = None,
+    connection: str | None = None,
     tag: list[str] | None = None,
-    media_type: str = "application/octet-stream",
+    evaluator: list[str] | None = None,
+    evaluator_params: list[str] | None = None,
+    analyzer: list[str] | None = None,
+    analyzer_params: list[str] | None = None,
+    analyzer_connection: list[str] | None = None,
+    media_type: str | None = None,
+    max_sessions: int | None = None,
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
-    """Upload a local payload and create one import job."""
+    """Upload a local payload or an API selection, then create one import job."""
     async with _open_asset_client() as client:
         return await sessions.import_sessions(
             client,
@@ -3548,8 +4463,19 @@ async def session_import(
             agent=agent,
             params=params,
             join_on=join_on,
+            since=since,
+            until=until,
+            trace_ids=trace_id,
+            query=query,
+            connection=connection,
             tags=tag,
+            evaluators=evaluator,
+            evaluator_params=evaluator_params,
+            analyzers=analyzer,
+            analyzer_params=analyzer_params,
+            analyzer_connections=analyzer_connection,
             media_type=media_type,
+            max_sessions=max_sessions,
             wait=wait,
             interval=interval,
             timeout=timeout,
@@ -3691,6 +4617,13 @@ async def session_get(session: uuid.UUID, /) -> CommandResult:
             ParameterSpec("--size", "integer", "option", False, "Items per page."),
             ParameterSpec("--cursor", "string", "option", False, "Page cursor."),
             ParameterSpec(
+                "--filter",
+                "JSON",
+                "option",
+                False,
+                "Filter expression as a JSON object.",
+            ),
+            ParameterSpec(
                 "--include-payloads",
                 "boolean",
                 "option",
@@ -3708,6 +4641,7 @@ async def session_nodes(
     size: int = 20,
     cursor: str | None = None,
     include_payloads: bool = False,
+    filter: str | None = None,
 ) -> CommandResult:
     """List one server page of a session's nodes."""
     async with _open_asset_client() as client:
@@ -3717,6 +4651,7 @@ async def session_nodes(
             size=size,
             cursor=cursor,
             include_payloads=include_payloads,
+            filter=filter,
         )
 
 
@@ -3877,7 +4812,7 @@ _WORKER_START_PARAMETERS = (
     ),
     ParameterSpec(
         "--selector",
-        "KEY=VALUE[,VALUE][]|JSON[]",
+        "KEY=[VALUE[,VALUE]][]|JSON[]",
         "option",
         False,
         "Task label selectors, combined by conjunction.",
@@ -3959,7 +4894,7 @@ async def worker_start(
     ] = None,
     selectors: Annotated[
         list[str] | None,
-        Parameter(name="--selector", help="KEY=VALUE[,VALUE] or selector JSON."),
+        Parameter(name="--selector", help="KEY=[VALUE[,VALUE]] or selector JSON."),
     ] = None,
     job_id: uuid.UUID | None = None,
     concurrency: int | None = None,

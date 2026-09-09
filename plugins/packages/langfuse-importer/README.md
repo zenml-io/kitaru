@@ -13,6 +13,8 @@ kitaru session import langfuse-export.jsonl \
 
 The importer understands Langfuse trace, observation, and ingestion-event records. It preserves hierarchy, timing, models, token usage, cost, and source payloads when the export provides them. Re-importing the same source identity skips sessions that Kitaru already stores.
 
+If the export has no embedded project ID, pass `--params '{"source_instance":"my-langfuse-project"}'` (or use the `project_id` alias). Reuse the same value for subsequent exports from that project. Filenames do not determine source identity. An explicit `source_instance` takes precedence over `project_id`, followed by the embedded project ID.
+
 See the [Langfuse import guide](https://docs.zenml.io/kitaru/guides/import-langfuse-traces) for accepted formats, parameters, deduplication behavior, and fidelity limits.
 
 ## Malformed exports
@@ -47,3 +49,5 @@ The adapter runs the function inside a Langfuse trace, waits for Langfuse to fin
 - [Issue tracker](https://github.com/zenml-io/kitaru/issues)
 
 Licensed under Apache-2.0.
+
+Project identity values must be strings. Leading and trailing whitespace is removed; null, empty, and whitespace-only values are absent. Invalid identity types and conflicting embedded projects are rejected even when an explicit parameter would override them. API query fields select what to fetch; import params select the identity used by the parser. File and API imports use the same identity rules.

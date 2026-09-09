@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.25.0"
+version = "0.25.0+dev"
 description = "Record, replay, and improve AI agents in production."
 readme = "README.md"
 license = "Apache-2.0"
@@ -73,6 +73,7 @@ server = [
     "packaging>=24.0",
 ]
 worker = [
+    "packaging>=24.0",
     "pydantic-settings>=2.14",
 ]
 otel = [
@@ -85,6 +86,9 @@ otel = [
 ]
 s3 = [
     "obstore>=0.11.1",
+]
+modal = [
+    "modal>=1.5,<2",
 ]
 
 [project.scripts]
@@ -128,6 +132,7 @@ dev = [
     "griffe-typingdoc>=0.2.8,<1.0.0",
     "hypothesis>=6.165",
     "hypothesis-jsonschema>=0.23",
+    "pyyaml>=6.0",
 ]
 fuzz = [
     "schemathesis>=4.25,<5",

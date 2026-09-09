@@ -8,10 +8,13 @@ Most users do not install or call this package directly. Start a Kitaru worker, 
 kitaru session import phoenix-traces.jsonl \
   --importer kitaru/phoenix@latest \
   --agent support-agent@latest \
+  --params '{"project":"my-project"}' \
   --wait
 ```
 
-The importer accepts Phoenix UI and CLI export shapes, preserves trace hierarchy and source evidence, and maps model and tool spans to Kitaru node types. Each Phoenix trace becomes one Kitaru session.
+The importer accepts Phoenix UI and CLI export shapes, preserves trace hierarchy and source evidence, and maps model and tool spans to Kitaru node types. Each Phoenix trace becomes one Kitaru session. Session external IDs are `<source_instance>:<trace_id>`. Identity comes from `params.source_instance`, then `params.project`, then an embedded top-level `project` field on a trace envelope or span. Strings are trimmed; null, empty, and whitespace-only values are absent. Other types and conflicting embedded projects within a trace fail that trace, including when an explicit parameter is supplied. Exports without project identity require an explicit parameter; filenames are never used.
+
+API imports retain the queried project, or the Phoenix environment project, in the parser payload. The adapter retains its configured environment project in the same way. Reuse that exact project identifier for file imports: project names and project IDs are not resolved to one another. This changes external IDs from earlier importer versions, which used bare trace IDs; reimporting an older trace can create a second session.
 
 See [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) for the live import workflow. The [provider-specific guide in the Kitaru repository](https://github.com/zenml-io/kitaru/blob/develop/docs/book/guides/import-phoenix-traces.md) documents accepted Phoenix formats, deduplication behavior, and fidelity limits.
 

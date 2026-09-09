@@ -2,7 +2,7 @@
 
 FumaDocs-specific instructions for AI-assisted development in the docs app.
 
-## Where the docs live now (read this first)
+## Where the docs live
 
 Kitaru documentation is split across three surfaces:
 
@@ -11,10 +11,10 @@ Kitaru documentation is split across three surfaces:
   (GitBook Git Sync, plain Markdown). Edit those `.md` files directly.
 - **Generated SDK reference** is served by **this FumaDocs app** at
   **`sdkdocs.kitaru.ai`** (mirrors `sdkdocs.zenml.io`).
-- **`kitaru.ai/docs/*`** is now a **redirect** to those new homes
+- **`kitaru.ai/docs/*`** redirects to those two surfaces
   (`docs/worker/redirect.mjs` + `wrangler.redirect.toml`, worker `kitaru-site`).
 
-So **this app is reference-only** — its content is the generated
+**This app is reference-only** — its content is the generated
 `content/docs/reference/python/` and `content/docs/cli/` plus a landing
 `index.mdx`.
 Do not add hand-written pages here; those belong in `docs/book/` (GitBook).
@@ -62,8 +62,7 @@ changes when redirect rules in `docs/worker/redirect.mjs` change.
 
 ## Key Rules
 
-- **Never add Node.js tooling to the repo root.** No root `package.json`,
-  no root `node_modules`, no workspace config.
+- Keep docs-only dependencies and scripts in the docs app. The existing root `package.json` and pnpm workspace support the TypeScript SDK and adapters; use their generation and validation commands when changing those packages.
 - **Never hand-edit generated files:** `content/docs/changelog.mdx` and `content/docs/reference/` are generated and gitignored. The public changelog is hosted at `docs.zenml.io/changelog`; the local `changelog.mdx` is only for local/reference builds. The reference pipeline is `scripts/generate_sdk_docs.py` (Python, griffe extraction filtered to the `PUBLIC_API` allowlist) followed by `docs/scripts/convert-sdk-docs.mjs` (Node, JSON to MDX); run it via `just generate-docs`.
 - **CLI reference is schema-driven:** command metadata lives under `src/kitaru/cli/` and is exposed through `kitaru schema`; `scripts/generate_cli_docs.py` consumes that schema to generate `content/docs/cli/` (run via `just generate-docs`). The generator hardcodes no command names — CLI changes flow through automatically.
 - **Respect static export constraints:** No server-side features (middleware,
@@ -116,7 +115,7 @@ pnpm run format     # Biome format
 
 The `SDK Reference Docs` workflow runs `pnpm run lint` on every PR that touches `docs/`, and root `just check` does not cover it, so run `just docs-lint` before pushing. `pnpm exec biome check --write` applies the safe fixes (formatting, import order). Rule exceptions live in `biome.jsonc` with a comment explaining each one.
 
-**Important:** Generated content (the local/reference changelog page and SDK reference) is gitignored. On a fresh clone, run `uv sync --extra cli` (the CLI generator runs `kitaru schema` in-process), `pnpm install` in `docs/`, then `uv pip install ./docs/node_modules/fumadocs-python`, then `just generate-docs` to materialize the reference before `just docs` shows the full sidebar. The deployed public changelog still lives at `docs.zenml.io/changelog`; the generated `changelog.mdx` here is not the public changelog source.
+**Important:** Generated content (the local/reference changelog page and SDK reference) is gitignored. On a fresh clone, run `uv sync --extra cli` (the CLI generator runs `kitaru schema` in-process), `pnpm install` in `docs/`, then `uv pip install ./docs/node_modules/fumadocs-python`, then `just generate-docs` to materialize the reference before `just docs` shows the full sidebar.
 
 ## File Responsibilities
 
@@ -136,7 +135,7 @@ this FumaDocs reference app, and generated output).
 ### Authoring conventions
 
 - Hand-written docs are **GitBook Markdown under `docs/book/`** (not MDX). Edit those `.md` files directly and add new pages to `docs/book/toc.md`. GitBook conventions live in `docs/book/AGENTS.md`.
-- Links **within the GitBook space** use relative `.md` paths (e.g. `../concepts/checkpoints.md`, `flows.md#runtime-options`). Link to the **SDK reference** with `https://sdkdocs.kitaru.ai` (the separate reference site, not in the GitBook space). Link to **other ZenML docs** with absolute `https://docs.zenml.io/...`. Diagrams are static PNG images hosted on Cloudflare R2 and referenced as `https://assets.kitaru.ai/docs/diagrams/<slug>.png` (regenerate via the diagram pipeline, not committed to the repo).
+- Links **within the GitBook space** use relative `.md` paths (e.g. `../concepts/README.md`). Do not add anchors to cross-file links; same-file anchors are fine. Link to the **SDK reference** with `https://sdkdocs.kitaru.ai` (the separate reference site, not in the GitBook space). Link to **other ZenML docs** with absolute `https://docs.zenml.io/...`. Diagrams are static PNG images hosted on Cloudflare R2 and referenced as `https://assets.kitaru.ai/docs/diagrams/<slug>.png` (regenerate via the diagram pipeline, not committed to the repo).
 - Do not commit temporary agent planning/review files such as `docs/plans/*`, `docs/reviews/*`, or prompt exports unless the user explicitly asks for a durable tracked document. Treat them as coordination scratchpads, not product docs.
 - Generated reference output must come from reviewed generation scripts rather than manual edits. The public surface it documents is the `PUBLIC_API` allowlist in `scripts/generate_sdk_docs.py`; change that allowlist (and its tests) rather than hand-editing output when the SDK surface changes.
 

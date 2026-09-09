@@ -1,6 +1,6 @@
 ---
 name: kitaru-docs
-description: Use for Kitaru docs.
+description: Kitaru documentation surfaces, link rules, and accuracy rules. Use when editing docs under docs/book, generated SDK or CLI reference, docs redirects, example READMEs, or docs CI.
 ---
 
 # Kitaru Documentation Workflow

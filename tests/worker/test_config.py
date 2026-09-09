@@ -16,6 +16,7 @@
 import uuid
 
 import pytest
+from pydantic import ValidationError
 
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import LabelSelector, WorkerClaim, WorkerScope
@@ -27,6 +28,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fields fall back to their defaults when no environment is set."""
     monkeypatch.delenv("KITARU_WORKER_CONCURRENCY", raising=False)
     config = WorkerConfig()
+    assert config.id is None
     assert config.name is None
     assert config.scope == WorkerScope(
         claims=[WorkerClaim(kind=kind) for kind in TaskKind]
@@ -35,6 +37,22 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.claim_batch_size is None
     assert config.timeout is None
     assert config.metadata == {}
+
+
+def test_id_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KITARU_WORKER_ID takes a bare uuid value."""
+    worker_id = uuid.uuid4()
+    monkeypatch.setenv("KITARU_WORKER_ID", str(worker_id))
+    config = WorkerConfig()
+    assert config.id == worker_id
+
+
+def test_id_rejects_a_scope_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KITARU_WORKER_SCOPE__* alongside KITARU_WORKER_ID fails validation."""
+    monkeypatch.setenv("KITARU_WORKER_ID", str(uuid.uuid4()))
+    monkeypatch.setenv("KITARU_WORKER_SCOPE__CLAIMS", '[{"kind": "agent"}]')
+    with pytest.raises(ValidationError, match="KITARU_WORKER_SCOPE"):
+        WorkerConfig()
 
 
 def test_concurrency_from_env(monkeypatch: pytest.MonkeyPatch) -> None:

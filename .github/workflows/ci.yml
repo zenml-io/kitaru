@@ -36,6 +36,7 @@ jobs:
       - run: uv run lint-imports
       - run: uv run python scripts/report_mcp_schema.py --check
       - run: uv run bash scripts/check_openapi.sh
+      - run: uv run python scripts/changelog_fragments.py check
       - run: uv run --with pyyaml python scripts/audit-example-coverage.py
       - run: find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml
           -print0 | xargs -0 uv run yamlfix --check
@@ -97,7 +98,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: crate-ci/typos@8a48f81b6c64dcfea44b3633223084c4be58ac5f  # v1.49.0
+      - uses: crate-ci/typos@d43b6c087ac471e2ea7b8af622ff15f05c0c365b  # v1.50.1
   typecheck:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
@@ -114,6 +115,7 @@ jobs:
           --extra cli
           --extra worker
           --extra s3
+          --extra modal
           --group fuzz
       - run: uv run ty check
   audit:
@@ -160,12 +162,13 @@ jobs:
         run: >-
           uv run --no-sync python scripts/smoke_plugin_artifacts.py
           --candidate-dir plugins/candidate-wheels
-      - name: Sync quickstart example
+      - name: Sync quickstart dependencies
         working-directory: examples/python/pydantic_ai_ticket_resolver
-        run: uv sync --frozen
-      - name: Run frozen quickstart example end to end
-        working-directory: examples/python/pydantic_ai_ticket_resolver
-        run: uv run --frozen python scripts/run_ci_e2e.py
+        run: >-
+          uv sync --frozen
+          --no-install-package kitaru
+          --no-install-package kitaru-pydantic-ai
+          --no-install-package kitaru-langfuse-importer
       - name: Install current Kitaru artifacts into quickstart example
         run: |
           uv pip install \
@@ -369,19 +372,19 @@ jobs:
         include:
           - name: py311-base
             python-version: '3.11'
-            sync-command: uv sync --frozen --extra server --extra otel
+            sync-command: uv sync --frozen --extra server --extra otel --extra modal
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py312-base
             python-version: '3.12'
-            sync-command: uv sync --frozen --extra server --extra otel
+            sync-command: uv sync --frozen --extra server --extra otel --extra modal
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py313-base
             python-version: '3.13'
-            sync-command: uv sync --frozen --extra server --extra otel
+            sync-command: uv sync --frozen --extra server --extra otel --extra modal
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py314-base
             python-version: '3.14'
-            sync-command: uv sync --frozen --extra server --extra otel
+            sync-command: uv sync --frozen --extra server --extra otel --extra modal
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py311-cli
             python-version: '3.11'

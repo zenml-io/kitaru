@@ -23,7 +23,8 @@ from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession
-from kitaru_logfire_importer.importer import LogfireRecordsImporter
+from kitaru_logfire_importer.importer import LogfireRecordsImporter, importer
+from kitaru_logfire_importer.importer import parse as unified_parse
 
 
 def row(
@@ -75,6 +76,13 @@ def parse(
 def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
     """Flatten imported nodes depth-first."""
     return [node for root in nodes for node in (root, *flatten(root.children))]
+
+
+def test_importer_instance_parse_matches_module_parse() -> None:
+    """Yield the same sessions from the module-level instance as from parse."""
+    content = jsonl(row("root"))
+
+    assert list(importer.parse(content, {})) == list(unified_parse(content, {}))
 
 
 def test_maps_trace_corpus_genai_spans() -> None:
@@ -195,6 +203,25 @@ def test_keeps_same_named_sessions_from_projects_separate() -> None:
     ] == [
         "project-1:conversation-1",
         "project-2:conversation-1",
+    ]
+
+
+def test_emits_sessions_in_first_appearance_order() -> None:
+    """Emit sessions in payload order rather than sorted by grouping key."""
+    parsed = parse(
+        jsonl(
+            row("root-2", trace_id="trace-2", project_id="project-2"),
+            row("root-1", trace_id="trace-1", project_id="project-1"),
+        )
+    )
+
+    assert [
+        session.external_id
+        for session in parsed
+        if isinstance(session, ImportedSession)
+    ] == [
+        "project-2:conversation-1",
+        "project-1:conversation-1",
     ]
 
 
@@ -478,3 +505,65 @@ def test_valid_numeric_attributes_are_preserved(value: Any) -> None:
         assert node.tokens is not None
         assert node.tokens.input_tokens == int(value)
     session.model_dump_json()
+
+
+@pytest.mark.parametrize("missing", [None, "", "   "])
+def test_requires_project_identity(missing: Any) -> None:
+    """Missing identity fails with an actionable command."""
+    [failure] = parse(jsonl(row("root", project_id=missing)))
+    assert isinstance(failure, ImportFailure)
+    assert '--params \'{"source_instance":"my-logfire-project"}\'' in failure.error
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"source_instance": " override ", "project_id": "alias"}, "override"),
+        ({"source_instance": " ", "project_id": " alias "}, "alias"),
+        ({"source_instance": None, "project_id": ""}, "project-1"),
+    ],
+)
+def test_normalizes_project_identity_precedence(
+    params: dict[str, Any], expected: str
+) -> None:
+    """Explicit identities precede normalized embedded identity."""
+    [session] = parse(jsonl(row("root", project_id=" project-1 ")), params)
+    assert isinstance(session, ImportedSession)
+    assert session.external_id == f"{expected}:conversation-1"
+    assert session.metadata["logfire.project_id"] == "project-1"
+
+
+@pytest.mark.parametrize("invalid", [42, False, [], {}])
+@pytest.mark.parametrize("field", ["source_instance", "project_id", "embedded"])
+def test_rejects_nonstring_project_identity(field: str, invalid: Any) -> None:
+    """Invalid identity types never become strings or disappear as false values."""
+    record = row("root", project_id=invalid) if field == "embedded" else row("root")
+    params = (
+        {"source_instance": "override"} if field == "embedded" else {field: invalid}
+    )
+    [failure] = parse(jsonl(record), params)
+    assert isinstance(failure, ImportFailure)
+    assert "must be a string" in failure.error
+
+
+@pytest.mark.parametrize("same_trace", [True, False])
+def test_override_preserves_embedded_project_conflicts(same_trace: bool) -> None:
+    """An override cannot combine conflicting embedded projects."""
+    records = [
+        row("root-1", trace_id="trace-1", project_id="project-1"),
+        row(
+            "root-2",
+            trace_id="trace-1" if same_trace else "trace-2",
+            project_id="project-2",
+        ),
+    ]
+    [failure] = parse(jsonl(*records), {"source_instance": "override"})
+    assert isinstance(failure, ImportFailure)
+    assert "conflicting Logfire project ids" in failure.error
+
+
+def test_missing_project_identity_isolates_trace() -> None:
+    """A rejected trace leaves valid sibling traces importable."""
+    parsed = parse(jsonl(row("bad", project_id=None), row("good", trace_id="trace-2")))
+    assert sum(isinstance(item, ImportedSession) for item in parsed) == 1
+    assert sum(isinstance(item, ImportFailure) for item in parsed) == 1

@@ -47,7 +47,7 @@ class HumanView:
     fields: tuple[HumanField, ...]
     sections: tuple[HumanSection, ...] = ()
     empty_message: str = "No results found."
-    renderer: Literal["default", "doctor", "root"] = "default"
+    renderer: Literal["default", "doctor", "root", "setup"] = "default"
 
 
 def _format_count(value: Any) -> str:
@@ -115,6 +115,31 @@ _INVESTIGATION_SESSION_FIELDS = (
 _ANNOTATION_FIELDS = (
     HumanField("value", "Value"),
     _ID,
+)
+_INSIGHT_FIELDS = (
+    _NAME,
+    HumanField("title", "Title"),
+    HumanField("data.type", "Type"),
+    _ID,
+)
+
+_CONNECTION_FIELDS = (
+    _NAME,
+    HumanField("provider", "Provider"),
+    HumanField("default", "Default"),
+    _ID,
+)
+_CONNECTION_SECTIONS = (
+    HumanSection("Summary", (_NAME, HumanField("provider", "Provider"), _ID)),
+    HumanSection(
+        "Values",
+        (
+            HumanField("env", "Environment"),
+            HumanField("secret_keys", "Secret keys"),
+            HumanField("default", "Default"),
+        ),
+    ),
+    HumanSection("Timing", (_CREATED, _UPDATED)),
 )
 
 _ASSET_FIELDS = (
@@ -284,6 +309,11 @@ _VIEWS: dict[str, HumanView] = {
         fields=(),
         renderer="doctor",
     ),
+    "setup": HumanView(
+        title="Setup",
+        fields=(),
+        renderer="setup",
+    ),
     "agent.list": _build_view("Agents", _ASSET_FIELDS, _ASSET_SECTIONS),
     "agent.get": _build_view("Agent", _ASSET_FIELDS, _ASSET_SECTIONS),
     "agent.register": _build_view("Agent", (), _REGISTRATION_SECTIONS),
@@ -342,6 +372,21 @@ _VIEWS: dict[str, HumanView] = {
     "cohort.get": _build_view("Cohort", _ASSET_FIELDS, _ASSET_SECTIONS),
     "cohort.create": _build_view("Cohort", _ASSET_FIELDS, _ASSET_SECTIONS),
     "cohort.update": _build_view("Cohort", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "connection.list": _build_view(
+        "Connections", (*_CONNECTION_FIELDS, _CREATED), _CONNECTION_SECTIONS
+    ),
+    "connection.get": _build_view(
+        "Connection", _CONNECTION_FIELDS, _CONNECTION_SECTIONS
+    ),
+    "connection.create": _build_view(
+        "Connection", _CONNECTION_FIELDS, _CONNECTION_SECTIONS
+    ),
+    "connection.update": _build_view(
+        "Connection", _CONNECTION_FIELDS, _CONNECTION_SECTIONS
+    ),
+    "connection.set-default": _build_view(
+        "Connection", _CONNECTION_FIELDS, _CONNECTION_SECTIONS
+    ),
     "cohort.version.list": _build_view(
         "Cohort versions",
         (
@@ -362,6 +407,28 @@ _VIEWS: dict[str, HumanView] = {
     "cohort.version.update": _build_view(
         "Cohort version", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
+    "insight.list": _build_view(
+        "Insights",
+        (
+            _NAME,
+            HumanField("title", "Title"),
+            HumanField("data.type", "Type"),
+            HumanField("agent_id", "Agent", 120),
+            _ID,
+            _CREATED,
+        ),
+    ),
+    "insight.create": _build_view(
+        "Insights",
+        (
+            _NAME,
+            HumanField("title", "Title"),
+            HumanField("data.type", "Type"),
+            _ID,
+        ),
+    ),
+    "insight.get": _build_view("Insight", _INSIGHT_FIELDS),
+    "insight.update": _build_view("Insight", _INSIGHT_FIELDS),
     "investigation.list": _build_view(
         "Investigations",
         (

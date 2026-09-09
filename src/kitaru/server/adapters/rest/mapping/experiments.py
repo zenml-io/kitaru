@@ -21,10 +21,12 @@ from kitaru.api_models.v1.experiment import (
     ExperimentResponse,
     ExperimentUpdateRequest,
 )
-from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
-from kitaru.server.adapters.rest.mapping.replay_config import (
+from kitaru.server.adapters.rest.mapping.evaluator_config import (
     evaluator_config_input,
     evaluator_config_to_wire,
+)
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
+from kitaru.server.adapters.rest.mapping.replay_config import (
     replay_override_to_domain,
     replay_override_to_wire,
     tool_policy_to_domain,

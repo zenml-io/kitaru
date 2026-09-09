@@ -187,6 +187,26 @@ async def test_query_hides_stale_unless_included(setup: Setup) -> None:
     assert {worker.id for worker in workers} == {stale.id, fresh.id}
 
 
+async def test_list_live_returns_workers_seen_after_the_cutoff(setup: Setup) -> None:
+    """List only workers whose last heartbeat is at or after the cutoff."""
+    repository, owner_id = setup
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(minutes=1)
+    await repository.register(
+        _worker(owner_id, name="stale", last_seen_at=now - timedelta(minutes=2))
+    )
+    live = await repository.register(_worker(owner_id, name="live", last_seen_at=now))
+
+    live_workers = await repository.list_live(cutoff)
+    assert [worker.id for worker in live_workers] == [live.id]
+
+    second_live = await repository.register(
+        _worker(owner_id, name="live-2", last_seen_at=now)
+    )
+    live_workers = await repository.list_live(cutoff)
+    assert [worker.id for worker in live_workers] == [live.id, second_live.id]
+
+
 async def test_query_walks_pages(setup: Setup) -> None:
     """Walk every page via next_cursor without duplicates or gaps."""
     repository, owner_id = setup

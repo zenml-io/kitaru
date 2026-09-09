@@ -353,7 +353,7 @@ async def _setup_agent_subtree(client: httpx.AsyncClient) -> dict[str, Any]:
             }
         },
     )
-    job = (
+    import_ = (
         await client.post(
             "/api/v1/imports",
             json={
@@ -363,8 +363,11 @@ async def _setup_agent_subtree(client: httpx.AsyncClient) -> dict[str, Any]:
             },
         )
     ).json()
-    tasks = (await client.get(f"/api/v1/jobs/{job['id']}/tasks")).json()["items"]
-    assert tasks[0]["agent_id"] == agent["id"]
+    assert import_["agent_id"] == agent["id"]
+    tasks = (await client.get(f"/api/v1/jobs/{import_['job_id']}/tasks")).json()[
+        "items"
+    ]
+    assert tasks[0]["import_id"] == import_["id"]
 
     return {
         "agent_id": agent["id"],

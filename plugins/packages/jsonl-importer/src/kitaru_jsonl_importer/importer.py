@@ -26,8 +26,6 @@ from pydantic_core import PydanticSerializationError
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.task.importer import ImportedSession, SessionImportError, flatten_nodes
 
-MAX_UPLOAD_BYTES = 64 * 1024 * 1024
-
 
 class InvalidImport(ValueError):
     """Raised when a Kitaru JSONL payload cannot be parsed."""
@@ -43,14 +41,12 @@ def parse(
         params: Import parameters, unused by this importer.
 
     Raises:
-        InvalidImport: The upload is too large, empty, or not UTF-8.
+        InvalidImport: The upload is empty or not UTF-8.
 
     Yields:
         Valid sessions and isolated line failures.
     """
     _ = params
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise InvalidImport("Kitaru JSONL import exceeds the 64 MiB upload limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:

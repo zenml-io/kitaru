@@ -25,11 +25,13 @@ from kitaru.base import FrozenModel
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
+    ForbiddenError,
     NotFoundError,
     ValidationError,
 )
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import (
+    NAMESPACE_SEPARATOR,
     RESERVED_NAMESPACE,
     NamespacedName,
     VersionName,
@@ -44,6 +46,7 @@ class PluginKind(StrEnum):
 
     EVALUATOR = "evaluator"
     IMPORTER = "importer"
+    ANALYZER = "analyzer"
 
 
 class PluginNotFound(NotFoundError):
@@ -87,6 +90,14 @@ class ReservedPluginName(ValidationError):
         )
 
 
+class DefaultPluginReadOnly(ForbiddenError):
+    """Modification of a server-managed default plugin is forbidden."""
+
+    def __init__(self, name: str) -> None:
+        """Initialize the error for the default plugin name."""
+        super().__init__(f"Default plugin '{name}' is read-only")
+
+
 class DuplicatePluginVersion(ConflictError):
     """Raised when a plugin version number is already registered."""
 
@@ -128,19 +139,27 @@ class PluginVersionIdNotFound(NotFoundError):
 
 
 class InvalidPluginProvider(ValidationError):
-    """Raised when an evaluator plugin carries a provider."""
+    """Raised when a plugin kind that does not carry a provider has one set."""
 
-    def __init__(self) -> None:
-        """Initialize the error."""
-        super().__init__("Evaluator plugins do not carry a provider")
+    def __init__(self, kind: PluginKind) -> None:
+        """Initialize the error.
+
+        Args:
+            kind: Kind that does not carry a provider.
+        """
+        super().__init__(f"{kind.value.capitalize()} plugins do not carry a provider")
 
 
 class InvalidPluginAgentScope(ValidationError):
-    """Raised when an importer plugin carries an agent id."""
+    """Raised when a plugin kind that does not carry an agent id has one set."""
 
-    def __init__(self) -> None:
-        """Initialize the error."""
-        super().__init__("Importer plugins do not carry an agent id")
+    def __init__(self, kind: PluginKind) -> None:
+        """Initialize the error.
+
+        Args:
+            kind: Kind that does not carry an agent id.
+        """
+        super().__init__(f"{kind.value.capitalize()} plugins do not carry an agent id")
 
 
 class InvalidPluginRequirement(ValidationError):
@@ -274,10 +293,20 @@ class Plugin(DomainModel):
     provider: str | None = None
     logo_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    connection_schema: dict[str, Any] | None = None
     latest_version: int = 0
     agent_id: uuid.UUID | None = None
     created: datetime | None = None
     updated: datetime | None = None
+
+    def check_modify(self) -> None:
+        """Reject changes to plugins provided by server bootstrap.
+
+        Raises:
+            DefaultPluginReadOnly: The plugin uses the reserved namespace.
+        """
+        if self.name.startswith(RESERVED_NAMESPACE + NAMESPACE_SEPARATOR):
+            raise DefaultPluginReadOnly(self.name)
 
     @model_validator(mode="after")
     def _check_provider(self) -> "Plugin":
@@ -290,22 +319,25 @@ class Plugin(DomainModel):
             The validated plugin.
         """
         if self.kind is PluginKind.EVALUATOR and self.provider is not None:
-            raise InvalidPluginProvider
+            raise InvalidPluginProvider(self.kind)
         return self
 
     @model_validator(mode="after")
     def _check_agent_id(self) -> "Plugin":
-        """Reject an agent id on an importer plugin.
+        """Reject an agent id on an importer or analyzer plugin.
 
         Raises:
-            InvalidPluginAgentScope: The kind is importer and agent_id is
-                set.
+            InvalidPluginAgentScope: The kind is importer or analyzer and
+                agent_id is set.
 
         Returns:
             The validated plugin.
         """
-        if self.kind is PluginKind.IMPORTER and self.agent_id is not None:
-            raise InvalidPluginAgentScope
+        if (
+            self.kind in (PluginKind.IMPORTER, PluginKind.ANALYZER)
+            and self.agent_id is not None
+        ):
+            raise InvalidPluginAgentScope(self.kind)
         return self
 
     def update_description(self, description: str | None) -> None:
@@ -331,6 +363,16 @@ class Plugin(DomainModel):
             metadata: New metadata.
         """
         self.metadata = metadata
+
+    def update_connection_schema(
+        self, connection_schema: dict[str, Any] | None
+    ) -> None:
+        """Set a new plugin connection schema.
+
+        Args:
+            connection_schema: New connection schema.
+        """
+        self.connection_schema = connection_schema
 
 
 class PluginVersion(DomainModel):

@@ -1,0 +1,41 @@
+---
+name: Notify failure
+# Reusable job that posts a short message to the SRE Discord channel when a
+# calling workflow fails. Deploy-on-main workflows have no PR to turn red, so
+# without this a broken production path goes unnoticed (the SDK Reference Docs
+# deploy failed on every main push for a week in Aug/Sep 2026 before anyone saw
+# it). Posts with plain curl rather than a marketplace action so there is no
+# unpinnable third-party dependency.
+on:
+  workflow_call:
+    inputs:
+      title:
+        description: Short label for what failed, such as "SDK Reference Docs deploy".
+        required: true
+        type: string
+    secrets:
+      DISCORD_WEBHOOK:
+        required: true
+permissions: {}
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Discord
+        env:
+          TITLE: ${{ inputs.title }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          EVENT: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
+            github.run_id }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |-
+          set -euo pipefail
+          content="$(printf '**%s failed** in %s\nRef: %s at %s (%s by %s)\n%s' \
+            "$TITLE" "$REPO" "$REF" "${SHA:0:12}" "$EVENT" "$ACTOR" "$RUN_URL")"
+          payload="$(jq -n --arg content "$content" '{content: $content}')"
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            --data "$payload" "$DISCORD_WEBHOOK" > /dev/null

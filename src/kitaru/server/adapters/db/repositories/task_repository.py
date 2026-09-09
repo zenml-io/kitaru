@@ -42,6 +42,7 @@ from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.task import DuplicateEvaluationTask, Task, TaskNotFound
+from kitaru.server.domain.worker import get_effective_selectors
 
 IN_FLIGHT_STATUS_VALUES = [TaskStatus.CLAIMED.value, TaskStatus.RUNNING.value]
 
@@ -91,7 +92,7 @@ def _residual_conditions(scope: WorkerScope) -> list[ColumnElement[bool]]:
     conditions: list[ColumnElement[bool]] = []
     if scope.job_id is not None:
         conditions.append(TaskORM.job_id == scope.job_id)
-    for selector in scope.selectors or []:
+    for selector in get_effective_selectors(scope):
         matches_value = TaskORM.labels[selector.key].astext.in_(selector.values)
         if selector.required:
             conditions.append(matches_value)

@@ -39,6 +39,8 @@ When a [worker](workers.md) runs a replay for that version, it fetches the refer
 
 ## What secrets don't cover (yet)
 
-Evaluator and importer plugins run without a run spec, so they don't receive per-plugin secrets; an LLM-judge evaluator reads its provider key from the **worker's** environment. Put judge credentials in the environment of the workers that run evaluations; per-plugin secret references are on the roadmap.
+Evaluator plugins run without a run spec, so they don't receive per-plugin secrets. An LLM-judge evaluator reads its provider key from the **worker's** environment. Put judge credentials in the environment of the workers that run evaluations. Per-plugin secret references for evaluators are on the roadmap.
+
+Importer plugins are the exception: a [provider connection](../guides/provider-connections.md) holds an importer's credentials on the server and delivers them to whichever worker claims the import task, so an importer's own key does not need to live in every worker's environment the way a judge's does.
 
 Rotation is an update plus nothing else: the next task fetches the new values. Nothing caches decrypted secrets on disk.

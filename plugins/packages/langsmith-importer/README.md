@@ -13,6 +13,8 @@ kitaru session import langsmith-runs.jsonl \
 
 The importer accepts LangSmith JSON and JSONL export shapes, reconstructs run hierarchy, and groups traces using thread-like metadata or an explicit grouping path. Re-importing the same source identity skips sessions that Kitaru already stores.
 
+For exports without project identity, pass `--params '{"source_instance":"my-project"}'` or use the `project_name` alias. `source_instance` takes precedence over `project_name`, and both override embedded project identity. Reuse the same value for repeated exports from the same project.
+
 See the [LangSmith import guide](https://docs.zenml.io/kitaru/guides/import-langsmith-traces) for accepted formats, grouping parameters, deduplication behavior, and fidelity limits.
 
 ## Validation limits
@@ -47,3 +49,7 @@ The adapter runs the function inside a LangSmith trace, waits for LangSmith to f
 - [Issue tracker](https://github.com/zenml-io/kitaru/issues)
 
 Licensed under Apache-2.0.
+
+Embedded `session_id` and `project_id` values take precedence over `session_name` and `project_name` across related runs. Conflicting IDs reject the trace or grouped session; names are compared only when no embedded ID is present.
+
+Project identity values must be strings. Leading and trailing whitespace is removed; null, empty, and whitespace-only values are absent. Invalid identity types and conflicting embedded projects are rejected even when an explicit parameter would override them. API query fields select what to fetch; import params select the identity used by the parser. File and API imports use the same identity rules.

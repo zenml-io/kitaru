@@ -1,7 +1,7 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
-"""Bounded investigation and annotation handlers."""
+"""Bounded investigation, annotation, and insight handlers."""
 
 import asyncio
 
@@ -13,6 +13,7 @@ from kitaru.api_models.v1.annotation import (
     InvestigationAnswerCreateRequest,
     ManualAnnotationCreateRequest,
 )
+from kitaru.api_models.v1.insight import InsightListParams, InsightUpdateRequest
 from kitaru.api_models.v1.investigation import (
     InvestigationCreateRequest,
     InvestigationListParams,
@@ -31,6 +32,8 @@ from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.common import PageData, ReviewItem, ToolSuccessPayload
 from kitaru.mcp.models.review import (
     AnnotationUpdate,
+    InsightsCreate,
+    InsightUpdate,
     InvestigationAnswerCreate,
     InvestigationCreate,
     InvestigationUpdate,
@@ -54,13 +57,14 @@ _INFO_LOOKUP_HANDLER_FRACTION = 0.25
 async def handle_review_read(
     state: MCPServerState, request: ReviewReadRequest
 ) -> object:
-    """Execute one bounded investigation or annotation read."""
+    """Execute one bounded investigation, annotation, or insight read."""
     if isinstance(request, ReviewGet):
-        resource = (
-            state.client.investigations
-            if request.kind == "investigation"
-            else state.client.annotations
-        )
+        if request.kind == "investigation":
+            resource = state.client.investigations
+        elif request.kind == "insight":
+            resource = state.client.insights
+        else:
+            resource = state.client.annotations
         return await resource.get(request.id)
     if isinstance(request, ReviewListSessions):
         params = InvestigationSessionsListParams(
@@ -74,6 +78,10 @@ async def handle_review_read(
         page = await state.client.investigations.list(
             build_list_params(InvestigationListParams, request)
         )
+    elif request.kind == "insight":
+        page = await state.client.insights.list(
+            build_list_params(InsightListParams, request)
+        )
     else:
         page = await state.client.annotations.list(
             build_list_params(AnnotationListParams, request)
@@ -84,7 +92,7 @@ async def handle_review_read(
 async def handle_review_manage(
     state: MCPServerState, request: ReviewManageRequest
 ) -> object:
-    """Perform one investigation or annotation mutation."""
+    """Perform one investigation, annotation, or insight mutation."""
     if isinstance(request, InvestigationCreate):
         info = None
         warnings: list[str] = []
@@ -140,6 +148,21 @@ async def handle_review_manage(
             request.investigation_id,
             request.session_id,
             InvestigationSessionUpdateRequest(verdict=request.verdict),
+        )
+    if isinstance(request, InsightsCreate):
+        return await state.client.insights.create(
+            request.agent_id,
+            request.insights,
+            idempotency_key=request.idempotency_key,
+        )
+    if isinstance(request, InsightUpdate):
+        values = request.model_dump(
+            include={"title", "description"}, exclude_unset=True
+        )
+        if request.clear_description:
+            values["description"] = None
+        return await state.client.insights.update(
+            request.insight_id, InsightUpdateRequest.model_validate(values)
         )
     if isinstance(request, ManualAnnotationCreate):
         return await state.client.annotations.create(

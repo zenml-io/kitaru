@@ -27,7 +27,7 @@ alongside the exact worker Kitaru version so dependency resolution cannot silent
 upgrade Kitaru away from the workspace version. Provider credentials are not baked
 into this image; installing the adapter does not enable funded model inference.
 
-The image bakes in the published `kitaru-skills` release. To refresh that baked copy during a manual build, use `--no-cache` so Docker reruns the remote skill installation. Once the frontend runtime-refresh change is deployed, newly created sandboxes also install published skills at startup, so skill-only releases no longer require an image rebuild. Dependency and bundled-example changes still require rebuilding the image. The frontend selects the ECR tag from the workspace version, and existing Modal sandboxes do not update when an image or skill release is published.
+The image bakes in the published `kitaru-skills` release. To refresh that baked copy during a manual build, use `--no-cache` so Docker reruns the remote skill installation. Newly created sandboxes also install the published skills at startup, so a skills-only release does not need an image rebuild; dependency and bundled-example changes do. The frontend selects the ECR tag from the workspace version, and existing Modal sandboxes do not update when an image or skill release is published.
 
 The development and release client, server, and worker builds resolve dependencies
 from the committed `uv.lock`. The release
@@ -51,7 +51,7 @@ runtime modes:
 
 | Stage | Purpose |
 |---|---|
-| `pre-builder` | Installs locked `server` and `otel` dependencies without the project |
+| `pre-builder` | Installs locked `server`, `s3`, `otel`, and `modal` dependencies without the project |
 | `common-runtime` | Installs local source editably for bind-mounted development |
 | `local-runtime` | Runs uvicorn with source reload enabled |
 | `builder` | Installs local source non-editably for the self-contained image |
@@ -110,6 +110,11 @@ docker build -f docker/release-worker.Dockerfile --target worker \
 # Release server from the matching published package
 docker build -f docker/release-server.Dockerfile --target server \
   --build-arg KITARU_VERSION=<version> -t kitaru-server .
+
+# Managed server with the modal extra, as published to the private ECR registry
+docker build -f docker/release-server.Dockerfile --target server \
+  --build-arg KITARU_VERSION=<version> --build-arg ADDITIONAL_EXTRAS=modal \
+  -t kitaru-pro-server .
 
 # Onboarding sandbox from the published worker image
 docker build -f docker/onboarding-sandbox.Dockerfile --target worker \

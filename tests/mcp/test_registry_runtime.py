@@ -23,28 +23,35 @@ EXPECTED = {
         "kitaru_registry_read",
         "kitaru_activity_read",
         "kitaru_review_read",
+        "kitaru_connection_read",
     ],
     CapabilityMode.STANDARD: [
         "kitaru_registry_read",
         "kitaru_activity_read",
         "kitaru_review_read",
+        "kitaru_connection_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
         "kitaru_review_manage",
         "kitaru_workflow_start",
         "kitaru_evaluators_manage",
+        "kitaru_analyzers_manage",
+        "kitaru_connections_manage",
     ],
     CapabilityMode.DESTRUCTIVE: [
         "kitaru_registry_read",
         "kitaru_activity_read",
         "kitaru_review_read",
+        "kitaru_connection_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
         "kitaru_review_manage",
         "kitaru_workflow_start",
         "kitaru_evaluators_manage",
+        "kitaru_analyzers_manage",
+        "kitaru_connections_manage",
         "kitaru_workflow_cancel",
         "kitaru_delete",
     ],
@@ -68,6 +75,7 @@ async def test_exact_capability_filtered_inventories_and_annotations() -> None:
                     "kitaru_registry_read",
                     "kitaru_activity_read",
                     "kitaru_review_read",
+                    "kitaru_connection_read",
                 }
             )
 
@@ -84,9 +92,9 @@ async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:
         combined = _compact_size(tool["inputSchema"]) + _compact_size(
             tool["outputSchema"]
         )
-        assert combined < 38 * 1024
-    assert _compact_size({"tools": dumped}) < 192 * 1024
-    assert len(tools) <= 12
+        assert combined < 44 * 1024
+    assert _compact_size({"tools": dumped}) < 206 * 1024
+    assert len(tools) <= 14
 
 
 async def test_activity_child_schema_exposes_only_kind_specific_fields() -> None:

@@ -127,6 +127,19 @@ def validate_version_name(value: str, max_length: int = MAX_NAME_LENGTH) -> str:
     return _validate(value, VERSION_ALLOWED_SEPARATORS, max_length)
 
 
+def get_namespace(value: str) -> str | None:
+    """Get the namespace of a namespaced name, None when it has none.
+
+    Args:
+        value: Namespaced name.
+
+    Returns:
+        Namespace.
+    """
+    namespace, separator, _ = value.partition(NAMESPACE_SEPARATOR)
+    return namespace if separator else None
+
+
 def validate_namespaced_name(value: str, max_length: int = MAX_NAME_LENGTH) -> str:
     """Validate a name with an optional namespace, allowing only the reserved one.
 

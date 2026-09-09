@@ -134,7 +134,7 @@ class EvaluationService:
         session = await self._sessions.get(
             session_id, include_payloads=False, exclusive=True
         )
-        check_task_session_read(session_id, session.task_id, actor)
+        check_task_session_read(session, actor)
         session.check_evaluate()
         seen: set[str] = set()
         for command in commands:

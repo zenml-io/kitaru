@@ -20,9 +20,13 @@ from kitaru.mcp.errors import (
 )
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.activity import ActivityReadRequest
+from kitaru.mcp.models.analyzers import AnalyzersManageRequest
 from kitaru.mcp.models.common import (
     ActivityReadResult,
+    AnalyzersManageResult,
     CohortsManageResult,
+    ConnectionReadResult,
+    ConnectionsManageResult,
     DeleteResult,
     EvaluatorsManageResult,
     ExperimentsManageResult,
@@ -34,6 +38,10 @@ from kitaru.mcp.models.common import (
     ToolSuccessPayload,
     WorkflowCancelResult,
     WorkflowStartResult,
+)
+from kitaru.mcp.models.connections import (
+    ConnectionReadRequest,
+    ConnectionsManageRequest,
 )
 from kitaru.mcp.models.evaluators import EvaluatorsManageRequest
 from kitaru.mcp.models.management import CohortsManageRequest, ExperimentsManageRequest
@@ -48,7 +56,12 @@ from kitaru.mcp.models.workflows import (
 from kitaru.mcp.redaction import redact_data
 from kitaru.mcp.settings import CapabilityMode
 from kitaru.mcp.tools.activity import handle_activity_read
+from kitaru.mcp.tools.analyzers import handle_analyzers_manage
 from kitaru.mcp.tools.cohorts import handle_cohorts_manage
+from kitaru.mcp.tools.connections import (
+    handle_connection_read,
+    handle_connections_manage,
+)
 from kitaru.mcp.tools.destructive import handle_delete, handle_workflow_cancel
 from kitaru.mcp.tools.evaluators import handle_evaluators_manage
 from kitaru.mcp.tools.experiments import handle_experiments_manage
@@ -105,10 +118,20 @@ async def activity_read_tool(
 async def review_read_tool(
     request: ReviewReadRequest, context: Context
 ) -> ReviewReadResult:
-    """Read investigations, annotations, and ordered investigation sessions."""
+    """Read investigations, annotations, insights, and investigation sessions."""
     return cast(
         ReviewReadResult,
         await _invoke(context, request, ReviewReadResult, handle_review_read),
+    )
+
+
+async def connection_read_tool(
+    request: ConnectionReadRequest, context: Context
+) -> ConnectionReadResult:
+    """Read provider connections without their secret values."""
+    return cast(
+        ConnectionReadResult,
+        await _invoke(context, request, ConnectionReadResult, handle_connection_read),
     )
 
 
@@ -147,7 +170,7 @@ async def session_import_tool(
 async def review_manage_tool(
     request: ReviewManageRequest, context: Context
 ) -> ReviewManageResult:
-    """Create or update investigations, annotations, tags, and tag links."""
+    """Create or update investigations, annotations, insights, tags, and tag links."""
     return cast(
         ReviewManageResult,
         await _invoke(context, request, ReviewManageResult, handle_review_manage),
@@ -172,6 +195,28 @@ async def evaluators_manage_tool(
         EvaluatorsManageResult,
         await _invoke(
             context, request, EvaluatorsManageResult, handle_evaluators_manage
+        ),
+    )
+
+
+async def analyzers_manage_tool(
+    request: AnalyzersManageRequest, context: Context
+) -> AnalyzersManageResult:
+    """Create or update analyzer parents and blob- or package-backed versions."""
+    return cast(
+        AnalyzersManageResult,
+        await _invoke(context, request, AnalyzersManageResult, handle_analyzers_manage),
+    )
+
+
+async def connections_manage_tool(
+    request: ConnectionsManageRequest, context: Context
+) -> ConnectionsManageResult:
+    """Create or update provider connections and select provider defaults."""
+    return cast(
+        ConnectionsManageResult,
+        await _invoke(
+            context, request, ConnectionsManageResult, handle_connections_manage
         ),
     )
 
@@ -246,6 +291,13 @@ TOOL_SPECS = (
         review_read_tool,
     ),
     ToolSpec(
+        "kitaru_connection_read",
+        CapabilityMode.READ_ONLY,
+        connection_read_tool.__doc__ or "",
+        _annotations(read_only=True, destructive=False, idempotent=True),
+        connection_read_tool,
+    ),
+    ToolSpec(
         "kitaru_cohorts_manage",
         CapabilityMode.STANDARD,
         cohorts_manage_tool.__doc__ or "",
@@ -286,6 +338,20 @@ TOOL_SPECS = (
         evaluators_manage_tool.__doc__ or "",
         _annotations(read_only=False, destructive=False, idempotent=False),
         evaluators_manage_tool,
+    ),
+    ToolSpec(
+        "kitaru_analyzers_manage",
+        CapabilityMode.STANDARD,
+        analyzers_manage_tool.__doc__ or "",
+        _annotations(read_only=False, destructive=False, idempotent=False),
+        analyzers_manage_tool,
+    ),
+    ToolSpec(
+        "kitaru_connections_manage",
+        CapabilityMode.STANDARD,
+        connections_manage_tool.__doc__ or "",
+        _annotations(read_only=False, destructive=False, idempotent=False),
+        connections_manage_tool,
     ),
     ToolSpec(
         "kitaru_workflow_cancel",

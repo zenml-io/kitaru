@@ -33,6 +33,7 @@ Export your traces from Langfuse as JSONL (trace, observation, and ingestion-eve
 kitaru session import langfuse-export.jsonl \
   --importer kitaru/langfuse@latest \
   --agent support-agent@latest \
+  --params '{"source_instance":"my-langfuse-project"}' \
   --tag imported-baseline \
   --media-type application/x-ndjson \
   --wait
@@ -48,9 +49,52 @@ kitaru session list --agent support-agent --origin imported
 
 The same import is two calls on the [Python client](../deploy/configuration.md) when you'd rather script it: upload the export with `client.blobs.upload(...)`, then create the import with `client.imports.create(ImportCreateRequest( importer="langfuse", agent_id=..., payload_blob_id=...))`.
 
-## Re-runs are safe
+## Or skip the export
 
-Every imported session keeps its source identity (`imported_from` + `external_id`). Importing the same export twice, or a bigger export that overlaps an earlier one, skips what's already there instead of duplicating it. Import incrementally, as often as you like.
+Langfuse, LangSmith, Braintrust, Logfire, and Arize Phoenix importers can fetch traces themselves instead of you exporting a file first. Omit the file argument, name a time window instead, and the worker calls the provider's API directly:
+
+```bash
+kitaru session import \
+  --importer kitaru/langfuse@latest \
+  --agent support-agent@latest \
+  --since 7d \
+  --tag imported-baseline --wait
+```
+
+`--since` and `--until` accept an ISO 8601 timestamp or a relative duration such as `7d`, `12h`, or `30m`. `--trace-id` fetches exactly the trace ids you name instead of a window. These merge with `--query` into one `ImportQuery` (`kitaru.api_models.v1.imports`), validated before the import is created, and provider-specific keys pass through untouched. The fetch runs on your worker, the same way the parse does, so provider credentials never leave your infrastructure. A [connection](../guides/provider-connections.md) named with `--connection`, or the provider's default connection, supplies them, and the worker's own environment is still the fallback when neither is set. Each provider's guide lists its query keys and the environment variables the fetch reads.
+
+Use the file upload from step 2 when you already have an export, when you'd rather not hand a worker live API credentials, or for the Kitaru JSONL importer, which only accepts uploaded files. Use the API fetch to skip the export step for the five provider importers.
+
+## Source identity
+
+The five provider importers choose project identity in the same order: `params.source_instance`, the provider-specific parameter below, then project identity embedded in the export. If none is available, the affected trace or session fails with an error showing the `--params` remedy. Filenames and generic provider names are not identity fallbacks.
+
+| Importer | Alternative parameter |
+| --- | --- |
+| Langfuse | `project_id` |
+| LangSmith | `project_name` |
+| Braintrust | `project_id` |
+| Logfire | `project_id` |
+| Arize Phoenix | `project` |
+
+Identity values must be strings. Surrounding whitespace is removed; `null` and empty or whitespace-only strings count as absent. Other types are rejected, including when an explicit override is available. Conflicting embedded project identities fail the affected trace or session even with an override. Each importer keeps its existing rules for grouping traces into sessions.
+
+Use the same identity value for every import from the same source project, including file and API imports. These parameters do not look up project names or convert them to IDs: `support` and `project-123` are different identities even if they describe the same provider project. `--query` selects what to fetch; `--params` supplies parser options. If fetched records do not carry identity, supply it in `--params`. Phoenix includes its selected API project in the fetched payload.
+
+The native Kitaru JSONL importer is different: each record already supplies its final `external_id`, which the importer preserves.
+
+### Existing imports
+
+- For an earlier Langfuse or Braintrust import that used a filename stem, supply that stem explicitly as `source_instance` to keep the same identity.
+- Braintrust now honors explicit parameters ahead of embedded project IDs. If an earlier import ignored your explicit parameter, omit it or set it to the previously selected embedded ID to retain the same identity.
+- For a Logfire import that used the old `logfire` fallback, supply `"source_instance":"logfire"` explicitly to retain that prefix.
+- Phoenix now prefixes the trace ID with project identity. Previously imported bare trace IDs do not match the new IDs, so importing overlapping traces into the same agent creates additional sessions. Existing sessions are not rewritten automatically.
+
+Trimming whitespace also changes any earlier identity that included surrounding whitespace. New identity validation does not reconcile previously imported sessions.
+
+## Re-runs skip existing sessions
+
+Every imported session keeps its source identity (`imported_from` + `external_id`). This pair is unique per destination agent. Importing the same export twice with the same identity skips what's already there instead of duplicating it. Skipped sessions are not refreshed with new nodes. Changing project identity or the grouping key can create additional sessions.
 
 {% hint style="warning" %} An import stores the parsed trace content (prompts, tool arguments, tool results) on your Kitaru server. The server is self-hosted, but check your own access and retention rules before importing exports that contain customer data. {% endhint %}
 

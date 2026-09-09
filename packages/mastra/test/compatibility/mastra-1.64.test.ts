@@ -1,6 +1,5 @@
 import { Agent } from "@mastra/core/agent";
 import type { LLMStepResult } from "@mastra/core/stream";
-// @ts-expect-error Mastra 1.51.0 exports this public test helper without declarations.
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,26 +13,14 @@ type CompatibilityStep = LLMStepResult<unknown> & {
   };
 };
 
-type ModelCall = {
-  maxOutputTokens?: number;
-  prompt: Array<{ content: unknown; role: string }>;
-  temperature?: number;
-  topP?: number;
-};
-
-type ModelResult = {
-  content: unknown[];
-  finishReason: string;
-  providerMetadata?: Record<string, unknown>;
-  request?: { body?: unknown };
-  response?: { id?: string; modelId?: string; timestamp?: Date };
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-  };
-  warnings: unknown[];
-};
+type DoGenerate = Extract<
+  NonNullable<
+    ConstructorParameters<typeof MastraLanguageModelV2Mock>[0]["doGenerate"]
+  >,
+  (options: never) => unknown
+>;
+type ModelCall = Parameters<DoGenerate>[0];
+type ModelResult = Awaited<ReturnType<DoGenerate>>;
 
 const RAW_INPUT = { count: "2" };
 const EXECUTION_INPUT = { count: 2, label: "default" };
@@ -140,7 +127,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Mastra 1.51.0 compatibility", () => {
+describe("Mastra 1.64.0 compatibility", () => {
   it("keeps raw registry keys in listTools and formats execution keys", async () => {
     const { model } = makeModel([textResult("unused")]);
     const agent = new Agent({

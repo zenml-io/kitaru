@@ -17,8 +17,6 @@ import uuid
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
-from pydantic import Field
-
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.base import FrozenModel
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
@@ -44,17 +42,6 @@ class SessionRunCreate(FrozenModel):
     agent_version_id: uuid.UUID
     inputs: Any = None
     name: str | None = None
-
-
-class ImportCreate(FrozenModel):
-    """Import create command."""
-
-    importer: str
-    agent_id: uuid.UUID
-    agent_version_id: uuid.UUID | None = None
-    version: int | None = None
-    payload_blob_id: uuid.UUID
-    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class EvaluationBatchCreate(FrozenModel):

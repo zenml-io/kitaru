@@ -36,14 +36,16 @@ from kitaru.server.application.interfaces.replay_repository import ReplayReposit
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.payload_store import PayloadStore
+from kitaru.server.application.services.job_service import get_agent_task_labels
+from kitaru.server.application.services.plugin_resolution import (
+    get_plugin_task_labels,
+)
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import AgentTask, EvaluationTask, Task
 from kitaru.server.utils import hash_params
-
-AGENT_VERSION_LABEL = "agent_version"
 
 
 async def create_replay_pipelines(
@@ -64,9 +66,9 @@ async def create_replay_pipelines(
     Each agent task carries its baseline session's inputs and the agent
     version as a label. With ``baseline_evaluation_mode`` other than
     ``NONE``, one baseline evaluator task is appended per evaluator, unless
-    ``IF_MISSING`` finds a prior evaluation of the same identity (baseline
+    ``IF_MISSING`` finds prior evaluations of the same identity (baseline
     session, evaluator version, params) to adopt instead, linking the
-    baseline's replay to it.
+    baseline's replay to every one of them.
 
     Args:
         baselines: Sessions being replayed.
@@ -111,7 +113,7 @@ async def create_replay_pipelines(
         )
         for job, baseline in zip(jobs, baselines, strict=True)
     ]
-    adoptable: dict[tuple[uuid.UUID, uuid.UUID, str], uuid.UUID] = {}
+    adoptable: dict[tuple[uuid.UUID, uuid.UUID, str], list[uuid.UUID]] = {}
     if baseline_evaluation_mode is BaselineEvaluationMode.IF_MISSING:
         adoptable = await evaluation_repository.get_latest_evaluation_ids_by_identity(
             [baseline.id for baseline in baselines]
@@ -128,7 +130,7 @@ async def create_replay_pipelines(
                 job_id=job.id,
                 agent_version_id=agent_version_id,
                 inputs=baseline.inputs.value if baseline.inputs is not None else None,
-                labels={AGENT_VERSION_LABEL: str(agent_version_id)},
+                labels=get_agent_task_labels(agent_version_id),
                 on_failure=TaskOnFailure.ABORT,
             )
         )
@@ -141,15 +143,18 @@ async def create_replay_pipelines(
                     evaluator.evaluator_version_id,
                     evaluator_hashes[evaluator.evaluator_version_id],
                 )
-                evaluation_id = adoptable.get(identity)
-                if evaluation_id is not None:
-                    adopted_links.append((replay.id, evaluation_id))
+                evaluation_ids = adoptable.get(identity)
+                if evaluation_ids is not None:
+                    adopted_links.extend(
+                        (replay.id, evaluation_id) for evaluation_id in evaluation_ids
+                    )
                     continue
             tasks.append(
                 EvaluationTask(
                     job_id=job.id,
                     plugin_version_id=evaluator.evaluator_version_id,
                     input_session_id=baseline.id,
+                    labels=get_plugin_task_labels(evaluator.evaluator),
                     params=evaluator.params,
                     on_failure=TaskOnFailure.ABORT,
                 )
@@ -196,6 +201,7 @@ async def append_result_evaluations(
             job_id=task.job_id,
             plugin_version_id=evaluator.evaluator_version_id,
             input_session_id=replay.result_session_id,
+            labels=get_plugin_task_labels(evaluator.evaluator),
             params=evaluator.params,
             on_failure=TaskOnFailure.ABORT,
         )

@@ -1,4 +1,3 @@
-// @ts-expect-error Mastra exports this public test helper without declarations.
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 
 const BASELINE_INPUT =
@@ -8,23 +7,14 @@ const REPLAY_INPUT =
 const REPLAY_INSTRUCTIONS =
   "Follow the configured support workflow. Use the account and order lookup tools and queue one refund review for a delayed duplicate charge. Answer with a JSON object only, using exactly the keys decision, evidence, risk, and nextAction, and record the queued refund review under evidence.";
 
-type ModelResult = {
-  content: unknown[];
-  finishReason: string;
-  providerMetadata: Record<string, unknown>;
-  request: { body: unknown };
-  response: { id: string; modelId: string; timestamp: Date };
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-  };
-  warnings: unknown[];
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+type DoGenerate = Extract<
+  NonNullable<
+    ConstructorParameters<typeof MastraLanguageModelV2Mock>[0]["doGenerate"]
+  >,
+  (options: never) => unknown
+>;
+type ModelCall = Parameters<DoGenerate>[0];
+type ModelResult = Awaited<ReturnType<DoGenerate>>;
 
 function toolResult(
   suffix: string,
@@ -98,7 +88,7 @@ export function createDeterministicModel(replay = false): unknown {
   return new MastraLanguageModelV2Mock({
     modelId: "gpt-5-nano-fixture",
     provider: "openai-fixture",
-    doGenerate: async (options: unknown) => {
+    doGenerate: async (options: ModelCall) => {
       const serializedOptions = JSON.stringify(options);
       const expectedInput = replay ? REPLAY_INPUT : BASELINE_INPUT;
       if (!serializedOptions.includes(expectedInput)) {
@@ -108,10 +98,7 @@ export function createDeterministicModel(replay = false): unknown {
         throw new Error("Expected replay instructions were not applied");
       }
       const expectedMaxOutputTokens = replay ? 3000 : 2000;
-      if (
-        !isRecord(options) ||
-        options.maxOutputTokens !== expectedMaxOutputTokens
-      ) {
+      if (options.maxOutputTokens !== expectedMaxOutputTokens) {
         throw new Error(
           `Expected maxOutputTokens=${expectedMaxOutputTokens} was not applied`,
         );

@@ -79,6 +79,7 @@ def session_to_response(session: Session) -> SessionResponse:
         number=session.number,
         agent_version_id=session.agent_version_id,
         task_id=session.task_id,
+        import_id=session.import_id,
         origin=session.origin,
         status=session.status,
         name=session.name,

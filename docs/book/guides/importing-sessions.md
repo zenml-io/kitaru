@@ -106,6 +106,8 @@ Node indexes do not need to be contiguous. Every `parent_index` and `secondary_p
 
 ## Import a file
 
+The `kitaru-jsonl` importer has no fetch entrypoint, so it only accepts uploaded files. FILE is always required, and `--since`, `--until`, `--trace-id`, and `--query` do not apply.
+
 The session import command uploads the file, resolves an exact importer and agent version, and creates an import job:
 
 ```bash
@@ -116,7 +118,21 @@ kitaru session import sessions.jsonl \
   --wait
 ```
 
-Use `--tag` with `--wait` to tag every created session. Use `--join-on` to group provider traces by a source value. Use `--params` for other provider-specific settings.
+Use `--tag` with `--wait` to tag every created session. Use `--join-on` to group provider traces by a source value. Use `--params` for other provider-specific settings. Use `--max-sessions` to stop the import after it creates a set number of sessions. Use `--evaluator` to score every imported session once the import finishes, and `--evaluator-params` to pass parameters to a selected evaluator. Use `--analyzer` to run an [analyzer](../concepts/analyzers.md) over every imported session once the import finishes, `--analyzer-params` to pass parameters to a selected analyzer, and `--analyzer-connection` to select credentials for it:
+
+```bash
+kitaru session import sessions.jsonl \
+  --importer kitaru/kitaru-jsonl@latest \
+  --agent customer-service@latest \
+  --evaluator accuracy@latest \
+  --evaluator-params 'accuracy@latest={"threshold": 0.8}' \
+  --analyzer session-outcomes@latest \
+  --analyzer-params 'session-outcomes@latest={"min_count": 5}' \
+  --analyzer-connection session-outcomes@latest=model-provider-prod \
+  --wait
+```
+
+The command prints the created import id and the job running it. One evaluator task runs per imported session and evaluator, and one analyzer task runs per analyzer over every session the import created, so a failed evaluator or analyzer marks the job failed while the import itself still records how many sessions it created.
 
 ## Join provider traces into sessions
 
@@ -150,12 +166,13 @@ The selected value must be a non-empty string, number, or boolean. A missing, co
 
 ### SDK and REST
 
-The CLI validates `--join-on` and adds it to the importer parameter object. SDK callers pass the same `join_on` parameter directly:
+The CLI validates `--join-on` and adds it to the importer parameter object, resolves each `--evaluator` into an entry of the `evaluators` list, and resolves each `--analyzer` plus any matching `--analyzer-connection` into an entry of the `analyzers` list. SDK callers pass the same `join_on` parameter, evaluator configs, and analyzer configs directly:
 
 ```python
 from kitaru.api_models.v1.imports import ImportCreateRequest
+from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
 
-job = await client.imports.create(
+created_import = await client.imports.create(
     ImportCreateRequest(
         importer="kitaru/langfuse",
         version=1,
@@ -163,6 +180,12 @@ job = await client.imports.create(
         agent_version_id=agent_version_id,
         payload_blob_id=blob_id,
         params={"join_on": "/metadata/customer/case_id"},
+        evaluators=[EvaluatorConfig(evaluator="accuracy", params={"threshold": 0.8})],
+        analyzers=[
+            AnalyzerConfig(
+                analyzer="session-outcomes", connection_id=analyzer_connection_id
+            )
+        ],
     )
 )
 ```
@@ -176,15 +199,31 @@ The REST request uses the same structure:
   "agent_id": "00000000-0000-0000-0000-000000000000",
   "agent_version_id": "00000000-0000-0000-0000-000000000001",
   "payload_blob_id": "00000000-0000-0000-0000-000000000002",
-  "params": {"join_on": "/metadata/customer/case_id"}
+  "params": {"join_on": "/metadata/customer/case_id"},
+  "evaluators": [{"evaluator": "accuracy", "params": {"threshold": 0.8}}],
+  "analyzers": [
+    {
+      "analyzer": "session-outcomes",
+      "connection_id": "00000000-0000-0000-0000-000000000003"
+    }
+  ]
 }
 ```
 
-Send this object to `POST /api/v1/imports`. The server stores `params` on the import task, the worker includes them in `ImportTaskDetails`, and the task process calls the selected importer as `parse(payload, params)`.
+Send this object to `POST /api/v1/imports`. Each `evaluators` entry names an evaluator, an optional `version` that resolves to the latest version when omitted, and `params`. Each `analyzers` entry does the same for an analyzer and can select a `connection_id`. Without one, the analyzer uses the default connection for its provider when available. The response is the import, whose `job_id` names the job running it. The server stores `params` and the resolved evaluators and analyzers on the import, the worker includes the params in `ImportTaskDetails`, and the task process calls the selected importer as `parse(payload, params)`. Once the import finishes, every listed evaluator scores every imported session and every listed analyzer runs once over the sessions the import created.
+
+Read an import back with `GET /api/v1/imports/{import_id}` or `client.imports.get(import_id)`, and list imports with `GET /api/v1/imports` or `client.imports.list(...)`, filterable on `id`, `agent_id`, and `job_id`.
+
+```bash
+kitaru import list --output json
+kitaru import get <import-id> --output json
+```
 
 Existing integrations can continue to send `params.join_on` as a dotted path. The explicit CLI option accepts JSON Pointer syntax only. Langfuse also retains its older `join_path` plus `join_key` parameters for compatibility, but new integrations should use `join_on`.
 
 ## What provider importers normalize
+
+Select the built-in [post-import insights](post-import-insights.md) analyzers explicitly to produce deterministic cards, OpenAI-backed cards, or both. They need a worker that claims analyzer tasks; only the OpenAI analyzer requires model credentials. The linked guide covers local and self-hosted setup and reading results.
 
 Provider importers apply the same output contract to different source formats:
 
@@ -201,7 +240,7 @@ Framework detection only sets `framework` when trace metadata identifies one sup
 
 ## Inspect failures
 
-The import job result reports created, skipped, and failed counts plus a bounded failure sample. Reimporting the same `(imported_from, external_id)` pair skips the duplicate.
+The import job result reports created, skipped, and failed counts plus a bounded failure sample. The same counts land in the `stats` field of the import once parsing completes, and a parse failure lands in its `error` field. `stats` records the parse outcome on its own, so an import whose evaluators or analyzers fail keeps its counts while the job reports the failed task. Every session created by an import carries the `import_id` it came from. Reimporting the same `(imported_from, external_id)` pair skips the duplicate.
 
 ## No importer for your provider
 
