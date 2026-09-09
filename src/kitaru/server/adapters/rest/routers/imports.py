@@ -20,10 +20,12 @@ from fastapi import APIRouter, Depends, Query, status
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.imports import (
+    ImportAnalyzeRequest,
     ImportCreateRequest,
     ImportListParams,
     ImportResponse,
 )
+from kitaru.api_models.v1.job import JobResponse
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_ephemeral_worker_starter,
@@ -31,10 +33,12 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.adapters.rest.ephemeral_workers import EphemeralWorkerStarter
 from kitaru.server.adapters.rest.mapping.imports import (
+    import_analyze_to_command,
     import_create_to_command,
     import_list_params_to_filter,
     import_to_response,
 )
+from kitaru.server.adapters.rest.mapping.jobs import job_to_response
 from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
@@ -123,3 +127,38 @@ async def get_import(
     """
     import_ = await service.get_import(import_id, actor=actor)
     return import_to_response(import_)
+
+
+@router.post(
+    "/{import_id}/analyze",
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 404, 409),
+)
+@idempotent
+async def analyze_import(
+    import_id: uuid.UUID,
+    body: ImportAnalyzeRequest,
+    service: Annotated[ImportService, Depends(get_import_service)],
+    starter: Annotated[EphemeralWorkerStarter, Depends(get_ephemeral_worker_starter)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> JobResponse:
+    """Run analyzers over the sessions of an import, as one job.
+
+    Clients observe HTTP 201 on success, 404 when the import, an analyzer,
+    a version, or a connection does not exist, 409 when the import has no
+    completed or failed session, and 422 when an analyzer version repeats.
+
+    Args:
+        import_id: Id of the import.
+        body: Import analyze request.
+        service: Import service.
+        starter: Ephemeral worker starter.
+        actor: Caller context.
+
+    Returns:
+        Created job.
+    """
+    command = import_analyze_to_command(body)
+    job = await service.analyze_import(import_id, command, actor=actor)
+    await starter.start(job.id, actor=actor)
+    return job_to_response(job)

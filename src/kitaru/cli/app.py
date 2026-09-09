@@ -3217,6 +3217,74 @@ async def import_get(import_id: uuid.UUID, /) -> CommandResult:
 
 
 @_register(
+    import_app,
+    _spec(
+        ("import", "analyze"),
+        "Run analyzers over the sessions of an existing import as one job.",
+        parameters=(
+            ParameterSpec("IMPORT_ID", "UUID", "argument", True, "Import ID."),
+            ParameterSpec(
+                "--analyzer",
+                "ANALYZER@VERSION[]",
+                "option",
+                True,
+                "Exact analyzer version run once over the import's sessions.",
+            ),
+            ParameterSpec(
+                "--analyzer-params",
+                "ANALYZER@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected analyzer token.",
+            ),
+            ParameterSpec(
+                "--analyzer-connection",
+                "ANALYZER@VERSION=CONNECTION[]",
+                "option",
+                False,
+                "Connection for a selected analyzer token.",
+            ),
+            *_WAIT_PARAMETERS,
+            _IDEMPOTENCY_KEY_PARAMETER,
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_job_created_per_request",
+        errors=(
+            *_ASSET_READ_ERRORS,
+            *_JOB_WAIT_ERRORS,
+        ),
+        streams=True,
+    ),
+)
+async def import_analyze(
+    import_id: uuid.UUID,
+    /,
+    *,
+    analyzer: list[str],
+    analyzer_params: list[str] | None = None,
+    analyzer_connection: list[str] | None = None,
+    wait: bool = False,
+    interval: float | None = None,
+    timeout: float | None = None,
+    idempotency_key: str | None = None,
+) -> CommandResult:
+    """Create one analysis job over the sessions of an existing import."""
+    async with _open_asset_client() as client:
+        return await imports.analyze_import(
+            client,
+            import_id,
+            analyzers=analyzer,
+            analyzer_params=analyzer_params,
+            analyzer_connections=analyzer_connection,
+            wait=wait,
+            interval=interval,
+            timeout=timeout,
+            idempotency_key=idempotency_key,
+        )
+
+
+@_register(
     experiment_run_app,
     _spec(
         ("experiment", "run", "start"),

@@ -19,10 +19,12 @@ from typing import TYPE_CHECKING
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.imports import (
+    ImportAnalyzeRequest,
     ImportCreateRequest,
     ImportListParams,
     ImportResponse,
 )
+from kitaru.api_models.v1.job import JobResponse
 from kitaru.client.resources.pagination import iterate_pages
 
 if TYPE_CHECKING:
@@ -64,6 +66,36 @@ class ImportsResource:
             idempotency_key=idempotency_key,
         )
         return ImportResponse.model_validate(response.json())
+
+    async def analyze(
+        self,
+        import_id: uuid.UUID,
+        request: ImportAnalyzeRequest,
+        idempotency_key: str | None = None,
+    ) -> JobResponse:
+        """Run analyzers over the sessions of an import.
+
+        Args:
+            import_id: Id of the import.
+            request: Import analyze request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
+
+        Raises:
+            APIError: The request failed, including 404 when the import, an
+                analyzer, or a connection does not exist and 409 when the
+                import has no completed or failed session.
+
+        Returns:
+            Created job.
+        """
+        response = await self._client.request(
+            "POST",
+            f"/api/v1/imports/{import_id}/analyze",
+            json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
+        )
+        return JobResponse.model_validate(response.json())
 
     async def get(self, import_id: uuid.UUID) -> ImportResponse:
         """Get an import by id.

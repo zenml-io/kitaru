@@ -4143,6 +4143,26 @@
         "title": "HistoryScope",
         "type": "string"
       },
+      "ImportAnalyzeRequest": {
+        "additionalProperties": false,
+        "description": "Import analyze request.",
+        "properties": {
+          "analyzers": {
+            "description": "Analyzers run across the import's sessions.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyzerConfig"
+            },
+            "minItems": 1,
+            "title": "Analyzers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "analyzers"
+        ],
+        "title": "ImportAnalyzeRequest",
+        "type": "object"
+      },
       "ImportCreateRequest": {
         "additionalProperties": false,
         "description": "Import create request.",
@@ -5704,7 +5724,8 @@
           "session_run",
           "import",
           "evaluation",
-          "replay"
+          "replay",
+          "analysis"
         ],
         "title": "JobKind",
         "type": "string"
@@ -20838,6 +20859,136 @@
           }
         },
         "summary": "Get Import",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/v1/imports/{import_id}/analyze": {
+      "post": {
+        "description": "Run analyzers over the sessions of an import, as one job.\n\nClients observe HTTP 201 on success, 404 when the import, an analyzer,\na version, or a connection does not exist, 409 when the import has no\ncompleted or failed session, and 422 when an analyzer version repeats.\n\nArgs:\n    import_id: Id of the import.\n    body: Import analyze request.\n    service: Import service.\n    starter: Ephemeral worker starter.\n    actor: Caller context.\n\nReturns:\n    Created job.",
+        "operationId": "analyze_import_api_v1_imports__import_id__analyze_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportAnalyzeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Analyze Import",
         "tags": [
           "imports"
         ]
