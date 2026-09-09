@@ -45,11 +45,12 @@ async def record_import_outcome(
     A no-op when the terminal task is not an import task or its import row
     is gone. A completed task stamps the import's stats from its result, any
     other terminal status stamps the task's error. Evaluator and analysis
-    tasks are appended only for a completed import naming evaluators or
-    analyzers, skipping sessions still in progress: one evaluator task per
-    imported session and evaluator, and one analysis task per analyzer
-    scoped to the import. No analysis task is appended when no session is
-    evaluatable. Inserts them without locking the job row. The
+    tasks are appended only for a completed import that created at least
+    one session and names evaluators or analyzers, skipping sessions still
+    in progress: one evaluator task per imported session and evaluator, and
+    one analysis task per analyzer scoped to the import. No analysis task
+    is appended when no session is evaluatable. Inserts them without
+    locking the job row. The
     completing task's own transition settles the job afterward, in the same
     transaction, and its drained scan reads every task including these, so
     the job can never be judged drained before they exist.
@@ -69,13 +70,17 @@ async def record_import_outcome(
         import_ = await import_repository.get(task.import_id)
     except ImportNotFound:
         return
+    stats = None
     if task.status is TaskStatus.COMPLETED:
-        import_.record_stats(ImportStats.model_validate(task.result))
+        stats = ImportStats.model_validate(task.result)
+        import_.record_stats(stats)
     else:
         import_.record_error(task.error)
     await import_repository.update(import_)
-    if task.status is not TaskStatus.COMPLETED or (
-        not import_.evaluators and not import_.analyzers
+    if (
+        stats is None
+        or stats.created == 0
+        or (not import_.evaluators and not import_.analyzers)
     ):
         return
     membership = FilterCondition(field="import_id", op=FilterOp.EQ, value=import_.id)
