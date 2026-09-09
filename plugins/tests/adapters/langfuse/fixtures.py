@@ -149,15 +149,20 @@ def build_trace_page(
     total_pages: int,
     *,
     session_ids: dict[str, str] | None = None,
+    timestamps: dict[str, str] | None = None,
+    latencies: dict[str, float] | None = None,
 ) -> Traces:
     """Build one page of the Langfuse trace-list response."""
     session_ids = session_ids or {}
+    timestamps = timestamps or {}
+    latencies = latencies or {}
     return Traces.model_validate(
         {
             "data": [
                 {
                     "id": trace_id,
-                    "timestamp": "2026-07-24T10:00:00Z",
+                    "timestamp": timestamps.get(trace_id, "2026-07-24T10:00:00Z"),
+                    "latency": latencies.get(trace_id, 1.0),
                     "session_id": session_ids.get(trace_id),
                     "tags": [],
                     "public": False,
@@ -203,6 +208,8 @@ class FakeLangfuseClient:
         self.trace_builders: list[TraceBuilder | Exception] = []
         self.trace_list_pages: list[Traces] = []
         self.observation_pages: dict[str, list[ObservationsV2Response]] = {}
+        self.observations: list[ObservationV2] = []
+        self.observation_page_size: int | None = None
         self.observation_calls: list[dict[str, Any]] = []
         self.requested: list[str] = []
         self.list_calls: list[dict[str, Any]] = []
@@ -240,10 +247,8 @@ class FakeLangfuseClient:
         assert self.trace_list_pages, "unexpected trace list call"
         return self.trace_list_pages.pop(0)
 
-    async def _get_many(
-        self, *, trace_id: str, **kwargs: Any
-    ) -> ObservationsV2Response:
-        self.observation_calls.append({"trace_id": trace_id, **kwargs})
+    async def _get_many(self, **kwargs: Any) -> ObservationsV2Response:
+        self.observation_calls.append(dict(kwargs))
         self.observation_in_flight += 1
         self.observation_peak_in_flight = max(
             self.observation_peak_in_flight, self.observation_in_flight
@@ -251,23 +256,31 @@ class FakeLangfuseClient:
         try:
             if self.observation_delays:
                 await asyncio.sleep(self.observation_delays.pop(0))
-            pages = self.observation_pages.get(trace_id)
-            assert pages, f"unexpected observations listing for trace {trace_id!r}"
-            page = pages.pop(0)
-            since = kwargs.get("from_start_time")
-            until = kwargs.get("to_start_time")
-            return page.model_copy(
-                update={
-                    "data": [
-                        observation
-                        for observation in page.data
-                        if (since is None or observation.start_time >= since)
-                        and (until is None or observation.start_time <= until)
-                    ]
-                }
-            )
+            trace_id = kwargs.get("trace_id")
+            if trace_id is not None:
+                pages = self.observation_pages.get(trace_id)
+                assert pages, f"unexpected observations listing for trace {trace_id!r}"
+                return pages.pop(0)
+            return self._list_window(kwargs)
         finally:
             self.observation_in_flight -= 1
+
+    def _list_window(self, kwargs: dict[str, Any]) -> ObservationsV2Response:
+        """Answer a start time range listing from the observation pool, paged."""
+        since = kwargs["from_start_time"]
+        until = kwargs["to_start_time"]
+        matching = [
+            observation
+            for observation in self.observations
+            if since <= observation.start_time < until
+        ]
+        page_size = self.observation_page_size or kwargs["limit"]
+        cursor = kwargs.get("cursor")
+        offset = int(cursor.removeprefix("offset-")) if cursor else 0
+        page = matching[offset : offset + page_size]
+        next_offset = offset + page_size
+        next_cursor = f"offset-{next_offset}" if next_offset < len(matching) else None
+        return build_observations_page(page, cursor=next_cursor)
 
     @contextmanager
     def start_as_current_observation(
@@ -282,29 +295,37 @@ class FakeLangfuseClient:
         self.events.append("flush")
 
 
-def seed_default_observations(fake: FakeLangfuseClient, trace_ids: list[str]) -> None:
+def seed_default_observations(
+    fake: FakeLangfuseClient,
+    trace_ids: list[str],
+    *,
+    start_times: dict[str, str] | None = None,
+) -> None:
     """Populate the fake's bulk observations listing for the default trace shape.
 
     Args:
         fake: Fake Langfuse client to populate.
         trace_ids: Trace ids to seed, each with a root span and a nested
             generation matching `build_complete_trace`'s observations.
+        start_times: Observation start time per trace id, for time range
+            listings.
     """
+    start_times = start_times or {}
     for trace_id in trace_ids:
-        fake.observation_pages[trace_id] = [
-            build_observations_page(
-                [
-                    build_observation_v2("obs-root", trace_id),
-                    build_observation_v2(
-                        "obs-llm",
-                        trace_id,
-                        parent_id="obs-root",
-                        observation_type="GENERATION",
-                        provided_model_name="gpt-5-nano",
-                    ),
-                ]
-            )
+        start_time = start_times.get(trace_id, "2026-07-24T10:00:00Z")
+        observations = [
+            build_observation_v2("obs-root", trace_id, start_time=start_time),
+            build_observation_v2(
+                "obs-llm",
+                trace_id,
+                parent_id="obs-root",
+                observation_type="GENERATION",
+                provided_model_name="gpt-5-nano",
+                start_time=start_time,
+            ),
         ]
+        fake.observation_pages[trace_id] = [build_observations_page(observations)]
+        fake.observations.extend(observations)
 
 
 @pytest.fixture(autouse=True)

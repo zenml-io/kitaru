@@ -15,10 +15,12 @@
 
 import asyncio
 from datetime import UTC, datetime
+from functools import partial
 
 import pytest
 from langfuse.api.core import ApiError
 
+import kitaru_langfuse_importer.api as api_module
 from kitaru.task.importer import ImportedNode, ImportedSession
 from kitaru_langfuse_importer.api import fetch
 from kitaru_langfuse_importer.importer import importer, parse
@@ -28,7 +30,6 @@ from .fixtures import (
     FakeLangfuseClient,
     build_complete_trace,
     build_observation_v2,
-    build_observations_page,
     build_trace_page,
     seed_default_observations,
 )
@@ -39,33 +40,72 @@ def _flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
     return [node for root in nodes for node in (root, *_flatten(root.children))]
 
 
+_TIMESTAMPS = {
+    "trace-1": "2026-07-24T10:00:00Z",
+    "trace-2": "2026-07-24T10:05:00Z",
+    "trace-3": "2026-07-24T10:10:00Z",
+}
+
+
+def _at(clock: str) -> datetime:
+    """Return the fixture day's datetime at a UTC clock time."""
+    return datetime.fromisoformat(f"2026-07-24T{clock}+00:00")
+
+
 async def test_fetch_with_trace_ids_fetches_exactly_those_in_order(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:
-    """Fetch exactly the requested trace ids, in the given order, as one payload."""
+    """Fetch exactly the requested trace ids, in the given order, one payload each.
+
+    The trace fetch carries the observations inline, so no observations
+    listing happens.
+    """
     fake_langfuse.trace_builders = [build_complete_trace, build_complete_trace]
-    seed_default_observations(fake_langfuse, ["trace-2", "trace-1"])
 
     payloads = await collect_payloads(fetch({"trace_ids": ["trace-2", "trace-1"]}))
 
     assert fake_langfuse.requested == ["trace-2", "trace-1"]
     assert fake_langfuse.list_calls == []
-    assert [call["trace_id"] for call in fake_langfuse.observation_calls] == [
-        "trace-2",
-        "trace-1",
+    assert fake_langfuse.observation_calls == []
+    assert len(payloads) == 2
+    sessions = [
+        item
+        for payload in payloads
+        for item in parse(payload, {})
+        if isinstance(item, ImportedSession)
     ]
-    assert all(
-        call.get("from_start_time") is None and call.get("to_start_time") is None
-        for call in fake_langfuse.observation_calls
-    )
-    assert len(payloads) == 1
-    parsed = list(parse(payloads[0], {}))
-    sessions = [item for item in parsed if isinstance(item, ImportedSession)]
-    assert len(sessions) == len(parsed) == 2
     assert [session.metadata["langfuse.trace_ids"] for session in sessions] == [
         ["trace-2"],
         ["trace-1"],
     ]
+    assert all(len(_flatten(session.nodes)) == 2 for session in sessions)
+
+
+async def test_fetch_with_trace_ids_holds_shared_sessions_until_the_end(
+    fake_langfuse: FakeLangfuseClient,
+) -> None:
+    """Yield standalone traces as fetched and a shared session once all are in."""
+    fake_langfuse.trace_builders = [
+        partial(build_complete_trace, session_id="session-A"),
+        build_complete_trace,
+        partial(build_complete_trace, session_id="session-A"),
+    ]
+
+    payloads = await collect_payloads(
+        fetch({"trace_ids": ["trace-1", "trace-2", "trace-3"], "concurrency": 1})
+    )
+
+    assert len(payloads) == 2
+    [solo] = [
+        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+    ]
+    assert solo.metadata["langfuse.trace_ids"] == ["trace-2"]
+    [shared] = [
+        item for item in parse(payloads[1], {}) if isinstance(item, ImportedSession)
+    ]
+    assert shared.metadata["langfuse.session_id"] == "session-A"
+    assert shared.metadata["langfuse.trace_ids"] == ["trace-1", "trace-3"]
+    assert len(_flatten(shared.nodes)) == 4
 
 
 async def test_importer_fetch_matches_api_fetch(
@@ -100,121 +140,117 @@ async def test_fetch_with_trace_ids_ignores_the_time_window(
     assert len(payloads) == 1
 
 
-async def test_fetch_time_window_lists_across_two_pages_and_fetches_each_trace(
+async def test_fetch_time_window_lists_across_two_pages_and_batches_observations(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:
-    """List every page of the time window and read each listed trace's observations.
+    """List every page of the time window and read observations in one range request.
 
-    None of the three traces share a session id, so each becomes its own
-    group and yields its own payload, in listing order.
+    Three traces fit one batch, so a single observations request spanning
+    the window covers all of them and one payload carries three sessions.
     """
     fake_langfuse.trace_list_pages = [
-        build_trace_page(["trace-1", "trace-2"], page=1, total_pages=2),
-        build_trace_page(["trace-3"], page=2, total_pages=2),
+        build_trace_page(
+            ["trace-1", "trace-2"], page=1, total_pages=2, timestamps=_TIMESTAMPS
+        ),
+        build_trace_page(["trace-3"], page=2, total_pages=2, timestamps=_TIMESTAMPS),
     ]
-    seed_default_observations(fake_langfuse, ["trace-1", "trace-2", "trace-3"])
+    seed_default_observations(
+        fake_langfuse, ["trace-1", "trace-2", "trace-3"], start_times=_TIMESTAMPS
+    )
     since = "2026-07-01T00:00:00+00:00"
-    until = "2026-07-24T00:00:00+00:00"
+    until = "2026-07-24T11:00:00+00:00"
 
     payloads = await collect_payloads(fetch({"since": since, "until": until}))
 
-    assert len(payloads) == 3
     assert [call["page"] for call in fake_langfuse.list_calls] == [1, 2]
     assert all(
         call["from_timestamp"] == datetime.fromisoformat(since)
         and call["to_timestamp"] == datetime.fromisoformat(until)
-        and call["order_by"] == "timestamp.asc"
         for call in fake_langfuse.list_calls
     )
-    assert [call["trace_id"] for call in fake_langfuse.observation_calls] == [
-        "trace-1",
-        "trace-2",
-        "trace-3",
-    ]
-    assert all(
-        call.get("from_start_time") is None and call.get("to_start_time") is None
-        for call in fake_langfuse.observation_calls
-    )
+    [call] = fake_langfuse.observation_calls
+    assert "trace_id" not in call
+    assert call["from_start_time"] == datetime.fromisoformat(since)
+    # The range reaches one second past the latest trace end.
+    assert call["to_start_time"] == datetime.fromisoformat("2026-07-24T10:10:02+00:00")
+    assert call["limit"] == 500
+
+    assert len(payloads) == 1
     sessions = [
-        session
-        for payload in payloads
-        for session in parse(payload, {})
-        if isinstance(session, ImportedSession)
+        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
     ]
-    assert len(sessions) == 3
-    assert [session.metadata["langfuse.trace_ids"][0] for session in sessions] == [
-        "trace-1",
-        "trace-2",
-        "trace-3",
+    assert [session.metadata["langfuse.trace_ids"] for session in sessions] == [
+        ["trace-1"],
+        ["trace-2"],
+        ["trace-3"],
     ]
+    assert all(len(_flatten(session.nodes)) == 2 for session in sessions)
 
 
-async def test_fetch_time_window_yields_one_payload_per_distinct_session(
-    fake_langfuse: FakeLangfuseClient,
+async def test_fetch_time_window_yields_one_payload_per_batch(
+    fake_langfuse: FakeLangfuseClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Yield one payload per session, in order, each parsing to its own session."""
+    """Split the listing into batches and yield each batch's complete sessions."""
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 1)
     fake_langfuse.trace_list_pages = [
         build_trace_page(
             ["trace-1", "trace-2"],
             page=1,
             total_pages=1,
             session_ids={"trace-1": "session-A", "trace-2": "session-B"},
+            timestamps=_TIMESTAMPS,
         )
     ]
-    seed_default_observations(fake_langfuse, ["trace-1", "trace-2"])
+    seed_default_observations(
+        fake_langfuse, ["trace-1", "trace-2"], start_times=_TIMESTAMPS
+    )
     since = "2026-07-01T00:00:00+00:00"
-    until = "2026-07-24T00:00:00+00:00"
 
-    payloads = await collect_payloads(fetch({"since": since, "until": until}))
+    payloads = await collect_payloads(
+        fetch({"since": since, "until": "2026-07-24T11:00:00+00:00"})
+    )
 
+    # Batch ranges are contiguous: each starts where the previous ended.
+    ranges = [
+        (call["from_start_time"], call["to_start_time"])
+        for call in fake_langfuse.observation_calls
+    ]
+    assert ranges == [
+        (datetime.fromisoformat(since), _at("10:05:00")),
+        (_at("10:05:00"), _at("10:05:02")),
+    ]
     assert len(payloads) == 2
-    first_sessions = [
+    first = [
         item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
     ]
-    second_sessions = [
+    second = [
         item for item in parse(payloads[1], {}) if isinstance(item, ImportedSession)
     ]
-    assert len(first_sessions) == len(second_sessions) == 1
-    assert first_sessions[0].metadata["langfuse.session_id"] == "session-A"
-    assert first_sessions[0].metadata["langfuse.trace_ids"] == ["trace-1"]
-    assert second_sessions[0].metadata["langfuse.session_id"] == "session-B"
-    assert second_sessions[0].metadata["langfuse.trace_ids"] == ["trace-2"]
+    assert [session.metadata["langfuse.session_id"] for session in first] == [
+        "session-A"
+    ]
+    assert [session.metadata["langfuse.session_id"] for session in second] == [
+        "session-B"
+    ]
 
 
-async def test_fetch_paginates_observations_within_one_trace(
+async def test_fetch_paginates_observations_within_one_batch(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:
-    """Follow the observations listing cursor across pages of one trace."""
+    """Follow the observations listing cursor across pages of one range."""
     fake_langfuse.trace_list_pages = [
         build_trace_page(["trace-1"], page=1, total_pages=1)
     ]
-    fake_langfuse.observation_pages = {
-        "trace-1": [
-            build_observations_page(
-                [build_observation_v2("obs-root", "trace-1")], cursor="cursor-1"
-            ),
-            build_observations_page(
-                [
-                    build_observation_v2(
-                        "obs-llm",
-                        "trace-1",
-                        parent_id="obs-root",
-                        observation_type="GENERATION",
-                        provided_model_name="gpt-5-nano",
-                    )
-                ]
-            ),
-        ]
-    }
-    since = "2026-07-01T00:00:00+00:00"
-    until = "2026-07-24T00:00:00+00:00"
+    seed_default_observations(fake_langfuse, ["trace-1"])
+    fake_langfuse.observation_page_size = 1
 
-    payloads = await collect_payloads(fetch({"since": since, "until": until}))
+    payloads = await collect_payloads(
+        fetch({"since": "2026-07-01T00:00:00+00:00", "until": "2026-07-24T11:00:00Z"})
+    )
 
     calls = fake_langfuse.observation_calls
-    assert [call["trace_id"] for call in calls] == ["trace-1", "trace-1"]
-    assert calls[0]["cursor"] is None
-    assert calls[1]["cursor"] == "cursor-1"
+    assert [call.get("cursor") for call in calls] == [None, "offset-1"]
+    assert len({call["from_start_time"] for call in calls}) == 1
 
     assert len(payloads) == 1
     sessions = [
@@ -224,48 +260,117 @@ async def test_fetch_paginates_observations_within_one_trace(
     assert len(_flatten(sessions[0].nodes)) == 2
 
 
-async def test_fetch_time_window_groups_shared_session_into_one_payload(
-    fake_langfuse: FakeLangfuseClient,
+async def test_fetch_time_window_holds_a_session_until_all_its_traces_are_complete(
+    fake_langfuse: FakeLangfuseClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Group traces that share a Langfuse session id into one payload.
+    """Release a session only after the batch covering its last trace end.
 
-    trace-3 has no session id, so it falls back to its own trace id and
-    lands in a separate payload, keyed by that trace id.
+    Session A spans trace-1 and trace-3 with trace-2 in between, so the
+    first batch yields nothing, the second yields trace-2 alone, and the
+    third yields session A with both of its traces in one payload.
     """
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 1)
     fake_langfuse.trace_list_pages = [
         build_trace_page(
             ["trace-1", "trace-2", "trace-3"],
             page=1,
             total_pages=1,
-            session_ids={"trace-1": "session-A", "trace-2": "session-A"},
+            session_ids={"trace-1": "session-A", "trace-3": "session-A"},
+            timestamps=_TIMESTAMPS,
         )
     ]
-    seed_default_observations(fake_langfuse, ["trace-1", "trace-2", "trace-3"])
-    since = "2026-07-01T00:00:00+00:00"
-    until = "2026-07-24T00:00:00+00:00"
+    seed_default_observations(
+        fake_langfuse, ["trace-1", "trace-2", "trace-3"], start_times=_TIMESTAMPS
+    )
 
-    payloads = await collect_payloads(fetch({"since": since, "until": until}))
+    payloads = await collect_payloads(
+        fetch({"since": "2026-07-01T00:00:00+00:00", "until": "2026-07-24T11:00:00Z"})
+    )
 
+    assert len(fake_langfuse.observation_calls) == 3
     assert len(payloads) == 2
-    assert all(call["order_by"] == "timestamp.asc" for call in fake_langfuse.list_calls)
-
-    shared_sessions = [
+    solo = [
         item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
     ]
-    assert len(shared_sessions) == 1
-    shared = shared_sessions[0]
-    assert shared.metadata["langfuse.session_id"] == "session-A"
-    assert shared.metadata["langfuse.trace_ids"] == ["trace-1", "trace-2"]
-    nodes = _flatten(shared.nodes)
-    assert {node.trace_id for node in nodes} == {"trace-1", "trace-2"}
-    assert len(nodes) == 4
-
-    solo_sessions = [
+    assert [session.metadata["langfuse.trace_ids"] for session in solo] == [["trace-2"]]
+    [shared] = [
         item for item in parse(payloads[1], {}) if isinstance(item, ImportedSession)
     ]
-    assert len(solo_sessions) == 1
-    assert solo_sessions[0].metadata["langfuse.session_id"] == "trace-3"
-    assert solo_sessions[0].metadata["langfuse.trace_ids"] == ["trace-3"]
+    assert shared.metadata["langfuse.session_id"] == "session-A"
+    assert shared.metadata["langfuse.trace_ids"] == ["trace-1", "trace-3"]
+    nodes = _flatten(shared.nodes)
+    assert {node.trace_id for node in nodes} == {"trace-1", "trace-3"}
+    assert len(nodes) == 4
+
+
+async def test_fetch_time_window_holds_a_long_trace_until_its_end_is_covered(
+    fake_langfuse: FakeLangfuseClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep a trace pending while later batches may still hold its children."""
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 1)
+    fake_langfuse.trace_list_pages = [
+        build_trace_page(
+            ["trace-1", "trace-2"],
+            page=1,
+            total_pages=1,
+            timestamps=_TIMESTAMPS,
+            latencies={"trace-1": 400.0},
+        )
+    ]
+    seed_default_observations(
+        fake_langfuse, ["trace-1", "trace-2"], start_times=_TIMESTAMPS
+    )
+    # A child of trace-1 that starts after trace-2 lands in the second batch.
+    fake_langfuse.observations.append(
+        build_observation_v2(
+            "late-child",
+            "trace-1",
+            parent_id="obs-root",
+            start_time="2026-07-24T10:06:00Z",
+            end_time="2026-07-24T10:06:40Z",
+        )
+    )
+
+    payloads = await collect_payloads(
+        fetch({"since": "2026-07-01T00:00:00+00:00", "until": "2026-07-24T11:00:00Z"})
+    )
+
+    # trace-2 completes in the second batch, trace-1 only once that batch's
+    # range reaches past its end at 10:06:40.
+    assert len(payloads) == 1
+    sessions = [
+        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+    ]
+    assert [session.metadata["langfuse.trace_ids"] for session in sessions] == [
+        ["trace-1"],
+        ["trace-2"],
+    ]
+    assert {node.name for node in _flatten(sessions[0].nodes)} == {
+        "obs-root",
+        "obs-llm",
+        "late-child",
+    }
+
+
+async def test_fetch_time_window_drops_observations_of_unlisted_traces(
+    fake_langfuse: FakeLangfuseClient,
+) -> None:
+    """Ignore observations in the range whose trace the listing did not select."""
+    fake_langfuse.trace_list_pages = [
+        build_trace_page(["trace-1"], page=1, total_pages=1)
+    ]
+    seed_default_observations(fake_langfuse, ["trace-1", "trace-older"])
+
+    [payload] = await collect_payloads(
+        fetch({"since": "2026-07-01T00:00:00+00:00", "until": "2026-07-24T11:00:00Z"})
+    )
+
+    sessions = [
+        item for item in parse(payload, {}) if isinstance(item, ImportedSession)
+    ]
+    assert [session.metadata["langfuse.trace_ids"] for session in sessions] == [
+        ["trace-1"]
+    ]
 
 
 async def test_fetch_time_window_defaults_until_to_now(
@@ -302,17 +407,19 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
     trace_ids = ["trace-1", "trace-2", "trace-3", "trace-4"]
     fake_langfuse.trace_builders = [build_complete_trace] * len(trace_ids)
     # Delays scramble completion order relative to submission order, so the
-    # merged result proves gather_bounded restores it rather than happening
+    # merged result proves stream_bounded restores it rather than happening
     # to already match it.
     fake_langfuse.fetch_delays = [0.03, 0.01, 0.02, 0.0]
-    seed_default_observations(fake_langfuse, trace_ids)
 
     payloads = await collect_payloads(fetch({"trace_ids": trace_ids, "concurrency": 2}))
 
     assert fake_langfuse.peak_in_flight == 2
-    assert len(payloads) == 1
+    assert len(payloads) == 4
     sessions = [
-        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+        item
+        for payload in payloads
+        for item in parse(payload, {})
+        if isinstance(item, ImportedSession)
     ]
     assert [session.metadata["langfuse.trace_ids"][0] for session in sessions] == (
         trace_ids
@@ -320,39 +427,43 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
 
     # The default query still works at the default concurrency.
     fake_langfuse.trace_builders = [build_complete_trace, build_complete_trace]
-    seed_default_observations(fake_langfuse, ["trace-5", "trace-6"])
     payloads = await collect_payloads(fetch({"trace_ids": ["trace-5", "trace-6"]}))
-    assert len(payloads) == 1
+    assert len(payloads) == 2
 
 
-async def test_fetch_time_window_bounds_concurrency_across_groups(
-    fake_langfuse: FakeLangfuseClient,
+async def test_fetch_time_window_bounds_concurrency_across_batches(
+    fake_langfuse: FakeLangfuseClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Bound total in-flight observation fetches across groups by concurrency."""
+    """Keep at most concurrency range requests in flight and yield in batch order."""
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 1)
     trace_ids = ["trace-1", "trace-2", "trace-3", "trace-4"]
+    timestamps = {
+        trace_id: f"2026-07-24T10:{index:02d}:00Z"
+        for index, trace_id in enumerate(trace_ids)
+    }
     fake_langfuse.trace_list_pages = [
-        build_trace_page(trace_ids, page=1, total_pages=1)
+        build_trace_page(trace_ids, page=1, total_pages=1, timestamps=timestamps)
     ]
-    seed_default_observations(fake_langfuse, trace_ids)
-    # None of the traces share a session, so each is its own group. Delays
-    # scramble completion order relative to listing order, so the yielded
-    # order proves stream_bounded restores it rather than happening to
-    # already match it.
-    fake_langfuse.observation_delays = [0.03, 0.01, 0.02, 0.0]
-    since = "2026-07-01T00:00:00+00:00"
-    until = "2026-07-24T00:00:00+00:00"
+    seed_default_observations(fake_langfuse, trace_ids, start_times=timestamps)
+    fake_langfuse.observation_delays = [0.03, 0.0, 0.02, 0.0]
 
     payloads = await collect_payloads(
-        fetch({"since": since, "until": until, "concurrency": 2})
+        fetch(
+            {
+                "since": "2026-07-01T00:00:00+00:00",
+                "until": "2026-07-24T11:00:00Z",
+                "concurrency": 2,
+            }
+        )
     )
 
     assert fake_langfuse.observation_peak_in_flight == 2
     assert len(payloads) == 4
     sessions = [
-        session
+        item
         for payload in payloads
-        for session in parse(payload, {})
-        if isinstance(session, ImportedSession)
+        for item in parse(payload, {})
+        if isinstance(item, ImportedSession)
     ]
     assert [session.metadata["langfuse.trace_ids"][0] for session in sessions] == (
         trace_ids
@@ -410,50 +521,33 @@ async def test_fetch_propagates_a_non_rate_limit_api_error(
     assert fake_langfuse.observation_calls == []
 
 
-async def test_window_keeps_children_outside_trace_selection_bounds(
+async def test_window_keeps_children_starting_after_until(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:
-    """Import every observation of a selected trace, across observation pages."""
+    """Fetch observations up to the trace end even when they start after until."""
     fake_langfuse.trace_list_pages = [
-        build_trace_page(["trace-1"], page=1, total_pages=1)
+        build_trace_page(
+            ["trace-1"], page=1, total_pages=1, latencies={"trace-1": 120.0}
+        )
     ]
-    fake_langfuse.observation_pages = {
-        "trace-1": [
-            build_observations_page(
-                [
-                    build_observation_v2("root", "trace-1"),
-                    build_observation_v2(
-                        "early-child",
-                        "trace-1",
-                        parent_id="root",
-                        start_time="2026-07-24T09:59:59Z",
-                    ),
-                ],
-                cursor="next",
-            ),
-            build_observations_page(
-                [
-                    build_observation_v2(
-                        "late-child",
-                        "trace-1",
-                        parent_id="root",
-                        start_time="2026-07-24T10:01:00Z",
-                        end_time="2026-07-24T10:02:00Z",
-                    ),
-                ]
-            ),
-        ]
-    }
+    fake_langfuse.observations = [
+        build_observation_v2("root", "trace-1"),
+        build_observation_v2(
+            "late-child",
+            "trace-1",
+            parent_id="root",
+            start_time="2026-07-24T10:01:00Z",
+            end_time="2026-07-24T10:02:00Z",
+        ),
+    ]
     [payload] = await collect_payloads(
         fetch({"since": "2026-07-24T10:00:00Z", "until": "2026-07-24T10:00:30Z"})
     )
+    [call] = fake_langfuse.observation_calls
+    assert call["to_start_time"] == _at("10:02:01")
     [session] = list(parse(payload, {}))
     assert isinstance(session, ImportedSession)
-    assert {node.name for node in _flatten(session.nodes)} == {
-        "root",
-        "early-child",
-        "late-child",
-    }
+    assert {node.name for node in _flatten(session.nodes)} == {"root", "late-child"}
 
 
 @pytest.mark.parametrize("source", [None, " explicit "])
