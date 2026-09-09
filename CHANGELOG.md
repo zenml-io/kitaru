@@ -228,7 +228,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Prepared the first Kitaru 0.22 release candidate with a selected frontend release and independently versioned plugin packages.
-## [Unreleased]
 
 ### Changed
 
