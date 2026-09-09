@@ -128,4 +128,4 @@ Stable core releases move the public Docker `latest` aliases, advance the core m
 - TypeScript releases are cut with `typescript/kitaru/v<VERSION>` tags handled by `.github/workflows/release-typescript.yml`; rehearse the exact tag through manual dispatch before pushing it.
 - A core tag directly starts `.github/workflows/release.yml`. Manual dispatch rehearses without publishing; recover publication by inspecting and rerunning the original failed jobs with the same immutable artifacts.
 - Release preparation maintains the version in `pyproject.toml`; application code should use `importlib.metadata.version("kitaru")` rather than hardcoding it.
-- Add a `changelog.d/<pr-number>.<section>.md` fragment for user-facing changes instead of editing `CHANGELOG.md`.
+- Add a `changelog.d/<pr-number>.<section>.md` fragment for user-facing changes instead of editing `CHANGELOG.md`. Any slug works in place of the number while the PR does not exist yet.

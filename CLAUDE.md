@@ -119,7 +119,7 @@ For adapter, importer, specialized UI API, docs, CI, and release work, load the 
 
 - **Single source of truth:** the `version` field in `pyproject.toml`. On `develop` it carries a `+dev` suffix. Only a release-preparation PR (see the `kitaru-release` skill) sets it to a release version, and the workflow's development-reset PR restores the `+dev` placeholder afterward. Do not change it in feature PRs.
 - **Never hardcode the version** in tests or application code. Use `importlib.metadata.version("kitaru")` to read it at runtime.
-- **Add a changelog fragment** when making user-facing changes. Write the Markdown list items to `changelog.d/<pr-number>.<section>.md`, where the section is one of `added`, `changed`, `deprecated`, `removed`, `fixed`, or `security` (see `changelog.d/README.md`). Do not edit `CHANGELOG.md` directly. The release-preparation PR runs `uv run python scripts/changelog_fragments.py build --version <version>`, which moves the fragments into a new versioned heading (e.g. `[0.2.0] - 2026-04-01`) and deletes them.
+- **Add a changelog fragment** when making user-facing changes. Write the Markdown list items to `changelog.d/<pr-number>.<section>.md`, where the section is one of `added`, `changed`, `deprecated`, `removed`, `fixed`, or `security` (see `changelog.d/README.md`). Any slug works in place of the number while the PR does not exist yet. Do not edit `CHANGELOG.md` directly. The release-preparation PR runs `uv run python scripts/changelog_fragments.py build --version <version>`, which moves the fragments into a new versioned heading (e.g. `[0.2.0] - 2026-04-01`) and deletes them.
 - **Track deprecations in `DEPRECATIONS.md`** at the repository root, one entry per deprecated surface.
 
 ## Commits and PRs
