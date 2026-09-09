@@ -35,6 +35,16 @@ _QUERY_PATTERN = re.compile(
     r" \| sort: _pagination_key asc \| limit: \d+"
 )
 
+_BATCH_QUERY_PATTERN = re.compile(
+    r"select: \* \| from: project_logs\('(?P<project_id>[^']+)'\) spans"
+    r" \| filter: (?P<filter>\(root_span_id = '[^']+'\)"
+    r"(?: OR \(root_span_id = '[^']+'\))*)"
+    r" \| sort: _pagination_key asc \| limit: \d+"
+    r"(?: \| cursor: '(?P<cursor>[^']+)')?"
+)
+
+_ROOT_SPAN_ID_TERM = re.compile(r"root_span_id = '([^']+)'")
+
 _LIST_QUERY_PATTERN = re.compile(
     r"select: root_span_id, created, metadata"
     r" \| from: project_logs\('(?P<project_id>[^']+)'\) spans"
@@ -194,6 +204,13 @@ class FakeBraintrust:
         self.in_flight = 0
         self.peak_in_flight = 0
         self.raise_once: Exception | None = None
+        # Root span ids asked for by each multi-id batch query, in query order.
+        self.batch_queries: list[list[str]] = []
+        self.batch_cursors_received: list[str | None] = []
+        # Rows returned per batch query page. None answers a batch query in
+        # one page regardless of its size.
+        self.batch_page_size: int | None = None
+        self._batch_rows_by_filter: dict[str, list[dict[str, Any]]] = {}
 
     def start_span(self, *, name: str) -> Any:
         if self.no_active_logger:
@@ -232,6 +249,43 @@ class FakeBraintrust:
                     root_span_id, metadata = entry, {}
                 rows.append({"root_span_id": root_span_id, "metadata": metadata})
             return _FakeResponse(rows, cursor=cursor)
+        batch_match = _BATCH_QUERY_PATTERN.fullmatch(json["query"])
+        if batch_match is not None:
+            assert batch_match["project_id"] == self.project_id
+            cache_key = batch_match["filter"]
+            cursor = batch_match["cursor"]
+            self.batch_cursors_received.append(cursor)
+            if cursor is None:
+                if self.raise_once is not None:
+                    error = self.raise_once
+                    self.raise_once = None
+                    return _FakeResponse([], error=error)
+                root_span_ids = _ROOT_SPAN_ID_TERM.findall(cache_key)
+                self.batch_queries.append(root_span_ids)
+                self.requested.extend(root_span_ids)
+                self.events.append("batch")
+                rows = []
+                for root_span_id in root_span_ids:
+                    builder = self.rows_builders_by_root_span_id.get(root_span_id)
+                    if builder is None:
+                        assert self.rows_builders, "unexpected BTQL batch query"
+                        builder = self.rows_builders.pop(0)
+                    rows.extend(builder(root_span_id))
+                self._batch_rows_by_filter[cache_key] = rows
+                offset = 0
+            else:
+                assert cache_key in self._batch_rows_by_filter, (
+                    "unexpected BTQL batch cursor"
+                )
+                offset = int(cursor)
+            all_rows = self._batch_rows_by_filter[cache_key]
+            page_size = self.batch_page_size or len(all_rows)
+            page = all_rows[offset : offset + page_size]
+            next_offset = offset + page_size
+            if next_offset < len(all_rows):
+                return _FakeResponse(page, cursor=str(next_offset))
+            del self._batch_rows_by_filter[cache_key]
+            return _FakeResponse(page)
         match = _QUERY_PATTERN.fullmatch(json["query"])
         assert match is not None, f"unexpected BTQL query: {json['query']}"
         assert match["project_id"] == self.project_id

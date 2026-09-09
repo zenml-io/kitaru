@@ -37,6 +37,9 @@ _POLL_INTERVAL = 2.0
 # The SDK pages in batches of at most 100, but limit caps the total returned.
 # Use the largest representable list size so its cursor pagination runs to the end.
 _SPAN_LIMIT = sys.maxsize
+# get_spans places trace_ids on the query string with no documented cap, so
+# this only bounds request URL size and per-batch result volume.
+_TRACES_PER_BATCH = 25
 
 
 def _parse_retry_after(value: str | None) -> float:
@@ -229,30 +232,79 @@ async def _list_root_trace_ids(
     return sorted(starts, key=lambda trace_id: (starts[trace_id], trace_id))
 
 
-async def _fetch_trace_payload(
-    trace_id: str, project: str, client: AsyncClient
-) -> bytes | None:
-    """Fetch one trace's spans and serialize them into a parser payload.
+def _chunk_trace_ids(trace_ids: list[str]) -> list[list[str]]:
+    """Split trace ids into ordered batches of at most _TRACES_PER_BATCH.
 
     Args:
-        trace_id: Phoenix trace id.
+        trace_ids: Trace ids in listing order.
+
+    Returns:
+        Batches in listing order.
+    """
+    return [
+        trace_ids[index : index + _TRACES_PER_BATCH]
+        for index in range(0, len(trace_ids), _TRACES_PER_BATCH)
+    ]
+
+
+async def _fetch_batch_spans(
+    batch: list[str], project: str, client: AsyncClient
+) -> list[Any]:
+    """Fetch the spans of a batch of traces once from the Phoenix span API.
+
+    Args:
+        batch: Batch of Phoenix trace ids.
         project: Phoenix project identifier.
         client: Phoenix client.
 
     Returns:
-        Trace payload bytes, or None when the trace has no spans.
+        Fetched spans of every batch trace.
     """
-    spans = await fetch_spans(trace_id, project, client)
-    return serialize_spans(spans, project=project) if spans else None
+    return await retry_rate_limited(
+        functools.partial(
+            client.spans.get_spans,
+            project_identifier=project,
+            trace_ids=batch,
+            limit=_SPAN_LIMIT,
+        ),
+        _get_retry_after,
+    )
+
+
+async def _fetch_batch_payload(
+    batch: list[str], project: str, client: AsyncClient
+) -> bytes | None:
+    """Fetch one batch of traces and serialize them into a parser payload.
+
+    Args:
+        batch: Batch of Phoenix trace ids, in listing order.
+        project: Phoenix project identifier.
+        client: Phoenix client.
+
+    Returns:
+        Trace payload bytes covering every batch trace with spans, ordered
+        to match the batch, or None when no batch trace has spans.
+    """
+    spans = await _fetch_batch_spans(batch, project, client)
+    by_trace: dict[str, list[Any]] = {}
+    for span in spans:
+        by_trace.setdefault(span["context"]["trace_id"], []).append(span)
+    # Reorder to the batch's listing order, since get_spans does not
+    # guarantee the returned spans follow the requested trace id order.
+    ordered = [span for trace_id in batch for span in by_trace.get(trace_id, [])]
+    return serialize_spans(ordered, project=project) if ordered else None
 
 
 async def fetch(query: dict[str, Any]) -> AsyncGenerator[bytes, None]:
-    """Fetch one parser payload per matching trace, oldest trace first.
+    """Fetch one parser payload per batch of matching traces, oldest first.
 
-    Traces are fetched concurrently, up to the query's concurrency, and
-    yielded back in listing order. A request that hits the Phoenix rate
-    limit waits out the reported delay and retries instead of failing the
-    fetch.
+    Trace ids are chunked into batches of at most _TRACES_PER_BATCH and each
+    batch is fetched with a single get_spans call covering every id in the
+    batch. Batches are fetched concurrently,
+    up to the query's concurrency, and yielded back in listing order, each
+    payload holding every fetched trace of its batch so the parser still
+    sees one session per trace. A request that hits the Phoenix rate limit
+    waits out the reported delay and retries instead of failing the fetch.
 
     Args:
         query: Fetch query with `project`, `trace_ids`, `since`, and `until`
@@ -262,8 +314,8 @@ async def fetch(query: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         ValueError: The query is invalid.
 
     Yields:
-        One payload per fetched trace, oldest first, skipping a trace whose
-        spans are empty.
+        One payload per fetched batch, oldest first, skipping a batch whose
+        traces have no spans.
     """
     parsed = PhoenixImportQuery.model_validate(query)
     client = AsyncClient()
@@ -277,10 +329,12 @@ async def fetch(query: dict[str, Any]) -> AsyncGenerator[bytes, None]:
         since, until = parsed.get_window()
         trace_ids = await _list_root_trace_ids(client, project, since, until)
 
+    batches = _chunk_trace_ids(trace_ids)
+
     # Close the stream explicitly so an early stop cancels in-flight fetches.
     async with aclosing(
         stream_bounded(
-            (_fetch_trace_payload(trace_id, project, client) for trace_id in trace_ids),
+            (_fetch_batch_payload(batch, project, client) for batch in batches),
             parsed.concurrency,
         )
     ) as payloads:

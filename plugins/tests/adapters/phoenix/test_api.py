@@ -31,21 +31,20 @@ from ..fetch_helpers import collect_payloads
 from .fixtures import PROJECT, FakePhoenix, build_complete_spans, build_span
 
 
-async def test_trace_ids_fetches_exactly_those_traces_in_order(
+async def test_trace_ids_fetches_exactly_those_traces_in_one_batch_call(
     fake_phoenix: FakePhoenix,
 ) -> None:
-    """Fetch the requested traces, skip the time window, and preserve order."""
+    """Fetch the requested traces in one get_spans call, skip the time window."""
     fake_phoenix.span_builders = [build_complete_spans, build_complete_spans]
 
     payloads = await collect_payloads(fetch({"trace_ids": ["trace-b", "trace-a"]}))
 
-    assert fake_phoenix.requested == ["trace-b", "trace-a"]
+    assert fake_phoenix.batches == [["trace-b", "trace-a"]]
     assert not fake_phoenix.list_windows
-    assert len(payloads) == 2
+    assert len(payloads) == 1
     sessions = [
         session
-        for payload in payloads
-        for session in parse(payload, {})
+        for session in parse(payloads[0], {})
         if isinstance(session, ImportedSession)
     ]
     assert [session.external_id for session in sessions] == [
@@ -68,10 +67,13 @@ async def test_importer_fetch_matches_api_fetch(fake_phoenix: FakePhoenix) -> No
     assert actual == expected
 
 
-async def test_fetch_bounds_concurrency_and_preserves_order(
-    fake_phoenix: FakePhoenix,
+async def test_fetch_bounds_concurrency_across_batches_and_preserves_order(
+    fake_phoenix: FakePhoenix, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Fetch at most the configured concurrency of traces at once, oldest first."""
+    """Fetch at most the configured concurrency of batches at once, oldest first."""
+    # One trace per batch turns each fetch into its own concurrency slot,
+    # so the scrambled delays below exercise the same bound across batches.
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 1)
     trace_ids = ["trace-1", "trace-2", "trace-3", "trace-4"]
     fake_phoenix.span_builders = [build_complete_spans] * len(trace_ids)
     # Delays scramble completion order relative to submission order, so the
@@ -82,6 +84,7 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
     payloads = await collect_payloads(fetch({"trace_ids": trace_ids, "concurrency": 2}))
 
     assert fake_phoenix.peak_in_flight <= 2
+    assert fake_phoenix.batches == [[trace_id] for trace_id in trace_ids]
     assert len(payloads) == 4
     sessions = [
         session
@@ -156,23 +159,26 @@ async def test_fetch_preserves_more_than_1000_spans_with_real_sdk_pagination(
             )
             assert trace_ids == [span["context"]["trace_id"] for span in spans]
         else:
-            fetched = await api_module.fetch_spans("trace-1", PROJECT, client)
+            # Fetch through the same multi-id-capable call fetch() uses for a
+            # batch, to prove it still paginates fully with a real server.
+            fetched = await api_module._fetch_batch_spans(["trace-1"], PROJECT, client)
             assert {span["context"]["span_id"] for span in fetched} == {
                 span["context"]["span_id"] for span in spans
             }
     assert cursors == [None, *map(str, range(100, 1005, 100))]
 
 
-async def test_time_window_fetch_yields_one_payload_per_trace_oldest_first(
-    fake_phoenix: FakePhoenix,
+async def test_time_window_fetch_batches_traces_and_preserves_oldest_first_order(
+    fake_phoenix: FakePhoenix, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Yield one payload per trace in oldest-first listing order.
+    """Yield one payload per batch of _TRACES_PER_BATCH traces, oldest first.
 
     get_spans has no ordering parameter, and pages can surface root spans
     out of start-time order, so the fetch must sort collected root spans
-    itself before fetching each trace. Each fetched trace parses into
-    exactly its own session.
+    itself before chunking them into batches. Each batch parses into one
+    session per trace, in listing order.
     """
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 2)
     fake_phoenix.list_pages = [
         [
             build_span(
@@ -207,8 +213,8 @@ async def test_time_window_fetch_yields_one_payload_per_trace_oldest_first(
         )
     )
 
-    assert fake_phoenix.requested == ["trace-c", "trace-a", "trace-b"]
-    assert len(payloads) == 3
+    assert fake_phoenix.batches == [["trace-c", "trace-a"], ["trace-b"]]
+    assert len(payloads) == 2
     sessions_per_payload = [
         [
             session
@@ -217,11 +223,40 @@ async def test_time_window_fetch_yields_one_payload_per_trace_oldest_first(
         ]
         for payload in payloads
     ]
-    assert [len(sessions) for sessions in sessions_per_payload] == [1, 1, 1]
-    assert [sessions[0].external_id for sessions in sessions_per_payload] == [
+    assert [len(sessions) for sessions in sessions_per_payload] == [2, 1]
+    assert [
+        session.external_id for sessions in sessions_per_payload for session in sessions
+    ] == [
         f"{PROJECT}:trace-c",
         f"{PROJECT}:trace-a",
         f"{PROJECT}:trace-b",
+    ]
+
+
+async def test_trace_ids_mode_chunks_into_batches_of_the_configured_size(
+    fake_phoenix: FakePhoenix, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Chunk a `trace_ids` query the same way as a time window."""
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 2)
+    trace_ids = ["trace-1", "trace-2", "trace-3", "trace-4", "trace-5"]
+    fake_phoenix.span_builders = [build_complete_spans] * len(trace_ids)
+
+    payloads = await collect_payloads(fetch({"trace_ids": trace_ids}))
+
+    assert fake_phoenix.batches == [
+        ["trace-1", "trace-2"],
+        ["trace-3", "trace-4"],
+        ["trace-5"],
+    ]
+    assert len(payloads) == 3
+    sessions = [
+        session
+        for payload in payloads
+        for session in parse(payload, {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [session.external_id for session in sessions] == [
+        f"{PROJECT}:{trace_id}" for trace_id in trace_ids
     ]
 
 
@@ -260,10 +295,10 @@ async def test_empty_listing_yields_nothing(fake_phoenix: FakePhoenix) -> None:
     assert fake_phoenix.requested == []
 
 
-async def test_trace_with_no_spans_yields_no_payload_for_that_trace(
+async def test_trace_with_no_spans_in_a_batch_does_not_break_its_neighbors(
     fake_phoenix: FakePhoenix,
 ) -> None:
-    """Skip the payload for a trace whose spans come back empty, keep its neighbors."""
+    """Drop only the empty trace from a batch payload, keep its neighbors."""
     fake_phoenix.span_builders = [
         build_complete_spans,
         lambda trace_id: [],
@@ -274,18 +309,27 @@ async def test_trace_with_no_spans_yields_no_payload_for_that_trace(
         fetch({"trace_ids": ["trace-1", "trace-2", "trace-3"]})
     )
 
-    assert fake_phoenix.requested == ["trace-1", "trace-2", "trace-3"]
-    assert len(payloads) == 2
+    assert fake_phoenix.batches == [["trace-1", "trace-2", "trace-3"]]
+    assert len(payloads) == 1
     sessions = [
         session
-        for payload in payloads
-        for session in parse(payload, {})
+        for session in parse(payloads[0], {})
         if isinstance(session, ImportedSession)
     ]
     assert [session.external_id for session in sessions] == [
         f"{PROJECT}:trace-1",
         f"{PROJECT}:trace-3",
     ]
+
+
+async def test_empty_batch_yields_no_payload(fake_phoenix: FakePhoenix) -> None:
+    """Yield nothing for a batch whose traces all come back without spans."""
+    fake_phoenix.span_builders = [lambda trace_id: [], lambda trace_id: []]
+
+    payloads = await collect_payloads(fetch({"trace_ids": ["trace-1", "trace-2"]}))
+
+    assert fake_phoenix.batches == [["trace-1", "trace-2"]]
+    assert payloads == []
 
 
 async def test_validation_errors(fake_phoenix: FakePhoenix) -> None:
