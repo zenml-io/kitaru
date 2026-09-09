@@ -56,22 +56,22 @@ from kitaru_post_import_insights.profiling import (
 )
 
 _CTA_LABELS = {
-    "failed-identical-retries": "Copy tool retry prompt",
-    "short-tool-cycles": "Copy tool cycle prompt",
-    "adjacent-same-tool-failures": "Copy repeated tool failure prompt",
-    "adjacent-identical-calls": "Copy repeated tool call prompt",
-    "tool-error-mix": "Copy tool error prompt",
-    "correction-language": "Copy correction language prompt",
-    "empty-tool-results": "Copy empty tool result prompt",
-    "repeated-punctuation": "Copy repeated punctuation prompt",
-    "mostly-uppercase-messages": "Copy uppercase message prompt",
-    "possible-profanity": "Copy profanity marker prompt",
-    "session-outcomes": "Copy session status prompt",
-    "tool-call-distribution": "Copy tool call count prompt",
-    "model-call-distribution": "Copy model call count prompt",
-    "total-activity-distribution": "Copy recorded activity prompt",
-    "recorded-duration-distribution": "Copy session duration prompt",
-    "model-mix": "Copy model mix prompt",
+    "failed-identical-retries": "Investigate tool retries",
+    "short-tool-cycles": "Investigate tool cycles",
+    "adjacent-same-tool-failures": "Investigate repeated tool failures",
+    "adjacent-identical-calls": "Investigate repeated tool calls",
+    "tool-error-mix": "Investigate tool errors",
+    "correction-language": "Investigate correction language",
+    "empty-tool-results": "Investigate empty tool results",
+    "repeated-punctuation": "Investigate repeated punctuation",
+    "mostly-uppercase-messages": "Investigate uppercase messages",
+    "possible-profanity": "Investigate profanity markers",
+    "session-outcomes": "Investigate session outcomes",
+    "tool-call-distribution": "Investigate tool call counts",
+    "model-call-distribution": "Investigate model call counts",
+    "total-activity-distribution": "Investigate recorded activity",
+    "recorded-duration-distribution": "Investigate session duration",
+    "model-mix": "Investigate model mix",
 }
 
 PROMPT_VERSION = "2026-09-09.1"
