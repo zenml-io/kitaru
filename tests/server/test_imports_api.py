@@ -16,56 +16,107 @@
 import json
 import uuid
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
 import pytest
 
 from conftest import (
+    FakeEphemeralWorkers,
     JobAndTaskServices,
     build_job_and_task_services,
     create_agent,
     create_blob,
+    create_connection,
     create_plugin,
     override_idempotency,
 )
+from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    get_auth_service,
+    get_ephemeral_workers,
     get_import_service,
+    get_job_service,
     get_task_service,
+    get_worker_service,
 )
 from kitaru.server.api.app import create_app
+from kitaru.server.api.bootstrap import register_default_plugins
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.models.worker import WorkerFilter
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import ImportTask
+from kitaru.server.ephemeral_worker_settings import (
+    EphemeralWorkerBackend,
+    EphemeralWorkerSettings,
+    ModalEphemeralWorkerSettings,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 
 @pytest.fixture
-def services() -> JobAndTaskServices:
+async def services() -> JobAndTaskServices:
     """Provide fake-backed job, task, and import services."""
-    return build_job_and_task_services()
+    services = build_job_and_task_services()
+    await register_default_plugins(services.plugins)
+    return services
 
 
 @pytest.fixture
-async def client(
+def ephemeral_workers() -> FakeEphemeralWorkers:
+    """Provide a fake ephemeral worker backend recording starts."""
+    return FakeEphemeralWorkers()
+
+
+def _settings(**overrides: Any) -> APISettings:
+    """Build API settings for the test app."""
+    return APISettings(
+        DB_HOST="localhost",
+        SECRET_ENCRYPTION_KEY="test-encryption-key",
+        JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        **overrides,
+    )
+
+
+def _ephemeral_settings() -> APISettings:
+    """Build API settings with a Modal ephemeral worker backend configured."""
+    return _settings(
+        SERVER_URL="https://kitaru.example.com",
+        EPHEMERAL_WORKER=EphemeralWorkerSettings(
+            backend=EphemeralWorkerBackend.MODAL,
+            image="zenmldocker/kitaru-worker:1.0.0",
+            modal=ModalEphemeralWorkerSettings(
+                token_id="ak-test", token_secret="as-test"
+            ),
+        ),
+    )
+
+
+@asynccontextmanager
+async def _client(
     services: JobAndTaskServices,
+    auth_service: AuthService,
+    settings: APISettings,
+    ephemeral_workers: FakeEphemeralWorkers | None = None,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed import services."""
-    app = create_app(
-        APISettings(
-            DB_HOST="localhost",
-            SECRET_ENCRYPTION_KEY="test-encryption-key",
-            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
-        )
-    )
+    app = create_app(settings)
     app.dependency_overrides[get_import_service] = lambda: services.import_service
     app.dependency_overrides[get_task_service] = lambda: services.task_service
+    app.dependency_overrides[get_job_service] = lambda: services.job_service
+    app.dependency_overrides[get_worker_service] = lambda: WorkerService(
+        repository=services.workers, liveness_timeout_seconds=60
+    )
+    app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_ephemeral_workers] = lambda: ephemeral_workers
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
@@ -73,10 +124,44 @@ async def client(
         yield client
 
 
+@pytest.fixture
+async def client(
+    services: JobAndTaskServices, auth_service: AuthService
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app without an ephemeral worker backend."""
+    async with _client(services, auth_service, _settings()) as client:
+        yield client
+
+
+@pytest.fixture
+async def ephemeral_client(
+    services: JobAndTaskServices,
+    auth_service: AuthService,
+    ephemeral_workers: FakeEphemeralWorkers,
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app with a fake ephemeral worker backend."""
+    async with _client(
+        services, auth_service, _ephemeral_settings(), ephemeral_workers
+    ) as client:
+        yield client
+
+
 async def _importer_version(services: JobAndTaskServices) -> PluginVersion:
     """Register the csv importer with one version."""
     plugin = await create_plugin(
         services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
+    )
+    return await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        display_version=None,
+    )
+
+
+async def _builtin_importer_version(services: JobAndTaskServices) -> PluginVersion:
+    """Register the reserved namespace csv importer with one version."""
+    plugin = await create_plugin(
+        services.plugins, None, PluginKind.IMPORTER, name="kitaru/csv"
     )
     return await services.plugins.create_version(
         plugin.id,
@@ -99,6 +184,18 @@ async def _evaluator_version(
     return await services.plugins.create_version(
         plugin.id,
         ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="score"),
+        display_version=None,
+    )
+
+
+async def _analyzer_version(services: JobAndTaskServices, name: str) -> PluginVersion:
+    """Register an analyzer with one version."""
+    plugin = await create_plugin(
+        services.plugins, ACCOUNT.id, PluginKind.ANALYZER, name=name
+    )
+    return await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="analyze"),
         display_version=None,
     )
 
@@ -137,9 +234,10 @@ async def test_create_import(
     assert created["agent_id"] == body["agent_id"]
     assert created["agent_version_id"] is None
     assert created["importer_version_id"] == str(version.id)
-    assert created["payload_blob_id"] == body["payload_blob_id"]
+    assert created["source"] == {"type": "blob", "blob_id": body["payload_blob_id"]}
     assert created["params"] == body["params"]
     assert created["evaluators"] == []
+    assert created["analyzers"] == []
     assert created["stats"] is None
     assert created["error"] is None
 
@@ -154,6 +252,236 @@ async def test_create_import(
     assert task.kind.value == "importer"
     assert task.import_id == uuid.UUID(created["id"])
     assert task.labels == {}
+
+
+async def test_create_import_starts_an_ephemeral_worker(
+    ephemeral_client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+) -> None:
+    """Start a worker pinned to the import's job after the response."""
+    await _builtin_importer_version(services)
+    body = await _import_request(services, importer="kitaru/csv")
+
+    response = await ephemeral_client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+
+    assert len(ephemeral_workers.starts) == 1
+    spec = ephemeral_workers.starts[0]
+    assert spec.job_id == uuid.UUID(created["job_id"])
+    worker = await services.workers.get(spec.worker_id)
+    assert worker.scope.job_id == spec.job_id
+    assert worker.metadata == {"ephemeral": "true"}
+
+
+async def test_create_import_skips_the_ephemeral_worker_for_a_user_importer(
+    ephemeral_client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+) -> None:
+    """Leave a job for a user importer to the account's own workers."""
+    await _importer_version(services)
+    body = await _import_request(services)
+
+    response = await ephemeral_client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+
+    assert ephemeral_workers.starts == []
+    workers, _ = await services.workers.query(WorkerFilter(), None)
+    assert workers == []
+
+
+async def test_create_import_registers_no_worker_without_a_backend(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Register no worker when no ephemeral worker backend is configured."""
+    await _builtin_importer_version(services)
+    body = await _import_request(services, importer="kitaru/csv")
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+
+    workers, _ = await services.workers.query(WorkerFilter(), None)
+    assert workers == []
+
+
+async def test_create_api_import(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Create an import that fetches from the provider API."""
+    plugin = await create_plugin(
+        services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        display_version=None,
+    )
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {"type": "api", "query": {"since": "2026-08-01T00:00:00Z"}},
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["source"] == {
+        "type": "api",
+        "query": {
+            "trace_ids": None,
+            "since": "2026-08-01T00:00:00Z",
+            "until": None,
+            "concurrency": 4,
+        },
+        "connection_id": None,
+    }
+
+
+async def test_create_api_import_rejects_a_naive_since(
+    client: httpx.AsyncClient,
+) -> None:
+    """A naive since fails validation before an import is created."""
+    body = {
+        "importer": "csv",
+        "agent_id": str(uuid.uuid4()),
+        "source": {"type": "api", "query": {"since": "2026-08-01T00:00:00"}},
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_api_import_round_trips_provider_extras(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """A provider-specific query key survives the round trip through the response."""
+    plugin = await create_plugin(
+        services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        display_version=None,
+    )
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {
+            "type": "api",
+            "query": {"trace_ids": ["t1"], "project_id": "proj-1"},
+        },
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["source"]["query"]["project_id"] == "proj-1"
+
+
+async def test_create_api_import_with_a_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """An API source naming a connection records it on the import."""
+    await _importer_version(services)
+    connection = await create_connection(
+        services.connections, ACCOUNT.id, secret_id=uuid.uuid4()
+    )
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {
+            "type": "api",
+            "query": {"trace_ids": ["t1"]},
+            "connection_id": str(connection.id),
+        },
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    assert response.json()["connection_id"] == str(connection.id)
+
+
+async def test_create_api_import_with_an_unknown_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """An API source naming a missing connection is rejected with HTTP 404."""
+    await _importer_version(services)
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    missing_id = uuid.uuid4()
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {
+            "type": "api",
+            "query": {"trace_ids": ["t1"]},
+            "connection_id": str(missing_id),
+        },
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 404
+    assert response.json() == {"detail": f"Connection {missing_id} was not found"}
+
+
+async def test_create_blob_import_carries_no_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """A blob source cannot name a connection and records none."""
+    await _importer_version(services)
+    body = await _import_request(services)
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    assert response.json()["connection_id"] is None
+
+
+async def test_blob_import_source_rejects_a_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """A blob source carries no connection_id field."""
+    await _importer_version(services)
+    body = await _import_request(services)
+    body["source"] = {
+        "type": "blob",
+        "blob_id": body.pop("payload_blob_id"),
+        "connection_id": str(uuid.uuid4()),
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_import_accepts_the_deprecated_payload_blob_id(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """The deprecated payload_blob_id maps to a blob source."""
+    await _importer_version(services)
+    body = await _import_request(services)
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    assert response.json()["source"] == {
+        "type": "blob",
+        "blob_id": body["payload_blob_id"],
+    }
+
+
+async def test_create_import_rejects_both_sources(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Setting source and payload_blob_id together is rejected."""
+    await _importer_version(services)
+    body = await _import_request(
+        services, source={"type": "api", "query": {"trace_ids": ["t1"]}}
+    )
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
 
 
 async def test_create_import_with_evaluators(
@@ -209,6 +537,53 @@ async def test_create_import_rejects_duplicate_evaluator_versions(
         evaluators=[
             {"evaluator": "accuracy"},
             {"evaluator": "accuracy", "version": 1},
+        ],
+    )
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_import_with_analyzers(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Create an import carrying resolved analyzers and no outcome yet."""
+    await _importer_version(services)
+    await _analyzer_version(services, "trends")
+    body = await _import_request(
+        services, analyzers=[{"analyzer": "trends", "params": {"k": 1}}]
+    )
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["analyzers"] == [
+        {"analyzer": "trends", "version": 1, "params": {"k": 1}, "connection_id": None}
+    ]
+    assert created["stats"] is None
+    assert created["error"] is None
+
+
+async def test_create_import_not_found_for_unknown_analyzer(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 404 for an analyzer that does not exist."""
+    await _importer_version(services)
+    body = await _import_request(services, analyzers=[{"analyzer": "does-not-exist"}])
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 404
+
+
+async def test_create_import_rejects_duplicate_analyzer_versions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 422 when two analyzer configs resolve to one version."""
+    await _importer_version(services)
+    await _analyzer_version(services, "trends")
+    body = await _import_request(
+        services,
+        analyzers=[
+            {"analyzer": "trends"},
+            {"analyzer": "trends", "version": 1},
         ],
     )
     response = await client.post("/api/v1/imports", json=body)

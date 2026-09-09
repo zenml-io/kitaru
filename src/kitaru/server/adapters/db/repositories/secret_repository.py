@@ -15,7 +15,7 @@
 
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from pydantic import SecretStr
 from sqlalchemy import select
@@ -25,6 +25,9 @@ from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.agent_version_secret import (
     AGENT_VERSION_SECRET_SECRET_ID_FOREIGN_KEY,
+)
+from kitaru.server.adapters.db.orm.connection import (
+    CONNECTION_SECRET_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.orm.secret import (
     SECRET_NAME_UNIQUE_CONSTRAINT,
@@ -131,6 +134,23 @@ class SQLSecretRepository(BaseSQLRepository[SecretORM]):
         row = await self._get_row(secret_id)
         return row.to_domain(self._decrypt_values(row.values_encrypted))
 
+    async def get_many(
+        self, secret_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Secret]:
+        """Bulk-load secrets by id, keyed by id, missing ids omitted.
+
+        Args:
+            secret_ids: Ids of the secrets to load.
+
+        Returns:
+            Stored secrets keyed by id.
+        """
+        rows = await self._load_by_ids(list(secret_ids))
+        return {
+            secret_id: row.to_domain(self._decrypt_values(row.values_encrypted))
+            for secret_id, row in rows.items()
+        }
+
     async def query(
         self, secret_filter: SecretFilter
     ) -> tuple[list[Secret], str | None]:
@@ -195,13 +215,15 @@ class SQLSecretRepository(BaseSQLRepository[SecretORM]):
 
         Raises:
             SecretNotFound: No secret has this id.
-            SecretInUse: The secret is referenced by an agent version.
+            SecretInUse: The secret is referenced by an agent version or a
+                connection.
         """
         await self._delete_row(
             secret_id,
             {
                 AGENT_VERSION_SECRET_SECRET_ID_FOREIGN_KEY: lambda: SecretInUse(
                     secret_id
-                )
+                ),
+                CONNECTION_SECRET_ID_FOREIGN_KEY: lambda: SecretInUse(secret_id),
             },
         )

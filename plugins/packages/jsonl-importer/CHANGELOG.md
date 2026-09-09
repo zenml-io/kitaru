@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Remove the importer payload size cap. Uploads are bounded by the server blob limit only.
+
 ## 0.1.1
 
 - Isolate numeric validation, deeply nested JSON, and invalid Unicode failures per line while retaining flat indexed node support.

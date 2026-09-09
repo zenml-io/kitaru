@@ -262,11 +262,7 @@ Include:
 
 Stop after the PR unless the user explicitly asks to publish.
 
-After the PR merges, verify its exact merge commit. Prefer `HEAD` in emitted tag commands when the selected branch points to that commit; otherwise fill in the literal reviewed SHA. Keep discovery commands out of the user-facing publication block.
-
-Emit the complete minimal, git-only publication command handoff in the PR and final response, using [publication-handoff.md](references/publication-handoff.md). Group commands by repository and source branch. Include every selected Python plugin, the TypeScript release set when selected, any new frontend release, manual `main` promotion, and the Kitaru skills release handoff. Use accepted versions and exact reviewed commits; do not leave a selected plugin as “repeat for the other plugins.” Do not execute publication commands during preparation.
-
-Push every release tag in its own `git push origin <tag>` command. GitHub does not create push events when more than three tags are pushed at once, which leaves immutable tags without release workflow runs. Do not batch release tags into one push, even when several point to the same commit. After each push, confirm the matching workflow run exists before pushing the next tag.
+After the PR merges, verify its exact merge commit, then emit the publication command handoff in the PR and final response exactly as [publication-handoff.md](references/publication-handoff.md) specifies: grouped by repository and source branch, covering every selected Python plugin, the TypeScript release set when selected, any new frontend release, manual `main` promotion, and the Kitaru skills release handoff. Do not execute publication commands during preparation.
 
 ## Rehearse before publication
 
@@ -338,17 +334,7 @@ Verify each published surface independently. Report core PyPI availability, publ
 
 After the required core and plugin versions are available on PyPI, complete any pending quickstart dependency refresh through a reviewed follow-up PR and rerun its frozen end-to-end test. Report which branch contains that update: the public README links to `main`, and merging a follow-up into `develop` alone does not update the public example. The development-reset PR does not currently refresh the quickstart lockfile.
 
-The workflow does not update `main`. After the newest stable core's public artifacts and GitHub Release succeed, inspect any remaining workflow failure and tell the release owner to fast-forward `main` to the immutable core tag:
-
-Verify the local and remote `main` branches can fast-forward to the tag before emitting:
-
-```bash
-git checkout main
-git merge --ff-only python/kitaru/v<python-version>
-git push origin main
-```
-
-The release owner runs these commands manually. Do not execute it on their behalf. The fast-forward updates `main` to the tagged commit without a merge commit and triggers the existing docs workflow. Skip this step for prereleases and older maintenance-line core releases.
+The workflow does not update `main`. After the newest stable core's public artifacts and GitHub Release succeed, inspect any remaining workflow failure and emit the `main` fast-forward block from [publication-handoff.md](references/publication-handoff.md) for the release owner to run. Do not execute it on their behalf. The fast-forward triggers the existing docs workflow. Skip this step for prereleases and older maintenance-line core releases.
 
 After core and required plugins are available, hand off pending `zenml-io/kitaru-skills` changes to its [skills-release skill](https://github.com/zenml-io/kitaru-skills/blob/develop/.claude/skills/skills-release/SKILL.md). Read the current skill before emitting that repository's commands. It owns the independent skills version, `develop` release commit, tag, `main` promotion, and GitHub Release. Core publication does not itself authorize publishing skills.
 

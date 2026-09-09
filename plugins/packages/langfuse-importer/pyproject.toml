@@ -27,8 +27,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-adapter = [
+api = [
     "langfuse>=4.14,<5",
+]
+adapter = [
+    "kitaru-langfuse-importer[api]",
 ]
 
 [project.urls]

@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Annotated, NamedTuple
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kitaru.analytics.client import AnalyticsClient
@@ -54,6 +54,9 @@ from kitaru.server.adapters.db.repositories.cohort_repository import (
 )
 from kitaru.server.adapters.db.repositories.cohort_version_repository import (
     SQLCohortVersionRepository,
+)
+from kitaru.server.adapters.db.repositories.connection_repository import (
+    SQLConnectionRepository,
 )
 from kitaru.server.adapters.db.repositories.device_repository import (
     SQLDeviceRepository,
@@ -102,6 +105,7 @@ from kitaru.server.adapters.db.repositories.worker_repository import (
 )
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.permissions.allow_all import AllowAllPermissionProvider
+from kitaru.server.adapters.rest.ephemeral_workers import EphemeralWorkerStarter
 from kitaru.server.adapters.rest.request_state import (
     attach_request_session,
     request_uses_read_engine,
@@ -137,6 +141,9 @@ from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.cohort_service import CohortService
 from kitaru.server.application.services.cohort_version_service import (
     CohortVersionService,
+)
+from kitaru.server.application.services.connection_service import (
+    ConnectionService,
 )
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.application.services.evaluation_service import EvaluationService
@@ -423,6 +430,27 @@ def get_secret_service(
     )
 
 
+def get_connection_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> ConnectionService:
+    """Return a connection service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Connection service bound to the SQL repositories.
+    """
+    return ConnectionService(
+        repository=SQLConnectionRepository(session),
+        secret_repository=SQLSecretRepository(
+            session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
+        ),
+    )
+
+
 def get_blob_data_stores(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -546,6 +574,27 @@ def get_importer_service(
     )
 
 
+def get_analyzer_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
+) -> PluginService:
+    """Return a plugin service bound to the analyzer kind.
+
+    Args:
+        session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
+
+    Returns:
+        Plugin service bound to the SQL repositories.
+    """
+    return PluginService(
+        kind=PluginKind.ANALYZER,
+        repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+        analytics=analytics,
+    )
+
+
 def get_session_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
@@ -589,6 +638,7 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
         sweep_batch_limit=settings.TASK_SWEEP_BATCH_LIMIT,
         evaluator_timeout_seconds=settings.EVALUATOR_TASK_TIMEOUT_SECONDS,
         importer_timeout_seconds=settings.IMPORTER_TASK_TIMEOUT_SECONDS,
+        analyzer_timeout_seconds=settings.ANALYZER_TASK_TIMEOUT_SECONDS,
         max_result_bytes=settings.MAX_TASK_RESULT_BYTES,
         evaluation_pair_limit=settings.EVALUATION_PAIR_LIMIT,
     )
@@ -664,6 +714,7 @@ def get_import_service(
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
         blob_repository=SQLBlobRepository(session),
+        connection_repository=SQLConnectionRepository(session),
     )
 
 
@@ -695,6 +746,7 @@ def get_task_service(
         ),
         replay_repository=replay_repository,
         import_repository=SQLImportRepository(session),
+        connection_repository=SQLConnectionRepository(session),
         policy=policy,
     )
     return TaskService(
@@ -1147,6 +1199,43 @@ def get_auth_service(
         password_hasher=BcryptPasswordHasher(),
         device_service=_build_device_service(auth_session, engine, settings),
         control_plane=control_plane,
+    )
+
+
+def get_ephemeral_worker_starter(
+    job_service: Annotated[JobService, Depends(get_job_service)],
+    worker_service: Annotated[WorkerService, Depends(get_worker_service)],
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+    ephemeral_workers: Annotated[
+        EphemeralWorkers | None, Depends(get_ephemeral_workers)
+    ],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+    server_id: Annotated[uuid.UUID | None, Depends(get_server_id_state)],
+    background_tasks: BackgroundTasks,
+) -> EphemeralWorkerStarter:
+    """Return an ephemeral worker starter for the current request.
+
+    Args:
+        job_service: Job service.
+        worker_service: Worker service.
+        auth_service: Authentication service for the current request.
+        ephemeral_workers: Ephemeral worker backend, None when none is
+            configured.
+        settings: API settings for this process.
+        server_id: Persisted server id, None before startup resolved it.
+        background_tasks: Tasks run after the response is sent.
+
+    Returns:
+        Starter bound to the request's services and background tasks.
+    """
+    return EphemeralWorkerStarter(
+        job_service=job_service,
+        worker_service=worker_service,
+        auth_service=auth_service,
+        ephemeral_workers=ephemeral_workers,
+        settings=settings,
+        server_id=server_id,
+        background_tasks=background_tasks,
     )
 
 

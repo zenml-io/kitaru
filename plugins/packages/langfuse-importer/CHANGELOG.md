@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Remove the importer payload size cap. Uploads are bounded by the server blob limit only.
+- Preserve observations outside the selection window when importing a trace that starts inside the window.
+
+- Fetch traces directly from the Langfuse API by trace id or time window, through the `api` extra.
+- Import traces oldest first and grouped by session, fixing later traces in a session being dropped as duplicates.
+- Fetch traces concurrently, bounded by the fetch query's `concurrency` key.
+- Read observations through the bulk observations endpoint instead of per-trace fetches, and wait out Langfuse rate limits during API imports.
+
 ## 0.2.0
 
 - Add the Langfuse importer-backed adapter, installed through the `adapter` extra.

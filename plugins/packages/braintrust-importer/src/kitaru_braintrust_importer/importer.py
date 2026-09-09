@@ -22,7 +22,7 @@ import json
 import math
 import re
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -39,7 +39,6 @@ from kitaru.task.importer import (
     ImportedSession,
 )
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _MAX_NESTED_DEPTH = 64
 _SESSION_FIELDS = (
     "session_id",
@@ -503,8 +502,6 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 def _parse_records(content: bytes) -> tuple[list[dict[str, Any]], bool]:
     """Parse Braintrust JSON, JSONL, or API fetch output."""
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise InvalidImport("Braintrust import exceeds the 50 MiB upload limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -836,7 +833,7 @@ class BraintrustProjectLogImporter:
                 continue
             grouped[(source_instance, session_id)].extend(rows)
 
-        for (source_instance, source_id), session_records in sorted(grouped.items()):
+        for (source_instance, source_id), session_records in grouped.items():
             try:
                 session = self._parse_session(
                     source_instance,
@@ -1138,6 +1135,16 @@ class BraintrustProjectLogImporter:
             framework=framework,
             nodes=_build_node_tree(nodes_with_parents),
         )
+
+    async def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
+        """Fetch parser payloads from the Braintrust API."""
+        from .api import fetch
+
+        async for payload in fetch(query):
+            yield payload
+
+
+importer = BraintrustProjectLogImporter()
 
 
 def parse(

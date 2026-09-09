@@ -25,6 +25,7 @@ class AnalyticsEvent(StrEnum):
     IMPORT_COMPLETED = "Import Completed"
     REPLAY_CREATED = "Replay Created"
     EVALUATION_COMPLETED = "Evaluation Completed"
+    ANALYSIS_COMPLETED = "Analysis Completed"
     EXPERIMENT_CREATED = "Experiment Created"
     EXPERIMENT_RUN_COMPLETED = "Experiment Run Completed"
     AGENT_CREATED = "Agent Created"

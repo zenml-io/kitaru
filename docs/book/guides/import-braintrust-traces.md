@@ -20,7 +20,7 @@ The importer is permissive about the container because Braintrust logs reach you
 - **A JSON object with an `events` array**, the shape the Braintrust API returns for a log fetch.
 - **A single JSON object**, treated as a one-event export.
 
-Payloads are capped at 50 MiB per import (the importer's own limit, separate from the server's configurable blob limit). Import in slices as often as you like; [dedup](#re-runs-skip-what-is-already-there) makes overlapping slices safe.
+Uploads are capped by the server's configurable blob limit. Import in slices as often as you like; [dedup](#re-runs-skip-what-is-already-there) makes overlapping slices safe.
 
 What matters is the fields on each record, not how you got the file. A full project-log export carries span identity, and that is what you want:
 
@@ -82,6 +82,31 @@ kitaru session list --agent support-agent --origin imported --imported-from brai
 | `join_on` | Dotted path or RFC 6901 JSON Pointer selecting the value that groups traces into one session. Defaults to the session id found in metadata. See [Grouping traces into sessions](#grouping-traces-into-sessions). |
 
 Pass them with `--params '{"source_instance": "my-braintrust-project"}'`, or use the dedicated `--join-on` flag, which accepts a JSON Pointer only (it must start with `/`) and cannot be combined with `join_on` inside `--params`.
+
+## 3. Or fetch from the Braintrust API
+
+Skip the export and upload, and let the import task fetch spans from Braintrust directly:
+
+```bash
+kitaru session import \
+  --importer kitaru/braintrust@latest \
+  --agent support-agent@latest \
+  --since 7d \
+  --query '{"project_id": "my-braintrust-project"}' \
+  --tag imported-baseline --wait
+```
+
+Omitting FILE and setting `--since` selects an API import: the worker calls the Braintrust API instead of parsing an uploaded payload. `--since` and `--until` accept an ISO 8601 timestamp or a relative duration (`7d`, `12h`, `30m`). `--trace-id` (repeatable) fetches exactly those root span ids instead of a time window. The same selection is a query object on the SDK and REST request:
+
+| Query key | Meaning |
+| --- | --- |
+| `project_id` | Braintrust project to fetch from. Required. |
+| `trace_ids` | Braintrust root span ids to fetch. When present, exactly those traces are fetched and the time window is ignored. |
+| `since` | Timezone-aware ISO 8601 datetime, lower bound of root span start time. Required when `trace_ids` is absent. |
+| `until` | Timezone-aware ISO 8601 datetime, upper bound of root span start time. Defaults to now. |
+| `concurrency` | Traces fetched at once. Defaults to 4. |
+
+The worker installs the package's `api` extra for an API import, which carries the provider client. A [connection](provider-connections.md) you name with `--connection`, or the provider's default connection, supplies `BRAINTRUST_API_KEY` and `BRAINTRUST_API_URL` for a self-hosted instance. Without either, the worker's own environment does, and only a worker started with `--selector kitaru/requires-credentials=braintrust` claims the task. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way.
 
 ## What a trace becomes
 

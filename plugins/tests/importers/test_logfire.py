@@ -23,7 +23,8 @@ from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession
-from kitaru_logfire_importer.importer import LogfireRecordsImporter
+from kitaru_logfire_importer.importer import LogfireRecordsImporter, importer
+from kitaru_logfire_importer.importer import parse as unified_parse
 
 
 def row(
@@ -75,6 +76,13 @@ def parse(
 def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
     """Flatten imported nodes depth-first."""
     return [node for root in nodes for node in (root, *flatten(root.children))]
+
+
+def test_importer_instance_parse_matches_module_parse() -> None:
+    """Yield the same sessions from the module-level instance as from parse."""
+    content = jsonl(row("root"))
+
+    assert list(importer.parse(content, {})) == list(unified_parse(content, {}))
 
 
 def test_maps_trace_corpus_genai_spans() -> None:
@@ -195,6 +203,25 @@ def test_keeps_same_named_sessions_from_projects_separate() -> None:
     ] == [
         "project-1:conversation-1",
         "project-2:conversation-1",
+    ]
+
+
+def test_emits_sessions_in_first_appearance_order() -> None:
+    """Emit sessions in payload order rather than sorted by grouping key."""
+    parsed = parse(
+        jsonl(
+            row("root-2", trace_id="trace-2", project_id="project-2"),
+            row("root-1", trace_id="trace-1", project_id="project-1"),
+        )
+    )
+
+    assert [
+        session.external_id
+        for session in parsed
+        if isinstance(session, ImportedSession)
+    ] == [
+        "project-2:conversation-1",
+        "project-1:conversation-1",
     ]
 
 

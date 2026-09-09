@@ -20,7 +20,7 @@
 import json
 import re
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -33,7 +33,6 @@ from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_PARENT_DEPTH = 64
 _DEFAULT_JOIN_PATHS = (
     "attributes.session.id",
@@ -163,8 +162,6 @@ def _decimal(value: Any) -> Decimal | None:
 
 def _parse_records(content: bytes) -> list[dict[str, Any]]:
     """Parse Logfire JSON, JSONL, or streaming NDJSON output."""
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise InvalidImport("Logfire import exceeds the 50 MiB upload limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -534,7 +531,10 @@ class LogfireRecordsImporter:
             if fallback:
                 fallback_sessions.add(key)
 
-        for (source_instance, session_id), session_traces in sorted(grouped.items()):
+        # Iterate grouped in insertion order, which follows the
+        # first-appearance order of records in the payload, so ingestion
+        # follows payload order rather than a sort of the group keys.
+        for (source_instance, session_id), session_traces in grouped.items():
             try:
                 session = self._parse_session(
                     source_instance,
@@ -843,6 +843,16 @@ class LogfireRecordsImporter:
             framework=_detect_framework(all_records, framework),
             nodes=node_tree,
         )
+
+    async def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
+        """Fetch parser payloads from the Logfire API."""
+        from .api import fetch
+
+        async for payload in fetch(query):
+            yield payload
+
+
+importer = LogfireRecordsImporter()
 
 
 def parse(

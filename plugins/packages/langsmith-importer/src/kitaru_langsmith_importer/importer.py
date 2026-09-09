@@ -20,7 +20,7 @@
 import json
 import re
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -36,7 +36,6 @@ from kitaru.task.importer import (
     ImportedSession,
 )
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _MAX_NESTED_DEPTH = 64
 _DEFAULT_JOIN_PATHS = (
     "extra.metadata.thread_id",
@@ -461,8 +460,6 @@ def _decimal(value: Any) -> Decimal | None:
 
 def _parse_records(content: bytes) -> list[dict[str, Any]]:
     """Parse JSON, JSONL, and LangSmith run-query envelopes."""
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise InvalidImport("LangSmith import exceeds the 50 MiB upload limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -827,7 +824,9 @@ class LangSmithRunImporter:
         )
         join_paths: dict[tuple[str, str], set[str]] = defaultdict(set)
         fallback_groups: set[tuple[str, str]] = set()
-        for trace_id, by_run_id in sorted(trace_records.items()):
+        # trace_records preserves the payload's run order, so iterating it
+        # directly groups traces in first-appearance order.
+        for trace_id, by_run_id in trace_records.items():
             rows = list(by_run_id.values())
             try:
                 if trace_id in duplicate_traces:
@@ -863,7 +862,9 @@ class LangSmithRunImporter:
                 )
 
         sessions: list[ImportedSession] = []
-        for key, traces in sorted(grouped.items()):
+        # grouped preserves the order each session key first appeared while
+        # grouping traces, so ingestion follows payload order.
+        for key, traces in grouped.items():
             try:
                 session = self._parse_session(
                     key[0],
@@ -1127,6 +1128,16 @@ class LangSmithRunImporter:
             framework=framework,
             nodes=_build_node_tree(nodes_with_parents),
         )
+
+    async def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
+        """Fetch parser payloads from the LangSmith API."""
+        from .api import fetch
+
+        async for payload in fetch(query):
+            yield payload
+
+
+importer = LangSmithRunImporter()
 
 
 def parse(

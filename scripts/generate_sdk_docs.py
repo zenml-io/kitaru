@@ -110,6 +110,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "AgentVersionsResource",
                 "JobsResource",
                 "EvaluatorsResource",
+                "AnalyzersResource",
                 "EvaluationsResource",
                 "CohortsResource",
                 "CohortVersionsResource",
@@ -194,6 +195,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
         symbols=frozenset(
             {
                 "EvaluatorConfig",
+                "AnalyzerConfig",
                 "HistoryConfig",
                 "PassthroughConfig",
                 "StaticConfig",
@@ -222,7 +224,14 @@ PUBLIC_API: dict[str, ModuleSpec] = {
     # kitaru.task.importer (see its reexports entry).
     "kitaru.api_models.v1.imports": ModuleSpec(
         symbols=frozenset(
-            {"ImportCreateRequest", "ImportListParams", "ImportResponse"}
+            {
+                "ImportCreateRequest",
+                "ImportListParams",
+                "ImportResponse",
+                "BlobImportSource",
+                "ApiImportSource",
+                "ImportQuery",
+            }
         ),
     ),
     "kitaru.api_models.v1.agent": ModuleSpec(
@@ -278,6 +287,19 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "EvaluatorVersionCreateRequest",
                 "EvaluatorVersionUpdateRequest",
                 "EvaluatorVersionResponse",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.analyzer": ModuleSpec(
+        symbols=frozenset(
+            {
+                "AnalyzerCreateRequest",
+                "AnalyzerUpdateRequest",
+                "AnalyzerListParams",
+                "AnalyzerResponse",
+                "AnalyzerVersionCreateRequest",
+                "AnalyzerVersionUpdateRequest",
+                "AnalyzerVersionResponse",
             }
         ),
     ),
@@ -374,6 +396,18 @@ PUBLIC_API: dict[str, ModuleSpec] = {
         ),
         reexports={"EvaluationResult": "kitaru.api_models.v1.evaluation"},
     ),
+    "kitaru.task.analyzer": ModuleSpec(
+        symbols=frozenset(
+            {
+                "AnalysisError",
+                "AnalyzerReturn",
+                "call_analyzer",
+            }
+        ),
+        reexports={
+            "InsightInput": "kitaru.api_models.v1.insight",
+        },
+    ),
     "kitaru.task.importer": ModuleSpec(
         symbols=frozenset(
             {
@@ -382,7 +416,13 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "ImportedItem",
                 "SessionImportError",
                 "Parser",
+                "Fetcher",
+                "FetchingImporter",
+                "Importer",
+                "gather_bounded",
+                "retry_rate_limited",
                 "call_parser",
+                "call_fetcher",
                 "flatten_nodes",
                 "ingest_session",
                 "session_request",

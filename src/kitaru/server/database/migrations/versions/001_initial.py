@@ -800,7 +800,7 @@ def upgrade() -> None:
         )
         batch_op.create_index(
             "ix_task_heartbeat_at_claimed_at",
-            [sa.literal_column("coalesce(heartbeat_at, claimed_at)")],  # ty: ignore[invalid-argument-type]
+            [sa.literal_column("coalesce(heartbeat_at, claimed_at)")],  # ty: ignore[invalid-argument-type, unused-ignore-comment]
             unique=False,
             postgresql_where=sa.text("status IN ('claimed', 'running')"),
         )

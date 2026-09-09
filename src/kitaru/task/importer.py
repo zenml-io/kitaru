@@ -13,11 +13,12 @@
 #  permissions and limitations under the License.
 """Importer plugin contract and the import flow."""
 
+import asyncio
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, TypeVar, runtime_checkable
 
 import httpx
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
@@ -36,7 +37,12 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeBatchRequest,
     SessionNodeCreateRequest,
 )
-from kitaru.api_models.v1.task import ImportTaskDetails, ScriptPluginSpec
+from kitaru.api_models.v1.task import (
+    ApiImportSourceSpec,
+    BlobImportSourceSpec,
+    ImportTaskDetails,
+    ScriptPluginSpec,
+)
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError
 from kitaru.task.plugins import PluginLoadError, load_plugin_entrypoint, load_source_ref
@@ -45,21 +51,30 @@ from kitaru.task.task_io import get_required_env, write_task_result
 __all__ = [
     "MAX_IMPORT_FAILURES",
     "NODE_BATCH_SIZE",
+    "Fetcher",
+    "FetchingImporter",
     "ImportFailure",
     "ImportStats",
     "ImportedItem",
     "ImportedNode",
     "ImportedSession",
+    "Importer",
     "Parser",
     "SessionImportError",
+    "call_fetcher",
     "call_parser",
     "flatten_nodes",
+    "gather_bounded",
     "ingest_session",
+    "retry_rate_limited",
     "run",
     "session_request",
 ]
 
 NODE_BATCH_SIZE = 200
+MAX_RATE_LIMIT_RETRIES = 10
+
+T = TypeVar("T")
 
 _LABEL = "Importer"
 
@@ -128,12 +143,105 @@ class ImportedSession(BaseModel):
 
 ImportedItem = ImportedSession | ImportFailure
 
-Parser = Callable[[bytes, dict[str, Any]], Iterator[ImportedItem]]
+Parser = Callable[
+    [bytes, dict[str, Any]], Iterator[ImportedItem] | AsyncIterator[ImportedItem]
+]
+
+Fetcher = Callable[[dict[str, Any]], Iterator[bytes] | AsyncIterator[bytes]]
 
 
-def call_parser(
+@runtime_checkable
+class Importer(Protocol):
+    """Importer object."""
+
+    def parse(
+        self, payload: bytes, params: dict[str, Any]
+    ) -> Iterator[ImportedItem] | AsyncIterator[ImportedItem]:
+        """Parse one payload into imported items, sync or async."""
+        ...
+
+
+@runtime_checkable
+class FetchingImporter(Importer, Protocol):
+    """Importer object that also fetches payloads from a provider API."""
+
+    def fetch(self, query: dict[str, Any]) -> Iterator[bytes] | AsyncIterator[bytes]:
+        """Fetch payloads matching a query, sync or async."""
+        ...
+
+
+# TODO: Move gather_bounded and retry_rate_limited into a module importer
+# implementations import, separate from the runtime in this module that calls
+# them.
+async def gather_bounded(
+    awaitables: Iterable[Awaitable[T]], concurrency: int
+) -> list[T]:
+    """Await every awaitable with at most concurrency in flight, in input order.
+
+    Args:
+        awaitables: Awaitables to run.
+        concurrency: Maximum number in flight at once.
+
+    Returns:
+        Results in input order.
+    """
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _run(awaitable: Awaitable[T]) -> T:
+        async with semaphore:
+            return await awaitable
+
+    return list(await asyncio.gather(*(_run(item) for item in awaitables)))
+
+
+async def retry_rate_limited(
+    call: Callable[[], Awaitable[T]],
+    get_retry_after: Callable[[Exception], float | None],
+    max_retries: int = MAX_RATE_LIMIT_RETRIES,
+) -> T:
+    """Await a call, sleeping and retrying while it reports a rate limit.
+
+    Args:
+        call: Factory of the awaitable to run.
+        get_retry_after: Seconds to wait when the exception is a rate limit,
+            None when it is not.
+        max_retries: Retries before the rate limit error propagates.
+
+    Returns:
+        Result of the call.
+    """
+    retries = 0
+    while True:
+        try:
+            return await call()
+        except Exception as exc:
+            retry_after = get_retry_after(exc)
+            if retry_after is None or retries >= max_retries:
+                raise
+            retries += 1
+            await asyncio.sleep(retry_after)
+
+
+async def _advance(iterator: Iterator[T] | AsyncIterator[T]) -> T:
+    """Advance a sync or async iterator by one item.
+
+    Raises:
+        StopAsyncIteration: The iterator is exhausted.
+
+    Returns:
+        The next item.
+    """
+    if isinstance(iterator, AsyncIterator):
+        return await anext(iterator)
+    try:
+        return next(iterator)
+    except StopIteration:
+        raise StopAsyncIteration from None
+
+
+async def call_parser(
     parser: Parser, payload: bytes, params: dict[str, Any]
-) -> Iterator[ImportedItem]:
+) -> AsyncIterator[ImportedItem]:
     """Advance a parser one item at a time, wrapping any failure.
 
     Wrapping only the parser call would protect nothing, since a generator
@@ -141,7 +249,7 @@ def call_parser(
     iteration instead.
 
     Args:
-        parser: Parser callable.
+        parser: Parser callable, sync or async.
         payload: Raw payload bytes.
         params: Parameters passed to the parser.
 
@@ -153,22 +261,68 @@ def call_parser(
         Imported items.
     """
     try:
-        iterator = iter(parser(payload, params))
+        result = parser(payload, params)
+        iterator = result if isinstance(result, AsyncIterator) else iter(result)
     except Exception as exc:
-        raise SessionImportError(f"Parser raised an error: {exc}") from exc
+        raise SessionImportError(
+            f"Parser raised an error: {type(exc).__name__}: {exc}"
+        ) from exc
     while True:
         try:
-            item = next(iterator)
-        except StopIteration:
+            item = await _advance(iterator)
+        except StopAsyncIteration:
             return
         except Exception as exc:
-            raise SessionImportError(f"Parser raised an error: {exc}") from exc
+            raise SessionImportError(
+                f"Parser raised an error: {type(exc).__name__}: {exc}"
+            ) from exc
         if not isinstance(item, ImportedSession | ImportFailure):
             raise SessionImportError(
                 f"Parser yielded an item that is not an ImportedSession or "
                 f"ImportFailure: {item!r}"
             )
         yield item
+
+
+async def call_fetcher(fetcher: Fetcher, query: dict[str, Any]) -> AsyncIterator[bytes]:
+    """Advance a fetcher one payload at a time, wrapping any failure.
+
+    Wrapping only the fetcher call would protect nothing, since a generator
+    function runs no code until iterated. This wraps every step of the
+    iteration instead.
+
+    Args:
+        fetcher: Fetcher callable, sync or async.
+        query: Importer-defined selection of what to fetch.
+
+    Raises:
+        SessionImportError: The fetcher raised while starting or advancing,
+            or yielded an item that is not bytes.
+
+    Yields:
+        Fetched payloads.
+    """
+    try:
+        result = fetcher(query)
+        iterator = result if isinstance(result, AsyncIterator) else iter(result)
+    except Exception as exc:
+        raise SessionImportError(
+            f"Fetcher raised an error: {type(exc).__name__}: {exc}"
+        ) from exc
+    while True:
+        try:
+            payload = await _advance(iterator)
+        except StopAsyncIteration:
+            return
+        except Exception as exc:
+            raise SessionImportError(
+                f"Fetcher raised an error: {type(exc).__name__}: {exc}"
+            ) from exc
+        if not isinstance(payload, bytes):
+            raise SessionImportError(
+                f"Fetcher yielded an item that is not bytes: {payload!r}"
+            )
+        yield payload
 
 
 def session_request(
@@ -334,30 +488,75 @@ async def ingest_session(
     return session
 
 
-def _resolve_parser(details: ImportTaskDetails) -> Parser:
-    """Load the parser callable named by a task's plugin spec.
+def _resolve_importer(details: ImportTaskDetails) -> tuple[Parser, Fetcher | None]:
+    """Load the parser and optional fetcher named by a task's plugin spec.
+
+    The entrypoint is either a parse callable or an importer object exposing
+    parse and, when it supports API imports, fetch.
 
     Args:
         details: Import task details.
 
     Raises:
-        SessionImportError: The plugin file or module fails to import, or
-            the entrypoint is missing or not callable.
+        SessionImportError: The plugin file or module fails to import, the
+            entrypoint is missing, or it is neither callable nor an importer.
 
     Returns:
-        Parser callable.
+        Parser and fetcher, None when the importer only parses uploads.
     """
     try:
         if isinstance(details.plugin, ScriptPluginSpec):
             path = Path(get_required_env("KITARU_TASK_PLUGIN_PATH"))
-            return load_plugin_entrypoint(path, details.plugin.entrypoint, _LABEL)
-        return load_source_ref(details.plugin.entrypoint, _LABEL)
+            entrypoint = load_plugin_entrypoint(path, details.plugin.entrypoint, _LABEL)
+        else:
+            entrypoint = load_source_ref(details.plugin.entrypoint, _LABEL)
     except PluginLoadError as exc:
         raise SessionImportError(str(exc)) from exc
+    if isinstance(entrypoint, FetchingImporter):
+        return entrypoint.parse, entrypoint.fetch
+    if isinstance(entrypoint, Importer):
+        return entrypoint.parse, None
+    if callable(entrypoint):
+        return entrypoint, None
+    raise SessionImportError(
+        f"{_LABEL} entrypoint '{details.plugin.entrypoint}' is neither callable "
+        "nor an importer"
+    )
+
+
+async def _iter_payloads(
+    details: ImportTaskDetails, fetcher: Fetcher | None
+) -> AsyncIterator[bytes]:
+    """Yield the payloads to parse for a blob or API import source.
+
+    Args:
+        details: Import task details.
+        fetcher: Importer fetcher, None when it only parses uploads.
+
+    Raises:
+        SessionImportError: The source is an API but the importer has no
+            fetcher, or the fetcher raised while starting or advancing, or
+            yielded an item that is not bytes.
+
+    Yields:
+        Raw payload bytes.
+    """
+    if isinstance(details.source, BlobImportSourceSpec):
+        yield Path(get_required_env("KITARU_TASK_PAYLOAD_PATH")).read_bytes()
+        return
+    assert isinstance(details.source, ApiImportSourceSpec)
+    if fetcher is None:
+        raise SessionImportError(
+            f"{_LABEL} entrypoint '{details.plugin.entrypoint}' does not fetch "
+            "from an API"
+        )
+    query = details.source.query.model_dump(mode="json")
+    async for payload in call_fetcher(fetcher, query):
+        yield payload
 
 
 async def run(client: KitaruAPIClient, task_id: str) -> None:
-    """Run the import flow: parse the payload and ingest sessions and nodes.
+    """Run the import flow: fetch, parse, and ingest sessions and nodes.
 
     Args:
         client: API client.
@@ -365,15 +564,14 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
 
     Raises:
         SessionImportError: The task is not an importer task, the plugin
-            fails to load, or the parser crashes mid-stream.
+            fails to load, or the fetcher or parser crashes mid-stream.
     """
     task_uuid = uuid.UUID(task_id)
     spec = await client.tasks.get_spec(task_uuid)
     details = spec.details
     if not isinstance(details, ImportTaskDetails):
         raise SessionImportError(f"Task {task_id} is not an importer task")
-    parser = _resolve_parser(details)
-    payload = Path(get_required_env("KITARU_TASK_PAYLOAD_PATH")).read_bytes()
+    parser, fetcher = _resolve_importer(details)
 
     created = 0
     skipped = 0
@@ -393,26 +591,27 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
         )
 
     try:
-        for item in call_parser(parser, payload, details.params):
-            line += 1
-            if isinstance(item, ImportFailure):
-                _record_failure(item)
-                continue
-            try:
-                session = await ingest_session(
-                    client, item, details.agent_id, details.provider
-                )
-            except APIError as exc:
-                _record_failure(
-                    ImportFailure(
-                        line=line, external_id=item.external_id, error=str(exc)
+        async for payload in _iter_payloads(details, fetcher):
+            async for item in call_parser(parser, payload, details.params):
+                line += 1
+                if isinstance(item, ImportFailure):
+                    _record_failure(item)
+                    continue
+                try:
+                    session = await ingest_session(
+                        client, item, details.agent_id, details.provider
                     )
-                )
-                continue
-            if session is None:
-                skipped += 1
-            else:
-                created += 1
+                except APIError as exc:
+                    _record_failure(
+                        ImportFailure(
+                            line=line, external_id=item.external_id, error=str(exc)
+                        )
+                    )
+                    continue
+                if session is None:
+                    skipped += 1
+                else:
+                    created += 1
     except SessionImportError as exc:
         _record_failure(ImportFailure(line=line + 1, external_id=None, error=str(exc)))
         write_task_result(_stats())

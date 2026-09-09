@@ -12,7 +12,7 @@ from kitaru.api_models.v1.filter import Filter
 from kitaru.mcp.models.common import MCPModel, PageOptions
 from kitaru.mcp.references import ParentKind
 
-VersionedKind = Literal["agent", "cohort", "importer", "evaluator"]
+VersionedKind = Literal["agent", "cohort", "importer", "evaluator", "analyzer"]
 
 
 class RegistryListRequest(PageOptions):
@@ -42,7 +42,10 @@ class RegistryListVersionsRequest(PageOptions):
     @model_validator(mode="after")
     def _validate_filter_support(self) -> Self:
         """Reject filters for plugin version endpoints that do not support them."""
-        if self.kind in {"importer", "evaluator"} and self.filter is not None:
+        if (
+            self.kind in {"importer", "evaluator", "analyzer"}
+            and self.filter is not None
+        ):
             raise ValueError("filter is supported only for agent and cohort versions")
         return self
 

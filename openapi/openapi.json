@@ -462,6 +462,498 @@
         "title": "AgentVersionUpdateRequest",
         "type": "object"
       },
+      "AnalysisTaskDetails": {
+        "description": "Analysis task details.",
+        "properties": {
+          "agent_id": {
+            "description": "Agent the insights belong to.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "analyzer_name": {
+            "description": "Name the analyzer emits insights under.",
+            "title": "Analyzer Name",
+            "type": "string"
+          },
+          "import_id": {
+            "description": "Import whose sessions are analyzed.",
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "analyzer",
+            "default": "analyzer",
+            "title": "Kind",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Parameters passed to the analyzer.",
+            "title": "Params",
+            "type": "object"
+          },
+          "plugin": {
+            "description": "Analyzer plugin to load.",
+            "discriminator": {
+              "mapping": {
+                "package": "#/components/schemas/PackagePluginSpec",
+                "script": "#/components/schemas/ScriptPluginSpec"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScriptPluginSpec"
+              },
+              {
+                "$ref": "#/components/schemas/PackagePluginSpec"
+              }
+            ],
+            "title": "Plugin"
+          }
+        },
+        "required": [
+          "analyzer_name",
+          "params",
+          "plugin",
+          "agent_id",
+          "import_id"
+        ],
+        "title": "AnalysisTaskDetails",
+        "type": "object"
+      },
+      "AnalyzerConfig": {
+        "additionalProperties": false,
+        "description": "Analyzer config.",
+        "properties": {
+          "analyzer": {
+            "description": "Analyzer name.",
+            "title": "Analyzer",
+            "type": "string"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Connection supplying provider credentials, an omitted value resolves to the provider's default.",
+            "title": "Connection Id"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Parameters passed to the analyzer.",
+            "title": "Params",
+            "type": "object"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer version, an omitted value resolves to latest.",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "analyzer"
+        ],
+        "title": "AnalyzerConfig",
+        "type": "object"
+      },
+      "AnalyzerCreateRequest": {
+        "additionalProperties": false,
+        "description": "Analyzer create request.",
+        "properties": {
+          "connection_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "JSON Schema of the connection values this analyzer reads.",
+            "title": "Connection Schema"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer description.",
+            "title": "Description"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer logo URL.",
+            "title": "Logo Url"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "Analyzer name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External service this analyzer calls.",
+            "title": "Provider"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AnalyzerCreateRequest",
+        "type": "object"
+      },
+      "AnalyzerResponse": {
+        "description": "Analyzer response.",
+        "properties": {
+          "connection_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "JSON Schema of the connection values this analyzer reads.",
+            "title": "Connection Schema"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer description.",
+            "title": "Description"
+          },
+          "id": {
+            "description": "Analyzer id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latest_version": {
+            "description": "Highest version number created for this analyzer.",
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer logo URL.",
+            "title": "Logo Url"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "Analyzer name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the owning account, null for a default plugin.",
+            "title": "Owner Id"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External service this analyzer calls.",
+            "title": "Provider"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "owner_id",
+          "id",
+          "name",
+          "description",
+          "provider",
+          "logo_url",
+          "metadata",
+          "connection_schema",
+          "latest_version"
+        ],
+        "title": "AnalyzerResponse",
+        "type": "object"
+      },
+      "AnalyzerUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Analyzer update request.",
+        "properties": {
+          "connection_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New connection schema.",
+            "title": "Connection Schema"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New analyzer description.",
+            "title": "Description"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New logo URL.",
+            "title": "Logo Url"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New metadata.",
+            "title": "Metadata"
+          }
+        },
+        "title": "AnalyzerUpdateRequest",
+        "type": "object"
+      },
+      "AnalyzerVersionCreateRequest": {
+        "additionalProperties": false,
+        "description": "Analyzer version create request.",
+        "properties": {
+          "display_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable designator.",
+            "title": "Display Version"
+          },
+          "source": {
+            "description": "Analyzer code to load.",
+            "discriminator": {
+              "mapping": {
+                "package": "#/components/schemas/PackagePluginSource",
+                "script": "#/components/schemas/ScriptPluginSource"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScriptPluginSource"
+              },
+              {
+                "$ref": "#/components/schemas/PackagePluginSource"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "AnalyzerVersionCreateRequest",
+        "type": "object"
+      },
+      "AnalyzerVersionResponse": {
+        "description": "Analyzer version response.",
+        "properties": {
+          "analyzer_id": {
+            "description": "Analyzer this version belongs to.",
+            "format": "uuid",
+            "title": "Analyzer Id",
+            "type": "string"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "display_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable designator.",
+            "title": "Display Version"
+          },
+          "id": {
+            "description": "Analyzer version id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "source": {
+            "description": "Analyzer code to load.",
+            "discriminator": {
+              "mapping": {
+                "package": "#/components/schemas/PackagePluginSource",
+                "script": "#/components/schemas/ScriptPluginSource"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScriptPluginSource"
+              },
+              {
+                "$ref": "#/components/schemas/PackagePluginSource"
+              }
+            ],
+            "title": "Source"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          },
+          "version": {
+            "description": "Server-assigned version number.",
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "id",
+          "analyzer_id",
+          "version",
+          "display_version",
+          "source"
+        ],
+        "title": "AnalyzerVersionResponse",
+        "type": "object"
+      },
+      "AnalyzerVersionUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Analyzer version update request.",
+        "properties": {
+          "display_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New human-readable designator.",
+            "title": "Display Version"
+          }
+        },
+        "title": "AnalyzerVersionUpdateRequest",
+        "type": "object"
+      },
       "AndFilter": {
         "additionalProperties": false,
         "description": "And filter.",
@@ -661,6 +1153,60 @@
           "value"
         ],
         "title": "AnnotationUpdateRequest",
+        "type": "object"
+      },
+      "ApiImportSource": {
+        "additionalProperties": false,
+        "description": "API import source.",
+        "properties": {
+          "connection_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Connection supplying provider credentials, an omitted value resolves to the provider's default.",
+            "title": "Connection Id"
+          },
+          "query": {
+            "$ref": "#/components/schemas/ImportQuery",
+            "description": "Importer-defined selection of what to fetch."
+          },
+          "type": {
+            "const": "api",
+            "default": "api",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ApiImportSource",
+        "type": "object"
+      },
+      "ApiImportSourceSpec": {
+        "description": "API import source spec.",
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/ImportQuery",
+            "description": "Importer-defined selection of what to fetch."
+          },
+          "type": {
+            "const": "api",
+            "default": "api",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ApiImportSourceSpec",
         "type": "object"
       },
       "ApiKeyCreateRequest": {
@@ -967,6 +1513,57 @@
           "bins"
         ],
         "title": "BinnedInsightData",
+        "type": "object"
+      },
+      "BlobImportSource": {
+        "additionalProperties": false,
+        "description": "Blob import source.",
+        "properties": {
+          "blob_id": {
+            "description": "Blob holding the payload to parse.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "blob",
+            "default": "blob",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blob_id"
+        ],
+        "title": "BlobImportSource",
+        "type": "object"
+      },
+      "BlobImportSourceSpec": {
+        "description": "Blob import source spec.",
+        "properties": {
+          "blob_id": {
+            "description": "Blob holding the payload.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Blob content hash.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "type": {
+            "const": "blob",
+            "default": "blob",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blob_id",
+          "sha256"
+        ],
+        "title": "BlobImportSourceSpec",
         "type": "object"
       },
       "BlobResponse": {
@@ -1497,6 +2094,184 @@
           }
         },
         "title": "CohortVersionUpdateRequest",
+        "type": "object"
+      },
+      "ConnectionCreateRequest": {
+        "additionalProperties": false,
+        "description": "Connection create request.",
+        "properties": {
+          "default": {
+            "default": false,
+            "description": "Whether this is the provider's default connection.",
+            "title": "Default",
+            "type": "boolean"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Non-secret environment values.",
+            "title": "Env",
+            "type": "object"
+          },
+          "name": {
+            "description": "Connection name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Provider the connection addresses.",
+            "title": "Provider",
+            "type": "string"
+          },
+          "secrets": {
+            "additionalProperties": {
+              "format": "password",
+              "type": "string",
+              "writeOnly": true
+            },
+            "description": "Sensitive environment values.",
+            "title": "Secrets",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "provider"
+        ],
+        "title": "ConnectionCreateRequest",
+        "type": "object"
+      },
+      "ConnectionResponse": {
+        "description": "Connection response.",
+        "properties": {
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "default": {
+            "description": "Whether this is the provider's default connection.",
+            "title": "Default",
+            "type": "boolean"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Non-secret environment values.",
+            "title": "Env",
+            "type": "object"
+          },
+          "id": {
+            "description": "Connection id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Connection name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Provider the connection addresses.",
+            "title": "Provider",
+            "type": "string"
+          },
+          "secret_id": {
+            "description": "Secret holding the sensitive values.",
+            "format": "uuid",
+            "title": "Secret Id",
+            "type": "string"
+          },
+          "secret_keys": {
+            "description": "Key names of the sensitive values.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Secret Keys",
+            "type": "array"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "owner_id",
+          "id",
+          "name",
+          "provider",
+          "env",
+          "secret_id",
+          "secret_keys",
+          "default"
+        ],
+        "title": "ConnectionResponse",
+        "type": "object"
+      },
+      "ConnectionUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Connection update request.",
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether this is the provider's default connection.",
+            "title": "Default"
+          },
+          "env": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New non-secret environment values.",
+            "title": "Env"
+          },
+          "secrets": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "format": "password",
+                  "type": "string",
+                  "writeOnly": true
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New sensitive environment values.",
+            "title": "Secrets"
+          }
+        },
+        "title": "ConnectionUpdateRequest",
         "type": "object"
       },
       "CopyWorkdirHook": {
@@ -3391,6 +4166,14 @@
             "description": "Agent version recorded on the imported sessions.",
             "title": "Agent Version Id"
           },
+          "analyzers": {
+            "description": "Analyzers selected to run across the imported sessions.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyzerConfig"
+            },
+            "title": "Analyzers",
+            "type": "array"
+          },
           "evaluators": {
             "description": "Evaluators run against every imported session.",
             "items": {
@@ -3411,10 +4194,44 @@
             "type": "object"
           },
           "payload_blob_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
             "description": "Blob holding the payload to parse.",
-            "format": "uuid",
-            "title": "Payload Blob Id",
-            "type": "string"
+            "title": "Payload Blob Id"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "api": "#/components/schemas/ApiImportSource",
+                    "blob": "#/components/schemas/BlobImportSource"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/BlobImportSource"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ApiImportSource"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the payload comes from.",
+            "title": "Source"
           },
           "version": {
             "anyOf": [
@@ -3431,8 +4248,7 @@
         },
         "required": [
           "importer",
-          "agent_id",
-          "payload_blob_id"
+          "agent_id"
         ],
         "title": "ImportCreateRequest",
         "type": "object"
@@ -3470,6 +4286,62 @@
         "title": "ImportFailure",
         "type": "object"
       },
+      "ImportQuery": {
+        "additionalProperties": true,
+        "description": "Import query.",
+        "properties": {
+          "concurrency": {
+            "default": 4,
+            "description": "Fetches the importer runs at once.",
+            "minimum": 1.0,
+            "title": "Concurrency",
+            "type": "integer"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start of the time window to fetch.",
+            "title": "Since"
+          },
+          "trace_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact trace ids to fetch, instead of a time window.",
+            "title": "Trace Ids"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End of the time window to fetch.",
+            "title": "Until"
+          }
+        },
+        "title": "ImportQuery",
+        "type": "object"
+      },
       "ImportResponse": {
         "description": "Import response.",
         "properties": {
@@ -3491,6 +4363,27 @@
             ],
             "description": "Agent version recorded on the imported sessions.",
             "title": "Agent Version Id"
+          },
+          "analyzers": {
+            "description": "Analyzers run against every imported session.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyzerConfig"
+            },
+            "title": "Analyzers",
+            "type": "array"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Connection resolved for the import.",
+            "title": "Connection Id"
           },
           "created": {
             "description": "Creation time.",
@@ -3562,11 +4455,24 @@
             "title": "Params",
             "type": "object"
           },
-          "payload_blob_id": {
-            "description": "Blob holding the payload parsed.",
-            "format": "uuid",
-            "title": "Payload Blob Id",
-            "type": "string"
+          "source": {
+            "description": "Where the payload comes from.",
+            "discriminator": {
+              "mapping": {
+                "api": "#/components/schemas/ApiImportSource",
+                "blob": "#/components/schemas/BlobImportSource"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlobImportSource"
+              },
+              {
+                "$ref": "#/components/schemas/ApiImportSource"
+              }
+            ],
+            "title": "Source"
           },
           "stats": {
             "anyOf": [
@@ -3592,9 +4498,10 @@
           "owner_id",
           "id",
           "agent_id",
-          "payload_blob_id",
+          "source",
           "params",
-          "evaluators"
+          "evaluators",
+          "analyzers"
         ],
         "title": "ImportResponse",
         "type": "object"
@@ -3656,10 +4563,6 @@
             "title": "Params",
             "type": "object"
           },
-          "payload": {
-            "$ref": "#/components/schemas/PayloadSpec",
-            "description": "Payload to parse."
-          },
           "plugin": {
             "description": "Importer plugin to load.",
             "discriminator": {
@@ -3690,11 +4593,30 @@
             ],
             "description": "Source system named on the import.",
             "title": "Provider"
+          },
+          "source": {
+            "description": "Where the payload comes from.",
+            "discriminator": {
+              "mapping": {
+                "api": "#/components/schemas/ApiImportSourceSpec",
+                "blob": "#/components/schemas/BlobImportSourceSpec"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlobImportSourceSpec"
+              },
+              {
+                "$ref": "#/components/schemas/ApiImportSourceSpec"
+              }
+            ],
+            "title": "Source"
           }
         },
         "required": [
           "plugin",
-          "payload",
+          "source",
           "agent_id",
           "params"
         ],
@@ -3705,6 +4627,19 @@
         "additionalProperties": false,
         "description": "Importer create request.",
         "properties": {
+          "connection_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "JSON Schema of the connection values this importer reads.",
+            "title": "Connection Schema"
+          },
           "description": {
             "anyOf": [
               {
@@ -3762,6 +4697,19 @@
       "ImporterResponse": {
         "description": "Importer response.",
         "properties": {
+          "connection_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "JSON Schema of the connection values this importer reads.",
+            "title": "Connection Schema"
+          },
           "created": {
             "description": "Creation time.",
             "format": "date-time",
@@ -3856,6 +4804,7 @@
           "provider",
           "logo_url",
           "metadata",
+          "connection_schema",
           "latest_version"
         ],
         "title": "ImporterResponse",
@@ -3865,6 +4814,19 @@
         "additionalProperties": false,
         "description": "Importer update request.",
         "properties": {
+          "connection_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New connection schema.",
+            "title": "Connection Schema"
+          },
           "description": {
             "anyOf": [
               {
@@ -4145,6 +5107,32 @@
             "title": "Agent Id",
             "type": "string"
           },
+          "analyzer_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Params the analyzer ran with.",
+            "title": "Analyzer Params"
+          },
+          "analyzer_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Analyzer version that produced the insight.",
+            "title": "Analyzer Version Id"
+          },
           "created": {
             "description": "Creation time.",
             "format": "date-time",
@@ -4191,6 +5179,19 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Import whose sessions produced the insight.",
+            "title": "Import Id"
           },
           "metadata": {
             "additionalProperties": true,
@@ -4871,7 +5872,6 @@
             "items": {
               "type": "string"
             },
-            "minItems": 1,
             "title": "Values",
             "type": "array"
           }
@@ -5144,6 +6144,66 @@
         "title": "Page[AgentVersionResponse]",
         "type": "object"
       },
+      "Page_AnalyzerResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyzerResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[AnalyzerResponse]",
+        "type": "object"
+      },
+      "Page_AnalyzerVersionResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyzerVersionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[AnalyzerVersionResponse]",
+        "type": "object"
+      },
       "Page_AnnotationResponse_": {
         "properties": {
           "items": {
@@ -5262,6 +6322,36 @@
           "next_cursor"
         ],
         "title": "Page[CohortVersionResponse]",
+        "type": "object"
+      },
+      "Page_ConnectionResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/ConnectionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[ConnectionResponse]",
         "type": "object"
       },
       "Page_DeviceResponse_": {
@@ -5936,28 +7026,6 @@
           }
         },
         "title": "PassthroughConfig",
-        "type": "object"
-      },
-      "PayloadSpec": {
-        "description": "Payload spec.",
-        "properties": {
-          "blob_id": {
-            "description": "Blob holding the payload.",
-            "format": "uuid",
-            "title": "Blob Id",
-            "type": "string"
-          },
-          "sha256": {
-            "description": "Blob content hash.",
-            "title": "Sha256",
-            "type": "string"
-          }
-        },
-        "required": [
-          "blob_id",
-          "sha256"
-        ],
-        "title": "PayloadSpec",
         "type": "object"
       },
       "ReplayCreateRequest": {
@@ -8677,7 +9745,8 @@
         "enum": [
           "agent",
           "evaluator",
-          "importer"
+          "importer",
+          "analyzer"
         ],
         "title": "TaskKind",
         "type": "string"
@@ -8695,6 +9764,19 @@
       "TaskResponse": {
         "description": "Task response.",
         "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent for an analysis task.",
+            "title": "Agent Id"
+          },
           "agent_version_id": {
             "anyOf": [
               {
@@ -8799,7 +9881,7 @@
                 "type": "null"
               }
             ],
-            "description": "Import run by an importer task.",
+            "description": "Import run by an importer task or analyzed by an analysis task.",
             "title": "Import Id"
           },
           "input_session_id": {
@@ -8949,6 +10031,7 @@
             "discriminator": {
               "mapping": {
                 "agent": "#/components/schemas/AgentTaskDetails",
+                "analyzer": "#/components/schemas/AnalysisTaskDetails",
                 "evaluator": "#/components/schemas/EvaluationTaskDetails",
                 "importer": "#/components/schemas/ImportTaskDetails"
               },
@@ -8963,6 +10046,9 @@
               },
               {
                 "$ref": "#/components/schemas/ImportTaskDetails"
+              },
+              {
+                "$ref": "#/components/schemas/AnalysisTaskDetails"
               }
             ],
             "title": "Details"
@@ -9014,7 +10100,7 @@
                 "type": "null"
               }
             ],
-            "description": "Command to run, unset for evaluator and importer tasks."
+            "description": "Command to run, unset for evaluator, importer, and analyzer tasks."
           },
           "secret_env": {
             "additionalProperties": {
@@ -11454,6 +12540,956 @@
         "summary": "Create Agent Version",
         "tags": [
           "agents"
+        ]
+      }
+    },
+    "/api/v1/analyzers": {
+      "get": {
+        "description": "List analyzers.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Analyzer service.\n    actor: Caller context.\n    params: Analyzer list params.\n\nReturns:\n    Page of analyzers.",
+        "operationId": "list_analyzers_api_v1_analyzers_get",
+        "parameters": [
+          {
+            "description": "Cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter expression, JSON-encoded in the query string.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_AnalyzerResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "List Analyzers",
+        "tags": [
+          "analyzers"
+        ]
+      },
+      "post": {
+        "description": "Create an analyzer.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Analyzer create request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Created analyzer.",
+        "operationId": "create_analyzer_api_v1_analyzers_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzerCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Create Analyzer",
+        "tags": [
+          "analyzers"
+        ]
+      }
+    },
+    "/api/v1/analyzers/{analyzer_id}": {
+      "delete": {
+        "description": "Delete an analyzer, cascading its versions.\n\nClients observe HTTP 204 on success, 403 when the analyzer is\nserver-managed, and 404 when no analyzer has this id.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    service: Analyzer service.\n    actor: Caller context.",
+        "operationId": "delete_analyzer_api_v1_analyzers__analyzer_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Delete Analyzer",
+        "tags": [
+          "analyzers"
+        ]
+      },
+      "get": {
+        "description": "Get an analyzer by id.\n\nClients observe HTTP 200 on success and 404 when no analyzer has this\nid.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Stored analyzer.",
+        "operationId": "get_analyzer_api_v1_analyzers__analyzer_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Analyzer",
+        "tags": [
+          "analyzers"
+        ]
+      },
+      "patch": {
+        "description": "Update an analyzer.\n\nClients observe HTTP 200 on success, 403 when the analyzer is\nserver-managed, 404 when no analyzer has this id, and 422 on invalid input.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    body: Analyzer update request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Updated analyzer.",
+        "operationId": "update_analyzer_api_v1_analyzers__analyzer_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzerUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Update Analyzer",
+        "tags": [
+          "analyzers"
+        ]
+      }
+    },
+    "/api/v1/analyzers/{analyzer_id}/versions": {
+      "get": {
+        "description": "List an analyzer's versions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    service: Analyzer service.\n    actor: Caller context.\n    params: List params.\n\nReturns:\n    Page of analyzer versions.",
+        "operationId": "list_analyzer_versions_api_v1_analyzers__analyzer_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_AnalyzerVersionResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "List Analyzer Versions",
+        "tags": [
+          "analyzers"
+        ]
+      },
+      "post": {
+        "description": "Create an analyzer version.\n\nClients observe HTTP 201 on success, 403 when the analyzer is\nserver-managed, 404 when no analyzer has this id or a script source names\nan unknown blob, and 422 on invalid input.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    body: Analyzer version create request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Created analyzer version.",
+        "operationId": "create_analyzer_version_api_v1_analyzers__analyzer_id__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzerVersionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Create Analyzer Version",
+        "tags": [
+          "analyzers"
+        ]
+      }
+    },
+    "/api/v1/analyzers/{analyzer_id}/versions/{version}": {
+      "get": {
+        "description": "Get an analyzer version by version number.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this analyzer.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    version: Version number.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Stored analyzer version.",
+        "operationId": "get_analyzer_version_api_v1_analyzers__analyzer_id__versions__version__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Analyzer Version",
+        "tags": [
+          "analyzers"
+        ]
+      },
+      "patch": {
+        "description": "Update an analyzer version's display version.\n\nClients observe HTTP 200 on success, 403 when the analyzer is\nserver-managed, and 404 when no version with this number exists for this\nanalyzer.\n\nArgs:\n    analyzer_id: Id of the analyzer.\n    version: Version number.\n    body: Analyzer version update request.\n    service: Analyzer service.\n    actor: Caller context.\n\nReturns:\n    Updated analyzer version.",
+        "operationId": "update_analyzer_version_api_v1_analyzers__analyzer_id__versions__version__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analyzer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Analyzer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzerVersionUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzerVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Update Analyzer Version",
+        "tags": [
+          "analyzers"
         ]
       }
     },
@@ -13998,6 +16034,501 @@
         ]
       }
     },
+    "/api/v1/connections": {
+      "get": {
+        "description": "List connections.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters. List responses never include secret values.\n\nArgs:\n    service: Connection service.\n    actor: Caller context.\n    params: Connection list params.\n\nReturns:\n    Page of connections without secret values.",
+        "operationId": "list_connections_api_v1_connections_get",
+        "parameters": [
+          {
+            "description": "Cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter expression, JSON-encoded in the query string.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ConnectionResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "List Connections",
+        "tags": [
+          "connections"
+        ]
+      },
+      "post": {
+        "description": "Create a connection.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 when a key uses the reserved prefix or is set as\nboth an env value and a secret. The response omits the secret values.\n\nArgs:\n    body: Connection create request.\n    service: Connection service.\n    actor: Caller context.\n\nReturns:\n    Created connection without secret values.",
+        "operationId": "create_connection_api_v1_connections_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Create Connection",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/api/v1/connections/{connection_id}": {
+      "delete": {
+        "description": "Delete a connection and the secret holding its values.\n\nClients observe HTTP 204 on success and 404 when no connection has this\nid.\n\nArgs:\n    connection_id: Id of the connection.\n    service: Connection service.\n    actor: Caller context.",
+        "operationId": "delete_connection_api_v1_connections__connection_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Delete Connection",
+        "tags": [
+          "connections"
+        ]
+      },
+      "get": {
+        "description": "Get a connection by id.\n\nClients observe HTTP 200 on success and 404 when no connection has this\nid.\n\nArgs:\n    connection_id: Id of the connection.\n    service: Connection service.\n    actor: Caller context.\n\nReturns:\n    Stored connection without secret values.",
+        "operationId": "get_connection_api_v1_connections__connection_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Connection",
+        "tags": [
+          "connections"
+        ]
+      },
+      "patch": {
+        "description": "Update a connection.\n\nClients observe HTTP 200 on success, 404 when no connection has this id,\nand 422 when a key uses the reserved prefix or is set as both an env\nvalue and a secret.\n\nArgs:\n    connection_id: Id of the connection.\n    body: Connection update request.\n    service: Connection service.\n    actor: Caller context.\n\nReturns:\n    Updated connection without secret values.",
+        "operationId": "update_connection_api_v1_connections__connection_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Update Connection",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
     "/api/v1/device_authorization": {
       "post": {
         "description": "Start a device authorization and receive its codes.\n\nThe caller shows the user code to a person, who confirms it at the\nverification URI while signed in. The caller then polls ``/api/v1/login`` with\nthe device grant type until the confirmation lands. Clients observe HTTP\n200 on success and 400 when this server does not authenticate requests.\nThe codes are returned exactly once.\n\nArgs:\n    request: Incoming request.\n    settings: Service settings governing auth behavior.\n    service: Device service.\n    hostname: Host the caller runs on.\n    os: Operating system the caller runs on.\n    python_version: Python version the caller runs.\n    client_version: Kitaru version the caller runs.\n\nRaises:\n    TokenGrantError: This server does not authenticate requests.\n\nReturns:\n    Device authorization carrying the plaintext codes.",
@@ -15150,7 +17681,7 @@
     },
     "/api/v1/evaluators/{evaluator_id}": {
       "delete": {
-        "description": "Delete an evaluator, cascading its versions.\n\nClients observe HTTP 204 on success and 404 when no evaluator has this\nid.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    service: Evaluator service.\n    actor: Caller context.",
+        "description": "Delete an evaluator, cascading its versions.\n\nClients observe HTTP 204 on success, 403 when the evaluator is\nserver-managed, and 404 when no evaluator has this id.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    service: Evaluator service.\n    actor: Caller context.",
         "operationId": "delete_evaluator_api_v1_evaluators__evaluator_id__delete",
         "parameters": [
           {
@@ -15307,7 +17838,7 @@
         ]
       },
       "patch": {
-        "description": "Update an evaluator.\n\nClients observe HTTP 200 on success, 404 when no evaluator has this id,\nand 422 on invalid input.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    body: Evaluator update request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Updated evaluator.",
+        "description": "Update an evaluator.\n\nClients observe HTTP 200 on success, 403 when the evaluator is\nserver-managed, 404 when no evaluator has this id, and 422 on invalid input.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    body: Evaluator update request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Updated evaluator.",
         "operationId": "update_evaluator_api_v1_evaluators__evaluator_id__patch",
         "parameters": [
           {
@@ -15518,7 +18049,7 @@
         ]
       },
       "post": {
-        "description": "Create an evaluator version.\n\nClients observe HTTP 201 on success, 404 when no evaluator has this id\nor a script source names an unknown blob, and 422 on invalid input.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    body: Evaluator version create request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Created evaluator version.",
+        "description": "Create an evaluator version.\n\nClients observe HTTP 201 on success, 403 when the evaluator is\nserver-managed, 404 when no evaluator has this id or a script source names\nan unknown blob, and 422 on invalid input.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    body: Evaluator version create request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Created evaluator version.",
         "operationId": "create_evaluator_version_api_v1_evaluators__evaluator_id__versions_post",
         "parameters": [
           {
@@ -15741,7 +18272,7 @@
         ]
       },
       "patch": {
-        "description": "Update an evaluator version's display version.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this evaluator.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    version: Version number.\n    body: Evaluator version update request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Updated evaluator version.",
+        "description": "Update an evaluator version's display version.\n\nClients observe HTTP 200 on success, 403 when the evaluator is\nserver-managed, and 404 when no version with this number exists for this\nevaluator.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    version: Version number.\n    body: Evaluator version update request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Updated evaluator version.",
         "operationId": "update_evaluator_version_api_v1_evaluators__evaluator_id__versions__version__patch",
         "parameters": [
           {
@@ -17280,7 +19811,7 @@
     },
     "/api/v1/importers/{importer_id}": {
       "delete": {
-        "description": "Delete an importer, cascading its versions.\n\nClients observe HTTP 204 on success and 404 when no importer has this\nid.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Importer service.\n    actor: Caller context.",
+        "description": "Delete an importer, cascading its versions.\n\nClients observe HTTP 204 on success, 403 when the importer is\nserver-managed, and 404 when no importer has this id.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Importer service.\n    actor: Caller context.",
         "operationId": "delete_importer_api_v1_importers__importer_id__delete",
         "parameters": [
           {
@@ -17437,7 +19968,7 @@
         ]
       },
       "patch": {
-        "description": "Update an importer.\n\nClients observe HTTP 200 on success, 404 when no importer has this id,\nand 422 on invalid input.\n\nArgs:\n    importer_id: Id of the importer.\n    body: Importer update request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Updated importer.",
+        "description": "Update an importer.\n\nClients observe HTTP 200 on success, 403 when the importer is\nserver-managed, 404 when no importer has this id, and 422 on invalid input.\n\nArgs:\n    importer_id: Id of the importer.\n    body: Importer update request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Updated importer.",
         "operationId": "update_importer_api_v1_importers__importer_id__patch",
         "parameters": [
           {
@@ -17648,7 +20179,7 @@
         ]
       },
       "post": {
-        "description": "Create an importer version.\n\nClients observe HTTP 201 on success, 404 when no importer has this id\nor a script source names an unknown blob, and 422 on invalid input.\n\nArgs:\n    importer_id: Id of the importer.\n    body: Importer version create request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Created importer version.",
+        "description": "Create an importer version.\n\nClients observe HTTP 201 on success, 403 when the importer is\nserver-managed, 404 when no importer has this id or a script source names\nan unknown blob, and 422 on invalid input.\n\nArgs:\n    importer_id: Id of the importer.\n    body: Importer version create request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Created importer version.",
         "operationId": "create_importer_version_api_v1_importers__importer_id__versions_post",
         "parameters": [
           {
@@ -17871,7 +20402,7 @@
         ]
       },
       "patch": {
-        "description": "Update an importer version's display version.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this importer.\n\nArgs:\n    importer_id: Id of the importer.\n    version: Version number.\n    body: Importer version update request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Updated importer version.",
+        "description": "Update an importer version's display version.\n\nClients observe HTTP 200 on success, 403 when the importer is\nserver-managed, and 404 when no version with this number exists for this\nimporter.\n\nArgs:\n    importer_id: Id of the importer.\n    version: Version number.\n    body: Importer version update request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Updated importer version.",
         "operationId": "update_importer_version_api_v1_importers__importer_id__versions__version__patch",
         "parameters": [
           {
@@ -18110,7 +20641,7 @@
         ]
       },
       "post": {
-        "description": "Import sessions from a payload blob, as a job holding one importer task.\n\nClients observe HTTP 201 on success, 404 when the importer, the version,\nthe payload blob, the agent, the agent version, or an evaluator does not\nexist, and 422 when the agent version belongs to another agent, an\nevaluator is scoped to another agent, or an evaluator version repeats.\n\nArgs:\n    body: Import create request.\n    service: Import service.\n    actor: Caller context.\n\nReturns:\n    Created import.",
+        "description": "Import sessions from a payload blob, as a job holding one importer task.\n\nClients observe HTTP 201 on success, 404 when the importer, the version,\nthe payload blob, the agent, the agent version, or an evaluator does not\nexist, and 422 when the agent version belongs to another agent, an\nevaluator is scoped to another agent, or an evaluator version repeats.\n\nArgs:\n    body: Import create request.\n    service: Import service.\n    starter: Ephemeral worker starter.\n    actor: Caller context.\n\nReturns:\n    Created import.",
         "operationId": "create_import_api_v1_imports_post",
         "parameters": [
           {
@@ -21575,7 +24106,7 @@
     },
     "/api/v1/sessions": {
       "get": {
-        "description": "List sessions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions, with payloads when include_payloads is set.",
+        "description": "List sessions.\n\nClients observe HTTP 200 on success, 403 when a task token is not granted\na listing, and 422 on invalid pagination parameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions, with payloads when include_payloads is set.",
         "operationId": "list_sessions_api_v1_sessions_get",
         "parameters": [
           {

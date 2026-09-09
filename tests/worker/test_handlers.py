@@ -17,19 +17,25 @@ import hashlib
 import json
 import sys
 import uuid
+from importlib.metadata import version
 from pathlib import Path
 
+import pytest
 from fakes import (
     FakeKitaruAPIClient,
     as_client,
     make_agent_spec,
+    make_analyzer_spec,
     make_evaluator_spec,
     make_importer_spec,
 )
 
+from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import (
+    AnalysisTaskDetails,
+    ApiImportSourceSpec,
+    BlobImportSourceSpec,
     PackagePluginSpec,
-    PayloadSpec,
     ScriptPluginSpec,
     TaskKind,
 )
@@ -37,6 +43,7 @@ from kitaru.worker.blob_cache import BlobCache
 from kitaru.worker.context import ExecutionContext
 from kitaru.worker.handlers import HANDLERS
 from kitaru.worker.handlers.agent import MAX_INPUTS_ENV_BYTES, AgentHandler
+from kitaru.worker.handlers.analysis import AnalysisHandler
 from kitaru.worker.handlers.evaluation import EvaluationHandler
 from kitaru.worker.handlers.imports import ImportHandler
 
@@ -55,7 +62,12 @@ def _digest(content: bytes) -> str:
 
 def test_handlers_registry_covers_every_kind() -> None:
     """HANDLERS carries one entry per task kind."""
-    assert set(HANDLERS) == {TaskKind.AGENT, TaskKind.EVALUATOR, TaskKind.IMPORTER}
+    assert set(HANDLERS) == {
+        TaskKind.AGENT,
+        TaskKind.EVALUATOR,
+        TaskKind.IMPORTER,
+        TaskKind.ANALYZER,
+    }
 
 
 async def test_agent_handler_builds_command_and_working_dir(tmp_path: Path) -> None:
@@ -219,6 +231,130 @@ async def test_evaluation_handler_reuses_cached_plugin(tmp_path: Path) -> None:
     assert client.blobs.download_calls == []
 
 
+async def test_analysis_handler_script_plugin_materializes_and_sets_path(
+    tmp_path: Path,
+) -> None:
+    """A script analyzer plugin is materialized and its path exported."""
+    content = b"# /// script\n# dependencies = ['numpy']\n# ///\n"
+    digest = _digest(content)
+    blob_id = uuid.uuid4()
+    plugin = ScriptPluginSpec(entrypoint="analyze", blob_id=blob_id, sha256=digest)
+    task_id = uuid.uuid4()
+    spec = make_analyzer_spec(task_id, plugin=plugin)
+
+    client = FakeKitaruAPIClient()
+    client.blobs.content[blob_id] = content
+    ctx = _ctx(tmp_path, client)
+
+    process = await AnalysisHandler().prepare(ctx, task_id, spec, "task-token")
+
+    plugin_path = Path(process.env["KITARU_TASK_PLUGIN_PATH"])
+    assert plugin_path.read_bytes() == content
+    assert client.blobs.download_calls == [blob_id]
+    assert process.working_dir is None
+    assert process.command == [
+        "uv",
+        "run",
+        "--no-project",
+        "--python",
+        sys.executable,
+        "--prerelease=allow",
+        "--with",
+        "numpy",
+        "python",
+        "-m",
+        "kitaru.task",
+        "analyze",
+    ]
+    assert process.env["KITARU_API_TOKEN"] == "task-token"
+
+
+async def test_analysis_handler_package_plugin_skips_materialization(
+    tmp_path: Path,
+) -> None:
+    """A package analyzer plugin needs no blob download."""
+    plugin = PackagePluginSpec(entrypoint="pkg.mod:analyze", requirement="pkg==1.0")
+    task_id = uuid.uuid4()
+    spec = make_analyzer_spec(task_id, plugin=plugin)
+    client = FakeKitaruAPIClient()
+    ctx = _ctx(tmp_path, client)
+
+    process = await AnalysisHandler().prepare(ctx, task_id, spec, "task-token")
+
+    assert "KITARU_TASK_PLUGIN_PATH" not in process.env
+    assert client.blobs.download_calls == []
+    assert process.command == [
+        "uv",
+        "run",
+        "--no-project",
+        "--python",
+        sys.executable,
+        "--prerelease=allow",
+        "--with",
+        "pkg==1.0",
+        "python",
+        "-m",
+        "kitaru.task",
+        "analyze",
+    ]
+
+
+@pytest.mark.parametrize(
+    "variant", ["builtin", "name", "entrypoint", "version", "model", "observe"]
+)
+async def test_analysis_handler_always_uses_exact_package_requirement(
+    tmp_path: Path, variant: str
+) -> None:
+    """Names, entrypoints, and params never change package dependencies."""
+    requirement = f"kitaru=={version('kitaru')}"
+    plugin = PackagePluginSpec(
+        entrypoint="kitaru.insights.analyzer:analyze_post_import_sessions",
+        requirement=requirement,
+    )
+    task_id = uuid.uuid4()
+    spec = make_analyzer_spec(task_id, plugin=plugin)
+    assert isinstance(spec.details, AnalysisTaskDetails)
+    spec.details.analyzer_name = "kitaru/post-import-insights"
+    if variant == "name":
+        spec.details.analyzer_name = "custom/insights"
+    elif variant == "entrypoint":
+        plugin.entrypoint = "custom:analyze"
+    elif variant == "version":
+        plugin.requirement = "kitaru==0.0.0"
+    elif variant == "model":
+        spec.details.params = {"model": "gpt-5.4"}
+    elif variant == "observe":
+        spec.details.params = {"observe": True}
+
+    process = await AnalysisHandler().prepare(
+        _ctx(tmp_path, FakeKitaruAPIClient()), task_id, spec, "task-token"
+    )
+    assert process.command[0] == "uv"
+    dependencies = [
+        process.command[index + 1]
+        for index, argument in enumerate(process.command)
+        if argument == "--with"
+    ]
+    assert dependencies == [plugin.requirement]
+
+
+async def test_analysis_handler_reuses_cached_plugin(tmp_path: Path) -> None:
+    """A cached plugin blob is not re-downloaded."""
+    content = b"def analyze(sessions, **params):\n    pass\n"
+    digest = _digest(content)
+    blob_id = uuid.uuid4()
+    plugin = ScriptPluginSpec(entrypoint="analyze", blob_id=blob_id, sha256=digest)
+    client = FakeKitaruAPIClient()
+    ctx = _ctx(tmp_path, client)
+    await ctx.blob_cache.put(digest, content)
+
+    task_id = uuid.uuid4()
+    spec = make_analyzer_spec(task_id, plugin=plugin)
+    await AnalysisHandler().prepare(ctx, task_id, spec, "task-token")
+
+    assert client.blobs.download_calls == []
+
+
 async def test_import_handler_script_plugin_materializes_code_and_payload(
     tmp_path: Path,
 ) -> None:
@@ -233,9 +369,9 @@ async def test_import_handler_script_plugin_materializes_code_and_payload(
     plugin = ScriptPluginSpec(
         entrypoint="parse", blob_id=code_blob_id, sha256=code_digest
     )
-    payload = PayloadSpec(blob_id=payload_blob_id, sha256=payload_digest)
+    source = BlobImportSourceSpec(blob_id=payload_blob_id, sha256=payload_digest)
     task_id = uuid.uuid4()
-    spec = make_importer_spec(task_id, plugin=plugin, payload=payload)
+    spec = make_importer_spec(task_id, plugin=plugin, source=source)
 
     client = FakeKitaruAPIClient()
     client.blobs.content[code_blob_id] = code_content
@@ -263,9 +399,9 @@ async def test_import_handler_package_plugin_materializes_only_the_payload(
     payload_blob_id = uuid.uuid4()
 
     plugin = PackagePluginSpec(entrypoint="pkg.mod:parse", requirement="pkg==2.0")
-    payload = PayloadSpec(blob_id=payload_blob_id, sha256=payload_digest)
+    source = BlobImportSourceSpec(blob_id=payload_blob_id, sha256=payload_digest)
     task_id = uuid.uuid4()
-    spec = make_importer_spec(task_id, plugin=plugin, payload=payload)
+    spec = make_importer_spec(task_id, plugin=plugin, source=source)
 
     client = FakeKitaruAPIClient()
     client.blobs.content[payload_blob_id] = payload_content
@@ -289,3 +425,49 @@ async def test_import_handler_package_plugin_materializes_only_the_payload(
         "kitaru.task",
         "import",
     ]
+
+
+async def test_import_handler_api_source_script_plugin_materializes_only_the_plugin(
+    tmp_path: Path,
+) -> None:
+    """An API source with a script plugin materializes the plugin, not a payload."""
+    code_content = b"def parse(payload, params):\n    return iter(())\n"
+    code_digest = _digest(code_content)
+    code_blob_id = uuid.uuid4()
+
+    plugin = ScriptPluginSpec(
+        entrypoint="parse", blob_id=code_blob_id, sha256=code_digest
+    )
+    source = ApiImportSourceSpec(query=ImportQuery(trace_ids=[]))
+    task_id = uuid.uuid4()
+    spec = make_importer_spec(task_id, plugin=plugin, source=source)
+
+    client = FakeKitaruAPIClient()
+    client.blobs.content[code_blob_id] = code_content
+    ctx = _ctx(tmp_path, client)
+
+    process = await ImportHandler().prepare(ctx, task_id, spec, "task-token")
+
+    assert Path(process.env["KITARU_TASK_PLUGIN_PATH"]).read_bytes() == code_content
+    assert client.blobs.download_calls == [code_blob_id]
+    assert "KITARU_TASK_PAYLOAD_PATH" not in process.env
+
+
+async def test_import_handler_api_source_package_plugin_materializes_nothing(
+    tmp_path: Path,
+) -> None:
+    """An API source with a package plugin materializes no blobs."""
+    plugin = PackagePluginSpec(entrypoint="pkg.mod:parse", requirement="pkg==2.0")
+    source = ApiImportSourceSpec(query=ImportQuery(trace_ids=[]))
+    task_id = uuid.uuid4()
+    spec = make_importer_spec(task_id, plugin=plugin, source=source)
+
+    client = FakeKitaruAPIClient()
+    ctx = _ctx(tmp_path, client)
+
+    process = await ImportHandler().prepare(ctx, task_id, spec, "task-token")
+
+    assert "KITARU_TASK_PLUGIN_PATH" not in process.env
+    assert "KITARU_TASK_PAYLOAD_PATH" not in process.env
+    assert client.blobs.download_calls == []
+    assert "pkg[api]==2.0" in process.command

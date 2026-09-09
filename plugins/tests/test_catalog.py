@@ -18,12 +18,14 @@ from importlib.metadata import version
 from packaging.requirements import Requirement
 
 from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS
+from kitaru.server.domain.plugin import PluginKind
 from kitaru.source_refs import parse_source_ref
+from kitaru.task.importer import Importer
 from kitaru.task.plugins import load_source_ref
 
 
 def test_catalog_names_and_entrypoints_are_unique_and_loadable() -> None:
-    """Expose one callable package entrypoint for each reserved plugin name."""
+    """Expose one loadable package entrypoint for each reserved plugin name."""
     definitions = DEFAULT_PLUGIN_DEFINITIONS
     names = [definition.name for definition in definitions]
     entrypoints = [definition.entrypoint for definition in definitions]
@@ -31,9 +33,13 @@ def test_catalog_names_and_entrypoints_are_unique_and_loadable() -> None:
     assert all(name.startswith("kitaru/") for name in names)
     assert len(names) == len(set(names))
     assert len(entrypoints) == len(set(entrypoints))
-    for entrypoint in entrypoints:
-        module, attribute = parse_source_ref(entrypoint)
-        assert callable(load_source_ref(f"{module}:{attribute}", "Plugin"))
+    for definition in definitions:
+        module, attribute = parse_source_ref(definition.entrypoint)
+        loaded = load_source_ref(f"{module}:{attribute}", "Plugin")
+        if definition.kind is PluginKind.IMPORTER:
+            assert isinstance(loaded, Importer) or callable(loaded)
+        else:
+            assert callable(loaded)
     for definition in definitions:
         requirement = Requirement(definition.requirement)
         package_version = version(requirement.name)

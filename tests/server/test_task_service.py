@@ -35,6 +35,7 @@ from conftest import (
     create_agent,
     create_agent_task,
     create_agent_version,
+    create_analysis_task,
     create_blob,
     create_evaluation_task,
     create_import,
@@ -47,6 +48,7 @@ from conftest import (
     create_worker,
 )
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.api_models.v1.imports import ImportStats
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import (
@@ -977,6 +979,37 @@ async def test_apply_status_evaluator_terminal_tracks_evaluation_completed() -> 
     assert tracked_properties["status"] == "completed"
     assert "plugin_version_id" not in tracked_properties
     assert "session_count" not in tracked_properties
+
+
+async def test_apply_status_analyzer_terminal_tracks_analysis_completed() -> None:
+    """Track an analysis_completed event when an analyzer task turns terminal."""
+    analytics = _RecordingAnalytics()
+    transitions, tasks, jobs, imports = _build_transitions(analytics)
+    job = await create_job(jobs, ACTOR.account.id)
+    import_ = await create_import(imports, ACTOR.account.id, agent_id=uuid.uuid4())
+    import_.record_stats(ImportStats(created=2, skipped=0, failed=0))
+    await imports.update(import_)
+    task = await create_analysis_task(tasks, job.id, import_id=import_.id)
+    await create_agent_task(tasks, job.id)
+
+    result = [
+        {
+            "name": "summary",
+            "title": "Summary",
+            "data": {"type": "text", "content": "ok"},
+        }
+    ]
+    completed = await _complete_task(transitions, task, result=result)
+
+    assert completed.status is TaskStatus.COMPLETED
+    assert len(analytics.tracked) == 1
+    tracked_user_id, tracked_event, tracked_properties = analytics.tracked[0]
+    assert tracked_user_id == ACTOR.account.id
+    assert tracked_event == AnalyticsEvent.ANALYSIS_COMPLETED
+    assert tracked_properties["status"] == "completed"
+    assert "plugin_version_id" not in tracked_properties
+    assert tracked_properties["session_count"] == 2
+    assert tracked_properties["insight_count"] == 1
 
 
 async def test_apply_status_import_terminal_tracks_the_importer_plugin() -> None:

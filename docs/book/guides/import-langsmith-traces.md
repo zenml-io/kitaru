@@ -18,7 +18,7 @@ The importer reads **LangSmith run records**, one JSON object per run, in any of
 - **A run-query envelope**: a JSON object with the runs under a `runs` or `data` key. This is what the LangSmith runs-query API returns, so you can pipe its response straight to a file.
 - **A single JSON object**, treated as a one-run export.
 
-Payloads must be UTF-8 and 50 MiB or smaller (the importer's own cap, separate from the server's configurable blob limit). Export in slices as often as you like; [dedup](#dedup-one-session-per-project-and-thread) makes overlapping exports safe.
+Payloads must be UTF-8, and uploads are capped by the server's configurable blob limit. Export in slices as often as you like; [dedup](#dedup-one-session-per-project-and-thread) makes overlapping exports safe.
 
 Each run record is read for the fields LangSmith already writes: `id`, `trace_id`, `parent_run_id`, `is_root`, `run_type`, `name`, `status`, `error`, `start_time` / `end_time`, `inputs`, `outputs`, `tags`, `extra.metadata`, `extra.invocation_params`, `serialized.kwargs`, `total_cost`, and token counts. Export whole traces rather than filtered subsets: a run whose parent is missing from the file still imports, but the session is marked partial.
 
@@ -59,6 +59,30 @@ kitaru session import langsmith-runs.jsonl \
   --media-type application/x-ndjson --wait
 ```
 
+## Fetch traces from the LangSmith API
+
+Skip the export and upload, and let the import task fetch runs from LangSmith directly:
+
+```bash
+kitaru session import \
+  --importer kitaru/langsmith@latest \
+  --agent support-agent@latest \
+  --since 7d \
+  --tag imported-baseline --wait
+```
+
+Omitting FILE and setting `--since` selects an API import: the worker calls the LangSmith API instead of parsing an uploaded payload. `--since` and `--until` accept an ISO 8601 timestamp or a relative duration (`7d`, `12h`, `30m`). `--trace-id` (repeatable) fetches exactly those trace ids instead of a time window. The same selection is a query object on the SDK and REST request:
+
+| Query key | Meaning |
+| --- | --- |
+| `trace_ids` | LangSmith trace ids to fetch. When present, exactly those traces are fetched and the time window is ignored. |
+| `since` | Timezone-aware ISO 8601 datetime, lower bound of trace start time. Required when `trace_ids` is absent. |
+| `until` | Timezone-aware ISO 8601 datetime, upper bound of trace end time. Defaults to now. |
+| `concurrency` | Traces fetched at once. Defaults to 4. |
+| `project_name` | LangSmith project to fetch from. Defaults to the SDK's tracer project, read from `LANGSMITH_PROJECT` (or `LANGCHAIN_PROJECT`) in the environment. |
+
+Pass `project_name` through `--query '{"project_name": "my-project"}'`. The worker installs the package's `api` extra for an API import, which carries the provider client. A [connection](provider-connections.md) you name with `--connection`, or the provider's default connection, supplies `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT` for a self-hosted instance. Without either, the worker's own environment does, and only a worker started with `--selector kitaru/requires-credentials=langsmith` claims the task. Each fetched trace is parsed the same way an uploaded export would be, so the mapping, dedup, and limitations below apply the same way.
+
 ## What a LangSmith trace becomes
 
 The mapping is one level deeper than a trace-per-session import, because a LangSmith thread is usually a multi-turn conversation spread over several traces:
@@ -90,7 +114,7 @@ This is what makes "export the last 24 hours every night" safe. It also means th
 - **Only what the export contains.** Anything LangSmith did not record (intermediate state, code, environment) is not recoverable from the file.
 - **Imported threads are frozen.** Once a thread is imported, later traces in the same thread are skipped by dedup rather than appended. Import a thread after it is finished, or scope `join_on` to something that closes.
 - **Partial graphs import with a warning.** A trace with more than one root run, a run whose parent is missing from the export, or model output containing `tool_calls` with no corresponding tool runs all set `source_completeness: partial` and add a line to `normalization_warnings`. The session still imports.
-- **A bad trace is isolated, not fatal.** A run with no trace id or run id, a trace with conflicting project identities or conflicting thread values, or a trace missing your chosen `join_on` value is reported as a failure and the rest of the file still imports. A malformed file (invalid JSON, non-UTF-8, empty, or over 50 MiB) fails the task as a whole.
+- **A bad trace is isolated, not fatal.** A run with no trace id or run id, a trace with conflicting project identities or conflicting thread values, or a trace missing your chosen `join_on` value is reported as a failure and the rest of the file still imports. A malformed file (invalid JSON, non-UTF-8, or empty) fails the task as a whole.
 - **Replay needs your code.** Imported sessions replay like recorded ones, but only if the agent version whose code produced the runs is registered with a run command. No trace export contains the code.
 
 {% hint style="warning" %} Imported payloads contain whatever your runs contain: prompts, customer data, tool results. They are stored on your self-hosted server and parsed on your workers, but access and retention are yours to govern. {% endhint %}

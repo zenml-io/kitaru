@@ -21,7 +21,7 @@ import json
 import math
 import re
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -38,7 +38,6 @@ from kitaru.task.importer import (
     ImportedSession,
 )
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_TREE_DEPTH = 64
 MAX_TOOL_SCAN_DEPTH = 64
 _TRACE_SHAPE = "trace"
@@ -749,8 +748,6 @@ def _detect_shape(record: dict[str, Any]) -> str:
 
 def _parse_records(content: bytes) -> list[dict[str, Any]]:
     """Parse non-empty JSON or JSONL records."""
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise InvalidImport("Langfuse import exceeds the 50 MiB upload limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -1241,7 +1238,9 @@ class LangfuseJSONLImporter:
                 fallback_sessions.add(session_id)
 
         sessions: list[ImportedSession] = []
-        for source_id, traces in sorted(session_traces.items()):
+        # Emit sessions in payload order, not sorted by session id, so
+        # ingestion follows the fetch or upload order.
+        for source_id, traces in session_traces.items():
             try:
                 sessions.append(
                     self._parse_session(
@@ -1589,6 +1588,23 @@ class LangfuseJSONLImporter:
         except PydanticSerializationError as exc:
             raise InvalidImport(f"Session cannot be serialized: {exc}") from exc
         return session
+
+    async def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
+        """Fetch parser payloads from the Langfuse API.
+
+        Args:
+            query: Fetch query.
+
+        Yields:
+            Parser payload bytes.
+        """
+        from .api import fetch
+
+        async for payload in fetch(query):
+            yield payload
+
+
+importer = LangfuseJSONLImporter()
 
 
 def parse(

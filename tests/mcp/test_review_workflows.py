@@ -40,6 +40,13 @@ from kitaru.api_models.v1.tag import (
 from kitaru.client.exceptions import APIError
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
+from kitaru.mcp.models.analyzers import (
+    AnalyzerCreate,
+    AnalyzersManageRequest,
+    AnalyzerUpdate,
+    AnalyzerVersionCreate,
+    AnalyzerVersionUpdate,
+)
 from kitaru.mcp.models.common import PageData
 from kitaru.mcp.models.evaluators import (
     EvaluatorCreate,
@@ -74,6 +81,7 @@ from kitaru.mcp.models.workflows import (
 )
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
+from kitaru.mcp.tools.analyzers import handle_analyzers_manage
 from kitaru.mcp.tools.destructive import handle_delete
 from kitaru.mcp.tools.evaluators import handle_evaluators_manage
 from kitaru.mcp.tools.review import handle_review_manage, handle_review_read
@@ -1400,6 +1408,184 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
     assert create_version_idempotency_keys == ["retry-evaluator-version-1"]
 
 
+def test_analyzer_version_sources_require_existing_blob_or_pinned_package() -> None:
+    adapter = TypeAdapter(AnalyzersManageRequest)
+    script = AnalyzerVersionCreate(
+        operation="create_version",
+        analyzer_id=uuid.uuid4(),
+        source={
+            "type": "script",
+            "blob_id": uuid.uuid4(),
+            "entrypoint": "analyze",
+        },
+    )
+    assert script.source.type == "script"
+    with pytest.raises(ValidationError, match="exactly pinned"):
+        adapter.validate_python(
+            {
+                "operation": "create_version",
+                "analyzer_id": uuid.uuid4(),
+                "source": {
+                    "type": "package",
+                    "requirement": "example>=1",
+                    "entrypoint": "example:analyze",
+                },
+            }
+        )
+
+
+def test_analyzer_updates_require_explicit_non_conflicting_changes() -> None:
+    analyzer_id = uuid.uuid4()
+
+    with pytest.raises(ValidationError, match="change at least one"):
+        AnalyzerUpdate(operation="update", analyzer_id=analyzer_id)
+    with pytest.raises(ValidationError, match="metadata cannot be null"):
+        AnalyzerUpdate(operation="update", analyzer_id=analyzer_id, metadata=None)
+    with pytest.raises(ValidationError, match="cannot be null without"):
+        AnalyzerUpdate(
+            operation="update", analyzer_id=analyzer_id, connection_schema=None
+        )
+    with pytest.raises(ValidationError, match="conflict"):
+        AnalyzerUpdate(
+            operation="update",
+            analyzer_id=analyzer_id,
+            connection_schema={"type": "object"},
+            clear_connection_schema=True,
+        )
+    with pytest.raises(ValidationError, match="exactly one"):
+        AnalyzerVersionUpdate(
+            operation="update_version", analyzer_id=analyzer_id, version=1
+        )
+    with pytest.raises(ValidationError, match="exactly one"):
+        AnalyzerVersionUpdate(
+            operation="update_version",
+            analyzer_id=analyzer_id,
+            version=1,
+            display_version="stable",
+            clear_display_version=True,
+        )
+
+
+async def test_analyzer_management_uses_only_typed_sdk_mutations() -> None:
+    calls: list[tuple[str, object]] = []
+    create_idempotency_keys: list[str | None] = []
+    create_version_idempotency_keys: list[str | None] = []
+
+    async def create(request: object, idempotency_key: str | None = None) -> object:
+        calls.append(("create", request))
+        create_idempotency_keys.append(idempotency_key)
+        return SimpleNamespace()
+
+    async def update(_id: uuid.UUID, request: object) -> object:
+        calls.append(("update", request))
+        return SimpleNamespace()
+
+    async def create_version(
+        _id: uuid.UUID, request: object, idempotency_key: str | None = None
+    ) -> object:
+        calls.append(("create_version", request))
+        create_version_idempotency_keys.append(idempotency_key)
+        return SimpleNamespace()
+
+    async def update_version(_id: uuid.UUID, _version: int, request: object) -> object:
+        calls.append(("update_version", request))
+        return SimpleNamespace()
+
+    client = SimpleNamespace(
+        analyzers=SimpleNamespace(
+            create=create,
+            update=update,
+            create_version=create_version,
+            update_version=update_version,
+        )
+    )
+    state = _get_state(client)
+    await handle_analyzers_manage(
+        state,
+        AnalyzerCreate(
+            operation="create",
+            name="clustering",
+            provider="langfuse",
+            connection_schema={"type": "object"},
+            idempotency_key="retry-analyzer-1",
+        ),
+    )
+    await handle_analyzers_manage(
+        state,
+        AnalyzerUpdate(
+            operation="update",
+            analyzer_id=uuid.uuid4(),
+            description=None,
+            clear_description=True,
+            metadata={"team": "insights"},
+            connection_schema={"type": "object"},
+        ),
+    )
+    await handle_analyzers_manage(
+        state,
+        AnalyzerUpdate(
+            operation="update",
+            analyzer_id=uuid.uuid4(),
+            clear_connection_schema=True,
+        ),
+    )
+    await handle_analyzers_manage(
+        state,
+        AnalyzerVersionCreate(
+            operation="create_version",
+            analyzer_id=uuid.uuid4(),
+            source={
+                "type": "package",
+                "requirement": "example==1.2.3",
+                "entrypoint": "example:analyze",
+            },
+            idempotency_key="retry-analyzer-version-1",
+        ),
+    )
+    await handle_analyzers_manage(
+        state,
+        AnalyzerVersionUpdate(
+            operation="update_version",
+            analyzer_id=uuid.uuid4(),
+            version=2,
+            display_version=None,
+            clear_display_version=True,
+        ),
+    )
+    assert [name for name, _ in calls] == [
+        "create",
+        "update",
+        "update",
+        "create_version",
+        "update_version",
+    ]
+    assert cast(Any, calls[0][1]).model_dump(exclude_unset=True) == {
+        "name": "clustering",
+        "description": None,
+        "provider": "langfuse",
+        "metadata": {},
+        "connection_schema": {"type": "object"},
+    }
+    assert cast(Any, calls[1][1]).model_dump(exclude_unset=True) == {
+        "description": None,
+        "metadata": {"team": "insights"},
+        "connection_schema": {"type": "object"},
+    }
+    assert cast(Any, calls[2][1]).model_dump(exclude_unset=True) == {
+        "connection_schema": None,
+    }
+    assert cast(Any, calls[3][1]).source.model_dump(mode="json") == {
+        "type": "package",
+        "requirement": "example==1.2.3",
+        "entrypoint": "example:analyze",
+    }
+    assert cast(Any, calls[4][1]).model_dump(exclude_unset=True) == {
+        "display_version": None
+    }
+    assert create_idempotency_keys == ["retry-analyzer-1"]
+    assert create_version_idempotency_keys == ["retry-analyzer-version-1"]
+
+
 async def test_script_evaluator_version_requires_existing_exact_blob() -> None:
     blob_id = uuid.uuid4()
     calls: list[str] = []
@@ -1464,11 +1650,76 @@ async def test_script_evaluator_version_rejects_mismatched_blob() -> None:
     assert create_calls == []
 
 
+async def test_script_analyzer_version_requires_existing_exact_blob() -> None:
+    blob_id = uuid.uuid4()
+    calls: list[str] = []
+
+    async def get_blob(item_id: uuid.UUID) -> object:
+        calls.append("blob")
+        return SimpleNamespace(id=item_id)
+
+    async def create_version(
+        _id: uuid.UUID, _request: object, idempotency_key: str | None = None
+    ) -> object:
+        calls.append("create_version")
+        return SimpleNamespace()
+
+    client = SimpleNamespace(
+        blobs=SimpleNamespace(get=get_blob),
+        analyzers=SimpleNamespace(create_version=create_version),
+    )
+    await handle_analyzers_manage(
+        _get_state(client),
+        AnalyzerVersionCreate(
+            operation="create_version",
+            analyzer_id=uuid.uuid4(),
+            source={
+                "type": "script",
+                "blob_id": blob_id,
+                "entrypoint": "analyze",
+            },
+        ),
+    )
+    assert calls == ["blob", "create_version"]
+
+
+async def test_script_analyzer_version_rejects_mismatched_blob() -> None:
+    blob_id = uuid.uuid4()
+    create_calls: list[object] = []
+
+    async def get_blob(_item_id: uuid.UUID) -> object:
+        return SimpleNamespace(id=uuid.uuid4())
+
+    async def create_version(_id: uuid.UUID, request: object) -> object:
+        create_calls.append(request)
+        return SimpleNamespace()
+
+    client = SimpleNamespace(
+        blobs=SimpleNamespace(get=get_blob),
+        analyzers=SimpleNamespace(create_version=create_version),
+    )
+    with pytest.raises(MCPToolError, match="different blob"):
+        await handle_analyzers_manage(
+            _get_state(client),
+            AnalyzerVersionCreate(
+                operation="create_version",
+                analyzer_id=uuid.uuid4(),
+                source={
+                    "type": "script",
+                    "blob_id": blob_id,
+                    "entrypoint": "analyze",
+                },
+            ),
+        )
+    assert create_calls == []
+
+
 @pytest.mark.parametrize(
     "kind",
     [
         "cohort",
         "cohort_version",
+        "connection",
         "experiment",
         "experiment_run",
         "insight",
@@ -1489,6 +1740,7 @@ async def test_existing_delete_payloads_keep_exact_resource_behavior(kind: str) 
     client = SimpleNamespace(
         cohorts=SimpleNamespace(delete=delete_resource("cohort")),
         cohort_versions=SimpleNamespace(delete=delete_resource("cohort_version")),
+        connections=SimpleNamespace(delete=delete_resource("connection")),
         experiments=SimpleNamespace(delete=delete_resource("experiment")),
         experiment_runs=SimpleNamespace(delete=delete_resource("experiment_run")),
         insights=SimpleNamespace(delete=delete_resource("insight")),

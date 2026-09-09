@@ -7,7 +7,8 @@ resolution-markers = [
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform != 'win32'",
     "python_full_version < '3.13' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform != 'win32'",
+    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
+    "(python_full_version < '3.12' and sys_platform == 'emscripten') or (python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32')",
 ]
 
 [options]
@@ -26,6 +27,7 @@ members = [
     "kitaru-logfire-importer",
     "kitaru-openai-agents",
     "kitaru-phoenix-importer",
+    "kitaru-post-import-insights",
     "kitaru-pydantic-ai",
 ]
 
@@ -41,6 +43,7 @@ dev = [
     { name = "kitaru-logfire-importer", extras = ["adapter"], editable = "packages/logfire-importer" },
     { name = "kitaru-openai-agents", editable = "packages/openai-agents" },
     { name = "kitaru-phoenix-importer", extras = ["adapter"], editable = "packages/phoenix-importer" },
+    { name = "kitaru-post-import-insights", extras = ["openai"], editable = "packages/post-import-insights" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], editable = "packages/pydantic-ai" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
@@ -889,15 +892,15 @@ wheels = [
 
 [[package]]
 name = "httpcore2"
-version = "2.9.1"
+version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "h11" },
     { name = "truststore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/39/a8/20ed1ed79cbc2ecdf5301c0968ab7c85547212e2a7bd126ddd2d986e206e/httpcore2-2.9.1.tar.gz", hash = "sha256:4d8acbf8b306f48c9d6046591fd5ba4037d1b1b1000d140fc2c3eab1e9a0c0e2", size = 67089, upload-time = "2026-07-24T09:21:03.867Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/ad/f4f0e57345f1870f3e8cb624e058d7eca6e5a27d33bcc3311d9b618734cd/httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648", size = 67548, upload-time = "2026-08-18T13:22:08.211Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/fb/46c52b781975c335a2bcf1072c7bbc007cbdc8d674217f5ee1daba2c848b/httpcore2-2.9.1-py3-none-any.whl", hash = "sha256:6182472379e855fe4221246a2bb7ecede403bc61c6798062ae1787d051ccde26", size = 82809, upload-time = "2026-07-24T09:21:01.178Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/74/d370e55600d9bcfa0d9794b0166126d49291a3d2b20c268fc98c453a4948/httpcore2-2.12.0-py3-none-any.whl", hash = "sha256:7e04258ce01013d7d615e5b910a3b27fac937d7a95038227e79652b4ba3b4ceb", size = 83074, upload-time = "2026-08-18T13:22:05.854Z" },
 ]
 
 [[package]]
@@ -926,18 +929,28 @@ wheels = [
 
 [[package]]
 name = "httpx2"
-version = "2.9.1"
+version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio" },
-    { name = "httpcore2" },
+    { name = "anyio", marker = "sys_platform != 'emscripten'" },
+    { name = "httpcore2", marker = "sys_platform != 'emscripten'" },
+    { name = "httpx2-jsfetch", marker = "python_full_version >= '3.12' and sys_platform == 'emscripten'" },
     { name = "idna" },
-    { name = "truststore" },
+    { name = "truststore", marker = "sys_platform != 'emscripten'" },
     { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/21/14/38128fbafd7e0ed41d874df6c9a653d47c2d111cfe59e2b4ac95161b4abd/httpx2-2.9.1.tar.gz", hash = "sha256:1932a768737e3666291582833da748cc4e563c337cf96706fccc04fa6e58764a", size = 95458, upload-time = "2026-07-24T09:21:04.972Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7f/f8/579a8b51e42e38ee32647df9f08aa25643ae788e275cc625b199829c4671/httpx2-2.12.0.tar.gz", hash = "sha256:7631fe9887a8a2275f4a2540e053aa670fcc50742864a9ae7c66e609fdcf12cf", size = 100040, upload-time = "2026-08-18T13:22:09.086Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/b8/cfd91c4ab9134d386d48f0b6ac662ff3d4be6efdee59ee1c67ebc3c0487c/httpx2-2.9.1-py3-none-any.whl", hash = "sha256:1820fe14a9ab1107bfeff39259987429450b070ec0ff38cc87eb0d8c97fdc71a", size = 91191, upload-time = "2026-07-24T09:21:02.6Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/95/411ba65569158e862368917aaf56597f3e5fa3b91b0502919638465a08f3/httpx2-2.12.0-py3-none-any.whl", hash = "sha256:cc8b6eecb8661c146b8f89a60e97456ee086e91a784ed31ac450c3a9e613dd36", size = 95427, upload-time = "2026-08-18T13:22:06.834Z" },
+]
+
+[[package]]
+name = "httpx2-jsfetch"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/cd/c4/0e5636363151a2a1795e0a77617168b9ca438e1748ec05fc9b5687f93d64/httpx2_jsfetch-1.0.tar.gz", hash = "sha256:70a0e3eabfef7cce5ad9c629f7d01ca05e418f586646f4ddf14782e4c1454c60", size = 6872, upload-time = "2026-08-07T00:13:07.492Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9b/43/832f631d32e4f1211caa2ba368317739fe71f0b8530e4c9d15dc454bac2a/httpx2_jsfetch-1.0-py3-none-any.whl", hash = "sha256:cb916b707601e69a07721aabc8f3f6659be3a6893bc1ff5c6f9e02241df2da32", size = 6382, upload-time = "2026-08-07T00:13:06.567Z" },
 ]
 
 [[package]]
@@ -1223,6 +1236,7 @@ requires-dist = [
     { name = "packaging", marker = "extra == 'cli'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'mcp'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'server'", specifier = ">=24.0" },
+    { name = "packaging", marker = "extra == 'worker'", specifier = ">=24.0" },
     { name = "pydantic", specifier = ">=2,<3" },
     { name = "pydantic-settings", marker = "extra == 'server'", specifier = ">=2.14" },
     { name = "pydantic-settings", marker = "extra == 'worker'", specifier = ">=2.14" },
@@ -1246,6 +1260,7 @@ dev = [
     { name = "pip-audit", specifier = ">=2.10,<3" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", specifier = ">=0.16.2" },
     { name = "ty", specifier = ">=0.0.72" },
     { name = "yamlfix" },
@@ -1265,14 +1280,18 @@ adapter = [
     { name = "braintrust" },
     { name = "httpx" },
 ]
+api = [
+    { name = "httpx" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "braintrust", marker = "extra == 'adapter'", specifier = ">=0.30,<1" },
-    { name = "httpx", marker = "extra == 'adapter'", specifier = ">=0.27,<1" },
+    { name = "httpx", marker = "extra == 'api'", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
+    { name = "kitaru-braintrust-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/braintrust-importer" },
 ]
-provides-extras = ["adapter"]
+provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-claude-agent-sdk"
@@ -1323,13 +1342,17 @@ dependencies = [
 adapter = [
     { name = "langfuse" },
 ]
+api = [
+    { name = "langfuse" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "kitaru", editable = "../" },
-    { name = "langfuse", marker = "extra == 'adapter'", specifier = ">=4.14,<5" },
+    { name = "kitaru-langfuse-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/langfuse-importer" },
+    { name = "langfuse", marker = "extra == 'api'", specifier = ">=4.14,<5" },
 ]
-provides-extras = ["adapter"]
+provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-langgraph"
@@ -1369,13 +1392,17 @@ dependencies = [
 adapter = [
     { name = "langsmith" },
 ]
+api = [
+    { name = "langsmith" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "kitaru", editable = "../" },
-    { name = "langsmith", marker = "extra == 'adapter'", specifier = ">=0.3,<1" },
+    { name = "kitaru-langsmith-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/langsmith-importer" },
+    { name = "langsmith", marker = "extra == 'api'", specifier = ">=0.3,<1" },
 ]
-provides-extras = ["adapter"]
+provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-logfire-importer"
@@ -1390,14 +1417,19 @@ adapter = [
     { name = "httpx" },
     { name = "logfire" },
 ]
+api = [
+    { name = "httpx" },
+    { name = "logfire" },
+]
 
 [package.metadata]
 requires-dist = [
-    { name = "httpx", marker = "extra == 'adapter'", specifier = ">=0.27,<1" },
+    { name = "httpx", marker = "extra == 'api'", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
-    { name = "logfire", marker = "extra == 'adapter'", specifier = ">=4.35,<6" },
+    { name = "kitaru-logfire-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/logfire-importer" },
+    { name = "logfire", marker = "extra == 'api'", specifier = ">=4.35,<6" },
 ]
-provides-extras = ["adapter"]
+provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-openai-agents"
@@ -1429,16 +1461,41 @@ adapter = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
 ]
+api = [
+    { name = "arize-phoenix-client" },
+    { name = "httpx" },
+]
 
 [package.metadata]
 requires-dist = [
-    { name = "arize-phoenix-client", marker = "extra == 'adapter'", specifier = ">=2.0,<4" },
-    { name = "httpx", marker = "extra == 'adapter'", specifier = ">=0.27,<1" },
+    { name = "arize-phoenix-client", marker = "extra == 'api'", specifier = ">=2.0,<4" },
+    { name = "httpx", marker = "extra == 'api'", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
+    { name = "kitaru-phoenix-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/phoenix-importer" },
     { name = "opentelemetry-api", marker = "extra == 'adapter'", specifier = ">=1.12" },
     { name = "opentelemetry-sdk", marker = "extra == 'adapter'", specifier = ">=1.12" },
 ]
-provides-extras = ["adapter"]
+provides-extras = ["api", "adapter"]
+
+[[package]]
+name = "kitaru-post-import-insights"
+version = "0.1.0"
+source = { editable = "packages/post-import-insights" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.optional-dependencies]
+openai = [
+    { name = "openai" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "kitaru", editable = "../" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=2.15,<4" },
+]
+provides-extras = ["openai"]
 
 [[package]]
 name = "kitaru-pydantic-ai"

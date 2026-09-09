@@ -53,12 +53,14 @@ from kitaru.server.adapters.rest.routers import (
     accounts,
     agent_versions,
     agents,
+    analyzers,
     annotations,
     api_keys,
     auth,
     blobs,
     cohort_versions,
     cohorts,
+    connections,
     devices,
     evaluations,
     evaluators,
@@ -407,6 +409,12 @@ def create_app(settings: APISettings) -> FastAPI:
         responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(
+        analyzers.router,
+        prefix="/api/v1/analyzers",
+        tags=["analyzers"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
         annotations.router,
         prefix="/api/v1/annotations",
         tags=["annotations"],
@@ -434,6 +442,12 @@ def create_app(settings: APISettings) -> FastAPI:
         cohort_versions.router,
         prefix="/api/v1/cohort-versions",
         tags=["cohort-versions"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        connections.router,
+        prefix="/api/v1/connections",
+        tags=["connections"],
         responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(

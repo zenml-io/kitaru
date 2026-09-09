@@ -29,6 +29,10 @@ from kitaru.api_models.v1.base import (
 )
 from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.hook import TaskHook
+from kitaru.api_models.v1.imports import ImportQuery
+
+# Label naming the provider whose credentials the claiming worker must hold.
+REQUIRES_CREDENTIALS_LABEL = "kitaru/requires-credentials"
 
 
 class TaskKind(StrEnum):
@@ -37,6 +41,7 @@ class TaskKind(StrEnum):
     AGENT = "agent"
     EVALUATOR = "evaluator"
     IMPORTER = "importer"
+    ANALYZER = "analyzer"
 
 
 class TaskOnFailure(StrEnum):
@@ -84,7 +89,11 @@ class TaskResponse(TimestampedResponseModel):
         default=None, description="Input session for an evaluator task."
     )
     import_id: uuid.UUID | None = Field(
-        default=None, description="Import run by an importer task."
+        default=None,
+        description="Import run by an importer task or analyzed by an analysis task.",
+    )
+    agent_id: uuid.UUID | None = Field(
+        default=None, description="Agent for an analysis task."
     )
     worker_id: uuid.UUID | None = Field(
         default=None, description="Worker that claimed the task."
@@ -158,11 +167,26 @@ PluginSpec = Annotated[
 ]
 
 
-class PayloadSpec(ResponseModel):
-    """Payload spec."""
+class BlobImportSourceSpec(ResponseModel):
+    """Blob import source spec."""
 
+    type: Literal["blob"] = Field(default="blob")
     blob_id: uuid.UUID = Field(description="Blob holding the payload.")
     sha256: str = Field(description="Blob content hash.")
+
+
+class ApiImportSourceSpec(ResponseModel):
+    """API import source spec."""
+
+    type: Literal["api"] = Field(default="api")
+    query: ImportQuery = Field(
+        description="Importer-defined selection of what to fetch."
+    )
+
+
+ImportSourceSpec = Annotated[
+    BlobImportSourceSpec | ApiImportSourceSpec, Field(discriminator="type")
+]
 
 
 class AgentTaskDetails(ResponseModel):
@@ -192,7 +216,7 @@ class ImportTaskDetails(ResponseModel):
 
     kind: Literal["importer"] = Field(default="importer")
     plugin: PluginSpec = Field(description="Importer plugin to load.")
-    payload: PayloadSpec = Field(description="Payload to parse.")
+    source: ImportSourceSpec = Field(description="Where the payload comes from.")
     provider: str | None = Field(
         default=None, description="Source system named on the import."
     )
@@ -204,8 +228,21 @@ class ImportTaskDetails(ResponseModel):
     )
 
 
+class AnalysisTaskDetails(ResponseModel):
+    """Analysis task details."""
+
+    kind: Literal["analyzer"] = Field(default="analyzer")
+    analyzer_name: str = Field(description="Name the analyzer emits insights under.")
+    params: dict[str, JsonValue] = Field(
+        description="Parameters passed to the analyzer."
+    )
+    plugin: PluginSpec = Field(description="Analyzer plugin to load.")
+    agent_id: uuid.UUID = Field(description="Agent the insights belong to.")
+    import_id: uuid.UUID = Field(description="Import whose sessions are analyzed.")
+
+
 TaskDetails = Annotated[
-    AgentTaskDetails | EvaluationTaskDetails | ImportTaskDetails,
+    AgentTaskDetails | EvaluationTaskDetails | ImportTaskDetails | AnalysisTaskDetails,
     Field(discriminator="kind"),
 ]
 
@@ -218,7 +255,8 @@ class TaskSpecResponse(ResponseModel):
     timeout_seconds: int = Field(description="Process timeout.")
     run: TaskRunSpec | None = Field(
         default=None,
-        description="Command to run, unset for evaluator and importer tasks.",
+        description="Command to run, unset for evaluator, importer, and analyzer "
+        "tasks.",
     )
     env: dict[str, str] = Field(description="Creator-set process environment extras.")
     secret_env: dict[str, str] = Field(

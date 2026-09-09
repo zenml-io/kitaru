@@ -14,9 +14,17 @@
 """Import DTO conversions."""
 
 from kitaru.api_models.v1.imports import (
+    ApiImportSource,
+    BlobImportSource,
     ImportCreateRequest,
     ImportListParams,
+    ImportQuery,
     ImportResponse,
+    ImportSource,
+)
+from kitaru.server.adapters.rest.mapping.analyzer_config import (
+    analyzer_config_input,
+    analyzer_config_to_wire,
 )
 from kitaru.server.adapters.rest.mapping.evaluator_config import (
     evaluator_config_input,
@@ -36,14 +44,25 @@ def import_create_to_command(body: ImportCreateRequest) -> ImportCreate:
     Returns:
         Import create command.
     """
+    source = body.get_source()
+    if isinstance(source, ApiImportSource):
+        payload_blob_id = None
+        fetch_query = source.query.model_dump(mode="json", exclude_unset=True)
+        connection_id = source.connection_id
+    else:
+        payload_blob_id, fetch_query = source.blob_id, None
+        connection_id = None
     return ImportCreate(
         importer=body.importer,
         agent_id=body.agent_id,
         agent_version_id=body.agent_version_id,
         version=body.version,
-        payload_blob_id=body.payload_blob_id,
+        connection_id=connection_id,
+        payload_blob_id=payload_blob_id,
+        fetch_query=fetch_query,
         params=body.params,
         evaluators=[evaluator_config_input(config) for config in body.evaluators],
+        analyzers=[analyzer_config_input(config) for config in body.analyzers],
     )
 
 
@@ -58,6 +77,12 @@ def import_to_response(import_: Import) -> ImportResponse:
     """
     assert import_.created is not None
     assert import_.updated is not None
+    source: ImportSource
+    if import_.payload_blob_id is not None:
+        source = BlobImportSource(blob_id=import_.payload_blob_id)
+    else:
+        assert import_.fetch_query is not None
+        source = ApiImportSource(query=ImportQuery.model_validate(import_.fetch_query))
     return ImportResponse(
         id=import_.id,
         owner_id=import_.owner_id,
@@ -65,11 +90,13 @@ def import_to_response(import_: Import) -> ImportResponse:
         agent_id=import_.agent_id,
         agent_version_id=import_.agent_version_id,
         importer_version_id=import_.importer_version_id,
-        payload_blob_id=import_.payload_blob_id,
+        connection_id=import_.connection_id,
+        source=source,
         params=import_.params,
         evaluators=[
             evaluator_config_to_wire(evaluator) for evaluator in import_.evaluators
         ],
+        analyzers=[analyzer_config_to_wire(analyzer) for analyzer in import_.analyzers],
         stats=import_.stats,
         error=import_.error,
         created=import_.created,

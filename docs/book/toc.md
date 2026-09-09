@@ -17,6 +17,7 @@
 - [Investigations & Annotations](concepts/investigations.md)
 - [Replay](concepts/replay.md)
 - [Evaluators & Evaluations](concepts/evaluators.md)
+- [Analyzers & Insights](concepts/analyzers.md)
 - [Cohorts](concepts/cohorts.md)
 - [Experiments](concepts/experiments.md)
 - [Workers](concepts/workers.md)
@@ -33,6 +34,7 @@
 - [Replay a failure and fork it](guides/replay-and-overrides.md)
 - [Build a regression suite from production](guides/regression-suite.md)
 - [Write an evaluator](guides/write-an-evaluator.md)
+- [Write an analyzer](guides/write-an-analyzer.md)
 - [Deterministic evaluations](guides/deterministic-evaluations.md)
 - [Tool policies](guides/tool-policies.md)
 - [Track cost and model usage](guides/llm-calls.md)
@@ -40,6 +42,7 @@
 ## Import your traces
 
 - [Overview](getting-started/import-your-traces.md)
+- [Post-import insights](guides/post-import-insights.md)
 - [Langfuse](guides/import-langfuse-traces.md)
 - [LangSmith](guides/import-langsmith-traces.md)
 - [Braintrust](guides/import-braintrust-traces.md)
@@ -47,6 +50,7 @@
 - [Arize Phoenix](guides/import-phoenix-traces.md)
 - [Kitaru JSONL](guides/importing-sessions.md)
 - [No importer for your format](guides/custom-importer.md)
+- [Provider connections](guides/provider-connections.md)
 
 ## Adapters
 

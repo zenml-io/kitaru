@@ -73,6 +73,7 @@ server = [
     "packaging>=24.0",
 ]
 worker = [
+    "packaging>=24.0",
     "pydantic-settings>=2.14",
 ]
 otel = [

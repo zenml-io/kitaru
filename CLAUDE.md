@@ -58,15 +58,9 @@ they belong in `docs/book/` (GitBook). The public changelog is owned by the
 changelog repo (published to `docs.zenml.io/changelog`), not by either docs
 surface here.
 
-The public marketing/runtime site for Kitaru lives in the sibling `zenml-io-v2`
-repository. If a task involves Astro pages, public site assets, marketing
-Cloudflare Pages deployment, or runtime web APIs such as
-waitlist/get-started/newsletter endpoints, switch to `zenml-io-v2` and follow
-that repo's instructions instead of adding that code back here.
-
 ## Website and marketing assets
 
-The Kitaru marketing site and its asset pipeline now live in `zenml-io-v2`. Do not add Astro pages, public site assets, R2 blog tooling, or runtime website changes to this repository. If a task is about the public website rather than the Python SDK/docs source, work in `zenml-io-v2` instead.
+The Kitaru marketing site, its asset pipeline, and the runtime web APIs (waitlist, get-started, newsletter) live in the sibling `zenml-io-v2` repository. Do not add Astro pages, public site assets, R2 blog tooling, or runtime website changes here. If a task is about the public website rather than the Python SDK or docs source, work in `zenml-io-v2` and follow that repo's instructions.
 
 ## Docs guidance
 
@@ -74,16 +68,12 @@ Detailed authoring conventions, link rules, and accuracy requirements for all
 three docs surfaces live in **`docs/CLAUDE.md`** (loaded when you work under
 `docs/`). Keep the quickstart example setup and import path runnable without provider credentials.
 
-Do not commit temporary agent planning/review files such as `docs/plans/*`,
-`docs/reviews/*`, or prompt exports unless the user explicitly asks for a
-durable tracked document.
-
 ## Branching strategy
 
-- **`develop`** is the default branch and the normal target for PRs. During the v2 migration, v2 feature work may target its explicitly named integration branch.
-- **`main`** contains only released versions. Updated by force-pushing during releases. Never push directly to `main`.
-- **`release/X.Y.Z`** branches are archival snapshots created during the release process.
-- **Tags** follow `vX.Y.Z` (e.g. `v0.1.0`).
+- **`develop`** is the default branch and the target for PRs.
+- **`main`** contains only released versions. After a stable core release the release owner fast-forwards it to the immutable core tag with `git merge --ff-only`. Never push to it directly and never force-push it.
+- **`release/<unit>/<major.minor>`** branches (for example `release/kitaru/0.25`) are maintenance lines that the release workflow creates or fast-forwards after a stable release; patch releases branch from them. The older `release/X.Y.Z` branches are archival snapshots from the previous release process.
+- **Tags** are namespaced per release unit: `python/kitaru/v<X.Y.Z>` for core, `python/<distribution>/v<X.Y.Z>` for Python plugins, and `typescript/kitaru/v<X.Y.Z>` for the TypeScript packages. The `kitaru-release` skill owns the full procedure.
 
 ## Development commands
 
@@ -127,9 +117,9 @@ For adapter, importer, specialized UI API, docs, CI, and release work, load the 
 
 ## Versioning and changelog
 
-- **Single source of truth:** the `version` field in `pyproject.toml`. The release workflow bumps it automatically — never change it by hand.
+- **Single source of truth:** the `version` field in `pyproject.toml`. On `develop` it carries a `+dev` suffix. Only a release-preparation PR (see the `kitaru-release` skill) sets it to a release version, and the workflow's development-reset PR restores the `+dev` placeholder afterward. Do not change it in feature PRs.
 - **Never hardcode the version** in tests or application code. Use `importlib.metadata.version("kitaru")` to read it at runtime.
-- **Update `CHANGELOG.md`** when making user-facing changes. Add entries under the `[Unreleased]` heading. The release workflow moves `[Unreleased]` to a versioned heading (e.g. `[0.2.0] - 2026-04-01`) at release time.
+- **Update `CHANGELOG.md`** when making user-facing changes. Add entries under the `[Unreleased]` heading. The release-preparation PR converts `[Unreleased]` to a versioned heading (e.g. `[0.2.0] - 2026-04-01`), and the development-reset PR restores an empty `[Unreleased]` afterward.
 - **Track deprecations in `DEPRECATIONS.md`** at the repository root, one entry per deprecated surface.
 
 ## Commits and PRs
@@ -139,13 +129,12 @@ For adapter, importer, specialized UI API, docs, CI, and release work, load the 
 - **Keep pre-existing failures separate.** If `just check` or `just test` surfaces a failure unrelated to the requested change, diagnose and report it. Fix it only when it blocks the scoped change or the user explicitly approves expanding the task; do not absorb another contributor's work into the current commit by default.
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.
-- **PRs:** Human-readable titles (no "feat:"/"doc:" prefixes). Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.
+- **PRs:** Human-readable titles with no "feat:", "doc:", or "[Codex]" prefixes. Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.
 - **PR reviewer guidance:** Every PR description should include a "Reviewer Notes" H2 or H3 section, but it should read like a guided walkthrough rather than a file inventory. Explain the story of the change, where the risky behavior lives, what would break if the implementation is wrong, and why the named files or functions matter.
 - **PR reproduction:** Include a concrete "Reproduction" subsection inside Reviewer Notes or immediately after it. Prefer a runnable example, API flow, or UI path that proves the behavior end to end. Tell the reviewer exactly what to run and what to look for afterward.
 - **PR local checks:** Do not create a standalone "Verification" section that only lists `just check`, `just test`, or `/simplify`. Those are still required local hygiene, but they are not useful reviewer guidance by themselves. If useful, include them as a short "Local checks run" note after the reproduction instructions.
 - **Before opening a PR or making a large commit**, always run `/simplify` to review changed code for reuse opportunities, quality issues, and efficiency improvements. Fix any issues it finds before committing.
 - **Preserve quickstart example compatibility** when changing Kitaru behavior used by `examples/python/pydantic_ai_ticket_resolver`. Inspect its current contract and validate the affected example checks before opening a PR.
-- Never include a "[Codex] " or "feat: " prefix to PR titles.
 
 ## Conventions
 

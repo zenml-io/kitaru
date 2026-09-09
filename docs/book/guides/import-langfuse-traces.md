@@ -44,7 +44,7 @@ Set `agent_version_id` when you know which code produced the traces; it's what l
 
 Kitaru ships provider importers as default plugins, registered at server startup under the `kitaru/` namespace, so `--importer kitaru/langfuse@latest` always resolves. They run on your worker like any other importer; there is nothing to write. See [Import your traces](../getting-started/import-your-traces.md) for the current built-in list.
 
-The Langfuse importer parses **Langfuse JSONL exports**, up to 50 MiB per payload (the importer's own cap, separate from the server's configurable blob limit), and understands three record shapes: `trace`, `observation`, and raw `ingestion_event` lines. Traces map to sessions; observations map to nodes with their parent relationships, timings, model names, token usage, and cost preserved. `params`:
+The Langfuse importer parses **Langfuse JSONL exports**, with uploads capped by the server's configurable blob limit, and understands three record shapes: `trace`, `observation`, and raw `ingestion_event` lines. Traces map to sessions; observations map to nodes with their parent relationships, timings, model names, token usage, and cost preserved. `params`:
 
 | Param | Meaning |
 | --- | --- |
@@ -53,6 +53,29 @@ The Langfuse importer parses **Langfuse JSONL exports**, up to 50 MiB per payloa
 | `infer_tool_call_links` | Optional boolean, default `true`. The importer matches tool-call ids emitted by a generation with `gen_ai.tool.call.id` on tool observations, nests each unambiguous tool call under the requesting generation, and retains its original Langfuse parent as a secondary parent. Unmatched or ambiguous ids remain unchanged. Set this to `false` to keep only the source observation hierarchy. |
 
 Import in slices as often as you like; dedup makes it safe.
+
+## Fetch traces from the Langfuse API
+
+Skip the export and upload, and let the import task fetch traces from Langfuse directly:
+
+```bash
+kitaru session import \
+  --importer kitaru/langfuse@latest \
+  --agent support-agent@latest \
+  --since 7d \
+  --tag imported-baseline --wait
+```
+
+Omitting FILE and setting `--since` selects an API import: the worker calls the Langfuse API instead of parsing an uploaded payload. `--since` and `--until` accept an ISO 8601 timestamp or a relative duration (`7d`, `12h`, `30m`). `--trace-id` (repeatable) fetches exactly those trace ids instead of a time window. The same selection is a query object on the SDK and REST request:
+
+| Query key | Meaning |
+| --- | --- |
+| `trace_ids` | Langfuse trace ids to fetch. When present, exactly those traces are fetched and the time window is ignored. |
+| `since` | Timezone-aware ISO 8601 datetime, lower bound of trace start time. Required when `trace_ids` is absent. |
+| `until` | Timezone-aware ISO 8601 datetime, upper bound of trace start time. Defaults to now. |
+| `concurrency` | Traces fetched at once. Defaults to 4. |
+
+The worker installs the package's `api` extra for an API import, which carries the provider client. A [connection](provider-connections.md) you name with `--connection`, or the provider's default connection, supplies `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` (or the older `LANGFUSE_HOST` for a self-hosted instance). Without either, the worker's own environment does, and only a worker started with `--selector kitaru/requires-credentials=langfuse` claims the task. Each fetched trace is parsed the same way an uploaded export would be, so the `params` table above, and the dedup rules below, apply the same way.
 
 ## Dedup: one session per (imported_from, external_id)
 

@@ -136,7 +136,8 @@ class SecretService:
         Raises:
             SecretNotFound: No secret has this id, or the secret is
                 internal.
-            SecretInUse: The secret is referenced by an agent version.
+            SecretInUse: The secret is referenced by an agent version or a
+                connection.
         """
         await self.get_secret(secret_id, actor=actor)
         await self._repository.delete(secret_id)

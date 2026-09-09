@@ -87,6 +87,9 @@ ephemeral_worker__command: {{ .Kitaru.ephemeralWorker.command | quote }}
 {{- if .Kitaru.ephemeralWorker.timeoutSeconds }}
 ephemeral_worker__timeout_seconds: {{ .Kitaru.ephemeralWorker.timeoutSeconds | quote }}
 {{- end }}
+{{- if .Kitaru.ephemeralWorker.selectors }}
+ephemeral_worker__selectors: {{ .Kitaru.ephemeralWorker.selectors | toJson | quote }}
+{{- end }}
 {{- with .Kitaru.ephemeralWorker.modal }}
 {{- if .tokenID }}
 ephemeral_worker__modal__token_id: {{ .tokenID | quote }}
@@ -250,6 +253,9 @@ blob_storage__s3__secret_access_key: {{ .Kitaru.blobStorage.s3.secretAccessKey |
 {{- end }}
 {{- if and (eq .Kitaru.ephemeralWorker.backend "modal") .Kitaru.ephemeralWorker.modal.tokenSecret }}
 ephemeral_worker__modal__token_secret: {{ .Kitaru.ephemeralWorker.modal.tokenSecret | quote }}
+{{- end }}
+{{- if and (ne .Kitaru.ephemeralWorker.backend "none") .Kitaru.ephemeralWorker.env }}
+ephemeral_worker__env: {{ .Kitaru.ephemeralWorker.env | toJson | quote }}
 {{- end }}
 {{- end }}
 

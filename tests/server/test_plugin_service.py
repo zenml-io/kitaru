@@ -32,17 +32,20 @@ from kitaru.server.application.models.plugin import (
     PluginFilter,
     PluginUpdate,
     PluginVersionFilter,
+    PluginVersionUpdate,
 )
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound
+from kitaru.server.domain.base import ForbiddenError
 from kitaru.server.domain.blob import BlobNotFound
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     InvalidPluginAgentScope,
     InvalidPluginProvider,
     PackagePluginSource,
+    Plugin,
     PluginKind,
     PluginNotFound,
     PluginVersionNotFound,
@@ -51,6 +54,86 @@ from kitaru.server.domain.plugin import (
 )
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+@pytest.mark.parametrize("kind", list(PluginKind))
+@pytest.mark.parametrize("owner_id", [None, ACTOR.account.id])
+@pytest.mark.parametrize(
+    "operation", ["update", "delete", "create_version", "update_version"]
+)
+async def test_default_plugins_cannot_be_modified(
+    kind: PluginKind,
+    owner_id: uuid.UUID | None,
+    operation: str,
+    repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+) -> None:
+    """Keep code in the trusted namespace controlled by server bootstrap."""
+    plugin = await repository.create(
+        Plugin(owner_id=owner_id, kind=kind, name="kitaru/default")
+    )
+    source = PackagePluginSource(requirement="example==1.0.0", entrypoint="example:run")
+    await repository.create_version(plugin.id, source, "1.0.0")
+    service = PluginService(
+        kind=kind, repository=repository, blob_repository=blob_repository
+    )
+
+    with pytest.raises(ForbiddenError, match="read-only"):
+        if operation == "update":
+            await service.update_plugin(
+                plugin.id, PluginUpdate(description="changed"), actor=ACTOR
+            )
+        elif operation == "delete":
+            await service.delete_plugin(plugin.id, actor=ACTOR)
+        elif operation == "create_version":
+            await service.create_version(plugin.id, source, "2.0.0", actor=ACTOR)
+        else:
+            await service.update_version(
+                plugin.id,
+                1,
+                PluginVersionUpdate(display_version="changed"),
+                actor=ACTOR,
+            )
+
+    stored = await repository.get(plugin.id)
+    assert stored.latest_version == 1
+    assert stored.description is None
+    assert (await repository.get_version(plugin.id, 1)).display_version == "1.0.0"
+
+
+@pytest.mark.parametrize("kind", list(PluginKind))
+async def test_ownerless_plugins_outside_reserved_namespace_can_be_modified(
+    kind: PluginKind,
+    repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+) -> None:
+    """Account deletion does not make user plugins server-managed."""
+    plugin = await repository.create(
+        Plugin(owner_id=None, kind=kind, name="kitaru-community")
+    )
+    service = PluginService(
+        kind=kind, repository=repository, blob_repository=blob_repository
+    )
+    updated = await service.update_plugin(
+        plugin.id, PluginUpdate(description="changed"), actor=ACTOR
+    )
+    assert updated.description == "changed"
+    version = await service.create_version(
+        plugin.id,
+        PackagePluginSource(requirement="example==1.0.0", entrypoint="example:run"),
+        "v1",
+        actor=ACTOR,
+    )
+    updated_version = await service.update_version(
+        plugin.id,
+        version.version,
+        PluginVersionUpdate(display_version="v2"),
+        actor=ACTOR,
+    )
+    assert updated_version.display_version == "v2"
+    await service.delete_plugin(plugin.id, actor=ACTOR)
+    with pytest.raises(PluginNotFound):
+        await repository.get(plugin.id)
 
 
 class _RecordingAnalytics(ServerAnalytics):
@@ -119,6 +202,19 @@ def importer_service(
     """Provide a plugin service bound to the importer kind, sharing the repository."""
     return PluginService(
         kind=PluginKind.IMPORTER,
+        repository=repository,
+        blob_repository=blob_repository,
+    )
+
+
+@pytest.fixture
+def analyzer_service(
+    repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+) -> PluginService:
+    """Provide a plugin service bound to the analyzer kind, sharing the repository."""
+    return PluginService(
+        kind=PluginKind.ANALYZER,
         repository=repository,
         blob_repository=blob_repository,
     )
@@ -199,6 +295,17 @@ async def test_create_plugin_importer_allows_provider(
         PluginCreate(
             name="langfuse-import", description=None, provider="langfuse", metadata={}
         ),
+        actor=ACTOR,
+    )
+    assert plugin.provider == "langfuse"
+
+
+async def test_create_plugin_analyzer_allows_provider(
+    analyzer_service: PluginService,
+) -> None:
+    """Store the provider on an analyzer plugin."""
+    plugin = await analyzer_service.create_plugin(
+        PluginCreate(name="trends", description=None, provider="langfuse", metadata={}),
         actor=ACTOR,
     )
     assert plugin.provider == "langfuse"
@@ -480,9 +587,40 @@ async def test_update_version_display_version(evaluator_service: PluginService) 
         actor=ACTOR,
     )
     updated = await evaluator_service.update_version(
-        plugin.id, created.version, display_version="v1.0.1", actor=ACTOR
+        plugin.id,
+        created.version,
+        PluginVersionUpdate(display_version="v1.0.1"),
+        actor=ACTOR,
     )
     assert updated.display_version == "v1.0.1"
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [(PluginVersionUpdate(), "v1"), (PluginVersionUpdate(display_version=None), None)],
+)
+async def test_update_version_preserves_omitted_and_clears_null_display_version(
+    evaluator_service: PluginService,
+    command: PluginVersionUpdate,
+    expected: str | None,
+) -> None:
+    """Distinguish an omitted display version from an explicit null."""
+    plugin = await evaluator_service.create_plugin(
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
+    )
+    created = await evaluator_service.create_version(
+        plugin.id,
+        PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg:score"),
+        display_version="v1",
+        actor=ACTOR,
+    )
+
+    updated = await evaluator_service.update_version(
+        plugin.id, created.version, command, actor=ACTOR
+    )
+
+    assert updated.display_version == expected
 
 
 async def test_update_version_not_found(evaluator_service: PluginService) -> None:
@@ -493,7 +631,7 @@ async def test_update_version_not_found(evaluator_service: PluginService) -> Non
     )
     with pytest.raises(PluginVersionNotFound):
         await evaluator_service.update_version(
-            plugin.id, 1, display_version="v1", actor=ACTOR
+            plugin.id, 1, PluginVersionUpdate(display_version="v1"), actor=ACTOR
         )
 
 
@@ -633,4 +771,15 @@ async def test_create_plugin_importer_rejects_agent_id(
     with pytest.raises(InvalidPluginAgentScope):
         await importer_service.create_plugin(
             PluginCreate(name="langfuse-import", agent_id=agent.id), actor=ACTOR
+        )
+
+
+async def test_create_plugin_analyzer_rejects_agent_id(
+    analyzer_service: PluginService, agent_repository: FakeAgentRepository
+) -> None:
+    """Reject an agent id on an analyzer plugin."""
+    agent = await create_agent(agent_repository, ACTOR.account.id)
+    with pytest.raises(InvalidPluginAgentScope):
+        await analyzer_service.create_plugin(
+            PluginCreate(name="trends", agent_id=agent.id), actor=ACTOR
         )

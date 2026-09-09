@@ -69,8 +69,14 @@ MAPPING = {
         "importers",
         "create_version",
     ),
+    ("POST", "/api/v1/analyzers"): ("analyzers", "create"),
+    ("POST", "/api/v1/analyzers/{analyzer_id}/versions"): (
+        "analyzers",
+        "create_version",
+    ),
     ("POST", "/api/v1/tags"): ("tags", "create"),
     ("POST", "/api/v1/secrets"): ("secrets", "create"),
+    ("POST", "/api/v1/connections"): ("connections", "create"),
     ("POST", "/api/v1/service-accounts"): ("service_accounts", "create"),
     ("POST", "/api/v1/users"): ("users", "create"),
 }
