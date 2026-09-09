@@ -33,6 +33,7 @@ class AnalyzerConfigInput(FrozenModel):
     """Analyzer config awaiting resolution."""
 
     analyzer: str
+    min_sessions: int | None = Field(default=None, ge=1)
     version: int | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     connection_id: uuid.UUID | None = None

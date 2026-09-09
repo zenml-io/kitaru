@@ -180,10 +180,12 @@ async def test_list_and_iter(
     assert len(collected) == 1
 
 
+@pytest.mark.parametrize("minimum", [None, 1])
 async def test_analyze(
     api_client: KitaruAPIClient,
     services: JobAndTaskServices,
     import_request: ImportCreateRequest,
+    minimum: int | None,
 ) -> None:
     """Analyze an import through the SDK."""
     created = await api_client.imports.create(import_request)
@@ -199,13 +201,17 @@ async def test_analyze(
     job = await api_client.imports.analyze(
         created.id,
         ImportAnalyzeRequest(
-            analyzers=[AnalyzerConfig(analyzer="kitaru/post-import-insights")]
+            analyzers=[
+                AnalyzerConfig(
+                    analyzer="kitaru/post-import-insights", min_sessions=minimum
+                )
+            ]
         ),
     )
 
     assert isinstance(job, JobResponse)
     assert job.kind is JobKind.ANALYSIS
-    assert job.status is JobStatus.PENDING
+    assert job.status is (JobStatus.PENDING if minimum == 1 else JobStatus.COMPLETED)
     assert job.id != created.job_id
 
 

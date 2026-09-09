@@ -145,8 +145,9 @@ async def analyze_import(
     """Run analyzers over the sessions of an import, as one job.
 
     Clients observe HTTP 201 on success, 404 when the import, an analyzer,
-    a version, or a connection does not exist, 409 when the import has no
-    completed or failed session, and 422 when an analyzer version repeats.
+    a version, or a connection does not exist, and 422 when an analyzer
+    version repeats or its minimum session count is invalid. Below the
+    minimum, the job records a skipped analysis without launching a worker.
 
     Args:
         import_id: Id of the import.
@@ -160,5 +161,6 @@ async def analyze_import(
     """
     command = import_analyze_to_command(body)
     job = await service.analyze_import(import_id, command, actor=actor)
-    await starter.start(job.id, actor=actor)
+    if not job.settled:
+        await starter.start(job.id, actor=actor)
     return job_to_response(job)

@@ -284,6 +284,34 @@ async def test_start_skips_a_user_plugin(
     assert workers == []
 
 
+@pytest.mark.parametrize("skipped_count", [1, 20])
+async def test_start_ignores_skipped_analysis_needing_unavailable_credentials(
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+    stored_auth_service: AuthService,
+    skipped_count: int,
+) -> None:
+    """A skipped analyzer does not block a worker for remaining job tasks."""
+    job = await _create_import(services, builtin=True)
+    skipped = AnalysisTask(
+        job_id=job.id,
+        plugin_version_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        import_id=uuid.uuid4(),
+        labels={
+            "kitaru/plugin-namespace": "kitaru",
+            "kitaru/requires-credentials": "openai",
+        },
+    )
+    skipped.skip_if_insufficient_sessions(1, 5, datetime.now(UTC))
+    for _ in range(skipped_count):
+        await services.tasks.create(skipped.model_copy(update={"id": uuid.uuid4()}))
+
+    await _start(job, services, ephemeral_workers, stored_auth_service)
+
+    assert len(ephemeral_workers.starts) == 1
+
+
 async def test_worker_drains_analysis_added_after_import_claim(
     services: JobAndTaskServices,
     ephemeral_workers: FakeEphemeralWorkers,

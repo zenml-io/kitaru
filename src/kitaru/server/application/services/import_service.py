@@ -50,7 +50,8 @@ from kitaru.server.application.services.plugin_resolution import (
     resolve_plugin,
     resolve_plugin_version,
 )
-from kitaru.server.domain.imports import Import, ImportNotAnalyzable
+from kitaru.server.application.services.task_transitions import TaskTransitions
+from kitaru.server.domain.imports import Import
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.server.domain.task import ImportTask, Task
@@ -70,6 +71,7 @@ class ImportService:
         plugin_repository: PluginRepository,
         blob_repository: BlobRepository,
         connection_repository: ConnectionRepository,
+        transitions: TaskTransitions,
     ) -> None:
         """Initialize the service.
 
@@ -86,6 +88,7 @@ class ImportService:
             blob_repository: Blob repository, for the payload lookup.
             connection_repository: Connection repository, for the named
                 connection lookup.
+            transitions: Job settlement and event dispatch.
         """
         self._repository = repository
         self._jobs = job_repository
@@ -96,6 +99,7 @@ class ImportService:
         self._plugins = plugin_repository
         self._blobs = blob_repository
         self._connections = connection_repository
+        self._transitions = transitions
 
     async def create_import(self, command: ImportCreate, actor: AuthContext) -> Import:
         """Create an import, its job, and the importer task running it.
@@ -218,8 +222,6 @@ class ImportService:
                 connection.
             ValidationError: Two analyzer configs resolve to the same plugin
                 version.
-            ImportNotAnalyzable: The import has no completed or failed
-                session.
 
         Returns:
             Created job.
@@ -228,18 +230,21 @@ class ImportService:
         analyzers = await validate_analyzers(
             command.analyzers, self._plugins, self._connections, actor
         )
-        if not await query_evaluatable_sessions(import_.id, self._sessions):
-            raise ImportNotAnalyzable(import_.id)
+        sessions = await query_evaluatable_sessions(import_.id, self._sessions)
         job = await self._jobs.create(
             Job(owner_id=actor.account.id, kind=JobKind.ANALYSIS)
         )
         # The job was just created in this call and cannot have settled yet, so
         # the tasks skip add_tasks' settled check.
         tasks: list[Task] = [
-            await build_analysis_task(analyzer, import_, job.id, self._plugins)
+            await build_analysis_task(
+                analyzer, import_, job.id, self._plugins, len(sessions)
+            )
             for analyzer in analyzers
         ]
         await self._tasks.create_many(tasks)
+        if all(task.terminal for task in tasks):
+            return await self._transitions.advance_job(job.id)
         return job
 
     async def get_import(self, import_id: uuid.UUID, actor: AuthContext) -> Import:

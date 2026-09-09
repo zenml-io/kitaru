@@ -3078,12 +3078,26 @@
                 }
               ],
               "default": null,
-              "description": "Connection supplying provider credentials, an omitted value resolves to the provider's default.",
+              "description": "Credential connection; defaults to the provider's default.",
               "title": "Connection Id"
+            },
+            "min_sessions": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session minimum (built-in insights: 5; others: 1).",
+              "title": "Min Sessions"
             },
             "params": {
               "additionalProperties": true,
-              "description": "Parameters passed to the analyzer.",
+              "description": "Plugin arguments.",
               "title": "Params",
               "type": "object"
             },
@@ -3097,7 +3111,7 @@
                 }
               ],
               "default": null,
-              "description": "Analyzer version, an omitted value resolves to latest.",
+              "description": "Analyzer version; defaults to latest.",
               "title": "Version"
             }
           },

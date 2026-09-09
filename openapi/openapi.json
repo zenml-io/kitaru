@@ -543,12 +543,25 @@
                 "type": "null"
               }
             ],
-            "description": "Connection supplying provider credentials, an omitted value resolves to the provider's default.",
+            "description": "Credential connection; defaults to the provider's default.",
             "title": "Connection Id"
+          },
+          "min_sessions": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session minimum (built-in insights: 5; others: 1).",
+            "title": "Min Sessions"
           },
           "params": {
             "additionalProperties": true,
-            "description": "Parameters passed to the analyzer.",
+            "description": "Plugin arguments.",
             "title": "Params",
             "type": "object"
           },
@@ -561,7 +574,7 @@
                 "type": "null"
               }
             ],
-            "description": "Analyzer version, an omitted value resolves to latest.",
+            "description": "Analyzer version; defaults to latest.",
             "title": "Version"
           }
         },
@@ -20909,7 +20922,7 @@
     },
     "/api/v1/imports/{import_id}/analyze": {
       "post": {
-        "description": "Run analyzers over the sessions of an import, as one job.\n\nClients observe HTTP 201 on success, 404 when the import, an analyzer,\na version, or a connection does not exist, 409 when the import has no\ncompleted or failed session, and 422 when an analyzer version repeats.\n\nArgs:\n    import_id: Id of the import.\n    body: Import analyze request.\n    service: Import service.\n    starter: Ephemeral worker starter.\n    actor: Caller context.\n\nReturns:\n    Created job.",
+        "description": "Run analyzers over the sessions of an import, as one job.\n\nClients observe HTTP 201 on success, 404 when the import, an analyzer,\na version, or a connection does not exist, and 422 when an analyzer\nversion repeats or its minimum session count is invalid. Below the\nminimum, the job records a skipped analysis without launching a worker.\n\nArgs:\n    import_id: Id of the import.\n    body: Import analyze request.\n    service: Import service.\n    starter: Ephemeral worker starter.\n    actor: Caller context.\n\nReturns:\n    Created job.",
         "operationId": "analyze_import_api_v1_imports__import_id__analyze_post",
         "parameters": [
           {

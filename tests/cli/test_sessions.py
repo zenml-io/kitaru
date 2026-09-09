@@ -681,6 +681,7 @@ async def test_session_import_forwards_analyzers(tmp_path: Path) -> None:
             "version": 2,
             "params": {"min_size": 5},
             "connection_id": None,
+            "min_sessions": None,
         }
     ]
     assert result.item["analyzers"] == [

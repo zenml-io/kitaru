@@ -552,14 +552,21 @@ async def test_create_import_with_analyzers(
     await _importer_version(services)
     await _analyzer_version(services, "trends")
     body = await _import_request(
-        services, analyzers=[{"analyzer": "trends", "params": {"k": 1}}]
+        services,
+        analyzers=[{"analyzer": "trends", "params": {"k": 1}, "min_sessions": 8}],
     )
 
     response = await client.post("/api/v1/imports", json=body)
     assert response.status_code == 201
     created = response.json()
     assert created["analyzers"] == [
-        {"analyzer": "trends", "version": 1, "params": {"k": 1}, "connection_id": None}
+        {
+            "analyzer": "trends",
+            "version": 1,
+            "params": {"k": 1},
+            "connection_id": None,
+            "min_sessions": 8,
+        }
     ]
     assert created["stats"] is None
     assert created["error"] is None
@@ -745,24 +752,33 @@ async def test_analyze_import(
     assert task.params == {"k": 1}
 
 
-async def test_analyze_import_starts_an_ephemeral_worker(
+@pytest.mark.parametrize("minimum,starts", [(1, 1), (5, 0)])
+async def test_analyze_import_starts_only_for_runnable_tasks(
     ephemeral_client: httpx.AsyncClient,
     services: JobAndTaskServices,
     ephemeral_workers: FakeEphemeralWorkers,
+    minimum: int,
+    starts: int,
 ) -> None:
-    """Start a worker pinned to the analysis job after the response."""
+    """Start a worker only when the analysis job has runnable tasks."""
     import_ = await _analyzable_import(ephemeral_client, services)
 
     response = await ephemeral_client.post(
         f"/api/v1/imports/{import_['id']}/analyze",
-        json={"analyzers": [{"analyzer": "kitaru/post-import-insights"}]},
+        json={
+            "analyzers": [
+                {"analyzer": "kitaru/post-import-insights", "min_sessions": minimum}
+            ]
+        },
     )
     assert response.status_code == 201
     job = response.json()
 
-    assert len(ephemeral_workers.starts) == 1
-    spec = ephemeral_workers.starts[0]
-    assert spec.job_id == uuid.UUID(job["id"])
+    assert len(ephemeral_workers.starts) == starts
+    assert job["status"] == ("pending" if starts else "completed")
+    if starts:
+        spec = ephemeral_workers.starts[0]
+        assert spec.job_id == uuid.UUID(job["id"])
 
 
 async def test_analyze_import_not_found_for_unknown_import(
@@ -791,10 +807,10 @@ async def test_analyze_import_not_found_for_unknown_analyzer(
     assert response.status_code == 404
 
 
-async def test_analyze_import_conflicts_without_sessions(
+async def test_analyze_import_returns_skip_without_sessions(
     client: httpx.AsyncClient, services: JobAndTaskServices
 ) -> None:
-    """Reject an import that created no session with 409."""
+    """An empty rerun returns a completed job and a readable skipped task."""
     await _importer_version(services)
     await _analyzer_version(services, "trends")
     body = await _import_request(services)
@@ -804,7 +820,28 @@ async def test_analyze_import_conflicts_without_sessions(
         f"/api/v1/imports/{created['id']}/analyze",
         json={"analyzers": [{"analyzer": "trends"}]},
     )
-    assert response.status_code == 409
+    assert response.status_code == 201
+    job = response.json()
+    assert job["status"] == "completed"
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=uuid.UUID(job["id"])), actor=AuthContext(account=ACCOUNT)
+    )
+    (task,) = tasks
+    response = await client.get(f"/api/v1/tasks/{task.id}")
+    assert response.status_code == 200
+    skipped = response.json()
+    assert skipped["status"] == "completed"
+    assert skipped["attempt"] == 0
+    assert skipped["worker_id"] is None
+    assert skipped["started_at"] is None
+    assert skipped["ended_at"] is not None
+    assert skipped["error"] is None
+    assert skipped["result"] == {
+        "status": "skipped",
+        "reason": "insufficient_sessions",
+        "eligible_sessions": 0,
+        "min_sessions": 1,
+    }
 
 
 async def test_analyze_import_rejects_an_empty_analyzer_list(
@@ -835,4 +872,23 @@ async def test_analyze_import_rejects_duplicate_analyzer_versions(
             ]
         },
     )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("minimum", [0, -1])
+@pytest.mark.parametrize("rerun", [False, True])
+async def test_analyzer_minimum_must_be_positive(
+    client: httpx.AsyncClient, services: JobAndTaskServices, minimum: int, rerun: bool
+) -> None:
+    """Both import creation and analysis reject a nonpositive threshold."""
+    analyzers = [{"analyzer": "kitaru/post-import-insights", "min_sessions": minimum}]
+    if rerun:
+        import_ = await _analyzable_import(client, services)
+        path = f"/api/v1/imports/{import_['id']}/analyze"
+        body = {"analyzers": analyzers}
+    else:
+        await _importer_version(services)
+        path = "/api/v1/imports"
+        body = await _import_request(services, analyzers=analyzers)
+    response = await client.post(path, json=body)
     assert response.status_code == 422

@@ -20,6 +20,8 @@ from importlib.metadata import version
 from fastapi import BackgroundTasks
 from pydantic import SecretStr
 
+from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.task import TaskStatus
 from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.api.config import APISettings
@@ -32,7 +34,10 @@ from kitaru.server.application.services.worker_service import (
     WorkerService,
     get_ephemeral_scope,
 )
+from kitaru.server.domain.task import TERMINAL_TASK_STATUSES
 from kitaru.server.domain.worker import Worker, scope_covers
+from kitaru.server.filtering import FilterCondition
+from kitaru.server.utils import paginate_all
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +90,26 @@ class EphemeralWorkerStarter:
         """
         if self._ephemeral_workers is None:
             return
-        tasks, _ = await self._job_service.list_job_tasks(
-            job_id, TaskFilter(), actor=actor
+        tasks = await paginate_all(
+            lambda cursor: self._job_service.list_job_tasks(
+                job_id,
+                TaskFilter(
+                    cursor=cursor,
+                    expression=FilterCondition(
+                        field="status",
+                        op=FilterOp.IN,
+                        value=[
+                            status
+                            for status in TaskStatus
+                            if status not in TERMINAL_TASK_STATUSES
+                        ],
+                    ),
+                ),
+                actor=actor,
+            )
         )
+        if not tasks:
+            return
         scope = get_ephemeral_scope(job_id, self._settings.EPHEMERAL_WORKER.selectors)
         if not all(scope_covers(scope, task) for task in tasks):
             return

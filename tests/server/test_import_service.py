@@ -32,7 +32,11 @@ from conftest import (
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
-from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL, TaskOnFailure
+from kitaru.api_models.v1.task import (
+    REQUIRES_CREDENTIALS_LABEL,
+    TaskOnFailure,
+    TaskStatus,
+)
 from kitaru.server.api.bootstrap import register_default_plugins
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.imports import (
@@ -51,7 +55,7 @@ from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersionAgentMismatch
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.connection import ConnectionNotFound
-from kitaru.server.domain.imports import Import, ImportNotAnalyzable, ImportNotFound
+from kitaru.server.domain.imports import Import, ImportNotFound
 from kitaru.server.domain.plugin import (
     PackagePluginSource,
     PluginKind,
@@ -331,7 +335,9 @@ async def test_create_import_stores_the_resolved_analyzers(
     analyzer_version = await _analyzer_version(services, "trends")
     command = await _import_command(
         services,
-        analyzers=[AnalyzerConfigInput(analyzer="trends", params={"k": 1})],
+        analyzers=[
+            AnalyzerConfigInput(analyzer="trends", params={"k": 1}, min_sessions=8)
+        ],
     )
 
     import_ = await services.import_service.create_import(command, actor=ACTOR)
@@ -341,6 +347,7 @@ async def test_create_import_stores_the_resolved_analyzers(
     assert analyzer.analyzer == "trends"
     assert analyzer.version == 1
     assert analyzer.params == {"k": 1}
+    assert analyzer.min_sessions == 8
     assert analyzer.analyzer_version_id == analyzer_version.id
     stored = await services.imports.get(import_.id)
     assert stored.analyzers == import_.analyzers
@@ -919,39 +926,57 @@ async def test_analyze_import_rejects_an_unknown_import(
         )
 
 
-async def test_analyze_import_rejects_an_import_without_sessions(
-    services: JobAndTaskServices,
+@pytest.mark.parametrize("in_progress", [False, True])
+async def test_analyze_import_skips_without_eligible_sessions(
+    services: JobAndTaskServices, in_progress: bool
 ) -> None:
-    """An import that created no session has nothing to analyze."""
+    """A rerun with no eligible sessions completes with an explicit skip."""
     await _importer_version(services)
     command = await _import_command(services)
     import_ = await services.import_service.create_import(command, actor=ACTOR)
+    if in_progress:
+        await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
     await _analyzer_version(services, "trends")
+    job = await services.import_service.analyze_import(
+        import_.id,
+        ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="trends")]),
+        actor=ACTOR,
+    )
+    assert job.status is JobStatus.COMPLETED
+    assert (await services.jobs.get(job.id)).status is JobStatus.COMPLETED
+    (task,) = await _analysis_tasks(services, job.id)
+    assert task.status is TaskStatus.COMPLETED
+    assert task.result == {
+        "status": "skipped",
+        "reason": "insufficient_sessions",
+        "eligible_sessions": 0,
+        "min_sessions": 1,
+    }
 
-    with pytest.raises(ImportNotAnalyzable):
-        await services.import_service.analyze_import(
-            import_.id,
-            ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="trends")]),
-            actor=ACTOR,
-        )
 
-
-async def test_analyze_import_rejects_an_import_with_only_in_progress_sessions(
+async def test_analyze_import_mixes_skipped_and_runnable_analyzers(
     services: JobAndTaskServices,
 ) -> None:
-    """A session still in progress does not count as analyzable."""
-    await _importer_version(services)
-    command = await _import_command(services)
-    import_ = await services.import_service.create_import(command, actor=ACTOR)
-    await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
-    await _analyzer_version(services, "trends")
-
-    with pytest.raises(ImportNotAnalyzable):
-        await services.import_service.analyze_import(
-            import_.id,
-            ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="trends")]),
-            actor=ACTOR,
-        )
+    """Skipped built-ins do not complete a job containing a runnable custom analyzer."""
+    import_ = await _analyzable_import(services)
+    trends = await _analyzer_version(services, "trends")
+    job = await services.import_service.analyze_import(
+        import_.id,
+        ImportAnalyze(
+            analyzers=[
+                AnalyzerConfigInput(analyzer="kitaru/post-import-insights"),
+                AnalyzerConfigInput(analyzer="trends"),
+            ]
+        ),
+        actor=ACTOR,
+    )
+    assert job.status is JobStatus.PENDING
+    tasks = await _analysis_tasks(services, job.id)
+    assert len(tasks) == 2
+    assert {task.status for task in tasks} == {TaskStatus.COMPLETED, TaskStatus.PENDING}
+    runnable = next(task for task in tasks if task.plugin_version_id == trends.id)
+    assert runnable.status is TaskStatus.PENDING
+    assert runnable.result is None
 
 
 async def test_analyze_import_rejects_an_unknown_analyzer(

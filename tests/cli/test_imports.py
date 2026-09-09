@@ -262,6 +262,7 @@ async def test_analyze_forwards_analyzer_configs() -> None:
         "analyzers": [
             {
                 "analyzer": "clustering",
+                "min_sessions": None,
                 "version": 2,
                 "params": {"min_size": 5},
                 "connection_id": str(client.connection.id),

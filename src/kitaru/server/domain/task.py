@@ -672,6 +672,15 @@ class ImportTask(Task):
             raise InvalidTaskResult(f"Task {self.id} requires a result")
 
 
+class _AnalysisSkippedResult(FrozenModel):
+    """Analysis not run because too few eligible sessions were available."""
+
+    status: Literal["skipped"] = "skipped"
+    reason: Literal["insufficient_sessions"] = "insufficient_sessions"
+    eligible_sessions: int = Field(ge=0)
+    min_sessions: int = Field(ge=1)
+
+
 class AnalysisTask(Task):
     """Analysis task."""
 
@@ -680,6 +689,26 @@ class AnalysisTask(Task):
     import_id: uuid.UUID
     connection_id: uuid.UUID | None = None
     params: dict[str, Any] = Field(default_factory=dict)
+
+    def skip_if_insufficient_sessions(
+        self, eligible_sessions: int, min_sessions: int, now: datetime
+    ) -> None:
+        """Complete a pending analysis without execution when below its minimum.
+
+        Args:
+            eligible_sessions: Number of eligible sessions in the import.
+            min_sessions: Minimum required to run the analyzer.
+            now: Current time.
+        """
+        if eligible_sessions >= min_sessions:
+            return
+        self._require_status({TaskStatus.PENDING}, TaskStatus.COMPLETED)
+        result = _AnalysisSkippedResult(
+            eligible_sessions=eligible_sessions, min_sessions=min_sessions
+        )
+        self.status = TaskStatus.COMPLETED
+        self.result = result.model_dump(mode="json")
+        self.ended_at = now
 
     @property
     def kind(self) -> TaskKind:
