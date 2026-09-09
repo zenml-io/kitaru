@@ -6,6 +6,7 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 kitaru = { path = "..", editable = true }
+kitaru-claude-agent-sdk = { workspace = true }
 kitaru-braintrust-importer = { workspace = true }
 kitaru-langfuse-importer = { workspace = true }
 kitaru-langgraph = { workspace = true }
@@ -14,11 +15,13 @@ kitaru-logfire-importer = { workspace = true }
 kitaru-mastra-importer = { workspace = true }
 kitaru-openai-agents = { workspace = true }
 kitaru-phoenix-importer = { workspace = true }
+kitaru-post-import-insights = { workspace = true }
 kitaru-pydantic-ai = { workspace = true }
 
 [dependency-groups]
 dev = [
     "kitaru[server]",
+    "kitaru-claude-agent-sdk",
     "kitaru-braintrust-importer[adapter]",
     "kitaru-langfuse-importer[adapter]",
     "kitaru-langgraph[deepagents]",
@@ -27,6 +30,7 @@ dev = [
     "kitaru-mastra-importer",
     "kitaru-openai-agents",
     "kitaru-phoenix-importer[adapter]",
+    "kitaru-post-import-insights[openai]",
     "kitaru-pydantic-ai[openai]",
     "pytest>=8.0",
     "pytest-asyncio>=1.4.0",
@@ -49,6 +53,7 @@ convention = "google"
 [tool.ruff.lint.isort]
 known-first-party = [
     "kitaru",
+    "kitaru_claude_agent_sdk",
     "kitaru_evaluator",
     "kitaru_braintrust_importer",
     "kitaru_jsonl_importer",
@@ -59,8 +64,14 @@ known-first-party = [
     "kitaru_mastra_importer",
     "kitaru_openai_agents",
     "kitaru_phoenix_importer",
+    "kitaru_post_import_insights",
     "kitaru_pydantic_ai",
 ]
+# The repository root holds a tests/mcp directory, so ruff's source detection
+# classifies the `mcp` distribution as first-party when it runs from there and
+# third-party when it runs from this directory. Naming it keeps one import
+# order valid from both.
+known-third-party = ["mcp"]
 
 [tool.ty.src]
 include = ["packages/*/src/**/*.py", "tests/**/*.py"]

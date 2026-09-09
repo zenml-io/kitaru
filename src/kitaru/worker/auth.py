@@ -22,7 +22,7 @@ class WorkerTokenSource:
     """Worker token renewed through an API key client."""
 
     def __init__(
-        self, client: KitaruAPIClient, worker_id: uuid.UUID, token: str
+        self, client: KitaruAPIClient, worker_id: uuid.UUID, token: str | None = None
     ) -> None:
         """Initialize the source.
 
@@ -30,7 +30,8 @@ class WorkerTokenSource:
             client: Client authenticating with the account API key, used to
                 renew the worker token.
             worker_id: Id of the registered worker.
-            token: Worker token issued by the registration.
+            token: Worker token issued by the registration, renewed on first
+                use when omitted.
         """
         self._client = client
         self._worker_id = worker_id
@@ -40,7 +41,7 @@ class WorkerTokenSource:
         """Return the worker token issued last.
 
         Returns:
-            Worker token.
+            Worker token, or None before the first renewal.
         """
         return self._token
 

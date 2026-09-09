@@ -43,6 +43,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.task import (
     TERMINAL_TASK_STATUSES,
     AgentTask,
+    AnalysisTask,
     EvaluationTask,
     ImportTask,
     Task,
@@ -54,11 +55,14 @@ ON_FAILURE_LENGTH = 16
 
 TASK_JOB_ID_FOREIGN_KEY = foreign_key_name("task", ["job_id"])
 TASK_WORKER_ID_FOREIGN_KEY = foreign_key_name("task", ["worker_id"])
+TASK_AGENT_ID_FOREIGN_KEY = foreign_key_name("task", ["agent_id"])
 TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT = unique_constraint_name(
     "task", ["job_id", "input_session_id", "plugin_version_id"]
 )
 TASK_JOB_ID_STATUS_INDEX = index_name("task", ["job_id", "status"])
 TASK_INPUT_SESSION_ID_INDEX = index_name("task", ["input_session_id"])
+TASK_IMPORT_ID_INDEX = index_name("task", ["import_id"])
+TASK_AGENT_ID_INDEX = index_name("task", ["agent_id"])
 # Partial indexes covering the queue scans: a scope claiming everything reads
 # pending rows in id order, a kind claim reads them per kind, and a
 # version-pinned claim reads them per agent version. The staleness sweep
@@ -90,6 +94,12 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=TASK_WORKER_ID_FOREIGN_KEY,
             ondelete="SET NULL",
         ),
+        ForeignKeyConstraint(
+            ["agent_id"],
+            ["agent.id"],
+            name=TASK_AGENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
         UniqueConstraint(
             "job_id",
             "input_session_id",
@@ -98,6 +108,8 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index(TASK_JOB_ID_STATUS_INDEX, "job_id", "status"),
         Index(TASK_INPUT_SESSION_ID_INDEX, "input_session_id"),
+        Index(TASK_IMPORT_ID_INDEX, "import_id"),
+        Index(TASK_AGENT_ID_INDEX, "agent_id"),
         Index(TASK_PENDING_ID_INDEX, "id", postgresql_where=text(PENDING_PREDICATE)),
         Index(
             TASK_PENDING_KIND_INDEX,
@@ -125,10 +137,11 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # deleting one neither cascades into the queue nor is blocked by it, and a
     # claim that cannot resolve an input cancels the task instead.
     agent_version_id: Mapped[uuid.UUID | None]
-    agent_id: Mapped[uuid.UUID | None]
     plugin_version_id: Mapped[uuid.UUID | None]
-    payload_blob_id: Mapped[uuid.UUID | None]
     input_session_id: Mapped[uuid.UUID | None]
+    import_id: Mapped[uuid.UUID | None]
+    connection_id: Mapped[uuid.UUID | None]
+    agent_id: Mapped[uuid.UUID | None]
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     attempt: Mapped[int]
     on_failure: Mapped[str] = mapped_column(String(ON_FAILURE_LENGTH))
@@ -182,10 +195,12 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             row.input_session_id = task.input_session_id
             row.inputs = task.params
         elif isinstance(task, ImportTask):
+            row.import_id = task.import_id
+        elif isinstance(task, AnalysisTask):
             row.plugin_version_id = task.plugin_version_id
-            row.payload_blob_id = task.payload_blob_id
             row.agent_id = task.agent_id
-            row.agent_version_id = task.agent_version_id
+            row.import_id = task.import_id
+            row.connection_id = task.connection_id
             row.inputs = task.params
         return row
 
@@ -250,14 +265,17 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                 **shared,
             )
         if kind is TaskKind.IMPORTER:
+            assert self.import_id is not None
+            return ImportTask(import_id=self.import_id, **shared)
+        if kind is TaskKind.ANALYZER:
             assert self.plugin_version_id is not None
-            assert self.payload_blob_id is not None
             assert self.agent_id is not None
-            return ImportTask(
+            assert self.import_id is not None
+            return AnalysisTask(
                 plugin_version_id=self.plugin_version_id,
-                payload_blob_id=self.payload_blob_id,
                 agent_id=self.agent_id,
-                agent_version_id=self.agent_version_id,
+                import_id=self.import_id,
+                connection_id=self.connection_id,
                 params=self.inputs if self.inputs is not None else {},
                 **shared,
             )

@@ -11,8 +11,9 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Evaluator config input model, shared by experiment and replay commands."""
+"""Evaluator and analyzer config input models."""
 
+import uuid
 from typing import Any
 
 from pydantic import Field
@@ -26,3 +27,13 @@ class EvaluatorConfigInput(FrozenModel):
     evaluator: str
     version: int | None = None
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnalyzerConfigInput(FrozenModel):
+    """Analyzer config awaiting resolution."""
+
+    analyzer: str
+    min_sessions: int | None = Field(default=None, ge=1)
+    version: int | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+    connection_id: uuid.UUID | None = None

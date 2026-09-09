@@ -24,6 +24,7 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeImportRepository,
     FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
@@ -191,6 +192,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(agent_repository),
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=payload_store,
     )
     node_service = SessionNodeService(

@@ -78,6 +78,29 @@ class EvaluatorConfig(FrozenModel):
     evaluator_version_id: uuid.UUID
 
 
+class AnalyzerConfig(FrozenModel):
+    """Analyzer config."""
+
+    analyzer: NamespacedName
+    min_sessions: int | None = Field(default=None, ge=1)
+    version: int
+    params: dict[str, Any] = Field(default_factory=dict)
+    analyzer_version_id: uuid.UUID
+    provider: str | None = None
+    connection_id: uuid.UUID | None = None
+
+    def get_min_sessions(self) -> int:
+        """Return the explicit minimum or the analyzer's default."""
+        if self.min_sessions is not None:
+            return self.min_sessions
+        if self.analyzer in {
+            "kitaru/post-import-insights",
+            "kitaru/openai-post-import-insights",
+        }:
+            return 5
+        return 1
+
+
 class StaticCase(FrozenModel):
     """Static tool call case."""
 

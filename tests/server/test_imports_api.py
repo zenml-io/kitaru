@@ -13,56 +13,112 @@
 #  permissions and limitations under the License.
 """Tests for the import routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import Any
 
 import httpx
 import pytest
 
 from conftest import (
+    FakeEphemeralWorkers,
     JobAndTaskServices,
     build_job_and_task_services,
     create_agent,
     create_blob,
+    create_connection,
     create_plugin,
+    create_session,
     override_idempotency,
 )
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
+from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    get_auth_service,
+    get_ephemeral_workers,
+    get_import_service,
     get_job_service,
     get_task_service,
+    get_worker_service,
 )
 from kitaru.server.api.app import create_app
+from kitaru.server.api.bootstrap import register_default_plugins
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.models.worker import WorkerFilter
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
-from kitaru.server.domain.task import ImportTask
+from kitaru.server.domain.agent import Agent
+from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
+from kitaru.server.domain.task import AnalysisTask, ImportTask
+from kitaru.server.ephemeral_worker_settings import (
+    EphemeralWorkerBackend,
+    EphemeralWorkerSettings,
+    ModalEphemeralWorkerSettings,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 
 @pytest.fixture
-def services() -> JobAndTaskServices:
-    """Provide fake-backed job and task services."""
-    return build_job_and_task_services()
+async def services() -> JobAndTaskServices:
+    """Provide fake-backed job, task, and import services."""
+    services = build_job_and_task_services()
+    await register_default_plugins(services.plugins)
+    return services
 
 
 @pytest.fixture
-async def client(
-    services: JobAndTaskServices,
-) -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Provide an HTTP client for the app with fake-backed job and task services."""
-    app = create_app(
-        APISettings(
-            DB_HOST="localhost",
-            SECRET_ENCRYPTION_KEY="test-encryption-key",
-            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
-        )
+def ephemeral_workers() -> FakeEphemeralWorkers:
+    """Provide a fake ephemeral worker backend recording starts."""
+    return FakeEphemeralWorkers()
+
+
+def _settings(**overrides: Any) -> APISettings:
+    """Build API settings for the test app."""
+    return APISettings(
+        DB_HOST="localhost",
+        SECRET_ENCRYPTION_KEY="test-encryption-key",
+        JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        **overrides,
     )
-    app.dependency_overrides[get_job_service] = lambda: services.job_service
+
+
+def _ephemeral_settings() -> APISettings:
+    """Build API settings with a Modal ephemeral worker backend configured."""
+    return _settings(
+        SERVER_URL="https://kitaru.example.com",
+        EPHEMERAL_WORKER=EphemeralWorkerSettings(
+            backend=EphemeralWorkerBackend.MODAL,
+            image="zenmldocker/kitaru-worker:1.0.0",
+            modal=ModalEphemeralWorkerSettings(
+                token_id="ak-test", token_secret="as-test"
+            ),
+        ),
+    )
+
+
+@asynccontextmanager
+async def _client(
+    services: JobAndTaskServices,
+    auth_service: AuthService,
+    settings: APISettings,
+    ephemeral_workers: FakeEphemeralWorkers | None = None,
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app with fake-backed import services."""
+    app = create_app(settings)
+    app.dependency_overrides[get_import_service] = lambda: services.import_service
     app.dependency_overrides[get_task_service] = lambda: services.task_service
+    app.dependency_overrides[get_job_service] = lambda: services.job_service
+    app.dependency_overrides[get_worker_service] = lambda: WorkerService(
+        repository=services.workers, liveness_timeout_seconds=60
+    )
+    app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_ephemeral_workers] = lambda: ephemeral_workers
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
@@ -70,89 +126,192 @@ async def client(
         yield client
 
 
-async def test_create_import(
-    client: httpx.AsyncClient, services: JobAndTaskServices
-) -> None:
-    """Create an import job holding one importer task."""
+@pytest.fixture
+async def client(
+    services: JobAndTaskServices, auth_service: AuthService
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app without an ephemeral worker backend."""
+    async with _client(services, auth_service, _settings()) as client:
+        yield client
+
+
+@pytest.fixture
+async def ephemeral_client(
+    services: JobAndTaskServices,
+    auth_service: AuthService,
+    ephemeral_workers: FakeEphemeralWorkers,
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app with a fake ephemeral worker backend."""
+    async with _client(
+        services, auth_service, _ephemeral_settings(), ephemeral_workers
+    ) as client:
+        yield client
+
+
+async def _importer_version(services: JobAndTaskServices) -> PluginVersion:
+    """Register the csv importer with one version."""
     plugin = await create_plugin(
         services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
     )
-    version = await services.plugins.create_version(
+    return await services.plugins.create_version(
         plugin.id,
         ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
         display_version=None,
     )
-    payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
-    agent = await create_agent(services.agents, ACCOUNT.id)
 
-    response = await client.post(
-        "/api/v1/imports",
-        json={
-            "importer": "csv",
-            "agent_id": str(agent.id),
-            "payload_blob_id": str(payload.id),
-            "params": {
-                "delimiter": ",",
-                "join_on": "/metadata/customer~1case_id",
-            },
-        },
+
+async def _builtin_importer_version(services: JobAndTaskServices) -> PluginVersion:
+    """Register the reserved namespace csv importer with one version."""
+    plugin = await create_plugin(
+        services.plugins, None, PluginKind.IMPORTER, name="kitaru/csv"
     )
-    assert response.status_code == 201
-    job = response.json()
-    assert job["status"] == "pending"
+    return await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        display_version=None,
+    )
 
+
+async def _evaluator_version(
+    services: JobAndTaskServices, name: str, agent_id: uuid.UUID | None = None
+) -> PluginVersion:
+    """Register an evaluator with one version, scoped to an agent when given."""
+    plugin = await create_plugin(
+        services.plugins,
+        ACCOUNT.id,
+        PluginKind.EVALUATOR,
+        name=name,
+        agent_id=agent_id,
+    )
+    return await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="score"),
+        display_version=None,
+    )
+
+
+async def _analyzer_version(services: JobAndTaskServices, name: str) -> PluginVersion:
+    """Register an analyzer with one version."""
+    plugin = await create_plugin(
+        services.plugins, ACCOUNT.id, PluginKind.ANALYZER, name=name
+    )
+    return await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="analyze"),
+        display_version=None,
+    )
+
+
+async def _import_request(
+    services: JobAndTaskServices, agent: Agent | None = None, **overrides: Any
+) -> dict[str, Any]:
+    """Build a create request body naming a stored payload and agent."""
+    payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
+    if agent is None:
+        agent = await create_agent(services.agents, ACCOUNT.id)
+    body: dict[str, Any] = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "payload_blob_id": str(payload.id),
+    }
+    body.update(overrides)
+    return body
+
+
+async def test_create_import(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Create an import whose job holds one importer task linking the import."""
+    version = await _importer_version(services)
+    body = await _import_request(
+        services,
+        params={"delimiter": ",", "join_on": "/metadata/customer~1case_id"},
+    )
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["owner_id"] == str(ACCOUNT.id)
+    assert created["job_id"] is not None
+    assert created["agent_id"] == body["agent_id"]
+    assert created["agent_version_id"] is None
+    assert created["importer_version_id"] == str(version.id)
+    assert created["source"] == {"type": "blob", "blob_id": body["payload_blob_id"]}
+    assert created["params"] == body["params"]
+    assert created["evaluators"] == []
+    assert created["analyzers"] == []
+    assert created["stats"] is None
+    assert created["error"] is None
+
+    job = await services.jobs.get(uuid.UUID(created["job_id"]))
+    assert job.status.value == "pending"
     tasks, _ = await services.task_service.list_tasks(
-        TaskFilter(job_id=uuid.UUID(job["id"])), actor=AuthContext(account=ACCOUNT)
+        TaskFilter(job_id=job.id), actor=AuthContext(account=ACCOUNT)
     )
     assert len(tasks) == 1
     task = tasks[0]
     assert isinstance(task, ImportTask)
     assert task.kind.value == "importer"
-    assert task.plugin_version_id == version.id
-    assert task.params == {
-        "delimiter": ",",
-        "join_on": "/metadata/customer~1case_id",
-    }
+    assert task.import_id == uuid.UUID(created["id"])
+    assert task.labels == {}
 
 
-async def test_create_import_rejects_nul_byte_in_importer(
+async def test_create_import_starts_an_ephemeral_worker(
+    ephemeral_client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+) -> None:
+    """Start a worker pinned to the import's job after the response."""
+    await _builtin_importer_version(services)
+    body = await _import_request(services, importer="kitaru/csv")
+
+    response = await ephemeral_client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+
+    assert len(ephemeral_workers.starts) == 1
+    spec = ephemeral_workers.starts[0]
+    assert spec.job_id == uuid.UUID(created["job_id"])
+    worker = await services.workers.get(spec.worker_id)
+    assert worker.scope.job_id == spec.job_id
+    assert worker.metadata == {"ephemeral": "true"}
+
+
+async def test_create_import_skips_the_ephemeral_worker_for_a_user_importer(
+    ephemeral_client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+) -> None:
+    """Leave a job for a user importer to the account's own workers."""
+    await _importer_version(services)
+    body = await _import_request(services)
+
+    response = await ephemeral_client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+
+    assert ephemeral_workers.starts == []
+    workers, _ = await services.workers.query(WorkerFilter(), None)
+    assert workers == []
+
+
+async def test_create_import_registers_no_worker_without_a_backend(
     client: httpx.AsyncClient, services: JobAndTaskServices
 ) -> None:
-    """Observe HTTP 422 for a NUL byte in the importer name."""
-    payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
-    agent = await create_agent(services.agents, ACCOUNT.id)
-    response = await client.post(
-        "/api/v1/imports",
-        json={
-            "importer": "csv\x00",
-            "agent_id": str(agent.id),
-            "payload_blob_id": str(payload.id),
-        },
-    )
-    assert response.status_code == 422
+    """Register no worker when no ephemeral worker backend is configured."""
+    await _builtin_importer_version(services)
+    body = await _import_request(services, importer="kitaru/csv")
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+
+    workers, _ = await services.workers.query(WorkerFilter(), None)
+    assert workers == []
 
 
-async def test_create_import_not_found_for_unknown_importer(
+async def test_create_api_import(
     client: httpx.AsyncClient, services: JobAndTaskServices
 ) -> None:
-    """Observe HTTP 404 for an unknown importer name."""
-    payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
-    agent = await create_agent(services.agents, ACCOUNT.id)
-    response = await client.post(
-        "/api/v1/imports",
-        json={
-            "importer": "does-not-exist",
-            "agent_id": str(agent.id),
-            "payload_blob_id": str(payload.id),
-        },
-    )
-    assert response.status_code == 404
-
-
-async def test_create_import_not_found_for_unknown_payload(
-    client: httpx.AsyncClient, services: JobAndTaskServices
-) -> None:
-    """Observe HTTP 404 for an unknown payload blob id."""
+    """Create an import that fetches from the provider API."""
     plugin = await create_plugin(
         services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
     )
@@ -162,12 +321,574 @@ async def test_create_import_not_found_for_unknown_payload(
         display_version=None,
     )
     agent = await create_agent(services.agents, ACCOUNT.id)
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {"type": "api", "query": {"since": "2026-08-01T00:00:00Z"}},
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["source"] == {
+        "type": "api",
+        "query": {
+            "trace_ids": None,
+            "since": "2026-08-01T00:00:00Z",
+            "until": None,
+            "concurrency": 4,
+        },
+        "connection_id": None,
+    }
+
+
+async def test_create_api_import_rejects_a_naive_since(
+    client: httpx.AsyncClient,
+) -> None:
+    """A naive since fails validation before an import is created."""
+    body = {
+        "importer": "csv",
+        "agent_id": str(uuid.uuid4()),
+        "source": {"type": "api", "query": {"since": "2026-08-01T00:00:00"}},
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_api_import_round_trips_provider_extras(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """A provider-specific query key survives the round trip through the response."""
+    plugin = await create_plugin(
+        services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        display_version=None,
+    )
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {
+            "type": "api",
+            "query": {"trace_ids": ["t1"], "project_id": "proj-1"},
+        },
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["source"]["query"]["project_id"] == "proj-1"
+
+
+async def test_create_api_import_with_a_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """An API source naming a connection records it on the import."""
+    await _importer_version(services)
+    connection = await create_connection(
+        services.connections, ACCOUNT.id, secret_id=uuid.uuid4()
+    )
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {
+            "type": "api",
+            "query": {"trace_ids": ["t1"]},
+            "connection_id": str(connection.id),
+        },
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    assert response.json()["connection_id"] == str(connection.id)
+
+
+async def test_create_api_import_with_an_unknown_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """An API source naming a missing connection is rejected with HTTP 404."""
+    await _importer_version(services)
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    missing_id = uuid.uuid4()
+    body = {
+        "importer": "csv",
+        "agent_id": str(agent.id),
+        "source": {
+            "type": "api",
+            "query": {"trace_ids": ["t1"]},
+            "connection_id": str(missing_id),
+        },
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 404
+    assert response.json() == {"detail": f"Connection {missing_id} was not found"}
+
+
+async def test_create_blob_import_carries_no_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """A blob source cannot name a connection and records none."""
+    await _importer_version(services)
+    body = await _import_request(services)
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    assert response.json()["connection_id"] is None
+
+
+async def test_blob_import_source_rejects_a_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """A blob source carries no connection_id field."""
+    await _importer_version(services)
+    body = await _import_request(services)
+    body["source"] = {
+        "type": "blob",
+        "blob_id": body.pop("payload_blob_id"),
+        "connection_id": str(uuid.uuid4()),
+    }
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_import_accepts_the_deprecated_payload_blob_id(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """The deprecated payload_blob_id maps to a blob source."""
+    await _importer_version(services)
+    body = await _import_request(services)
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    assert response.json()["source"] == {
+        "type": "blob",
+        "blob_id": body["payload_blob_id"],
+    }
+
+
+async def test_create_import_rejects_both_sources(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Setting source and payload_blob_id together is rejected."""
+    await _importer_version(services)
+    body = await _import_request(
+        services, source={"type": "api", "query": {"trace_ids": ["t1"]}}
+    )
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_import_with_evaluators(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Create an import carrying resolved evaluators and no outcome yet."""
+    await _importer_version(services)
+    await _evaluator_version(services, "accuracy")
+    body = await _import_request(
+        services, evaluators=[{"evaluator": "accuracy", "params": {"k": 1}}]
+    )
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["evaluators"] == [
+        {"evaluator": "accuracy", "version": 1, "params": {"k": 1}}
+    ]
+    assert created["stats"] is None
+    assert created["error"] is None
+
+
+async def test_create_import_not_found_for_unknown_evaluator(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 404 for an evaluator that does not exist."""
+    await _importer_version(services)
+    body = await _import_request(services, evaluators=[{"evaluator": "does-not-exist"}])
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 404
+
+
+async def test_create_import_rejects_an_evaluator_scoped_to_another_agent(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 422 for an evaluator scoped to a different agent."""
+    await _importer_version(services)
+    other = await create_agent(services.agents, ACCOUNT.id, name="other")
+    await _evaluator_version(services, "accuracy", agent_id=other.id)
+    body = await _import_request(services, evaluators=[{"evaluator": "accuracy"}])
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_import_rejects_duplicate_evaluator_versions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 422 when two evaluator configs resolve to one version."""
+    await _importer_version(services)
+    await _evaluator_version(services, "accuracy")
+    body = await _import_request(
+        services,
+        evaluators=[
+            {"evaluator": "accuracy"},
+            {"evaluator": "accuracy", "version": 1},
+        ],
+    )
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_import_with_analyzers(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Create an import carrying resolved analyzers and no outcome yet."""
+    await _importer_version(services)
+    await _analyzer_version(services, "trends")
+    body = await _import_request(
+        services,
+        analyzers=[{"analyzer": "trends", "params": {"k": 1}, "min_sessions": 8}],
+    )
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["analyzers"] == [
+        {
+            "analyzer": "trends",
+            "version": 1,
+            "params": {"k": 1},
+            "connection_id": None,
+            "min_sessions": 8,
+        }
+    ]
+    assert created["stats"] is None
+    assert created["error"] is None
+
+
+async def test_create_import_not_found_for_unknown_analyzer(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 404 for an analyzer that does not exist."""
+    await _importer_version(services)
+    body = await _import_request(services, analyzers=[{"analyzer": "does-not-exist"}])
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 404
+
+
+async def test_create_import_rejects_duplicate_analyzer_versions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 422 when two analyzer configs resolve to one version."""
+    await _importer_version(services)
+    await _analyzer_version(services, "trends")
+    body = await _import_request(
+        services,
+        analyzers=[
+            {"analyzer": "trends"},
+            {"analyzer": "trends", "version": 1},
+        ],
+    )
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_import_with_max_sessions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Create an import carrying a session cap, and read it back by id."""
+    await _importer_version(services)
+    body = await _import_request(services, max_sessions=5)
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["max_sessions"] == 5
+
+    response = await client.get(f"/api/v1/imports/{created['id']}")
+    assert response.status_code == 200
+    assert response.json()["max_sessions"] == 5
+
+
+async def test_create_import_rejects_a_zero_max_sessions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 422 for a session cap below one."""
+    await _importer_version(services)
+    body = await _import_request(services, max_sessions=0)
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_import_rejects_nul_byte_in_importer(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 422 for a NUL byte in the importer name."""
+    body = await _import_request(services, importer="csv\x00")
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
+async def test_create_import_not_found_for_unknown_importer(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 404 for an unknown importer name."""
+    body = await _import_request(services, importer="does-not-exist")
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 404
+
+
+async def test_create_import_not_found_for_unknown_payload(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 404 for an unknown payload blob id."""
+    await _importer_version(services)
+    body = await _import_request(services, payload_blob_id=str(uuid.uuid4()))
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 404
+
+
+async def test_get_import(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Read a created import back by id."""
+    await _importer_version(services)
+    body = await _import_request(services)
+    created = (await client.post("/api/v1/imports", json=body)).json()
+
+    response = await client.get(f"/api/v1/imports/{created['id']}")
+    assert response.status_code == 200
+    assert response.json() == created
+
+
+async def test_get_import_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an unknown import id."""
+    response = await client.get(f"/api/v1/imports/{uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+async def test_list_imports_filters_by_agent_id(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """List every import, then only the ones of one agent."""
+    await _importer_version(services)
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    other = await create_agent(services.agents, ACCOUNT.id, name="other")
+    first = (
+        await client.post(
+            "/api/v1/imports", json=await _import_request(services, agent=agent)
+        )
+    ).json()
+    await client.post(
+        "/api/v1/imports", json=await _import_request(services, agent=other)
+    )
+
+    response = await client.get("/api/v1/imports")
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 2
+
+    agent_filter = {"field": "agent_id", "op": "eq", "value": str(agent.id)}
+    response = await client.get(
+        "/api/v1/imports", params={"filter": json.dumps(agent_filter)}
+    )
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["id"] for item in items] == [first["id"]]
+
+
+async def _analyzable_import(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> dict[str, Any]:
+    """Create an import that has one completed session."""
+    await _importer_version(services)
+    body = await _import_request(services)
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    await create_session(
+        services.sessions,
+        ACCOUNT.id,
+        agent_id=uuid.UUID(created["agent_id"]),
+        origin=SessionOrigin.IMPORTED,
+        status=SessionStatus.COMPLETED,
+        import_id=uuid.UUID(created["id"]),
+    )
+    return created
+
+
+async def test_analyze_import(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Analyze an import as a new job holding one task per analyzer."""
+    import_ = await _analyzable_import(client, services)
+    version = await _analyzer_version(services, "trends")
+
     response = await client.post(
-        "/api/v1/imports",
+        f"/api/v1/imports/{import_['id']}/analyze",
+        json={"analyzers": [{"analyzer": "trends", "params": {"k": 1}}]},
+    )
+    assert response.status_code == 201
+    job = response.json()
+    assert job["owner_id"] == str(ACCOUNT.id)
+    assert job["kind"] == "analysis"
+    assert job["status"] == "pending"
+    assert job["id"] != import_["job_id"]
+
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=uuid.UUID(job["id"])), actor=AuthContext(account=ACCOUNT)
+    )
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert isinstance(task, AnalysisTask)
+    assert task.import_id == uuid.UUID(import_["id"])
+    assert task.agent_id == uuid.UUID(import_["agent_id"])
+    assert task.plugin_version_id == version.id
+    assert task.params == {"k": 1}
+
+
+@pytest.mark.parametrize("minimum,starts", [(1, 1), (5, 0)])
+async def test_analyze_import_starts_only_for_runnable_tasks(
+    ephemeral_client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    ephemeral_workers: FakeEphemeralWorkers,
+    minimum: int,
+    starts: int,
+) -> None:
+    """Start a worker only when the analysis job has runnable tasks."""
+    import_ = await _analyzable_import(ephemeral_client, services)
+
+    response = await ephemeral_client.post(
+        f"/api/v1/imports/{import_['id']}/analyze",
         json={
-            "importer": "csv",
-            "agent_id": str(agent.id),
-            "payload_blob_id": str(uuid.uuid4()),
+            "analyzers": [
+                {"analyzer": "kitaru/post-import-insights", "min_sessions": minimum}
+            ]
         },
     )
+    assert response.status_code == 201
+    job = response.json()
+
+    assert len(ephemeral_workers.starts) == starts
+    assert job["status"] == ("pending" if starts else "completed")
+    if starts:
+        spec = ephemeral_workers.starts[0]
+        assert spec.job_id == uuid.UUID(job["id"])
+
+
+async def test_analyze_import_not_found_for_unknown_import(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Reject an unknown import id with 404."""
+    await _analyzer_version(services, "trends")
+
+    response = await client.post(
+        f"/api/v1/imports/{uuid.uuid4()}/analyze",
+        json={"analyzers": [{"analyzer": "trends"}]},
+    )
     assert response.status_code == 404
+
+
+async def test_analyze_import_not_found_for_unknown_analyzer(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Reject an unknown analyzer with 404."""
+    import_ = await _analyzable_import(client, services)
+
+    response = await client.post(
+        f"/api/v1/imports/{import_['id']}/analyze",
+        json={"analyzers": [{"analyzer": "missing"}]},
+    )
+    assert response.status_code == 404
+
+
+async def test_analyze_import_returns_skip_without_sessions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """An empty rerun returns a completed job and a readable skipped task."""
+    await _importer_version(services)
+    await _analyzer_version(services, "trends")
+    body = await _import_request(services)
+    created = (await client.post("/api/v1/imports", json=body)).json()
+
+    response = await client.post(
+        f"/api/v1/imports/{created['id']}/analyze",
+        json={"analyzers": [{"analyzer": "trends"}]},
+    )
+    assert response.status_code == 201
+    job = response.json()
+    assert job["status"] == "completed"
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=uuid.UUID(job["id"])), actor=AuthContext(account=ACCOUNT)
+    )
+    (task,) = tasks
+    response = await client.get(f"/api/v1/tasks/{task.id}")
+    assert response.status_code == 200
+    skipped = response.json()
+    assert skipped["status"] == "completed"
+    assert skipped["attempt"] == 0
+    assert skipped["worker_id"] is None
+    assert skipped["started_at"] is None
+    assert skipped["ended_at"] is not None
+    assert skipped["error"] is None
+    assert skipped["result"] == {
+        "status": "skipped",
+        "reason": "insufficient_sessions",
+        "eligible_sessions": 0,
+        "min_sessions": 1,
+    }
+
+
+async def test_analyze_import_rejects_an_empty_analyzer_list(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Reject a request naming no analyzer with 422."""
+    import_ = await _analyzable_import(client, services)
+
+    response = await client.post(
+        f"/api/v1/imports/{import_['id']}/analyze", json={"analyzers": []}
+    )
+    assert response.status_code == 422
+
+
+async def test_analyze_import_rejects_duplicate_analyzer_versions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Reject two configs resolving to one analyzer version with 422."""
+    import_ = await _analyzable_import(client, services)
+    await _analyzer_version(services, "trends")
+
+    response = await client.post(
+        f"/api/v1/imports/{import_['id']}/analyze",
+        json={
+            "analyzers": [
+                {"analyzer": "trends"},
+                {"analyzer": "trends", "version": 1},
+            ]
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("minimum", [0, -1])
+@pytest.mark.parametrize("rerun", [False, True])
+async def test_analyzer_minimum_must_be_positive(
+    client: httpx.AsyncClient, services: JobAndTaskServices, minimum: int, rerun: bool
+) -> None:
+    """Both import creation and analysis reject a nonpositive threshold."""
+    analyzers = [{"analyzer": "kitaru/post-import-insights", "min_sessions": minimum}]
+    if rerun:
+        import_ = await _analyzable_import(client, services)
+        path = f"/api/v1/imports/{import_['id']}/analyze"
+        body = {"analyzers": analyzers}
+    else:
+        await _importer_version(services)
+        path = "/api/v1/imports"
+        body = await _import_request(services, analyzers=analyzers)
+    response = await client.post(path, json=body)
+    assert response.status_code == 422

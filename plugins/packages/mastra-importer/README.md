@@ -1,6 +1,6 @@
 # Kitaru Mastra importer
 
-Import selected Mastra trace exports as Kitaru sessions. This is a development package, not a server-default importer. The optional history-only replay mode targets the context contract in [#1050](https://github.com/zenml-io/kitaru/issues/1050), verified against that implementation in a separate checkout. Integrate that adapter change before releasing this mode. Default imports preserve raw invocation inputs and report `metadata.mastra.replay.eligible: false`.
+Import selected Mastra trace exports as Kitaru sessions. This is a development package, not a server-default importer. The optional history-only replay mode targets the context contract in [#1050](https://github.com/zenml-io/kitaru/issues/1050), integrated in this branch and validated against the adapter built from this checkout. Release this mode only with that context-capable adapter. Default imports preserve raw invocation inputs and report `metadata.mastra.replay.eligible: false`.
 
 ## Accepted export
 

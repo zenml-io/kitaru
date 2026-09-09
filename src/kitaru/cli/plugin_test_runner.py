@@ -6,6 +6,7 @@
 """Internal child-process runner for local plugin validation."""
 
 import argparse
+import asyncio
 import contextlib
 import inspect
 import io
@@ -15,6 +16,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from kitaru.task.importer import Importer
 from kitaru.task.plugins import load_plugin_entrypoint
 
 _CAPTURE_LIMIT = 32 * 1024
@@ -38,6 +40,23 @@ class _BoundedText(io.TextIOBase):
         return self._value
 
 
+async def _count_parsed_items(
+    callable_: Any, payload: bytes, params: dict[str, Any]
+) -> dict[str, int]:
+    """Count sessions, failures, and total items a parser yields, sync or async."""
+    from kitaru.api_models.v1.imports import ImportFailure
+    from kitaru.task.importer import ImportedSession, call_parser
+
+    sessions = 0
+    failures = 0
+    items = 0
+    async for item in call_parser(callable_, payload, params):
+        sessions += isinstance(item, ImportedSession)
+        failures += isinstance(item, ImportFailure)
+        items += 1
+    return {"sessions": sessions, "failures": failures, "items": items}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Load a plugin, validate its signature, and optionally call an importer."""
     parser = argparse.ArgumentParser()
@@ -59,6 +78,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         callable_ = load_plugin_entrypoint(
             args.path, args.entrypoint, args.kind.title()
         )
+        if args.kind == "importer" and isinstance(callable_, Importer):
+            callable_ = callable_.parse
         signature = inspect.signature(callable_)
         if args.kind == "importer":
             signature.bind(b"", {})
@@ -66,23 +87,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             signature.bind(object())
         result["loaded"] = True
         if args.kind == "importer" and args.payload is not None:
-            from kitaru.api_models.v1.imports import ImportFailure
-            from kitaru.task.importer import ImportedSession, call_parser
-
             params = json.loads(args.params)
-            sessions = 0
-            failures = 0
-            items = 0
-            for item in call_parser(callable_, args.payload.read_bytes(), params):
-                sessions += isinstance(item, ImportedSession)
-                failures += isinstance(item, ImportFailure)
-                items += 1
-            result.update(
-                invoked=True,
-                sessions=sessions,
-                failures=failures,
-                items=items,
+            counts = asyncio.run(
+                _count_parsed_items(callable_, args.payload.read_bytes(), params)
             )
+            result.update(invoked=True, **counts)
     result["stdout"] = plugin_stdout.get_value()
     result["stderr"] = plugin_stderr.get_value()
     args.result.write_text(json.dumps(result, separators=(",", ":")), encoding="utf-8")

@@ -22,6 +22,7 @@ import pytest
 from pydantic import SecretStr
 
 from conftest import (
+    FakeImportRepository,
     FakeJobRepository,
     FakePluginRepository,
     FakeTaskRepository,
@@ -34,8 +35,10 @@ from conftest import (
     create_agent,
     create_agent_task,
     create_agent_version,
+    create_analysis_task,
     create_blob,
     create_evaluation_task,
+    create_import,
     create_import_task,
     create_job,
     create_plugin,
@@ -45,6 +48,7 @@ from conftest import (
     create_worker,
 )
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.api_models.v1.imports import ImportStats
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import (
@@ -73,7 +77,6 @@ from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
     ImportTask,
-    ImportTaskDetails,
     Task,
     TaskAttemptMismatch,
     TaskResultSessionMissing,
@@ -129,34 +132,37 @@ async def _claimable_import_task(
     job_id: uuid.UUID,
     **overrides: Any,
 ) -> ImportTask:
-    """Store an importer task backed by a real plugin version, so its spec builds."""
+    """Store an importer task backed by an import row, so its spec builds."""
     plugin = await create_plugin(
         services.plugins,
         ACTOR.account.id,
         PluginKind.IMPORTER,
         name=f"imp{uuid.uuid4().hex[:8]}",
     )
-    version = await services.plugins.create_version(
-        plugin.id,
-        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
-        display_version=None,
-    )
     code_blob = await create_blob(
         services.blobs, ACTOR.account.id, content=uuid.uuid4().bytes
     )
-    version = version.model_copy(
-        update={"source": ScriptPluginSource(blob_id=code_blob.id, entrypoint="run")}
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="run"),
+        display_version=None,
     )
-    await services.plugins.update_version(version)
     payload = await create_blob(
         services.blobs, ACTOR.account.id, content=uuid.uuid4().bytes
     )
-    return await create_import_task(
-        services.tasks,
-        job_id,
-        plugin_version_id=version.id,
+    agent = await create_agent(
+        services.agents, ACTOR.account.id, name=f"a{uuid.uuid4().hex[:8]}"
+    )
+    import_ = await create_import(
+        services.imports,
+        ACTOR.account.id,
+        agent.id,
+        job_id=job_id,
+        importer_version_id=version.id,
         payload_blob_id=payload.id,
-        **overrides,
+    )
+    return await create_import_task(
+        services.tasks, job_id, import_id=import_.id, **overrides
     )
 
 
@@ -874,46 +880,6 @@ async def test_evaluation_spec_uses_the_evaluator_timeout_and_no_run(
     assert spec.details.kind.value == "evaluator"
 
 
-async def test_import_spec_carries_the_payload_sha256_and_provider(
-    services: JobAndTaskServices,
-) -> None:
-    """An importer spec carries the payload's sha256 and the plugin's provider."""
-    plugin = await create_plugin(
-        services.plugins,
-        ACTOR.account.id,
-        PluginKind.IMPORTER,
-        name="csv-importer",
-        provider="acme",
-    )
-    version = await services.plugins.create_version(
-        plugin.id,
-        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
-        display_version=None,
-    )
-    code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
-    version = version.model_copy(
-        update={"source": ScriptPluginSource(blob_id=code_blob.id, entrypoint="run")}
-    )
-    await services.plugins.update_version(version)
-    payload = await create_blob(
-        services.blobs, ACTOR.account.id, content=b"payload-data"
-    )
-
-    job_id = await _pending_job(services)
-    task = await create_import_task(
-        services.tasks, job_id, plugin_version_id=version.id, payload_blob_id=payload.id
-    )
-    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
-    assert (
-        spec.timeout_seconds == services.task_service._policy.importer_timeout_seconds
-    )
-    assert spec.hooks == []
-    assert isinstance(spec.details, ImportTaskDetails)
-    assert spec.details.provider == "acme"
-    assert spec.details.payload.blob_id == payload.id
-    assert spec.details.payload.sha256 == payload.sha256
-
-
 class _RecordingAnalytics(ServerAnalytics):
     """Analytics tracker recording track calls instead of buffering them."""
 
@@ -940,18 +906,22 @@ class _RecordingAnalytics(ServerAnalytics):
 def _build_transitions(
     analytics: ServerAnalytics | None,
     plugin_repository: FakePluginRepository | None = None,
-) -> tuple[TaskTransitions, FakeTaskRepository, FakeJobRepository]:
+) -> tuple[
+    TaskTransitions, FakeTaskRepository, FakeJobRepository, FakeImportRepository
+]:
     """Wire a transitions dispatch directly over fresh fake repositories."""
     tasks = FakeTaskRepository()
     jobs = FakeJobRepository(tasks=tasks)
+    imports = FakeImportRepository()
     transitions = TaskTransitions(
         task_repository=tasks,
         job_repository=jobs,
         dispatcher=EventDispatcher(),
         analytics=analytics,
         plugin_repository=plugin_repository,
+        import_repository=imports,
     )
-    return transitions, tasks, jobs
+    return transitions, tasks, jobs, imports
 
 
 async def _complete_task(transitions: TaskTransitions, task: Task, result: Any) -> Task:
@@ -969,9 +939,12 @@ async def _complete_task(transitions: TaskTransitions, task: Task, result: Any) 
 async def test_apply_status_importer_terminal_tracks_import_completed() -> None:
     """Track an import_completed event when an importer task turns terminal."""
     analytics = _RecordingAnalytics()
-    transitions, tasks, jobs = _build_transitions(analytics)
+    transitions, tasks, jobs, imports = _build_transitions(analytics)
     job = await create_job(jobs, ACTOR.account.id)
-    task = await create_import_task(tasks, job.id)
+    import_ = await create_import(
+        imports, ACTOR.account.id, uuid.uuid4(), job_id=job.id
+    )
+    task = await create_import_task(tasks, job.id, import_id=import_.id)
     await create_agent_task(tasks, job.id)
 
     completed = await _complete_task(transitions, task, result={"created": 3})
@@ -990,7 +963,7 @@ async def test_apply_status_importer_terminal_tracks_import_completed() -> None:
 async def test_apply_status_evaluator_terminal_tracks_evaluation_completed() -> None:
     """Track an evaluation_completed event when an evaluator task turns terminal."""
     analytics = _RecordingAnalytics()
-    transitions, tasks, jobs = _build_transitions(analytics)
+    transitions, tasks, jobs, _ = _build_transitions(analytics)
     job = await create_job(jobs, ACTOR.account.id)
     task = await create_evaluation_task(tasks, job.id)
     await create_agent_task(tasks, job.id)
@@ -1006,6 +979,37 @@ async def test_apply_status_evaluator_terminal_tracks_evaluation_completed() -> 
     assert tracked_properties["status"] == "completed"
     assert "plugin_version_id" not in tracked_properties
     assert "session_count" not in tracked_properties
+
+
+async def test_apply_status_analyzer_terminal_tracks_analysis_completed() -> None:
+    """Track an analysis_completed event when an analyzer task turns terminal."""
+    analytics = _RecordingAnalytics()
+    transitions, tasks, jobs, imports = _build_transitions(analytics)
+    job = await create_job(jobs, ACTOR.account.id)
+    import_ = await create_import(imports, ACTOR.account.id, agent_id=uuid.uuid4())
+    import_.record_stats(ImportStats(created=2, skipped=0, failed=0))
+    await imports.update(import_)
+    task = await create_analysis_task(tasks, job.id, import_id=import_.id)
+    await create_agent_task(tasks, job.id)
+
+    result = [
+        {
+            "name": "summary",
+            "title": "Summary",
+            "data": {"type": "text", "content": "ok"},
+        }
+    ]
+    completed = await _complete_task(transitions, task, result=result)
+
+    assert completed.status is TaskStatus.COMPLETED
+    assert len(analytics.tracked) == 1
+    tracked_user_id, tracked_event, tracked_properties = analytics.tracked[0]
+    assert tracked_user_id == ACTOR.account.id
+    assert tracked_event == AnalyticsEvent.ANALYSIS_COMPLETED
+    assert tracked_properties["status"] == "completed"
+    assert "plugin_version_id" not in tracked_properties
+    assert tracked_properties["session_count"] == 2
+    assert tracked_properties["insight_count"] == 1
 
 
 async def test_apply_status_import_terminal_tracks_the_importer_plugin() -> None:
@@ -1025,9 +1029,16 @@ async def test_apply_status_import_terminal_tracks_the_importer_plugin() -> None
         ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="parse"),
         display_version=None,
     )
-    transitions, tasks, jobs = _build_transitions(analytics, plugins)
+    transitions, tasks, jobs, imports = _build_transitions(analytics, plugins)
     job = await create_job(jobs, ACTOR.account.id)
-    task = await create_import_task(tasks, job.id, plugin_version_id=version.id)
+    import_ = await create_import(
+        imports,
+        ACTOR.account.id,
+        uuid.uuid4(),
+        job_id=job.id,
+        importer_version_id=version.id,
+    )
+    task = await create_import_task(tasks, job.id, import_id=import_.id)
     await create_agent_task(tasks, job.id)
 
     await _complete_task(transitions, task, result={"created": 1})
@@ -1053,7 +1064,7 @@ async def test_apply_status_evaluator_terminal_hides_the_custom_plugin_name() ->
         ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="score"),
         display_version=None,
     )
-    transitions, tasks, jobs = _build_transitions(analytics, plugins)
+    transitions, tasks, jobs, _ = _build_transitions(analytics, plugins)
     job = await create_job(jobs, ACTOR.account.id)
     task = await create_evaluation_task(tasks, job.id, plugin_version_id=version.id)
     await create_agent_task(tasks, job.id)
@@ -1069,7 +1080,7 @@ async def test_apply_status_evaluator_terminal_hides_the_custom_plugin_name() ->
 async def test_apply_status_agent_terminal_tracks_nothing() -> None:
     """Skip tracking when an agent task turns terminal."""
     analytics = _RecordingAnalytics()
-    transitions, tasks, jobs = _build_transitions(analytics)
+    transitions, tasks, jobs, _ = _build_transitions(analytics)
     job = await create_job(jobs, ACTOR.account.id)
     task = await create_agent_task(tasks, job.id)
     await create_agent_task(tasks, job.id)
@@ -1090,7 +1101,7 @@ async def test_apply_status_agent_terminal_tracks_nothing() -> None:
 async def test_advance_job_settlement_tracks_job_completed() -> None:
     """Track a job_completed event carrying task_count once every task drains."""
     analytics = _RecordingAnalytics()
-    transitions, tasks, jobs = _build_transitions(analytics)
+    transitions, tasks, jobs, _ = _build_transitions(analytics)
     job = await create_job(jobs, ACTOR.account.id)
     import_task = await create_import_task(tasks, job.id)
     evaluation_task = await create_evaluation_task(tasks, job.id)
@@ -1118,7 +1129,7 @@ async def test_second_of_two_sibling_tasks_settles_the_job() -> None:
     Exactly one of the two completions elects itself the settler, the one
     whose scan finds every task of the job terminal.
     """
-    transitions, tasks, jobs = _build_transitions(None)
+    transitions, tasks, jobs, _ = _build_transitions(None)
     job = await create_job(jobs, ACTOR.account.id)
     first = await create_import_task(tasks, job.id)
     second = await create_evaluation_task(tasks, job.id)
@@ -1136,7 +1147,7 @@ async def test_second_of_two_sibling_tasks_settles_the_job() -> None:
 async def test_apply_status_non_terminal_writes_track_nothing() -> None:
     """Skip tracking when a transition leaves the task non-terminal."""
     analytics = _RecordingAnalytics()
-    transitions, tasks, jobs = _build_transitions(analytics)
+    transitions, tasks, jobs, _ = _build_transitions(analytics)
     job = await create_job(jobs, ACTOR.account.id)
     task = await create_import_task(tasks, job.id)
     now = datetime.now(UTC)
@@ -1151,7 +1162,7 @@ async def test_apply_status_non_terminal_writes_track_nothing() -> None:
 
 async def test_apply_status_with_analytics_none_is_safe() -> None:
     """Drive a task to terminal without an analytics tracker configured."""
-    transitions, tasks, jobs = _build_transitions(None)
+    transitions, tasks, jobs, _ = _build_transitions(None)
     job = await create_job(jobs, ACTOR.account.id)
     task = await create_import_task(tasks, job.id)
 

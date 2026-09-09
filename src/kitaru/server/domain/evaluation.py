@@ -82,6 +82,7 @@ class Evaluation(DomainModel):
     evaluator_version_id: uuid.UUID | None = None
     session_id: uuid.UUID
     task_id: uuid.UUID | None = None
+    invocation_id: uuid.UUID | None = None
     name: EvaluationName
     data_type: EvaluationDataType
     score: FiniteFloat | bool | None = None

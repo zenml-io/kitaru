@@ -1,6 +1,6 @@
 # Kitaru plugins
 
-Each adapter and importer under `packages/` is an independently versioned Python distribution. The built-in evaluators share the `kitaru-evaluator` distribution and are released together.
+Each adapter, importer, and analyzer under `packages/` is an independently versioned Python distribution. The built-in evaluators share the `kitaru-evaluator` distribution and are released together.
 
 Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At startup, the server records each exact distribution requirement and `module:callable` entrypoint without installing or importing the plugin package.
 
@@ -9,6 +9,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 | Directory | Distribution | Contents |
 |---|---|---|
 | `braintrust-importer` | `kitaru-braintrust-importer` | Braintrust importer and importer-backed adapter |
+| `claude-agent-sdk` | `kitaru-claude-agent-sdk` | Claude Agent SDK recording and replay adapter |
 | `evaluator` | `kitaru-evaluator` | All built-in evaluators |
 | `jsonl-importer` | `kitaru-jsonl-importer` | Kitaru JSONL importer |
 | `langfuse-importer` | `kitaru-langfuse-importer` | Langfuse importer and importer-backed adapter |
@@ -18,6 +19,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 | `mastra-importer` | `kitaru-mastra-importer` | Mastra trace importer (unpublished, non-default) |
 | `openai-agents` | `kitaru-openai-agents` | OpenAI Agents SDK recording adapter |
 | `phoenix-importer` | `kitaru-phoenix-importer` | Arize Phoenix importer and importer-backed adapter |
+| `post-import-insights` | `kitaru-post-import-insights` | Post-import profiling and insight generation |
 | `pydantic-ai` | `kitaru-pydantic-ai` | PydanticAI recording and replay adapter |
 
 ## Development and releases

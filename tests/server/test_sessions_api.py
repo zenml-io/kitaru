@@ -28,6 +28,7 @@ from conftest import (
     FakeCohortVersionRepository,
     FakeEvaluationRepository,
     FakeIdempotencyKeyRepository,
+    FakeImportRepository,
     FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
@@ -162,6 +163,7 @@ async def client(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=payload_store,
     )
     node_service = SessionNodeService(
@@ -963,13 +965,14 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
     account: Account,
     auth_service: AuthService,
 ) -> None:
-    """Observe HTTP 403 for a worker or task credential on an account-only route."""
+    """Observe HTTP 403 for a worker credential or an import-less task credential."""
     app = create_app(local_settings())
     app.dependency_overrides[get_session_service] = lambda: SessionService(
         repository=session_repository,
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=build_payload_store().store,
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
@@ -1031,6 +1034,7 @@ def _build_task_scoped_app(
         if agent_version_repository is not None
         else FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=payload_store,
     )
     app.dependency_overrides[get_session_node_service] = lambda: SessionNodeService(
@@ -1055,12 +1059,15 @@ def _task_token(
     auth_service: AuthService,
     account: Account,
     granted_session_id: uuid.UUID | None = None,
+    granted_import_id: uuid.UUID | None = None,
     task_id: uuid.UUID | None = None,
 ) -> str:
     """Mint a task token scoped to the given account for the task route tests."""
     grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
     if granted_session_id is not None:
         grants[GrantKind.SESSION] = frozenset({granted_session_id})
+    if granted_import_id is not None:
+        grants[GrantKind.IMPORT] = frozenset({granted_import_id})
     return auth_service.issue_task_token(
         TaskSubject(
             task_id=task_id if task_id is not None else uuid.uuid4(),
@@ -1072,6 +1079,83 @@ def _task_token(
         ),
         timeout_seconds=3600,
     ).token
+
+
+async def test_list_sessions_scopes_a_task_token_to_its_granted_import(
+    session_repository: FakeSessionRepository,
+    node_repository: FakeSessionNodeRepository,
+    evaluation_repository: FakeEvaluationRepository,
+    task_repository: FakeTaskRepository,
+    account: Account,
+    auth_service: AuthService,
+) -> None:
+    """List only the granted import's sessions for a task token."""
+    import_id = uuid.uuid4()
+    other_import_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    granted = await create_session(
+        session_repository, account.id, agent_id=agent_id, import_id=import_id
+    )
+    await create_session(
+        session_repository, account.id, agent_id=agent_id, import_id=other_import_id
+    )
+    await create_session(session_repository, account.id, agent_id=agent_id)
+    client = _build_task_scoped_app(
+        session_repository,
+        node_repository,
+        task_repository,
+        evaluation_repository,
+        auth_service,
+    )
+    async with client:
+        token = _task_token(auth_service, account, granted_import_id=import_id)
+        headers = {"Authorization": f"Bearer {token}"}
+        response = await client.get("/api/v1/sessions", headers=headers)
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()["items"]] == [str(granted.id)]
+
+        other_filter = {"field": "import_id", "op": "eq", "value": str(other_import_id)}
+        response = await client.get(
+            "/api/v1/sessions",
+            params={"filter": json.dumps(other_filter)},
+            headers=headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["items"] == []
+
+
+async def test_get_session_allows_a_task_token_granted_its_import(
+    session_repository: FakeSessionRepository,
+    node_repository: FakeSessionNodeRepository,
+    evaluation_repository: FakeEvaluationRepository,
+    task_repository: FakeTaskRepository,
+    account: Account,
+    auth_service: AuthService,
+) -> None:
+    """Read a session through an import grant instead of a session grant."""
+    import_id = uuid.uuid4()
+    session = await create_session(
+        session_repository, account.id, agent_id=uuid.uuid4(), import_id=import_id
+    )
+    client = _build_task_scoped_app(
+        session_repository,
+        node_repository,
+        task_repository,
+        evaluation_repository,
+        auth_service,
+    )
+    async with client:
+        token = _task_token(auth_service, account, granted_import_id=import_id)
+        response = await client.get(
+            f"/api/v1/sessions/{session.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        response = await client.get(
+            f"/api/v1/sessions/{session.id}",
+            headers={"Authorization": f"Bearer {_task_token(auth_service, account)}"},
+        )
+        assert response.status_code == 403
 
 
 async def test_get_session_denies_a_task_token_for_another_tasks_session(

@@ -24,6 +24,7 @@ from conftest import (
     FakeAgentVersionRepository,
     FakeBlobDataStore,
     FakeBlobRepository,
+    FakeImportRepository,
     FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
@@ -109,6 +110,7 @@ def session_service(
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
         payload_store=payload_store,
     )
 

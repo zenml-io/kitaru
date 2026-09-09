@@ -123,9 +123,13 @@ Replay is execution, not a transaction. A passthrough tool can complete an exter
 
 ## Memory behavior
 
-Replay deliberately stays off live Mastra memory threads. The adapter removes per-run `memory`, `threadId`, `resourceId`, and `savePerStep` values and removes Mastra's reserved thread and resource keys from `requestContext`. It rejects agents whose default options would add those memory settings back.
+A supplied message array and recalled thread history are different inputs. An array contains only the messages the caller supplied; Mastra can still recall additional history when the invocation selects a memory thread.
 
-The replay therefore neither reads messages added to a production thread after the recording nor writes replay messages into that thread. The consequence is that a session originally recorded with thread history replays without that history.
+For memory-dependent invocations, the adapter records a versioned conversation snapshot immediately before the first model step. Session inputs keep the supplied messages separately from the effective conversation, including its system messages and recalled history. The snapshot is tagged as memory-dependent; its message list is the combined effective input, not a separate recalled-only array. Replay uses that snapshot instead of recalling the thread again. This replays one invocation with its original context; it does not generate a new adaptive dialogue.
+
+Replay removes per-run `memory`, `threadId`, `resourceId`, and `savePerStep` values, and removes Mastra's thread, resource, and internal memory keys from a copy of `requestContext`. It neither reads newer live history nor writes replay messages into the original thread. Default memory options remain unsupported because Mastra would merge them back after removal. Working memory, semantic recall, observational memory, and original invocations with user input processors or `prepareStep` are not replayable from these snapshots; they can add tools or change context beyond the first model step.
+
+A missing, incomplete, or lossy snapshot produces an actionable unsupported-replay error before model execution. Record the invocation again with this adapter, or supply its complete recorded message array without live memory selectors. An explicit array without memory selectors continues to replay directly. Old recordings do not acquire missing history automatically. Their raw inputs do not identify whether memory was used, so removing memory settings from the replay entrypoint cannot establish that those inputs are complete. Record legacy memory-dependent invocations again before replaying them. Prompt and system-instruction overrides on conversation snapshots remain unsupported because replacing them can discard part of the recorded context; record a new invocation with the desired messages instead.
 
 ## Structured output
 

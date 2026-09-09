@@ -30,7 +30,7 @@ from typing import Literal, Protocol
 from urllib.parse import urlsplit
 
 import httpx
-from packaging.version import InvalidVersion, Version
+from packaging.version import InvalidVersion
 from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.cli.output import CLIError
@@ -41,6 +41,7 @@ from kitaru.client.config import (
     normalize_server_url,
     write_json_file,
 )
+from kitaru.images import SERVER_IMAGE_REPOSITORY, get_image
 
 DEFAULT_LOCAL_PORT = 8000
 LOCAL_PORT_ENV = "KITARU_LOCAL_PORT"
@@ -485,23 +486,6 @@ async def _validate_docker(runner: DockerCommandRunner) -> None:
         )
 
 
-def _format_image_version(version: Version) -> str:
-    """Format a PEP 440 version as a Docker-compatible image tag."""
-    canonical_version = str(version)
-    base_version = version.base_version
-    image_base_version = base_version.replace("!", ".epoch.")
-    suffix = canonical_version.removeprefix(base_version)
-    if not suffix:
-        return image_base_version
-
-    public_suffix, local_separator, local_suffix = suffix.partition("+")
-    public_suffix = re.sub(r"([A-Za-z]+)([0-9]+)", r"\1.\2", public_suffix).strip(".")
-    suffix_parts = [public_suffix] if public_suffix else []
-    if local_separator:
-        suffix_parts.append(f"local.{local_suffix}")
-    return f"{image_base_version}-{'.'.join(suffix_parts)}"
-
-
 def _get_local_server_url(port: int) -> str:
     """Build the loopback URL for a local host port."""
     return f"http://localhost:{port}"
@@ -547,20 +531,19 @@ def _get_server_image(package_version: str) -> tuple[str, bool]:
             )
         return image, True
     try:
-        parsed_version = Version(package_version)
+        image = get_image(SERVER_IMAGE_REPOSITORY, package_version)
     except InvalidVersion as error:
         raise CLIError(
             "invalid_configuration",
             f"The installed Kitaru version {package_version!r} is invalid.",
         ) from error
-    if parsed_version.is_devrelease or parsed_version.local is not None:
+    except ValueError as error:
         raise CLIError(
             "invalid_configuration",
             "No published local server image is available for this development build.",
             hint=f"Set {LOCAL_IMAGE_ENV} to a compatible local image.",
-        )
-    image_version = _format_image_version(parsed_version)
-    return f"zenmldocker/kitaru-server:{image_version}", False
+        ) from error
+    return image, False
 
 
 async def _ensure_image(

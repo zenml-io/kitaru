@@ -86,7 +86,8 @@ RUN uv sync \
   --no-install-project \
   --extra server \
   --extra s3 \
-  --extra otel
+  --extra otel \
+  --extra modal
 
 FROM pre-builder AS common-runtime
 
@@ -109,7 +110,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Keep the project editable so a source bind mount is immediately visible to
 # the reload process while retaining installed package metadata.
-RUN uv sync --locked --no-dev --extra server --extra s3 --extra otel && \
+RUN uv sync --locked --no-dev --extra server --extra s3 --extra otel --extra modal && \
   uv pip check && \
   python -c \
     "from kitaru.server.api.main import app; assert callable(app)" && \
@@ -149,7 +150,8 @@ RUN uv sync \
   --no-editable \
   --extra server \
   --extra s3 \
-  --extra otel && \
+  --extra otel \
+  --extra modal && \
   uv pip check && \
   python -c \
     "from kitaru.server.api.main import app; assert callable(app)" && \

@@ -20,7 +20,7 @@ The importer is permissive about the container because Braintrust logs reach you
 - **A JSON object with an `events` array**, the shape the Braintrust API returns for a log fetch.
 - **A single JSON object**, treated as a one-event export.
 
-Payloads are capped at 50 MiB per import (the importer's own limit, separate from the server's configurable blob limit). Import in slices as often as you like; [dedup](#re-runs-skip-what-is-already-there) makes overlapping slices safe.
+Uploads are capped by the server's configurable blob limit. Import in slices as often as you like; [dedup](#re-runs-skip-what-is-already-there) makes overlapping slices safe.
 
 What matters is the fields on each record, not how you got the file. A full project-log export carries span identity, and that is what you want:
 
@@ -77,11 +77,38 @@ kitaru session list --agent support-agent --origin imported --imported-from brai
 
 | Param | Meaning |
 | --- | --- |
-| `source_instance` | Project identity fallback. The importer prefers each record's `project_id`; `source_instance` is used when the export carries none. |
-| `filename` | Optional label. When neither `project_id` nor `source_instance` is available, the filename stem becomes the project identity. A record with none of the three fails with "Braintrust export has no project id; provide source\_instance". |
+| `source_instance` | Explicit project identity, preferred over the `project_id` parameter and embedded project IDs. Keep it stable across imports from the same project. |
+| `project_id` | Provider-native alias for `source_instance`, used when `source_instance` is absent or blank. Either parameter takes precedence over embedded project IDs. |
 | `join_on` | Dotted path or RFC 6901 JSON Pointer selecting the value that groups traces into one session. Defaults to the session id found in metadata. See [Grouping traces into sessions](#grouping-traces-into-sessions). |
 
 Pass them with `--params '{"source_instance": "my-braintrust-project"}'`, or use the dedicated `--join-on` flag, which accepts a JSON Pointer only (it must start with `/`) and cannot be combined with `join_on` inside `--params`.
+
+If the export contains no project ID, supply one of the identity parameters; filenames do not determine identity. Values are trimmed strings, and conflicting embedded project IDs fail the affected trace or session even with an override. See [Import your traces](../getting-started/import-your-traces.md) for the shared identity rules and guidance for existing imports.
+
+## 3. Or fetch from the Braintrust API
+
+Skip the export and upload, and let the import task fetch spans from Braintrust directly:
+
+```bash
+kitaru session import \
+  --importer kitaru/braintrust@latest \
+  --agent support-agent@latest \
+  --since 7d \
+  --query '{"project_id": "my-braintrust-project"}' \
+  --tag imported-baseline --wait
+```
+
+Omitting FILE and setting `--since` selects an API import: the worker calls the Braintrust API instead of parsing an uploaded payload. `--since` and `--until` accept an ISO 8601 timestamp or a relative duration (`7d`, `12h`, `30m`). `--trace-id` (repeatable) fetches exactly those root span ids instead of a time window. The same selection is a query object on the SDK and REST request:
+
+| Query key | Meaning |
+| --- | --- |
+| `project_id` | Braintrust project to fetch from. Required. |
+| `trace_ids` | Braintrust root span ids to fetch. When present, exactly those traces are fetched and the time window is ignored. |
+| `since` | Timezone-aware ISO 8601 datetime, lower bound of root span start time. Required when `trace_ids` is absent. |
+| `until` | Timezone-aware ISO 8601 datetime, upper bound of root span start time. Defaults to now. |
+| `concurrency` | Traces fetched at once. Defaults to 4. |
+
+The worker installs the package's `api` extra for an API import, which carries the provider client. A [connection](provider-connections.md) you name with `--connection`, or the provider's default connection, supplies `BRAINTRUST_API_KEY` and `BRAINTRUST_API_URL` for a self-hosted instance. Without either, the worker's own environment does, and only a worker started with `--selector kitaru/requires-credentials=braintrust` claims the task. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way.
 
 ## What a trace becomes
 
@@ -120,7 +147,7 @@ Session metadata records the provenance you'll want when reading the import back
 
 ## Re-runs skip what is already there
 
-Every imported session records its source identity: `imported_from` (`braintrust`) and an `external_id` of `<project>:<session>`. That pair is unique on the server, so re-importing an overlapping export **skips** what is already stored and reports it as `skipped`, not as an error. Exporting the last 24 hours every night is safe; it will not duplicate earlier sessions.
+Every imported session records its source identity: `imported_from` (`braintrust`) and an `external_id` of `<source_instance>:<session>`. That pair is unique per destination agent, so re-importing an overlapping export with the same identity **skips** what is already stored and reports it as `skipped`, not as an error. Skipped sessions are not refreshed with new nodes.
 
 ## Limitations
 

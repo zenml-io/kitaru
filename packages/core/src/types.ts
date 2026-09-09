@@ -136,8 +136,7 @@ export interface SessionListParams {
   includePayloads?: boolean;
 }
 
-export interface SessionNodeListParams {
-  cursor?: string | null;
-  size?: number;
+export interface SessionNodeListParams extends ListParams {
+  sort?: "index:asc";
   includePayloads?: boolean;
 }

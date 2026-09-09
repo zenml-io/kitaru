@@ -160,7 +160,8 @@ def _configure_logs(resource: Any, endpoint: str, settings: APISettings) -> bool
         set_logger_provider(provider)
         _providers.append(provider)
         handler = LoggingHandler(
-            level=logging.getLevelName(settings.LOG_LEVEL), logger_provider=provider
+            level=logging.getLevelNamesMapping()[settings.LOG_LEVEL.value],
+            logger_provider=provider,
         )
         logging.getLogger().addHandler(handler)
         _log_handler = handler

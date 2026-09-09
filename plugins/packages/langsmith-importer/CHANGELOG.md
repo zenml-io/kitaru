@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Standardize source identity precedence as `source_instance`, then `project_name`, then embedded project identity; trim strings, reject other types, and reject embedded conflicts even with overrides.
+- Accept `project_name` as an alias for `source_instance` and include an actionable import parameter example when project identity is missing.
+- Remove the importer payload size cap. Uploads are bounded by the server blob limit only.
+- Fetch traces from the LangSmith API by trace id or time window through the `api` extra.
+- Import traces oldest first and group them by thread instead of dropping later traces of a thread as duplicates.
+- Fetch traces concurrently, bounded by the fetch query's `concurrency` key.
+- Wait out a LangSmith rate limit and retry instead of failing the import task.
+
 ## 0.2.0
 
 - Add the LangSmith importer-backed adapter, installed through the `adapter` extra.

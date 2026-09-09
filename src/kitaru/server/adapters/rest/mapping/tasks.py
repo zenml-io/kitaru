@@ -17,10 +17,13 @@ import uuid
 
 from kitaru.api_models.v1.task import (
     AgentTaskDetails,
+    AnalysisTaskDetails,
+    ApiImportSourceSpec,
+    BlobImportSourceSpec,
     EvaluationTaskDetails,
+    ImportSourceSpec,
     ImportTaskDetails,
     PackagePluginSpec,
-    PayloadSpec,
     PluginSpec,
     ScriptPluginSpec,
     TaskClaimResponse,
@@ -37,6 +40,7 @@ from kitaru.server.adapters.rest.mapping.hooks import hook_to_response
 from kitaru.server.application.models.task import ClaimedTask, TaskFilter, TaskUpdate
 from kitaru.server.domain.task import (
     AgentTask,
+    AnalysisTask,
     EvaluationTask,
     ImportTask,
     Task,
@@ -46,13 +50,19 @@ from kitaru.server.domain.task import (
     AgentTaskDetails as DomainAgentTaskDetails,
 )
 from kitaru.server.domain.task import (
+    AnalysisTaskDetails as DomainAnalysisTaskDetails,
+)
+from kitaru.server.domain.task import (
+    ApiImportSourceSpec as DomainApiSourceSpec,
+)
+from kitaru.server.domain.task import (
+    BlobImportSourceSpec as DomainBlobSourceSpec,
+)
+from kitaru.server.domain.task import (
     EvaluationTaskDetails as DomainEvaluationTaskDetails,
 )
 from kitaru.server.domain.task import (
     ImportTaskDetails as DomainImportTaskDetails,
-)
-from kitaru.server.domain.task import (
-    PayloadSpec as DomainPayloadSpec,
 )
 from kitaru.server.domain.task import (
     PluginSpec as DomainPluginSpec,
@@ -88,15 +98,15 @@ def task_to_response(task: Task) -> TaskResponse:
             task.agent_version_id if isinstance(task, AgentTask) else None
         ),
         plugin_version_id=(
-            task.plugin_version_id
-            if isinstance(task, EvaluationTask | ImportTask)
-            else None
+            task.plugin_version_id if isinstance(task, EvaluationTask) else None
         ),
-        payload_blob_id=task.payload_blob_id if isinstance(task, ImportTask) else None,
         input_session_id=(
             task.input_session_id if isinstance(task, EvaluationTask) else None
         ),
-        agent_id=task.agent_id if isinstance(task, ImportTask) else None,
+        import_id=(
+            task.import_id if isinstance(task, (ImportTask, AnalysisTask)) else None
+        ),
+        agent_id=task.agent_id if isinstance(task, AnalysisTask) else None,
         worker_id=task.worker_id,
         claimed_at=task.claimed_at,
         heartbeat_at=task.heartbeat_at,
@@ -128,16 +138,20 @@ def _plugin_spec_to_response(plugin: DomainPluginSpec) -> PluginSpec:
     )
 
 
-def _payload_spec_to_response(payload: DomainPayloadSpec) -> PayloadSpec:
-    """Convert a payload spec value object to its response DTO.
+def _source_spec_to_response(
+    source: DomainBlobSourceSpec | DomainApiSourceSpec,
+) -> ImportSourceSpec:
+    """Convert a source spec value object to its response DTO.
 
     Args:
-        payload: Payload the importer parses.
+        source: Where the payload comes from.
 
     Returns:
-        Payload spec DTO.
+        Source spec DTO.
     """
-    return PayloadSpec(blob_id=payload.blob_id, sha256=payload.sha256)
+    if isinstance(source, DomainBlobSourceSpec):
+        return BlobImportSourceSpec(blob_id=source.blob_id, sha256=source.sha256)
+    return ApiImportSourceSpec(query=source.query)
 
 
 def _run_spec_to_response(run_spec: DomainTaskRunSpec) -> TaskRunSpec:
@@ -161,7 +175,7 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
         spec: Execution spec.
 
     Raises:
-        ValueError: The details are not one of the three known kinds.
+        ValueError: The details are not one of the four known kinds.
 
     Returns:
         Task details DTO.
@@ -179,10 +193,19 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
     if isinstance(details, DomainImportTaskDetails):
         return ImportTaskDetails(
             plugin=_plugin_spec_to_response(details.plugin),
-            payload=_payload_spec_to_response(details.payload),
+            source=_source_spec_to_response(details.source),
             provider=details.provider,
             agent_id=details.agent_id,
             params=details.params,
+            max_sessions=details.max_sessions,
+        )
+    if isinstance(details, DomainAnalysisTaskDetails):
+        return AnalysisTaskDetails(
+            analyzer_name=details.analyzer_name,
+            params=details.params,
+            plugin=_plugin_spec_to_response(details.plugin),
+            agent_id=details.agent_id,
+            import_id=details.import_id,
         )
     raise ValueError(f"Task {spec.task_id} details have no response mapping")
 

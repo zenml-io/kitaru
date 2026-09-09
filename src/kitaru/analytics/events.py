@@ -25,6 +25,7 @@ class AnalyticsEvent(StrEnum):
     IMPORT_COMPLETED = "Import Completed"
     REPLAY_CREATED = "Replay Created"
     EVALUATION_COMPLETED = "Evaluation Completed"
+    ANALYSIS_COMPLETED = "Analysis Completed"
     EXPERIMENT_CREATED = "Experiment Created"
     EXPERIMENT_RUN_COMPLETED = "Experiment Run Completed"
     AGENT_CREATED = "Agent Created"
@@ -39,6 +40,7 @@ class AnalyticsEvent(StrEnum):
     SAMPLE_DATA_LOADED = "Sample Data Loaded"
     ACCOUNT_CREATED = "Account Created"
     USER_ENRICHED = "User Enriched"
+    INSIGHT_CREATED = "Insight Created"
 
 
 class AccountOrigin(StrEnum):

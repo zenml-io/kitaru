@@ -25,20 +25,35 @@ from conftest import (
     create_agent,
     create_blob,
     create_plugin,
+    create_session,
     override_idempotency,
 )
-from kitaru.api_models.v1.imports import ImportCreateRequest
-from kitaru.api_models.v1.job import JobResponse
+from kitaru.api_models.v1.imports import (
+    BlobImportSource,
+    ImportAnalyzeRequest,
+    ImportCreateRequest,
+    ImportListParams,
+    ImportResponse,
+)
+from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
+from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import NotFoundError
+from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    get_auth_service,
+    get_import_service,
     get_job_service,
     get_task_service,
+    get_worker_service,
 )
 from kitaru.server.api.app import create_app
+from kitaru.server.api.bootstrap import register_default_plugins
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 
@@ -46,14 +61,16 @@ ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 
 @pytest.fixture
-def services() -> JobAndTaskServices:
+async def services() -> JobAndTaskServices:
     """Provide fake-backed job and task services."""
-    return build_job_and_task_services()
+    services = build_job_and_task_services()
+    await register_default_plugins(services.plugins)
+    return services
 
 
 @pytest.fixture
 async def api_client(
-    services: JobAndTaskServices,
+    services: JobAndTaskServices, auth_service: AuthService
 ) -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with fake-backed services."""
     app = create_app(
@@ -65,33 +82,58 @@ async def api_client(
     )
     app.dependency_overrides[get_job_service] = lambda: services.job_service
     app.dependency_overrides[get_task_service] = lambda: services.task_service
+    app.dependency_overrides[get_import_service] = lambda: services.import_service
+    app.dependency_overrides[get_worker_service] = lambda: WorkerService(
+        repository=services.workers, liveness_timeout_seconds=60
+    )
+    app.dependency_overrides[get_auth_service] = lambda: auth_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     override_idempotency(app, ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
 
 
-async def test_create(
-    api_client: KitaruAPIClient, services: JobAndTaskServices
-) -> None:
-    """Create an import job through the SDK."""
-    plugin = await create_plugin(
-        services.plugins, ACCOUNT.id, PluginKind.IMPORTER, name="csv"
-    )
-    await services.plugins.create_version(
-        plugin.id,
-        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
-        display_version=None,
-    )
+@pytest.fixture
+async def import_request(services: JobAndTaskServices) -> ImportCreateRequest:
+    """Provide a create request naming a registered importer and evaluator."""
+    for kind, name in (
+        (PluginKind.IMPORTER, "csv"),
+        (PluginKind.EVALUATOR, "accuracy"),
+    ):
+        plugin = await create_plugin(services.plugins, ACCOUNT.id, kind, name=name)
+        await services.plugins.create_version(
+            plugin.id,
+            ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+            display_version=None,
+        )
     payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
     agent = await create_agent(services.agents, ACCOUNT.id)
-
-    job = await api_client.imports.create(
-        ImportCreateRequest(
-            importer="csv", agent_id=agent.id, payload_blob_id=payload.id
-        )
+    return ImportCreateRequest(
+        importer="csv",
+        agent_id=agent.id,
+        payload_blob_id=payload.id,
+        evaluators=[EvaluatorConfig(evaluator="accuracy")],
     )
-    assert isinstance(job, JobResponse)
+
+
+async def test_create(
+    api_client: KitaruAPIClient,
+    services: JobAndTaskServices,
+    import_request: ImportCreateRequest,
+) -> None:
+    """Create an import through the SDK."""
+    created = await api_client.imports.create(import_request)
+    assert isinstance(created, ImportResponse)
+    assert created.agent_id == import_request.agent_id
+    assert isinstance(created.source, BlobImportSource)
+    assert created.source.blob_id == import_request.payload_blob_id
+    assert created.evaluators == [
+        EvaluatorConfig(evaluator="accuracy", version=1, params={})
+    ]
+    assert created.stats is None
+    assert created.error is None
+    assert created.job_id is not None
+    job = await api_client.jobs.get(created.job_id)
     assert job.status.value == "pending"
 
 
@@ -108,4 +150,77 @@ async def test_create_not_found_for_unknown_importer(
                 agent_id=agent.id,
                 payload_blob_id=payload.id,
             )
+        )
+
+
+async def test_get(
+    api_client: KitaruAPIClient, import_request: ImportCreateRequest
+) -> None:
+    """Get an import by id through the SDK."""
+    created = await api_client.imports.create(import_request)
+    loaded = await api_client.imports.get(created.id)
+    assert loaded == created
+
+
+async def test_get_not_found(api_client: KitaruAPIClient) -> None:
+    """Surface HTTP 404 as a typed error."""
+    with pytest.raises(NotFoundError):
+        await api_client.imports.get(uuid.uuid4())
+
+
+async def test_list_and_iter(
+    api_client: KitaruAPIClient, import_request: ImportCreateRequest
+) -> None:
+    """List and iterate imports through the SDK."""
+    await api_client.imports.create(import_request)
+    page = await api_client.imports.list(ImportListParams())
+    assert len(page.items) == 1
+
+    collected = [item async for item in api_client.imports.iter()]
+    assert len(collected) == 1
+
+
+@pytest.mark.parametrize("minimum", [None, 1])
+async def test_analyze(
+    api_client: KitaruAPIClient,
+    services: JobAndTaskServices,
+    import_request: ImportCreateRequest,
+    minimum: int | None,
+) -> None:
+    """Analyze an import through the SDK."""
+    created = await api_client.imports.create(import_request)
+    await create_session(
+        services.sessions,
+        ACCOUNT.id,
+        agent_id=created.agent_id,
+        origin=SessionOrigin.IMPORTED,
+        status=SessionStatus.COMPLETED,
+        import_id=created.id,
+    )
+
+    job = await api_client.imports.analyze(
+        created.id,
+        ImportAnalyzeRequest(
+            analyzers=[
+                AnalyzerConfig(
+                    analyzer="kitaru/post-import-insights", min_sessions=minimum
+                )
+            ]
+        ),
+    )
+
+    assert isinstance(job, JobResponse)
+    assert job.kind is JobKind.ANALYSIS
+    assert job.status is (JobStatus.PENDING if minimum == 1 else JobStatus.COMPLETED)
+    assert job.id != created.job_id
+
+
+async def test_analyze_not_found(api_client: KitaruAPIClient) -> None:
+    """Surface HTTP 404 as a typed error for an unknown import."""
+    with pytest.raises(NotFoundError):
+        await api_client.imports.analyze(
+            uuid.uuid4(),
+            ImportAnalyzeRequest(
+                analyzers=[AnalyzerConfig(analyzer="kitaru/post-import-insights")]
+            ),
         )

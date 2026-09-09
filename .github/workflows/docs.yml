@@ -83,6 +83,21 @@ jobs:
         working-directory: docs
       - name: Test redirect worker mapping
         run: node --test docs/worker/redirect.test.mjs
+      - name: Put the lockfile-pinned Wrangler on PATH
+        # wrangler-action installs Wrangler with `npm i` in the working directory,
+        # and npm cannot do that at this pnpm workspace root ("Cannot read
+        # properties of null (reading 'edgesOut')"), which failed every
+        # production deploy from 26 Aug to 3 Sep. The docs app pins wrangler as a
+        # dev dependency instead; with its bin dir on PATH the action's
+        # `npx --no-install wrangler --version` probe succeeds and it skips its
+        # own install.
+        if: >-
+          steps.sdk_generator.outputs.available == 'true' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          github.event_name == 'workflow_dispatch')
+        run: |
+          echo "$GITHUB_WORKSPACE/docs/node_modules/.bin" >> "$GITHUB_PATH"
+          "$GITHUB_WORKSPACE/docs/node_modules/.bin/wrangler" --version
       - name: Deploy production docs
         # Push deploys only from main; a manual workflow_dispatch deploys whichever
         # branch it runs against, so docs can be shipped to production from develop.
@@ -114,3 +129,14 @@ jobs:
           packageManager: npm
           wranglerVersion: ${{ env.WRANGLER_VERSION }}
           command: deploy --config wrangler.redirect.toml
+  notify-failure:
+    # PR runs already surface as a red check; only the production deploy path
+    # (push to main, manual dispatch) needs a Discord ping.
+    needs: build-deploy
+    if: failure() && github.event_name != 'pull_request'
+    permissions: {}
+    uses: ./.github/workflows/notify-failure.yml
+    with:
+      title: SDK Reference Docs deploy
+    secrets:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_SRE }}

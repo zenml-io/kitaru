@@ -1,7 +1,7 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
-"""Strict investigation and annotation tool inputs."""
+"""Strict investigation, annotation, and insight tool inputs."""
 
 import uuid
 from typing import Annotated, Literal
@@ -11,6 +11,7 @@ from pydantic import Field, model_validator
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.filter import Filter
+from kitaru.api_models.v1.insight import MAX_INSIGHT_BATCH_SIZE, InsightInput
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionInput,
     InvestigationSessionVerdict,
@@ -23,11 +24,11 @@ from kitaru.mcp.models.common import (
     PageOptions,
 )
 
-ReviewKind = Literal["investigation", "annotation"]
+ReviewKind = Literal["investigation", "annotation", "insight"]
 
 
 class ReviewList(PageOptions):
-    """List one bounded page of investigations or annotations."""
+    """List one bounded page of investigations, annotations, or insights."""
 
     operation: Literal["list"]
     kind: ReviewKind
@@ -35,7 +36,7 @@ class ReviewList(PageOptions):
 
 
 class ReviewGet(MCPModel):
-    """Get one investigation or annotation by exact UUID."""
+    """Get one investigation, annotation, or insight by exact UUID."""
 
     operation: Literal["get"]
     kind: ReviewKind
@@ -118,6 +119,48 @@ class SetInvestigationSessionVerdict(MCPModel):
     verdict: InvestigationSessionVerdict | None
 
 
+class InsightsCreate(MCPModel):
+    """Create a batch of insights for one agent."""
+
+    operation: Literal["create_insights"]
+    agent_id: uuid.UUID
+    insights: list[InsightInput] = Field(
+        min_length=1, max_length=MAX_INSIGHT_BATCH_SIZE
+    )
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
+
+
+class InsightUpdate(MCPModel):
+    """Sparsely update one insight's title or description."""
+
+    operation: Literal["update_insight"]
+    insight_id: uuid.UUID
+    title: str | None = None
+    description: str | None = None
+    clear_description: bool = False
+
+    @model_validator(mode="after")
+    def _validate_update(self) -> "InsightUpdate":
+        if "title" in self.model_fields_set and self.title is None:
+            raise ValueError("title cannot be null")
+        if (
+            "description" in self.model_fields_set
+            and self.description is None
+            and not self.clear_description
+        ):
+            raise ValueError("description cannot be null without clear_description")
+        if self.description is not None and self.clear_description:
+            raise ValueError("description and clear_description conflict")
+        if not ({"title", "description"} & self.model_fields_set) and not (
+            self.clear_description
+        ):
+            raise ValueError("insight update must change at least one field")
+        return self
+
+
 class ManualAnnotationCreate(MCPModel):
     """Create a manual annotation for one session."""
 
@@ -185,6 +228,8 @@ ReviewManageRequest = Annotated[
     InvestigationCreate
     | InvestigationUpdate
     | SetInvestigationSessionVerdict
+    | InsightsCreate
+    | InsightUpdate
     | ManualAnnotationCreate
     | InvestigationAnswerCreate
     | AnnotationUpdate

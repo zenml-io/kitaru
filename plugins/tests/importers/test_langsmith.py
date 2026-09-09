@@ -19,7 +19,6 @@ from typing import Any
 
 import pytest
 
-import kitaru_langsmith_importer.importer as langsmith_module
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -27,6 +26,7 @@ from kitaru.task.importer import ImportedNode, ImportedSession
 from kitaru_langsmith_importer.importer import (
     InvalidImport,
     LangSmithRunImporter,
+    importer,
     parse,
 )
 
@@ -97,6 +97,13 @@ def failures(
 def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
     """Flatten imported nodes depth-first."""
     return [node for root in nodes for node in (root, *flatten(root.children))]
+
+
+def test_importer_instance_parse_matches_module_parse() -> None:
+    """Yield the same sessions from the module-level instance as from parse."""
+    content = jsonl(run("root", "trace-1", inputs="hello", outputs="world"))
+
+    assert list(importer.parse(content, {})) == list(parse(content, {}))
 
 
 def test_groups_thread_traces_into_ordered_turns_and_nodes() -> None:
@@ -271,6 +278,27 @@ def test_falls_back_to_trace_id_with_warning() -> None:
     )
 
 
+def test_sessions_are_emitted_in_first_appearance_order() -> None:
+    """Emit sessions in payload order rather than sorted by grouping key."""
+    parsed = sessions(
+        jsonl(
+            run("root-a", "trace-a", thread_id="zzz-thread", inputs="a"),
+            run(
+                "root-b",
+                "trace-b",
+                thread_id="aaa-thread",
+                start_time="2026-08-05T10:01:00Z",
+                inputs="b",
+            ),
+        )
+    )
+
+    assert [session.external_id for session in parsed] == [
+        "project-1:zzz-thread",
+        "project-1:aaa-thread",
+    ]
+
+
 def test_isolates_trace_missing_selected_join_value() -> None:
     """Preserve valid traces when another lacks the selected grouping field."""
     valid = run(
@@ -392,20 +420,47 @@ def test_source_instance_override_supports_exports_without_project_id() -> None:
     assert session.external_id == "selected-project:thread-1"
 
 
+@pytest.mark.parametrize(
+    ("project_id", "params", "expected"),
+    [
+        (None, {"project_name": "named-project"}, "named-project"),
+        (
+            None,
+            {"source_instance": "", "project_name": "named-project"},
+            "named-project",
+        ),
+        ("embedded", {"project_name": "named-project"}, "named-project"),
+        ("embedded", {}, "embedded"),
+        (
+            "embedded",
+            {"source_instance": "selected", "project_name": "named-project"},
+            "selected",
+        ),
+    ],
+)
+def test_project_name_alias_preserves_identity_precedence(
+    project_id: str | None, params: dict[str, Any], expected: str
+) -> None:
+    """Explicit import identity takes precedence over embedded project identity."""
+    [session] = sessions(jsonl(run("root", "trace", project_id=project_id)), params)
+
+    assert session.external_id == f"{expected}:thread-1"
+
+
+def test_missing_project_identity_explains_import_params() -> None:
+    """Include a copyable remedy when the export omits its project identity."""
+    [failure] = failures(jsonl(run("root", "trace", project_id=None)))
+
+    assert '--params \'{"source_instance":"my-project"}\'' in failure.error
+    assert "project_name" in failure.error
+
+
 def test_unified_parse_yields_worker_contract_models() -> None:
     """Expose imported sessions through the standard plugin entrypoint."""
     parsed = list(parse(jsonl(run("root", "trace", inputs="hello")), {}))
 
     assert len(parsed) == 1
     assert isinstance(parsed[0], ImportedSession)
-
-
-def test_rejects_oversized_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Enforce the upload limit before decoding."""
-    monkeypatch.setattr(langsmith_module, "MAX_UPLOAD_BYTES", 3)
-
-    with pytest.raises(InvalidImport, match="50 MiB upload limit"):
-        LangSmithRunImporter().parse(b"1234", {})
 
 
 def assert_bad_run_isolated(row: dict[str, Any]) -> None:
@@ -553,3 +608,59 @@ def test_valid_unicode_survives() -> None:
     assert result[0].nodes[0].outputs == "你好 🌍"
     assert result[0].nodes[0].model == "模型 🌍"
     result[0].model_dump_json()
+
+
+@pytest.mark.parametrize("same_trace", [False, True])
+def test_override_does_not_hide_embedded_project_conflicts(same_trace: bool) -> None:
+    """Reject conflicting embedded projects within a trace or grouped session."""
+    content = jsonl(
+        run("root-a", "trace-a", project_id="first"),
+        run("root-b", "trace-a" if same_trace else "trace-b", project_id="second"),
+    )
+    result = list(parse(content, {"source_instance": "explicit"}))
+    assert len(result) == 1
+    assert isinstance(result[0], ImportFailure)
+    assert "conflicting project identities" in result[0].error
+
+
+def test_embedded_project_id_takes_priority_over_name() -> None:
+    """A record can contain both a project ID and its different display name."""
+    [session] = sessions(jsonl(run("root", "trace", session_name="display-name")))
+    assert session.external_id == "project-1:thread-1"
+
+
+def test_project_on_one_run_supplies_identity_for_trace() -> None:
+    """A child without project identity inherits the trace's embedded project."""
+    [session] = sessions(
+        jsonl(
+            run("root", "trace"),
+            run("child", "trace", parent_run_id="root", project_id=None),
+        )
+    )
+    assert session.external_id == "project-1:thread-1"
+
+
+def test_embedded_project_id_aliases_cannot_conflict_in_one_run() -> None:
+    """Different values for project ID aliases are conflicting embedded identity."""
+    record = run("root", "trace")
+    record["project_id"] = "other-project"
+    [failure] = list(parse(jsonl(record), {"source_instance": "explicit"}))
+    assert isinstance(failure, ImportFailure)
+    assert "conflicting project identities" in failure.error
+
+
+def test_project_id_on_one_run_takes_priority_over_child_project_name() -> None:
+    """Do not compare a project's display name with its ID across related runs."""
+    [session] = sessions(
+        jsonl(
+            run("root", "trace"),
+            run(
+                "child",
+                "trace",
+                parent_run_id="root",
+                project_id=None,
+                project_name="display-name",
+            ),
+        )
+    )
+    assert session.external_id == "project-1:thread-1"

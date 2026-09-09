@@ -62,7 +62,7 @@ def load_plugin_module(name: str, path: Path) -> ModuleType:
 
 
 def get_module_attribute(module: ModuleType, attribute: str, label: str) -> Any:
-    """Resolve a callable attribute on an imported module.
+    """Resolve an attribute on an imported module.
 
     Args:
         module: Module to resolve the attribute on.
@@ -70,15 +70,15 @@ def get_module_attribute(module: ModuleType, attribute: str, label: str) -> Any:
         label: Plugin kind, named in the error message.
 
     Raises:
-        PluginLoadError: The attribute is missing or not callable.
+        PluginLoadError: The attribute is missing.
 
     Returns:
         Resolved attribute.
     """
     value = getattr(module, attribute, None)
-    if value is None or not callable(value):
+    if value is None:
         raise PluginLoadError(
-            f"{label} entrypoint '{attribute}' was not found or is not callable "
+            f"{label} entrypoint '{attribute}' was not found "
             f"on module '{module.__name__}'"
         )
     return value
@@ -94,10 +94,10 @@ def load_plugin_entrypoint(path: Path, entrypoint: str, label: str) -> Any:
 
     Raises:
         PluginLoadError: The file does not import, or the entrypoint is
-            missing or not callable.
+            missing.
 
     Returns:
-        Resolved entrypoint callable.
+        Resolved entrypoint.
     """
     module = load_plugin_module(_SCRIPT_PLUGIN_MODULE_NAME, path)
     return get_module_attribute(module, entrypoint, label)
@@ -112,10 +112,10 @@ def load_source_ref(ref: str, label: str) -> Any:
 
     Raises:
         PluginLoadError: The reference is malformed, the module does not
-            import, or the attribute is missing or not callable.
+            import, or the attribute is missing.
 
     Returns:
-        Resolved entrypoint callable.
+        Resolved entrypoint.
     """
     try:
         module_name, attribute = parse_source_ref(ref)

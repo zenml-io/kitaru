@@ -46,6 +46,7 @@ class SessionFilter(ListFilter):
             value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS
         ),
         "task_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS),
+        "import_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS),
         "origin": FilterField(value_type=SessionOrigin, ops=EQUALITY_OPS),
         "status": FilterField(value_type=SessionStatus, ops=EQUALITY_OPS),
         "imported_from": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),

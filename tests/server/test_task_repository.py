@@ -22,6 +22,7 @@ from typing import Any, NamedTuple
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from worker_coverage_cases import COVERAGE_CASES, CoverageCase, CoverageIds
 
 from conftest import (
     UNSCOPED_WORKER_SCOPE,
@@ -72,6 +73,7 @@ from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import (
     AgentTask,
+    AnalysisTask,
     DuplicateEvaluationTask,
     EvaluationTask,
     ImportTask,
@@ -93,7 +95,6 @@ class Setup(NamedTuple):
     agent_version_id: uuid.UUID
     agent_version_id_2: uuid.UUID
     plugin_version_id: uuid.UUID
-    payload_blob_id: uuid.UUID
     session_id: uuid.UUID
     worker_id: uuid.UUID
     worker_id_2: uuid.UUID
@@ -132,15 +133,6 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
         ScriptPluginSource(blob_id=code_blob.id, entrypoint="score"),
         display_version=None,
     )
-    payload, _ = await SQLBlobRepository(session).create(
-        Blob(
-            owner_id=owner.id,
-            sha256="0" * 64,
-            size=4,
-            media_type="text/csv",
-            stored_in=BlobStorageBackend.DATABASE,
-        )
-    )
     stored_session = await SQLSessionRepository(session, engine).create(
         Session(owner_id=owner.id, agent_id=agent.id, number=1, origin="recorded")
     )
@@ -174,7 +166,6 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
         agent_version_id=agent_version.id,
         agent_version_id_2=agent_version_2.id,
         plugin_version_id=plugin_version.id,
-        payload_blob_id=payload.id,
         session_id=stored_session.id,
         worker_id=worker.id,
         worker_id_2=worker_2.id,
@@ -199,7 +190,6 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             agent_version_id=uuid.uuid4(),
             agent_version_id_2=uuid.uuid4(),
             plugin_version_id=uuid.uuid4(),
-            payload_blob_id=uuid.uuid4(),
             session_id=uuid.uuid4(),
             worker_id=uuid.uuid4(),
             worker_id_2=uuid.uuid4(),
@@ -278,19 +268,35 @@ async def test_evaluator_pair_uniqueness(setup: Setup) -> None:
 
 
 async def test_import_task_round_trips_its_fields(setup: Setup) -> None:
-    """An importer task round-trips its plugin, payload, and agent references."""
-    task = ImportTask(
-        job_id=setup.job_id,
-        plugin_version_id=setup.plugin_version_id,
-        payload_blob_id=setup.payload_blob_id,
-        agent_id=setup.agent_id,
-        params={"delimiter": ","},
-    )
+    """An importer task round-trips its import reference."""
+    import_id = uuid.uuid4()
+    task = ImportTask(job_id=setup.job_id, import_id=import_id)
     created = await setup.tasks.create(task)
     assert isinstance(created, ImportTask)
+    assert created.import_id == import_id
+
+
+async def test_analysis_task_round_trips_its_fields(setup: Setup) -> None:
+    """An analysis task round-trips its agent id, import id, and params."""
+    import_id = uuid.uuid4()
+    task = AnalysisTask(
+        job_id=setup.job_id,
+        plugin_version_id=setup.plugin_version_id,
+        agent_id=setup.agent_id,
+        import_id=import_id,
+        connection_id=uuid.uuid4(),
+        params={"threshold": 0.5},
+    )
+    created = await setup.tasks.create(task)
+    assert isinstance(created, AnalysisTask)
     assert created.plugin_version_id == setup.plugin_version_id
-    assert created.payload_blob_id == setup.payload_blob_id
-    assert created.params == {"delimiter": ","}
+    assert created.agent_id == setup.agent_id
+    assert created.import_id == import_id
+    assert created.connection_id == task.connection_id
+    assert created.params == {"threshold": 0.5}
+
+    loaded = await setup.tasks.get(created.id)
+    assert loaded == created
 
 
 async def test_list_by_job_orders_by_id(setup: Setup) -> None:
@@ -400,12 +406,7 @@ async def test_claim_pending_kind_filter(setup: Setup) -> None:
     """Claim respects a kind-scoped worker."""
     agent_task = await setup.tasks.create(_agent_task(setup))
     import_task = await setup.tasks.create(
-        ImportTask(
-            job_id=setup.job_id,
-            plugin_version_id=setup.plugin_version_id,
-            payload_blob_id=setup.payload_blob_id,
-            agent_id=setup.agent_id,
-        )
+        ImportTask(job_id=setup.job_id, import_id=uuid.uuid4())
     )
     claimed = await setup.tasks.claim_pending(
         WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)]),
@@ -575,14 +576,7 @@ async def test_claim_pending_kind_isolation_across_claims(setup: Setup) -> None:
             input_session_id=setup.session_id,
         )
     )
-    await setup.tasks.create(
-        ImportTask(
-            job_id=setup.job_id,
-            plugin_version_id=setup.plugin_version_id,
-            payload_blob_id=setup.payload_blob_id,
-            agent_id=setup.agent_id,
-        )
-    )
+    await setup.tasks.create(ImportTask(job_id=setup.job_id, import_id=uuid.uuid4()))
 
     claimed_by_agent_scope = await setup.tasks.claim_pending(
         WorkerScope(
@@ -655,6 +649,30 @@ async def test_claim_pending_full_scope_takes_an_older_task_of_any_kind(
         UNSCOPED_WORKER_SCOPE, setup.worker_id, 1, datetime.now(UTC)
     )
     assert [task.id for task in claimed] == [evaluation_task.id]
+
+
+@pytest.mark.parametrize(
+    "case", COVERAGE_CASES, ids=[case.name for case in COVERAGE_CASES]
+)
+async def test_claim_pending_matches_coverage_cases(
+    setup: Setup, case: CoverageCase
+) -> None:
+    """Claim agrees with the shared worker coverage cases."""
+    ids = CoverageIds(
+        job_id=setup.job_id,
+        other_job_id=uuid.uuid4(),
+        agent_version_id=setup.agent_version_id,
+        agent_version_id_2=setup.agent_version_id_2,
+        plugin_version_id=setup.plugin_version_id,
+        import_id=uuid.uuid4(),
+        session_id=setup.session_id,
+    )
+    task = await setup.tasks.create(case.task(ids))
+    claimed = await setup.tasks.claim_pending(
+        case.scope(ids), setup.worker_id, 10, datetime.now(UTC)
+    )
+    expected = [task.id] if case.covered else []
+    assert [claimed_task.id for claimed_task in claimed] == expected
 
 
 async def test_claim_stale(setup: Setup) -> None:

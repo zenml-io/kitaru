@@ -8,6 +8,7 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunJobsListParams,
     ExperimentRunListParams,
 )
+from kitaru.api_models.v1.imports import ImportListParams
 from kitaru.api_models.v1.job import JobListParams, JobTasksListParams
 from kitaru.api_models.v1.replay import ReplayListParams
 from kitaru.api_models.v1.session import SessionListParams
@@ -35,6 +36,8 @@ async def handle_activity_read(
             return await client.sessions.get(request.id)
         if request.kind == "replay":
             return await client.replays.get(request.id)
+        if request.kind == "import":
+            return await client.imports.get(request.id)
         if request.kind == "evaluation":
             return await client.evaluations.get(request.id)
         if request.kind == "experiment_run":
@@ -48,6 +51,10 @@ async def handle_activity_read(
         elif request.kind == "replay":
             page = await client.replays.list(
                 build_list_params(ReplayListParams, request)
+            )
+        elif request.kind == "import":
+            page = await client.imports.list(
+                build_list_params(ImportListParams, request)
             )
         elif request.kind == "evaluation":
             page = await client.evaluations.list(
@@ -67,14 +74,9 @@ async def _get_children(
     state: MCPServerState, request: ActivityChildrenRequest
 ) -> object:
     if isinstance(request, SessionNodesRequest):
-        page = await state.client.sessions.list_nodes(
-            request.parent_id,
-            SessionNodeListParams(
-                cursor=request.cursor,
-                size=request.size,
-                include_payloads=request.include_payloads,
-            ),
-        )
+        params = build_list_params(SessionNodeListParams, request)
+        params.include_payloads = request.include_payloads
+        page = await state.client.sessions.list_nodes(request.parent_id, params)
     elif request.kind == "experiment_run_jobs":
         page = await state.client.experiment_runs.list_jobs(
             request.parent_id,
