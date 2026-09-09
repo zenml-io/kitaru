@@ -15,7 +15,8 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from datetime import datetime
 from functools import partial
 from typing import Any
@@ -32,7 +33,7 @@ from langfuse.api.core import ApiError, RequestOptions
 from pydantic import ConfigDict
 
 from kitaru.api_models.v1.imports import ImportQuery
-from kitaru.task.importer import gather_bounded, retry_rate_limited
+from kitaru.task.importer import gather_bounded, retry_rate_limited, stream_bounded
 
 __all__ = [
     "fetch",
@@ -255,21 +256,63 @@ async def _assemble_trace_payload(
     return payload
 
 
+def _get_session_group_key(trace: TraceWithDetails) -> str:
+    """Return the session grouping key the parser's default join would use.
+
+    Args:
+        trace: Listed trace row.
+
+    Returns:
+        The trace's session id when it is a non-empty string, its own id
+        otherwise.
+    """
+    if isinstance(trace.session_id, str) and trace.session_id:
+        return trace.session_id
+    return trace.id
+
+
+async def _fetch_group_payload(
+    rows: list[TraceWithDetails], semaphore: asyncio.Semaphore
+) -> bytes:
+    """Assemble one session group's traces into a parser payload.
+
+    Args:
+        rows: Trace rows sharing one session grouping key, in listing order.
+        semaphore: Bound on in-flight observation fetches, shared across
+            every group so the total stays within the query concurrency.
+
+    Returns:
+        Trace list payload bytes holding only this group's traces.
+    """
+
+    async def _fetch_one(trace: TraceWithDetails) -> dict[str, Any]:
+        async with semaphore:
+            return await _assemble_trace_payload(trace)
+
+    payloads = await asyncio.gather(*(_fetch_one(row) for row in rows))
+    return json.dumps(list(payloads)).encode("utf-8")
+
+
 class LangfuseImportQuery(ImportQuery):
     """Langfuse import query."""
 
     model_config = ConfigDict(extra="forbid")
 
 
-async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    """Fetch one parser payload containing every trace matching a query.
+async def fetch(query: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+    """Fetch one parser payload per session group matching a query.
 
-    The parser groups traces into sessions by Langfuse session id, so every
-    matching trace must reach it in a single payload for that grouping to
-    work. A time-window query lists traces oldest first, then reads each
-    one's observations through the high-volume bulk observations endpoint,
-    concurrently up to the query's concurrency, and merges them back into
-    that order.
+    A time-window query lists traces oldest first, groups them by the
+    Langfuse session id the parser's default join would use, falling back
+    to the trace id, and yields one payload per group in listing order.
+    Every trace of one group still has to reach the parser in the same
+    payload, because the parser folds them into a single session, and a
+    second payload carrying the same external id conflicts with the first
+    and is skipped. A `trace_ids` query has no cheap listing step to group
+    ahead of the fetch, so it fetches every requested trace and yields
+    them as one payload instead. Both modes read observations through the
+    high-volume bulk observations endpoint, bounded by the query's
+    concurrency.
 
     Args:
         query: Fetch query with `trace_ids`, `since`, and `until` keys.
@@ -278,11 +321,12 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         ValueError: The query is invalid.
 
     Yields:
-        One trace list payload, or nothing when no trace matches.
+        One trace list payload per session group in listing order, or one
+        payload for all requested trace ids, or nothing when no trace
+        matches.
     """
     parsed = LangfuseImportQuery.model_validate(query)
 
-    trace_rows: Sequence[TraceWithDetails | TraceWithFullDetails]
     if parsed.trace_ids is not None:
         trace_rows = await gather_bounded(
             (
@@ -291,13 +335,27 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
             ),
             parsed.concurrency,
         )
-    else:
-        since, until = parsed.get_window()
-        trace_rows = [trace async for trace in _list_traces(since, until)]
+        payloads = await gather_bounded(
+            (_assemble_trace_payload(trace) for trace in trace_rows),
+            parsed.concurrency,
+        )
+        if payloads:
+            yield json.dumps(payloads).encode("utf-8")
+        return
 
-    payloads = await gather_bounded(
-        (_assemble_trace_payload(trace) for trace in trace_rows),
-        parsed.concurrency,
+    since, until = parsed.get_window()
+    groups: dict[str, list[TraceWithDetails]] = {}
+    async for trace in _list_traces(since, until):
+        groups.setdefault(_get_session_group_key(trace), []).append(trace)
+    if not groups:
+        return
+
+    semaphore = asyncio.Semaphore(parsed.concurrency)
+    group_awaitables = (
+        _fetch_group_payload(rows, semaphore) for rows in groups.values()
     )
-    if payloads:
-        yield json.dumps(payloads).encode("utf-8")
+    async with aclosing(
+        stream_bounded(group_awaitables, parsed.concurrency)
+    ) as payloads:
+        async for payload in payloads:
+            yield payload

@@ -15,7 +15,8 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -27,7 +28,9 @@ from pydantic import ConfigDict
 
 from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.env import get_required_env
-from kitaru.task.importer import gather_bounded, retry_rate_limited
+from kitaru.task.importer import gather_bounded, retry_rate_limited, stream_bounded
+
+from .importer import get_default_join_value
 
 __all__ = ["fetch", "fetch_trace", "wait_for_trace"]
 
@@ -206,10 +209,10 @@ def _rows_from_ndjson(content: bytes) -> list[dict[str, Any]]:
     return rows
 
 
-async def _list_root_trace_ids(
+async def _list_root_rows(
     client: httpx.AsyncClient, since: datetime, until: datetime
-) -> list[str]:
-    """List distinct root trace ids started within a time window.
+) -> list[dict[str, Any]]:
+    """List distinct root trace rows started within a time window.
 
     Args:
         client: HTTP client.
@@ -217,7 +220,8 @@ async def _list_root_trace_ids(
         until: Upper bound of trace start time.
 
     Returns:
-        Trace ids ordered by start timestamp.
+        Root rows carrying trace_id, start_timestamp, and attributes,
+        ordered by start timestamp.
     """
     read_token = get_required_env("LOGFIRE_READ_TOKEN")
     content = await _post_query(
@@ -225,7 +229,7 @@ async def _list_root_trace_ids(
         read_token,
         {
             "sql": (
-                "SELECT DISTINCT trace_id, start_timestamp FROM records "
+                "SELECT DISTINCT trace_id, start_timestamp, attributes FROM records "
                 "WHERE parent_span_id IS NULL "
                 f"AND start_timestamp >= '{since.isoformat()}' "
                 f"AND start_timestamp <= '{until.isoformat()}' "
@@ -237,14 +241,61 @@ async def _list_root_trace_ids(
     )
     rows = _rows_from_ndjson(content)
 
-    trace_ids: list[str] = []
+    roots: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in rows:
         trace_id = str(row["trace_id"])
         if trace_id not in seen:
             seen.add(trace_id)
-            trace_ids.append(trace_id)
-    return trace_ids
+            roots.append(row)
+    return roots
+
+
+def _get_session_group_key(row: dict[str, Any]) -> str:
+    """Return the session grouping key the parser's default join would use.
+
+    Args:
+        row: Listed root trace row.
+
+    Returns:
+        The value at the parser's default join paths, the row's own trace
+        id when none of them resolve.
+    """
+    return get_default_join_value(row) or str(row["trace_id"])
+
+
+async def _fetch_group_payload(
+    trace_ids: list[str],
+    min_timestamp: datetime,
+    client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+) -> bytes:
+    """Fetch one session group's traces and join them into a parser payload.
+
+    Args:
+        trace_ids: Trace ids sharing one session grouping key, in listing
+            order.
+        min_timestamp: Minimum timestamp for each trace's records query.
+        client: HTTP client.
+        semaphore: Bound on in-flight trace fetches, shared across every
+            group so the total stays within the query concurrency.
+
+    Returns:
+        NDJSON payload joining the group's trace payloads in listing order.
+    """
+
+    async def _fetch_one(trace_id: str) -> bytes:
+        async with semaphore:
+            return await fetch_trace(trace_id, min_timestamp, client)
+
+    trace_payloads = await asyncio.gather(
+        *(_fetch_one(trace_id) for trace_id in trace_ids)
+    )
+    # Join every trace of one session into a single payload so the parser
+    # groups them into one Kitaru session instead of splitting them across
+    # separate parse calls, where only the first trace of a session would
+    # survive deduplication.
+    return b"\n".join(trace_payloads)
 
 
 class LogfireImportQuery(ImportQuery):
@@ -253,11 +304,22 @@ class LogfireImportQuery(ImportQuery):
     model_config = ConfigDict(extra="forbid")
 
 
-async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    """Fetch every trace matched by the query into one parser payload.
+async def fetch(query: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+    """Fetch one parser payload per session group matching a query.
+
+    A time-window query lists root trace rows oldest first, groups them by
+    the parser's default session join value, falling back to the trace id,
+    and yields one payload per group in listing order so the runtime can
+    ingest completed sessions before the rest of the window has been
+    fetched. Every trace of one group still has to reach the parser in the
+    same payload, because the parser folds them into a single session, and
+    a second payload carrying the same external id conflicts with the
+    first and is skipped. A `trace_ids` query has no cheap listing step to
+    group ahead of the fetch, so it fetches every requested trace and
+    yields them as one payload instead.
 
     Traces are fetched concurrently, up to the query's concurrency, and
-    merged back in fetch order. A request that hits the Logfire rate
+    merged back in listing order. A request that hits the Logfire rate
     limit waits out the reported delay and retries instead of failing
     the fetch.
 
@@ -270,8 +332,9 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         ValueError: The query is invalid.
 
     Yields:
-        One NDJSON payload concatenating every fetched trace, oldest
-        first. Nothing when there is nothing to fetch.
+        One NDJSON payload per session group, oldest first, or one payload
+        for all requested trace ids. Nothing when there is nothing to
+        fetch.
     """
     parsed = LogfireImportQuery.model_validate(query)
     read_token = get_required_env("LOGFIRE_READ_TOKEN")
@@ -284,19 +347,33 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
             # point, so fall back to the earliest possible timestamp
             # instead.
             min_timestamp = parsed.since or datetime.min.replace(tzinfo=UTC)
-            trace_ids = parsed.trace_ids
-        else:
-            since, until = parsed.get_window()
-            min_timestamp = since
-            trace_ids = await _list_root_trace_ids(client, since, until)
+            trace_payloads = await gather_bounded(
+                (
+                    fetch_trace(trace_id, min_timestamp, client)
+                    for trace_id in parsed.trace_ids
+                ),
+                parsed.concurrency,
+            )
+            if trace_payloads:
+                yield b"\n".join(trace_payloads)
+            return
 
-        trace_payloads = await gather_bounded(
-            (fetch_trace(trace_id, min_timestamp, client) for trace_id in trace_ids),
-            parsed.concurrency,
+        since, until = parsed.get_window()
+        groups: dict[str, list[str]] = {}
+        for row in await _list_root_rows(client, since, until):
+            groups.setdefault(_get_session_group_key(row), []).append(
+                str(row["trace_id"])
+            )
+        if not groups:
+            return
+
+        semaphore = asyncio.Semaphore(parsed.concurrency)
+        group_awaitables = (
+            _fetch_group_payload(trace_ids, since, client, semaphore)
+            for trace_ids in groups.values()
         )
-        # Concatenate into one payload so the parser groups traces sharing
-        # a session id into one Kitaru session instead of splitting them
-        # across separate parse calls, where only the first trace of a
-        # session would survive deduplication.
-        if trace_payloads:
-            yield b"\n".join(trace_payloads)
+        async with aclosing(
+            stream_bounded(group_awaitables, parsed.concurrency)
+        ) as payloads:
+            async for payload in payloads:
+                yield payload

@@ -44,7 +44,7 @@ _FETCH_SQL_PATTERN = re.compile(
     r"SELECT \* FROM records WHERE trace_id = '(?P<trace_id>[0-9a-f]{32})'"
 )
 _LIST_SQL_PATTERN = re.compile(
-    r"SELECT DISTINCT trace_id, start_timestamp FROM records "
+    r"SELECT DISTINCT trace_id, start_timestamp, attributes FROM records "
     r"WHERE parent_span_id IS NULL "
     r"AND start_timestamp >= '(?P<since>[^']+)' "
     r"AND start_timestamp <= '(?P<until>[^']+)' "
@@ -132,9 +132,18 @@ def build_conversation_rows(
     ]
 
 
-def build_list_row(trace_id: str, start_timestamp: str) -> dict[str, Any]:
+def build_list_row(
+    trace_id: str,
+    start_timestamp: str,
+    *,
+    attributes: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Build one trace-listing result row."""
-    return {"trace_id": trace_id, "start_timestamp": start_timestamp}
+    return {
+        "trace_id": trace_id,
+        "start_timestamp": start_timestamp,
+        "attributes": attributes or {},
+    }
 
 
 def ndjson(rows: list[dict[str, Any]]) -> bytes:

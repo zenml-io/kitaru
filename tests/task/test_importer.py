@@ -17,6 +17,7 @@ import asyncio
 import json
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from pathlib import Path
 from typing import Any, cast
 
@@ -69,6 +70,7 @@ from kitaru.task.importer import (
     retry_rate_limited,
     run,
     session_request,
+    stream_bounded,
 )
 
 
@@ -291,6 +293,76 @@ async def test_gather_bounded_limits_in_flight_and_keeps_order() -> None:
     results = await gather_bounded((_work(value) for value in range(6)), 2)
     assert results == list(range(6))
     assert peak == 2
+
+
+async def test_stream_bounded_limits_in_flight_and_keeps_order() -> None:
+    in_flight = 0
+    peak = 0
+    started: list[int] = []
+
+    async def _work(value: int) -> int:
+        nonlocal in_flight, peak
+        started.append(value)
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return value
+
+    results: list[int] = []
+    async for value in stream_bounded((_work(value) for value in range(6)), 2):
+        results.append(value)
+        # The window starts at most two ahead of the value just yielded.
+        assert len(started) <= value + 3
+
+    assert results == list(range(6))
+    assert peak == 2
+
+
+async def test_stream_bounded_cancels_pending_on_early_exit() -> None:
+    cancelled: list[int] = []
+
+    async def _work(value: int) -> int:
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled.append(value)
+            raise
+        return value
+
+    async def _quick() -> int:
+        return 0
+
+    awaitables = [_quick(), _work(1), _work(2), _work(3)]
+    async with aclosing(stream_bounded(awaitables, 3)) as results:
+        async for value in results:
+            assert value == 0
+            break
+
+    assert sorted(cancelled) == [1, 2]
+    # The fourth awaitable was never started, so close it without a warning.
+    awaitables[3].close()
+
+
+async def test_stream_bounded_cancels_pending_when_an_awaitable_fails() -> None:
+    cancelled: list[int] = []
+
+    async def _work(value: int) -> int:
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled.append(value)
+            raise
+        return value
+
+    async def _fail() -> int:
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        async for _ in stream_bounded([_fail(), _work(1), _work(2)], 3):
+            pass
+
+    assert sorted(cancelled) == [1, 2]
 
 
 async def test_retry_rate_limited_sleeps_and_retries(
@@ -1041,6 +1113,52 @@ class _Importer:
 importer = _Importer()
 """
 
+_API_FETCH_CLOSING_SCRIPT = """
+import os
+from contextlib import aclosing
+from pathlib import Path
+
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.task.importer import ImportedSession
+
+
+def parse(payload: bytes, params: dict):
+    external_id = payload.decode()
+    yield ImportedSession(
+        status=SessionStatus.COMPLETED,
+        name=external_id,
+        inputs=None,
+        outputs=None,
+        error=None,
+        started_at=None,
+        ended_at=None,
+        external_id=external_id,
+        metadata={},
+        nodes=[],
+    )
+
+
+async def fetch(query: dict):
+    try:
+        for trace_id in query["trace_ids"]:
+            yield trace_id.encode()
+    finally:
+        Path(os.environ["KITARU_TEST_CLOSE_MARKER"]).write_text("closed")
+
+
+class _Importer:
+    def parse(self, payload, params):
+        return parse(payload, params)
+
+    async def fetch(self, query):
+        async with aclosing(fetch(query)) as payloads:
+            async for payload in payloads:
+                yield payload
+
+
+importer = _Importer()
+"""
+
 _API_FETCH_CRASHING_SCRIPT = """
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.task.importer import ImportedSession
@@ -1176,6 +1294,33 @@ async def test_run_with_api_source_stops_fetching_at_max_sessions(
     assert written.created == 2
     assert written.limit_reached is True
     assert fetched == 3
+
+
+async def test_run_with_api_source_closes_the_fetcher_at_max_sessions(
+    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Close the fetcher before returning when the session limit stops the import."""
+    result_path = tmp_path / "result.json"
+    close_marker = tmp_path / "closed"
+    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
+    monkeypatch.setenv("KITARU_TEST_CLOSE_MARKER", str(close_marker))
+    task_id = await _create_api_source_task(
+        task_app,
+        _API_FETCH_CLOSING_SCRIPT,
+        tmp_path,
+        monkeypatch,
+        query={"trace_ids": ["a", "b", "c", "d", "e"]},
+        max_sessions=2,
+    )
+
+    await run(task_app.client, str(task_id))
+
+    # Checked without yielding to the loop, so a close left to garbage
+    # collection would not have run yet.
+    assert close_marker.read_text() == "closed"
+    written = ImportStats.model_validate(json.loads(result_path.read_text()))
+    assert written.created == 2
+    assert written.limit_reached is True
 
 
 async def test_importer_flow_rejects_non_importer_task(

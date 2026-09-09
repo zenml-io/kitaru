@@ -103,7 +103,11 @@ async def test_fetch_with_trace_ids_ignores_the_time_window(
 async def test_fetch_time_window_lists_across_two_pages_and_fetches_each_trace(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:
-    """List every page of the time window and read each listed trace's observations."""
+    """List every page of the time window and read each listed trace's observations.
+
+    None of the three traces share a session id, so each becomes its own
+    group and yields its own payload, in listing order.
+    """
     fake_langfuse.trace_list_pages = [
         build_trace_page(["trace-1", "trace-2"], page=1, total_pages=2),
         build_trace_page(["trace-3"], page=2, total_pages=2),
@@ -114,7 +118,7 @@ async def test_fetch_time_window_lists_across_two_pages_and_fetches_each_trace(
 
     payloads = await collect_payloads(fetch({"since": since, "until": until}))
 
-    assert len(payloads) == 1
+    assert len(payloads) == 3
     assert [call["page"] for call in fake_langfuse.list_calls] == [1, 2]
     assert all(
         call["from_timestamp"] == datetime.fromisoformat(since)
@@ -131,8 +135,50 @@ async def test_fetch_time_window_lists_across_two_pages_and_fetches_each_trace(
         call.get("from_start_time") is None and call.get("to_start_time") is None
         for call in fake_langfuse.observation_calls
     )
-    sessions = list(parse(payloads[0], {}))
+    sessions = [
+        session
+        for payload in payloads
+        for session in parse(payload, {})
+        if isinstance(session, ImportedSession)
+    ]
     assert len(sessions) == 3
+    assert [session.metadata["langfuse.trace_ids"][0] for session in sessions] == [
+        "trace-1",
+        "trace-2",
+        "trace-3",
+    ]
+
+
+async def test_fetch_time_window_yields_one_payload_per_distinct_session(
+    fake_langfuse: FakeLangfuseClient,
+) -> None:
+    """Yield one payload per session, in order, each parsing to its own session."""
+    fake_langfuse.trace_list_pages = [
+        build_trace_page(
+            ["trace-1", "trace-2"],
+            page=1,
+            total_pages=1,
+            session_ids={"trace-1": "session-A", "trace-2": "session-B"},
+        )
+    ]
+    seed_default_observations(fake_langfuse, ["trace-1", "trace-2"])
+    since = "2026-07-01T00:00:00+00:00"
+    until = "2026-07-24T00:00:00+00:00"
+
+    payloads = await collect_payloads(fetch({"since": since, "until": until}))
+
+    assert len(payloads) == 2
+    first_sessions = [
+        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+    ]
+    second_sessions = [
+        item for item in parse(payloads[1], {}) if isinstance(item, ImportedSession)
+    ]
+    assert len(first_sessions) == len(second_sessions) == 1
+    assert first_sessions[0].metadata["langfuse.session_id"] == "session-A"
+    assert first_sessions[0].metadata["langfuse.trace_ids"] == ["trace-1"]
+    assert second_sessions[0].metadata["langfuse.session_id"] == "session-B"
+    assert second_sessions[0].metadata["langfuse.trace_ids"] == ["trace-2"]
 
 
 async def test_fetch_paginates_observations_within_one_trace(
@@ -181,7 +227,11 @@ async def test_fetch_paginates_observations_within_one_trace(
 async def test_fetch_time_window_groups_shared_session_into_one_payload(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:
-    """Group traces that share a Langfuse session id when parsed from one payload."""
+    """Group traces that share a Langfuse session id into one payload.
+
+    trace-3 has no session id, so it falls back to its own trace id and
+    lands in a separate payload, keyed by that trace id.
+    """
     fake_langfuse.trace_list_pages = [
         build_trace_page(
             ["trace-1", "trace-2", "trace-3"],
@@ -196,22 +246,26 @@ async def test_fetch_time_window_groups_shared_session_into_one_payload(
 
     payloads = await collect_payloads(fetch({"since": since, "until": until}))
 
-    assert len(payloads) == 1
+    assert len(payloads) == 2
     assert all(call["order_by"] == "timestamp.asc" for call in fake_langfuse.list_calls)
 
-    parsed = list(parse(payloads[0], {}))
-    sessions = [item for item in parsed if isinstance(item, ImportedSession)]
-    assert len(sessions) == len(parsed) == 2
-
-    shared = next(
-        session
-        for session in sessions
-        if session.metadata["langfuse.session_id"] == "session-A"
-    )
+    shared_sessions = [
+        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+    ]
+    assert len(shared_sessions) == 1
+    shared = shared_sessions[0]
+    assert shared.metadata["langfuse.session_id"] == "session-A"
     assert shared.metadata["langfuse.trace_ids"] == ["trace-1", "trace-2"]
     nodes = _flatten(shared.nodes)
     assert {node.trace_id for node in nodes} == {"trace-1", "trace-2"}
     assert len(nodes) == 4
+
+    solo_sessions = [
+        item for item in parse(payloads[1], {}) if isinstance(item, ImportedSession)
+    ]
+    assert len(solo_sessions) == 1
+    assert solo_sessions[0].metadata["langfuse.session_id"] == "trace-3"
+    assert solo_sessions[0].metadata["langfuse.trace_ids"] == ["trace-3"]
 
 
 async def test_fetch_time_window_defaults_until_to_now(
@@ -269,6 +323,40 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
     seed_default_observations(fake_langfuse, ["trace-5", "trace-6"])
     payloads = await collect_payloads(fetch({"trace_ids": ["trace-5", "trace-6"]}))
     assert len(payloads) == 1
+
+
+async def test_fetch_time_window_bounds_concurrency_across_groups(
+    fake_langfuse: FakeLangfuseClient,
+) -> None:
+    """Bound total in-flight observation fetches across groups by concurrency."""
+    trace_ids = ["trace-1", "trace-2", "trace-3", "trace-4"]
+    fake_langfuse.trace_list_pages = [
+        build_trace_page(trace_ids, page=1, total_pages=1)
+    ]
+    seed_default_observations(fake_langfuse, trace_ids)
+    # None of the traces share a session, so each is its own group. Delays
+    # scramble completion order relative to listing order, so the yielded
+    # order proves stream_bounded restores it rather than happening to
+    # already match it.
+    fake_langfuse.observation_delays = [0.03, 0.01, 0.02, 0.0]
+    since = "2026-07-01T00:00:00+00:00"
+    until = "2026-07-24T00:00:00+00:00"
+
+    payloads = await collect_payloads(
+        fetch({"since": since, "until": until, "concurrency": 2})
+    )
+
+    assert fake_langfuse.observation_peak_in_flight == 2
+    assert len(payloads) == 4
+    sessions = [
+        session
+        for payload in payloads
+        for session in parse(payload, {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [session.metadata["langfuse.trace_ids"][0] for session in sessions] == (
+        trace_ids
+    )
 
 
 async def test_fetch_rejects_an_invalid_query(

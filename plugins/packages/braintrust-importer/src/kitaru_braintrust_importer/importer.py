@@ -23,6 +23,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -561,7 +562,7 @@ def _metadata(record: dict[str, Any]) -> dict[str, Any]:
     return {key: metadata[key] for key in _ALLOWED_METADATA if key in metadata}
 
 
-def _session_id(record: dict[str, Any]) -> str | None:
+def get_session_id(record: dict[str, Any]) -> str | None:
     """Extract the configured Braintrust session identifier."""
     metadata = _dict(record.get("metadata"))
     for field in _SESSION_FIELDS:
@@ -575,7 +576,7 @@ def _join_value(record: dict[str, Any], params: dict[str, Any], trace_id: str) -
     """Resolve the session grouping value for one trace root."""
     selected = params.get("join_on")
     if selected is None:
-        return _session_id(record) or trace_id
+        return get_session_id(record) or trace_id
     if not isinstance(selected, str):
         raise InvalidImport("join_on must be a dotted path or JSON pointer")
     value = _path_value(record, selected)
@@ -1153,8 +1154,9 @@ class BraintrustProjectLogImporter:
         """Fetch parser payloads from the Braintrust API."""
         from .api import fetch
 
-        async for payload in fetch(query):
-            yield payload
+        async with aclosing(fetch(query)) as payloads:
+            async for payload in payloads:
+                yield payload
 
 
 importer = BraintrustProjectLogImporter()

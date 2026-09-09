@@ -421,6 +421,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "FetchingImporter",
                 "Importer",
                 "gather_bounded",
+                "stream_bounded",
                 "retry_rate_limited",
                 "call_parser",
                 "call_fetcher",

@@ -21,6 +21,7 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -585,6 +586,21 @@ def _get_source_instance(projects: set[str], params: dict[str, Any]) -> str:
     return source
 
 
+def _default_join_match(record: dict[str, Any]) -> tuple[str, str] | None:
+    """Return the value and path of the first default join path that resolves."""
+    for path in _DEFAULT_JOIN_PATHS:
+        value = _path_value(record, path)
+        if value not in (None, ""):
+            return str(value), path
+    return None
+
+
+def get_default_join_value(record: dict[str, Any]) -> str | None:
+    """Resolve the session grouping value from the default join paths."""
+    match = _default_join_match(record)
+    return match[0] if match is not None else None
+
+
 def _join_value(
     record: dict[str, Any], params: dict[str, Any], trace_id: str
 ) -> tuple[str, str, bool]:
@@ -604,10 +620,10 @@ def _join_value(
                 f"'{selected}'"
             )
         return str(value), selected, False
-    for path in _DEFAULT_JOIN_PATHS:
-        value = _path_value(record, path)
-        if value not in (None, ""):
-            return str(value), path, False
+    match = _default_join_match(record)
+    if match is not None:
+        value, path = match
+        return value, path, False
     return trace_id, "trace_id", True
 
 
@@ -1159,8 +1175,9 @@ class LangSmithRunImporter:
         """Fetch parser payloads from the LangSmith API."""
         from .api import fetch
 
-        async for payload in fetch(query):
-            yield payload
+        async with aclosing(fetch(query)) as payloads:
+            async for payload in payloads:
+                yield payload
 
 
 importer = LangSmithRunImporter()

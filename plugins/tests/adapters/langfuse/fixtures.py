@@ -211,6 +211,9 @@ class FakeLangfuseClient:
         self.fetch_delays: list[float] = []
         self.in_flight = 0
         self.peak_in_flight = 0
+        self.observation_delays: list[float] = []
+        self.observation_in_flight = 0
+        self.observation_peak_in_flight = 0
         self.async_api = SimpleNamespace(
             trace=SimpleNamespace(get=self._get, list=self._list),
             observations=SimpleNamespace(get_many=self._get_many),
@@ -241,21 +244,30 @@ class FakeLangfuseClient:
         self, *, trace_id: str, **kwargs: Any
     ) -> ObservationsV2Response:
         self.observation_calls.append({"trace_id": trace_id, **kwargs})
-        pages = self.observation_pages.get(trace_id)
-        assert pages, f"unexpected observations listing for trace {trace_id!r}"
-        page = pages.pop(0)
-        since = kwargs.get("from_start_time")
-        until = kwargs.get("to_start_time")
-        return page.model_copy(
-            update={
-                "data": [
-                    observation
-                    for observation in page.data
-                    if (since is None or observation.start_time >= since)
-                    and (until is None or observation.start_time <= until)
-                ]
-            }
+        self.observation_in_flight += 1
+        self.observation_peak_in_flight = max(
+            self.observation_peak_in_flight, self.observation_in_flight
         )
+        try:
+            if self.observation_delays:
+                await asyncio.sleep(self.observation_delays.pop(0))
+            pages = self.observation_pages.get(trace_id)
+            assert pages, f"unexpected observations listing for trace {trace_id!r}"
+            page = pages.pop(0)
+            since = kwargs.get("from_start_time")
+            until = kwargs.get("to_start_time")
+            return page.model_copy(
+                update={
+                    "data": [
+                        observation
+                        for observation in page.data
+                        if (since is None or observation.start_time >= since)
+                        and (until is None or observation.start_time <= until)
+                    ]
+                }
+            )
+        finally:
+            self.observation_in_flight -= 1
 
     @contextmanager
     def start_as_current_observation(

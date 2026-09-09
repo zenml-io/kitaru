@@ -37,12 +37,14 @@ async def test_trace_ids_fetches_exactly_those_traces_in_order(
     """Fetch the requested traces, skip the time window, and preserve order."""
     fake_phoenix.span_builders = [build_complete_spans, build_complete_spans]
 
-    [payload] = await collect_payloads(fetch({"trace_ids": ["trace-b", "trace-a"]}))
+    payloads = await collect_payloads(fetch({"trace_ids": ["trace-b", "trace-a"]}))
 
     assert fake_phoenix.requested == ["trace-b", "trace-a"]
     assert not fake_phoenix.list_windows
+    assert len(payloads) == 2
     sessions = [
         session
+        for payload in payloads
         for session in parse(payload, {})
         if isinstance(session, ImportedSession)
     ]
@@ -73,17 +75,18 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
     trace_ids = ["trace-1", "trace-2", "trace-3", "trace-4"]
     fake_phoenix.span_builders = [build_complete_spans] * len(trace_ids)
     # Delays scramble completion order relative to submission order, so the
-    # merged result proves gather_bounded restores it rather than happening
+    # yielded payloads prove stream_bounded restores it rather than happening
     # to already match it.
     fake_phoenix.fetch_delays = [0.03, 0.01, 0.02, 0.0]
 
     payloads = await collect_payloads(fetch({"trace_ids": trace_ids, "concurrency": 2}))
 
-    assert fake_phoenix.peak_in_flight == 2
-    assert len(payloads) == 1
+    assert fake_phoenix.peak_in_flight <= 2
+    assert len(payloads) == 4
     sessions = [
         session
-        for session in parse(payloads[0], {})
+        for payload in payloads
+        for session in parse(payload, {})
         if isinstance(session, ImportedSession)
     ]
     assert [session.external_id for session in sessions] == [
@@ -93,7 +96,7 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
     # The default query still works at the default concurrency.
     fake_phoenix.span_builders = [build_complete_spans, build_complete_spans]
     payloads = await collect_payloads(fetch({"trace_ids": ["trace-5", "trace-6"]}))
-    assert len(payloads) == 1
+    assert len(payloads) == 2
 
 
 @pytest.mark.parametrize("same_timestamp", [False, True])
@@ -160,14 +163,15 @@ async def test_fetch_preserves_more_than_1000_spans_with_real_sdk_pagination(
     assert cursors == [None, *map(str, range(100, 1005, 100))]
 
 
-async def test_time_window_fetch_yields_one_oldest_first_payload(
+async def test_time_window_fetch_yields_one_payload_per_trace_oldest_first(
     fake_phoenix: FakePhoenix,
 ) -> None:
-    """Merge every fetched trace's spans into one oldest-first payload.
+    """Yield one payload per trace in oldest-first listing order.
 
     get_spans has no ordering parameter, and pages can surface root spans
     out of start-time order, so the fetch must sort collected root spans
-    itself before fetching each trace.
+    itself before fetching each trace. Each fetched trace parses into
+    exactly its own session.
     """
     fake_phoenix.list_pages = [
         [
@@ -197,19 +201,24 @@ async def test_time_window_fetch_yields_one_oldest_first_payload(
         build_complete_spans,
     ]
 
-    [payload] = await collect_payloads(
+    payloads = await collect_payloads(
         fetch(
             {"since": "2026-08-27T09:00:00+00:00", "until": "2026-08-27T11:00:00+00:00"}
         )
     )
 
     assert fake_phoenix.requested == ["trace-c", "trace-a", "trace-b"]
-    sessions = [
-        session
-        for session in parse(payload, {})
-        if isinstance(session, ImportedSession)
+    assert len(payloads) == 3
+    sessions_per_payload = [
+        [
+            session
+            for session in parse(payload, {})
+            if isinstance(session, ImportedSession)
+        ]
+        for payload in payloads
     ]
-    assert [session.external_id for session in sessions] == [
+    assert [len(sessions) for sessions in sessions_per_payload] == [1, 1, 1]
+    assert [sessions[0].external_id for sessions in sessions_per_payload] == [
         f"{PROJECT}:trace-c",
         f"{PROJECT}:trace-a",
         f"{PROJECT}:trace-b",
@@ -249,6 +258,34 @@ async def test_empty_listing_yields_nothing(fake_phoenix: FakePhoenix) -> None:
 
     assert payloads == []
     assert fake_phoenix.requested == []
+
+
+async def test_trace_with_no_spans_yields_no_payload_for_that_trace(
+    fake_phoenix: FakePhoenix,
+) -> None:
+    """Skip the payload for a trace whose spans come back empty, keep its neighbors."""
+    fake_phoenix.span_builders = [
+        build_complete_spans,
+        lambda trace_id: [],
+        build_complete_spans,
+    ]
+
+    payloads = await collect_payloads(
+        fetch({"trace_ids": ["trace-1", "trace-2", "trace-3"]})
+    )
+
+    assert fake_phoenix.requested == ["trace-1", "trace-2", "trace-3"]
+    assert len(payloads) == 2
+    sessions = [
+        session
+        for payload in payloads
+        for session in parse(payload, {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [session.external_id for session in sessions] == [
+        f"{PROJECT}:trace-1",
+        f"{PROJECT}:trace-3",
+    ]
 
 
 async def test_validation_errors(fake_phoenix: FakePhoenix) -> None:

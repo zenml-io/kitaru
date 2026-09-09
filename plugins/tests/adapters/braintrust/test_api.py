@@ -69,7 +69,7 @@ async def test_importer_fetch_matches_api_fetch(
 async def test_time_window_lists_root_span_ids_and_fetches_each_trace(
     fake_braintrust: FakeBraintrust,
 ) -> None:
-    """List root span ids in the window, then fetch each trace in order."""
+    """A trace without a session id gets its own payload keyed by trace id."""
     fake_braintrust.list_pages = [(["root-a", "root-b"], None)]
     fake_braintrust.rows_builders = [build_complete_rows, build_complete_rows]
 
@@ -87,11 +87,41 @@ async def test_time_window_lists_root_span_ids_and_fetches_each_trace(
     assert fake_braintrust.list_queries[0]["since"] == "2026-01-01T00:00:00+00:00"
     assert fake_braintrust.list_queries[0]["until"] == "2026-01-02T00:00:00+00:00"
     assert fake_braintrust.requested == ["root-a", "root-b"]
-    assert len(payloads) == 1
-    sessions = list(parse(payloads[0], {}))
-    assert len(sessions) == 2
-    assert isinstance(sessions[1], ImportedSession)
-    assert sessions[1].external_id == "project-1:root-b"
+    assert len(payloads) == 2
+    sessions = [
+        item
+        for payload in payloads
+        for item in parse(payload, {})
+        if isinstance(item, ImportedSession)
+    ]
+    assert [session.external_id for session in sessions] == [
+        "project-1:root-a",
+        "project-1:root-b",
+    ]
+
+
+async def test_window_two_sessions_yield_two_payloads_in_listing_order(
+    fake_braintrust: FakeBraintrust,
+) -> None:
+    """Traces in two different sessions each parse into their own session."""
+    fake_braintrust.list_pages = [([("root-a", "sess-1"), ("root-b", "sess-2")], None)]
+    fake_braintrust.rows_builders = [
+        build_session_rows("sess-1"),
+        build_session_rows("sess-2"),
+    ]
+
+    payloads = await collect_payloads(
+        fetch({"project_id": "project-1", "since": "2026-01-01T00:00:00+00:00"})
+    )
+
+    assert len(payloads) == 2
+    sessions = [
+        [item for item in parse(payload, {}) if isinstance(item, ImportedSession)]
+        for payload in payloads
+    ]
+    assert [len(group) for group in sessions] == [1, 1]
+    assert sessions[0][0].external_id == "project-1:sess-1"
+    assert sessions[1][0].external_id == "project-1:sess-2"
 
 
 async def test_time_window_paginates_through_multiple_list_pages(
@@ -111,7 +141,7 @@ async def test_time_window_paginates_through_multiple_list_pages(
     assert len(fake_braintrust.list_queries) == 2
     assert fake_braintrust.list_cursors_received == [None, "cursor-1"]
     assert fake_braintrust.requested == ["root-a", "root-b"]
-    assert len(payloads) == 1
+    assert len(payloads) == 2
 
 
 async def test_window_uses_supported_btql_and_restores_creation_order(
@@ -147,7 +177,12 @@ async def test_window_uses_supported_btql_and_restores_creation_order(
         fetch({"project_id": "project-1", "since": "2026-01-01T00:00:00Z"})
     )
 
-    sessions = list(parse(payloads[0], {}))
+    sessions = [
+        item
+        for payload in payloads
+        for item in parse(payload, {})
+        if isinstance(item, ImportedSession)
+    ]
     assert [session.external_id for session in sessions] == [
         "project-1:older",
         "project-1:newer",
@@ -193,33 +228,39 @@ async def test_traces_sharing_a_session_are_fetched_in_one_payload(
     fake_braintrust: FakeBraintrust,
 ) -> None:
     """Merge same-session traces into one Kitaru session, not a dropped duplicate."""
-    fake_braintrust.list_pages = [(["root-a", "root-b", "root-c"], None)]
-    fake_braintrust.rows_builders = [
-        build_session_rows("sess-1"),
-        build_complete_rows,
-        build_session_rows("sess-1"),
+    fake_braintrust.list_pages = [
+        ([("root-a", "sess-1"), "root-b", ("root-c", "sess-1")], None)
     ]
+    # root-a and root-c fetch concurrently within the sess-1 group, so their
+    # builders are keyed by root span id rather than the request order.
+    fake_braintrust.rows_builders_by_root_span_id = {
+        "root-a": build_session_rows("sess-1"),
+        "root-b": build_complete_rows,
+        "root-c": build_session_rows("sess-1"),
+    }
 
     payloads = await collect_payloads(
         fetch({"project_id": "project-1", "since": "2026-01-01T00:00:00+00:00"})
     )
 
-    assert len(payloads) == 1
-    sessions = [
+    # sess-1 groups root-a, the first trace listed, so its payload is
+    # emitted before root-b's even though "root-b" sorts before "sess-1".
+    assert len(payloads) == 2
+    shared_sessions = [
         item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
     ]
-    assert len(sessions) == 2
-    # sess-1 groups root-a, the first trace read from the payload, so it is
-    # emitted before root-b even though "root-b" sorts before "sess-1".
-    assert [session.external_id for session in sessions] == [
-        "project-1:sess-1",
-        "project-1:root-b",
-    ]
-    by_id = {session.external_id: session for session in sessions}
-    shared_session = by_id["project-1:sess-1"]
+    assert len(shared_sessions) == 1
+    shared_session = shared_sessions[0]
+    assert shared_session.external_id == "project-1:sess-1"
     assert shared_session.metadata["braintrust.trace_ids"] == ["root-a", "root-c"]
     assert len(shared_session.nodes) == 2
     assert {node.trace_id for node in shared_session.nodes} == {"root-a", "root-c"}
+
+    other_sessions = [
+        item for item in parse(payloads[1], {}) if isinstance(item, ImportedSession)
+    ]
+    assert len(other_sessions) == 1
+    assert other_sessions[0].external_id == "project-1:root-b"
 
 
 async def test_until_defaults_to_now(fake_braintrust: FakeBraintrust) -> None:
@@ -253,7 +294,7 @@ async def test_fetch_yields_nothing_for_an_empty_listing(
 async def test_fetch_bounds_concurrency_and_preserves_order(
     fake_braintrust: FakeBraintrust,
 ) -> None:
-    """Fetch at most the configured concurrency of traces at once, oldest first."""
+    """A trace_ids fetch bounds concurrency and keeps the requested order."""
     trace_ids = ["root-a", "root-b", "root-c", "root-d"]
     fake_braintrust.rows_builders = [build_complete_rows] * len(trace_ids)
     # Delays scramble completion order relative to submission order, so the
@@ -280,6 +321,43 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
         fetch({"project_id": "project-1", "trace_ids": ["root-e", "root-f"]})
     )
     assert len(payloads) == 1
+
+
+async def test_fetch_bounds_concurrency_across_groups_and_preserves_order(
+    fake_braintrust: FakeBraintrust,
+) -> None:
+    """A window fetch bounds in-flight span fetches across groups, oldest first."""
+    root_span_ids = ["root-a", "root-b", "root-c", "root-d"]
+    entries: list[str | tuple[str, str]] = list(root_span_ids)
+    fake_braintrust.list_pages = [(entries, None)]
+    fake_braintrust.rows_builders = [build_complete_rows] * len(root_span_ids)
+    # The listing query consumes the first delay. The remaining delays
+    # scramble completion order relative to submission order, so the merged
+    # result proves stream_bounded restores it rather than happening to
+    # already match it.
+    fake_braintrust.fetch_delays = [0.0, 0.03, 0.01, 0.02, 0.0]
+
+    payloads = await collect_payloads(
+        fetch(
+            {
+                "project_id": "project-1",
+                "since": "2026-01-01T00:00:00+00:00",
+                "concurrency": 2,
+            }
+        )
+    )
+
+    assert fake_braintrust.peak_in_flight == 2
+    assert len(payloads) == len(root_span_ids)
+    sessions = [
+        item
+        for payload in payloads
+        for item in parse(payload, {})
+        if isinstance(item, ImportedSession)
+    ]
+    assert [session.external_id for session in sessions] == [
+        f"project-1:{root_span_id}" for root_span_id in root_span_ids
+    ]
 
 
 async def test_fetch_waits_out_a_rate_limit_and_succeeds(

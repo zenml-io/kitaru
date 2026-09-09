@@ -15,6 +15,7 @@
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
@@ -38,6 +39,7 @@ from .fixtures import (
 TRACE_ID_1 = "a" * 32
 TRACE_ID_2 = "b" * 32
 TRACE_ID_3 = "c" * 32
+TRACE_ID_4 = "d" * 32
 
 
 async def test_fetch_by_trace_ids_fetches_exactly_those_traces_into_one_payload(
@@ -128,10 +130,14 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
     assert len(payloads) == 1
 
 
-async def test_fetch_by_time_window_lists_trace_ids_and_fetches_each(
+async def test_fetch_by_time_window_lists_root_rows_and_fetches_each_group(
     fake_logfire: FakeLogfire,
 ) -> None:
-    """List trace ids within the window, then fetch each into one payload."""
+    """List root rows in the window, then fetch each group into its own payload.
+
+    Neither listed row carries a session attribute, so each trace becomes
+    its own group and yields its own payload, in listing order.
+    """
     fake_logfire.list_builders = [
         lambda: [
             build_list_row(TRACE_ID_1, "2026-07-24T09:00:00Z"),
@@ -149,44 +155,179 @@ async def test_fetch_by_time_window_lists_trace_ids_and_fetches_each(
     assert fake_logfire.list_max_timestamps == ["2026-07-24T10:00:00+00:00"]
     assert fake_logfire.requested == [TRACE_ID_1, TRACE_ID_2]
     assert fake_logfire.fetch_min_timestamps == ["2026-07-24T09:00:00+00:00"] * 2
-    assert len(payloads) == 1
+    assert len(payloads) == 2
+    sessions = [
+        session
+        for payload in payloads
+        for session in parse(payload, {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [session.metadata["logfire.trace_ids"][0] for session in sessions] == [
+        TRACE_ID_1,
+        TRACE_ID_2,
+    ]
 
 
-async def test_fetch_by_time_window_groups_a_shared_session_into_one_session(
+async def test_fetch_by_time_window_yields_one_payload_per_distinct_session(
     fake_logfire: FakeLogfire,
 ) -> None:
-    """Group traces sharing a session id even when listed apart in the window."""
+    """Yield one payload per session, in listing order, each its own session."""
     fake_logfire.list_builders = [
         lambda: [
-            build_list_row(TRACE_ID_1, "2026-07-24T09:00:00Z"),
-            build_list_row(TRACE_ID_2, "2026-07-24T09:05:00Z"),
-            build_list_row(TRACE_ID_3, "2026-07-24T09:10:00Z"),
+            build_list_row(
+                TRACE_ID_1,
+                "2026-07-24T09:00:00Z",
+                attributes={"session": {"id": "session-a"}},
+            ),
+            build_list_row(
+                TRACE_ID_2,
+                "2026-07-24T09:05:00Z",
+                attributes={"session": {"id": "session-b"}},
+            ),
         ]
     ]
     fake_logfire.fetch_builders = [
-        lambda trace_id: build_conversation_rows(trace_id, "conversation-a"),
-        lambda trace_id: build_conversation_rows(trace_id, "conversation-b"),
-        lambda trace_id: build_conversation_rows(trace_id, "conversation-a"),
+        lambda trace_id: build_conversation_rows(trace_id, "session-a"),
+        lambda trace_id: build_conversation_rows(trace_id, "session-b"),
     ]
 
     payloads = await collect_payloads(
         fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
     )
 
-    assert len(payloads) == 1
-    sessions = [
+    assert len(payloads) == 2
+    first_sessions = [
+        item for item in parse(payloads[0], {}) if isinstance(item, ImportedSession)
+    ]
+    second_sessions = [
+        item for item in parse(payloads[1], {}) if isinstance(item, ImportedSession)
+    ]
+    assert len(first_sessions) == len(second_sessions) == 1
+    assert first_sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_1]
+    assert second_sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_2]
+
+
+async def test_fetch_by_time_window_groups_a_shared_session_into_one_payload(
+    fake_logfire: FakeLogfire,
+) -> None:
+    """Group traces sharing a session id even when listed apart in the window.
+
+    TRACE_ID_3 carries no session attribute, so it falls back to its own
+    trace id and lands in a separate payload, keyed by that trace id.
+    """
+    fake_logfire.list_builders = [
+        lambda: [
+            build_list_row(
+                TRACE_ID_1,
+                "2026-07-24T09:00:00Z",
+                attributes={"session": {"id": "session-a"}},
+            ),
+            build_list_row(
+                TRACE_ID_2,
+                "2026-07-24T09:05:00Z",
+                attributes={"session": {"id": "session-a"}},
+            ),
+            build_list_row(TRACE_ID_3, "2026-07-24T09:10:00Z"),
+        ]
+    ]
+
+    def _fetch(trace_id: str) -> list[dict[str, Any]]:
+        conversation = "session-a" if trace_id != TRACE_ID_3 else "solo"
+        return build_conversation_rows(trace_id, conversation)
+
+    fake_logfire.fetch_builders = [_fetch, _fetch, _fetch]
+
+    payloads = await collect_payloads(
+        fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
+    )
+
+    assert len(payloads) == 2
+    shared_sessions = [
         session
         for session in parse(payloads[0], {})
         if isinstance(session, ImportedSession)
     ]
-    assert len(sessions) == 2
-    by_trace_ids = {
-        tuple(session.metadata["logfire.trace_ids"]): session for session in sessions
-    }
-    shared = by_trace_ids[(TRACE_ID_1, TRACE_ID_3)]
+    assert len(shared_sessions) == 1
+    shared = shared_sessions[0]
+    assert shared.metadata["logfire.trace_ids"] == [TRACE_ID_1, TRACE_ID_2]
+    assert {node.trace_id for node in shared.nodes} == {TRACE_ID_1, TRACE_ID_2}
     assert len(shared.nodes) == 2
-    assert {node.trace_id for node in shared.nodes} == {TRACE_ID_1, TRACE_ID_3}
-    assert by_trace_ids[(TRACE_ID_2,)].nodes[0].trace_id == TRACE_ID_2
+
+    solo_sessions = [
+        session
+        for session in parse(payloads[1], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert len(solo_sessions) == 1
+    assert solo_sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_3]
+
+
+async def test_fetch_by_time_window_bounds_concurrency_across_groups(
+    fake_logfire: FakeLogfire,
+) -> None:
+    """Bound total in-flight trace fetches across groups by concurrency."""
+    trace_ids = [TRACE_ID_1, TRACE_ID_2, TRACE_ID_3, TRACE_ID_4]
+    fake_logfire.list_builders = [
+        lambda: [
+            build_list_row(trace_id, f"2026-07-24T09:0{index}:00Z")
+            for index, trace_id in enumerate(trace_ids)
+        ]
+    ]
+    fake_logfire.fetch_builders = [build_complete_rows] * len(trace_ids)
+    # None of the traces share a session, so each is its own group. Delays
+    # scramble completion order relative to listing order, so the yielded
+    # order proves stream_bounded restores it rather than happening to
+    # already match it.
+    fake_logfire.fetch_delays = [0.03, 0.01, 0.02, 0.0]
+
+    payloads = await collect_payloads(
+        fetch(
+            {
+                "since": "2026-07-24T09:00:00Z",
+                "until": "2026-07-24T10:00:00Z",
+                "concurrency": 2,
+            }
+        )
+    )
+
+    assert fake_logfire.peak_in_flight == 2
+    assert len(payloads) == 4
+    sessions = [
+        session
+        for payload in payloads
+        for session in parse(payload, {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [session.metadata["logfire.trace_ids"][0] for session in sessions] == (
+        trace_ids
+    )
+
+
+async def test_fetch_by_time_window_yields_earlier_groups_before_a_later_fetch_fails(
+    fake_logfire: FakeLogfire,
+) -> None:
+    """Yield an already-completed group's payload before a later group's fetch fails."""
+    fake_logfire.list_builders = [
+        lambda: [
+            build_list_row(TRACE_ID_1, "2026-07-24T09:00:00Z"),
+            build_list_row(TRACE_ID_2, "2026-07-24T09:05:00Z"),
+        ]
+    ]
+
+    def _fail(_: str) -> list[dict[str, Any]]:
+        raise RuntimeError("boom")
+
+    fake_logfire.fetch_builders = [build_complete_rows, _fail]
+
+    payloads = fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
+    first_payload = await anext(payloads)
+    first_sessions = [
+        item for item in parse(first_payload, {}) if isinstance(item, ImportedSession)
+    ]
+    assert first_sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_1]
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await anext(payloads)
 
 
 async def test_fetch_by_time_window_defaults_until_to_now(
