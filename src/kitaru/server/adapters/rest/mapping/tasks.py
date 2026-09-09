@@ -197,6 +197,7 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
             provider=details.provider,
             agent_id=details.agent_id,
             params=details.params,
+            max_sessions=details.max_sessions,
         )
     if isinstance(details, DomainAnalysisTaskDetails):
         return AnalysisTaskDetails(

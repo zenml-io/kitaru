@@ -51,6 +51,7 @@ class ImportCreate(FrozenModel):
     params: dict[str, Any] = Field(default_factory=dict)
     evaluators: list[EvaluatorConfigInput] = Field(default_factory=list)
     analyzers: list[AnalyzerConfigInput] = Field(default_factory=list)
+    max_sessions: int | None = None
 
 
 class ImportAnalyze(FrozenModel):

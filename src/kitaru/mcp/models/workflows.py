@@ -27,6 +27,7 @@ class SessionImportRequest(MCPModel):
     params: dict[str, JsonValue] = Field(default_factory=dict)
     evaluators: list[EvaluatorConfig] = Field(default_factory=list)
     analyzers: list[AnalyzerConfig] = Field(default_factory=list)
+    max_sessions: int | None = Field(default=None, ge=1)
     idempotency_key: str | None = Field(
         default=None,
         description=IDEMPOTENCY_KEY_DESCRIPTION,

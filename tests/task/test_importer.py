@@ -596,6 +596,7 @@ async def _create_importer_task(
     script: str,
     tmp_path: Path,
     params: dict[str, Any] | None = None,
+    max_sessions: int | None = None,
 ) -> tuple[uuid.UUID, Path]:
     """Register a script importer plugin and a running import task for it.
 
@@ -604,6 +605,7 @@ async def _create_importer_task(
         script: Parser script source written to the plugin file.
         tmp_path: Temporary directory the plugin file is written under.
         params: Parameters passed to the importer task.
+        max_sessions: Maximum number of sessions created by the import.
 
     Returns:
         Id of the running import task and the path of its plugin file.
@@ -625,6 +627,7 @@ async def _create_importer_task(
         importer_version_id=version.id,
         payload_blob_id=payload.id,
         params=params,
+        max_sessions=max_sessions,
     )
     task = await create_import_task(
         task_app.services.tasks, job.id, import_id=import_.id
@@ -642,6 +645,7 @@ async def _create_api_source_task(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     query: dict[str, Any] | None = None,
+    max_sessions: int | None = None,
 ) -> uuid.UUID:
     """Stub a running import task spec sourced from an API fetcher.
 
@@ -651,6 +655,7 @@ async def _create_api_source_task(
         tmp_path: Temporary directory the plugin file is written under.
         monkeypatch: Fixture used to stub the plugin path and task spec.
         query: Query passed to the fetch entrypoint.
+        max_sessions: Maximum number of sessions created by the import.
 
     Returns:
         Id of the stubbed running import task.
@@ -676,6 +681,7 @@ async def _create_api_source_task(
             ),
             agent_id=task_app.agent.id,
             params={},
+            max_sessions=max_sessions,
         ),
     )
 
@@ -842,6 +848,121 @@ async def test_run_caps_failure_samples_without_losing_count(
     written = ImportStats.model_validate(json.loads(result_path.read_text()))
     assert written.failed == failure_count
     assert len(written.failures) == MAX_IMPORT_FAILURES
+
+
+_MANY_SESSIONS_PARSER_SCRIPT = """
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.task.importer import ImportedSession
+
+
+def parse(payload: bytes, params: dict):
+    for i in range(params["session_count"]):
+        yield ImportedSession(
+            status=SessionStatus.COMPLETED,
+            name=f"session-{i}",
+            inputs=None,
+            outputs=None,
+            error=None,
+            started_at=None,
+            ended_at=None,
+            external_id=f"session-{i}",
+            metadata={},
+            nodes=[],
+        )
+"""
+
+_DUPLICATE_THEN_MANY_SESSIONS_PARSER_SCRIPT = """
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.task.importer import ImportedSession
+
+
+def parse(payload: bytes, params: dict):
+    yield ImportedSession(
+        status=SessionStatus.COMPLETED,
+        name="session-0",
+        inputs=None,
+        outputs=None,
+        error=None,
+        started_at=None,
+        ended_at=None,
+        external_id="session-0",
+        metadata={},
+        nodes=[],
+    )
+    for i in range(params["session_count"]):
+        yield ImportedSession(
+            status=SessionStatus.COMPLETED,
+            name=f"session-{i}",
+            inputs=None,
+            outputs=None,
+            error=None,
+            started_at=None,
+            ended_at=None,
+            external_id=f"session-{i}",
+            metadata={},
+            nodes=[],
+        )
+"""
+
+
+async def test_run_stops_creating_sessions_at_max_sessions(
+    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stop creating sessions once the import reaches its session limit."""
+    session_count = 5
+    max_sessions = 2
+    task_id, plugin_path = await _create_importer_task(
+        task_app,
+        _MANY_SESSIONS_PARSER_SCRIPT,
+        tmp_path,
+        params={"session_count": session_count},
+        max_sessions=max_sessions,
+    )
+    payload_path = tmp_path / "payload.json"
+    payload_path.write_text(json.dumps({"session_count": session_count}))
+    result_path = tmp_path / "result.json"
+
+    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
+    monkeypatch.setenv("KITARU_TASK_PAYLOAD_PATH", str(payload_path))
+    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
+
+    await run(task_app.client, str(task_id))
+
+    written = ImportStats.model_validate(json.loads(result_path.read_text()))
+    assert written.created == max_sessions
+    assert written.skipped == 0
+    assert written.failed == 0
+    assert written.limit_reached is True
+
+
+async def test_run_duplicates_do_not_consume_the_session_limit(
+    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skip a duplicate without counting it against the session limit."""
+    session_count = 3
+    max_sessions = 2
+    task_id, plugin_path = await _create_importer_task(
+        task_app,
+        _DUPLICATE_THEN_MANY_SESSIONS_PARSER_SCRIPT,
+        tmp_path,
+        params={"session_count": session_count},
+        max_sessions=max_sessions,
+    )
+    payload_path = tmp_path / "payload.json"
+    payload_path.write_text(json.dumps({"session_count": session_count}))
+    result_path = tmp_path / "result.json"
+
+    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
+    monkeypatch.setenv("KITARU_TASK_PAYLOAD_PATH", str(payload_path))
+    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
+
+    await run(task_app.client, str(task_id))
+
+    written = ImportStats.model_validate(json.loads(result_path.read_text()))
+    assert written.created == max_sessions
+    assert written.skipped == 1
+    assert written.failed == 0
+    assert written.limit_reached is True
 
 
 _API_FETCH_PARSER_SCRIPT = """
@@ -1017,6 +1138,44 @@ async def test_run_with_api_source_mid_stream_fetch_crash_writes_partial_stats(
     assert written.created == 1
     assert written.failed == 1
     assert "fetcher exploded" in written.failures[0].error
+
+
+async def test_run_with_api_source_stops_fetching_at_max_sessions(
+    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stop pulling further payloads once the import reaches its session limit."""
+    from kitaru.task import importer as importer_module
+
+    result_path = tmp_path / "result.json"
+    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
+    task_id = await _create_api_source_task(
+        task_app,
+        _API_FETCH_PARSER_SCRIPT,
+        tmp_path,
+        monkeypatch,
+        query={"trace_ids": ["a", "b", "c", "d", "e"]},
+        max_sessions=2,
+    )
+
+    fetched = 0
+    original_call_fetcher = importer_module.call_fetcher
+
+    async def counting_call_fetcher(
+        fetcher: Any, query: dict[str, Any]
+    ) -> AsyncIterator[bytes]:
+        nonlocal fetched
+        async for payload in original_call_fetcher(fetcher, query):
+            fetched += 1
+            yield payload
+
+    monkeypatch.setattr(importer_module, "call_fetcher", counting_call_fetcher)
+
+    await run(task_app.client, str(task_id))
+
+    written = ImportStats.model_validate(json.loads(result_path.read_text()))
+    assert written.created == 2
+    assert written.limit_reached is True
+    assert fetched == 3
 
 
 async def test_importer_flow_rejects_non_importer_task(

@@ -148,6 +148,11 @@ class ImportCreateRequest(RequestModel):
         default_factory=list,
         description="Analyzers selected to run across the imported sessions.",
     )
+    max_sessions: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum number of sessions created by the import.",
+    )
 
     @model_validator(mode="after")
     def _source_xor_payload_blob_id(self) -> Self:
@@ -216,6 +221,10 @@ class ImportStats(ResponseModel):
         max_length=MAX_IMPORT_FAILURES,
         description="Sample of failures.",
     )
+    limit_reached: bool = Field(
+        default=False,
+        description="Whether the import stopped at its session limit.",
+    )
 
 
 class ImportResponse(OwnedResponseModel):
@@ -247,6 +256,10 @@ class ImportResponse(OwnedResponseModel):
     )
     analyzers: list[AnalyzerConfig] = Field(
         description="Analyzers run against every imported session."
+    )
+    max_sessions: int | None = Field(
+        default=None,
+        description="Maximum number of sessions created by the import.",
     )
     stats: ImportStats | None = Field(
         default=None, description="Stats from a completed import."

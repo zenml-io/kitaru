@@ -226,6 +226,10 @@ class ImportTaskDetails(ResponseModel):
     params: dict[str, JsonValue] = Field(
         description="Parameters passed to the importer."
     )
+    max_sessions: int | None = Field(
+        default=None,
+        description="Maximum number of sessions created by the import.",
+    )
 
 
 class AnalysisTaskDetails(ResponseModel):

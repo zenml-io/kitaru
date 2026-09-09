@@ -118,7 +118,7 @@ kitaru session import sessions.jsonl \
   --wait
 ```
 
-Use `--tag` with `--wait` to tag every created session. Use `--join-on` to group provider traces by a source value. Use `--params` for other provider-specific settings. Use `--evaluator` to score every imported session once the import finishes, and `--evaluator-params` to pass parameters to a selected evaluator. Use `--analyzer` to run an [analyzer](../concepts/analyzers.md) over every imported session once the import finishes, `--analyzer-params` to pass parameters to a selected analyzer, and `--analyzer-connection` to select credentials for it:
+Use `--tag` with `--wait` to tag every created session. Use `--join-on` to group provider traces by a source value. Use `--params` for other provider-specific settings. Use `--max-sessions` to stop the import after it creates a set number of sessions. Use `--evaluator` to score every imported session once the import finishes, and `--evaluator-params` to pass parameters to a selected evaluator. Use `--analyzer` to run an [analyzer](../concepts/analyzers.md) over every imported session once the import finishes, `--analyzer-params` to pass parameters to a selected analyzer, and `--analyzer-connection` to select credentials for it:
 
 ```bash
 kitaru session import sessions.jsonl \

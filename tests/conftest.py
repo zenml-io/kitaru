@@ -5393,6 +5393,7 @@ async def create_import(
     params: dict[str, Any] | None = None,
     evaluators: list[EvaluatorConfig] | None = None,
     analyzers: list[AnalyzerConfig] | None = None,
+    max_sessions: int | None = None,
 ) -> Import:
     """Store an import in the fake repository.
 
@@ -5408,6 +5409,7 @@ async def create_import(
         params: Parameters passed to the importer.
         evaluators: Evaluators run against every imported session.
         analyzers: Analyzers run against every imported session.
+        max_sessions: Maximum number of sessions created by the import.
 
     Returns:
         Stored import.
@@ -5428,6 +5430,7 @@ async def create_import(
             params=params if params is not None else {},
             evaluators=evaluators if evaluators is not None else [],
             analyzers=analyzers if analyzers is not None else [],
+            max_sessions=max_sessions,
         )
     )
 

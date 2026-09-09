@@ -147,6 +147,7 @@ async def _import_command(
     evaluators: list[EvaluatorConfigInput] | None = None,
     analyzers: list[AnalyzerConfigInput] | None = None,
     connection_id: uuid.UUID | None = None,
+    max_sessions: int | None = None,
     fetch: bool = False,
 ) -> ImportCreate:
     """Build a create command naming a stored payload or a query, and an agent."""
@@ -169,6 +170,7 @@ async def _import_command(
         params={"delimiter": ","},
         evaluators=evaluators if evaluators is not None else [],
         analyzers=analyzers if analyzers is not None else [],
+        max_sessions=max_sessions,
     )
 
 
@@ -225,6 +227,32 @@ async def test_create_import_stores_the_resolved_evaluators(
     assert evaluator.evaluator_version_id == evaluator_version.id
     stored = await services.imports.get(import_.id)
     assert stored.evaluators == import_.evaluators
+
+
+async def test_create_import_stores_max_sessions(
+    services: JobAndTaskServices,
+) -> None:
+    """The import row carries the session cap from the command."""
+    await _importer_version(services)
+    command = await _import_command(services, max_sessions=5)
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.max_sessions == 5
+    stored = await services.imports.get(import_.id)
+    assert stored.max_sessions == 5
+
+
+async def test_create_import_without_max_sessions_stores_none(
+    services: JobAndTaskServices,
+) -> None:
+    """An import command without a session cap stores none."""
+    await _importer_version(services)
+    command = await _import_command(services)
+
+    import_ = await services.import_service.create_import(command, actor=ACTOR)
+
+    assert import_.max_sessions is None
 
 
 async def test_create_import_rejects_an_unknown_evaluator(

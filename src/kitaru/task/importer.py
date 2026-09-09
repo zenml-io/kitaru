@@ -576,6 +576,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
     created = 0
     skipped = 0
     failed = 0
+    limit_reached = False
     failures: list[ImportFailure] = []
     line = 0
 
@@ -587,7 +588,11 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
 
     def _stats() -> ImportStats:
         return ImportStats(
-            created=created, skipped=skipped, failed=failed, failures=failures
+            created=created,
+            skipped=skipped,
+            failed=failed,
+            failures=failures,
+            limit_reached=limit_reached,
         )
 
     try:
@@ -597,6 +602,9 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
                 if isinstance(item, ImportFailure):
                     _record_failure(item)
                     continue
+                if details.max_sessions is not None and created >= details.max_sessions:
+                    limit_reached = True
+                    break
                 try:
                     session = await ingest_session(
                         client, item, details.agent_id, details.provider
@@ -612,6 +620,8 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
                     skipped += 1
                 else:
                     created += 1
+            if limit_reached:
+                break
     except SessionImportError as exc:
         _record_failure(ImportFailure(line=line + 1, external_id=None, error=str(exc)))
         write_task_result(_stats())
