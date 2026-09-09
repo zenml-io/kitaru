@@ -1,7 +1,6 @@
 import { Agent } from "@mastra/core/agent";
 import { MastraMemory } from "@mastra/core/memory";
 import { InMemoryStore } from "@mastra/core/storage";
-// @ts-expect-error Mastra 1.51.0 exports this public test helper without declarations.
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { afterEach, expect, it, vi } from "vitest";
 
