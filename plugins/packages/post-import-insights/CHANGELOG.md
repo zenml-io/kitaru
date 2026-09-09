@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Describe insight actions with "Investigate [topic]" labels, such as "Investigate tool retries", and use "Investigate this finding" for unknown finding types.
+
 - Include up to five highest-valued session examples from each nonuniform distribution's highest occupied bin in copied investigation prompts, preserving their priority through reference limits and stating whether the highlighted list is complete.
 - Persist short, finding-specific copy button labels alongside investigation prompts in both analyzer modes.
 

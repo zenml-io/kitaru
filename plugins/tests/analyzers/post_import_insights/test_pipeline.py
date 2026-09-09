@@ -1229,18 +1229,18 @@ async def test_generated_labels_survive_json_in_all_modes(generator) -> None:
     assert result.insights
     for insight in json.loads(result.model_dump_json())["insights"]:
         label = insight["metadata"][INSIGHT_METADATA_KEY]["cta_label"]
-        assert label.startswith("Copy ") and label.endswith(" prompt")
+        assert label.startswith("Investigate ")
         assert len(label) <= 40
-        assert label != "Copy investigation prompt"
+        assert label != "Investigate this finding"
 
 
 @pytest.mark.parametrize(
     "candidate_id, label",
     [
-        ("failed-identical-retries", "Copy tool retry prompt"),
-        ("adjacent-identical-calls", "Copy repeated tool call prompt"),
-        ("recorded-duration-distribution", "Copy session duration prompt"),
-        ("future-finding", "Copy investigation prompt"),
+        ("failed-identical-retries", "Investigate tool retries"),
+        ("adjacent-identical-calls", "Investigate repeated tool calls"),
+        ("recorded-duration-distribution", "Investigate session duration"),
+        ("future-finding", "Investigate this finding"),
     ],
 )
 async def test_cta_labels_follow_candidate_identity(
