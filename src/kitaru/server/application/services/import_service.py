@@ -184,6 +184,7 @@ class ImportService:
                 params=command.params,
                 evaluators=evaluators,
                 analyzers=analyzers,
+                max_sessions=command.max_sessions,
             )
         )
         # The job was just created in this call and cannot have settled yet, so

@@ -68,6 +68,7 @@ def import_create_to_command(body: ImportCreateRequest) -> ImportCreate:
         params=body.params,
         evaluators=[evaluator_config_input(config) for config in body.evaluators],
         analyzers=[analyzer_config_input(config) for config in body.analyzers],
+        max_sessions=body.max_sessions,
     )
 
 
@@ -116,6 +117,7 @@ def import_to_response(import_: Import) -> ImportResponse:
             evaluator_config_to_wire(evaluator) for evaluator in import_.evaluators
         ],
         analyzers=[analyzer_config_to_wire(analyzer) for analyzer in import_.analyzers],
+        max_sessions=import_.max_sessions,
         stats=import_.stats,
         error=import_.error,
         created=import_.created,

@@ -599,6 +599,33 @@ async def test_create_import_rejects_duplicate_analyzer_versions(
     assert response.status_code == 422
 
 
+async def test_create_import_with_max_sessions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Create an import carrying a session cap, and read it back by id."""
+    await _importer_version(services)
+    body = await _import_request(services, max_sessions=5)
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["max_sessions"] == 5
+
+    response = await client.get(f"/api/v1/imports/{created['id']}")
+    assert response.status_code == 200
+    assert response.json()["max_sessions"] == 5
+
+
+async def test_create_import_rejects_a_zero_max_sessions(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 422 for a session cap below one."""
+    await _importer_version(services)
+    body = await _import_request(services, max_sessions=0)
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 422
+
+
 async def test_create_import_rejects_nul_byte_in_importer(
     client: httpx.AsyncClient, services: JobAndTaskServices
 ) -> None:

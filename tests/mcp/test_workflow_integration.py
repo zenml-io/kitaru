@@ -206,6 +206,23 @@ async def test_session_import_forwards_analyzers() -> None:
     assert client.request.analyzers == [analyzer]
 
 
+async def test_session_import_forwards_max_sessions() -> None:
+    client = _ImportClient()
+
+    await handle_session_import(
+        _get_state(client),
+        SessionImportRequest(
+            source=BlobImportSource(blob_id=uuid.uuid4()),
+            importer_id=uuid.uuid4(),
+            importer_version=2,
+            agent_version_id=uuid.uuid4(),
+            max_sessions=5,
+        ),
+    )
+
+    assert client.request.max_sessions == 5
+
+
 async def test_evaluator_selections_use_name_version_dto_and_cache_parent() -> None:
     evaluator_id = uuid.uuid4()
     client = _EvaluatorClient(evaluator_id)

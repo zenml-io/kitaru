@@ -100,6 +100,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     params: Mapped[dict[str, Any]] = mapped_column(JSONB)
     evaluators: Mapped[list[Any]] = mapped_column(JSONB)
     analyzers: Mapped[list[Any]] = mapped_column(JSONB)
+    max_sessions: Mapped[int | None]
     stats: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     error: Mapped[str | None] = mapped_column(Text)
 
@@ -130,6 +131,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             analyzers=[
                 analyzer.model_dump(mode="json") for analyzer in import_.analyzers
             ],
+            max_sessions=import_.max_sessions,
             stats=(
                 import_.stats.model_dump(mode="json")
                 if import_.stats is not None
@@ -174,6 +176,7 @@ class ImportORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             analyzers=[
                 AnalyzerConfig.model_validate(analyzer) for analyzer in self.analyzers
             ],
+            max_sessions=self.max_sessions,
             stats=(
                 ImportStats.model_validate(self.stats)
                 if self.stats is not None

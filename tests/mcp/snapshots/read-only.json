@@ -3871,6 +3871,19 @@
               "description": "Job running the import.",
               "title": "Job Id"
             },
+            "max_sessions": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Maximum number of sessions created by the import.",
+              "title": "Max Sessions"
+            },
             "owner_id": {
               "description": "Id of the owning account.",
               "format": "uuid",
@@ -3956,6 +3969,12 @@
               "maxItems": 20,
               "title": "Failures",
               "type": "array"
+            },
+            "limit_reached": {
+              "default": false,
+              "description": "Whether the import stopped at its session limit.",
+              "title": "Limit Reached",
+              "type": "boolean"
             },
             "skipped": {
               "description": "Sessions skipped as duplicates.",

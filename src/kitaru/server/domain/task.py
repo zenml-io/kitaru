@@ -826,6 +826,7 @@ class ImportTaskDetails(FrozenModel):
     provider: str | None = None
     agent_id: uuid.UUID
     params: dict[str, Any] = Field(default_factory=dict)
+    max_sessions: int | None = None
 
 
 class AnalysisTaskDetails(FrozenModel):
