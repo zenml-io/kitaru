@@ -261,6 +261,7 @@ Use the package directory and distribution name from this table:
 | `logfire-importer` | `kitaru-logfire-importer` | `logfire-importer-vX.Y.Z` |
 | `phoenix-importer` | `kitaru-phoenix-importer` | `python/kitaru-phoenix-importer/vX.Y.Z` |
 | `langsmith-importer` | `kitaru-langsmith-importer` | `langsmith-importer-vX.Y.Z` |
+| `mastra-importer` | `kitaru-mastra-importer` | `python/kitaru-mastra-importer/vX.Y.Z` |
 | `openai-agents` | `kitaru-openai-agents` | `openai-agents-vX.Y.Z` |
 | `pydantic-ai` | `kitaru-pydantic-ai` | `pydantic-ai-vX.Y.Z` |
 

@@ -11,7 +11,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-31T09:09:28.238793Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P3D"
 
 [manifest]
@@ -23,6 +23,7 @@ members = [
     "kitaru-langgraph",
     "kitaru-langsmith-importer",
     "kitaru-logfire-importer",
+    "kitaru-mastra-importer",
     "kitaru-openai-agents",
     "kitaru-phoenix-importer",
     "kitaru-pydantic-ai",
@@ -37,6 +38,7 @@ dev = [
     { name = "kitaru-langgraph", extras = ["deepagents"], editable = "packages/langgraph" },
     { name = "kitaru-langsmith-importer", extras = ["adapter"], editable = "packages/langsmith-importer" },
     { name = "kitaru-logfire-importer", extras = ["adapter"], editable = "packages/logfire-importer" },
+    { name = "kitaru-mastra-importer", editable = "packages/mastra-importer" },
     { name = "kitaru-openai-agents", editable = "packages/openai-agents" },
     { name = "kitaru-phoenix-importer", extras = ["adapter"], editable = "packages/phoenix-importer" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], editable = "packages/pydantic-ai" },
@@ -1361,6 +1363,17 @@ requires-dist = [
     { name = "logfire", marker = "extra == 'adapter'", specifier = ">=4.35,<5" },
 ]
 provides-extras = ["adapter"]
+
+[[package]]
+name = "kitaru-mastra-importer"
+version = "0.1.0"
+source = { editable = "packages/mastra-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-openai-agents"
