@@ -111,7 +111,7 @@ Before creating a core tag:
 
 1. Fetch `develop`, `main`, and tags.
 2. Confirm the intended release commits are on `develop` and identify the last immutable release tag.
-3. Review the changelog and version classification.
+3. Review the changelog fragments in `changelog.d/` and the version classification.
 4. Confirm no other release run is active.
 5. After changing the core version, run `uv run python scripts/generate_openapi.py` and commit the updated `openapi/openapi.json`.
 6. Run `just check`, the relevant base/CLI/MCP tests, `just mcp-schema-check`, `just cli-artifact-smoke`, `just plugin-artifact-smoke`, `just migration-check`, and `just build` as applicable. Run `just mcp-wheel-smoke` only after `just build`; it consumes the wheel under `dist/`.
@@ -128,4 +128,4 @@ Stable core releases move the public Docker `latest` aliases, advance the core m
 - TypeScript releases are cut with `typescript/kitaru/v<VERSION>` tags handled by `.github/workflows/release-typescript.yml`; rehearse the exact tag through manual dispatch before pushing it.
 - A core tag directly starts `.github/workflows/release.yml`. Manual dispatch rehearses without publishing; recover publication by inspecting and rerunning the original failed jobs with the same immutable artifacts.
 - Release preparation maintains the version in `pyproject.toml`; application code should use `importlib.metadata.version("kitaru")` rather than hardcoding it.
-- Update `CHANGELOG.md` under `[Unreleased]` for user-facing changes.
+- Add a `changelog.d/<pr-number>.<section>.md` fragment for user-facing changes instead of editing `CHANGELOG.md`. Any slug works in place of the number while the PR does not exist yet.

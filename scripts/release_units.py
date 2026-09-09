@@ -193,7 +193,6 @@ def prepare_core_development_reset(
     development_version = f"{release_version}+dev"
     paths = {
         "project": repo_root / "pyproject.toml",
-        "changelog": repo_root / "CHANGELOG.md",
         "OpenAPI": repo_root / "openapi" / "openapi.json",
         "root lock": repo_root / "uv.lock",
         "plugin lock": repo_root / "plugins" / "uv.lock",
@@ -236,21 +235,6 @@ def prepare_core_development_reset(
                 f"{name} must contain exactly one core {release_version} entry"
             )
         updated[name] = documents[name].replace(current, replacement, 1)
-
-    unreleased_heading = "## [Unreleased]"
-    release_heading = f"## [{release_version}]"
-    if documents["changelog"].count(release_heading) != 1:
-        raise ReleaseInventoryError(
-            f"changelog must contain exactly one {release_heading} heading"
-        )
-    current_release_offset = documents["changelog"].index(release_heading)
-    if unreleased_heading in documents["changelog"][:current_release_offset]:
-        raise ReleaseInventoryError(
-            "changelog already contains an Unreleased section above the release"
-        )
-    updated["changelog"] = documents["changelog"].replace(
-        release_heading, f"{unreleased_heading}\n\n{release_heading}", 1
-    )
 
     for name, path in paths.items():
         path.write_text(updated[name])
