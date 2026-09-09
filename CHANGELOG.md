@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Workers select the providers whose credentials their environment holds with `--selector kitaru/requires-credentials=<provider>[,<provider>]` on `kitaru worker start`, and a worker that sets no such selector claims as if it had set an empty one. Either way a worker skips import and analysis tasks that need any other provider's credentials, so a worker selecting nothing only claims tasks whose credentials arrive through a connection or that need none. Set `KITARU_SERVER_EPHEMERAL_WORKER__SELECTORS`, or `server.ephemeralWorker.selectors` in the Helm chart, to add selectors to every ephemeral worker's scope. A label selector's `values` may now be empty, matching only tasks that lack the key, and the compact `--selector KEY=` form sets one.
 
 - Added `kitaru agent delete AGENT --force`, which soft deletes an agent by UUID or name.
-- Added a session limit to imports. Pass `max_sessions` on `POST /api/v1/imports`, or `--max-sessions` to `kitaru session import`, and the import stops once it has created that many sessions. Duplicates and failed items do not count toward the limit. The import's `stats` record `limit_reached` and the CLI receipt reports it as a warning.
+- Added a session limit to imports. Pass `max_sessions` on `POST /api/v1/imports` or the MCP `kitaru_session_import` tool, or `--max-sessions` to `kitaru session import`, and the import stops once it has created that many sessions. Duplicates and failed items do not count toward the limit. The import's `stats` record `limit_reached` and the CLI receipt reports it as a warning.
 
 ### Changed
 
