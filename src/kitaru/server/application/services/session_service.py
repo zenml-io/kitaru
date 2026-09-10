@@ -198,6 +198,9 @@ class SessionService:
         try:
             stored = await self._repository.create(session)
         except DuplicateSessionExternalId:
+            # The constraint only fires when both identity fields are set.
+            if session.imported_from is None or session.external_id is None:
+                raise
             existing = await self._repository.get_by_external_id(
                 session.imported_from,
                 session.external_id,
