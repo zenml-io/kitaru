@@ -189,7 +189,9 @@ def test_typescript_ci_owns_cross_language_tests() -> None:
         1
     ].split("\n          - name: py311-cli\n", maxsplit=1)[0]
 
-    assert base_matrix.count("--ignore=tests/typescript") == 4
+    base_commands = base_matrix.split("pytest-command:")[1:]
+    assert base_commands
+    assert all("--ignore=tests/typescript" in command for command in base_commands)
     assert "run: uv run pytest -q tests/typescript" in typescript_job
     assert (
         "uv sync --frozen --extra server --extra cli --extra worker" in typescript_job
