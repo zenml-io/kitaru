@@ -9049,10 +9049,9 @@ export interface components {
             session_id: string;
             /**
              * Started At
-             * Format: date-time
              * @description Time the node started.
              */
-            started_at: string;
+            started_at?: string | null;
             /** @description Node status. */
             status: components["schemas"]["NodeStatus"];
             /**

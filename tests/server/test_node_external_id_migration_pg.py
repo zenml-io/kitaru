@@ -130,7 +130,7 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
         identities = {row.id: (row.external_id, row.started_at) for row in upgraded}
         assert identities[root_id] == ("call-0", started_at)
         assert identities[child_id] == ("index-1", started_at)
-        assert identities[orphan_id] == ("index-2", created)
+        assert identities[orphan_id] == ("index-2", None)
         references = {
             row.id: (row.parent_external_id, row.secondary_parent_external_ids)
             for row in upgraded
@@ -156,7 +156,7 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
                     text('SELECT id, "index" FROM session_node ORDER BY "index"')
                 )
             ).all()
-        assert [row.id for row in downgraded] == [orphan_id, root_id, child_id]
+        assert [row.id for row in downgraded] == [root_id, child_id, orphan_id]
         assert [row.index for row in downgraded] == [0, 1, 2]
         async with engine.connect() as connection:
             columns = (

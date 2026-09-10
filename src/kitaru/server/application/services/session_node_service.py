@@ -14,7 +14,7 @@
 """Session node use cases."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.cache_keys import compute_tool_cache_key
@@ -48,24 +48,23 @@ from kitaru.server.domain.session_node import (
 
 
 def _resolve_started_at(
-    started_at: datetime | None, parent: SessionNode | None, fallback: datetime
-) -> datetime:
+    started_at: datetime | None, parent: SessionNode | None
+) -> datetime | None:
     """Derive the start time a node is positioned by.
 
     Args:
         started_at: Start time the node reports, if any.
         parent: Resolved parent node, if any.
-        fallback: Start time for a node that reports none and has no
-            resolved parent.
 
     Returns:
-        Start time to store.
+        Start time to store, None when neither the node nor a resolved
+        parent reports one.
     """
     if started_at is not None:
         return started_at
     if parent is not None:
         return parent.started_at
-    return fallback
+    return None
 
 
 def _get_node_payloads(nodes: list[SessionNode]) -> list[Payload]:
@@ -170,7 +169,6 @@ class SessionNodeService:
             session_id, sorted(referenced_external_ids), include_payloads=False
         )
         known_by_external_id = dict(existing_by_external_id)
-        now = datetime.now(UTC)
 
         resolved: list[SessionNode] = []
         pending_links: list[PendingParentLink] = []
@@ -194,7 +192,7 @@ class SessionNodeService:
                     )
 
             existing_node = existing_by_external_id.get(item.external_id)
-            started_at = _resolve_started_at(item.started_at, parent, now)
+            started_at = _resolve_started_at(item.started_at, parent)
             cache_key = None
             if item.node_type == NodeType.TOOL_CALL and item.tool_name is not None:
                 cache_key = compute_tool_cache_key(item.tool_name, item.inputs)

@@ -4956,10 +4956,18 @@
               "type": "string"
             },
             "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
               "description": "Time the node started.",
-              "format": "date-time",
-              "title": "Started At",
-              "type": "string"
+              "title": "Started At"
             },
             "status": {
               "$ref": "#/$defs/NodeStatus",
@@ -5039,7 +5047,6 @@
             "node_type",
             "name",
             "status",
-            "started_at",
             "metadata"
           ],
           "title": "SessionNodeResponse",

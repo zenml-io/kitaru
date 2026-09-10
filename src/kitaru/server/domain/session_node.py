@@ -58,7 +58,7 @@ class SessionNode(DomainModel):
     name: str
     status: NodeStatus
     error: str | None = None
-    started_at: datetime
+    started_at: datetime | None = None
     ended_at: datetime | None = None
     input_text_selector: str | None = None
     output_text_selector: str | None = None

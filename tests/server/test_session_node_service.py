@@ -419,14 +419,83 @@ async def test_ingest_inherits_the_parent_start(
     assert stored[1].started_at == _start(0)
 
 
-async def test_ingest_falls_back_to_now_without_a_parent(
+async def test_ingest_keeps_no_start_without_a_parent(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
-    """Fill the start time of a root node that reports none with the current time."""
-    before = datetime.now(UTC)
+    """Leave the start time of a root node that reports none unset."""
     stored = await service.ingest_nodes(session_id, [_llm_node("n0")], actor=ACTOR)
 
-    assert stored[0].started_at >= before
+    assert stored[0].started_at is None
+
+
+async def test_ingest_keeps_no_start_when_the_parent_is_unknown(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Leave the start time unset while the named parent has not landed."""
+    stored = await service.ingest_nodes(
+        session_id, [_llm_node("n1", parent_external_id="n0")], actor=ACTOR
+    )
+
+    assert stored[0].started_at is None
+
+
+async def test_ingest_keeps_no_start_when_the_parent_has_none(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Leave the start time unset when the parent reports none either."""
+    batch = [_llm_node("n0"), _llm_node("n1", parent_external_id="n0")]
+    stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
+
+    assert [node.started_at for node in stored] == [None, None]
+
+
+async def test_ingest_inherits_the_start_of_a_stored_parent(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Fill the start time from a parent stored by an earlier batch."""
+    await service.ingest_nodes(
+        session_id, [_llm_node("n0", started_at=_start(0))], actor=ACTOR
+    )
+    stored = await service.ingest_nodes(
+        session_id, [_llm_node("n1", parent_external_id="n0")], actor=ACTOR
+    )
+
+    assert stored[0].started_at == _start(0)
+
+
+async def test_ingest_does_not_rewrite_a_start_when_the_parent_lands(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Keep a child unset when its parent arrives after it."""
+    await service.ingest_nodes(
+        session_id, [_llm_node("n1", parent_external_id="n0")], actor=ACTOR
+    )
+    await service.ingest_nodes(
+        session_id, [_llm_node("n0", started_at=_start(0))], actor=ACTOR
+    )
+
+    nodes = await service.list_all_nodes(
+        session_id, include_payloads=False, actor=ACTOR
+    )
+    child = next(node for node in nodes if node.external_id == "n1")
+    assert child.started_at is None
+
+
+async def test_list_nodes_orders_untimed_nodes_last(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Sort a node without a start time after every timed node."""
+    batch = [
+        _llm_node("untimed"),
+        _llm_node("n1", started_at=_start(1)),
+        _llm_node("n0", started_at=_start(0)),
+    ]
+    await service.ingest_nodes(session_id, batch, actor=ACTOR)
+
+    nodes = await service.list_all_nodes(
+        session_id, include_payloads=False, actor=ACTOR
+    )
+    assert [node.external_id for node in nodes] == ["n0", "n1", "untimed"]
 
 
 async def test_ingest_replace_keeps_the_position_of_a_started_node(
