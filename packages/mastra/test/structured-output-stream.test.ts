@@ -101,6 +101,30 @@ afterEach(() => {
 });
 
 describe("structured output provider streams", () => {
+  it("preserves v2 chunks and records detailed token usage", async () => {
+    const chunks = [
+      {
+        ...finish,
+        usage: {
+          inputTokens: 11,
+          outputTokens: 8,
+          inputTokenDetails: { cacheReadTokens: 5 },
+          outputTokenDetails: { reasoningTokens: 3 },
+        },
+      },
+    ];
+    const test = await setup(() => streamOf(chunks));
+    expect(await collect((await test.open()).stream)).toEqual(chunks);
+    expect(test.nodes()[0]).toMatchObject({
+      tokens: {
+        input_tokens: 11,
+        output_tokens: 8,
+        cached_input_tokens: 5,
+        reasoning_tokens: 3,
+      },
+    });
+  });
+
   it.each([
     "v3",
     "v4",

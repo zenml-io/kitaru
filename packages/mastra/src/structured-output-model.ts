@@ -36,13 +36,19 @@ function getTokens(value: unknown): SessionNodeCreateRequest["tokens"] {
   const usage = asRecord(value);
   const input = asRecord(usage.inputTokens);
   const output = asRecord(usage.outputTokens);
+  const inputDetails = asRecord(usage.inputTokenDetails);
+  const outputDetails = asRecord(usage.outputTokenDetails);
   const tokens = {
     input_tokens: tokenCount(usage.inputTokens) ?? tokenCount(input.total),
     output_tokens: tokenCount(usage.outputTokens) ?? tokenCount(output.total),
     cached_input_tokens:
-      tokenCount(usage.cachedInputTokens) ?? tokenCount(input.cacheRead),
+      tokenCount(usage.cachedInputTokens) ??
+      tokenCount(inputDetails.cacheReadTokens) ??
+      tokenCount(input.cacheRead),
     reasoning_tokens:
-      tokenCount(usage.reasoningTokens) ?? tokenCount(output.reasoning),
+      tokenCount(usage.reasoningTokens) ??
+      tokenCount(outputDetails.reasoningTokens) ??
+      tokenCount(output.reasoning),
   };
   return Object.values(tokens).some((count) => count !== undefined)
     ? tokens
