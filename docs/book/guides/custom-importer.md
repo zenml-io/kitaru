@@ -51,7 +51,7 @@ def parse(
 
 Yield lazily; the import consumes one item at a time, so payload size is bounded by disk, not memory. Yield an `ImportFailure` for a bad record and the import counts it and moves on. Only a crash of the parser itself fails the task, with partial stats preserved. The full field reference for `ParsedSession` and `ParsedNode` is the [portable session contract](importing-sessions.md). `parse` may be a regular or an async generator.
 
-Set a stable `external_id` from your source system: together with the importer's provider name it is the dedup key, so re-importing an overlapping export skips what is already stored instead of duplicating it.
+Set a stable `external_id` from your source system: together with the importer's provider name it is the dedup key, so re-importing an overlapping export adds to what is already stored instead of duplicating it.
 
 ## Fetch traces from your own API instead of a file
 

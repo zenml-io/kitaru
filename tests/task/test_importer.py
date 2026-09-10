@@ -334,8 +334,8 @@ async def test_retry_rate_limited_gives_up_and_passes_other_errors() -> None:
         await retry_rate_limited(_other, _retry_after)
 
 
-def test_flatten_nodes_assigns_depth_first_indexes_and_parents() -> None:
-    """Assign indexes and parent indexes in depth-first order."""
+def test_flatten_nodes_assigns_depth_first_external_ids_and_parents() -> None:
+    """Mint external ids and map parents to them in depth-first order."""
     tree = [
         imported_node(
             "root",
@@ -349,16 +349,22 @@ def test_flatten_nodes_assigns_depth_first_indexes_and_parents() -> None:
     flattened = flatten_nodes(tree)
     by_name = {request.name: request for request in flattened}
 
-    assert [request.index for request in flattened] == [0, 1, 2, 3, 4]
-    assert by_name["root"].parent_index is None
-    assert by_name["child-1"].parent_index == by_name["root"].index
-    assert by_name["grandchild"].parent_index == by_name["child-1"].index
-    assert by_name["child-2"].parent_index == by_name["root"].index
-    assert by_name["second-root"].parent_index is None
+    assert [request.external_id for request in flattened] == [
+        "node-0",
+        "node-1",
+        "node-2",
+        "node-3",
+        "node-4",
+    ]
+    assert by_name["root"].parent_external_id is None
+    assert by_name["child-1"].parent_external_id == by_name["root"].external_id
+    assert by_name["grandchild"].parent_external_id == by_name["child-1"].external_id
+    assert by_name["child-2"].parent_external_id == by_name["root"].external_id
+    assert by_name["second-root"].parent_external_id is None
 
 
-def test_flatten_nodes_preserves_explicit_wire_indexes() -> None:
-    """Keep the flat Kitaru JSONL node representation unchanged."""
+def test_flatten_nodes_indexed_mode_maps_parent_index_to_external_id() -> None:
+    """Keep the flat Kitaru JSONL representation and map indexes to external ids."""
     nodes = [
         imported_node("child").model_copy(update={"index": 7, "parent_index": 4}),
         imported_node("root").model_copy(update={"index": 4}),
@@ -366,8 +372,25 @@ def test_flatten_nodes_preserves_explicit_wire_indexes() -> None:
 
     flattened = flatten_nodes(nodes)
 
-    assert [node.index for node in flattened] == [4, 7]
-    assert flattened[1].parent_index == 4
+    assert [node.external_id for node in flattened] == ["node-4", "node-7"]
+    assert flattened[1].parent_external_id == "node-4"
+
+
+def test_flatten_nodes_indexed_mode_prefers_a_node_s_own_external_id() -> None:
+    """Map an explicit parent index to the parent node's own external id."""
+    nodes = [
+        imported_node("root").model_copy(
+            update={"index": 0, "external_id": "root-ext"}
+        ),
+        imported_node("child").model_copy(
+            update={"index": 1, "parent_index": 0, "external_id": "child-ext"}
+        ),
+    ]
+
+    flattened = flatten_nodes(nodes)
+
+    assert [node.external_id for node in flattened] == ["root-ext", "child-ext"]
+    assert flattened[1].parent_external_id == "root-ext"
 
 
 def test_flatten_nodes_handles_deep_acyclic_tree() -> None:
@@ -383,7 +406,13 @@ def test_flatten_nodes_handles_deep_acyclic_tree() -> None:
 
     assert len(flattened) == 1_200
     assert [node.name for node in flattened] == [str(i) for i in range(1_200)]
-    assert [node.parent_index for node in flattened] == [None, *range(1_199)]
+    assert [node.external_id for node in flattened] == [
+        f"node-{i}" for i in range(1_200)
+    ]
+    assert [node.parent_external_id for node in flattened] == [
+        None,
+        *[f"node-{i}" for i in range(1_199)],
+    ]
     for node in flattened:
         json.loads(node.model_dump_json())
 
@@ -414,7 +443,40 @@ def test_flatten_nodes_allows_shared_child_outside_ancestor_path() -> None:
     )
 
     assert [node.name for node in flattened] == ["left", "shared", "right", "shared"]
-    assert [node.parent_index for node in flattened] == [None, 0, None, 2]
+    assert [node.external_id for node in flattened] == [
+        "node-0",
+        "node-1",
+        "node-2",
+        "node-3",
+    ]
+    assert [node.parent_external_id for node in flattened] == [
+        None,
+        "node-0",
+        None,
+        "node-2",
+    ]
+
+
+def test_flatten_nodes_rejects_a_duplicate_external_id() -> None:
+    """Reject two tree nodes in the same session sharing an external id."""
+    nodes = [
+        imported_node("left").model_copy(update={"external_id": "dup"}),
+        imported_node("right").model_copy(update={"external_id": "dup"}),
+    ]
+
+    with pytest.raises(SessionImportError, match="not unique"):
+        flatten_nodes(nodes)
+
+
+def test_flatten_nodes_rejects_a_duplicate_external_id_in_indexed_mode() -> None:
+    """Reject two indexed nodes in the same session sharing an external id."""
+    nodes = [
+        imported_node("left").model_copy(update={"index": 0, "external_id": "dup"}),
+        imported_node("right").model_copy(update={"index": 1, "external_id": "dup"}),
+    ]
+
+    with pytest.raises(SessionImportError, match="not unique"):
+        flatten_nodes(nodes)
 
 
 def test_session_request_maps_fields() -> None:
@@ -597,6 +659,7 @@ async def _create_importer_task(
     tmp_path: Path,
     params: dict[str, Any] | None = None,
     max_sessions: int | None = None,
+    plugin_name: str = "acme-importer",
 ) -> tuple[uuid.UUID, Path]:
     """Register a script importer plugin and a running import task for it.
 
@@ -606,15 +669,42 @@ async def _create_importer_task(
         tmp_path: Temporary directory the plugin file is written under.
         params: Parameters passed to the importer task.
         max_sessions: Maximum number of sessions created by the import.
+        plugin_name: Name of the registered importer.
 
     Returns:
         Id of the running import task and the path of its plugin file.
+    """
+    task_id = await _start_import_task(
+        task_app, params=params, max_sessions=max_sessions, plugin_name=plugin_name
+    )
+
+    plugin_path = tmp_path / "importer.py"
+    plugin_path.write_text(script)
+    return task_id, plugin_path
+
+
+async def _start_import_task(
+    task_app: TaskAppFixture,
+    params: dict[str, Any] | None = None,
+    max_sessions: int | None = None,
+    plugin_name: str = "acme-importer",
+) -> uuid.UUID:
+    """Create an import task, start it, and authenticate the client as it.
+
+    Args:
+        task_app: Task app fixture the task is created against.
+        params: Parameters passed to the importer task.
+        max_sessions: Maximum number of sessions created by the import.
+        plugin_name: Name of the registered importer.
+
+    Returns:
+        Id of the running import task.
     """
     version = await create_script_plugin_version(
         task_app,
         PluginKind.IMPORTER,
         entrypoint="parse",
-        name="acme-importer",
+        name=plugin_name,
         provider="acme",
     )
     job = await create_job(task_app.services.jobs, task_app.agent.owner_id)
@@ -632,11 +722,8 @@ async def _create_importer_task(
     task = await create_import_task(
         task_app.services.tasks, job.id, import_id=import_.id
     )
-    await start_task(task_app, task.id)
-
-    plugin_path = tmp_path / "importer.py"
-    plugin_path.write_text(script)
-    return task.id, plugin_path
+    task_app.auth.principal = await start_task(task_app, task.id)
+    return task.id
 
 
 async def _create_api_source_task(
@@ -663,8 +750,11 @@ async def _create_api_source_task(
     plugin_path = tmp_path / "importer.py"
     plugin_path.write_text(script)
     monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
-
-    task_id = uuid.uuid4()
+    # The spec is stubbed, but the task behind it is real so the sessions the
+    # flow creates carry its id and its node writes pass the task checks.
+    task_id = await _start_import_task(
+        task_app, max_sessions=max_sessions, plugin_name="acme-api-importer"
+    )
     spec = TaskSpecResponse(
         task_id=task_id,
         kind=TaskKind.IMPORTER,
@@ -693,10 +783,10 @@ async def _create_api_source_task(
     return task_id
 
 
-async def test_importer_flow_batches_nodes_and_dedups(
+async def test_importer_flow_batches_nodes_and_reingests_a_repeated_external_id(
     task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Batch node ingestion over NODE_BATCH_SIZE and skip a duplicate session."""
+    """Batch node ingestion over NODE_BATCH_SIZE and recreate a revisited session."""
     node_count = NODE_BATCH_SIZE + 50
     task_id, plugin_path = await _create_importer_task(
         task_app, _PARSER_SCRIPT, tmp_path, params={"node_count": node_count}
@@ -730,6 +820,8 @@ async def test_importer_flow_batches_nodes_and_dedups(
         ImportFailure(line=1, external_id="bad-1", error="unparsable item")
     ]
 
+    # A task principal holds no session listing grant, so inspect as the account.
+    task_app.auth.principal = None
     sessions_page = await task_app.client.sessions.list(
         SessionListParams(
             filter=FilterCondition(
@@ -938,7 +1030,7 @@ async def test_run_stops_creating_sessions_at_max_sessions(
 async def test_run_duplicates_do_not_consume_the_session_limit(
     task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Skip a duplicate without counting it against the session limit."""
+    """Skip a session the import revisits without consuming the session limit."""
     session_count = 3
     max_sessions = 2
     task_id, plugin_path = await _create_importer_task(
@@ -963,6 +1055,98 @@ async def test_run_duplicates_do_not_consume_the_session_limit(
     assert written.skipped == 1
     assert written.failed == 0
     assert written.limit_reached is True
+
+
+_SHARED_EXTERNAL_ID_PARSER_SCRIPT = """
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.task.importer import ImportedNode, ImportedSession
+
+
+def parse(payload: bytes, params: dict):
+    yield ImportedSession(
+        status=SessionStatus.COMPLETED,
+        name="shared",
+        inputs=None,
+        outputs=None,
+        error=None,
+        started_at=None,
+        ended_at=None,
+        external_id="shared-session",
+        metadata={},
+        nodes=[
+            ImportedNode(
+                external_id=f"{params['tag']}-node",
+                node_type=NodeType.LLM_CALL,
+                name=f"{params['tag']}-call",
+                status=NodeStatus.COMPLETED,
+                inputs=None,
+                outputs=None,
+                attributes=None,
+            )
+        ],
+    )
+"""
+
+
+async def test_run_ingests_into_a_session_created_by_another_task(
+    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Count a session another task already created as skipped and ingest into it."""
+    first_task_id, first_plugin_path = await _create_importer_task(
+        task_app,
+        _SHARED_EXTERNAL_ID_PARSER_SCRIPT,
+        tmp_path,
+        params={"tag": "first"},
+    )
+    first_payload_path = tmp_path / "first-payload.json"
+    first_payload_path.write_text(json.dumps({}))
+    first_result_path = tmp_path / "first-result.json"
+    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(first_plugin_path))
+    monkeypatch.setenv("KITARU_TASK_PAYLOAD_PATH", str(first_payload_path))
+    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(first_result_path))
+    await run(task_app.client, str(first_task_id))
+    first_written = ImportStats.model_validate(
+        json.loads(first_result_path.read_text())
+    )
+    assert first_written.created == 1
+    assert first_written.skipped == 0
+
+    second_task_id, second_plugin_path = await _create_importer_task(
+        task_app,
+        _SHARED_EXTERNAL_ID_PARSER_SCRIPT,
+        tmp_path,
+        params={"tag": "second"},
+        plugin_name="acme-importer-2",
+    )
+    second_payload_path = tmp_path / "second-payload.json"
+    second_payload_path.write_text(json.dumps({}))
+    second_result_path = tmp_path / "second-result.json"
+    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(second_plugin_path))
+    monkeypatch.setenv("KITARU_TASK_PAYLOAD_PATH", str(second_payload_path))
+    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(second_result_path))
+    await run(task_app.client, str(second_task_id))
+    second_written = ImportStats.model_validate(
+        json.loads(second_result_path.read_text())
+    )
+    assert second_written.created == 0
+    assert second_written.skipped == 1
+
+    # A task principal holds no session listing grant, so inspect as the account.
+    task_app.auth.principal = None
+    sessions_page = await task_app.client.sessions.list(
+        SessionListParams(
+            filter=FilterCondition(
+                field="external_id", op=FilterOp.EQ, value="shared-session"
+            )
+        )
+    )
+    assert len(sessions_page.items) == 1
+    nodes_page = await task_app.client.sessions.list_nodes(sessions_page.items[0].id)
+    assert {node.external_id for node in nodes_page.items} == {
+        "first-node",
+        "second-node",
+    }
 
 
 _API_FETCH_PARSER_SCRIPT = """

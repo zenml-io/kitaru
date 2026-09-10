@@ -185,7 +185,7 @@ async def test_exact_trace_fetch_includes_spans_after_first_page(
     assert isinstance(sessions[0], ImportedSession)
     nodes = flatten_nodes(sessions[0].nodes)
     assert len(nodes) == 2
-    assert nodes[1].parent_index == nodes[0].index
+    assert nodes[1].parent_external_id == nodes[0].external_id
     assert len(requests) == 2
 
 

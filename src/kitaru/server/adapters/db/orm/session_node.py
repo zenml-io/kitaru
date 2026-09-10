@@ -50,9 +50,6 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session_node import SessionNode
 
-SESSION_NODE_SESSION_ID_INDEX_UNIQUE_CONSTRAINT = unique_constraint_name(
-    "session_node", ["session_id", "index"]
-)
 SESSION_NODE_SESSION_ID_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session_node", ["session_id", "external_id"]
 )
@@ -67,6 +64,12 @@ SESSION_NODE_ATTRIBUTES_BLOB_ID_FOREIGN_KEY = foreign_key_name(
     "session_node", ["attributes_blob_id"]
 )
 SESSION_NODE_CACHE_KEY_INDEX = index_name("session_node", ["cache_key"])
+SESSION_NODE_POSITION_INDEX = index_name(
+    "session_node", ["session_id", "effective_started_at", "id"]
+)
+SESSION_NODE_PARENT_EXTERNAL_ID_INDEX = index_name(
+    "session_node", ["session_id", "parent_external_id"]
+)
 
 NODE_TYPE_LENGTH = 32
 NODE_STATUS_LENGTH = 32
@@ -78,11 +81,6 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "session_node"
     __table_args__ = (
-        UniqueConstraint(
-            "session_id",
-            "index",
-            name=SESSION_NODE_SESSION_ID_INDEX_UNIQUE_CONSTRAINT,
-        ),
         UniqueConstraint(
             "session_id",
             "external_id",
@@ -114,6 +112,17 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "cache_key",
             postgresql_where=text("cache_key IS NOT NULL"),
         ),
+        Index(
+            SESSION_NODE_POSITION_INDEX,
+            "session_id",
+            "effective_started_at",
+            "id",
+        ),
+        Index(
+            SESSION_NODE_PARENT_EXTERNAL_ID_INDEX,
+            "session_id",
+            "parent_external_id",
+        ),
     )
 
     session_id: Mapped[uuid.UUID]
@@ -121,8 +130,11 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # a foreign key cannot express.
     parent_id: Mapped[uuid.UUID | None]
     secondary_parent_ids: Mapped[list[str]] = mapped_column(JSONB)
-    index: Mapped[int]
-    external_id: Mapped[str | None] = mapped_column(Text)
+    external_id: Mapped[str] = mapped_column(Text)
+    # Kept as sent so a reference that no stored node matches yet links once
+    # its target lands.
+    parent_external_id: Mapped[str | None] = mapped_column(Text)
+    secondary_parent_external_ids: Mapped[list[str]] = mapped_column(JSONB)
     trace_id: Mapped[str | None] = mapped_column(Text)
     node_type: Mapped[str] = mapped_column(String(NODE_TYPE_LENGTH))
     name: Mapped[str] = mapped_column(Text)
@@ -130,6 +142,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    effective_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     input_text_selector: Mapped[str | None] = mapped_column(Text)
     output_text_selector: Mapped[str | None] = mapped_column(Text)
     system_prompt_selector: Mapped[str | None] = mapped_column(Text)
@@ -194,8 +207,9 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.secondary_parent_ids = [
             str(parent_id) for parent_id in node.secondary_parent_ids
         ]
-        self.index = node.index
         self.external_id = node.external_id
+        self.parent_external_id = node.parent_external_id
+        self.secondary_parent_external_ids = list(node.secondary_parent_external_ids)
         self.trace_id = node.trace_id
         self.node_type = node.node_type.value
         self.name = node.name
@@ -203,6 +217,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.error = node.error
         self.started_at = node.started_at
         self.ended_at = node.ended_at
+        self.effective_started_at = node.effective_started_at
         self.input_text_selector = node.input_text_selector
         self.output_text_selector = node.output_text_selector
         self.system_prompt_selector = node.system_prompt_selector
@@ -266,8 +281,9 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             secondary_parent_ids=[
                 uuid.UUID(parent_id) for parent_id in self.secondary_parent_ids
             ],
-            index=self.index,
             external_id=self.external_id,
+            parent_external_id=self.parent_external_id,
+            secondary_parent_external_ids=list(self.secondary_parent_external_ids),
             trace_id=self.trace_id,
             node_type=NodeType(self.node_type),
             name=self.name,
@@ -275,6 +291,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,
+            effective_started_at=self.effective_started_at,
             input_text_selector=self.input_text_selector,
             output_text_selector=self.output_text_selector,
             system_prompt_selector=self.system_prompt_selector,

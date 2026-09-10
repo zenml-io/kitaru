@@ -65,13 +65,9 @@ def test_preserves_invocations_and_graph_independent_of_export_order(
         source = {span["spanId"]: span for span in trace["spans"]}
         nodes = flatten_nodes(session.nodes)
         assert len(nodes) == len(source)
-        by_index = {node.index: node.external_id for node in nodes}
         for node in nodes:
             assert node.trace_id == trace["traceId"]
-            assert (
-                by_index.get(node.parent_index)
-                == source[node.external_id]["parentSpanId"]
-            )
+            assert node.parent_external_id == source[node.external_id]["parentSpanId"]
         assert session.framework == "mastra"
 
 
@@ -171,7 +167,7 @@ def test_namespace_changes_identity_without_changing_source_trace(
     assert namespaced.nodes == original.nodes
 
 
-async def test_reimport_skips_sessions_and_does_not_ingest_nodes_twice(
+async def test_reimport_ingests_nodes_into_the_existing_session(
     traces: list[dict[str, Any]],
 ) -> None:
     client = Mock(spec=KitaruAPIClient)
@@ -180,7 +176,7 @@ async def test_reimport_skips_sessions_and_does_not_ingest_nodes_twice(
     async def create(request: SessionCreateRequest) -> SessionResponse:
         key = (request.imported_from, request.external_id)
         if key in stored:
-            raise APIError(409, "Session already exists")
+            return stored[key]
         session = Mock(spec=SessionResponse)
         session.id = uuid4()
         stored[key] = session
@@ -198,12 +194,17 @@ async def test_reimport_skips_sessions_and_does_not_ingest_nodes_twice(
         await ingest_session(client, s, agent_id, "mastra")
         for s in _get_sessions(traces)
     ]
-    assert all(session is not None for session in first)
-    assert second == [None, None]
+    assert [session.id for session in second] == [session.id for session in first]
     assert len(stored) == 2
-    assert client.sessions.ingest_nodes.await_count == 2
+    assert client.sessions.ingest_nodes.await_count == 4
     batches = client.sessions.ingest_nodes.await_args_list
-    assert [len(call.args[1].nodes) for call in batches] == [10, 5]
+    assert [call.args[0] for call in batches] == [
+        first[0].id,
+        first[1].id,
+        first[0].id,
+        first[1].id,
+    ]
+    assert [len(call.args[1].nodes) for call in batches] == [10, 5, 10, 5]
 
 
 @pytest.mark.parametrize(

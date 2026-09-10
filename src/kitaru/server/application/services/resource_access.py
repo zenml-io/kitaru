@@ -16,6 +16,7 @@
 import uuid
 
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import (
     AuthContext,
@@ -124,25 +125,27 @@ def check_task_session_read(session: Session, actor: AuthContext) -> None:
     raise SessionAccessDenied(session.id)
 
 
-def check_task_session_write(
-    session_id: uuid.UUID, session_task_id: uuid.UUID | None, actor: AuthContext
-) -> None:
+def check_task_session_write(session: Session, actor: AuthContext) -> None:
     """Require a task principal to own the session being written.
 
-    An account principal always passes.
+    An imported session is open to any task principal, so a later import
+    contributes to a session an earlier one created. Owner scoping is
+    applied by the repository. An account principal always passes.
 
     Args:
-        session_id: Id of the session being written.
-        session_task_id: Id of the task the session is linked to, if any.
+        session: Session being written.
         actor: Caller context.
 
     Raises:
-        SessionAccessDenied: A task principal does not own the session.
+        SessionAccessDenied: A task principal neither owns the session nor
+            writes into an imported one.
     """
     if not isinstance(actor.principal, TaskPrincipal):
         return
-    if session_task_id != actor.principal.task_id:
-        raise SessionAccessDenied(session_id)
+    if session.origin == SessionOrigin.IMPORTED:
+        return
+    if session.task_id != actor.principal.task_id:
+        raise SessionAccessDenied(session.id)
 
 
 def check_task_blob_read(blob_id: uuid.UUID, actor: AuthContext) -> None:

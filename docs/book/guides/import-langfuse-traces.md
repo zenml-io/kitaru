@@ -81,7 +81,7 @@ The worker installs the package's `api` extra for an API import, which carries t
 
 ## Dedup: one session per (imported_from, external_id) per agent
 
-Every imported session records `imported_from` (`langfuse`) and an `external_id` combining the selected source identity with the source session ID. This pair is unique per destination agent, so re-importing an overlapping export with the same identity **skips** what's already stored; the stats report it as `skipped`, not as an error. Skipped sessions are not updated with new nodes.
+Every imported session records `imported_from` (`langfuse`) and an `external_id` combining the selected source identity with the source session ID. This pair is unique per destination agent, so re-importing an overlapping export with the same identity **adds** the new batch to the session that's already stored. The stats report it as `skipped`, not as an error. Nodes are matched by their own external id: an existing node is replaced and a new one is added.
 
 ## No importer for your format?
 

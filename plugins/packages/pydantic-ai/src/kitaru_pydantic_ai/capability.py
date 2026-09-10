@@ -96,6 +96,7 @@ from .pricing import CostCalculator, PydanticAIUsageSummary, normalize_cost
 
 ADAPTER_VERSION = version("kitaru-pydantic-ai")
 FRAMEWORK = "pydantic_ai"
+ROOT_EXTERNAL_ID = "root"
 _JSON_ADAPTER = TypeAdapter(Any)
 _USER_CONTENT_TYPES = (
     str,
@@ -314,6 +315,11 @@ def _error_text(error: BaseException) -> str:
     return str(error) or type(error).__name__
 
 
+def _mint_external_id() -> str:
+    """Return a synthetic external id for a node with no provider identity."""
+    return str(uuid.uuid4())
+
+
 def _case_matches(case: StaticCase, arguments: dict[str, Any]) -> bool:
     """Check whether a static replay case matches validated tool arguments."""
     if case.match is None:
@@ -469,8 +475,7 @@ class _RunState:
     message_history: list[ModelMessage]
     session_id: uuid.UUID | None = None
     started_at: datetime | None = None
-    next_index: int = 1
-    latest_llm_index: int | None = None
+    latest_llm_external_id: str | None = None
     history_occurrences: dict[str, int] = field(default_factory=dict)
     buffer: list[SessionNodeCreateRequest] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -569,8 +574,8 @@ class _KitaruCapability(AbstractCapability[Any]):
                 SessionNodeBatchRequest(
                     nodes=[
                         SessionNodeCreateRequest(
-                            index=0,
-                            parent_index=None,
+                            external_id=ROOT_EXTERNAL_ID,
+                            parent_external_id=None,
                             node_type=NodeType.SPAN,
                             name="run",
                             status=NodeStatus.IN_PROGRESS,
@@ -676,7 +681,7 @@ class _KitaruCapability(AbstractCapability[Any]):
                 model_replaced=replacement is not None,
             )
 
-        node_index = await self._allocate_node()
+        external_id = _mint_external_id()
         started_at = datetime.now(UTC)
         input_payload = _messages_json(effective.messages)
         input_text_selector = _input_text_selector(input_payload)
@@ -687,8 +692,8 @@ class _KitaruCapability(AbstractCapability[Any]):
             try:
                 await self._buffer_node(
                     SessionNodeCreateRequest(
-                        index=node_index,
-                        parent_index=0,
+                        external_id=external_id,
+                        parent_external_id=ROOT_EXTERNAL_ID,
                         node_type=NodeType.LLM_CALL,
                         name="model_request",
                         status=NodeStatus.FAILED,
@@ -723,8 +728,8 @@ class _KitaruCapability(AbstractCapability[Any]):
             attributes["provider_native_calls"] = unpaired_native_calls
         output_payload = _jsonable(response)
         llm_node = SessionNodeCreateRequest(
-            index=node_index,
-            parent_index=0,
+            external_id=external_id,
+            parent_external_id=ROOT_EXTERNAL_ID,
             node_type=NodeType.LLM_CALL,
             name="model_request",
             status=NodeStatus.COMPLETED,
@@ -745,8 +750,8 @@ class _KitaruCapability(AbstractCapability[Any]):
             attributes=attributes,
         )
         await self._buffer_node(llm_node)
-        state.latest_llm_index = node_index
-        unsupported_native = await self._record_native_tools(response, node_index)
+        state.latest_llm_external_id = external_id
+        unsupported_native = await self._record_native_tools(response, external_id)
         if unsupported_native is not None:
             raise unsupported_native
         return response
@@ -763,7 +768,6 @@ class _KitaruCapability(AbstractCapability[Any]):
         """Apply a replay policy around local function-tool execution."""
         del ctx, tool_def
         state = self._require_state()
-        node_index = await self._allocate_node()
         started_at = datetime.now(UTC)
         policy = self._tool_policy(call.tool_name)
         json_args = cast(dict[str, Any], _jsonable(args))
@@ -840,8 +844,7 @@ class _KitaruCapability(AbstractCapability[Any]):
         except BaseException as error:
             try:
                 await self._record_tool(
-                    node_index=node_index,
-                    parent_index=state.latest_llm_index or 0,
+                    parent_external_id=state.latest_llm_external_id or ROOT_EXTERNAL_ID,
                     tool_name=call.tool_name,
                     arguments=json_args,
                     result=None,
@@ -861,8 +864,7 @@ class _KitaruCapability(AbstractCapability[Any]):
 
         attributes = {"mocked": True, "policy": mocked_policy} if mocked_policy else {}
         await self._record_tool(
-            node_index=node_index,
-            parent_index=state.latest_llm_index or 0,
+            parent_external_id=state.latest_llm_external_id or ROOT_EXTERNAL_ID,
             tool_name=call.tool_name,
             arguments=json_args,
             result=result,
@@ -901,7 +903,7 @@ class _KitaruCapability(AbstractCapability[Any]):
         return config.tools.get(tool_name, config.default)
 
     async def _record_native_tools(
-        self, response: ModelResponse, parent_index: int
+        self, response: ModelResponse, parent_external_id: str
     ) -> ToolPolicyError | None:
         """Record public provider-native call/return parts truthfully."""
         calls = {
@@ -922,15 +924,13 @@ class _KitaruCapability(AbstractCapability[Any]):
             result = returns.get(call_id)
             if result is None:
                 continue
-            node_index = await self._allocate_node()
             status = (
                 NodeStatus.COMPLETED
                 if result.outcome == "success"
                 else NodeStatus.FAILED
             )
             await self._record_tool(
-                node_index=node_index,
-                parent_index=parent_index,
+                parent_external_id=parent_external_id,
                 tool_name=call.tool_name,
                 arguments=call.args_as_dict(),
                 result=result.content,
@@ -966,8 +966,7 @@ class _KitaruCapability(AbstractCapability[Any]):
     async def _record_tool(
         self,
         *,
-        node_index: int,
-        parent_index: int | None,
+        parent_external_id: str,
         tool_name: str,
         arguments: Any,
         result: Any,
@@ -975,16 +974,15 @@ class _KitaruCapability(AbstractCapability[Any]):
         status: NodeStatus,
         error: str | None,
         attributes: dict[str, Any],
-        external_id: str | None,
+        external_id: str,
     ) -> None:
         """Buffer a terminal tool-call node."""
         input_payload = _jsonable(arguments)
         output_payload = _jsonable(result)
         await self._buffer_node(
             SessionNodeCreateRequest(
-                index=node_index,
-                parent_index=parent_index,
                 external_id=external_id,
+                parent_external_id=parent_external_id,
                 node_type=NodeType.TOOL_CALL,
                 name=tool_name,
                 status=status,
@@ -999,14 +997,6 @@ class _KitaruCapability(AbstractCapability[Any]):
                 attributes=attributes,
             )
         )
-
-    async def _allocate_node(self) -> int:
-        """Allocate a monotonic node index."""
-        state = self._require_state()
-        async with state.lock:
-            index = state.next_index
-            state.next_index += 1
-        return index
 
     async def _buffer_node(self, node: SessionNodeCreateRequest) -> None:
         """Buffer one node and flush at the configured batch size."""
@@ -1042,10 +1032,13 @@ class _KitaruCapability(AbstractCapability[Any]):
         input_payload = _jsonable(state.effective_input)
         output_payload = _jsonable(outputs)
         async with state.lock:
-            state.buffer.append(
+            # The root must precede every buffered child in this flush, so
+            # insert it first rather than appending it after them.
+            state.buffer.insert(
+                0,
                 SessionNodeCreateRequest(
-                    index=0,
-                    parent_index=None,
+                    external_id=ROOT_EXTERNAL_ID,
+                    parent_external_id=None,
                     node_type=NodeType.SPAN,
                     name="run",
                     status=node_status,
@@ -1057,7 +1050,7 @@ class _KitaruCapability(AbstractCapability[Any]):
                     inputs=input_payload,
                     outputs=output_payload,
                     attributes={},
-                )
+                ),
             )
             try:
                 await self._flush_locked(state)

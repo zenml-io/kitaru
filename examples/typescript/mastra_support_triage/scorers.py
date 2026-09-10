@@ -34,7 +34,7 @@ def _trace_completeness(session: SessionView) -> float:
     roots = [
         node
         for node in session.nodes
-        if node.node_type is NodeType.SPAN and node.parent_index is None
+        if node.node_type is NodeType.SPAN and node.parent_id is None
     ]
     llm_nodes = [node for node in session.nodes if node.node_type is NodeType.LLM_CALL]
     tool_names = {

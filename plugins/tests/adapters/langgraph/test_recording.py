@@ -12,7 +12,7 @@ from kitaru.api_models.v1.session_node import NodeType
 from kitaru_langgraph import KitaruGraphRunner
 from kitaru_langgraph.callbacks import AsyncKitaruCallback
 from kitaru_langgraph.capture import CapturePolicy
-from kitaru_langgraph.recording import InvocationRecorder
+from kitaru_langgraph.recording import ROOT_EXTERNAL_ID, InvocationRecorder
 
 
 async def test_key_loss_in_recorded_copy_preserves_native_tool_result(
@@ -84,11 +84,8 @@ async def test_nested_ancestor_is_persisted_before_child(fake_client: Any) -> No
     nodes = [node for _, batch in client.sessions.node_batches for node in batch.nodes]
     nested = next(node for node in nodes if node.name == "nested")
     model = next(node for node in nodes if node.node_type is NodeType.LLM_CALL)
-    assert nested.index < model.index
-    assert model.parent_index == nested.index
-    assert all(
-        node.parent_index is None or node.parent_index < node.index for node in nodes
-    )
+    assert model.parent_external_id == nested.external_id
+    assert nested.parent_external_id == ROOT_EXTERNAL_ID
 
 
 async def test_callback_failures_preserve_error_text(fake_client: Any) -> None:
@@ -125,7 +122,9 @@ async def test_callback_failures_preserve_error_text(fake_client: Any) -> None:
     nodes = [node for _, batch in client.sessions.node_batches for node in batch.nodes]
     nested = next(node for node in reversed(nodes) if node.name == "nested")
     tool = next(node for node in reversed(nodes) if node.name == "weather")
-    root = next(node for node in reversed(nodes) if node.index == 0)
+    root = next(
+        node for node in reversed(nodes) if node.external_id == ROOT_EXTERNAL_ID
+    )
     assert nested.error == "chain failed"
     assert tool.error == "service down"
     assert root.error == "graph failed"

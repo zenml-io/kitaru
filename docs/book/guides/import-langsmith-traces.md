@@ -108,14 +108,13 @@ At session level you get the thread's trace ids, the join paths used, the union 
 
 ## Dedup: one session per project and thread
 
-Every imported session records `imported_from: langsmith` plus an `external_id` of `<source_instance>:<thread>`. That pair is unique per destination agent, so re-importing an overlapping export with the same identity **skips** what is already stored and reports it as `skipped`, not as an error. Skipped sessions are not refreshed with new nodes.
+Every imported session records `imported_from: langsmith` plus an `external_id` of `<source_instance>:<thread>`. That pair is unique per destination agent, so re-importing an overlapping export with the same identity **adds** the new batch to the session that is already stored, reported as `skipped`, not as an error. Nodes are matched by their own external id: an existing node is replaced and a new one is added, and a later trace of the same thread is appended as a new turn.
 
 This is what makes "export the last 24 hours every night" safe. It also means the grouping key matters: if you change `source_instance` or `join_on` between imports of the same runs, the same thread lands as a second session rather than deduping against the first.
 
 ## Limitations
 
 - **Only what the export contains.** Anything LangSmith did not record (intermediate state, code, environment) is not recoverable from the file.
-- **Imported threads are frozen.** Once a thread is imported, later traces in the same thread are skipped by dedup rather than appended. Import a thread after it is finished, or scope `join_on` to something that closes.
 - **Partial graphs import with a warning.** A trace with more than one root run, a run whose parent is missing from the export, or model output containing `tool_calls` with no corresponding tool runs all set `source_completeness: partial` and add a line to `normalization_warnings`. The session still imports.
 - **A bad trace is isolated, not fatal.** A run with no trace id or run id, a trace with conflicting project identities or conflicting thread values, or a trace missing your chosen `join_on` value is reported as a failure and the rest of the file still imports. A malformed file (invalid JSON, non-UTF-8, or empty) fails the task as a whole.
 - **Replay needs your code.** Imported sessions replay like recorded ones, but only if the agent version whose code produced the runs is registered with a run command. No trace export contains the code.

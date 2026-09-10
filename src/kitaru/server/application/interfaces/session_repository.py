@@ -95,6 +95,27 @@ class SessionRepository(Protocol):
         """
         ...
 
+    async def get_by_external_id(
+        self,
+        imported_from: str | None,
+        external_id: str | None,
+        agent_id: uuid.UUID,
+        include_payloads: bool,
+    ) -> Session | None:
+        """Load the session registered under an import source and external id.
+
+        Args:
+            imported_from: Source system the session was imported from.
+            external_id: Id from the source system.
+            agent_id: Id of the agent the session belongs to.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
+
+        Returns:
+            Stored session, or ``None`` when the triple is unregistered.
+        """
+        ...
+
     async def query(
         self, session_filter: SessionFilter, include_payloads: bool
     ) -> tuple[list[Session], str | None]:

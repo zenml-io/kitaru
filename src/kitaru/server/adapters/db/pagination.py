@@ -15,10 +15,11 @@
 
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
 from typing import TypeVar
 
 from asyncpg.exceptions import QueryCanceledError
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, tuple_
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
@@ -26,7 +27,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 from kitaru.server.adapters.db.orm.base import UUIDPrimaryKeyMixin
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.base import ListFilter
-from kitaru.server.domain.base import QueryTimeoutError
+from kitaru.server.domain.base import QueryTimeoutError, ValidationError
 
 LIST_QUERY_TIMEOUT_INFO_KEY = "list_query_timeout_seconds"
 
@@ -151,6 +152,93 @@ async def paginate_by_index(
         rows = rows[: list_filter.size]
         last_index = getattr(rows[-1], index_column.key)
         next_cursor = encode_cursor(list_filter.sort, str(last_index), filter_hash)
+    return rows, next_cursor
+
+
+def _encode_start_cursor(started_at: datetime, row_id: uuid.UUID) -> str:
+    """Join a start time and an id into one cursor payload.
+
+    Args:
+        started_at: Start time of the last row on the page.
+        row_id: Id of the last row on the page.
+
+    Returns:
+        Cursor payload the decode splits back apart.
+    """
+    return f"{started_at.isoformat()}|{row_id}"
+
+
+def _decode_start_cursor(payload: str) -> tuple[datetime, uuid.UUID]:
+    """Split a cursor payload back into a start time and an id.
+
+    Args:
+        payload: Cursor payload written by ``_encode_start_cursor``.
+
+    Raises:
+        ValidationError: The payload does not carry a start time and an id.
+
+    Returns:
+        Start time and id of the last row of the previous page.
+    """
+    started_at, separator, row_id = payload.rpartition("|")
+    if not separator:
+        raise ValidationError("Invalid cursor")
+    try:
+        return datetime.fromisoformat(started_at), uuid.UUID(row_id)
+    except ValueError as exc:
+        raise ValidationError("Invalid cursor") from exc
+
+
+async def paginate_by_started_at(
+    session: AsyncSession,
+    statement: Select[tuple[RowT]],
+    list_filter: ListFilter,
+    started_at_column: InstrumentedAttribute[datetime],
+    id_column: InstrumentedAttribute[uuid.UUID],
+) -> tuple[Sequence[RowT], str | None]:
+    """Execute a filtered select as one page plus the next cursor.
+
+    Unlike ``paginate()``, the keyset rides a start time in fixed ascending
+    order, broken by the UUIDv7 id, for a nested resource read in the order
+    its rows ran.
+
+    Args:
+        session: Database session for the query.
+        statement: Filtered select without ordering or pagination.
+        list_filter: List filter carrying the cursor, size, and filter hash.
+        started_at_column: Start time column defining the sort order.
+        id_column: Primary key column breaking start time ties.
+
+    Returns:
+        Page of matching rows and the next cursor, or None on the last page.
+    """
+    filter_hash = list_filter.compute_filter_hash()
+    cursor = None
+    if list_filter.cursor is not None:
+        cursor = decode_cursor(list_filter.cursor, list_filter.sort, filter_hash)
+
+    statement = statement.order_by(started_at_column.asc(), id_column.asc())
+    if cursor is not None:
+        statement = statement.where(
+            tuple_(started_at_column, id_column) > _decode_start_cursor(cursor.id)
+        )
+
+    statement = statement.limit(list_filter.size + 1)
+    await _apply_list_query_timeout(session)
+    try:
+        rows = (await session.scalars(statement)).all()
+    except DBAPIError as error:
+        _translate_query_timeout(error)
+        raise
+    next_cursor = None
+    if len(rows) > list_filter.size:
+        rows = rows[: list_filter.size]
+        last_row = rows[-1]
+        next_cursor = encode_cursor(
+            list_filter.sort,
+            _encode_start_cursor(getattr(last_row, started_at_column.key), last_row.id),
+            filter_hash,
+        )
     return rows, next_cursor
 
 

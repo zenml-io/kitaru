@@ -120,7 +120,7 @@ def _assert_recorded_shape(nodes: list[SessionNodeResponse]) -> None:
     roots = [
         node
         for node in nodes
-        if node.node_type is NodeType.SPAN and node.parent_index is None
+        if node.node_type is NodeType.SPAN and node.parent_id is None
     ]
     llm_nodes = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
     tool_names = {

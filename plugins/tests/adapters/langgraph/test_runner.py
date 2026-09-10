@@ -31,7 +31,7 @@ from kitaru_langgraph import (
     UnsupportedWorkerInterruptError,
 )
 from kitaru_langgraph.capability import _make_capability_manifest
-from kitaru_langgraph.recording import get_active_invocation
+from kitaru_langgraph.recording import ROOT_EXTERNAL_ID, get_active_invocation
 
 
 class _RaisingRunnable(Runnable[Any, Any]):
@@ -78,8 +78,8 @@ def test_sync_result_identity_and_config_are_preserved(fake_client: Any) -> None
     client = fake_client.instances[0]
     assert client.closed
     assert client.sessions.updated[-1][1].status.value == "completed"
-    assert _nodes(client)[0].index == 0
-    assert _nodes(client)[-1].index == 0
+    assert _nodes(client)[0].external_id == ROOT_EXTERNAL_ID
+    assert _nodes(client)[-1].external_id == ROOT_EXTERNAL_ID
 
 
 async def test_async_result_identity_is_preserved(fake_client: Any) -> None:

@@ -61,10 +61,14 @@ export class SmokeClient implements AdapterClient {
     _sessionId: string,
     request: SessionNodeBatchRequest,
   ): Promise<SessionNodeResponse[]> {
+    const offset = this.nodeBatches.reduce(
+      (total, batch) => total + batch.nodes.length,
+      0,
+    );
     this.nodeBatches.push(request);
-    return request.nodes.map((node) => ({
-      id: `018f0000-0000-7000-8001-${String(node.index + 500).padStart(12, "0")}`,
-      index: node.index,
+    return request.nodes.map((node, position) => ({
+      id: `018f0000-0000-7000-8001-${String(offset + position + 500).padStart(12, "0")}`,
+      external_id: node.external_id,
       node_type: node.node_type,
       status: node.status,
     })) as SessionNodeResponse[];
