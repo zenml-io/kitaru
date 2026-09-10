@@ -207,24 +207,14 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         exclude = {column.key for column in deferred}
         return [row.to_domain(exclude=exclude) for row in rows]
 
-    async def replace_pending_links(
-        self, child_ids: Sequence[uuid.UUID], links: Sequence[PendingParentLink]
-    ) -> None:
-        """Replace the pending parent links of the given children.
+    async def add_pending_links(self, links: Sequence[PendingParentLink]) -> None:
+        """Store pending parent links.
 
         Args:
-            child_ids: Ids of the children whose pending links are dropped.
-            links: Pending links to store in their place.
+            links: Pending links to store.
         """
-        if not child_ids and not links:
+        if not links:
             return
-        if child_ids:
-            statement = (
-                delete(SessionNodePendingLinkORM)
-                .where(SessionNodePendingLinkORM.child_id.in_(child_ids))
-                .execution_options(synchronize_session="fetch")
-            )
-            await self._session.execute(statement)
         for link in links:
             self._session.add(SessionNodePendingLinkORM.from_domain(link))
         await self._flush()

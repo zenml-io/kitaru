@@ -2939,34 +2939,6 @@ class FakeSessionRepository:
                 return self._copy(session, include_payloads)
         return None
 
-    async def get_by_external_id(
-        self,
-        imported_from: str,
-        external_id: str,
-        agent_id: uuid.UUID,
-        include_payloads: bool,
-    ) -> Session | None:
-        """Load the session registered under an import source and external id.
-
-        Args:
-            imported_from: Source system the session was imported from.
-            external_id: Id from the source system.
-            agent_id: Id of the agent the session belongs to.
-            include_payloads: Whether to read the inputs and outputs
-                columns.
-
-        Returns:
-            Stored session, or ``None`` when the triple is unregistered.
-        """
-        for session in self._sessions.values():
-            if (
-                session.imported_from == imported_from
-                and session.external_id == external_id
-                and session.agent_id == agent_id
-            ):
-                return self._copy(session, include_payloads)
-        return None
-
     def _session_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
         """Resolve the ids of sessions linked to a tag by name.
 
@@ -3517,19 +3489,12 @@ class FakeSessionNodeRepository:
             for node in ordered
         ]
 
-    async def replace_pending_links(
-        self, child_ids: Sequence[uuid.UUID], links: Sequence[PendingParentLink]
-    ) -> None:
-        """Replace the pending parent links of the given children.
+    async def add_pending_links(self, links: Sequence[PendingParentLink]) -> None:
+        """Store pending parent links.
 
         Args:
-            child_ids: Ids of the children whose pending links are dropped.
-            links: Pending links to store in their place.
+            links: Pending links to store.
         """
-        dropped = set(child_ids)
-        self._pending_links = [
-            link for link in self._pending_links if link.child_id not in dropped
-        ]
         self._pending_links.extend(link.model_copy() for link in links)
 
     async def link_pending_parents(

@@ -44,7 +44,6 @@ from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import (
-    DuplicateSessionExternalId,
     Session,
     SessionAgentMismatch,
     SessionAgentRequired,
@@ -98,7 +97,7 @@ class SessionService:
 
     async def create_session(
         self, command: SessionCreate, actor: AuthContext
-    ) -> tuple[Session, bool]:
+    ) -> Session:
         """Create a session owned by the caller.
 
         A task principal's session is linked to the principal's task, which
@@ -109,9 +108,7 @@ class SessionService:
         session. The task, or the import it runs, is the source of truth for
         the agent and the agent version. The session takes the next number of
         its agent, allocated outside the request transaction, so a failed
-        create leaves a gap. A command repeating an imported_from and
-        external id pair the calling task already registered returns that
-        session instead of creating one.
+        create leaves a gap.
 
         Args:
             command: Fields for the new session.
@@ -137,10 +134,10 @@ class SessionService:
                 another agent.
             AgentNotFound: No agent has the resolved id.
             DuplicateSessionExternalId: The imported_from and external id pair is
-                already registered by another caller.
+                already registered.
 
         Returns:
-            Session and whether this call created it.
+            Created session.
         """
         task_id = None
         task = None
@@ -197,26 +194,7 @@ class SessionService:
             [p for p in (session.inputs, session.outputs) if p is not None],
             session.owner_id,
         )
-        try:
-            stored = await self._repository.create(session)
-        except DuplicateSessionExternalId:
-            # The constraint only fires when both identity fields are set, and
-            # only the task that registered the pair gets the session back.
-            if (
-                task_id is None
-                or session.imported_from is None
-                or session.external_id is None
-            ):
-                raise
-            existing = await self._repository.get_by_external_id(
-                session.imported_from,
-                session.external_id,
-                agent_id,
-                include_payloads=False,
-            )
-            if existing is not None and existing.task_id == task_id:
-                return existing, False
-            raise
+        stored = await self._repository.create(session)
         if isinstance(task, AgentTask):
             replay = await self._replays.get_by_job_id(task.job_id)
             if replay is not None:
@@ -228,7 +206,7 @@ class SessionService:
                 AnalyticsEvent.SESSION_COMPLETED,
                 analytics_events.build_session_completed_properties(stored),
             )
-        return stored, True
+        return stored
 
     async def _resolve_agent(
         self, command: SessionCreate, task: Task | None, import_: Import | None

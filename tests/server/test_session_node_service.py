@@ -55,6 +55,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session import SessionAccessDenied
+from kitaru.server.domain.session_node import SessionNodeParentChanged
 from kitaru.server.domain.task import AgentTask
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -369,41 +370,56 @@ async def test_ingest_links_both_reference_kinds_of_one_child(
     assert linked.secondary_parent_ids == [parents[1].id]
 
 
-async def test_ingest_replace_recomputes_the_pending_links(
+async def test_ingest_replace_rejects_a_changed_parent(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
-    """Drop the pending links of a replaced node before recording the new ones."""
+    """Reject a node sent again with a different primary parent."""
     await service.ingest_nodes(
-        session_id,
-        [_llm_node("n2", parent_external_id="n0", started_at=_start(2))],
-        actor=ACTOR,
+        session_id, [_llm_node("n2", parent_external_id="n0")], actor=ACTOR
     )
+
+    with pytest.raises(SessionNodeParentChanged):
+        await service.ingest_nodes(
+            session_id, [_llm_node("n2", parent_external_id="n1")], actor=ACTOR
+        )
+
+
+async def test_ingest_replace_rejects_changed_secondary_parents(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Reject a node sent again with different secondary parents."""
     await service.ingest_nodes(
         session_id,
-        [_llm_node("n2", parent_external_id="n1", started_at=_start(2))],
+        [_llm_node("n2", secondary_parent_external_ids=["n0"])],
         actor=ACTOR,
     )
 
-    dropped = await service.ingest_nodes(
-        session_id, [_llm_node("n0", started_at=_start(0))], actor=ACTOR
+    with pytest.raises(SessionNodeParentChanged):
+        await service.ingest_nodes(
+            session_id,
+            [_llm_node("n2", secondary_parent_external_ids=["n0", "n1"])],
+            actor=ACTOR,
+        )
+
+
+async def test_ingest_replace_keeps_the_pending_link(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Link a node sent twice before its parent once the parent lands."""
+    await service.ingest_nodes(
+        session_id, [_llm_node("n2", parent_external_id="n0")], actor=ACTOR
     )
+    await service.ingest_nodes(
+        session_id, [_llm_node("n2", parent_external_id="n0")], actor=ACTOR
+    )
+
+    parent = await service.ingest_nodes(session_id, [_llm_node("n0")], actor=ACTOR)
     nodes = await service.list_all_nodes(
         session_id, include_payloads=False, actor=ACTOR
     )
     child = next(node for node in nodes if node.external_id == "n2")
-    assert child.parent_id is None
-    assert child.parent_external_id == "n1"
 
-    kept = await service.ingest_nodes(
-        session_id, [_llm_node("n1", started_at=_start(1))], actor=ACTOR
-    )
-    nodes = await service.list_all_nodes(
-        session_id, include_payloads=False, actor=ACTOR
-    )
-    child = next(node for node in nodes if node.external_id == "n2")
-
-    assert child.parent_id == kept[0].id
-    assert child.parent_id != dropped[0].id
+    assert child.parent_id == parent[0].id
 
 
 async def test_ingest_inherits_the_parent_start(

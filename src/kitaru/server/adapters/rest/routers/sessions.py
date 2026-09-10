@@ -16,7 +16,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, status
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.evaluation import EvaluationResponse
@@ -70,41 +70,31 @@ router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.post(
-    "",
-    status_code=status.HTTP_201_CREATED,
-    responses={
-        status.HTTP_200_OK: {"model": SessionResponse, "description": "OK"},
-        **error_responses(400, 404, 409),
-    },
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 404, 409)
 )
 @idempotent
 async def create_session(
     body: SessionCreateRequest,
-    response: Response,
     service: Annotated[SessionService, Depends(get_session_service)],
     actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> SessionResponse:
     """Create a session.
 
     A task principal's session is always linked to its own task, regardless
-    of the request's task_id. Clients observe HTTP 201 when the call creates
-    the session, 200 with the session the calling task already registered
-    under the request's imported_from and external id pair, 409 when another
-    caller registered that pair, and 422 on invalid input.
+    of the request's task_id. Clients observe HTTP 201 on success, 409 when
+    the imported_from and external id pair is already registered, and 422 on
+    invalid input.
 
     Args:
         body: Session create request.
-        response: Response the status code is set on.
         service: Session service.
         actor: Caller context.
 
     Returns:
-        Created or already registered session.
+        Created session.
     """
     command = session_create_to_command(body)
-    session, created = await service.create_session(command, actor=actor)
-    if not created:
-        response.status_code = status.HTTP_200_OK
+    session = await service.create_session(command, actor=actor)
     return session_to_response(session)
 
 
@@ -225,10 +215,11 @@ async def ingest_session_nodes(
 ) -> list[SessionNodeResponse]:
     """Ingest a batch of session nodes.
 
-    An external id already stored is replaced whole, matching the upsert
-    semantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,
-    404 when no session has this id, and 409 when the session does not
-    currently accept node ingestion.
+    An external id already stored is replaced whole and keeps its parent
+    references, matching the upsert semantics of ``POST /api/v1/workers``.
+    Clients observe HTTP 200 on success, 404 when no session has this id,
+    409 when the session does not currently accept node ingestion, and 422
+    when a node already stored is sent again with different parents.
 
     Args:
         session_id: Id of the session to ingest into.

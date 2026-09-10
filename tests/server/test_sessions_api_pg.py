@@ -228,6 +228,49 @@ async def test_ingest_and_list_nodes_persist_across_requests(
     assert items[0]["inputs"] == {"q": "hi"}
 
 
+async def test_ingest_resends_a_child_before_its_parent(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Keep one pending link for a child sent twice, then resolve it."""
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(agent_id))
+    ).json()
+    child = {
+        "external_id": "n1",
+        "parent_external_id": "n0",
+        "node_type": "span",
+        "name": "child",
+        "status": "completed",
+        "inputs": None,
+        "outputs": None,
+        "attributes": None,
+        "metadata": {},
+    }
+    for _ in range(2):
+        response = await client.post(
+            f"/api/v1/sessions/{created['id']}/nodes", json={"nodes": [child]}
+        )
+        assert response.status_code == 200
+        assert response.json()[0]["parent_id"] is None
+
+    response = await client.post(
+        f"/api/v1/sessions/{created['id']}/nodes",
+        json={"nodes": [{**child, "parent_external_id": "n2"}]},
+    )
+    assert response.status_code == 422
+
+    response = await client.post(
+        f"/api/v1/sessions/{created['id']}/nodes",
+        json={"nodes": [{**child, "external_id": "n0", "parent_external_id": None}]},
+    )
+    assert response.status_code == 200
+    parent_id = response.json()[0]["id"]
+
+    response = await client.get(f"/api/v1/sessions/{created['id']}/nodes")
+    items = {item["external_id"]: item for item in response.json()["items"]}
+    assert items["n1"]["parent_id"] == parent_id
+
+
 async def test_ingest_into_terminal_recorded_session_rejected(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:

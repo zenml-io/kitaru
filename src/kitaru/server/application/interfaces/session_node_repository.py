@@ -93,14 +93,11 @@ class SessionNodeRepository(Protocol):
         """
         ...
 
-    async def replace_pending_links(
-        self, child_ids: Sequence[uuid.UUID], links: Sequence[PendingParentLink]
-    ) -> None:
-        """Replace the pending parent links of the given children.
+    async def add_pending_links(self, links: Sequence[PendingParentLink]) -> None:
+        """Store pending parent links.
 
         Args:
-            child_ids: Ids of the children whose pending links are dropped.
-            links: Pending links to store in their place.
+            links: Pending links to store.
         """
         ...
 

@@ -495,11 +495,6 @@ async def ingest_session(
 ) -> SessionResponse | None:
     """Create a session for one parsed import item and ingest its nodes.
 
-    A session the calling task already registered under the same
-    imported_from and external id pair is reused and its nodes are ingested
-    the same way as for a new session. A pair another caller registered
-    skips the item.
-
     Args:
         client: API client.
         parsed: Imported session.
@@ -513,8 +508,8 @@ async def ingest_session(
         SessionImportError: The imported node tree is invalid.
 
     Returns:
-        Session the nodes were ingested into, None when another caller
-        already registered the external id.
+        Created session, None when a session with the external id already
+        exists.
     """
     request = session_request(parsed, agent_id, provider, origin)
     try:
@@ -523,13 +518,20 @@ async def ingest_session(
         if exc.status_code == httpx.codes.CONFLICT:
             return None
         raise
-    nodes = flatten_nodes(parsed.nodes)
-    for start in range(0, len(nodes), NODE_BATCH_SIZE):
-        batch = nodes[start : start + NODE_BATCH_SIZE]
-        await client.sessions.ingest_nodes(
-            session.id, SessionNodeBatchRequest(nodes=batch)
-        )
+    await _ingest_nodes(client, session.id, parsed.nodes)
     return session
+
+
+async def _ingest_nodes(
+    client: KitaruAPIClient, session_id: uuid.UUID, nodes: list[ImportedNode]
+) -> None:
+    """Flatten imported nodes and ingest them into a session in batches."""
+    requests = flatten_nodes(nodes)
+    for start in range(0, len(requests), NODE_BATCH_SIZE):
+        batch = requests[start : start + NODE_BATCH_SIZE]
+        await client.sessions.ingest_nodes(
+            session_id, SessionNodeBatchRequest(nodes=batch)
+        )
 
 
 def _resolve_importer(details: ImportTaskDetails) -> tuple[Parser, Fetcher | None]:
@@ -619,7 +621,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
 
     created = 0
     skipped = 0
-    ingested: set[str] = set()
+    session_ids: dict[str, uuid.UUID] = {}
     failed = 0
     limit_reached = False
     failures: list[ImportFailure] = []
@@ -651,6 +653,13 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
                     limit_reached = True
                     break
                 try:
+                    # A session this run already created takes the nodes of a
+                    # repeated item instead of being created again.
+                    session_id = session_ids.get(item.external_id)
+                    if session_id is not None:
+                        await _ingest_nodes(client, session_id, item.nodes)
+                        skipped += 1
+                        continue
                     session = await ingest_session(
                         client, item, details.agent_id, details.provider
                     )
@@ -661,13 +670,11 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
                         )
                     )
                     continue
-                # A session this run already ingested was updated in place,
-                # and one another caller registered was left untouched.
-                if session is None or item.external_id in ingested:
+                if session is None:
                     skipped += 1
                 else:
                     created += 1
-                    ingested.add(item.external_id)
+                    session_ids[item.external_id] = session.id
             if limit_reached:
                 break
     except SessionImportError as exc:

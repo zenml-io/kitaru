@@ -24519,7 +24519,7 @@
         ]
       },
       "post": {
-        "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 when the call creates\nthe session, 200 with the session the calling task already registered\nunder the request's imported_from and external id pair, 409 when another\ncaller registered that pair, and 422 on invalid input.\n\nArgs:\n    body: Session create request.\n    response: Response the status code is set on.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created or already registered session.",
+        "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 on success, 409 when\nthe imported_from and external id pair is already registered, and 422 on\ninvalid input.\n\nArgs:\n    body: Session create request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created session.",
         "operationId": "create_session_api_v1_sessions_post",
         "parameters": [
           {
@@ -24550,16 +24550,6 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionResponse"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "201": {
             "content": {
               "application/json": {
@@ -25278,7 +25268,7 @@
         ]
       },
       "post": {
-        "description": "Ingest a batch of session nodes.\n\nAn external id already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, and 409 when the session does not\ncurrently accept node ingestion.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with reasoning, inputs, outputs, and\n    attributes null.",
+        "description": "Ingest a batch of session nodes.\n\nAn external id already stored is replaced whole and keeps its parent\nreferences, matching the upsert semantics of ``POST /api/v1/workers``.\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the session does not currently accept node ingestion, and 422\nwhen a node already stored is sent again with different parents.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with reasoning, inputs, outputs, and\n    attributes null.",
         "operationId": "ingest_session_nodes_api_v1_sessions__session_id__nodes_post",
         "parameters": [
           {

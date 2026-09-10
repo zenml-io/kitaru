@@ -43,6 +43,7 @@ from kitaru.server.domain.session_node import (
     PendingLinkKind,
     PendingParentLink,
     SessionNode,
+    SessionNodeParentChanged,
     node_rollup_contribution,
 )
 
@@ -118,12 +119,13 @@ class SessionNodeService:
         """Upsert a batch of nodes on (session, external id).
 
         An external id already stored is replaced whole, keeping the node
-        id. ``parent_external_id`` and ``secondary_parent_external_ids``
-        resolve against stored rows, and a reference that resolves to none
-        of them is recorded as a pending link that the batch carrying its
-        target resolves. The session's cost, tokens, and call counts roll up
-        by one atomic delta-based update covering the whole batch. A task
-        principal ingests only into a session it owns.
+        id and its parent references. ``parent_external_id`` and
+        ``secondary_parent_external_ids`` resolve against stored rows, and a
+        reference that resolves to none of them is recorded as a pending
+        link that the batch carrying its target resolves. The session's
+        cost, tokens, and call counts roll up by one atomic delta-based
+        update covering the whole batch. A task principal ingests only into
+        a session it owns.
 
         Args:
             session_id: Id of the session to ingest into.
@@ -135,6 +137,8 @@ class SessionNodeService:
             SessionAccessDenied: A task principal does not own the session.
             SessionNotIngestable: The session is not in progress, its origin
                 is not imported, and it names no import source.
+            SessionNodeParentChanged: A node already stored is sent again
+                with different parent references.
 
         Returns:
             Stored nodes in batch order, without payloads.
@@ -190,6 +194,12 @@ class SessionNodeService:
                     )
 
             existing_node = existing_by_external_id.get(item.external_id)
+            if existing_node is not None and (
+                item.parent_external_id != existing_node.parent_external_id
+                or item.secondary_parent_external_ids
+                != existing_node.secondary_parent_external_ids
+            ):
+                raise SessionNodeParentChanged(item.external_id)
             started_at = _resolve_started_at(item.started_at, parent)
             cache_key = None
             if item.node_type == NodeType.TOOL_CALL and item.tool_name is not None:
@@ -238,17 +248,20 @@ class SessionNodeService:
             )
             resolved.append(node)
             known_by_external_id[item.external_id] = node
-            # Deduplicated because one child holds at most one pending link
-            # per parent reference and kind.
-            pending_links.extend(
-                PendingParentLink(
-                    session_id=session_id,
-                    parent_external_id=external_id,
-                    child_id=node.id,
-                    kind=kind,
+            # A replaced node keeps its parent references, so the links its
+            # earlier write recorded still stand. Deduplicated because one
+            # child holds at most one pending link per parent reference and
+            # kind.
+            if existing_node is None:
+                pending_links.extend(
+                    PendingParentLink(
+                        session_id=session_id,
+                        parent_external_id=external_id,
+                        child_id=node.id,
+                        kind=kind,
+                    )
+                    for external_id, kind in dict.fromkeys(unresolved)
                 )
-                for external_id, kind in dict.fromkeys(unresolved)
-            )
 
         deltas = [
             rollup_delta(
@@ -261,12 +274,7 @@ class SessionNodeService:
             _get_node_payloads(resolved), session.owner_id
         )
         stored = await self._repository.upsert_batch(session_id, resolved)
-        # Only a replaced node can hold links from an earlier write, so a
-        # batch of new nodes never issues the delete.
-        replaced_ids = [
-            node.id for node in resolved if node.external_id in existing_by_external_id
-        ]
-        await self._repository.replace_pending_links(replaced_ids, pending_links)
+        await self._repository.add_pending_links(pending_links)
         relinked = await self._repository.link_pending_parents(session_id, resolved)
         await self._sessions.apply_rollups(session_id, combine_rollups(deltas))
         relinked_by_id = {node.id: node for node in relinked}

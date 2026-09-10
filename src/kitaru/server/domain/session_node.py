@@ -23,7 +23,7 @@ from pydantic import Field
 
 from kitaru.api_models.v1.session import TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.server.domain.base import ConflictError, DomainModel
+from kitaru.server.domain.base import ConflictError, DomainModel, ValidationError
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import SessionRollups
@@ -40,6 +40,20 @@ class DuplicateSessionNodeExternalId(ConflictError):
         """
         super().__init__(
             f"Session {session_id} already holds a node with one of these external ids"
+        )
+
+
+class SessionNodeParentChanged(ValidationError):
+    """Raised when a node sent again names different parents than the stored node."""
+
+    def __init__(self, external_id: str) -> None:
+        """Initialize the error.
+
+        Args:
+            external_id: External id of the node whose parents changed.
+        """
+        super().__init__(
+            f"Node {external_id} names different parents than the stored node"
         )
 
 
