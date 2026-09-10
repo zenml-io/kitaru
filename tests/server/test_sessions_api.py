@@ -210,10 +210,10 @@ async def test_create_session(client: httpx.AsyncClient) -> None:
     assert body["owner_id"] == str(ACCOUNT.id)
 
 
-async def test_create_session_repeated_external_id(
+async def test_create_session_duplicate_external_id(
     client: httpx.AsyncClient,
 ) -> None:
-    """Observe HTTP 200 and the stored session for a repeated external id."""
+    """Observe HTTP 409 for a duplicated imported_from and external id pair."""
     agent_id = str(uuid.uuid4())
     body = _session_body(
         agent_id=agent_id,
@@ -224,11 +224,9 @@ async def test_create_session_repeated_external_id(
     created = await client.post("/api/v1/sessions", json=body)
     assert created.status_code == 201
 
-    response = await client.post("/api/v1/sessions", json={**body, "name": "resent"})
+    response = await client.post("/api/v1/sessions", json=body)
 
-    assert response.status_code == 200
-    assert response.json()["id"] == created.json()["id"]
-    assert response.json()["name"] == created.json()["name"]
+    assert response.status_code == 409
 
 
 async def test_create_session_same_external_id_different_agent(

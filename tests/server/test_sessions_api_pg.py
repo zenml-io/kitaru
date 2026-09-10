@@ -96,20 +96,17 @@ async def test_sessions_number_sequentially_per_agent(
     assert other["number"] == 1
 
 
-async def test_repeated_external_id_returns_the_stored_session(
+async def test_duplicate_external_id_conflict(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Translate the database constraint into HTTP 200 and the stored session."""
+    """Translate the database constraint into HTTP 409."""
     body = _session_body(
         agent_id, origin="imported", imported_from="langsmith", external_id="run-1"
     )
-    created = await client.post("/api/v1/sessions", json=body)
-    assert created.status_code == 201
-
     response = await client.post("/api/v1/sessions", json=body)
-
-    assert response.status_code == 200
-    assert response.json()["id"] == created.json()["id"]
+    assert response.status_code == 201
+    response = await client.post("/api/v1/sessions", json=body)
+    assert response.status_code == 409
 
 
 async def test_external_id_reuse_after_agent_delete(
@@ -127,11 +124,10 @@ async def test_external_id_reuse_after_agent_delete(
     body = _session_body(
         other["id"], origin="imported", imported_from="langsmith", external_id="run-1"
     )
-    created = await client.post("/api/v1/sessions", json=body)
-    assert created.status_code == 201
     response = await client.post("/api/v1/sessions", json=body)
-    assert response.status_code == 200
-    assert response.json()["id"] == created.json()["id"]
+    assert response.status_code == 201
+    response = await client.post("/api/v1/sessions", json=body)
+    assert response.status_code == 409
 
 
 async def test_update_persists_across_requests(

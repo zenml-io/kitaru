@@ -123,8 +123,7 @@ class SessionNodeService:
         of them is recorded as a pending link that the batch carrying its
         target resolves. The session's cost, tokens, and call counts roll up
         by one atomic delta-based update covering the whole batch. A task
-        principal ingests only into a session it owns or into an imported
-        session.
+        principal ingests only into a session it owns.
 
         Args:
             session_id: Id of the session to ingest into.
@@ -133,8 +132,7 @@ class SessionNodeService:
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionAccessDenied: A task principal neither owns the session
-                nor writes into an imported one.
+            SessionAccessDenied: A task principal does not own the session.
             SessionNotIngestable: The session is not in progress, its origin
                 is not imported, and it names no import source.
 
@@ -148,7 +146,7 @@ class SessionNodeService:
         session = await self._sessions.get(
             session_id, include_payloads=False, exclusive=True
         )
-        check_task_session_write(session, actor)
+        check_task_session_write(session_id, session.task_id, actor)
         await check_task_attempt(actor, self._tasks)
         session.check_node_ingest()
         if not batch:

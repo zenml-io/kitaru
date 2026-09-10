@@ -785,28 +785,84 @@ async def test_delete_session_restricted_by_replay_baseline(
         await service.delete_session(created.id, actor=ACTOR)
 
 
-async def test_create_session_returns_the_registered_external_id(
+async def test_create_session_duplicate_external_id_conflict(
     service: SessionService,
 ) -> None:
-    """Return the stored session for a repeated imported_from and external id."""
+    """Reject a duplicate imported_from and external id pair under one agent."""
     agent_id = uuid.uuid4()
+    await service.create_session(
+        SessionCreate(
+            agent_id=agent_id,
+            origin=SessionOrigin.IMPORTED,
+            imported_from="langsmith",
+            external_id="run-1",
+        ),
+        actor=ACTOR,
+    )
+    with pytest.raises(Exception, match="already registered"):
+        await service.create_session(
+            SessionCreate(
+                agent_id=agent_id,
+                origin=SessionOrigin.IMPORTED,
+                imported_from="langsmith",
+                external_id="run-1",
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_session_returns_the_external_id_its_task_registered(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    import_repository: FakeImportRepository,
+) -> None:
+    """Return the stored session for a pair the calling task already registered."""
+    task, _ = await _running_import_task(
+        task_repository, import_repository, uuid.uuid4()
+    )
     command = SessionCreate(
-        agent_id=agent_id,
         origin=SessionOrigin.IMPORTED,
         imported_from="langsmith",
         external_id="run-1",
         name="first",
     )
-    first, created = await service.create_session(command, actor=ACTOR)
+    first, created = await service.create_session(
+        command, actor=_task_principal(task.id)
+    )
     assert created is True
 
     second, created_again = await service.create_session(
-        command.model_copy(update={"name": "second"}), actor=ACTOR
+        command.model_copy(update={"name": "second"}),
+        actor=_task_principal(task.id),
     )
 
     assert created_again is False
     assert second.id == first.id
     assert second.name == "first"
+
+
+async def test_create_session_rejects_the_external_id_another_task_registered(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    import_repository: FakeImportRepository,
+) -> None:
+    """Reject a pair another task registered under the same agent."""
+    agent_id = uuid.uuid4()
+    first_task, _ = await _running_import_task(
+        task_repository, import_repository, agent_id
+    )
+    second_task, _ = await _running_import_task(
+        task_repository, import_repository, agent_id
+    )
+    command = SessionCreate(
+        origin=SessionOrigin.IMPORTED,
+        imported_from="langsmith",
+        external_id="run-1",
+    )
+    await service.create_session(command, actor=_task_principal(first_task.id))
+
+    with pytest.raises(Exception, match="already registered"):
+        await service.create_session(command, actor=_task_principal(second_task.id))
 
 
 async def test_create_session_separates_agents_on_one_external_id(

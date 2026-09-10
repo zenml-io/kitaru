@@ -4671,7 +4671,7 @@
             "type": "boolean"
           },
           "skipped": {
-            "description": "Sessions that already existed and were updated in place.",
+            "description": "Sessions skipped as duplicates.",
             "title": "Skipped",
             "type": "integer"
           }
@@ -24519,7 +24519,7 @@
         ]
       },
       "post": {
-        "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 when the call creates\nthe session, 200 with the session already registered under the request's\nimported_from and external id pair, and 422 on invalid input.\n\nArgs:\n    body: Session create request.\n    response: Response the status code is set on.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created or already registered session.",
+        "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 when the call creates\nthe session, 200 with the session the calling task already registered\nunder the request's imported_from and external id pair, 409 when another\ncaller registered that pair, and 422 on invalid input.\n\nArgs:\n    body: Session create request.\n    response: Response the status code is set on.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created or already registered session.",
         "operationId": "create_session_api_v1_sessions_post",
         "parameters": [
           {

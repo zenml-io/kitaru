@@ -94,7 +94,7 @@ Pass `project` through `--query '{"project": "my-project"}'`. The worker install
 
 ## What becomes a session
 
-Each Phoenix trace becomes one Kitaru session. Its `external_id` is `<source_instance>:<trace_id>`, so importing the same trace with the same project identity into the same agent adds the new batch to the session that's already there. Nodes are matched by their own external id: an existing node is replaced and a new one is added. Earlier bare trace IDs do not match these prefixed IDs. Overlapping re-imports of those can therefore create additional sessions. Phoenix session or conversation attributes remain on the span; the importer does not join several traces into one multi-turn session.
+Each Phoenix trace becomes one Kitaru session. Its `external_id` is `<source_instance>:<trace_id>`, so importing the same trace with the same project identity into the same agent skips it. Earlier bare trace IDs do not match these prefixed IDs. Overlapping re-imports of those can therefore create additional sessions. Phoenix session or conversation attributes remain on the span; the importer does not join several traces into one multi-turn session.
 
 Every exported span becomes a node. The importer sorts spans by time and reconstructs their parent relationships instead of trusting export order.
 

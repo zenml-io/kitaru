@@ -804,31 +804,6 @@ async def test_ingest_nodes_allows_a_task_principal_for_its_own_session(
     assert len(stored) == 1
 
 
-async def test_ingest_nodes_allows_a_task_principal_for_an_imported_session(
-    service: SessionNodeService,
-    session_repository: FakeSessionRepository,
-    task_repository: FakeTaskRepository,
-) -> None:
-    """Allow a task principal to ingest nodes into a session another task imported."""
-    task = await task_repository.create(
-        AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4(), attempt=1)
-    )
-    session = await create_session(
-        session_repository,
-        uuid.uuid4(),
-        agent_id=uuid.uuid4(),
-        task_id=uuid.uuid4(),
-        origin=SessionOrigin.IMPORTED,
-        status=SessionStatus.COMPLETED,
-    )
-
-    stored = await service.ingest_nodes(
-        session.id, [_llm_node("n0")], actor=_task_principal(task.id)
-    )
-
-    assert len(stored) == 1
-
-
 async def test_list_nodes_denies_a_task_principal_for_another_tasks_session(
     service: SessionNodeService, session_repository: FakeSessionRepository
 ) -> None:

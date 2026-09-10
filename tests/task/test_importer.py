@@ -1089,10 +1089,10 @@ def parse(payload: bytes, params: dict):
 """
 
 
-async def test_run_ingests_into_a_session_created_by_another_task(
+async def test_run_skips_a_session_created_by_another_task(
     task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Count a session another task already created as skipped and ingest into it."""
+    """Count a session another task already created as skipped and leave it alone."""
     first_task_id, first_plugin_path = await _create_importer_task(
         task_app,
         _SHARED_EXTERNAL_ID_PARSER_SCRIPT,
@@ -1143,10 +1143,7 @@ async def test_run_ingests_into_a_session_created_by_another_task(
     )
     assert len(sessions_page.items) == 1
     nodes_page = await task_app.client.sessions.list_nodes(sessions_page.items[0].id)
-    assert {node.external_id for node in nodes_page.items} == {
-        "first-node",
-        "second-node",
-    }
+    assert [node.external_id for node in nodes_page.items] == ["first-node"]
 
 
 _API_FETCH_PARSER_SCRIPT = """

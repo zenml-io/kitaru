@@ -20,6 +20,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
+import httpx
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.imports import MAX_IMPORT_FAILURES, ImportFailure, ImportStats
@@ -491,11 +492,13 @@ async def ingest_session(
     agent_id: uuid.UUID | None,
     provider: str | None,
     origin: SessionOrigin = SessionOrigin.IMPORTED,
-) -> SessionResponse:
-    """Create or reuse a session for one parsed import item and ingest its nodes.
+) -> SessionResponse | None:
+    """Create a session for one parsed import item and ingest its nodes.
 
-    A session whose external id already exists is reused instead of created,
-    and its nodes are ingested the same way as for a new session.
+    A session the calling task already registered under the same
+    imported_from and external id pair is reused and its nodes are ingested
+    the same way as for a new session. A pair another caller registered
+    skips the item.
 
     Args:
         client: API client.
@@ -510,10 +513,16 @@ async def ingest_session(
         SessionImportError: The imported node tree is invalid.
 
     Returns:
-        Session the nodes were ingested into, new or reused.
+        Session the nodes were ingested into, None when another caller
+        already registered the external id.
     """
     request = session_request(parsed, agent_id, provider, origin)
-    session = await client.sessions.create(request)
+    try:
+        session = await client.sessions.create(request)
+    except APIError as exc:
+        if exc.status_code == httpx.codes.CONFLICT:
+            return None
+        raise
     nodes = flatten_nodes(parsed.nodes)
     for start in range(0, len(nodes), NODE_BATCH_SIZE):
         batch = nodes[start : start + NODE_BATCH_SIZE]
@@ -652,13 +661,13 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
                         )
                     )
                     continue
-                # A session this run already ingested, or one another task
-                # created, was updated in place rather than created here.
-                if item.external_id in ingested or session.task_id != task_uuid:
+                # A session this run already ingested was updated in place,
+                # and one another caller registered was left untouched.
+                if session is None or item.external_id in ingested:
                     skipped += 1
                 else:
                     created += 1
-                ingested.add(item.external_id)
+                    ingested.add(item.external_id)
             if limit_reached:
                 break
     except SessionImportError as exc:
