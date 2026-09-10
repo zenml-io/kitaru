@@ -215,7 +215,7 @@ class ImportStats(ResponseModel):
 
     created: int = Field(description="Sessions created.")
     skipped: int = Field(
-        description="Sessions that already existed and received the batch."
+        description="Sessions that already existed and were updated in place."
     )
     failed: int = Field(description="Items that failed to import.")
     failures: list[ImportFailure] = Field(

@@ -653,7 +653,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
                     )
                     continue
                 # A session this run already ingested, or one another task
-                # created, received the batch but was not created here.
+                # created, was updated in place rather than created here.
                 if item.external_id in ingested or session.task_id != task_uuid:
                     skipped += 1
                 else:

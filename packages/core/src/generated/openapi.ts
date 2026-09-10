@@ -6742,7 +6742,7 @@ export interface components {
             limit_reached: boolean;
             /**
              * Skipped
-             * @description Sessions that already existed and received the batch.
+             * @description Sessions that already existed and were updated in place.
              */
             skipped: number;
         };
