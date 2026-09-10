@@ -94,7 +94,7 @@ Trimming whitespace also changes any earlier identity that included surrounding 
 
 ## Re-runs skip existing sessions
 
-Every imported session keeps its source identity (`imported_from` + `external_id`). This pair is unique per destination agent. Importing the same export twice with the same identity adds the new batch to the session that's already there instead of duplicating it. Nodes are matched by their own external id: an existing node is replaced and a new one is added. The receipt reports these sessions as `skipped`, meaning they already existed and received the batch. Changing project identity or the grouping key can create additional sessions.
+Every imported session keeps its source identity (`imported_from` + `external_id`). This pair is unique per destination agent. Importing the same export twice with the same identity adds the new batch to the session that's already there instead of duplicating it. Nodes are matched by their own external id: an existing node is replaced and a new one is added. The receipt reports these sessions as `skipped`, meaning they already existed and were updated in place. Changing project identity or the grouping key can create additional sessions.
 
 {% hint style="warning" %} An import stores the parsed trace content (prompts, tool arguments, tool results) on your Kitaru server. The server is self-hosted, but check your own access and retention rules before importing exports that contain customer data. {% endhint %}
 

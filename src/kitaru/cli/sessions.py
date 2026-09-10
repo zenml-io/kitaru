@@ -314,7 +314,7 @@ def _terminal_import_result(
         warnings.extend(_format_import_failure(failure) for failure in stats.failures)
     if stats.skipped:
         warnings.append(
-            f"{stats.skipped} session(s) already existed and received the batch."
+            f"{stats.skipped} session(s) already existed and were updated in place."
         )
     if stats.limit_reached:
         warnings.append(
