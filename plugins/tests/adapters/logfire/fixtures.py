@@ -30,6 +30,7 @@ import kitaru_logfire_importer.adapter as adapter_module
 import kitaru_logfire_importer.api as api_module
 
 RowsBuilder = Callable[[str], list[dict[str, Any]]]
+BatchRowsBuilder = Callable[[list[str]], list[dict[str, Any]]]
 
 PROJECT_ID = "project-1"
 READ_TOKEN = "test-read-token"
@@ -43,13 +44,22 @@ _POLL_SQL_PATTERN = re.compile(
 _FETCH_SQL_PATTERN = re.compile(
     r"SELECT \* FROM records WHERE trace_id = '(?P<trace_id>[0-9a-f]{32})'"
 )
+_BATCH_SQL_PATTERN = re.compile(
+    r"SELECT \* FROM records WHERE trace_id IN "
+    r"\((?P<ids>'[0-9a-f]{32}'(?:, '[0-9a-f]{32}')*)\)"
+)
 _LIST_SQL_PATTERN = re.compile(
-    r"SELECT DISTINCT trace_id, start_timestamp FROM records "
+    r"SELECT DISTINCT trace_id, start_timestamp, attributes FROM records "
     r"WHERE parent_span_id IS NULL "
     r"AND start_timestamp >= '(?P<since>[^']+)' "
     r"AND start_timestamp <= '(?P<until>[^']+)' "
     r"ORDER BY start_timestamp"
 )
+
+
+def rows_for_ids(build: RowsBuilder) -> BatchRowsBuilder:
+    """Adapt a single-trace row builder into a batch builder over trace ids."""
+    return lambda trace_ids: [row for trace_id in trace_ids for row in build(trace_id)]
 
 
 def build_row(
@@ -132,9 +142,18 @@ def build_conversation_rows(
     ]
 
 
-def build_list_row(trace_id: str, start_timestamp: str) -> dict[str, Any]:
+def build_list_row(
+    trace_id: str,
+    start_timestamp: str,
+    *,
+    attributes: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Build one trace-listing result row."""
-    return {"trace_id": trace_id, "start_timestamp": start_timestamp}
+    return {
+        "trace_id": trace_id,
+        "start_timestamp": start_timestamp,
+        "attributes": attributes or {},
+    }
 
 
 def ndjson(rows: list[dict[str, Any]]) -> bytes:
@@ -233,6 +252,31 @@ class _FakeAsyncClient:
             finally:
                 self._fake.in_flight -= 1
 
+        batch_match = _BATCH_SQL_PATTERN.fullmatch(json["sql"])
+        if batch_match is not None:
+            trace_ids = re.findall(r"'([0-9a-f]{32})'", batch_match["ids"])
+            self._fake.in_flight += 1
+            self._fake.peak_in_flight = max(
+                self._fake.peak_in_flight, self._fake.in_flight
+            )
+            try:
+                if self._fake.fetch_delays:
+                    await asyncio.sleep(self._fake.fetch_delays.pop(0))
+                if self._fake.raise_once is not None:
+                    error = self._fake.raise_once
+                    self._fake.raise_once = None
+                    return _FakeResponse(error=error)
+                self._fake.requested.extend(trace_ids)
+                self._fake.requested_batches.append(trace_ids)
+                self._fake.batch_min_timestamps.append(json["min_timestamp"])
+                self._fake.events.append("batch")
+                assert self._fake.batch_builders, "unexpected records batch fetch"
+                return _FakeResponse(
+                    ndjson(self._fake.batch_builders.pop(0)(trace_ids))
+                )
+            finally:
+                self._fake.in_flight -= 1
+
         list_match = _LIST_SQL_PATTERN.fullmatch(json["sql"])
         assert list_match is not None, f"unexpected query: {json['sql']}"
         self._fake.list_min_timestamps.append(json["min_timestamp"])
@@ -248,10 +292,13 @@ class FakeLogfire:
     def __init__(self) -> None:
         self.poll_builders: list[RowsBuilder] = []
         self.fetch_builders: list[RowsBuilder] = []
+        self.batch_builders: list[BatchRowsBuilder] = []
         self.list_builders: list[Callable[[], list[dict[str, Any]]]] = []
         self.requested: list[str] = []
+        self.requested_batches: list[list[str]] = []
         self.poll_min_timestamps: list[datetime] = []
         self.fetch_min_timestamps: list[str] = []
+        self.batch_min_timestamps: list[str] = []
         self.list_min_timestamps: list[str] = []
         self.list_max_timestamps: list[str] = []
         self.events: list[str] = []

@@ -13,12 +13,13 @@
 #  permissions and limitations under the License.
 """Shared LangSmith SDK fakes for the LangSmith adapter."""
 
+import re
 import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -30,6 +31,8 @@ import kitaru_langsmith_importer.api as api_module
 RunsBuilder = Callable[[str], list[Run]]
 
 PROJECT_ID = "11111111-1111-4111-8111-111111111111"
+
+_RANGE_FILTER_RE = re.compile(r'lt\(start_time, "(?P<until>[^"]+)"\)')
 
 
 def build_run(
@@ -74,6 +77,65 @@ def build_complete_runs(trace_id: str) -> list[Run]:
             extra={"metadata": {"ls_model_name": "gpt-5-nano"}},
         ),
     ]
+
+
+def build_root_run(
+    trace_id: str,
+    *,
+    start_time: datetime,
+    end_time: datetime | None = None,
+    thread_id: str | None = None,
+) -> Run:
+    """Build one root run, its id and trace id equal to trace_id."""
+    kwargs: dict[str, Any] = (
+        {"extra": {"metadata": {"thread_id": thread_id}}} if thread_id else {}
+    )
+    return build_run(
+        trace_id,
+        trace_id,
+        start_time=start_time,
+        end_time=end_time or start_time + timedelta(seconds=2),
+        **kwargs,
+    )
+
+
+def build_child_run(
+    trace_id: str,
+    *,
+    start_time: datetime,
+    end_time: datetime | None = None,
+    name: str = "llm-call",
+) -> Run:
+    """Build one non-root run of a trace."""
+    run_id = str(
+        uuid.uuid5(uuid.NAMESPACE_OID, f"{trace_id}-{name}-{start_time.isoformat()}")
+    )
+    return build_run(
+        run_id,
+        trace_id,
+        parent_run_id=trace_id,
+        name=name,
+        run_type="llm",
+        start_time=start_time,
+        end_time=end_time or start_time + timedelta(minutes=1),
+    )
+
+
+def seed_range_runs(fake: "FakeLangSmith", roots: list[Run]) -> None:
+    """Populate the fake's range listing pool with each root and a matching child.
+
+    Args:
+        fake: Fake LangSmith SDK to populate.
+        roots: Root runs to seed, each paired with one child run starting
+            one second later.
+    """
+    for root in roots:
+        fake.range_runs.append(root)
+        fake.range_runs.append(
+            build_child_run(
+                str(root.trace_id), start_time=root.start_time + timedelta(seconds=1)
+            )
+        )
 
 
 class FakeRunTree:
@@ -126,16 +188,48 @@ class FakeLangSmithClient:
             finally:
                 with self._fake.lock:
                     self._fake.in_flight -= 1
-        self._fake.root_listing_calls.append(
-            {
-                "project_name": project_name,
-                "is_root": is_root,
-                "start_time": start_time,
-                "filter": filter,
-            }
-        )
-        assert self._fake.root_run_listings, "unexpected root run listing"
-        return iter(self._fake.root_run_listings.pop(0))
+        if is_root:
+            self._fake.root_listing_calls.append(
+                {
+                    "project_name": project_name,
+                    "is_root": is_root,
+                    "start_time": start_time,
+                    "filter": filter,
+                }
+            )
+            assert self._fake.root_run_listings, "unexpected root run listing"
+            return iter(self._fake.root_run_listings.pop(0))
+        assert start_time is not None and filter is not None
+        match = _RANGE_FILTER_RE.fullmatch(filter)
+        assert match is not None, f"unexpected range filter {filter!r}"
+        until = datetime.fromisoformat(match["until"])
+        with self._fake.lock:
+            self._fake.range_in_flight += 1
+            self._fake.range_peak_in_flight = max(
+                self._fake.range_peak_in_flight, self._fake.range_in_flight
+            )
+            delay = self._fake.range_delays.pop(0) if self._fake.range_delays else 0.0
+        try:
+            if delay:
+                time.sleep(delay)
+            with self._fake.lock:
+                self._fake.range_calls.append(
+                    {
+                        "project_name": project_name,
+                        "start_time": start_time,
+                        "filter": filter,
+                    }
+                )
+            return iter(
+                [
+                    run
+                    for run in self._fake.range_runs
+                    if start_time <= run.start_time < until
+                ]
+            )
+        finally:
+            with self._fake.lock:
+                self._fake.range_in_flight -= 1
 
 
 class FakeLangSmith:
@@ -148,6 +242,11 @@ class FakeLangSmith:
         self.pinned_run_ids: list[uuid.UUID] = []
         self.root_run_listings: list[list[Run]] = []
         self.root_listing_calls: list[dict[str, Any]] = []
+        self.range_runs: list[Run] = []
+        self.range_calls: list[dict[str, Any]] = []
+        self.range_delays: list[float] = []
+        self.range_in_flight = 0
+        self.range_peak_in_flight = 0
         self.default_project_name = "fake-default-project"
         self.fetch_delays: list[float] = []
         self.in_flight = 0

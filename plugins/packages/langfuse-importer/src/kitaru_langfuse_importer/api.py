@@ -15,10 +15,11 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Sequence
-from datetime import datetime
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
+from datetime import datetime, timedelta
 from functools import partial
-from typing import Any
+from typing import Any, NamedTuple
 
 from langfuse import get_client
 from langfuse.api import (
@@ -32,7 +33,7 @@ from langfuse.api.core import ApiError, RequestOptions
 from pydantic import ConfigDict
 
 from kitaru.api_models.v1.imports import ImportQuery
-from kitaru.task.importer import gather_bounded, retry_rate_limited
+from kitaru.task.importer import retry_rate_limited, stream_bounded
 
 __all__ = [
     "fetch",
@@ -50,7 +51,12 @@ _DEFAULT_RETRY_AFTER = 60.0
 # carries id, traceId, startTime, endTime, and parentObservationId; "basic"
 # carries name, level, statusMessage, environment, and version.
 _OBSERVATION_FIELDS = "core,basic,io,metadata,model,usage,prompt"
-_OBSERVATION_LIMIT = 100
+_OBSERVATION_LIMIT = 500
+# Listed traces whose start times span one observations request.
+_TRACES_PER_BATCH = 25
+# Added past the latest trace end so the last batch's exclusive upper bound
+# still covers observations starting at that end.
+_BATCH_END_MARGIN = timedelta(seconds=1)
 # Metadata keys the parser reads through nested lookups, exempted from the
 # endpoint's default 200-character truncation of metadata values.
 _EXPAND_METADATA = "attributes,resourceAttributes"
@@ -205,11 +211,12 @@ async def _list_traces(
         page += 1
 
 
-async def _list_observations(trace_id: str) -> list[dict[str, Any]]:
-    """List every observation of one trace through the bulk v2 endpoint.
+async def _list_observations(**filters: Any) -> list[dict[str, Any]]:
+    """List every observation matching the filters through the bulk v2 endpoint.
 
     Args:
-        trace_id: Langfuse trace id.
+        filters: Query filters passed to the endpoint, such as a trace id or
+            a start time range.
 
     Returns:
         Observation payload dicts, in listing order.
@@ -221,12 +228,12 @@ async def _list_observations(trace_id: str) -> list[dict[str, Any]]:
         response = await retry_rate_limited(
             partial(
                 api.observations.get_many,
-                trace_id=trace_id,
                 fields=_OBSERVATION_FIELDS,
                 expand_metadata=_EXPAND_METADATA,
                 limit=_OBSERVATION_LIMIT,
                 cursor=cursor,
                 request_options=_REQUEST_OPTIONS,
+                **filters,
             ),
             _get_retry_after,
         )
@@ -238,21 +245,137 @@ async def _list_observations(trace_id: str) -> list[dict[str, Any]]:
             return observations
 
 
-async def _assemble_trace_payload(
-    trace: TraceWithDetails | TraceWithFullDetails,
-) -> dict[str, Any]:
-    """Assemble one trace row and its observations into a parser payload record.
+def _get_session_group_key(trace: TraceWithDetails) -> str:
+    """Return the session grouping key the parser's default join would use.
 
     Args:
-        trace: Trace row from listing or a single trace fetch.
+        trace: Listed trace row.
 
     Returns:
-        Trace payload dict with a populated observations list.
+        The trace's session id when it is a non-empty string, its own id
+        otherwise.
     """
-    payload = trace.model_dump(mode="json", by_alias=True)
-    # The window selects trace starts; children may start outside those bounds.
-    payload["observations"] = await _list_observations(trace.id)
-    return payload
+    if isinstance(trace.session_id, str) and trace.session_id:
+        return trace.session_id
+    return trace.id
+
+
+def _get_trace_end(trace: TraceWithDetails) -> datetime:
+    """Return the trace end time from its timestamp and latency.
+
+    Args:
+        trace: Listed trace row.
+
+    Returns:
+        Trace end time, the timestamp itself when latency is unknown.
+    """
+    return trace.timestamp + timedelta(seconds=trace.latency or 0.0)
+
+
+class _Batch(NamedTuple):
+    """Observation start time range, inclusive start and exclusive end."""
+
+    start: datetime
+    end: datetime
+
+
+def _split_batches(traces: list[TraceWithDetails], since: datetime) -> list[_Batch]:
+    """Cut the listed traces into contiguous observation start time ranges.
+
+    Args:
+        traces: Listed trace rows, oldest first.
+        since: Lower bound of the listing window.
+
+    Returns:
+        Batches in listing order. Each one starts where the previous ended,
+        the first at since, and the last reaches past every trace end.
+    """
+    starts = [
+        traces[index].timestamp for index in range(0, len(traces), _TRACES_PER_BATCH)
+    ]
+    final_end = max(_get_trace_end(trace) for trace in traces) + _BATCH_END_MARGIN
+    batches: list[_Batch] = []
+    start = since
+    for end in [*starts[1:], final_end]:
+        end = max(start, end)
+        batches.append(_Batch(start, end))
+        start = end
+    return batches
+
+
+async def _fetch_batch(batch: _Batch) -> tuple[_Batch, list[dict[str, Any]]]:
+    """Fetch every observation starting within one batch's time range.
+
+    Args:
+        batch: Observation start time range.
+
+    Returns:
+        The batch and its observation payload dicts, none for an empty range.
+    """
+    if batch.end <= batch.start:
+        return batch, []
+    observations = await _list_observations(
+        from_start_time=batch.start, to_start_time=batch.end
+    )
+    return batch, observations
+
+
+class _WindowAssembler:
+    """Collect batch observations and release sessions whose traces have all ended."""
+
+    def __init__(self, traces: list[TraceWithDetails]) -> None:
+        self._traces = {trace.id: trace for trace in traces}
+        self._observations: dict[str, list[dict[str, Any]]] = {
+            trace.id: [] for trace in traces
+        }
+        self._groups: dict[str, list[str]] = {}
+        for trace in traces:
+            self._groups.setdefault(_get_session_group_key(trace), []).append(trace.id)
+        self._pending = list(self._groups)
+
+    def add(self, observations: list[dict[str, Any]]) -> None:
+        """Bucket observations by trace, dropping those of unlisted traces.
+
+        Args:
+            observations: Observation payload dicts from one batch.
+        """
+        # A batch range also catches observations of traces that started
+        # before the window, which the listing did not select.
+        for observation in observations:
+            bucket = self._observations.get(observation.get("traceId"))
+            if bucket is not None:
+                bucket.append(observation)
+
+    def release(self, fetched_until: datetime) -> list[dict[str, Any]]:
+        """Remove and return the traces of every session complete up to a time.
+
+        Args:
+            fetched_until: Exclusive upper bound of observation start times
+                fetched so far.
+
+        Returns:
+            Trace payload records of the released sessions, in listing order.
+        """
+        released: list[dict[str, Any]] = []
+        pending: list[str] = []
+        for key in self._pending:
+            trace_ids = self._groups[key]
+            # Every observation starts no later than its trace ends, so a
+            # trace is complete once the fetched range passes its end.
+            if all(
+                _get_trace_end(self._traces[trace_id]) < fetched_until
+                for trace_id in trace_ids
+            ):
+                for trace_id in trace_ids:
+                    payload = self._traces[trace_id].model_dump(
+                        mode="json", by_alias=True
+                    )
+                    payload["observations"] = self._observations.pop(trace_id)
+                    released.append(payload)
+            else:
+                pending.append(key)
+        self._pending = pending
+        return released
 
 
 class LangfuseImportQuery(ImportQuery):
@@ -261,15 +384,21 @@ class LangfuseImportQuery(ImportQuery):
     model_config = ConfigDict(extra="forbid")
 
 
-async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
-    """Fetch one parser payload containing every trace matching a query.
+async def fetch(query: dict[str, Any]) -> AsyncGenerator[bytes, None]:
+    """Fetch parser payloads matching a query, one per batch of complete sessions.
 
-    The parser groups traces into sessions by Langfuse session id, so every
-    matching trace must reach it in a single payload for that grouping to
-    work. A time-window query lists traces oldest first, then reads each
-    one's observations through the high-volume bulk observations endpoint,
-    concurrently up to the query's concurrency, and merges them back into
-    that order.
+    A time-window query lists traces oldest first, then reads observations
+    in contiguous start time ranges, each spanning the starts of a run of
+    listed traces, so one paginated request covers many traces. A trace is
+    complete once the fetched ranges pass its end, known from the listed
+    timestamp and latency, and a session is released as soon as every trace
+    sharing its Langfuse session id is complete, so the parser sees all of
+    a session in one payload. Observations of traces the listing did not
+    select are dropped. A `trace_ids` query fetches each trace with its
+    observations inline, yields a trace without a session id as soon as it
+    is in, and yields traces sharing a session id together once every
+    requested trace is in. Requests run concurrently up to the query's
+    concurrency.
 
     Args:
         query: Fetch query with `trace_ids`, `since`, and `until` keys.
@@ -278,26 +407,45 @@ async def fetch(query: dict[str, Any]) -> AsyncIterator[bytes]:
         ValueError: The query is invalid.
 
     Yields:
-        One trace list payload, or nothing when no trace matches.
+        One trace list payload per batch that completes at least one
+        session, in listing order, or one payload per requested standalone
+        trace and per session, or nothing when no trace matches.
     """
     parsed = LangfuseImportQuery.model_validate(query)
 
-    trace_rows: Sequence[TraceWithDetails | TraceWithFullDetails]
     if parsed.trace_ids is not None:
-        trace_rows = await gather_bounded(
-            (
-                retry_rate_limited(partial(fetch_trace, trace_id), _get_retry_after)
-                for trace_id in parsed.trace_ids
-            ),
-            parsed.concurrency,
+        trace_awaitables = (
+            retry_rate_limited(partial(fetch_trace, trace_id), _get_retry_after)
+            for trace_id in parsed.trace_ids
         )
-    else:
-        since, until = parsed.get_window()
-        trace_rows = [trace async for trace in _list_traces(since, until)]
+        # A trace's session is only known once its row is back, so traces
+        # with a session id wait until every requested trace is in.
+        held: dict[str, list[dict[str, Any]]] = {}
+        async with aclosing(
+            stream_bounded(trace_awaitables, parsed.concurrency)
+        ) as traces:
+            async for trace in traces:
+                payload = trace.model_dump(mode="json", by_alias=True)
+                if isinstance(trace.session_id, str) and trace.session_id:
+                    held.setdefault(trace.session_id, []).append(payload)
+                else:
+                    yield json.dumps([payload]).encode("utf-8")
+        for payloads in held.values():
+            yield json.dumps(payloads).encode("utf-8")
+        return
 
-    payloads = await gather_bounded(
-        (_assemble_trace_payload(trace) for trace in trace_rows),
-        parsed.concurrency,
-    )
-    if payloads:
-        yield json.dumps(payloads).encode("utf-8")
+    since, until = parsed.get_window()
+    traces = [trace async for trace in _list_traces(since, until)]
+    if not traces:
+        return
+
+    assembler = _WindowAssembler(traces)
+    batch_awaitables = (_fetch_batch(batch) for batch in _split_batches(traces, since))
+    async with aclosing(
+        stream_bounded(batch_awaitables, parsed.concurrency)
+    ) as results:
+        async for batch, observations in results:
+            assembler.add(observations)
+            records = assembler.release(batch.end)
+            if records:
+                yield json.dumps(records).encode("utf-8")

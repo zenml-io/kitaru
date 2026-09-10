@@ -15,6 +15,7 @@
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
@@ -32,27 +33,44 @@ from .fixtures import (
     build_complete_rows,
     build_conversation_rows,
     build_list_row,
+    build_row,
     ndjson,
+    rows_for_ids,
 )
 
 TRACE_ID_1 = "a" * 32
 TRACE_ID_2 = "b" * 32
 TRACE_ID_3 = "c" * 32
+TRACE_ID_4 = "d" * 32
+TRACE_ID_5 = "e" * 32
+
+
+def _standalone_rows(trace_id: str) -> list[dict[str, Any]]:
+    """Build a single root row that resolves to no session join value."""
+    return [
+        build_row(
+            "root",
+            trace_id,
+            span_name="kitaru-run",
+            attributes={"gen_ai.conversation.id": ""},
+        )
+    ]
 
 
 async def test_fetch_by_trace_ids_fetches_exactly_those_traces_into_one_payload(
     fake_logfire: FakeLogfire,
 ) -> None:
-    """Fetch exactly the requested trace ids, concatenated in order."""
-    fake_logfire.fetch_builders = [build_complete_rows, build_complete_rows]
+    """Fetch exactly the requested trace ids in one batch query, one payload."""
+    fake_logfire.batch_builders = [rows_for_ids(build_complete_rows)]
 
     payloads = await collect_payloads(
         fetch({"trace_ids": [TRACE_ID_1, TRACE_ID_2], "since": "2026-07-24T09:00:00Z"})
     )
 
-    assert fake_logfire.events == ["fetch", "fetch"]
+    assert fake_logfire.events == ["batch"]
     assert fake_logfire.requested == [TRACE_ID_1, TRACE_ID_2]
-    assert fake_logfire.fetch_min_timestamps == ["2026-07-24T09:00:00+00:00"] * 2
+    assert fake_logfire.requested_batches == [[TRACE_ID_1, TRACE_ID_2]]
+    assert fake_logfire.batch_min_timestamps == ["2026-07-24T09:00:00+00:00"]
     assert len(payloads) == 1
     # Both traces share the default conversation id, so the parser groups
     # them into one session instead of dropping the second as a duplicate.
@@ -65,10 +83,10 @@ async def test_fetch_by_trace_ids_fetches_exactly_those_traces_into_one_payload(
 async def test_importer_fetch_matches_api_fetch(fake_logfire: FakeLogfire) -> None:
     """Yield the same payload from the importer instance as from the API fetch."""
     query = {"trace_ids": [TRACE_ID_1], "since": "2026-07-24T09:00:00Z"}
-    fake_logfire.fetch_builders = [build_complete_rows]
+    fake_logfire.batch_builders = [rows_for_ids(build_complete_rows)]
     expected = await collect_payloads(fetch(query))
 
-    fake_logfire.fetch_builders = [build_complete_rows]
+    fake_logfire.batch_builders = [rows_for_ids(build_complete_rows)]
     actual = await collect_payloads(importer.fetch(query))
 
     assert actual == expected
@@ -78,35 +96,99 @@ async def test_fetch_by_trace_ids_without_since_uses_the_earliest_bound(
     fake_logfire: FakeLogfire,
 ) -> None:
     """Fall back to the earliest possible timestamp without a since bound."""
-    fake_logfire.fetch_builders = [build_complete_rows]
+    fake_logfire.batch_builders = [rows_for_ids(build_complete_rows)]
 
     await collect_payloads(fetch({"trace_ids": [TRACE_ID_1]}))
 
-    assert fake_logfire.fetch_min_timestamps == [
+    assert fake_logfire.batch_min_timestamps == [
         datetime.min.replace(tzinfo=UTC).isoformat()
     ]
+
+
+async def test_fetch_by_trace_ids_batches_chunks_and_holds_shared_sessions(
+    fake_logfire: FakeLogfire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Chunk trace ids, yield standalone traces per chunk, hold shared sessions.
+
+    TRACE_ID_1 and TRACE_ID_3 share a session but land in different chunks,
+    so they are only yielded together once every chunk has been fetched.
+    TRACE_ID_2 and TRACE_ID_4 carry no session attribute and are yielded
+    as soon as their own chunk completes.
+    """
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 2)
+
+    def _build(trace_ids: list[str]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for trace_id in trace_ids:
+            if trace_id in (TRACE_ID_1, TRACE_ID_3):
+                rows.extend(build_conversation_rows(trace_id, "shared"))
+            else:
+                rows.extend(_standalone_rows(trace_id))
+        return rows
+
+    fake_logfire.batch_builders = [_build, _build]
+
+    payloads = await collect_payloads(
+        fetch(
+            {
+                "trace_ids": [TRACE_ID_1, TRACE_ID_2, TRACE_ID_3, TRACE_ID_4],
+                "since": "2026-07-24T09:00:00Z",
+            }
+        )
+    )
+
+    assert fake_logfire.events == ["batch", "batch"]
+    assert fake_logfire.requested_batches == [
+        [TRACE_ID_1, TRACE_ID_2],
+        [TRACE_ID_3, TRACE_ID_4],
+    ]
+    assert len(payloads) == 3
+
+    standalone_ids = []
+    for payload in payloads[:2]:
+        sessions = [
+            session
+            for session in parse(payload, {})
+            if isinstance(session, ImportedSession)
+        ]
+        assert len(sessions) == 1
+        standalone_ids.append(sessions[0].metadata["logfire.trace_ids"][0])
+    assert standalone_ids == [TRACE_ID_2, TRACE_ID_4]
+
+    shared_sessions = [
+        session
+        for session in parse(payloads[2], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert len(shared_sessions) == 1
+    assert shared_sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_1, TRACE_ID_3]
 
 
 async def test_fetch_bounds_concurrency_and_preserves_order(
     fake_logfire: FakeLogfire,
 ) -> None:
-    """Fetch at most the configured concurrency of traces at once, oldest first."""
+    """Fetch at most the configured concurrency of batches at once, oldest first."""
     trace_ids = [str(digit) * 32 for digit in range(1, 5)]
-    fake_logfire.fetch_builders = [build_complete_rows] * len(trace_ids)
+    fake_logfire.batch_builders = [rows_for_ids(build_complete_rows)] * len(trace_ids)
     # Delays scramble completion order relative to submission order, so the
-    # merged result proves gather_bounded restores it rather than happening
+    # merged result proves stream_bounded restores it rather than happening
     # to already match it.
     fake_logfire.fetch_delays = [0.03, 0.01, 0.02, 0.0]
 
-    payloads = await collect_payloads(
-        fetch(
-            {
-                "trace_ids": trace_ids,
-                "since": "2026-07-24T09:00:00Z",
-                "concurrency": 2,
-            }
+    with pytest.MonkeyPatch.context() as scoped:
+        # A one-id batch size puts each trace in its own chunk, so the
+        # concurrency bound applies across chunks the same way it would
+        # across many more trace ids at the default batch size.
+        scoped.setattr(api_module, "_TRACES_PER_BATCH", 1)
+        payloads = await collect_payloads(
+            fetch(
+                {
+                    "trace_ids": trace_ids,
+                    "since": "2026-07-24T09:00:00Z",
+                    "concurrency": 2,
+                }
+            )
         )
-    )
 
     assert fake_logfire.peak_in_flight == 2
     assert len(payloads) == 1
@@ -116,58 +198,85 @@ async def test_fetch_bounds_concurrency_and_preserves_order(
         if isinstance(session, ImportedSession)
     ]
     # All four traces share the default conversation id, so the parser
-    # groups them into one session, merged in fetch order.
+    # groups them into one session, merged in chunk submission order.
     assert len(sessions) == 1
     assert sessions[0].metadata["logfire.trace_ids"] == trace_ids
 
     # The default query still works at the default concurrency.
-    fake_logfire.fetch_builders = [build_complete_rows, build_complete_rows]
+    fake_logfire.batch_builders = [rows_for_ids(build_complete_rows)]
     payloads = await collect_payloads(
         fetch({"trace_ids": [TRACE_ID_1, TRACE_ID_2], "since": "2026-07-24T09:00:00Z"})
     )
     assert len(payloads) == 1
 
 
-async def test_fetch_by_time_window_lists_trace_ids_and_fetches_each(
+async def test_fetch_by_time_window_lists_root_rows_and_fetches_each_group(
     fake_logfire: FakeLogfire,
 ) -> None:
-    """List trace ids within the window, then fetch each into one payload."""
+    """List root rows in the window, then fetch the whole batch in one query.
+
+    Neither listed row nor fetched row carries a session attribute, so each
+    trace becomes its own group, but both groups still fit in one batch and
+    one payload.
+    """
     fake_logfire.list_builders = [
         lambda: [
             build_list_row(TRACE_ID_1, "2026-07-24T09:00:00Z"),
             build_list_row(TRACE_ID_2, "2026-07-24T09:05:00Z"),
         ]
     ]
-    fake_logfire.fetch_builders = [build_complete_rows, build_complete_rows]
+    fake_logfire.batch_builders = [rows_for_ids(_standalone_rows)]
 
     payloads = await collect_payloads(
         fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
     )
 
-    assert fake_logfire.events == ["list", "fetch", "fetch"]
+    assert fake_logfire.events == ["list", "batch"]
     assert fake_logfire.list_min_timestamps == ["2026-07-24T09:00:00+00:00"]
     assert fake_logfire.list_max_timestamps == ["2026-07-24T10:00:00+00:00"]
     assert fake_logfire.requested == [TRACE_ID_1, TRACE_ID_2]
-    assert fake_logfire.fetch_min_timestamps == ["2026-07-24T09:00:00+00:00"] * 2
+    assert fake_logfire.requested_batches == [[TRACE_ID_1, TRACE_ID_2]]
+    assert fake_logfire.batch_min_timestamps == ["2026-07-24T09:00:00+00:00"]
     assert len(payloads) == 1
+    sessions = [
+        session
+        for session in parse(payloads[0], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [session.metadata["logfire.trace_ids"][0] for session in sessions] == [
+        TRACE_ID_1,
+        TRACE_ID_2,
+    ]
 
 
-async def test_fetch_by_time_window_groups_a_shared_session_into_one_session(
+async def test_fetch_by_time_window_yields_one_payload_per_distinct_session(
     fake_logfire: FakeLogfire,
 ) -> None:
-    """Group traces sharing a session id even when listed apart in the window."""
+    """Parse one session per distinct session id out of the batch payload."""
     fake_logfire.list_builders = [
         lambda: [
-            build_list_row(TRACE_ID_1, "2026-07-24T09:00:00Z"),
-            build_list_row(TRACE_ID_2, "2026-07-24T09:05:00Z"),
-            build_list_row(TRACE_ID_3, "2026-07-24T09:10:00Z"),
+            build_list_row(
+                TRACE_ID_1,
+                "2026-07-24T09:00:00Z",
+                attributes={"session": {"id": "session-a"}},
+            ),
+            build_list_row(
+                TRACE_ID_2,
+                "2026-07-24T09:05:00Z",
+                attributes={"session": {"id": "session-b"}},
+            ),
         ]
     ]
-    fake_logfire.fetch_builders = [
-        lambda trace_id: build_conversation_rows(trace_id, "conversation-a"),
-        lambda trace_id: build_conversation_rows(trace_id, "conversation-b"),
-        lambda trace_id: build_conversation_rows(trace_id, "conversation-a"),
-    ]
+
+    def _fetch(trace_ids: list[str]) -> list[dict[str, Any]]:
+        sessions = {TRACE_ID_1: "session-a", TRACE_ID_2: "session-b"}
+        return [
+            row
+            for trace_id in trace_ids
+            for row in build_conversation_rows(trace_id, sessions[trace_id])
+        ]
+
+    fake_logfire.batch_builders = [_fetch]
 
     payloads = await collect_payloads(
         fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
@@ -180,13 +289,260 @@ async def test_fetch_by_time_window_groups_a_shared_session_into_one_session(
         if isinstance(session, ImportedSession)
     ]
     assert len(sessions) == 2
-    by_trace_ids = {
-        tuple(session.metadata["logfire.trace_ids"]): session for session in sessions
-    }
-    shared = by_trace_ids[(TRACE_ID_1, TRACE_ID_3)]
+    assert sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_1]
+    assert sessions[1].metadata["logfire.trace_ids"] == [TRACE_ID_2]
+
+
+async def test_fetch_by_time_window_groups_a_shared_session_into_one_payload(
+    fake_logfire: FakeLogfire,
+) -> None:
+    """Group traces sharing a session id even when listed apart in the window.
+
+    TRACE_ID_3 carries no session attribute, so it falls back to its own
+    trace id and forms a separate session, keyed by that trace id.
+    """
+    fake_logfire.list_builders = [
+        lambda: [
+            build_list_row(
+                TRACE_ID_1,
+                "2026-07-24T09:00:00Z",
+                attributes={"session": {"id": "session-a"}},
+            ),
+            build_list_row(
+                TRACE_ID_2,
+                "2026-07-24T09:05:00Z",
+                attributes={"session": {"id": "session-a"}},
+            ),
+            build_list_row(TRACE_ID_3, "2026-07-24T09:10:00Z"),
+        ]
+    ]
+
+    def _fetch(trace_ids: list[str]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for trace_id in trace_ids:
+            conversation = "session-a" if trace_id != TRACE_ID_3 else "solo"
+            rows.extend(build_conversation_rows(trace_id, conversation))
+        return rows
+
+    fake_logfire.batch_builders = [_fetch]
+
+    payloads = await collect_payloads(
+        fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
+    )
+
+    assert len(payloads) == 1
+    sessions = [
+        session
+        for session in parse(payloads[0], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert len(sessions) == 2
+    shared = sessions[0]
+    assert shared.metadata["logfire.trace_ids"] == [TRACE_ID_1, TRACE_ID_2]
+    assert {node.trace_id for node in shared.nodes} == {TRACE_ID_1, TRACE_ID_2}
     assert len(shared.nodes) == 2
-    assert {node.trace_id for node in shared.nodes} == {TRACE_ID_1, TRACE_ID_3}
-    assert by_trace_ids[(TRACE_ID_2,)].nodes[0].trace_id == TRACE_ID_2
+
+    solo = sessions[1]
+    assert solo.metadata["logfire.trace_ids"] == [TRACE_ID_3]
+
+
+async def test_fetch_by_time_window_never_splits_a_session_across_batches(
+    fake_logfire: FakeLogfire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep a session's traces in one batch even when the cutoff falls mid-group."""
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 1)
+    fake_logfire.list_builders = [
+        lambda: [
+            build_list_row(
+                TRACE_ID_1,
+                "2026-07-24T09:00:00Z",
+                attributes={"session": {"id": "session-a"}},
+            ),
+            build_list_row(
+                TRACE_ID_2,
+                "2026-07-24T09:05:00Z",
+                attributes={"session": {"id": "session-a"}},
+            ),
+            build_list_row(TRACE_ID_3, "2026-07-24T09:10:00Z"),
+        ]
+    ]
+
+    def _fetch(trace_ids: list[str]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for trace_id in trace_ids:
+            conversation = "session-a" if trace_id != TRACE_ID_3 else "solo"
+            rows.extend(build_conversation_rows(trace_id, conversation))
+        return rows
+
+    fake_logfire.batch_builders = [_fetch, _fetch]
+
+    payloads = await collect_payloads(
+        fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
+    )
+
+    # A cutoff of one trace id would split session-a's two traces, but a
+    # batch never closes mid-group, so it holds both instead.
+    assert fake_logfire.requested_batches == [
+        [TRACE_ID_1, TRACE_ID_2],
+        [TRACE_ID_3],
+    ]
+    assert len(payloads) == 2
+    shared_sessions = [
+        session
+        for session in parse(payloads[0], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert len(shared_sessions) == 1
+    assert shared_sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_1, TRACE_ID_2]
+
+    solo_sessions = [
+        session
+        for session in parse(payloads[1], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert len(solo_sessions) == 1
+    assert solo_sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_3]
+
+
+async def test_fetch_by_time_window_batches_many_single_trace_sessions(
+    fake_logfire: FakeLogfire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue one query per batch of trace ids and parse each batch's sessions."""
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 2)
+    trace_ids = [TRACE_ID_1, TRACE_ID_2, TRACE_ID_3, TRACE_ID_4, TRACE_ID_5]
+    fake_logfire.list_builders = [
+        lambda: [
+            build_list_row(trace_id, f"2026-07-24T09:0{index}:00Z")
+            for index, trace_id in enumerate(trace_ids)
+        ]
+    ]
+    fake_logfire.batch_builders = [rows_for_ids(_standalone_rows)] * 3
+
+    payloads = await collect_payloads(
+        fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
+    )
+
+    assert fake_logfire.requested_batches == [
+        [TRACE_ID_1, TRACE_ID_2],
+        [TRACE_ID_3, TRACE_ID_4],
+        [TRACE_ID_5],
+    ]
+    assert len(payloads) == 3
+    sessions = [
+        session
+        for payload in payloads
+        for session in parse(payload, {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [
+        session.metadata["logfire.trace_ids"][0] for session in sessions
+    ] == trace_ids
+
+
+async def test_fetch_refetches_a_batch_per_trace_when_it_fills_the_row_limit(
+    fake_logfire: FakeLogfire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fall back to one query per trace when a batch returns as many rows as the cap."""
+    monkeypatch.setattr(api_module, "_ROW_LIMIT", 2)
+    trace_ids = [TRACE_ID_1, TRACE_ID_2]
+    fake_logfire.list_builders = [
+        lambda: [
+            build_list_row(trace_id, f"2026-07-24T09:0{index}:00Z")
+            for index, trace_id in enumerate(trace_ids)
+        ]
+    ]
+    # Two traces of one row each fill a cap of two, each alone does not.
+    fake_logfire.batch_builders = [rows_for_ids(_standalone_rows)] * 3
+
+    payloads = await collect_payloads(
+        fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
+    )
+
+    assert fake_logfire.requested_batches == [
+        [TRACE_ID_1, TRACE_ID_2],
+        [TRACE_ID_1],
+        [TRACE_ID_2],
+    ]
+    assert len(payloads) == 1
+    sessions = [
+        session
+        for session in parse(payloads[0], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [
+        session.metadata["logfire.trace_ids"][0] for session in sessions
+    ] == trace_ids
+    assert all(len(session.nodes) >= 1 for session in sessions)
+
+
+async def test_fetch_by_time_window_bounds_concurrency_across_groups(
+    fake_logfire: FakeLogfire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bound total in-flight batch fetches across groups by concurrency."""
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 1)
+    trace_ids = [TRACE_ID_1, TRACE_ID_2, TRACE_ID_3, TRACE_ID_4]
+    fake_logfire.list_builders = [
+        lambda: [
+            build_list_row(trace_id, f"2026-07-24T09:0{index}:00Z")
+            for index, trace_id in enumerate(trace_ids)
+        ]
+    ]
+    fake_logfire.batch_builders = [rows_for_ids(build_complete_rows)] * len(trace_ids)
+    # None of the traces share a session, so each is its own batch. Delays
+    # scramble completion order relative to listing order, so the yielded
+    # order proves stream_bounded restores it rather than happening to
+    # already match it.
+    fake_logfire.fetch_delays = [0.03, 0.01, 0.02, 0.0]
+
+    payloads = await collect_payloads(
+        fetch(
+            {
+                "since": "2026-07-24T09:00:00Z",
+                "until": "2026-07-24T10:00:00Z",
+                "concurrency": 2,
+            }
+        )
+    )
+
+    assert fake_logfire.peak_in_flight == 2
+    assert len(payloads) == 4
+    sessions = [
+        session
+        for payload in payloads
+        for session in parse(payload, {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert [session.metadata["logfire.trace_ids"][0] for session in sessions] == (
+        trace_ids
+    )
+
+
+async def test_fetch_by_time_window_yields_earlier_groups_before_a_later_fetch_fails(
+    fake_logfire: FakeLogfire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Yield an already-completed batch's payload before a later batch's fetch fails."""
+    monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 1)
+    fake_logfire.list_builders = [
+        lambda: [
+            build_list_row(TRACE_ID_1, "2026-07-24T09:00:00Z"),
+            build_list_row(TRACE_ID_2, "2026-07-24T09:05:00Z"),
+        ]
+    ]
+
+    def _fail(_: list[str]) -> list[dict[str, Any]]:
+        raise RuntimeError("boom")
+
+    fake_logfire.batch_builders = [rows_for_ids(build_complete_rows), _fail]
+
+    payloads = fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
+    first_payload = await anext(payloads)
+    first_sessions = [
+        item for item in parse(first_payload, {}) if isinstance(item, ImportedSession)
+    ]
+    assert first_sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_1]
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await anext(payloads)
 
 
 async def test_fetch_by_time_window_defaults_until_to_now(
@@ -227,7 +583,7 @@ async def test_fetch_waits_out_a_rate_limit_and_succeeds(
         sleeps.append(seconds)
 
     monkeypatch.setattr(importer_module.asyncio, "sleep", _sleep)
-    fake_logfire.fetch_builders = [build_complete_rows]
+    fake_logfire.batch_builders = [rows_for_ids(build_complete_rows)]
     fake_logfire.raise_once = httpx.HTTPStatusError(
         "rate limited",
         request=httpx.Request("POST", "https://logfire-api.test/v2/query"),
@@ -243,7 +599,14 @@ async def test_fetch_waits_out_a_rate_limit_and_succeeds(
     )
 
     assert sleeps == [5.0]
-    assert payloads == [ndjson(build_complete_rows(TRACE_ID_1))]
+    assert len(payloads) == 1
+    sessions = [
+        session
+        for session in parse(payloads[0], {})
+        if isinstance(session, ImportedSession)
+    ]
+    assert len(sessions) == 1
+    assert sessions[0].metadata["logfire.trace_ids"] == [TRACE_ID_1]
 
 
 async def test_fetch_propagates_a_non_rate_limit_error(
@@ -323,7 +686,7 @@ async def test_api_and_file_imports_share_project_identity(
     fake_logfire: FakeLogfire, params: dict[str, str]
 ) -> None:
     """Fetching records preserves the identity of an equivalent file export."""
-    fake_logfire.fetch_builders = [build_complete_rows]
+    fake_logfire.batch_builders = [rows_for_ids(build_complete_rows)]
     [payload] = await collect_payloads(fetch({"trace_ids": [TRACE_ID_1]}))
     file_payload = json.dumps(build_complete_rows(TRACE_ID_1)).encode()
 

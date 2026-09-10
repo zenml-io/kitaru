@@ -22,6 +22,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -1670,8 +1671,9 @@ class LangfuseJSONLImporter:
         """
         from .api import fetch
 
-        async for payload in fetch(query):
-            yield payload
+        async with aclosing(fetch(query)) as payloads:
+            async for payload in payloads:
+                yield payload
 
 
 importer = LangfuseJSONLImporter()
