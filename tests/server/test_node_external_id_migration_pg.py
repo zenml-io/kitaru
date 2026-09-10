@@ -38,6 +38,11 @@ from kitaru.server.domain.session import Session
 NODE_EXTERNAL_ID_REVISION = "020_node_external_id"
 PREVIOUS_REVISION = "019_import_max_sessions"
 
+PENDING_LINK_TABLE_EXISTS = text("""
+    SELECT count(*) FROM information_schema.tables
+    WHERE table_name = 'session_node_pending_link'
+""")
+
 INSERT_NODE = text("""
     INSERT INTO session_node (
         id, session_id, parent_id, secondary_parent_ids, "index", external_id,
@@ -65,8 +70,8 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
         )
         created = datetime(2026, 5, 1, tzinfo=UTC)
         started_at = datetime(2026, 5, 1, 12, tzinfo=UTC)
-        # Fixed ids because the parent and its child share one effective
-        # start, which leaves the id as the only tie-break.
+        # Fixed ids because the parent and its child share one start,
+        # which leaves the id as the only tie-break.
         root_id = uuid.UUID("00000000-0000-7000-8000-000000000001")
         child_id = uuid.UUID("00000000-0000-7000-8000-000000000002")
         orphan_id = uuid.UUID("00000000-0000-7000-8000-000000000003")
@@ -116,15 +121,13 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
             upgraded = (
                 await connection.execute(
                     text(
-                        "SELECT id, external_id, effective_started_at, "
+                        "SELECT id, external_id, started_at, "
                         "parent_external_id, secondary_parent_external_ids "
-                        "FROM session_node ORDER BY effective_started_at, id"
+                        "FROM session_node ORDER BY started_at, id"
                     )
                 )
             ).all()
-        identities = {
-            row.id: (row.external_id, row.effective_started_at) for row in upgraded
-        }
+        identities = {row.id: (row.external_id, row.started_at) for row in upgraded}
         assert identities[root_id] == ("call-0", started_at)
         assert identities[child_id] == ("index-1", started_at)
         assert identities[orphan_id] == ("index-2", created)
@@ -135,6 +138,14 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
         assert references[root_id] == (None, [])
         assert references[child_id] == ("call-0", ["index-2"])
         assert references[orphan_id] == (None, [])
+        async with engine.connect() as connection:
+            assert (await connection.execute(PENDING_LINK_TABLE_EXISTS)).scalar() == 1
+            pending = (
+                await connection.execute(
+                    text("SELECT count(*) FROM session_node_pending_link")
+                )
+            ).scalar()
+        assert pending == 0
 
         await alembic.downgrade(PREVIOUS_REVISION)
 
@@ -162,6 +173,8 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
             )
         assert "parent_external_id" not in columns
         assert "secondary_parent_external_ids" not in columns
+        async with engine.connect() as connection:
+            assert (await connection.execute(PENDING_LINK_TABLE_EXISTS)).scalar() == 0
     finally:
         await engine.dispose()
         await drop_test_database(settings)

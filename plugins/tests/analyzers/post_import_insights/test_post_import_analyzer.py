@@ -108,6 +108,7 @@ def _view(
                     node_type=NodeType.TOOL_CALL,
                     name="lookup_order",
                     status=NodeStatus.FAILED,
+                    started_at=datetime.now(UTC),
                     inputs={"order_id": "123"},
                     outputs=None,
                     tool_name="lookup_order",

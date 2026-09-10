@@ -29,9 +29,10 @@ down_revision = "019_import_max_sessions"
 branch_labels = None
 depends_on = None
 
-POSITION_INDEX = "ix_session_node_session_id_effective_started_at_id"
-PARENT_EXTERNAL_ID_INDEX = "ix_session_node_session_id_parent_external_id"
+POSITION_INDEX = "ix_session_node_session_id_started_at_id"
 SESSION_ID_INDEX_UNIQUE_CONSTRAINT = "uq_session_node_session_id_index"
+PENDING_LINK_TABLE = "session_node_pending_link"
+PENDING_LINK_INDEX = "ix_session_node_pending_link_session_id_parent_external_id"
 
 
 def upgrade() -> None:
@@ -47,9 +48,6 @@ def upgrade() -> None:
     )
 
     with op.batch_alter_table("session_node", schema=None) as batch_op:
-        batch_op.add_column(
-            sa.Column("effective_started_at", sa.DateTime(timezone=True), nullable=True)
-        )
         batch_op.add_column(sa.Column("parent_external_id", sa.Text(), nullable=True))
         batch_op.add_column(
             sa.Column(
@@ -89,40 +87,79 @@ def upgrade() -> None:
     """)
     )
 
+    # Every node is positioned by its start time, so a node that reported
+    # none takes its parent's and otherwise the time it was recorded.
     op.execute(
         sa.text("""
         UPDATE session_node AS n
-        SET effective_started_at = coalesce(
-            n.started_at,
+        SET started_at = coalesce(
             (SELECT p.started_at FROM session_node AS p WHERE p.id = n.parent_id),
             n.created
         )
+        WHERE n.started_at IS NULL
     """)
     )
 
     with op.batch_alter_table("session_node", schema=None) as batch_op:
         batch_op.alter_column("external_id", existing_type=sa.Text(), nullable=False)
         batch_op.alter_column(
-            "effective_started_at",
+            "started_at",
             existing_type=sa.DateTime(timezone=True),
             nullable=False,
         )
         batch_op.create_index(
             POSITION_INDEX,
-            ["session_id", "effective_started_at", "id"],
-            unique=False,
-        )
-        batch_op.create_index(
-            PARENT_EXTERNAL_ID_INDEX,
-            ["session_id", "parent_external_id"],
+            ["session_id", "started_at", "id"],
             unique=False,
         )
         batch_op.drop_constraint(SESSION_ID_INDEX_UNIQUE_CONSTRAINT, type_="unique")
         batch_op.drop_column("index")
 
+    # Every stored reference resolved under the previous revision, so the
+    # table starts empty.
+    op.create_table(
+        PENDING_LINK_TABLE,
+        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("session_id", sa.Uuid(), nullable=False),
+        sa.Column("parent_external_id", sa.Text(), nullable=False),
+        sa.Column("child_id", sa.Uuid(), nullable=False),
+        sa.Column("kind", sa.String(length=16), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["child_id"],
+            ["session_node.id"],
+            name="fk_session_node_pending_link_child_id",
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["session_id"],
+            ["session.id"],
+            name="fk_session_node_pending_link_session_id",
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "child_id",
+            "parent_external_id",
+            "kind",
+            name="uq_session_node_pending_link_child_id_parent_external_id_kind",
+        ),
+    )
+    with op.batch_alter_table(PENDING_LINK_TABLE, schema=None) as batch_op:
+        batch_op.create_index(
+            PENDING_LINK_INDEX,
+            ["session_id", "parent_external_id"],
+            unique=False,
+        )
+
 
 def downgrade() -> None:
     """Downgrade database schema and/or data back to the previous revision."""
+    with op.batch_alter_table(PENDING_LINK_TABLE, schema=None) as batch_op:
+        batch_op.drop_index(PENDING_LINK_INDEX)
+    op.drop_table(PENDING_LINK_TABLE)
+
     with op.batch_alter_table("session_node", schema=None) as batch_op:
         batch_op.add_column(sa.Column("index", sa.Integer(), nullable=True))
 
@@ -134,7 +171,7 @@ def downgrade() -> None:
             SELECT
                 id,
                 row_number() OVER (
-                    PARTITION BY session_id ORDER BY effective_started_at, id
+                    PARTITION BY session_id ORDER BY started_at, id
                 ) - 1 AS position
             FROM session_node
         ) AS ranked
@@ -148,8 +185,11 @@ def downgrade() -> None:
             SESSION_ID_INDEX_UNIQUE_CONSTRAINT, ["session_id", "index"]
         )
         batch_op.alter_column("external_id", existing_type=sa.Text(), nullable=True)
-        batch_op.drop_index(PARENT_EXTERNAL_ID_INDEX)
+        batch_op.alter_column(
+            "started_at",
+            existing_type=sa.DateTime(timezone=True),
+            nullable=True,
+        )
         batch_op.drop_index(POSITION_INDEX)
         batch_op.drop_column("secondary_parent_external_ids")
         batch_op.drop_column("parent_external_id")
-        batch_op.drop_column("effective_started_at")

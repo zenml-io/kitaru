@@ -123,6 +123,7 @@ def _node(
         node_type=NodeType.TOOL_CALL,
         name="lookup_order",
         status=NodeStatus.COMPLETED,
+        started_at=NOW,
         inputs={},
         outputs={},
         tool_name="lookup_order",

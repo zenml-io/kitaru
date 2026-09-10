@@ -9068,17 +9068,10 @@
             "type": "string"
           },
           "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Time the node started.",
-            "title": "Started At"
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
           },
           "status": {
             "$ref": "#/components/schemas/NodeStatus",
@@ -9153,6 +9146,7 @@
           "node_type",
           "name",
           "status",
+          "started_at",
           "metadata"
         ],
         "title": "SessionNodeResponse",
