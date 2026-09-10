@@ -110,8 +110,8 @@ class SessionService:
         the agent and the agent version. The session takes the next number of
         its agent, allocated outside the request transaction, so a failed
         create leaves a gap. A command repeating an imported_from and
-        external id pair returns the session already registered under it,
-        so a later import contributes to a session it did not create.
+        external id pair the calling task already registered returns that
+        session instead of creating one.
 
         Args:
             command: Fields for the new session.
@@ -136,6 +136,8 @@ class SessionService:
             AgentVersionAgentMismatch: The resolved agent version belongs to
                 another agent.
             AgentNotFound: No agent has the resolved id.
+            DuplicateSessionExternalId: The imported_from and external id pair is
+                already registered by another caller.
 
         Returns:
             Session and whether this call created it.
@@ -198,8 +200,13 @@ class SessionService:
         try:
             stored = await self._repository.create(session)
         except DuplicateSessionExternalId:
-            # The constraint only fires when both identity fields are set.
-            if session.imported_from is None or session.external_id is None:
+            # The constraint only fires when both identity fields are set, and
+            # only the task that registered the pair gets the session back.
+            if (
+                task_id is None
+                or session.imported_from is None
+                or session.external_id is None
+            ):
                 raise
             existing = await self._repository.get_by_external_id(
                 session.imported_from,
@@ -207,7 +214,7 @@ class SessionService:
                 agent_id,
                 include_payloads=False,
             )
-            if existing is not None:
+            if existing is not None and existing.task_id == task_id:
                 return existing, False
             raise
         if isinstance(task, AgentTask):
@@ -395,7 +402,7 @@ class SessionService:
         ``Session.finish``. When the command sets none of them and no
         ``status``, the session's current status carries through as a no-op
         transition, which leaves those fields untouched. A task principal
-        writes only a session it owns or one with an imported origin.
+        writes only a session it owns.
 
         Args:
             session_id: Id of the session.
@@ -404,8 +411,7 @@ class SessionService:
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionAccessDenied: A task principal neither owns the session
-                nor writes into an imported one.
+            SessionAccessDenied: A task principal does not own the session.
             SessionNotUpdatable: The session is not in progress.
             SessionStatusCannotBeCleared: The command clears the status with
                 an explicit null.
@@ -416,7 +422,7 @@ class SessionService:
         session = await self._repository.get(
             session_id, include_payloads=False, exclusive=True
         )
-        check_task_session_write(session, actor)
+        check_task_session_write(session_id, session.task_id, actor)
         await check_task_attempt(actor, self._tasks)
         session.check_update()
         fields = command.model_fields_set

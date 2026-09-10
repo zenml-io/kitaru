@@ -431,17 +431,18 @@ def test_run_raises_a_create_error_after_the_function(
     assert client.sessions.batches == []
 
 
-def test_run_ingests_into_an_already_imported_trace(
+def test_run_rejects_an_already_imported_trace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ingest nodes normally when the create call reuses an existing session."""
+    """Raise SessionImportError when the session external id already exists."""
     adapter, client = _adapter(monkeypatch, _single_session_parser)
+    client.sessions.create_error = APIError(httpx.codes.CONFLICT, "conflict")
 
-    adapter.run(lambda: adapter.events.append("func"))
+    with pytest.raises(SessionImportError, match="already exists"):
+        adapter.run(lambda: adapter.events.append("func"))
 
     assert "func" in adapter.events
-    assert len(client.sessions.created) == 1
-    assert len(client.sessions.batches) == 1
+    assert client.sessions.batches == []
 
 
 def test_run_rejects_a_replay_with_an_override(

@@ -1111,9 +1111,7 @@ async def test_waited_session_import_returns_validated_stats_and_task_action(
     assert result.item["tagged_session_count"] == 4
     assert tag_calls == [(task.id, ["baseline", "discovery"])]
     assert not hasattr(client.requests[0], "tags")
-    assert result.warnings == [
-        "2 session(s) already existed and were updated in place."
-    ]
+    assert result.warnings == ["2 duplicate session(s) were skipped."]
     assert str(task.id) in result.next_actions[0]
     assert '"field":"task_id"' in result.next_actions[0]
 

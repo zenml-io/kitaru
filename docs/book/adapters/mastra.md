@@ -246,7 +246,7 @@ The worker calls the model again with the saved context. A matching tool call re
 
 ### Identity and limits
 
-Reimporting a trace adds its nodes to the existing session rather than creating a duplicate, but it does not change the session's own fields. Keep `source_namespace` stable for one source deployment. It distinguishes deployments that might reuse trace IDs. Changing parameters alone does not upgrade a default import into a replay snapshot. If you already imported the trace without replay context, use a new explicit namespace to create a separate replay-ready copy.
+Reimporting a trace skips the existing session rather than updating it. Keep `source_namespace` stable for one source deployment. It distinguishes deployments that might reuse trace IDs. Changing parameters alone does not upgrade a default import into a replay snapshot. If you already imported the trace without replay context, use a new explicit namespace to create a separate replay-ready copy.
 
 The importer accepts selected files only; it does not fetch traces or live memory. It preserves usage reported by the export without counting generation totals twice, and imports monetary cost only when the source explicitly identifies USD. Missing usage and cost remain missing. Malformed traces produce isolated import failures while valid neighboring traces continue. See [Importing sessions](../guides/importing-sessions.md) for import counts and failure inspection.
 

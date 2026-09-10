@@ -3113,8 +3113,9 @@ export interface paths {
          *
          *     A task principal's session is always linked to its own task, regardless
          *     of the request's task_id. Clients observe HTTP 201 when the call creates
-         *     the session, 200 with the session already registered under the request's
-         *     imported_from and external id pair, and 422 on invalid input.
+         *     the session, 200 with the session the calling task already registered
+         *     under the request's imported_from and external id pair, 409 when another
+         *     caller registered that pair, and 422 on invalid input.
          *
          *     Args:
          *         body: Session create request.
@@ -6742,7 +6743,7 @@ export interface components {
             limit_reached: boolean;
             /**
              * Skipped
-             * @description Sessions that already existed and were updated in place.
+             * @description Sessions skipped as duplicates.
              */
             skipped: number;
         };

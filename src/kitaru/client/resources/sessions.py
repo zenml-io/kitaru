@@ -55,8 +55,8 @@ class SessionsResource:
     ) -> SessionResponse:
         """Create a session.
 
-        A request whose imported_from and external id pair already exists
-        returns the existing session instead of creating a new one.
+        A request repeating an imported_from and external id pair the calling
+        task already registered returns that session instead of creating one.
 
         Args:
             request: Session create request.
@@ -64,7 +64,8 @@ class SessionsResource:
                 random default.
 
         Raises:
-            APIError: The request failed.
+            APIError: The request failed, including 409 for an imported_from
+                and external id pair another caller registered.
 
         Returns:
             Created or existing session.

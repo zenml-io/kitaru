@@ -248,7 +248,7 @@ Framework detection only sets `framework` when trace metadata identifies one sup
 
 ## Inspect failures
 
-The import job result reports created, skipped, and failed counts plus a bounded failure sample. The same counts land in the `stats` field of the import once parsing completes, and a parse failure lands in its `error` field. `stats` records the parse outcome on its own, so an import whose evaluators or analyzers fail keeps its counts while the job reports the failed task. Every session created by an import carries the `import_id` it came from. Reimporting the same `(imported_from, external_id)` pair adds to the existing session instead of creating a duplicate, and reports it as `skipped`.
+The import job result reports created, skipped, and failed counts plus a bounded failure sample. The same counts land in the `stats` field of the import once parsing completes, and a parse failure lands in its `error` field. `stats` records the parse outcome on its own, so an import whose evaluators or analyzers fail keeps its counts while the job reports the failed task. Every session created by an import carries the `import_id` it came from. Reimporting the same `(imported_from, external_id)` pair skips the duplicate.
 
 ## No importer for your provider
 
