@@ -24,6 +24,7 @@ from kitaru.api_models.v1.auth import DeviceAuthorizationResponse
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.cli import local_runtime
 from kitaru.cli.config import validate_server_url
+from kitaru.cli.diagnostics import get_server_info
 from kitaru.cli.output import CLIError, CommandResult, write_interaction
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.config import set_server_url
@@ -40,7 +41,6 @@ from kitaru.client.control_plane_auth import (
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken
 from kitaru.client.device_auth import device_login
-from kitaru.client.exceptions import NotFoundError
 
 _WORKSPACE_POLL_INTERVAL_SECONDS = 5
 _WORKSPACE_POLL_ATTEMPTS = 36
@@ -166,18 +166,7 @@ async def login(
     credential_stored = False
     credential_kind = "none"
     try:
-        try:
-            info = await client.info.get()
-        except NotFoundError as error:
-            raise CLIError(
-                "invalid_configuration",
-                f"Kitaru is not available at {server_url}. "
-                "Check the URL or deployment.",
-                details={
-                    "status_code": error.status_code,
-                    "server_url": server_url,
-                },
-            ) from error
+        info = await get_server_info(client, server_url)
         if info.auth_scheme is AuthScheme.NONE:
             _reject_auth_inputs(
                 username=username,

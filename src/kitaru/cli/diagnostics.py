@@ -44,6 +44,7 @@ from kitaru.cli.skill_discovery import (
     get_kitaru_skill_status,
     select_visible_skill_names,
 )
+from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.config import (
     DIRECTORY_MODE,
     FILE_MODE,
@@ -51,7 +52,7 @@ from kitaru.client.config import (
 )
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ServerCredentials
-from kitaru.client.exceptions import APIError
+from kitaru.client.exceptions import APIError, NotFoundError
 
 
 def package_version() -> str:
@@ -64,6 +65,39 @@ def package_version() -> str:
         return importlib.metadata.version("kitaru")
     except importlib.metadata.PackageNotFoundError:
         return "unknown"
+
+
+async def get_server_info(
+    client: KitaruAPIClient, server_url: str
+) -> ServerInfoResponse:
+    """Fetch the server's self-description.
+
+    Args:
+        client: API client bound to ``server_url``.
+        server_url: Selected server URL, named in the error message.
+
+    Returns:
+        The server's self-description.
+
+    Raises:
+        CLIError: Nothing at ``server_url`` answers as a Kitaru server.
+    """
+    try:
+        return await client.info.get()
+    except NotFoundError as error:
+        # The info endpoint takes no resource name, so a 404 can only mean
+        # that nothing at this URL speaks the Kitaru API: the deployment was
+        # deleted, the URL is wrong, or a proxy in front no longer routes here.
+        raise CLIError(
+            "invalid_configuration",
+            f"The server at {server_url} did not answer as a Kitaru server "
+            "(HTTP 404). It may have been deleted or the URL may be wrong.",
+            details={"server_url": server_url, "status_code": error.status_code},
+            hint=(
+                "Run `kitaru doctor` for details, or `kitaru login` "
+                "to select a different server."
+            ),
+        ) from error
 
 
 async def status(
@@ -86,7 +120,7 @@ async def status(
     client = build_api_client(target.server_url, credential, credential_store, timeout)
     warnings: list[str] = []
     try:
-        info = await client.info.get()
+        info = await get_server_info(client, target.server_url)
         live_workers: int | None = None
         authentication = (
             "not_required" if info.auth_scheme is AuthScheme.NONE else "missing"
@@ -149,7 +183,7 @@ async def info(
     credential = resolve_credential(target.server_url, credential_store)
     client = build_api_client(target.server_url, credential, credential_store, timeout)
     try:
-        server = await client.info.get()
+        server = await get_server_info(client, target.server_url)
     finally:
         await client.close()
     client_version = package_version()
@@ -277,7 +311,7 @@ async def doctor(
         )
         try:
             try:
-                server_info = await client.info.get()
+                server_info = await get_server_info(client, target.server_url)
                 checks.append(
                     _check(
                         "server_info",
@@ -287,6 +321,9 @@ async def doctor(
                         f"auth={server_info.auth_scheme.value}",
                     )
                 )
+            except CLIError as error:
+                failure_categories.add("server")
+                checks.append(_check("server_info", "fail", True, error.message))
             except (APIError, httpx.HTTPError, TimeoutError) as error:
                 failure_categories.add("server")
                 checks.append(_check("server_info", "fail", True, str(error)))
