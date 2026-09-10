@@ -140,7 +140,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(NODE_STATUS_LENGTH))
     error: Mapped[str | None] = mapped_column(Text)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     input_text_selector: Mapped[str | None] = mapped_column(Text)
     output_text_selector: Mapped[str | None] = mapped_column(Text)

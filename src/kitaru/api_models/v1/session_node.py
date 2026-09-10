@@ -174,7 +174,9 @@ class SessionNodeResponse(ResponseModel):
     name: str = Field(description="Node name.")
     status: NodeStatus = Field(description="Node status.")
     error: str | None = Field(default=None, description="Error from a failed node.")
-    started_at: datetime = Field(description="Time the node started.")
+    started_at: datetime | None = Field(
+        default=None, description="Time the node started."
+    )
     ended_at: datetime | None = Field(default=None, description="Time the node ended.")
     input_text_selector: str | None = Field(
         default=None,

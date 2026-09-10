@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import TypeVar
 
 from asyncpg.exceptions import QueryCanceledError
-from sqlalchemy import Select, func, select, tuple_
+from sqlalchemy import ColumnElement, Select, and_, func, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
@@ -155,20 +155,20 @@ async def paginate_by_index(
     return rows, next_cursor
 
 
-def _encode_start_cursor(started_at: datetime, row_id: uuid.UUID) -> str:
+def _encode_start_cursor(started_at: datetime | None, row_id: uuid.UUID) -> str:
     """Join a start time and an id into one cursor payload.
 
     Args:
-        started_at: Start time of the last row on the page.
+        started_at: Start time of the last row on the page, if any.
         row_id: Id of the last row on the page.
 
     Returns:
         Cursor payload the decode splits back apart.
     """
-    return f"{started_at.isoformat()}|{row_id}"
+    return f"{started_at.isoformat() if started_at is not None else ''}|{row_id}"
 
 
-def _decode_start_cursor(payload: str) -> tuple[datetime, uuid.UUID]:
+def _decode_start_cursor(payload: str) -> tuple[datetime | None, uuid.UUID]:
     """Split a cursor payload back into a start time and an id.
 
     Args:
@@ -178,29 +178,59 @@ def _decode_start_cursor(payload: str) -> tuple[datetime, uuid.UUID]:
         ValidationError: The payload does not carry a start time and an id.
 
     Returns:
-        Start time and id of the last row of the previous page.
+        Start time and id of the last row of the previous page, the start
+        time None when that row had none.
     """
     started_at, separator, row_id = payload.rpartition("|")
     if not separator:
         raise ValidationError("Invalid cursor")
     try:
-        return datetime.fromisoformat(started_at), uuid.UUID(row_id)
+        return (
+            datetime.fromisoformat(started_at) if started_at else None,
+            uuid.UUID(row_id),
+        )
     except ValueError as exc:
         raise ValidationError("Invalid cursor") from exc
+
+
+def _build_start_keyset_predicate(
+    started_at_column: InstrumentedAttribute[datetime | None],
+    id_column: InstrumentedAttribute[uuid.UUID],
+    started_at: datetime | None,
+    row_id: uuid.UUID,
+) -> ColumnElement[bool]:
+    """Build the continuation predicate of a start-ascending keyset.
+
+    Args:
+        started_at_column: Start time column defining the sort order.
+        id_column: Primary key column breaking start time ties.
+        started_at: Start time of the last row of the previous page.
+        row_id: Id of the last row of the previous page.
+
+    Returns:
+        Predicate matching the rows that follow that row.
+    """
+    if started_at is None:
+        return and_(started_at_column.is_(None), id_column > row_id)
+    return or_(
+        started_at_column > started_at,
+        and_(started_at_column == started_at, id_column > row_id),
+        started_at_column.is_(None),
+    )
 
 
 async def paginate_by_started_at(
     session: AsyncSession,
     statement: Select[tuple[RowT]],
     list_filter: ListFilter,
-    started_at_column: InstrumentedAttribute[datetime],
+    started_at_column: InstrumentedAttribute[datetime | None],
     id_column: InstrumentedAttribute[uuid.UUID],
 ) -> tuple[Sequence[RowT], str | None]:
     """Execute a filtered select as one page plus the next cursor.
 
-    Unlike ``paginate()``, the keyset rides a start time in fixed ascending
-    order, broken by the UUIDv7 id, for a nested resource read in the order
-    its rows ran.
+    Unlike ``paginate()``, the keyset rides a nullable start time in fixed
+    ascending order with the rows carrying none last, broken by the UUIDv7
+    id, for a nested resource read in the order its rows ran.
 
     Args:
         session: Database session for the query.
@@ -217,10 +247,15 @@ async def paginate_by_started_at(
     if list_filter.cursor is not None:
         cursor = decode_cursor(list_filter.cursor, list_filter.sort, filter_hash)
 
-    statement = statement.order_by(started_at_column.asc(), id_column.asc())
+    statement = statement.order_by(
+        started_at_column.asc().nulls_last(), id_column.asc()
+    )
     if cursor is not None:
+        last_started_at, last_id = _decode_start_cursor(cursor.id)
         statement = statement.where(
-            tuple_(started_at_column, id_column) > _decode_start_cursor(cursor.id)
+            _build_start_keyset_predicate(
+                started_at_column, id_column, last_started_at, last_id
+            )
         )
 
     statement = statement.limit(list_filter.size + 1)

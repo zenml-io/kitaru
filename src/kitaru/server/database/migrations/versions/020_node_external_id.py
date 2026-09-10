@@ -87,26 +87,21 @@ def upgrade() -> None:
     """)
     )
 
-    # Every node is positioned by its start time, so a node that reported
-    # none takes its parent's and otherwise the time it was recorded.
+    # Nodes are positioned by their start time, so a node that reported none
+    # takes its parent's and keeps none when the parent has none either.
     op.execute(
         sa.text("""
         UPDATE session_node AS n
-        SET started_at = coalesce(
-            (SELECT p.started_at FROM session_node AS p WHERE p.id = n.parent_id),
-            n.created
-        )
-        WHERE n.started_at IS NULL
+        SET started_at = p.started_at
+        FROM session_node AS p
+        WHERE p.id = n.parent_id
+            AND n.started_at IS NULL
+            AND p.started_at IS NOT NULL
     """)
     )
 
     with op.batch_alter_table("session_node", schema=None) as batch_op:
         batch_op.alter_column("external_id", existing_type=sa.Text(), nullable=False)
-        batch_op.alter_column(
-            "started_at",
-            existing_type=sa.DateTime(timezone=True),
-            nullable=False,
-        )
         batch_op.create_index(
             POSITION_INDEX,
             ["session_id", "started_at", "id"],
@@ -171,7 +166,8 @@ def downgrade() -> None:
             SELECT
                 id,
                 row_number() OVER (
-                    PARTITION BY session_id ORDER BY started_at, id
+                    PARTITION BY session_id
+                    ORDER BY started_at ASC NULLS LAST, id ASC
                 ) - 1 AS position
             FROM session_node
         ) AS ranked
@@ -185,11 +181,6 @@ def downgrade() -> None:
             SESSION_ID_INDEX_UNIQUE_CONSTRAINT, ["session_id", "index"]
         )
         batch_op.alter_column("external_id", existing_type=sa.Text(), nullable=True)
-        batch_op.alter_column(
-            "started_at",
-            existing_type=sa.DateTime(timezone=True),
-            nullable=True,
-        )
         batch_op.drop_index(POSITION_INDEX)
         batch_op.drop_column("secondary_parent_external_ids")
         batch_op.drop_column("parent_external_id")

@@ -198,7 +198,9 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         statement = (
             select(SessionNodeORM)
             .where(SessionNodeORM.session_id == session_id)
-            .order_by(SessionNodeORM.started_at, SessionNodeORM.id)
+            .order_by(
+                SessionNodeORM.started_at.asc().nulls_last(), SessionNodeORM.id.asc()
+            )
             .options(*(defer(column) for column in deferred))
         )
         rows = (await self._session.scalars(statement)).all()
@@ -316,11 +318,16 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         Returns:
             Last matching node in position order, or ``None`` on a miss.
         """
+        # Reverse of the ascending position order, where a node without a
+        # start time sorts last, so the nulls lead the descending scan.
         statement = (
             statement.options(
                 *(defer(column) for column in TOOL_LOOKUP_DEFERRED_COLUMNS)
             )
-            .order_by(SessionNodeORM.started_at.desc(), SessionNodeORM.id.desc())
+            .order_by(
+                SessionNodeORM.started_at.desc().nulls_first(),
+                SessionNodeORM.id.desc(),
+            )
             .limit(1)
         )
         row = (await self._session.scalars(statement)).one_or_none()
@@ -371,7 +378,9 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
                 SessionNodeORM.status.in_(FINISHED_NODE_STATUSES),
             )
             .options(*(defer(column) for column in TOOL_LOOKUP_DEFERRED_COLUMNS))
-            .order_by(SessionNodeORM.started_at, SessionNodeORM.id)
+            .order_by(
+                SessionNodeORM.started_at.asc().nulls_last(), SessionNodeORM.id.asc()
+            )
             .offset(occurrence)
             .limit(1)
         )

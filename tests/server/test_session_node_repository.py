@@ -275,6 +275,43 @@ def _node(position: int, **overrides: Any) -> SessionNode:
     return SessionNode(**values)
 
 
+def _by_id(nodes: list[SessionNode]) -> list[str]:
+    """List the external ids of nodes in ascending id order.
+
+    Args:
+        nodes: Nodes to order.
+
+    Returns:
+        External ids in id order.
+    """
+    return [node.external_id for node in sorted(nodes, key=lambda node: node.id)]
+
+
+async def _walk_pages(
+    repository: SessionNodeRepository, session_id: uuid.UUID, size: int
+) -> list[str]:
+    """Collect the external ids of every page of a session, following the cursor.
+
+    Args:
+        repository: Repository under test.
+        session_id: Id of the session to read.
+        size: Page size.
+
+    Returns:
+        External ids in page order.
+    """
+    collected: list[str] = []
+    cursor = None
+    while True:
+        nodes, next_cursor = await repository.query(
+            SessionNodeFilter(session_id=session_id, cursor=cursor, size=size)
+        )
+        collected.extend(node.external_id for node in nodes)
+        if next_cursor is None:
+            return collected
+        cursor = next_cursor
+
+
 async def test_get_by_external_ids_empty_when_none_stored(setup: Setup) -> None:
     """Return no rows for external ids that are not stored."""
     repository, session_id, _ = setup
@@ -390,18 +427,70 @@ async def test_query_walks_pages_by_start(setup: Setup) -> None:
         [_node(position, session_id=session_id) for position in range(5)],
     )
 
-    collected: list[str] = []
-    cursor = None
-    while True:
-        nodes, next_cursor = await repository.query(
-            SessionNodeFilter(session_id=session_id, cursor=cursor, size=2)
-        )
-        collected.extend(node.external_id for node in nodes)
-        if next_cursor is None:
-            break
-        cursor = next_cursor
+    collected = await _walk_pages(repository, session_id, size=2)
 
     assert collected == ["n0", "n1", "n2", "n3", "n4"]
+
+
+async def test_query_orders_untimed_nodes_last(setup: Setup) -> None:
+    """Sort a node without a start time after every timed node."""
+    repository, session_id, _ = setup
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(2, session_id=session_id, started_at=None),
+            _node(1, session_id=session_id),
+            _node(0, session_id=session_id),
+        ],
+    )
+    nodes, next_cursor = await repository.query(
+        SessionNodeFilter(session_id=session_id)
+    )
+    assert next_cursor is None
+    assert [node.external_id for node in nodes] == ["n0", "n1", "n2"]
+
+
+async def test_query_walks_pages_into_the_untimed_tail(setup: Setup) -> None:
+    """Walk from the last timed node into the untimed tail without gaps."""
+    repository, session_id, _ = setup
+    timed = [_node(position, session_id=session_id) for position in range(2)]
+    untimed = [
+        _node(position, session_id=session_id, started_at=None)
+        for position in range(2, 5)
+    ]
+    await repository.upsert_batch(session_id, timed + untimed)
+
+    collected = await _walk_pages(repository, session_id, size=2)
+
+    assert collected == ["n0", "n1", *_by_id(untimed)]
+
+
+async def test_query_walks_pages_within_the_untimed_tail(setup: Setup) -> None:
+    """Walk nodes that all lack a start time page by page in id order."""
+    repository, session_id, _ = setup
+    untimed = [
+        _node(position, session_id=session_id, started_at=None) for position in range(3)
+    ]
+    await repository.upsert_batch(session_id, untimed)
+
+    collected = await _walk_pages(repository, session_id, size=1)
+
+    assert collected == _by_id(untimed)
+
+
+async def test_list_all_orders_untimed_nodes_last(setup: Setup) -> None:
+    """Read a node without a start time after every timed node."""
+    repository, session_id, _ = setup
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(2, session_id=session_id, started_at=None),
+            _node(0, session_id=session_id),
+            _node(1, session_id=session_id),
+        ],
+    )
+    nodes = await repository.list_all(session_id, include_payloads=False)
+    assert [node.external_id for node in nodes] == ["n0", "n1", "n2"]
 
 
 @pytest.mark.parametrize(

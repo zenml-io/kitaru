@@ -3271,7 +3271,7 @@ def _paginate_fake_by_index(
 def build_session_node(
     session_id: uuid.UUID, external_id: str, **overrides: Any
 ) -> SessionNode:
-    """Build a session node with the fields the ingest service derives.
+    """Build a session node identified by its session and external id.
 
     Args:
         session_id: Id of the owning session.
@@ -3286,56 +3286,75 @@ def build_session_node(
         "external_id": external_id,
     }
     values.update(overrides)
-    values.setdefault("started_at", datetime.now(UTC))
     return SessionNode(**values)
 
 
-def _node_position_key(node: SessionNode) -> tuple[datetime, uuid.UUID]:
+def _start_sort_key(
+    started_at: datetime | None, row_id: uuid.UUID
+) -> tuple[bool, datetime, uuid.UUID]:
+    """Build the sort key placing a node without a start time last.
+
+    Args:
+        started_at: Start time of the node, if any.
+        row_id: Id of the node.
+
+    Returns:
+        Untimed marker, start time, and id.
+    """
+    if started_at is None:
+        return True, datetime.min.replace(tzinfo=UTC), row_id
+    return False, started_at, row_id
+
+
+def _node_position_key(node: SessionNode) -> tuple[bool, datetime, uuid.UUID]:
     """Build the sort key a session node is positioned by.
 
     Args:
         node: Session node to position.
 
     Returns:
-        Start time and id of the node.
+        Untimed marker, start time, and id of the node.
     """
-    return node.started_at, node.id
+    return _start_sort_key(node.started_at, node.id)
 
 
 def _paginate_fake_by_start(
-    items: list[ListItemT],
-    list_filter: ListFilter,
-    key: Callable[[ListItemT], tuple[datetime, uuid.UUID]],
-) -> tuple[list[ListItemT], str | None]:
-    """Apply start-ascending cursor pagination to an in-memory list.
+    items: list[SessionNode], list_filter: ListFilter
+) -> tuple[list[SessionNode], str | None]:
+    """Apply start-ascending cursor pagination to an in-memory list of nodes.
 
     Args:
-        items: Candidate domain objects, already scoped by the caller.
+        items: Candidate nodes, already scoped by the caller.
         list_filter: Filter carrying the cursor and size.
-        key: Item start time and id accessor.
 
     Returns:
-        Page of matching items and the next cursor.
+        Page of matching nodes and the next cursor.
     """
     filter_hash = list_filter.compute_filter_hash()
     cursor = None
     if list_filter.cursor is not None:
         cursor = decode_cursor(list_filter.cursor, list_filter.sort, filter_hash)
 
-    ordered = sorted(items, key=key)
+    ordered = sorted(items, key=_node_position_key)
     if cursor is not None:
         started_at, _, row_id = cursor.id.rpartition("|")
-        last = (datetime.fromisoformat(started_at), uuid.UUID(row_id))
-        ordered = [item for item in ordered if key(item) > last]
+        last = _start_sort_key(
+            datetime.fromisoformat(started_at) if started_at else None,
+            uuid.UUID(row_id),
+        )
+        ordered = [item for item in ordered if _node_position_key(item) > last]
 
     page = ordered[: list_filter.size + 1]
     next_cursor = None
     if len(page) > list_filter.size:
         page = page[: list_filter.size]
-        last_started_at, last_id = key(page[-1])
+        last_node = page[-1]
+        last_started_at = (
+            last_node.started_at.isoformat() if last_node.started_at is not None else ""
+        )
         next_cursor = encode_cursor(
             list_filter.sort,
-            f"{last_started_at.isoformat()}|{last_id}",
+            f"{last_started_at}|{last_node.id}",
             filter_hash,
         )
     return page, next_cursor
@@ -3461,9 +3480,7 @@ class FakeSessionNodeRepository:
                 or _evaluate_filter_expression(node, session_node_filter.expression)
             )
         ]
-        page, next_cursor = _paginate_fake_by_start(
-            nodes, session_node_filter, _node_position_key
-        )
+        page, next_cursor = _paginate_fake_by_start(nodes, session_node_filter)
         result = []
         for node in page:
             if session_node_filter.include_payloads:
