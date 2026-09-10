@@ -25,8 +25,10 @@ from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.cli import app as app_module
 from kitaru.cli import diagnostics
 from kitaru.cli.config import ResolvedCredential, ResolvedTarget
+from kitaru.cli.output import CLIError
 from kitaru.cli.skill_discovery import INSTALL_COMMAND
 from kitaru.client.credential_store import CredentialStore
+from kitaru.client.exceptions import NotFoundError
 
 
 class FakeWorkers:
@@ -135,6 +137,70 @@ async def test_status_and_info_add_non_blocking_compatibility_warnings(
             assert len(result.warnings) == 1
             assert warning in result.warnings[0]
             assert "not blocked" in result.warnings[0]
+
+
+async def _raise_bare_404() -> ServerInfoResponse:
+    raise NotFoundError(404, "")
+
+
+MISSING_SERVER_MESSAGE = (
+    "The server at https://gone.example.com did not answer as a Kitaru server "
+    "(HTTP 404). It may have been deleted or the URL may be wrong."
+)
+
+
+@pytest.mark.parametrize("command", [diagnostics.status, diagnostics.info])
+async def test_info_endpoint_404_is_reported_as_a_missing_server(
+    tmp_path, monkeypatch, command
+) -> None:
+    """A 404 from the info endpoint means the URL is not a Kitaru server."""
+    client = FakeClient()
+    client.info = SimpleNamespace(get=_raise_bare_404)
+    monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: client)
+
+    with pytest.raises(CLIError) as excinfo:
+        await command(
+            target=ResolvedTarget("https://gone.example.com", "stored"),
+            credential_store=CredentialStore(tmp_path / "credentials.json"),
+            timeout=30,
+        )
+
+    error = excinfo.value
+    assert error.kind == "invalid_configuration"
+    assert error.message == MISSING_SERVER_MESSAGE
+    assert error.details == {
+        "server_url": "https://gone.example.com",
+        "status_code": 404,
+    }
+    assert error.hint is not None
+    assert "kitaru doctor" in error.hint
+    assert "kitaru login" in error.hint
+    assert client.closed is True
+
+
+async def test_doctor_explains_a_404_from_the_info_endpoint(
+    tmp_path, monkeypatch
+) -> None:
+    """Doctor's server_info check carries the same explanation as status."""
+
+    async def probe_404(*args) -> int:
+        return 404
+
+    client = FakeClient()
+    client.info = SimpleNamespace(get=_raise_bare_404)
+    monkeypatch.setattr(diagnostics, "_probe", probe_404)
+    monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: client)
+
+    result = await diagnostics.doctor(
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+        explicit_server="https://gone.example.com",
+        timeout=0.1,
+    )
+
+    assert result.item["healthy"] is False
+    server_info = next(c for c in result.item["checks"] if c["name"] == "server_info")
+    assert server_info["status"] == "fail"
+    assert server_info["detail"] == MISSING_SERVER_MESSAGE
 
 
 async def test_info_reports_runtime_and_server_details(tmp_path, monkeypatch) -> None:

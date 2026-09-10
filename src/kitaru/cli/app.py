@@ -5214,18 +5214,21 @@ def _convert_error(
         )
     if isinstance(exception, APIError):
         details = {"status_code": exception.status_code}
+        # Proxies and edge servers often answer with an empty body, which
+        # would otherwise render as a title with nothing under it.
+        detail = exception.detail.strip() or (
+            f"The server returned HTTP {exception.status_code} with no detail."
+        )
         if exception.status_code in {401, 403}:
-            return CLIError("authentication_failed", exception.detail, details=details)
+            return CLIError("authentication_failed", detail, details=details)
         if exception.status_code == 404:
-            return CLIError("not_found", exception.detail, details=details)
+            return CLIError("not_found", detail, details=details)
         if exception.status_code == 409:
-            return CLIError("conflict", exception.detail, details=details)
+            return CLIError("conflict", detail, details=details)
         if exception.status_code in {400, 413, 422}:
-            return CLIError("invalid_arguments", exception.detail, details=details)
+            return CLIError("invalid_arguments", detail, details=details)
         if exception.status_code >= 500:
-            return CLIError(
-                "network_error", exception.detail, retryable=True, details=details
-            )
+            return CLIError("network_error", detail, retryable=True, details=details)
         return CLIError("internal_error", str(exception), details=details)
     if isinstance(exception, httpx.TransportError):
         server_url = _get_transport_server_url(exception, server_url)

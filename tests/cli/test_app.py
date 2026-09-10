@@ -536,6 +536,15 @@ def test_http_413_maps_to_invalid_arguments_with_server_detail() -> None:
     assert error.details == {"status_code": 413}
 
 
+def test_http_404_without_detail_names_the_status_code() -> None:
+    """An empty error body still produces a readable message."""
+    error = app_module._convert_error(APIError(404, ""))
+
+    assert error.kind == "not_found"
+    assert error.message == "The server returned HTTP 404 with no detail."
+    assert error.details == {"status_code": 404}
+
+
 def test_html_response_maps_to_invalid_configuration() -> None:
     """The shared boundary names the endpoint that answered with an HTML page."""
     error = app_module._convert_error(

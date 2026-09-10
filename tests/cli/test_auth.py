@@ -409,7 +409,8 @@ async def test_login_explains_when_kitaru_is_not_available(
 
     assert raised.value.kind == "invalid_configuration"
     assert str(raised.value) == (
-        f"Kitaru is not available at {server}. Check the URL or deployment."
+        f"The server at {server} did not answer as a Kitaru server (HTTP 404). "
+        "It may have been deleted or the URL may be wrong."
     )
     assert raised.value.details == {
         "status_code": 404,
