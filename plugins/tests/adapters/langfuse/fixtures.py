@@ -95,7 +95,6 @@ def build_observation_v2(
         "output": None,
         "metadata": None,
         "model_parameters": None,
-        "provided_model_name": None,
         **extra,
     }
     if end_time is not None:

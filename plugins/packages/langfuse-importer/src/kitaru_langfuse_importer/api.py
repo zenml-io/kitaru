@@ -164,11 +164,10 @@ def _serialize_observation(observation: ObservationV2) -> dict[str, Any]:
         Observation payload dict.
     """
     payload = observation.model_dump(mode="json", by_alias=True)
-    # The v2 listing exposes the raw model string as providedModelName. The
-    # parser looks for a plain "model" key first, so carry it across under
-    # that name too instead of falling through to modelId, which names a
-    # matched catalog entry rather than the model string itself.
-    payload["model"] = observation.provided_model_name
+    # Langfuse 4.15.2 renamed providedModelName to model. Normalize the wire
+    # payload so either SDK shape preserves the model name rather than using
+    # modelId, which identifies a matched catalog entry.
+    payload.setdefault("model", payload.get("providedModelName"))
     return payload
 
 

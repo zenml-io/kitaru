@@ -14,7 +14,9 @@
 """Focused contract tests for the Langfuse fetch entrypoint."""
 
 import asyncio
+import json
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from langfuse.api.core import ApiError
@@ -37,6 +39,44 @@ from .fixtures import (
 def _flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
     """Flatten imported nodes depth-first for assertions."""
     return [node for root in nodes for node in (root, *_flatten(root.children))]
+
+
+@pytest.mark.parametrize(
+    ("model_fields", "expected"),
+    [
+        ({"model": "gpt-5-nano"}, "gpt-5-nano"),
+        ({"providedModelName": "gpt-5-nano"}, "gpt-5-nano"),
+        ({"model": "current", "providedModelName": "legacy"}, "current"),
+        ({"model": None}, None),
+        ({"model": None, "providedModelName": "legacy"}, None),
+        ({}, None),
+    ],
+)
+async def test_fetch_preserves_model_across_sdk_field_rename(
+    fake_langfuse: FakeLangfuseClient,
+    model_fields: dict[str, Any],
+    expected: str | None,
+) -> None:
+    """Accept both wire field names without requiring an SDK-specific attribute."""
+    fake_langfuse.trace_builders = [build_complete_trace]
+    fake_langfuse.observation_pages = {
+        "trace-1": [
+            build_observations_page(
+                [
+                    build_observation_v2(
+                        "obs-llm",
+                        "trace-1",
+                        observation_type="GENERATION",
+                        **model_fields,
+                    )
+                ]
+            )
+        ]
+    }
+
+    payloads = await collect_payloads(fetch({"trace_ids": ["trace-1"]}))
+
+    assert json.loads(payloads[0])[0]["observations"][0]["model"] == expected
 
 
 async def test_fetch_with_trace_ids_fetches_exactly_those_in_order(
