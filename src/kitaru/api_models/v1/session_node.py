@@ -158,10 +158,6 @@ class SessionNodeResponse(ResponseModel):
 
     id: uuid.UUID = Field(description="Node id.")
     session_id: uuid.UUID = Field(description="Session this node belongs to.")
-    parent_id: uuid.UUID | None = Field(default=None, description="Parent node.")
-    secondary_parent_ids: list[uuid.UUID] = Field(
-        description="Additional parent nodes."
-    )
     external_id: str = Field(description="Id from the source system.")
     parent_external_id: str | None = Field(
         default=None, description="External id of the parent node."

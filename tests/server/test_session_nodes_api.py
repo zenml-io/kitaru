@@ -165,7 +165,7 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
     assert response.status_code == 200
     items = response.json()
     assert len(items) == 2
-    assert items[1]["parent_id"] == items[0]["id"]
+    assert items[1]["parent_external_id"] == "n0"
     assert items[1]["cache_key"] is not None
     assert items[0]["input_text_selector"] == "/q"
     assert items[0]["output_text_selector"] == "/answer"
@@ -462,70 +462,30 @@ async def test_get_session_with_nodes_populates_payloads(
 async def test_get_session_with_nodes_carries_the_parent_references(
     client: httpx.AsyncClient, session_id: str
 ) -> None:
-    """Carry both the stored parent reference and the resolved parent id."""
+    """Carry the parent references as sent, resolved or not."""
     await client.post(
         f"/api/v1/sessions/{session_id}/nodes",
-        json={"nodes": [_node(0), _node(1, parent_external_id="n0")]},
+        json={
+            "nodes": [
+                _node(1, parent_external_id="n0"),
+                _node(
+                    2,
+                    parent_external_id="missing",
+                    secondary_parent_external_ids=["n1"],
+                ),
+                _node(0),
+            ]
+        },
     )
 
     response = await client.get(f"/api/v1/sessions/{session_id}/full")
 
     assert response.status_code == 200
-    nodes = response.json()["nodes"]
-    assert nodes[0]["parent_external_id"] is None
-    assert nodes[0]["parent_id"] is None
-    assert nodes[1]["parent_external_id"] == "n0"
-    assert nodes[1]["parent_id"] == nodes[0]["id"]
-
-
-async def test_ingest_nodes_links_a_child_batched_before_its_parent(
-    client: httpx.AsyncClient, session_id: str
-) -> None:
-    """Link a child a batch carries ahead of its parent."""
-    response = await client.post(
-        f"/api/v1/sessions/{session_id}/nodes",
-        json={"nodes": [_node(1, parent_external_id="n0"), _node(0)]},
-    )
-
-    assert response.status_code == 200
-    child, parent = response.json()
-    assert child["parent_external_id"] == "n0"
-    assert child["parent_id"] == parent["id"]
-
-
-async def test_ingest_nodes_links_a_child_of_an_earlier_batch(
-    client: httpx.AsyncClient, session_id: str
-) -> None:
-    """Link a stored child once a later batch carries its parent."""
-    child = await client.post(
-        f"/api/v1/sessions/{session_id}/nodes",
-        json={"nodes": [_node(1, parent_external_id="n0")]},
-    )
-    assert child.json()[0]["parent_id"] is None
-
-    parent = await client.post(
-        f"/api/v1/sessions/{session_id}/nodes", json={"nodes": [_node(0)]}
-    )
-
-    response = await client.get(f"/api/v1/sessions/{session_id}/full")
     nodes = {node["external_id"]: node for node in response.json()["nodes"]}
-    assert nodes["n1"]["parent_id"] == parent.json()[0]["id"]
-
-
-async def test_ingest_nodes_reads_an_unlinked_child_as_a_root(
-    client: httpx.AsyncClient, session_id: str
-) -> None:
-    """Read a child whose parent never landed with no parent id."""
-    await client.post(
-        f"/api/v1/sessions/{session_id}/nodes",
-        json={"nodes": [_node(1, parent_external_id="missing")]},
-    )
-
-    response = await client.get(f"/api/v1/sessions/{session_id}/full")
-
-    node = response.json()["nodes"][0]
-    assert node["parent_id"] is None
-    assert node["parent_external_id"] == "missing"
+    assert nodes["n0"]["parent_external_id"] is None
+    assert nodes["n1"]["parent_external_id"] == "n0"
+    assert nodes["n2"]["parent_external_id"] == "missing"
+    assert nodes["n2"]["secondary_parent_external_ids"] == ["n1"]
 
 
 async def test_get_session_with_nodes_session_not_found(

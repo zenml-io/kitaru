@@ -78,8 +78,6 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("session_node", "outputs_blob_id"): None,
     ("session_node", "attributes_blob_id"): None,
     ("session_node", "reasoning_blob_id"): None,
-    ("session_node_pending_link", "session_id"): "CASCADE",
-    ("session_node_pending_link", "child_id"): "CASCADE",
     # A task names its inputs by id and carries no constraint to them, so
     # agent_version_id, import_id, input_session_id, and plugin_version_id are
     # absent here. The job a task belongs to, the worker holding it, and an

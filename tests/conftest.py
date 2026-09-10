@@ -256,8 +256,6 @@ from kitaru.server.domain.session import (
 )
 from kitaru.server.domain.session_node import (
     DuplicateSessionNodeExternalId,
-    PendingLinkKind,
-    PendingParentLink,
     SessionNode,
 )
 from kitaru.server.domain.tag import (
@@ -3349,7 +3347,6 @@ class FakeSessionNodeRepository:
                 the cohort-version-scope history search.
         """
         self._nodes: dict[uuid.UUID, SessionNode] = {}
-        self._pending_links: list[PendingParentLink] = []
         self._sessions = sessions
         self._cohort_versions = cohort_versions
 
@@ -3487,61 +3484,6 @@ class FakeSessionNodeRepository:
                 update={"inputs": None, "outputs": None, "attributes": None}
             )
             for node in ordered
-        ]
-
-    async def add_pending_links(self, links: Sequence[PendingParentLink]) -> None:
-        """Store pending parent links.
-
-        Args:
-            links: Pending links to store.
-        """
-        self._pending_links.extend(link.model_copy() for link in links)
-
-    async def link_pending_parents(
-        self, session_id: uuid.UUID, parents: Sequence[SessionNode]
-    ) -> list[SessionNode]:
-        """Resolve the pending links of a session that name these parents.
-
-        Args:
-            session_id: Id of the owning session.
-            parents: Nodes whose external ids the pending links may name.
-
-        Returns:
-            Linked children, without payloads.
-        """
-        parent_id_by_external_id = {parent.external_id: parent.id for parent in parents}
-        resolved = [
-            link
-            for link in self._pending_links
-            if link.session_id == session_id
-            and link.parent_external_id in parent_id_by_external_id
-        ]
-        linked_ids: list[uuid.UUID] = []
-        for link in resolved:
-            node = self._nodes[link.child_id]
-            parent_id = parent_id_by_external_id[link.parent_external_id]
-            if link.kind == PendingLinkKind.PRIMARY:
-                update: dict[str, Any] = {"parent_id": parent_id}
-            else:
-                update = {
-                    "secondary_parent_ids": [*node.secondary_parent_ids, parent_id]
-                }
-            self._nodes[link.child_id] = node.model_copy(update=update)
-            if link.child_id not in linked_ids:
-                linked_ids.append(link.child_id)
-        self._pending_links = [
-            link for link in self._pending_links if link not in resolved
-        ]
-        return [
-            self._nodes[child_id].model_copy(
-                update={
-                    "reasoning": None,
-                    "inputs": None,
-                    "outputs": None,
-                    "attributes": None,
-                }
-            )
-            for child_id in linked_ids
         ]
 
     async def exists_in_session(

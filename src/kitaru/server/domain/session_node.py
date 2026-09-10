@@ -16,14 +16,13 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from enum import StrEnum
 from typing import Any
 
 from pydantic import Field
 
 from kitaru.api_models.v1.session import TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.server.domain.base import ConflictError, DomainModel, ValidationError
+from kitaru.server.domain.base import ConflictError, DomainModel
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import SessionRollups
@@ -43,27 +42,11 @@ class DuplicateSessionNodeExternalId(ConflictError):
         )
 
 
-class SessionNodeParentChanged(ValidationError):
-    """Raised when a node sent again names different parents than the stored node."""
-
-    def __init__(self, external_id: str) -> None:
-        """Initialize the error.
-
-        Args:
-            external_id: External id of the node whose parents changed.
-        """
-        super().__init__(
-            f"Node {external_id} names different parents than the stored node"
-        )
-
-
 class SessionNode(DomainModel):
     """Session node."""
 
     id: uuid.UUID = Field(default_factory=uuid7)
     session_id: uuid.UUID
-    parent_id: uuid.UUID | None = None
-    secondary_parent_ids: list[uuid.UUID] = Field(default_factory=list)
     external_id: str
     parent_external_id: str | None = None
     secondary_parent_external_ids: list[str] = Field(default_factory=list)
@@ -93,22 +76,6 @@ class SessionNode(DomainModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created: datetime | None = None
     updated: datetime | None = None
-
-
-class PendingLinkKind(StrEnum):
-    """Pending link kind."""
-
-    PRIMARY = "primary"
-    SECONDARY = "secondary"
-
-
-class PendingParentLink(DomainModel):
-    """Pending parent link."""
-
-    session_id: uuid.UUID
-    parent_external_id: str
-    child_id: uuid.UUID
-    kind: PendingLinkKind
 
 
 def node_rollup_contribution(node: SessionNode | None) -> SessionRollups:

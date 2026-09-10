@@ -16,7 +16,7 @@
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import Select, delete, select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import defer
 
 from kitaru.api_models.v1.session import SessionOrigin
@@ -31,17 +31,12 @@ from kitaru.server.adapters.db.orm.session_node import (
     SESSION_NODE_SESSION_ID_FOREIGN_KEY,
     SessionNodeORM,
 )
-from kitaru.server.adapters.db.orm.session_node_pending_link import (
-    SessionNodePendingLinkORM,
-)
 from kitaru.server.adapters.db.pagination import paginate_by_started_at
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.domain.session import SessionNotFound
 from kitaru.server.domain.session_node import (
     DuplicateSessionNodeExternalId,
-    PendingLinkKind,
-    PendingParentLink,
     SessionNode,
 )
 
@@ -205,74 +200,6 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         )
         rows = (await self._session.scalars(statement)).all()
         exclude = {column.key for column in deferred}
-        return [row.to_domain(exclude=exclude) for row in rows]
-
-    async def add_pending_links(self, links: Sequence[PendingParentLink]) -> None:
-        """Store pending parent links.
-
-        Args:
-            links: Pending links to store.
-        """
-        if not links:
-            return
-        for link in links:
-            self._session.add(SessionNodePendingLinkORM.from_domain(link))
-        await self._flush()
-
-    async def link_pending_parents(
-        self, session_id: uuid.UUID, parents: Sequence[SessionNode]
-    ) -> list[SessionNode]:
-        """Resolve the pending links of a session that name these parents.
-
-        A primary link sets the child's parent id and a secondary link
-        appends to its secondary parent ids. Every resolved link is dropped.
-
-        Args:
-            session_id: Id of the owning session.
-            parents: Nodes whose external ids the pending links may name.
-
-        Returns:
-            Linked children, without payloads.
-        """
-        if not parents:
-            return []
-        parent_id_by_external_id = {parent.external_id: parent.id for parent in parents}
-        link_statement = select(SessionNodePendingLinkORM).where(
-            SessionNodePendingLinkORM.session_id == session_id,
-            SessionNodePendingLinkORM.parent_external_id.in_(
-                sorted(parent_id_by_external_id)
-            ),
-        )
-        links = (await self._session.scalars(link_statement)).all()
-        if not links:
-            return []
-        child_statement = (
-            select(SessionNodeORM)
-            .where(SessionNodeORM.id.in_({link.child_id for link in links}))
-            .options(*(defer(column) for column in PAYLOAD_COLUMNS))
-        )
-        rows = (await self._session.scalars(child_statement)).all()
-        rows_by_id = {row.id: row for row in rows}
-        for link in links:
-            row = rows_by_id[link.child_id]
-            parent_id = parent_id_by_external_id[link.parent_external_id]
-            if link.kind == PendingLinkKind.PRIMARY:
-                row.parent_id = parent_id
-            else:
-                # Reassigned rather than appended to because a JSONB column
-                # does not track in-place mutation.
-                row.secondary_parent_ids = [
-                    *row.secondary_parent_ids,
-                    str(parent_id),
-                ]
-        delete_statement = (
-            delete(SessionNodePendingLinkORM)
-            .where(SessionNodePendingLinkORM.id.in_([link.id for link in links]))
-            .execution_options(synchronize_session="fetch")
-        )
-        await self._session.execute(delete_statement)
-        await self._flush()
-        exclude = {column.key for column in PAYLOAD_COLUMNS}
         return [row.to_domain(exclude=exclude) for row in rows]
 
     async def exists_in_session(

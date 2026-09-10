@@ -4892,20 +4892,6 @@
               "description": "External id of the parent node.",
               "title": "Parent External Id"
             },
-            "parent_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Parent node.",
-              "title": "Parent Id"
-            },
             "reasoning": {
               "anyOf": [
                 {
@@ -4938,15 +4924,6 @@
                 "type": "string"
               },
               "title": "Secondary Parent External Ids",
-              "type": "array"
-            },
-            "secondary_parent_ids": {
-              "description": "Additional parent nodes.",
-              "items": {
-                "format": "uuid",
-                "type": "string"
-              },
-              "title": "Secondary Parent Ids",
               "type": "array"
             },
             "session_id": {
@@ -5041,7 +5018,6 @@
           "required": [
             "id",
             "session_id",
-            "secondary_parent_ids",
             "external_id",
             "secondary_parent_external_ids",
             "node_type",

@@ -126,13 +126,9 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     session_id: Mapped[uuid.UUID]
-    # Validated at ingestion to reference a node of the same session, which
-    # a foreign key cannot express.
-    parent_id: Mapped[uuid.UUID | None]
-    secondary_parent_ids: Mapped[list[str]] = mapped_column(JSONB)
     external_id: Mapped[str] = mapped_column(Text)
-    # Kept as sent so a reference that no stored node matches yet links once
-    # its target lands.
+    # Resolved to node ids when the session is read, so a reference may name
+    # a node that has not landed yet.
     parent_external_id: Mapped[str | None] = mapped_column(Text)
     secondary_parent_external_ids: Mapped[list[str]] = mapped_column(JSONB)
     trace_id: Mapped[str | None] = mapped_column(Text)
@@ -204,10 +200,6 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         outputs, outputs_blob_id = split_payload(node.outputs)
         attributes, attributes_blob_id = split_payload(node.attributes)
         self.session_id = node.session_id
-        self.parent_id = node.parent_id
-        self.secondary_parent_ids = [
-            str(parent_id) for parent_id in node.secondary_parent_ids
-        ]
         self.external_id = node.external_id
         self.parent_external_id = node.parent_external_id
         self.secondary_parent_external_ids = list(node.secondary_parent_external_ids)
@@ -278,10 +270,6 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return SessionNode(
             id=self.id,
             session_id=self.session_id,
-            parent_id=self.parent_id,
-            secondary_parent_ids=[
-                uuid.UUID(parent_id) for parent_id in self.secondary_parent_ids
-            ],
             external_id=self.external_id,
             parent_external_id=self.parent_external_id,
             secondary_parent_external_ids=list(self.secondary_parent_external_ids),

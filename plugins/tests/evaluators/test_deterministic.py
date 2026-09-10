@@ -60,10 +60,6 @@ def _node(
     return SessionNodeResponse(
         id=uuid.UUID(int=ordinal + 100),
         session_id=SESSION_ID,
-        parent_id=(
-            uuid.UUID(int=parent_ordinal + 100) if parent_ordinal is not None else None
-        ),
-        secondary_parent_ids=[],
         external_id=external_id,
         parent_external_id=parent_external_id,
         secondary_parent_external_ids=[],

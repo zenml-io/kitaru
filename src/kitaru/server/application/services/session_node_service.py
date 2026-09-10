@@ -40,10 +40,7 @@ from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import combine_rollups, rollup_delta
 from kitaru.server.domain.session_node import (
-    PendingLinkKind,
-    PendingParentLink,
     SessionNode,
-    SessionNodeParentChanged,
     node_rollup_contribution,
 )
 
@@ -119,13 +116,12 @@ class SessionNodeService:
         """Upsert a batch of nodes on (session, external id).
 
         An external id already stored is replaced whole, keeping the node
-        id and its parent references. ``parent_external_id`` and
-        ``secondary_parent_external_ids`` resolve against stored rows, and a
-        reference that resolves to none of them is recorded as a pending
-        link that the batch carrying its target resolves. The session's
-        cost, tokens, and call counts roll up by one atomic delta-based
-        update covering the whole batch. A task principal ingests only into
-        a session it owns.
+        id. ``parent_external_id`` and ``secondary_parent_external_ids`` are
+        stored as sent and resolved to node ids when the nodes are read, so
+        a parent may land after its children. The session's cost, tokens,
+        and call counts roll up by one atomic delta-based update covering
+        the whole batch. A task principal ingests only into a session it
+        owns.
 
         Args:
             session_id: Id of the session to ingest into.
@@ -137,8 +133,6 @@ class SessionNodeService:
             SessionAccessDenied: A task principal does not own the session.
             SessionNotIngestable: The session is not in progress, its origin
                 is not imported, and it names no import source.
-            SessionNodeParentChanged: A node already stored is sent again
-                with different parent references.
 
         Returns:
             Stored nodes in batch order, without payloads.
@@ -156,16 +150,14 @@ class SessionNodeService:
         if not batch:
             return []
 
-        # A parent external id may point at a node already stored from an
-        # earlier batch, not just at one in this batch, so the bulk fetch
-        # covers every external id either batch or parent reference touches.
-        # A reference this fetch does not resolve becomes a pending link.
+        # A node without a start time takes its parent's, and the parent may
+        # be stored from an earlier batch, so the bulk fetch covers the
+        # parent references as well as the batch's own external ids.
         referenced_external_ids: set[str] = set()
         for item in batch:
             referenced_external_ids.add(item.external_id)
             if item.parent_external_id is not None:
                 referenced_external_ids.add(item.parent_external_id)
-            referenced_external_ids.update(item.secondary_parent_external_ids)
 
         existing_by_external_id = await self._repository.get_by_external_ids(
             session_id, sorted(referenced_external_ids), include_payloads=False
@@ -173,33 +165,11 @@ class SessionNodeService:
         known_by_external_id = dict(existing_by_external_id)
 
         resolved: list[SessionNode] = []
-        pending_links: list[PendingParentLink] = []
         for item in batch:
-            unresolved: list[tuple[str, PendingLinkKind]] = []
             parent = None
             if item.parent_external_id is not None:
                 parent = known_by_external_id.get(item.parent_external_id)
-                if parent is None:
-                    unresolved.append(
-                        (item.parent_external_id, PendingLinkKind.PRIMARY)
-                    )
-            secondary_parent_ids: list[uuid.UUID] = []
-            for secondary_external_id in item.secondary_parent_external_ids:
-                secondary_parent = known_by_external_id.get(secondary_external_id)
-                if secondary_parent is not None:
-                    secondary_parent_ids.append(secondary_parent.id)
-                else:
-                    unresolved.append(
-                        (secondary_external_id, PendingLinkKind.SECONDARY)
-                    )
-
             existing_node = existing_by_external_id.get(item.external_id)
-            if existing_node is not None and (
-                item.parent_external_id != existing_node.parent_external_id
-                or item.secondary_parent_external_ids
-                != existing_node.secondary_parent_external_ids
-            ):
-                raise SessionNodeParentChanged(item.external_id)
             started_at = _resolve_started_at(item.started_at, parent)
             cache_key = None
             if item.node_type == NodeType.TOOL_CALL and item.tool_name is not None:
@@ -208,8 +178,6 @@ class SessionNodeService:
             node = SessionNode(
                 id=existing_node.id if existing_node is not None else uuid7(),
                 session_id=session_id,
-                parent_id=parent.id if parent is not None else None,
-                secondary_parent_ids=secondary_parent_ids,
                 external_id=item.external_id,
                 parent_external_id=item.parent_external_id,
                 secondary_parent_external_ids=item.secondary_parent_external_ids,
@@ -248,20 +216,6 @@ class SessionNodeService:
             )
             resolved.append(node)
             known_by_external_id[item.external_id] = node
-            # A replaced node keeps its parent references, so the links its
-            # earlier write recorded still stand. Deduplicated because one
-            # child holds at most one pending link per parent reference and
-            # kind.
-            if existing_node is None:
-                pending_links.extend(
-                    PendingParentLink(
-                        session_id=session_id,
-                        parent_external_id=external_id,
-                        child_id=node.id,
-                        kind=kind,
-                    )
-                    for external_id, kind in dict.fromkeys(unresolved)
-                )
 
         deltas = [
             rollup_delta(
@@ -274,11 +228,8 @@ class SessionNodeService:
             _get_node_payloads(resolved), session.owner_id
         )
         stored = await self._repository.upsert_batch(session_id, resolved)
-        await self._repository.add_pending_links(pending_links)
-        relinked = await self._repository.link_pending_parents(session_id, resolved)
         await self._sessions.apply_rollups(session_id, combine_rollups(deltas))
-        relinked_by_id = {node.id: node for node in relinked}
-        return [relinked_by_id.get(node.id, node) for node in stored]
+        return stored
 
     async def list_nodes(
         self, session_node_filter: SessionNodeFilter, actor: AuthContext

@@ -31,8 +31,6 @@ depends_on = None
 
 POSITION_INDEX = "ix_session_node_session_id_started_at_id"
 SESSION_ID_INDEX_UNIQUE_CONSTRAINT = "uq_session_node_session_id_index"
-PENDING_LINK_TABLE = "session_node_pending_link"
-PENDING_LINK_INDEX = "ix_session_node_pending_link_session_id_parent_external_id"
 
 
 def upgrade() -> None:
@@ -61,7 +59,7 @@ def upgrade() -> None:
         batch_op.alter_column("secondary_parent_external_ids", server_default=None)
 
     # Restate the links the id columns carry as the references the source
-    # sent, which the ingest path now stores and resolves against.
+    # sent, which are resolved back to ids when a session is read.
     op.execute(
         sa.text("""
         UPDATE session_node AS n
@@ -109,54 +107,53 @@ def upgrade() -> None:
         )
         batch_op.drop_constraint(SESSION_ID_INDEX_UNIQUE_CONSTRAINT, type_="unique")
         batch_op.drop_column("index")
-
-    # Every stored reference resolved under the previous revision, so the
-    # table starts empty.
-    op.create_table(
-        PENDING_LINK_TABLE,
-        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("session_id", sa.Uuid(), nullable=False),
-        sa.Column("parent_external_id", sa.Text(), nullable=False),
-        sa.Column("child_id", sa.Uuid(), nullable=False),
-        sa.Column("kind", sa.String(length=16), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["child_id"],
-            ["session_node.id"],
-            name="fk_session_node_pending_link_child_id",
-            ondelete="CASCADE",
-        ),
-        sa.ForeignKeyConstraint(
-            ["session_id"],
-            ["session.id"],
-            name="fk_session_node_pending_link_session_id",
-            ondelete="CASCADE",
-        ),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "child_id",
-            "parent_external_id",
-            "kind",
-            name="uq_session_node_pending_link_child_id_parent_external_id_kind",
-        ),
-    )
-    with op.batch_alter_table(PENDING_LINK_TABLE, schema=None) as batch_op:
-        batch_op.create_index(
-            PENDING_LINK_INDEX,
-            ["session_id", "parent_external_id"],
-            unique=False,
-        )
+        batch_op.drop_column("parent_id")
+        batch_op.drop_column("secondary_parent_ids")
 
 
 def downgrade() -> None:
     """Downgrade database schema and/or data back to the previous revision."""
-    with op.batch_alter_table(PENDING_LINK_TABLE, schema=None) as batch_op:
-        batch_op.drop_index(PENDING_LINK_INDEX)
-    op.drop_table(PENDING_LINK_TABLE)
-
     with op.batch_alter_table("session_node", schema=None) as batch_op:
         batch_op.add_column(sa.Column("index", sa.Integer(), nullable=True))
+        batch_op.add_column(sa.Column("parent_id", sa.Uuid(), nullable=True))
+        batch_op.add_column(
+            sa.Column(
+                "secondary_parent_ids",
+                postgresql.JSONB(astext_type=sa.Text()),
+                nullable=False,
+                server_default=sa.text("'[]'::jsonb"),
+            )
+        )
+        batch_op.alter_column("secondary_parent_ids", server_default=None)
+
+    # Resolve the stored references back into the id columns.
+    op.execute(
+        sa.text("""
+        UPDATE session_node AS n
+        SET parent_id = p.id
+        FROM session_node AS p
+        WHERE p.session_id = n.session_id
+            AND p.external_id = n.parent_external_id
+    """)
+    )
+
+    op.execute(
+        sa.text("""
+        UPDATE session_node AS n
+        SET secondary_parent_ids = coalesce(
+            (
+                SELECT jsonb_agg(p.id::text ORDER BY secondary.ordinality)
+                FROM jsonb_array_elements_text(n.secondary_parent_external_ids)
+                    WITH ORDINALITY AS secondary(external_id, ordinality)
+                JOIN session_node AS p
+                    ON p.session_id = n.session_id
+                    AND p.external_id = secondary.external_id
+            ),
+            '[]'::jsonb
+        )
+        WHERE jsonb_array_length(n.secondary_parent_external_ids) > 0
+    """)
+    )
 
     op.execute(
         sa.text("""

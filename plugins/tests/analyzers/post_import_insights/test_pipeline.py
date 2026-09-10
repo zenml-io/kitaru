@@ -119,7 +119,6 @@ def _node(
         external_id=external_id,
         parent_external_id=None,
         secondary_parent_external_ids=[],
-        secondary_parent_ids=[],
         node_type=NodeType.TOOL_CALL,
         name="lookup_order",
         status=NodeStatus.COMPLETED,

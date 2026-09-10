@@ -116,8 +116,7 @@ class SessionsResource:
     ) -> list[SessionNodeResponse]:
         """Ingest a batch of session nodes.
 
-        An external id already stored is replaced whole and keeps its parent
-        references.
+        An external id already stored is replaced whole.
 
         Args:
             session_id: Id of the session to ingest into.

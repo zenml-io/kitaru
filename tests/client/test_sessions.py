@@ -123,7 +123,7 @@ async def test_create(api_client: KitaruAPIClient) -> None:
 
 
 async def test_create_duplicate_external_id(api_client: KitaruAPIClient) -> None:
-    """Return the already registered session instead of creating a second one."""
+    """Surface HTTP 409 as a typed error."""
     request = SessionCreateRequest(
         agent_id=uuid.uuid4(),
         origin=SessionOrigin.IMPORTED,
@@ -133,9 +133,10 @@ async def test_create_duplicate_external_id(api_client: KitaruAPIClient) -> None
         imported_from="langsmith",
         external_id="run-1",
     )
-    first = await api_client.sessions.create(request)
-    second = await api_client.sessions.create(request)
-    assert second.id == first.id
+    await api_client.sessions.create(request)
+    with pytest.raises(APIError) as exc_info:
+        await api_client.sessions.create(request)
+    assert exc_info.value.status_code == 409
 
 
 async def test_get(api_client: KitaruAPIClient) -> None:
@@ -352,7 +353,7 @@ async def test_ingest_nodes_and_list_nodes(api_client: KitaruAPIClient) -> None:
     )
     stored = await api_client.sessions.ingest_nodes(created.id, batch)
     assert len(stored) == 2
-    assert stored[1].parent_id == stored[0].id
+    assert stored[1].parent_external_id == "call"
     assert stored[1].cache_key is not None
 
     page = await api_client.sessions.list_nodes(created.id)

@@ -65,8 +65,6 @@ from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.session_node import (
     DuplicateSessionNodeExternalId,
-    PendingLinkKind,
-    PendingParentLink,
     SessionNode,
 )
 from kitaru.server.filtering import (
@@ -226,31 +224,6 @@ def _external_id(position: int) -> str:
         External id.
     """
     return f"n{position}"
-
-
-def _pending_link(
-    session_id: uuid.UUID,
-    child_id: uuid.UUID,
-    parent_external_id: str,
-    kind: PendingLinkKind = PendingLinkKind.PRIMARY,
-) -> PendingParentLink:
-    """Build a pending parent link.
-
-    Args:
-        session_id: Id of the owning session.
-        child_id: Id of the referencing node.
-        parent_external_id: External id the node references.
-        kind: Reference kind.
-
-    Returns:
-        Pending parent link.
-    """
-    return PendingParentLink(
-        session_id=session_id,
-        parent_external_id=parent_external_id,
-        child_id=child_id,
-        kind=kind,
-    )
 
 
 def _node(position: int, **overrides: Any) -> SessionNode:
@@ -728,161 +701,6 @@ async def test_query_scoped_to_session(setup: Setup) -> None:
     nodes, _ = await repository.query(SessionNodeFilter(session_id=session_id))
     assert len(nodes) == 1
     assert nodes[0].session_id == session_id
-
-
-async def test_link_pending_parents_links_a_stored_child(setup: Setup) -> None:
-    """Link a stored child whose parent external id a later batch carries."""
-    repository, session_id, _ = setup
-    stored_child = await repository.upsert_batch(
-        session_id,
-        [_node(1, session_id=session_id, parent_external_id="n0")],
-    )
-    await repository.add_pending_links(
-        [_pending_link(session_id, stored_child[0].id, "n0")],
-    )
-    stored_parent = await repository.upsert_batch(
-        session_id, [_node(0, session_id=session_id)]
-    )
-
-    relinked = await repository.link_pending_parents(session_id, stored_parent)
-
-    assert [node.id for node in relinked] == [stored_child[0].id]
-    assert relinked[0].parent_id == stored_parent[0].id
-
-
-async def test_link_pending_parents_keeps_the_child_start(setup: Setup) -> None:
-    """Leave the start time of a linked child untouched."""
-    repository, session_id, _ = setup
-    stored_child = await repository.upsert_batch(
-        session_id,
-        [
-            _node(
-                9,
-                session_id=session_id,
-                external_id="n1",
-                parent_external_id="n0",
-            )
-        ],
-    )
-    await repository.add_pending_links(
-        [_pending_link(session_id, stored_child[0].id, "n0")],
-    )
-    stored_parent = await repository.upsert_batch(
-        session_id, [_node(0, session_id=session_id)]
-    )
-
-    relinked = await repository.link_pending_parents(session_id, stored_parent)
-
-    assert relinked[0].started_at == _start(9)
-
-
-async def test_link_pending_parents_links_a_secondary_reference(
-    setup: Setup,
-) -> None:
-    """Append the resolved parent to the secondary parents of a child."""
-    repository, session_id, _ = setup
-    stored_child = await repository.upsert_batch(
-        session_id,
-        [_node(1, session_id=session_id, secondary_parent_external_ids=["n0"])],
-    )
-    await repository.add_pending_links(
-        [
-            _pending_link(
-                session_id, stored_child[0].id, "n0", PendingLinkKind.SECONDARY
-            )
-        ],
-    )
-    stored_parent = await repository.upsert_batch(
-        session_id, [_node(0, session_id=session_id)]
-    )
-
-    relinked = await repository.link_pending_parents(session_id, stored_parent)
-
-    assert [node.id for node in relinked] == [stored_child[0].id]
-    assert relinked[0].parent_id is None
-    assert relinked[0].secondary_parent_ids == [stored_parent[0].id]
-
-
-async def test_link_pending_parents_drops_the_resolved_links(setup: Setup) -> None:
-    """Leave no pending link behind for a reference that resolved."""
-    repository, session_id, _ = setup
-    stored_child = await repository.upsert_batch(
-        session_id,
-        [
-            _node(
-                1,
-                session_id=session_id,
-                parent_external_id="n0",
-                secondary_parent_external_ids=["n0"],
-            )
-        ],
-    )
-    await repository.add_pending_links(
-        [
-            _pending_link(session_id, stored_child[0].id, "n0"),
-            _pending_link(
-                session_id, stored_child[0].id, "n0", PendingLinkKind.SECONDARY
-            ),
-        ],
-    )
-    stored_parent = await repository.upsert_batch(
-        session_id, [_node(0, session_id=session_id)]
-    )
-    linked = await repository.link_pending_parents(session_id, stored_parent)
-    assert linked[0].parent_id == stored_parent[0].id
-    assert linked[0].secondary_parent_ids == [stored_parent[0].id]
-
-    assert await repository.link_pending_parents(session_id, stored_parent) == []
-
-    loaded = await repository.get_by_external_ids(
-        session_id, ["n1"], include_payloads=False
-    )
-    assert loaded["n1"].secondary_parent_ids == [stored_parent[0].id]
-
-
-async def test_link_pending_parents_leaves_a_linked_child_alone(setup: Setup) -> None:
-    """Report no link when every reference of the session already resolves."""
-    repository, session_id, _ = setup
-    stored_parent = await repository.upsert_batch(
-        session_id, [_node(0, session_id=session_id)]
-    )
-    await repository.upsert_batch(
-        session_id,
-        [
-            _node(
-                1,
-                session_id=session_id,
-                parent_id=stored_parent[0].id,
-                parent_external_id="n0",
-            )
-        ],
-    )
-
-    assert await repository.link_pending_parents(session_id, stored_parent) == []
-
-
-async def test_link_pending_parents_scoped_to_session(setup: Setup) -> None:
-    """Leave a pending child of another session unlinked."""
-    repository, session_id, make_session_id = setup
-    other_session_id = await make_session_id()
-    other_child = await repository.upsert_batch(
-        other_session_id,
-        [_node(1, session_id=other_session_id, parent_external_id="n0")],
-    )
-    await repository.add_pending_links(
-        [_pending_link(other_session_id, other_child[0].id, "n0")],
-    )
-    stored_parent = await repository.upsert_batch(
-        session_id, [_node(0, session_id=session_id)]
-    )
-
-    await repository.link_pending_parents(session_id, stored_parent)
-
-    loaded = await repository.get_by_external_ids(
-        other_session_id, ["n1"], include_payloads=False
-    )
-    assert loaded["n1"].id == other_child[0].id
-    assert loaded["n1"].parent_id is None
 
 
 async def test_exists_in_session_matches_only_the_owning_session(

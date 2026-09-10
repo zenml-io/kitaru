@@ -55,7 +55,6 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session import SessionAccessDenied
-from kitaru.server.domain.session_node import SessionNodeParentChanged
 from kitaru.server.domain.task import AgentTask
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -172,8 +171,7 @@ async def test_ingest_insert_assigns_ids_and_rollups(
     ]
     stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
-    assert stored[0].parent_id is None
-    assert stored[1].parent_id == stored[0].id
+    assert stored[1].parent_external_id == "n0"
     assert stored[1].cache_key is not None
 
     session = await session_repository.get(session_id, include_payloads=True)
@@ -217,48 +215,6 @@ async def test_ingest_cache_key_null_when_inputs_missing(
     assert stored[0].cache_key is None
 
 
-async def test_ingest_secondary_parents_resolve(
-    service: SessionNodeService, session_id: uuid.UUID
-) -> None:
-    """Resolve secondary_parent_external_ids into secondary_parent_ids."""
-    batch = [
-        _llm_node("n0"),
-        _llm_node("n1"),
-        SessionNodeUpsert(
-            external_id="n2",
-            parent_external_id="n0",
-            secondary_parent_external_ids=["n1"],
-            node_type=NodeType.SUBAGENT_CALL,
-            name="merge",
-            status=NodeStatus.COMPLETED,
-        ),
-    ]
-    stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
-    assert stored[2].parent_id == stored[0].id
-    assert stored[2].secondary_parent_ids == [stored[1].id]
-
-
-async def test_ingest_parent_resolves_against_stored_row(
-    service: SessionNodeService, session_id: uuid.UUID
-) -> None:
-    """Resolve a parent external id against a row stored in an earlier batch."""
-    first = await service.ingest_nodes(session_id, [_llm_node("n0")], actor=ACTOR)
-    second = await service.ingest_nodes(
-        session_id,
-        [
-            SessionNodeUpsert(
-                external_id="n1",
-                parent_external_id="n0",
-                node_type=NodeType.TOOL_CALL,
-                name="search",
-                status=NodeStatus.COMPLETED,
-            )
-        ],
-        actor=ACTOR,
-    )
-    assert second[0].parent_id == first[0].id
-
-
 async def test_ingest_keeps_an_unresolved_parent_external_id_unlinked(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
@@ -275,151 +231,7 @@ async def test_ingest_keeps_an_unresolved_parent_external_id_unlinked(
 
     stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
-    assert stored[0].parent_id is None
     assert stored[0].parent_external_id == "n0"
-
-
-async def test_ingest_links_a_child_batched_before_its_parent(
-    service: SessionNodeService, session_id: uuid.UUID
-) -> None:
-    """Link a child that a batch carries ahead of its parent."""
-    batch = [
-        _llm_node("n1", parent_external_id="n0", started_at=_start(1)),
-        _llm_node("n0", started_at=_start(0)),
-    ]
-
-    stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
-
-    assert stored[0].parent_id == stored[1].id
-    assert stored[0].parent_external_id == "n0"
-
-
-async def test_ingest_links_a_child_stored_by_an_earlier_batch(
-    service: SessionNodeService, session_id: uuid.UUID
-) -> None:
-    """Link a stored child once a later batch carries its parent."""
-    child = await service.ingest_nodes(
-        session_id, [_llm_node("n1", parent_external_id="n0")], actor=ACTOR
-    )
-    assert child[0].parent_id is None
-
-    parent = await service.ingest_nodes(
-        session_id, [_llm_node("n0", started_at=_start(0))], actor=ACTOR
-    )
-    nodes = await service.list_all_nodes(
-        session_id, include_payloads=False, actor=ACTOR
-    )
-    linked = next(node for node in nodes if node.external_id == "n1")
-
-    assert linked.parent_id == parent[0].id
-
-
-async def test_ingest_links_a_secondary_parent_that_arrives_later(
-    service: SessionNodeService, session_id: uuid.UUID
-) -> None:
-    """Fill the secondary parent ids of a stored child once its parent lands."""
-    child = await service.ingest_nodes(
-        session_id,
-        [_llm_node("n1", secondary_parent_external_ids=["n0"], started_at=_start(1))],
-        actor=ACTOR,
-    )
-    assert child[0].secondary_parent_ids == []
-
-    parent = await service.ingest_nodes(
-        session_id, [_llm_node("n0", started_at=_start(0))], actor=ACTOR
-    )
-    nodes = await service.list_all_nodes(
-        session_id, include_payloads=False, actor=ACTOR
-    )
-    linked = next(node for node in nodes if node.external_id == "n1")
-
-    assert linked.secondary_parent_ids == [parent[0].id]
-    assert linked.secondary_parent_external_ids == ["n0"]
-
-
-async def test_ingest_links_both_reference_kinds_of_one_child(
-    service: SessionNodeService, session_id: uuid.UUID
-) -> None:
-    """Link the primary and the secondary reference a later batch resolves."""
-    child = await service.ingest_nodes(
-        session_id,
-        [
-            _llm_node(
-                "n2",
-                parent_external_id="n0",
-                secondary_parent_external_ids=["n1"],
-                started_at=_start(2),
-            )
-        ],
-        actor=ACTOR,
-    )
-    assert child[0].parent_id is None
-    assert child[0].secondary_parent_ids == []
-
-    parents = await service.ingest_nodes(
-        session_id,
-        [_llm_node("n0", started_at=_start(0)), _llm_node("n1", started_at=_start(1))],
-        actor=ACTOR,
-    )
-    nodes = await service.list_all_nodes(
-        session_id, include_payloads=False, actor=ACTOR
-    )
-    linked = next(node for node in nodes if node.external_id == "n2")
-
-    assert linked.parent_id == parents[0].id
-    assert linked.secondary_parent_ids == [parents[1].id]
-
-
-async def test_ingest_replace_rejects_a_changed_parent(
-    service: SessionNodeService, session_id: uuid.UUID
-) -> None:
-    """Reject a node sent again with a different primary parent."""
-    await service.ingest_nodes(
-        session_id, [_llm_node("n2", parent_external_id="n0")], actor=ACTOR
-    )
-
-    with pytest.raises(SessionNodeParentChanged):
-        await service.ingest_nodes(
-            session_id, [_llm_node("n2", parent_external_id="n1")], actor=ACTOR
-        )
-
-
-async def test_ingest_replace_rejects_changed_secondary_parents(
-    service: SessionNodeService, session_id: uuid.UUID
-) -> None:
-    """Reject a node sent again with different secondary parents."""
-    await service.ingest_nodes(
-        session_id,
-        [_llm_node("n2", secondary_parent_external_ids=["n0"])],
-        actor=ACTOR,
-    )
-
-    with pytest.raises(SessionNodeParentChanged):
-        await service.ingest_nodes(
-            session_id,
-            [_llm_node("n2", secondary_parent_external_ids=["n0", "n1"])],
-            actor=ACTOR,
-        )
-
-
-async def test_ingest_replace_keeps_the_pending_link(
-    service: SessionNodeService, session_id: uuid.UUID
-) -> None:
-    """Link a node sent twice before its parent once the parent lands."""
-    await service.ingest_nodes(
-        session_id, [_llm_node("n2", parent_external_id="n0")], actor=ACTOR
-    )
-    await service.ingest_nodes(
-        session_id, [_llm_node("n2", parent_external_id="n0")], actor=ACTOR
-    )
-
-    parent = await service.ingest_nodes(session_id, [_llm_node("n0")], actor=ACTOR)
-    nodes = await service.list_all_nodes(
-        session_id, include_payloads=False, actor=ACTOR
-    )
-    child = next(node for node in nodes if node.external_id == "n2")
-
-    assert child.parent_id == parent[0].id
 
 
 async def test_ingest_inherits_the_parent_start(
