@@ -733,8 +733,7 @@ async def test_link_pending_parents_links_a_stored_child(setup: Setup) -> None:
         session_id,
         [_node(1, session_id=session_id, parent_external_id="n0")],
     )
-    await repository.replace_pending_links(
-        [stored_child[0].id],
+    await repository.add_pending_links(
         [_pending_link(session_id, stored_child[0].id, "n0")],
     )
     stored_parent = await repository.upsert_batch(
@@ -761,8 +760,7 @@ async def test_link_pending_parents_keeps_the_child_start(setup: Setup) -> None:
             )
         ],
     )
-    await repository.replace_pending_links(
-        [stored_child[0].id],
+    await repository.add_pending_links(
         [_pending_link(session_id, stored_child[0].id, "n0")],
     )
     stored_parent = await repository.upsert_batch(
@@ -783,8 +781,7 @@ async def test_link_pending_parents_links_a_secondary_reference(
         session_id,
         [_node(1, session_id=session_id, secondary_parent_external_ids=["n0"])],
     )
-    await repository.replace_pending_links(
-        [stored_child[0].id],
+    await repository.add_pending_links(
         [
             _pending_link(
                 session_id, stored_child[0].id, "n0", PendingLinkKind.SECONDARY
@@ -816,8 +813,7 @@ async def test_link_pending_parents_drops_the_resolved_links(setup: Setup) -> No
             )
         ],
     )
-    await repository.replace_pending_links(
-        [stored_child[0].id],
+    await repository.add_pending_links(
         [
             _pending_link(session_id, stored_child[0].id, "n0"),
             _pending_link(
@@ -838,28 +834,6 @@ async def test_link_pending_parents_drops_the_resolved_links(setup: Setup) -> No
         session_id, ["n1"], include_payloads=False
     )
     assert loaded["n1"].secondary_parent_ids == [stored_parent[0].id]
-
-
-async def test_replace_pending_links_drops_the_previous_links(setup: Setup) -> None:
-    """Keep only the links of the latest write for a child."""
-    repository, session_id, _ = setup
-    stored_child = await repository.upsert_batch(
-        session_id,
-        [_node(2, session_id=session_id, parent_external_id="n0")],
-    )
-    await repository.replace_pending_links(
-        [stored_child[0].id],
-        [_pending_link(session_id, stored_child[0].id, "n0")],
-    )
-    await repository.replace_pending_links(
-        [stored_child[0].id],
-        [_pending_link(session_id, stored_child[0].id, "n1")],
-    )
-    stored_parent = await repository.upsert_batch(
-        session_id, [_node(0, session_id=session_id)]
-    )
-
-    assert await repository.link_pending_parents(session_id, stored_parent) == []
 
 
 async def test_link_pending_parents_leaves_a_linked_child_alone(setup: Setup) -> None:
@@ -891,8 +865,7 @@ async def test_link_pending_parents_scoped_to_session(setup: Setup) -> None:
         other_session_id,
         [_node(1, session_id=other_session_id, parent_external_id="n0")],
     )
-    await repository.replace_pending_links(
-        [other_child[0].id],
+    await repository.add_pending_links(
         [_pending_link(other_session_id, other_child[0].id, "n0")],
     )
     stored_parent = await repository.upsert_batch(

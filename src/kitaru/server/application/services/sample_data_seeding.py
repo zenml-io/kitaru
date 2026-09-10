@@ -243,7 +243,7 @@ class SampleDataSeeder:
         """
         seeded: dict[str, SeededSession] = {}
         for item in data.sessions:
-            session, _ = await self._sessions.create_session(
+            session = await self._sessions.create_session(
                 item.session.model_copy(update={"agent_id": agent.id}), actor
             )
             nodes = await self._nodes.ingest_nodes(session.id, item.nodes, actor)

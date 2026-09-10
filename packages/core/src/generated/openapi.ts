@@ -3112,19 +3112,17 @@ export interface paths {
          * @description Create a session.
          *
          *     A task principal's session is always linked to its own task, regardless
-         *     of the request's task_id. Clients observe HTTP 201 when the call creates
-         *     the session, 200 with the session the calling task already registered
-         *     under the request's imported_from and external id pair, 409 when another
-         *     caller registered that pair, and 422 on invalid input.
+         *     of the request's task_id. Clients observe HTTP 201 on success, 409 when
+         *     the imported_from and external id pair is already registered, and 422 on
+         *     invalid input.
          *
          *     Args:
          *         body: Session create request.
-         *         response: Response the status code is set on.
          *         service: Session service.
          *         actor: Caller context.
          *
          *     Returns:
-         *         Created or already registered session.
+         *         Created session.
          */
         post: operations["create_session_api_v1_sessions_post"];
         delete?: never;
@@ -3291,10 +3289,11 @@ export interface paths {
          * Ingest Session Nodes
          * @description Ingest a batch of session nodes.
          *
-         *     An external id already stored is replaced whole, matching the upsert
-         *     semantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,
-         *     404 when no session has this id, and 409 when the session does not
-         *     currently accept node ingestion.
+         *     An external id already stored is replaced whole and keeps its parent
+         *     references, matching the upsert semantics of ``POST /api/v1/workers``.
+         *     Clients observe HTTP 200 on success, 404 when no session has this id,
+         *     409 when the session does not currently accept node ingestion, and 422
+         *     when a node already stored is sent again with different parents.
          *
          *     Args:
          *         session_id: Id of the session to ingest into.
@@ -19442,15 +19441,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionResponse"];
-                };
-            };
             /** @description Successful Response */
             201: {
                 headers: {
