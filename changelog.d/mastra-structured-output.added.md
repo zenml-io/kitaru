@@ -1,1 +1,0 @@
-- Added recording and replay of per-run Mastra secondary structured-output models, including separate model usage, inputs, results, and failures. Conversation-aware structuring, suppressed validation errors, and agent-default secondary models remain unsupported.

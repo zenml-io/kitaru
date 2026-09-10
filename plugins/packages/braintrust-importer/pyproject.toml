@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-braintrust-importer"
-version = "0.2.0"
+version = "0.3.0"
 description = "Braintrust trace importer for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
@@ -28,6 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 api = [
+    "kitaru>=0.26.0",
     "httpx>=0.27,<1",
 ]
 adapter = [

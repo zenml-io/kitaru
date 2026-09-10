@@ -1193,7 +1193,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.25.0+dev"
+version = "0.26.0"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
@@ -1271,7 +1271,7 @@ fuzz = [{ name = "schemathesis", specifier = ">=4.25,<5" }]
 
 [[package]]
 name = "kitaru-braintrust-importer"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/braintrust-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1281,9 +1281,11 @@ dependencies = [
 adapter = [
     { name = "braintrust" },
     { name = "httpx" },
+    { name = "kitaru" },
 ]
 api = [
     { name = "httpx" },
+    { name = "kitaru" },
 ]
 
 [package.metadata]
@@ -1291,6 +1293,7 @@ requires-dist = [
     { name = "braintrust", marker = "extra == 'adapter'", specifier = ">=0.30,<1" },
     { name = "httpx", marker = "extra == 'api'", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
+    { name = "kitaru", marker = "extra == 'api'", editable = "../" },
     { name = "kitaru-braintrust-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/braintrust-importer" },
 ]
 provides-extras = ["api", "adapter"]
@@ -1323,7 +1326,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-jsonl-importer"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/jsonl-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1334,7 +1337,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1342,15 +1345,18 @@ dependencies = [
 
 [package.optional-dependencies]
 adapter = [
+    { name = "kitaru" },
     { name = "langfuse" },
 ]
 api = [
+    { name = "kitaru" },
     { name = "langfuse" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "kitaru", editable = "../" },
+    { name = "kitaru", marker = "extra == 'api'", editable = "../" },
     { name = "kitaru-langfuse-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/langfuse-importer" },
     { name = "langfuse", marker = "extra == 'api'", specifier = ">=4.14,<5" },
 ]
@@ -1384,7 +1390,7 @@ provides-extras = ["deepagents"]
 
 [[package]]
 name = "kitaru-langsmith-importer"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/langsmith-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1392,15 +1398,18 @@ dependencies = [
 
 [package.optional-dependencies]
 adapter = [
+    { name = "kitaru" },
     { name = "langsmith" },
 ]
 api = [
+    { name = "kitaru" },
     { name = "langsmith" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "kitaru", editable = "../" },
+    { name = "kitaru", marker = "extra == 'api'", editable = "../" },
     { name = "kitaru-langsmith-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/langsmith-importer" },
     { name = "langsmith", marker = "extra == 'api'", specifier = ">=0.3,<1" },
 ]
@@ -1408,7 +1417,7 @@ provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-logfire-importer"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/logfire-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1417,10 +1426,12 @@ dependencies = [
 [package.optional-dependencies]
 adapter = [
     { name = "httpx" },
+    { name = "kitaru" },
     { name = "logfire" },
 ]
 api = [
     { name = "httpx" },
+    { name = "kitaru" },
     { name = "logfire" },
 ]
 
@@ -1428,6 +1439,7 @@ api = [
 requires-dist = [
     { name = "httpx", marker = "extra == 'api'", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
+    { name = "kitaru", marker = "extra == 'api'", editable = "../" },
     { name = "kitaru-logfire-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/logfire-importer" },
     { name = "logfire", marker = "extra == 'api'", specifier = ">=4.35,<6" },
 ]
@@ -1461,7 +1473,7 @@ requires-dist = [
 
 [[package]]
 name = "kitaru-phoenix-importer"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/phoenix-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1471,12 +1483,14 @@ dependencies = [
 adapter = [
     { name = "arize-phoenix-client" },
     { name = "httpx" },
+    { name = "kitaru" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
 ]
 api = [
     { name = "arize-phoenix-client" },
     { name = "httpx" },
+    { name = "kitaru" },
 ]
 
 [package.metadata]
@@ -1484,6 +1498,7 @@ requires-dist = [
     { name = "arize-phoenix-client", marker = "extra == 'api'", specifier = ">=2.0,<4" },
     { name = "httpx", marker = "extra == 'api'", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
+    { name = "kitaru", marker = "extra == 'api'", editable = "../" },
     { name = "kitaru-phoenix-importer", extras = ["api"], marker = "extra == 'adapter'", editable = "packages/phoenix-importer" },
     { name = "opentelemetry-api", marker = "extra == 'adapter'", specifier = ">=1.12" },
     { name = "opentelemetry-sdk", marker = "extra == 'adapter'", specifier = ">=1.12" },
@@ -1512,7 +1527,7 @@ provides-extras = ["openai"]
 
 [[package]]
 name = "kitaru-pydantic-ai"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/pydantic-ai" }
 dependencies = [
     { name = "genai-prices" },
