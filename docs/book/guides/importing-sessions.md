@@ -7,7 +7,7 @@ icon: file-import
 
 Kitaru importers convert exported trace data into session graphs. Provider importers decode source records, join related traces into sessions, order turns, reconstruct node relationships, and project common fields for the UI while preserving source inputs and outputs.
 
-Use a provider importer for Langfuse, LangSmith, Braintrust, Logfire, or Arize Phoenix data. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
+Use a provider importer for Langfuse, LangSmith, Braintrust, Logfire, or Arize Phoenix data. For Mastra full trace exports, follow the registration and import workflow in the [Mastra guide](../adapters/mastra.md); that importer is not a server default. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
 
 ## The portable session contract
 
@@ -136,7 +136,7 @@ The command prints the created import id and the job running it. One evaluator t
 
 ## Join provider traces into sessions
 
-Providers often record one conversation turn as one trace. Importers group related traces into one Kitaru session, then order the traces by start time with a stable trace-ID tie-breaker.
+Providers often record one conversation turn as one trace. Importers that support conversation grouping combine related traces into one Kitaru session, then order the traces by start time with a stable trace-ID tie-breaker. The Mastra importer instead preserves each invocation as a separate session and does not accept `--join-on`.
 
 Default grouping uses the provider's native conversation or session identifier. When that identifier is absent, each trace becomes one session. Use `--join-on` when the export carries the shared session identity in another field.
 
@@ -232,6 +232,7 @@ Provider importers apply the same output contract to different source formats:
 | Langfuse | Trace, observation, and ingestion-event JSON or JSONL | `sessionId`, then `traceId` |
 | LangSmith | Run-query and bulk-export JSON or JSONL | Known thread metadata paths, then `trace_id` |
 | Braintrust | Project-log and UI JSON exports | Known session or conversation fields, then trace ID |
+| Mastra | Full `getTrace` JSON response or an array of responses | No grouping; each trace is one invocation |
 | Kitaru | One portable Kitaru session per JSONL line | No grouping; each line is one session |
 
 Normalization includes source identity, parent-child graph reconstruction, deterministic ordering, status and error mapping, model fields, token counts, cost, tool arguments and results, text selectors, visible `reasoning`, and framework detection. Source payloads remain in `inputs` and `outputs`. Session metadata reports normalization warnings and source completeness.

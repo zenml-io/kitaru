@@ -173,6 +173,21 @@ maintenance-branch-prefix = "release/langsmith/"
 checks = []
 
 [[units]]
+slug = "mastra-importer"
+path = "plugins/packages/mastra-importer"
+distribution = "kitaru-mastra-importer"
+registry = "pypi"
+version-source = "plugins/packages/mastra-importer/pyproject.toml"
+changelog = "plugins/packages/mastra-importer/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = false
+release-label = "requires:plugin:mastra"
+impact-paths = ["plugins/packages/mastra-importer/**"]
+tag-prefix = "python/kitaru-mastra-importer/v"
+maintenance-branch-prefix = "release/mastra/"
+checks = []
+
+[[units]]
 slug = "openai-agents"
 path = "plugins/packages/openai-agents"
 distribution = "kitaru-openai-agents"
