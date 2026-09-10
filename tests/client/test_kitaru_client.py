@@ -301,7 +301,7 @@ async def test_list_session_nodes(
         SessionNodeBatchRequest(
             nodes=[
                 SessionNodeCreateRequest(
-                    index=0,
+                    external_id="call-1",
                     node_type=NodeType.LLM_CALL,
                     name="call-1",
                     status=NodeStatus.COMPLETED,
@@ -310,7 +310,7 @@ async def test_list_session_nodes(
                     attributes={},
                 ),
                 SessionNodeCreateRequest(
-                    index=1,
+                    external_id="call-2",
                     node_type=NodeType.LLM_CALL,
                     name="call-2",
                     status=NodeStatus.COMPLETED,
@@ -323,7 +323,7 @@ async def test_list_session_nodes(
     )
 
     nodes = [node async for node in client.list_session_nodes(session.id)]
-    assert [node.index for node in nodes] == [0, 1]
+    assert [node.external_id for node in nodes] == ["call-1", "call-2"]
 
 
 async def test_replay_wait_true_returns_terminal_replay() -> None:

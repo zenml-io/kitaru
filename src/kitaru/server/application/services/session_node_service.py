@@ -14,7 +14,7 @@
 """Session node use cases."""
 
 import uuid
-from collections.abc import Collection
+from datetime import UTC, datetime
 
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.cache_keys import compute_tool_cache_key
@@ -41,9 +41,34 @@ from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import combine_rollups, rollup_delta
 from kitaru.server.domain.session_node import (
     SessionNode,
-    SessionNodeParentNotFound,
     node_rollup_contribution,
 )
+
+
+def _resolve_effective_start(
+    started_at: datetime | None,
+    parent: SessionNode | None,
+    existing: SessionNode | None,
+    fallback: datetime,
+) -> datetime:
+    """Derive the start time a node is positioned by.
+
+    Args:
+        started_at: Start time the node reports, if any.
+        parent: Resolved parent node, if any.
+        existing: Stored node this upsert replaces, if any.
+        fallback: Start time for a node that is new and reports none.
+
+    Returns:
+        Effective start time.
+    """
+    if started_at is not None:
+        return started_at
+    if parent is not None:
+        return parent.effective_started_at
+    if existing is not None and existing.created is not None:
+        return existing.created
+    return fallback
 
 
 def _get_node_payloads(nodes: list[SessionNode]) -> list[Payload]:
@@ -94,74 +119,78 @@ class SessionNodeService:
         batch: list[SessionNodeUpsert],
         actor: AuthContext,
     ) -> list[SessionNode]:
-        """Upsert a batch of nodes on (session, index).
+        """Upsert a batch of nodes on (session, external id).
 
-        An index already stored is replaced whole. ``parent_index`` and
-        ``secondary_parent_indexes`` resolve against both stored rows and
-        earlier rows in the same batch. The session's cost, tokens, and call
-        counts roll up by one atomic delta-based update covering the whole
-        batch. A task principal ingests only into a session it owns.
+        An external id already stored is replaced whole, keeping the node
+        id. ``parent_external_id`` and ``secondary_parent_external_ids``
+        resolve against stored rows and earlier rows in the same batch, and
+        a reference that resolves to neither is kept unlinked until its
+        target lands. The session's cost, tokens, and call counts roll up by
+        one atomic delta-based update covering the whole batch. A task
+        principal ingests only into a session it owns or into an imported
+        session.
 
         Args:
             session_id: Id of the session to ingest into.
-            batch: Nodes to upsert, parent before child.
+            batch: Nodes to upsert, in any order.
             actor: Caller context.
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionAccessDenied: A task principal does not own the session.
+            SessionAccessDenied: A task principal neither owns the session
+                nor writes into an imported one.
             SessionNotIngestable: The session is not in progress, its origin
                 is not imported, and it names no import source.
-            SessionNodeParentNotFound: A parent_index or secondary parent
-                index does not match a stored or batched node.
 
         Returns:
             Stored nodes in batch order, without payloads.
         """
-        # Node ids are minted for indexes this read does not find, so two
-        # concurrent batches for one index would both insert and collide on
-        # the (session, index) key. The lock also stabilizes the pre-image
-        # the rollup deltas are computed against.
+        # Node ids are minted for external ids this read does not find, so
+        # two concurrent batches for one external id would both insert and
+        # collide on the (session, external id) key. The lock also
+        # stabilizes the pre-image the rollup deltas are computed against.
         session = await self._sessions.get(
             session_id, include_payloads=False, exclusive=True
         )
-        check_task_session_write(session_id, session.task_id, actor)
+        check_task_session_write(session, actor)
         await check_task_attempt(actor, self._tasks)
         session.check_node_ingest()
         if not batch:
             return []
 
-        # A parent_index or secondary_parent_index may point at an index
-        # already stored from an earlier batch, not just at one in this
-        # batch, so the bulk fetch covers every index either batch or
-        # parent reference touches.
-        referenced_indexes: set[int] = set()
+        # A parent external id may point at a node already stored from an
+        # earlier batch, not just at one in this batch, so the bulk fetch
+        # covers every external id either batch or parent reference touches.
+        # References this fetch does not resolve are linked after the write.
+        referenced_external_ids: set[str] = set()
         for item in batch:
-            referenced_indexes.add(item.index)
-            if item.parent_index is not None:
-                referenced_indexes.add(item.parent_index)
-            referenced_indexes.update(item.secondary_parent_indexes)
+            referenced_external_ids.add(item.external_id)
+            if item.parent_external_id is not None:
+                referenced_external_ids.add(item.parent_external_id)
+            referenced_external_ids.update(item.secondary_parent_external_ids)
 
-        existing_by_index = await self._repository.get_by_indexes(
-            session_id, sorted(referenced_indexes), include_payloads=False
+        existing_by_external_id = await self._repository.get_by_external_ids(
+            session_id, sorted(referenced_external_ids), include_payloads=False
         )
-        id_by_index = {index: node.id for index, node in existing_by_index.items()}
+        known_by_external_id = dict(existing_by_external_id)
+        now = datetime.now(UTC)
 
         resolved: list[SessionNode] = []
         for item in batch:
-            parent_id = None
-            if item.parent_index is not None:
-                parent_id = id_by_index.get(item.parent_index)
-                if parent_id is None:
-                    raise SessionNodeParentNotFound(item.index, item.parent_index)
-            secondary_parent_ids: list[uuid.UUID] = []
-            for secondary_index in item.secondary_parent_indexes:
-                secondary_id = id_by_index.get(secondary_index)
-                if secondary_id is None:
-                    raise SessionNodeParentNotFound(item.index, secondary_index)
-                secondary_parent_ids.append(secondary_id)
+            parent = None
+            if item.parent_external_id is not None:
+                parent = known_by_external_id.get(item.parent_external_id)
+            secondary_parent_ids = [
+                secondary_parent.id
+                for secondary_external_id in item.secondary_parent_external_ids
+                if (secondary_parent := known_by_external_id.get(secondary_external_id))
+                is not None
+            ]
 
-            existing_node = existing_by_index.get(item.index)
+            existing_node = existing_by_external_id.get(item.external_id)
+            effective_started_at = _resolve_effective_start(
+                item.started_at, parent, existing_node, now
+            )
             cache_key = None
             if item.node_type == NodeType.TOOL_CALL and item.tool_name is not None:
                 cache_key = compute_tool_cache_key(item.tool_name, item.inputs)
@@ -169,10 +198,11 @@ class SessionNodeService:
             node = SessionNode(
                 id=existing_node.id if existing_node is not None else uuid7(),
                 session_id=session_id,
-                parent_id=parent_id,
+                parent_id=parent.id if parent is not None else None,
                 secondary_parent_ids=secondary_parent_ids,
-                index=item.index,
                 external_id=item.external_id,
+                parent_external_id=item.parent_external_id,
+                secondary_parent_external_ids=item.secondary_parent_external_ids,
                 trace_id=item.trace_id,
                 node_type=item.node_type,
                 name=item.name,
@@ -180,6 +210,7 @@ class SessionNodeService:
                 error=item.error,
                 started_at=item.started_at,
                 ended_at=item.ended_at,
+                effective_started_at=effective_started_at,
                 input_text_selector=item.input_text_selector,
                 output_text_selector=item.output_text_selector,
                 system_prompt_selector=item.system_prompt_selector,
@@ -207,11 +238,11 @@ class SessionNodeService:
                 metadata=item.metadata,
             )
             resolved.append(node)
-            id_by_index[item.index] = node.id
+            known_by_external_id[item.external_id] = node
 
         deltas = [
             rollup_delta(
-                node_rollup_contribution(existing_by_index.get(node.index)),
+                node_rollup_contribution(existing_by_external_id.get(node.external_id)),
                 node_rollup_contribution(node),
             )
             for node in resolved
@@ -220,13 +251,15 @@ class SessionNodeService:
             _get_node_payloads(resolved), session.owner_id
         )
         stored = await self._repository.upsert_batch(session_id, resolved)
+        relinked = await self._repository.link_pending_parents(session_id, resolved)
         await self._sessions.apply_rollups(session_id, combine_rollups(deltas))
-        return stored
+        relinked_by_id = {node.id: node for node in relinked}
+        return [relinked_by_id.get(node.id, node) for node in stored]
 
     async def list_nodes(
         self, session_node_filter: SessionNodeFilter, actor: AuthContext
     ) -> tuple[list[SessionNode], str | None]:
-        """List the nodes of a session, ordered by index ascending.
+        """List the nodes of a session, ordered by position ascending.
 
         A task principal reads only a session it owns or holds as its
         task's input session.
@@ -257,7 +290,7 @@ class SessionNodeService:
     async def list_all_nodes(
         self, session_id: uuid.UUID, include_payloads: bool, actor: AuthContext
     ) -> list[SessionNode]:
-        """Read every node of a session, ordered by index ascending.
+        """Read every node of a session, ordered by position ascending.
 
         A task principal reads only a session it owns or holds as its
         task's input session.
@@ -284,36 +317,6 @@ class SessionNodeService:
         if include_payloads:
             await self._resolve_payloads(nodes)
         return nodes
-
-    async def get_indexes_by_ids(
-        self,
-        session_id: uuid.UUID,
-        node_ids: Collection[uuid.UUID],
-        actor: AuthContext,
-    ) -> dict[uuid.UUID, int]:
-        """Look up the index of the named nodes of a session, keyed by node id.
-
-        A task principal reads only a session it owns or holds as its
-        task's input session.
-
-        Args:
-            session_id: Id of the session whose nodes to look up.
-            node_ids: Ids to look up.
-            actor: Caller context.
-
-        Raises:
-            SessionNotFound: A task principal names a session that does not
-                exist.
-            SessionAccessDenied: A task principal owns neither the session nor
-                holds it as its task's input session.
-
-        Returns:
-            Each requested node id mapped to its index, missing ids omitted.
-        """
-        if isinstance(actor.principal, TaskPrincipal):
-            session = await self._sessions.get(session_id, include_payloads=False)
-            check_task_session_read(session, actor)
-        return await self._repository.get_indexes_by_ids(session_id, node_ids)
 
     async def _resolve_payloads(self, nodes: list[SessionNode]) -> None:
         """Resolve reasoning, inputs, outputs, and attributes refs across nodes.

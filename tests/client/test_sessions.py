@@ -123,7 +123,7 @@ async def test_create(api_client: KitaruAPIClient) -> None:
 
 
 async def test_create_duplicate_external_id(api_client: KitaruAPIClient) -> None:
-    """Surface HTTP 409 as a typed error."""
+    """Return the already registered session instead of creating a second one."""
     request = SessionCreateRequest(
         agent_id=uuid.uuid4(),
         origin=SessionOrigin.IMPORTED,
@@ -133,10 +133,9 @@ async def test_create_duplicate_external_id(api_client: KitaruAPIClient) -> None
         imported_from="langsmith",
         external_id="run-1",
     )
-    await api_client.sessions.create(request)
-    with pytest.raises(APIError) as exc_info:
-        await api_client.sessions.create(request)
-    assert exc_info.value.status_code == 409
+    first = await api_client.sessions.create(request)
+    second = await api_client.sessions.create(request)
+    assert second.id == first.id
 
 
 async def test_get(api_client: KitaruAPIClient) -> None:
@@ -329,7 +328,7 @@ async def test_ingest_nodes_and_list_nodes(api_client: KitaruAPIClient) -> None:
     batch = SessionNodeBatchRequest(
         nodes=[
             SessionNodeCreateRequest(
-                index=0,
+                external_id="call",
                 node_type=NodeType.LLM_CALL,
                 name="call",
                 status=NodeStatus.COMPLETED,
@@ -339,8 +338,8 @@ async def test_ingest_nodes_and_list_nodes(api_client: KitaruAPIClient) -> None:
                 attributes=None,
             ),
             SessionNodeCreateRequest(
-                index=1,
-                parent_index=0,
+                external_id="search",
+                parent_external_id="call",
                 node_type=NodeType.TOOL_CALL,
                 name="search",
                 status=NodeStatus.COMPLETED,
@@ -357,7 +356,7 @@ async def test_ingest_nodes_and_list_nodes(api_client: KitaruAPIClient) -> None:
     assert stored[1].cache_key is not None
 
     page = await api_client.sessions.list_nodes(created.id)
-    assert [item.index for item in page.items] == [0, 1]
+    assert [item.external_id for item in page.items] == ["call", "search"]
     assert page.items[0].inputs is None
 
     page = await api_client.sessions.list_nodes(
@@ -369,18 +368,21 @@ async def test_ingest_nodes_and_list_nodes(api_client: KitaruAPIClient) -> None:
 @pytest.mark.parametrize(
     ("filter_", "expected"),
     [
-        (None, [0, 1, 2, 3, 4]),
-        (FilterCondition(field="node_type", op=FilterOp.EQ, value="llm_call"), [1, 4]),
+        (None, ["node-0", "node-1", "node-2", "node-3", "node-4"]),
+        (
+            FilterCondition(field="node_type", op=FilterOp.EQ, value="llm_call"),
+            ["node-1", "node-4"],
+        ),
         (
             FilterCondition(
                 field="node_type", op=FilterOp.IN, value=["llm_call", "tool_call"]
             ),
-            [1, 3, 4],
+            ["node-1", "node-3", "node-4"],
         ),
     ],
 )
 async def test_iter_nodes(
-    api_client: KitaruAPIClient, filter_: Filter | None, expected: list[int]
+    api_client: KitaruAPIClient, filter_: Filter | None, expected: list[str]
 ) -> None:
     """Iterate every node of a session across pages through the SDK."""
     created = await api_client.sessions.create(
@@ -395,7 +397,7 @@ async def test_iter_nodes(
     batch = SessionNodeBatchRequest(
         nodes=[
             SessionNodeCreateRequest(
-                index=index,
+                external_id=f"node-{index}",
                 node_type=[
                     NodeType.SPAN,
                     NodeType.LLM_CALL,
@@ -415,7 +417,7 @@ async def test_iter_nodes(
     await api_client.sessions.ingest_nodes(created.id, batch)
 
     collected = [
-        item.index
+        item.external_id
         async for item in api_client.sessions.iter_nodes(
             created.id, SessionNodeListParams(size=2, filter=filter_)
         )

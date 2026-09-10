@@ -16,6 +16,7 @@
 import itertools
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -62,7 +63,10 @@ from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.cohort_version import CohortVersion
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import Session
-from kitaru.server.domain.session_node import SessionNode
+from kitaru.server.domain.session_node import (
+    DuplicateSessionNodeExternalId,
+    SessionNode,
+)
 from kitaru.server.filtering import (
     FilterCondition,
     FilterExpression,
@@ -198,10 +202,35 @@ async def scoped_setup(
         )
 
 
-def _node(index: int, **overrides: Any) -> SessionNode:
+def _start(position: int) -> datetime:
+    """Build the effective start of a node at a position.
+
+    Args:
+        position: Position of the node within its session.
+
+    Returns:
+        Effective start time.
+    """
+    return datetime(2026, 1, 1, tzinfo=UTC) + timedelta(minutes=position)
+
+
+def _external_id(position: int) -> str:
+    """Build the external id of a node at a position.
+
+    Args:
+        position: Position of the node within its session.
+
+    Returns:
+        External id.
+    """
+    return f"n{position}"
+
+
+def _node(position: int, **overrides: Any) -> SessionNode:
     values: dict[str, Any] = {
         "session_id": uuid.uuid4(),
-        "index": index,
+        "external_id": _external_id(position),
+        "effective_started_at": _start(position),
         "node_type": NodeType.LLM_CALL,
         "name": "call",
         "status": NodeStatus.COMPLETED,
@@ -219,24 +248,26 @@ def _node(index: int, **overrides: Any) -> SessionNode:
     return SessionNode(**values)
 
 
-async def test_get_by_indexes_empty_when_none_stored(setup: Setup) -> None:
-    """Return no rows for indexes that are not stored."""
+async def test_get_by_external_ids_empty_when_none_stored(setup: Setup) -> None:
+    """Return no rows for external ids that are not stored."""
     repository, session_id, _ = setup
-    result = await repository.get_by_indexes(session_id, [0, 1], include_payloads=True)
+    result = await repository.get_by_external_ids(
+        session_id, ["n0", "n1"], include_payloads=True
+    )
     assert result == {}
 
 
-async def test_get_by_indexes_bulk_fetch(setup: Setup) -> None:
-    """Bulk-load stored nodes keyed by index, missing indexes omitted."""
+async def test_get_by_external_ids_bulk_fetch(setup: Setup) -> None:
+    """Bulk-load stored nodes keyed by external id, missing ids omitted."""
     repository, session_id, _ = setup
     await repository.upsert_batch(
         session_id,
         [_node(0, session_id=session_id), _node(1, session_id=session_id)],
     )
-    result = await repository.get_by_indexes(
-        session_id, [0, 1, 2], include_payloads=True
+    result = await repository.get_by_external_ids(
+        session_id, ["n0", "n1", "n2"], include_payloads=True
     )
-    assert set(result.keys()) == {0, 1}
+    assert set(result.keys()) == {"n0", "n1"}
 
 
 async def test_upsert_batch_inserts_new_rows(setup: Setup) -> None:
@@ -252,29 +283,35 @@ async def test_upsert_batch_inserts_new_rows(setup: Setup) -> None:
 async def test_upsert_batch_replaces_existing_row_preserving_id(
     setup: Setup,
 ) -> None:
-    """Replace an existing index whole, preserving the row id."""
+    """Replace an existing external id whole, preserving the row id."""
     repository, session_id, _ = setup
     first = await repository.upsert_batch(
         session_id, [_node(0, session_id=session_id, name="first")]
     )
     replaced = await repository.upsert_batch(
         session_id,
-        [
-            SessionNode(
-                id=first[0].id,
-                session_id=session_id,
-                index=0,
-                node_type=NodeType.LLM_CALL,
-                name="second",
-                status=NodeStatus.COMPLETED,
-            )
-        ],
+        [_node(0, id=first[0].id, session_id=session_id, name="second")],
     )
     assert replaced[0].id == first[0].id
     assert replaced[0].name == "second"
 
-    loaded = await repository.get_by_indexes(session_id, [0], include_payloads=True)
-    assert loaded[0].name == "second"
+    loaded = await repository.get_by_external_ids(
+        session_id, ["n0"], include_payloads=True
+    )
+    assert loaded["n0"].name == "second"
+
+
+async def test_upsert_batch_rejects_an_external_id_held_by_another_node(
+    setup: Setup,
+) -> None:
+    """Translate the session external id constraint into a domain conflict."""
+    repository, session_id, _ = setup
+    await repository.upsert_batch(session_id, [_node(0, session_id=session_id)])
+
+    with pytest.raises(DuplicateSessionNodeExternalId):
+        await repository.upsert_batch(
+            session_id, [_node(1, session_id=session_id, external_id="n0")]
+        )
 
 
 async def test_upsert_batch_replace_clears_omitted_fields(setup: Setup) -> None:
@@ -286,55 +323,58 @@ async def test_upsert_batch_replace_clears_omitted_fields(setup: Setup) -> None:
     )
     replaced = await repository.upsert_batch(
         session_id,
-        [
-            SessionNode(
-                id=first[0].id,
-                session_id=session_id,
-                index=0,
-                node_type=NodeType.LLM_CALL,
-                name="call",
-                status=NodeStatus.COMPLETED,
-            )
-        ],
+        [_node(0, id=first[0].id, session_id=session_id)],
     )
     assert replaced[0].error is None
     assert replaced[0].tool_name is None
 
 
-async def test_query_ordered_by_index_ascending(setup: Setup) -> None:
-    """Order nodes by index ascending regardless of insertion order."""
+async def test_query_ordered_by_start_ascending(setup: Setup) -> None:
+    """Order nodes by effective start ascending regardless of insertion order."""
     repository, session_id, _ = setup
     await repository.upsert_batch(
         session_id,
-        [_node(index, session_id=session_id) for index in (2, 0, 1)],
+        [_node(position, session_id=session_id) for position in (2, 0, 1)],
     )
     nodes, next_cursor = await repository.query(
         SessionNodeFilter(session_id=session_id)
     )
     assert next_cursor is None
-    assert [node.index for node in nodes] == [0, 1, 2]
+    assert [node.external_id for node in nodes] == ["n0", "n1", "n2"]
 
 
-async def test_query_walks_pages_by_index(setup: Setup) -> None:
-    """Walk every page via next_cursor in index order without gaps."""
+async def test_query_breaks_start_ties_by_id(setup: Setup) -> None:
+    """Order nodes sharing one effective start by ascending id."""
+    repository, session_id, _ = setup
+    tied = [
+        _node(position, session_id=session_id, effective_started_at=_start(0))
+        for position in range(3)
+    ]
+    await repository.upsert_batch(session_id, tied)
+    nodes, _ = await repository.query(SessionNodeFilter(session_id=session_id))
+    assert [node.id for node in nodes] == sorted(node.id for node in tied)
+
+
+async def test_query_walks_pages_by_start(setup: Setup) -> None:
+    """Walk every page via next_cursor in start order without gaps."""
     repository, session_id, _ = setup
     await repository.upsert_batch(
         session_id,
-        [_node(index, session_id=session_id) for index in range(5)],
+        [_node(position, session_id=session_id) for position in range(5)],
     )
 
-    collected: list[int] = []
+    collected: list[str] = []
     cursor = None
     while True:
         nodes, next_cursor = await repository.query(
             SessionNodeFilter(session_id=session_id, cursor=cursor, size=2)
         )
-        collected.extend(node.index for node in nodes)
+        collected.extend(node.external_id for node in nodes)
         if next_cursor is None:
             break
         cursor = next_cursor
 
-    assert collected == [0, 1, 2, 3, 4]
+    assert collected == ["n0", "n1", "n2", "n3", "n4"]
 
 
 @pytest.mark.parametrize(
@@ -372,7 +412,7 @@ async def test_query_walks_pages_by_index(setup: Setup) -> None:
 async def test_query_filters_node_types_before_pagination(
     setup: Setup, expression: FilterExpression | None, expected: list[int]
 ) -> None:
-    """Fill pages with matching types while retaining original node indexes."""
+    """Fill pages with matching types while retaining the original node order."""
     repository, session_id, make_session_id = setup
     types = [
         NodeType.SPAN,
@@ -385,8 +425,8 @@ async def test_query_filters_node_types_before_pagination(
     await repository.upsert_batch(
         session_id,
         [
-            _node(index, session_id=session_id, node_type=kind)
-            for index, kind in enumerate(types)
+            _node(position, session_id=session_id, node_type=kind)
+            for position, kind in enumerate(types)
         ],
     )
     other_session_id = await make_session_id()
@@ -394,7 +434,7 @@ async def test_query_filters_node_types_before_pagination(
         other_session_id,
         [_node(0, session_id=other_session_id, node_type=NodeType.LLM_CALL)],
     )
-    collected: list[int] = []
+    collected: list[str] = []
     cursor = None
     for _ in range(len(types) + 1):
         nodes, cursor = await repository.query(
@@ -402,13 +442,13 @@ async def test_query_filters_node_types_before_pagination(
                 session_id=session_id, expression=expression, size=2, cursor=cursor
             )
         )
-        collected.extend(node.index for node in nodes)
+        collected.extend(node.external_id for node in nodes)
         if cursor is None:
             break
         assert len(nodes) == 2
     else:
         pytest.fail("Filtered pagination did not terminate")
-    assert collected == expected
+    assert collected == [_external_id(position) for position in expected]
 
 
 async def test_query_include_payloads_false_nulls_heavy_columns(
@@ -465,7 +505,7 @@ async def test_query_include_payloads_true_populates_heavy_columns(
     assert nodes[0].attributes.value == {"k": 1}
 
 
-async def test_get_by_indexes_include_payloads_false_nulls_heavy_columns(
+async def test_get_by_external_ids_include_payloads_false_nulls_heavy_columns(
     setup: Setup,
 ) -> None:
     """Null inputs, outputs, and attributes when include_payloads is unset."""
@@ -482,14 +522,16 @@ async def test_get_by_indexes_include_payloads_false_nulls_heavy_columns(
             )
         ],
     )
-    loaded = await repository.get_by_indexes(session_id, [0], include_payloads=False)
-    assert loaded[0].inputs is None
-    assert loaded[0].outputs is None
-    assert loaded[0].attributes is None
-    assert loaded[0].metadata == {}
+    loaded = await repository.get_by_external_ids(
+        session_id, ["n0"], include_payloads=False
+    )
+    assert loaded["n0"].inputs is None
+    assert loaded["n0"].outputs is None
+    assert loaded["n0"].attributes is None
+    assert loaded["n0"].metadata == {}
 
 
-async def test_get_by_indexes_include_payloads_true_populates_heavy_columns(
+async def test_get_by_external_ids_include_payloads_true_populates_heavy_columns(
     setup: Setup,
 ) -> None:
     """Populate inputs, outputs, and attributes when requested."""
@@ -506,13 +548,15 @@ async def test_get_by_indexes_include_payloads_true_populates_heavy_columns(
             )
         ],
     )
-    loaded = await repository.get_by_indexes(session_id, [0], include_payloads=True)
-    assert loaded[0].inputs is not None
-    assert loaded[0].inputs.value == {"q": "hi"}
-    assert loaded[0].outputs is not None
-    assert loaded[0].outputs.value == {"a": "there"}
-    assert loaded[0].attributes is not None
-    assert loaded[0].attributes.value == {"k": 1}
+    loaded = await repository.get_by_external_ids(
+        session_id, ["n0"], include_payloads=True
+    )
+    assert loaded["n0"].inputs is not None
+    assert loaded["n0"].inputs.value == {"q": "hi"}
+    assert loaded["n0"].outputs is not None
+    assert loaded["n0"].outputs.value == {"a": "there"}
+    assert loaded["n0"].attributes is not None
+    assert loaded["n0"].attributes.value == {"k": 1}
 
 
 async def test_upsert_batch_replace_keeps_payloads_of_deferred_reload(
@@ -546,13 +590,15 @@ async def test_upsert_batch_replace_keeps_payloads_of_deferred_reload(
         ],
     )
 
-    loaded = await repository.get_by_indexes(session_id, [0], include_payloads=True)
-    assert loaded[0].inputs is not None
-    assert loaded[0].inputs.value == {"q": "new"}
-    assert loaded[0].outputs is not None
-    assert loaded[0].outputs.value == {"a": "new"}
-    assert loaded[0].attributes is not None
-    assert loaded[0].attributes.value == {"k": 1}
+    loaded = await repository.get_by_external_ids(
+        session_id, ["n0"], include_payloads=True
+    )
+    assert loaded["n0"].inputs is not None
+    assert loaded["n0"].inputs.value == {"q": "new"}
+    assert loaded["n0"].outputs is not None
+    assert loaded["n0"].outputs.value == {"a": "new"}
+    assert loaded["n0"].attributes is not None
+    assert loaded["n0"].attributes.value == {"k": 1}
 
 
 async def test_query_scoped_to_session(setup: Setup) -> None:
@@ -568,48 +614,147 @@ async def test_query_scoped_to_session(setup: Setup) -> None:
     assert nodes[0].session_id == session_id
 
 
-async def test_get_indexes_by_ids_returns_the_requested_node_indexes(
-    setup: Setup,
-) -> None:
-    """Map each requested node id in a session to its index."""
+async def test_link_pending_parents_links_a_stored_child(setup: Setup) -> None:
+    """Link a stored child whose parent external id a later batch carries."""
     repository, session_id, _ = setup
-    nodes = [_node(0, session_id=session_id), _node(1, session_id=session_id)]
-    stored = await repository.upsert_batch(session_id, nodes)
-
-    index_by_id = await repository.get_indexes_by_ids(
-        session_id, [stored[0].id, stored[1].id]
+    stored_child = await repository.upsert_batch(
+        session_id,
+        [_node(1, session_id=session_id, parent_external_id="n0")],
+    )
+    stored_parent = await repository.upsert_batch(
+        session_id, [_node(0, session_id=session_id)]
     )
 
-    assert index_by_id == {stored[0].id: 0, stored[1].id: 1}
+    relinked = await repository.link_pending_parents(session_id, stored_parent)
+
+    assert [node.id for node in relinked] == [stored_child[0].id]
+    assert relinked[0].parent_id == stored_parent[0].id
 
 
-async def test_get_indexes_by_ids_omits_ids_it_was_not_asked_for(
-    setup: Setup,
-) -> None:
-    """Leave out the nodes of a session the caller did not name."""
+async def test_link_pending_parents_inherits_the_parent_start(setup: Setup) -> None:
+    """Pull a linked child that reports no start onto its parent's start."""
     repository, session_id, _ = setup
-    nodes = [_node(0, session_id=session_id), _node(1, session_id=session_id)]
-    stored = await repository.upsert_batch(session_id, nodes)
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                1,
+                session_id=session_id,
+                parent_external_id="n0",
+                started_at=None,
+                effective_started_at=_start(9),
+            )
+        ],
+    )
+    stored_parent = await repository.upsert_batch(
+        session_id, [_node(0, session_id=session_id)]
+    )
 
-    index_by_id = await repository.get_indexes_by_ids(session_id, [stored[1].id])
+    relinked = await repository.link_pending_parents(session_id, stored_parent)
 
-    assert index_by_id == {stored[1].id: 1}
+    assert relinked[0].effective_started_at == _start(0)
 
 
-async def test_get_indexes_by_ids_takes_no_query_for_an_empty_request(
-    setup: Setup,
-) -> None:
-    """Return an empty mapping when no ids are named."""
+async def test_link_pending_parents_keeps_a_reported_start(setup: Setup) -> None:
+    """Leave the effective start of a linked child that reports its own start."""
     repository, session_id, _ = setup
-    await repository.upsert_batch(session_id, [_node(0, session_id=session_id)])
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                1,
+                session_id=session_id,
+                parent_external_id="n0",
+                started_at=_start(1),
+            )
+        ],
+    )
+    stored_parent = await repository.upsert_batch(
+        session_id, [_node(0, session_id=session_id)]
+    )
 
-    assert await repository.get_indexes_by_ids(session_id, []) == {}
+    relinked = await repository.link_pending_parents(session_id, stored_parent)
+
+    assert relinked[0].effective_started_at == _start(1)
 
 
-async def test_find_nth_by_cache_key_in_session_walks_index_order(
+async def test_link_pending_parents_fills_a_secondary_parent(setup: Setup) -> None:
+    """Append a secondary parent id once a later batch carries its target."""
+    repository, session_id, _ = setup
+    await repository.upsert_batch(
+        session_id,
+        [_node(1, session_id=session_id, secondary_parent_external_ids=["n0"])],
+    )
+    stored_parent = await repository.upsert_batch(
+        session_id, [_node(0, session_id=session_id)]
+    )
+
+    relinked = await repository.link_pending_parents(session_id, stored_parent)
+
+    assert relinked[0].secondary_parent_ids == [stored_parent[0].id]
+
+
+async def test_link_pending_parents_leaves_a_linked_child_alone(setup: Setup) -> None:
+    """Report no relink when every reference of the session already resolves."""
+    repository, session_id, _ = setup
+    stored_parent = await repository.upsert_batch(
+        session_id, [_node(0, session_id=session_id)]
+    )
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                1,
+                session_id=session_id,
+                parent_id=stored_parent[0].id,
+                parent_external_id="n0",
+            )
+        ],
+    )
+
+    assert await repository.link_pending_parents(session_id, stored_parent) == []
+
+
+async def test_link_pending_parents_scoped_to_session(setup: Setup) -> None:
+    """Leave a pending child of another session unlinked."""
+    repository, session_id, make_session_id = setup
+    other_session_id = await make_session_id()
+    other_child = await repository.upsert_batch(
+        other_session_id,
+        [_node(1, session_id=other_session_id, parent_external_id="n0")],
+    )
+    stored_parent = await repository.upsert_batch(
+        session_id, [_node(0, session_id=session_id)]
+    )
+
+    await repository.link_pending_parents(session_id, stored_parent)
+
+    loaded = await repository.get_by_external_ids(
+        other_session_id, ["n1"], include_payloads=False
+    )
+    assert loaded["n1"].id == other_child[0].id
+    assert loaded["n1"].parent_id is None
+
+
+async def test_exists_in_session_matches_only_the_owning_session(
     setup: Setup,
 ) -> None:
-    """Resolve each occurrence in index order, missing past the last match."""
+    """Report a node only for the session that holds it."""
+    repository, session_id, make_session_id = setup
+    other_session_id = await make_session_id()
+    stored = await repository.upsert_batch(
+        session_id, [_node(0, session_id=session_id)]
+    )
+
+    assert await repository.exists_in_session(session_id, stored[0].id)
+    assert not await repository.exists_in_session(other_session_id, stored[0].id)
+    assert not await repository.exists_in_session(session_id, uuid.uuid4())
+
+
+async def test_find_nth_by_cache_key_in_session_walks_position_order(
+    setup: Setup,
+) -> None:
+    """Resolve each occurrence in position order, missing past the last match."""
     repository, session_id, make_session_id = setup
     other_session_id = await make_session_id()
     cache_key = "d" * 64
@@ -617,13 +762,13 @@ async def test_find_nth_by_cache_key_in_session_walks_index_order(
         session_id,
         [
             _node(
-                index,
+                position,
                 session_id=session_id,
                 node_type=NodeType.TOOL_CALL,
                 cache_key=cache_key,
                 outputs={"ticket": ticket},
             )
-            for index, ticket in enumerate(["a", "b", "c"])
+            for position, ticket in enumerate(["a", "b", "c"])
         ],
     )
     await repository.upsert_batch(

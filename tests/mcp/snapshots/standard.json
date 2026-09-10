@@ -4032,7 +4032,7 @@
               "type": "boolean"
             },
             "skipped": {
-              "description": "Sessions skipped as duplicates.",
+              "description": "Sessions that already existed and received the batch.",
               "title": "Skipped",
               "type": "integer"
             }
@@ -4778,28 +4778,15 @@
               "title": "Error"
             },
             "external_id": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
               "description": "Id from the source system.",
-              "title": "External Id"
+              "title": "External Id",
+              "type": "string"
             },
             "id": {
               "description": "Node id.",
               "format": "uuid",
               "title": "Id",
               "type": "string"
-            },
-            "index": {
-              "description": "Position within the session.",
-              "title": "Index",
-              "type": "integer"
             },
             "input_text_selector": {
               "anyOf": [
@@ -4892,6 +4879,19 @@
               "description": "Node outputs, null unless include_payloads.",
               "title": "Outputs"
             },
+            "parent_external_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "External id of the parent node.",
+              "title": "Parent External Id"
+            },
             "parent_id": {
               "anyOf": [
                 {
@@ -4905,18 +4905,6 @@
               "default": null,
               "description": "Parent node.",
               "title": "Parent Id"
-            },
-            "parent_index": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Parent node index.",
-              "title": "Parent Index"
             },
             "reasoning": {
               "anyOf": [
@@ -4944,6 +4932,14 @@
               "description": "Model requested by the call.",
               "title": "Requested Model"
             },
+            "secondary_parent_external_ids": {
+              "description": "External ids of additional parent nodes.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Secondary Parent External Ids",
+              "type": "array"
+            },
             "secondary_parent_ids": {
               "description": "Additional parent nodes.",
               "items": {
@@ -4951,14 +4947,6 @@
                 "type": "string"
               },
               "title": "Secondary Parent Ids",
-              "type": "array"
-            },
-            "secondary_parent_indexes": {
-              "description": "Secondary parent indexes.",
-              "items": {
-                "type": "integer"
-              },
-              "title": "Secondary Parent Indexes",
               "type": "array"
             },
             "session_id": {
@@ -5053,10 +5041,9 @@
           "required": [
             "id",
             "session_id",
-            "index",
-            "parent_index",
-            "secondary_parent_indexes",
             "secondary_parent_ids",
+            "external_id",
+            "secondary_parent_external_ids",
             "node_type",
             "name",
             "status",

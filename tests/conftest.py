@@ -254,7 +254,10 @@ from kitaru.server.domain.session import (
     SessionNotFound,
     SessionRollups,
 )
-from kitaru.server.domain.session_node import SessionNode
+from kitaru.server.domain.session_node import (
+    DuplicateSessionNodeExternalId,
+    SessionNode,
+)
 from kitaru.server.domain.tag import (
     DuplicateTagLink,
     DuplicateTagName,
@@ -2934,6 +2937,34 @@ class FakeSessionRepository:
                 return self._copy(session, include_payloads)
         return None
 
+    async def get_by_external_id(
+        self,
+        imported_from: str | None,
+        external_id: str | None,
+        agent_id: uuid.UUID,
+        include_payloads: bool,
+    ) -> Session | None:
+        """Load the session registered under an import source and external id.
+
+        Args:
+            imported_from: Source system the session was imported from.
+            external_id: Id from the source system.
+            agent_id: Id of the agent the session belongs to.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
+
+        Returns:
+            Stored session, or ``None`` when the triple is unregistered.
+        """
+        for session in self._sessions.values():
+            if (
+                session.imported_from == imported_from
+                and session.external_id == external_id
+                and session.agent_id == agent_id
+            ):
+                return self._copy(session, include_payloads)
+        return None
+
     def _session_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
         """Resolve the ids of sessions linked to a tag by name.
 
@@ -3235,6 +3266,81 @@ def _paginate_fake_by_index(
     return page, next_cursor
 
 
+def build_session_node(
+    session_id: uuid.UUID, external_id: str, **overrides: Any
+) -> SessionNode:
+    """Build a session node with the fields the ingest service derives.
+
+    Args:
+        session_id: Id of the owning session.
+        external_id: Id from the source system.
+        **overrides: Additional node fields.
+
+    Returns:
+        Session node.
+    """
+    values: dict[str, Any] = {
+        "session_id": session_id,
+        "external_id": external_id,
+    }
+    values.update(overrides)
+    values.setdefault(
+        "effective_started_at", values.get("started_at") or datetime.now(UTC)
+    )
+    return SessionNode(**values)
+
+
+def _node_position_key(node: SessionNode) -> tuple[datetime, uuid.UUID]:
+    """Build the sort key a session node is positioned by.
+
+    Args:
+        node: Session node to position.
+
+    Returns:
+        Effective start time and id of the node.
+    """
+    return node.effective_started_at, node.id
+
+
+def _paginate_fake_by_start(
+    items: list[ListItemT],
+    list_filter: ListFilter,
+    key: Callable[[ListItemT], tuple[datetime, uuid.UUID]],
+) -> tuple[list[ListItemT], str | None]:
+    """Apply start-ascending cursor pagination to an in-memory list.
+
+    Args:
+        items: Candidate domain objects, already scoped by the caller.
+        list_filter: Filter carrying the cursor and size.
+        key: Item start time and id accessor.
+
+    Returns:
+        Page of matching items and the next cursor.
+    """
+    filter_hash = list_filter.compute_filter_hash()
+    cursor = None
+    if list_filter.cursor is not None:
+        cursor = decode_cursor(list_filter.cursor, list_filter.sort, filter_hash)
+
+    ordered = sorted(items, key=key)
+    if cursor is not None:
+        started_at, _, row_id = cursor.id.rpartition("|")
+        last = (datetime.fromisoformat(started_at), uuid.UUID(row_id))
+        ordered = [item for item in ordered if key(item) > last]
+
+    page = ordered[: list_filter.size + 1]
+    next_cursor = None
+    if len(page) > list_filter.size:
+        page = page[: list_filter.size]
+        last_started_at, last_id = key(page[-1])
+        next_cursor = encode_cursor(
+            list_filter.sort,
+            f"{last_started_at.isoformat()}|{last_id}",
+            filter_hash,
+        )
+    return page, next_cursor
+
+
 class FakeSessionNodeRepository:
     """In-memory session node repository."""
 
@@ -3255,30 +3361,33 @@ class FakeSessionNodeRepository:
         self._sessions = sessions
         self._cohort_versions = cohort_versions
 
-    async def get_by_indexes(
-        self, session_id: uuid.UUID, indexes: Sequence[int], include_payloads: bool
-    ) -> dict[int, SessionNode]:
-        """Bulk-load the stored nodes of a session at the given indexes.
+    async def get_by_external_ids(
+        self,
+        session_id: uuid.UUID,
+        external_ids: Sequence[str],
+        include_payloads: bool,
+    ) -> dict[str, SessionNode]:
+        """Bulk-load the stored nodes of a session under the given external ids.
 
         Args:
             session_id: Id of the owning session.
-            indexes: Indexes to load.
+            external_ids: External ids to load.
             include_payloads: Whether to read the inputs, outputs, and
                 attributes.
 
         Returns:
-            Stored nodes keyed by index, missing indexes omitted.
+            Stored nodes keyed by external id, missing ids omitted.
         """
-        wanted = set(indexes)
+        wanted = set(external_ids)
         matches = [
             node
             for node in self._nodes.values()
-            if node.session_id == session_id and node.index in wanted
+            if node.session_id == session_id and node.external_id in wanted
         ]
         if include_payloads:
-            return {node.index: node.model_copy() for node in matches}
+            return {node.external_id: node.model_copy() for node in matches}
         return {
-            node.index: node.model_copy(
+            node.external_id: node.model_copy(
                 update={"inputs": None, "outputs": None, "attributes": None}
             )
             for node in matches
@@ -3287,16 +3396,28 @@ class FakeSessionNodeRepository:
     async def upsert_batch(
         self, session_id: uuid.UUID, nodes: list[SessionNode]
     ) -> list[SessionNode]:
-        """Insert or replace nodes upserted on (session, index).
+        """Insert or replace nodes upserted on (session, external id).
 
         Args:
             session_id: Id of the owning session.
             nodes: Fully resolved nodes to store, in batch order.
 
+        Raises:
+            DuplicateSessionNodeExternalId: An external id of the batch is
+                already held by another node of the session.
+
         Returns:
             Stored nodes in batch order, without payloads.
         """
-        _ = session_id
+        held_by_external_id = {
+            node.external_id: node.id
+            for node in self._nodes.values()
+            if node.session_id == session_id
+        }
+        for node in nodes:
+            held = held_by_external_id.get(node.external_id)
+            if held is not None and held != node.id:
+                raise DuplicateSessionNodeExternalId(session_id)
         stored: list[SessionNode] = []
         for node in nodes:
             existing = self._nodes.get(node.id)
@@ -3322,7 +3443,7 @@ class FakeSessionNodeRepository:
     async def query(
         self, session_node_filter: SessionNodeFilter
     ) -> tuple[list[SessionNode], str | None]:
-        """Query the nodes of a session, ordered by index ascending.
+        """Query the nodes of a session, ordered by position ascending.
 
         Args:
             session_node_filter: Filter and pagination parameters.
@@ -3339,8 +3460,8 @@ class FakeSessionNodeRepository:
                 or _evaluate_filter_expression(node, session_node_filter.expression)
             )
         ]
-        page, next_cursor = _paginate_fake_by_index(
-            nodes, session_node_filter, lambda node: node.index
+        page, next_cursor = _paginate_fake_by_start(
+            nodes, session_node_filter, _node_position_key
         )
         result = []
         for node in page:
@@ -3357,7 +3478,7 @@ class FakeSessionNodeRepository:
     async def list_all(
         self, session_id: uuid.UUID, include_payloads: bool
     ) -> list[SessionNode]:
-        """Read every node of a session, ordered by index ascending.
+        """Read every node of a session, ordered by position ascending.
 
         Args:
             session_id: Id of the owning session.
@@ -3368,7 +3489,7 @@ class FakeSessionNodeRepository:
             Every node of the session.
         """
         nodes = [node for node in self._nodes.values() if node.session_id == session_id]
-        ordered = sorted(nodes, key=lambda node: node.index)
+        ordered = sorted(nodes, key=_node_position_key)
         if include_payloads:
             return [node.model_copy() for node in ordered]
         return [
@@ -3378,37 +3499,82 @@ class FakeSessionNodeRepository:
             for node in ordered
         ]
 
-    async def get_indexes_by_ids(
-        self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
-    ) -> dict[uuid.UUID, int]:
-        """Bulk-load the index of the named nodes of a session, keyed by node id.
+    async def link_pending_parents(
+        self, session_id: uuid.UUID, parents: Sequence[SessionNode]
+    ) -> list[SessionNode]:
+        """Link the stored nodes of a session whose references these parents resolve.
 
         Args:
             session_id: Id of the owning session.
-            node_ids: Ids to look up.
+            parents: Nodes whose external ids the pending references may
+                name.
 
         Returns:
-            Each requested node id mapped to its index, missing ids omitted.
+            Relinked nodes, without payloads.
         """
-        requested = set(node_ids)
-        return {
-            node.id: node.index
-            for node in self._nodes.values()
-            if node.session_id == session_id and node.id in requested
-        }
+        parent_by_external_id = {parent.external_id: parent for parent in parents}
+        relinked: list[SessionNode] = []
+        for node_id, node in list(self._nodes.items()):
+            if node.session_id != session_id:
+                continue
+            updates: dict[str, Any] = {}
+            if node.parent_id is None and node.parent_external_id is not None:
+                parent = parent_by_external_id.get(node.parent_external_id)
+                if parent is not None:
+                    updates["parent_id"] = parent.id
+                    if node.started_at is None:
+                        updates["effective_started_at"] = parent.effective_started_at
+            secondary_parent_ids = list(node.secondary_parent_ids)
+            for external_id in node.secondary_parent_external_ids:
+                parent = parent_by_external_id.get(external_id)
+                if parent is None or parent.id in secondary_parent_ids:
+                    continue
+                secondary_parent_ids.append(parent.id)
+            if secondary_parent_ids != node.secondary_parent_ids:
+                updates["secondary_parent_ids"] = secondary_parent_ids
+            if not updates:
+                continue
+            row = node.model_copy(update=updates)
+            self._nodes[node_id] = row
+            relinked.append(
+                row.model_copy(
+                    update={
+                        "reasoning": None,
+                        "inputs": None,
+                        "outputs": None,
+                        "attributes": None,
+                    }
+                )
+            )
+        return relinked
+
+    async def exists_in_session(
+        self, session_id: uuid.UUID, node_id: uuid.UUID
+    ) -> bool:
+        """Report whether a node belongs to a session.
+
+        Args:
+            session_id: Id of the owning session.
+            node_id: Id of the node.
+
+        Returns:
+            Whether the node belongs to the session.
+        """
+        node = self._nodes.get(node_id)
+        return node is not None and node.session_id == session_id
 
     def _newest_match(self, candidates: list[SessionNode]) -> SessionNode | None:
-        """Pick the highest-id node from a candidate list.
+        """Pick the last node in position order from a candidate list.
 
         Args:
             candidates: Matching nodes.
 
         Returns:
-            Highest-id node, or ``None`` when the list is empty.
+            Last node in position order, or ``None`` when the list is empty.
         """
         if not candidates:
             return None
-        return max(candidates, key=lambda node: node.id).model_copy()
+        return max(candidates, key=_node_position_key).model_copy()
 
     async def find_latest_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str
@@ -3420,7 +3586,7 @@ class FakeSessionNodeRepository:
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         return self._newest_match(
             [
@@ -3435,7 +3601,7 @@ class FakeSessionNodeRepository:
     async def find_nth_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str, occurrence: int
     ) -> SessionNode | None:
-        """Find the nth finished node with a cache key in one session, in index order.
+        """Find the nth finished node of a session with a cache key, in position order.
 
         Only completed and failed tool calls are candidates, so the
         occurrence offset counts finished calls only.
@@ -3443,7 +3609,7 @@ class FakeSessionNodeRepository:
         Args:
             session_id: Id of the session to search.
             cache_key: Tool call cache key to match.
-            occurrence: Zero-based match position in index order.
+            occurrence: Zero-based match position in position order.
 
         Returns:
             Matching node at the position, or ``None`` on a miss.
@@ -3456,7 +3622,7 @@ class FakeSessionNodeRepository:
                 and node.cache_key == cache_key
                 and node.status in (NodeStatus.COMPLETED, NodeStatus.FAILED)
             ),
-            key=lambda node: node.index,
+            key=_node_position_key,
         )
         if occurrence >= len(matches):
             return None
@@ -3475,7 +3641,7 @@ class FakeSessionNodeRepository:
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         assert self._sessions is not None
         session_ids = {
@@ -3504,7 +3670,7 @@ class FakeSessionNodeRepository:
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         assert self._cohort_versions is not None
         session_ids = set(self._cohort_versions._members.get(cohort_version_id, []))

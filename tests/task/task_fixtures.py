@@ -69,12 +69,26 @@ from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginS
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 
+class TaskAuthHolder:
+    """Task principal the app's auth overrides answer with once a task runs."""
+
+    def __init__(self) -> None:
+        self.principal: TaskPrincipal | None = None
+
+    def context(self) -> AuthContext:
+        """Return the auth context for the current principal."""
+        if self.principal is None:
+            return AuthContext(account=ACCOUNT)
+        return TaskAuthContext(account=ACCOUNT, principal=self.principal)
+
+
 class TaskAppFixture(NamedTuple):
     """API client routed to the real app plus the fake services behind it."""
 
     client: KitaruAPIClient
     services: JobAndTaskServices
     agent: Agent
+    auth: TaskAuthHolder
 
 
 async def build_task_app() -> AsyncGenerator[TaskAppFixture, None]:
@@ -105,15 +119,18 @@ async def build_task_app() -> AsyncGenerator[TaskAppFixture, None]:
     app.dependency_overrides[get_task_service] = lambda: services.task_service
     app.dependency_overrides[get_session_service] = lambda: session_service
     app.dependency_overrides[get_session_node_service] = lambda: node_service
-    app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
-    app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
+    # Sessions the flow creates carry the task id only when the request is
+    # authenticated as that task, so importer tests install its principal.
+    auth = TaskAuthHolder()
+    app.dependency_overrides[authorize] = auth.context
+    app.dependency_overrides[authorize_with_task] = auth.context
     override_idempotency(app, ACCOUNT)
     agent = await create_agent(services.agents, ACCOUNT.id)
     async with asgi_api_client(app) as client:
-        yield TaskAppFixture(client=client, services=services, agent=agent)
+        yield TaskAppFixture(client=client, services=services, agent=agent, auth=auth)
 
 
-async def start_task(fixture: TaskAppFixture, task_id: uuid.UUID) -> None:
+async def start_task(fixture: TaskAppFixture, task_id: uuid.UUID) -> TaskPrincipal:
     """Claim a task with a fresh worker and transition it to running.
 
     Mirrors what the worker does before spawning the task process, so the
@@ -124,6 +141,9 @@ async def start_task(fixture: TaskAppFixture, task_id: uuid.UUID) -> None:
     Args:
         fixture: Task app fixture the task was created against.
         task_id: Id of the task to start.
+
+    Returns:
+        Principal of the running task, for callers that authenticate as it.
     """
     worker = await create_worker(fixture.services.workers, ACCOUNT.id)
     worker_actor = WorkerAuthContext(
@@ -140,6 +160,7 @@ async def start_task(fixture: TaskAppFixture, task_id: uuid.UUID) -> None:
     await fixture.services.task_service.update_task(
         task_id, TaskUpdate(status=TaskStatus.RUNNING), actor=task_actor
     )
+    return task_actor.principal
 
 
 async def create_script_plugin_version(

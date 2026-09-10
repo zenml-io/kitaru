@@ -96,17 +96,20 @@ async def test_sessions_number_sequentially_per_agent(
     assert other["number"] == 1
 
 
-async def test_duplicate_external_id_conflict(
+async def test_repeated_external_id_returns_the_stored_session(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Translate the database constraint into HTTP 409."""
+    """Translate the database constraint into HTTP 200 and the stored session."""
     body = _session_body(
         agent_id, origin="imported", imported_from="langsmith", external_id="run-1"
     )
+    created = await client.post("/api/v1/sessions", json=body)
+    assert created.status_code == 201
+
     response = await client.post("/api/v1/sessions", json=body)
-    assert response.status_code == 201
-    response = await client.post("/api/v1/sessions", json=body)
-    assert response.status_code == 409
+
+    assert response.status_code == 200
+    assert response.json()["id"] == created.json()["id"]
 
 
 async def test_external_id_reuse_after_agent_delete(
@@ -124,10 +127,11 @@ async def test_external_id_reuse_after_agent_delete(
     body = _session_body(
         other["id"], origin="imported", imported_from="langsmith", external_id="run-1"
     )
+    created = await client.post("/api/v1/sessions", json=body)
+    assert created.status_code == 201
     response = await client.post("/api/v1/sessions", json=body)
-    assert response.status_code == 201
-    response = await client.post("/api/v1/sessions", json=body)
-    assert response.status_code == 409
+    assert response.status_code == 200
+    assert response.json()["id"] == created.json()["id"]
 
 
 async def test_update_persists_across_requests(
@@ -178,7 +182,7 @@ async def test_ingest_and_list_nodes_persist_across_requests(
         json={
             "nodes": [
                 {
-                    "index": 0,
+                    "external_id": "n0",
                     "node_type": "llm_call",
                     "name": "call",
                     "status": "completed",
@@ -190,8 +194,8 @@ async def test_ingest_and_list_nodes_persist_across_requests(
                     "metadata": {},
                 },
                 {
-                    "index": 1,
-                    "parent_index": 0,
+                    "external_id": "n1",
+                    "parent_external_id": "n0",
                     "node_type": "tool_call",
                     "name": "search",
                     "status": "completed",
@@ -217,7 +221,7 @@ async def test_ingest_and_list_nodes_persist_across_requests(
     response = await client.get(f"/api/v1/sessions/{created['id']}/nodes")
     assert response.status_code == 200
     items = response.json()["items"]
-    assert [item["index"] for item in items] == [0, 1]
+    assert [item["external_id"] for item in items] == ["n0", "n1"]
     assert items[0]["inputs"] is None
 
     response = await client.get(
@@ -243,7 +247,7 @@ async def test_ingest_into_terminal_recorded_session_rejected(
         json={
             "nodes": [
                 {
-                    "index": 0,
+                    "external_id": "n0",
                     "node_type": "span",
                     "name": "x",
                     "status": "completed",
@@ -314,7 +318,7 @@ async def test_large_payload_offload_round_trips_through_the_api() -> None:
             json={
                 "nodes": [
                     {
-                        "index": 0,
+                        "external_id": "n0",
                         "node_type": "llm_call",
                         "name": "call",
                         "status": "completed",

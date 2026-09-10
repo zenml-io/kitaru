@@ -415,18 +415,33 @@ def test_run_raises_an_ingest_error_after_the_function(
     assert client.sessions.batches == []
 
 
-def test_run_rejects_an_already_imported_trace(
+def test_run_raises_a_create_error_after_the_function(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Raise SessionImportError when the session external id already exists."""
+    """Raise the session create error after the function has completed."""
     adapter, client = _adapter(monkeypatch, _single_session_parser)
-    client.sessions.create_error = APIError(httpx.codes.CONFLICT, "conflict")
+    client.sessions.create_error = APIError(
+        httpx.codes.SERVICE_UNAVAILABLE, "backend unavailable"
+    )
 
-    with pytest.raises(SessionImportError, match="already exists"):
+    with pytest.raises(APIError, match="backend unavailable"):
         adapter.run(lambda: adapter.events.append("func"))
 
     assert "func" in adapter.events
     assert client.sessions.batches == []
+
+
+def test_run_ingests_into_an_already_imported_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ingest nodes normally when the create call reuses an existing session."""
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
+
+    adapter.run(lambda: adapter.events.append("func"))
+
+    assert "func" in adapter.events
+    assert len(client.sessions.created) == 1
+    assert len(client.sessions.batches) == 1
 
 
 def test_run_rejects_a_replay_with_an_override(

@@ -183,14 +183,16 @@ class ImporterBackedAdapter(ABC):
     async def _import_trace(self, external_id: str, origin: SessionOrigin) -> None:
         """Wait for the provider trace, then fetch, parse, and ingest it.
 
+        A session with the trace's external id already existing is ingested
+        into rather than treated as a failure.
+
         Args:
             external_id: Provider trace id.
             origin: Session origin.
 
         Raises:
             SessionImportError: The parse yielded a failure or anything but
-                exactly one session, or a session with the external id
-                already exists.
+                exactly one session.
         """
         try:
             async with asyncio.timeout(self._completeness_timeout):
@@ -213,13 +215,7 @@ class ImporterBackedAdapter(ABC):
                 f"{external_id}, expected exactly one"
             )
         async with KitaruAPIClient() as client:
-            session = await ingest_session(
-                client, sessions[0], None, self._provider, origin
-            )
-        if session is None:
-            raise SessionImportError(
-                f"A session with external id {sessions[0].external_id} already exists"
-            )
+            await ingest_session(client, sessions[0], None, self._provider, origin)
 
     async def _create_timed_out_session(
         self, client: KitaruAPIClient, external_id: str, origin: SessionOrigin

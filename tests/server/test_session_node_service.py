@@ -14,6 +14,7 @@
 """Tests for session node use cases."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -54,7 +55,6 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session import SessionAccessDenied
-from kitaru.server.domain.session_node import SessionNodeParentNotFound
 from kitaru.server.domain.task import AgentTask
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -128,9 +128,21 @@ async def session_id(session_repository: FakeSessionRepository) -> uuid.UUID:
     return session.id
 
 
-def _llm_node(index: int, **overrides: Any) -> SessionNodeUpsert:
+def _start(offset: int) -> datetime:
+    """Build a start time offset from a fixed base.
+
+    Args:
+        offset: Minutes past the base time.
+
+    Returns:
+        Start time.
+    """
+    return datetime(2026, 1, 1, tzinfo=UTC) + timedelta(minutes=offset)
+
+
+def _llm_node(external_id: str, **overrides: Any) -> SessionNodeUpsert:
     values: dict[str, Any] = {
-        "index": index,
+        "external_id": external_id,
         "node_type": NodeType.LLM_CALL,
         "name": "call",
         "status": NodeStatus.COMPLETED,
@@ -146,10 +158,10 @@ async def test_ingest_insert_assigns_ids_and_rollups(
 ) -> None:
     """Insert new nodes and roll up their cost, tokens, and call counts."""
     batch = [
-        _llm_node(0, cost=Decimal("1.50"), tokens=TokenUsage(input_tokens=10)),
+        _llm_node("n0", cost=Decimal("1.50"), tokens=TokenUsage(input_tokens=10)),
         SessionNodeUpsert(
-            index=1,
-            parent_index=0,
+            external_id="n1",
+            parent_external_id="n0",
             node_type=NodeType.TOOL_CALL,
             name="search",
             status=NodeStatus.COMPLETED,
@@ -177,7 +189,7 @@ async def test_ingest_cache_key_null_when_tool_name_missing(
     """Leave cache_key null on a tool call node without a tool name."""
     batch = [
         SessionNodeUpsert(
-            index=0,
+            external_id="n0",
             node_type=NodeType.TOOL_CALL,
             name="unknown-tool",
             status=NodeStatus.COMPLETED,
@@ -193,7 +205,7 @@ async def test_ingest_cache_key_null_when_inputs_missing(
     """Leave cache_key null on a tool call node without recorded inputs."""
     batch = [
         SessionNodeUpsert(
-            index=0,
+            external_id="n0",
             node_type=NodeType.TOOL_CALL,
             name="search",
             status=NodeStatus.COMPLETED,
@@ -207,14 +219,14 @@ async def test_ingest_cache_key_null_when_inputs_missing(
 async def test_ingest_secondary_parents_resolve(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
-    """Resolve secondary_parent_indexes into secondary_parent_ids."""
+    """Resolve secondary_parent_external_ids into secondary_parent_ids."""
     batch = [
-        _llm_node(0),
-        _llm_node(1),
+        _llm_node("n0"),
+        _llm_node("n1"),
         SessionNodeUpsert(
-            index=2,
-            parent_index=0,
-            secondary_parent_indexes=[1],
+            external_id="n2",
+            parent_external_id="n0",
+            secondary_parent_external_ids=["n1"],
             node_type=NodeType.SUBAGENT_CALL,
             name="merge",
             status=NodeStatus.COMPLETED,
@@ -228,14 +240,14 @@ async def test_ingest_secondary_parents_resolve(
 async def test_ingest_parent_resolves_against_stored_row(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
-    """Resolve a parent_index against a row stored in an earlier batch."""
-    first = await service.ingest_nodes(session_id, [_llm_node(0)], actor=ACTOR)
+    """Resolve a parent external id against a row stored in an earlier batch."""
+    first = await service.ingest_nodes(session_id, [_llm_node("n0")], actor=ACTOR)
     second = await service.ingest_nodes(
         session_id,
         [
             SessionNodeUpsert(
-                index=1,
-                parent_index=0,
+                external_id="n1",
+                parent_external_id="n0",
                 node_type=NodeType.TOOL_CALL,
                 name="search",
                 status=NodeStatus.COMPLETED,
@@ -246,21 +258,123 @@ async def test_ingest_parent_resolves_against_stored_row(
     assert second[0].parent_id == first[0].id
 
 
-async def test_ingest_unresolved_parent_index_raises(
+async def test_ingest_keeps_an_unresolved_parent_external_id_unlinked(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
-    """Raise when a parent_index matches no stored or batched node."""
+    """Store a node whose parent external id matches nothing yet as a root."""
     batch = [
         SessionNodeUpsert(
-            index=1,
-            parent_index=0,
+            external_id="n1",
+            parent_external_id="n0",
             node_type=NodeType.TOOL_CALL,
             name="search",
             status=NodeStatus.COMPLETED,
         )
     ]
-    with pytest.raises(SessionNodeParentNotFound):
-        await service.ingest_nodes(session_id, batch, actor=ACTOR)
+
+    stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
+
+    assert stored[0].parent_id is None
+    assert stored[0].parent_external_id == "n0"
+
+
+async def test_ingest_links_a_child_batched_before_its_parent(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Link a child that a batch carries ahead of its parent."""
+    batch = [
+        _llm_node("n1", parent_external_id="n0", started_at=_start(1)),
+        _llm_node("n0", started_at=_start(0)),
+    ]
+
+    stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
+
+    assert stored[0].parent_id == stored[1].id
+    assert stored[0].parent_external_id == "n0"
+
+
+async def test_ingest_links_a_child_stored_by_an_earlier_batch(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Link a stored child once a later batch carries its parent."""
+    child = await service.ingest_nodes(
+        session_id, [_llm_node("n1", parent_external_id="n0")], actor=ACTOR
+    )
+    assert child[0].parent_id is None
+
+    parent = await service.ingest_nodes(
+        session_id, [_llm_node("n0", started_at=_start(0))], actor=ACTOR
+    )
+    nodes = await service.list_all_nodes(
+        session_id, include_payloads=False, actor=ACTOR
+    )
+    linked = next(node for node in nodes if node.external_id == "n1")
+
+    assert linked.parent_id == parent[0].id
+    assert linked.effective_started_at == _start(0)
+
+
+async def test_ingest_links_a_secondary_parent_that_arrives_later(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Fill in a secondary parent id once a later batch carries its target."""
+    child = await service.ingest_nodes(
+        session_id,
+        [_llm_node("n1", secondary_parent_external_ids=["n0"], started_at=_start(1))],
+        actor=ACTOR,
+    )
+    assert child[0].secondary_parent_ids == []
+
+    parent = await service.ingest_nodes(
+        session_id, [_llm_node("n0", started_at=_start(0))], actor=ACTOR
+    )
+    nodes = await service.list_all_nodes(
+        session_id, include_payloads=False, actor=ACTOR
+    )
+    linked = next(node for node in nodes if node.external_id == "n1")
+
+    assert linked.secondary_parent_ids == [parent[0].id]
+    assert linked.secondary_parent_external_ids == ["n0"]
+
+
+async def test_ingest_inherits_the_parent_start(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Position a node without a start time at its parent's effective start."""
+    batch = [
+        _llm_node("n0", started_at=_start(0)),
+        _llm_node("n1", parent_external_id="n0"),
+    ]
+    stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
+
+    assert stored[1].started_at is None
+    assert stored[1].effective_started_at == _start(0)
+
+
+async def test_ingest_falls_back_to_the_row_start_without_a_parent(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Position a root node without a start time by its own row."""
+    before = datetime.now(UTC)
+    stored = await service.ingest_nodes(session_id, [_llm_node("n0")], actor=ACTOR)
+
+    assert stored[0].started_at is None
+    assert stored[0].effective_started_at >= before
+
+
+async def test_ingest_replace_keeps_the_position_of_a_started_node(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Carry a resent start time into the effective start of the replacement."""
+    created = await service.ingest_nodes(
+        session_id, [_llm_node("n0", started_at=_start(3))], actor=ACTOR
+    )
+    replaced = await service.ingest_nodes(
+        session_id, [_llm_node("n0", started_at=_start(3), name="renamed")], actor=ACTOR
+    )
+
+    assert replaced[0].id == created[0].id
+    assert replaced[0].effective_started_at == _start(3)
 
 
 async def test_ingest_replace_clears_omitted_fields(
@@ -269,10 +383,10 @@ async def test_ingest_replace_clears_omitted_fields(
     """Replace a node whole, clearing fields the resent version omits."""
     created = await service.ingest_nodes(
         session_id,
-        [_llm_node(0, error="boom", requested_model="gpt", tool_name="unused")],
+        [_llm_node("n0", error="boom", requested_model="gpt", tool_name="unused")],
         actor=ACTOR,
     )
-    replaced = await service.ingest_nodes(session_id, [_llm_node(0)], actor=ACTOR)
+    replaced = await service.ingest_nodes(session_id, [_llm_node("n0")], actor=ACTOR)
     assert replaced[0].id == created[0].id
     assert replaced[0].error is None
     assert replaced[0].requested_model is None
@@ -282,10 +396,10 @@ async def test_ingest_replace_clears_omitted_fields(
 async def test_ingest_replace_preserves_id(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
-    """Preserve the row id when replacing an already-stored index."""
-    created = await service.ingest_nodes(session_id, [_llm_node(0)], actor=ACTOR)
+    """Preserve the row id when replacing an already-stored external id."""
+    created = await service.ingest_nodes(session_id, [_llm_node("n0")], actor=ACTOR)
     replaced = await service.ingest_nodes(
-        session_id, [_llm_node(0, name="renamed")], actor=ACTOR
+        session_id, [_llm_node("n0", name="renamed")], actor=ACTOR
     )
     assert replaced[0].id == created[0].id
     assert replaced[0].name == "renamed"
@@ -299,12 +413,12 @@ async def test_ingest_replace_updates_rollup_delta(
     """Correct the session rollup when a replace changes cost and tokens."""
     await service.ingest_nodes(
         session_id,
-        [_llm_node(0, cost=Decimal("1.00"), tokens=TokenUsage(input_tokens=10))],
+        [_llm_node("n0", cost=Decimal("1.00"), tokens=TokenUsage(input_tokens=10))],
         actor=ACTOR,
     )
     await service.ingest_nodes(
         session_id,
-        [_llm_node(0, cost=Decimal("4.00"), tokens=TokenUsage(input_tokens=30))],
+        [_llm_node("n0", cost=Decimal("4.00"), tokens=TokenUsage(input_tokens=30))],
         actor=ACTOR,
     )
     session = await session_repository.get(session_id, include_payloads=True)
@@ -320,12 +434,12 @@ async def test_ingest_replace_changing_node_type_updates_call_counts(
     session_id: uuid.UUID,
 ) -> None:
     """Move the call count from one kind to another when the type changes."""
-    await service.ingest_nodes(session_id, [_llm_node(0)], actor=ACTOR)
+    await service.ingest_nodes(session_id, [_llm_node("n0")], actor=ACTOR)
     await service.ingest_nodes(
         session_id,
         [
             SessionNodeUpsert(
-                index=0,
+                external_id="n0",
                 node_type=NodeType.SPAN,
                 name="span",
                 status=NodeStatus.COMPLETED,
@@ -344,7 +458,7 @@ async def test_ingest_retry_identical_batch_nets_zero_delta(
     session_id: uuid.UUID,
 ) -> None:
     """Net a zero rollup delta when an identical batch is retried."""
-    batch = [_llm_node(0, cost=Decimal("2.00"), tokens=TokenUsage(input_tokens=5))]
+    batch = [_llm_node("n0", cost=Decimal("2.00"), tokens=TokenUsage(input_tokens=5))]
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
     before = await session_repository.get(session_id, include_payloads=True)
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
@@ -367,7 +481,7 @@ async def test_ingest_into_terminal_imported_session_allowed(
         origin=SessionOrigin.IMPORTED,
         status=SessionStatus.COMPLETED,
     )
-    stored = await service.ingest_nodes(session.id, [_llm_node(0)], actor=ACTOR)
+    stored = await service.ingest_nodes(session.id, [_llm_node("n0")], actor=ACTOR)
     assert len(stored) == 1
 
 
@@ -385,7 +499,7 @@ async def test_ingest_into_terminal_import_sourced_session_allowed(
         status=SessionStatus.COMPLETED,
         imported_from="langfuse",
     )
-    stored = await service.ingest_nodes(session.id, [_llm_node(0)], actor=ACTOR)
+    stored = await service.ingest_nodes(session.id, [_llm_node("n0")], actor=ACTOR)
     assert len(stored) == 1
 
 
@@ -399,7 +513,7 @@ async def test_ingest_into_terminal_recorded_session_rejected(
         session_id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
     )
     with pytest.raises(Exception, match="does not accept node ingestion"):
-        await service.ingest_nodes(session_id, [_llm_node(0)], actor=ACTOR)
+        await service.ingest_nodes(session_id, [_llm_node("n0")], actor=ACTOR)
 
 
 async def test_list_nodes_include_payloads_true(
@@ -408,7 +522,11 @@ async def test_list_nodes_include_payloads_true(
     """Populate inputs, outputs, and attributes when include_payloads is set."""
     await service.ingest_nodes(
         session_id,
-        [_llm_node(0, inputs={"q": "hi"}, outputs={"a": "there"}, attributes={"k": 1})],
+        [
+            _llm_node(
+                "n0", inputs={"q": "hi"}, outputs={"a": "there"}, attributes={"k": 1}
+            )
+        ],
         actor=ACTOR,
     )
     nodes, next_cursor = await service.list_nodes(
@@ -429,7 +547,11 @@ async def test_list_nodes_include_payloads_false(
     """Null inputs, outputs, and attributes when include_payloads is unset."""
     await service.ingest_nodes(
         session_id,
-        [_llm_node(0, inputs={"q": "hi"}, outputs={"a": "there"}, attributes={"k": 1})],
+        [
+            _llm_node(
+                "n0", inputs={"q": "hi"}, outputs={"a": "there"}, attributes={"k": 1}
+            )
+        ],
         actor=ACTOR,
     )
     nodes, _ = await service.list_nodes(
@@ -440,26 +562,29 @@ async def test_list_nodes_include_payloads_false(
     assert nodes[0].attributes is None
 
 
-async def test_list_nodes_ordered_by_index_with_pagination(
+async def test_list_nodes_ordered_by_start_with_pagination(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
-    """Page through nodes in index-ascending order via next_cursor."""
-    batch = [_llm_node(index) for index in (2, 0, 1, 4, 3)]
+    """Page through nodes in start-ascending order via next_cursor."""
+    batch = [
+        _llm_node(f"n{position}", started_at=_start(position))
+        for position in (2, 0, 1, 4, 3)
+    ]
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
-    collected: list[int] = []
+    collected: list[str] = []
     cursor = None
     while True:
         nodes, next_cursor = await service.list_nodes(
             SessionNodeFilter(session_id=session_id, cursor=cursor, size=2),
             actor=ACTOR,
         )
-        collected.extend(node.index for node in nodes)
+        collected.extend(node.external_id for node in nodes)
         if next_cursor is None:
             break
         cursor = next_cursor
 
-    assert collected == [0, 1, 2, 3, 4]
+    assert collected == ["n0", "n1", "n2", "n3", "n4"]
 
 
 async def test_ingest_empty_batch_is_a_no_op(
@@ -502,7 +627,7 @@ async def test_ingest_nodes_denies_a_task_principal_for_another_tasks_session(
     )
     actor = _task_principal(uuid.uuid4())
     with pytest.raises(SessionAccessDenied):
-        await service.ingest_nodes(session.id, [_llm_node(0)], actor=actor)
+        await service.ingest_nodes(session.id, [_llm_node("n0")], actor=actor)
 
 
 async def test_ingest_nodes_denies_a_task_principal_for_its_input_session(
@@ -518,7 +643,7 @@ async def test_ingest_nodes_denies_a_task_principal_for_its_input_session(
     )
     actor = _task_principal(uuid.uuid4(), granted_session_id=session.id)
     with pytest.raises(SessionAccessDenied):
-        await service.ingest_nodes(session.id, [_llm_node(0)], actor=actor)
+        await service.ingest_nodes(session.id, [_llm_node("n0")], actor=actor)
 
 
 async def test_ingest_nodes_allows_a_task_principal_for_its_own_session(
@@ -539,40 +664,33 @@ async def test_ingest_nodes_allows_a_task_principal_for_its_own_session(
         status=SessionStatus.IN_PROGRESS,
     )
     actor = _task_principal(task_id)
-    stored = await service.ingest_nodes(session.id, [_llm_node(0)], actor=actor)
+    stored = await service.ingest_nodes(session.id, [_llm_node("n0")], actor=actor)
     assert len(stored) == 1
 
 
-async def test_get_indexes_by_ids_denies_a_task_principal_for_another_tasks_session(
-    service: SessionNodeService, session_repository: FakeSessionRepository
-) -> None:
-    """Reject a task principal reading the index of a session it does not own."""
-    session = await create_session(
-        session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=uuid.uuid4()
-    )
-    actor = _task_principal(uuid.uuid4())
-    with pytest.raises(SessionAccessDenied):
-        await service.get_indexes_by_ids(session.id, [], actor=actor)
-
-
-async def test_get_indexes_by_ids_allows_a_task_principal_for_its_input_session(
-    service: SessionNodeService, session_repository: FakeSessionRepository
-) -> None:
-    """Allow a task principal to read the index of its input session."""
-    session = await create_session(
-        session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=uuid.uuid4()
-    )
-    actor = _task_principal(uuid.uuid4(), granted_session_id=session.id)
-    index_by_id = await service.get_indexes_by_ids(session.id, [], actor=actor)
-    assert index_by_id == {}
-
-
-async def test_get_indexes_by_ids_skips_the_ownership_check_for_an_account_principal(
+async def test_ingest_nodes_allows_a_task_principal_for_an_imported_session(
     service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
 ) -> None:
-    """Preserve the existing empty-dict result for an unknown session id."""
-    index_by_id = await service.get_indexes_by_ids(uuid.uuid4(), [], actor=ACTOR)
-    assert index_by_id == {}
+    """Allow a task principal to ingest nodes into a session another task imported."""
+    task = await task_repository.create(
+        AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4(), attempt=1)
+    )
+    session = await create_session(
+        session_repository,
+        uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        task_id=uuid.uuid4(),
+        origin=SessionOrigin.IMPORTED,
+        status=SessionStatus.COMPLETED,
+    )
+
+    stored = await service.ingest_nodes(
+        session.id, [_llm_node("n0")], actor=_task_principal(task.id)
+    )
+
+    assert len(stored) == 1
 
 
 async def test_list_nodes_denies_a_task_principal_for_another_tasks_session(
@@ -635,7 +753,7 @@ async def test_ingest_offloads_over_threshold_payloads(
     attributes = {"c": "attr" * 50}
     batch = [
         _llm_node(
-            0,
+            "n0",
             reasoning=reasoning,
             inputs=inputs,
             outputs=outputs,
@@ -645,8 +763,10 @@ async def test_ingest_offloads_over_threshold_payloads(
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
     raw = (
-        await node_repository.get_by_indexes(session_id, [0], include_payloads=True)
-    )[0]
+        await node_repository.get_by_external_ids(
+            session_id, ["n0"], include_payloads=True
+        )
+    )["n0"]
     assert raw.reasoning is not None
     assert raw.reasoning.blob_id is not None
     assert raw.inputs is not None
@@ -676,13 +796,15 @@ async def test_ingest_under_threshold_stays_inline(
         node_repository, session_repository, task_repository, threshold_bytes=1024
     )
     batch = [
-        _llm_node(0, reasoning="short", inputs={"a": 1}, attributes={"c": 3}),
+        _llm_node("n0", reasoning="short", inputs={"a": 1}, attributes={"c": 3}),
     ]
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
     raw = (
-        await node_repository.get_by_indexes(session_id, [0], include_payloads=True)
-    )[0]
+        await node_repository.get_by_external_ids(
+            session_id, ["n0"], include_payloads=True
+        )
+    )["n0"]
     assert raw.reasoning is not None
     assert raw.reasoning.value == "short"
     assert raw.reasoning.blob_id is None
@@ -707,18 +829,18 @@ async def test_ingest_dedupes_identical_inputs_across_nodes(
     )
     shared_inputs = {"a": "i" * 50}
     batch = [
-        _llm_node(0, inputs=shared_inputs),
-        _llm_node(1, inputs=shared_inputs),
+        _llm_node("n0", inputs=shared_inputs),
+        _llm_node("n1", inputs=shared_inputs),
     ]
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
-    raw = await node_repository.get_by_indexes(
-        session_id, [0, 1], include_payloads=True
+    raw = await node_repository.get_by_external_ids(
+        session_id, ["n0", "n1"], include_payloads=True
     )
-    assert raw[0].inputs is not None
-    assert raw[1].inputs is not None
-    assert raw[0].inputs.blob_id is not None
-    assert raw[0].inputs.blob_id == raw[1].inputs.blob_id
+    assert raw["n0"].inputs is not None
+    assert raw["n1"].inputs is not None
+    assert raw["n0"].inputs.blob_id is not None
+    assert raw["n0"].inputs.blob_id == raw["n1"].inputs.blob_id
 
 
 async def test_ingest_threshold_zero_offloads_every_non_null_payload(
@@ -731,12 +853,14 @@ async def test_ingest_threshold_zero_offloads_every_non_null_payload(
     service, _, _ = _service_with_threshold(
         node_repository, session_repository, task_repository, threshold_bytes=0
     )
-    batch = [_llm_node(0, inputs={"a": 1})]
+    batch = [_llm_node("n0", inputs={"a": 1})]
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
     raw = (
-        await node_repository.get_by_indexes(session_id, [0], include_payloads=True)
-    )[0]
+        await node_repository.get_by_external_ids(
+            session_id, ["n0"], include_payloads=True
+        )
+    )["n0"]
     assert raw.inputs is not None
     assert raw.inputs.blob_id is not None
     # outputs was never set, so it stays trivially None with no payload at all.
@@ -756,7 +880,7 @@ async def test_ingest_cache_key_computed_from_raw_inputs_before_offload(
     inputs = {"q": "i" * 50}
     batch = [
         SessionNodeUpsert(
-            index=0,
+            external_id="n0",
             node_type=NodeType.TOOL_CALL,
             name="search",
             status=NodeStatus.COMPLETED,
@@ -779,7 +903,9 @@ async def test_list_all_nodes_include_payloads_hydrates_offloaded_values(
         node_repository, session_repository, task_repository, threshold_bytes=10
     )
     inputs = {"a": "i" * 50}
-    await service.ingest_nodes(session_id, [_llm_node(0, inputs=inputs)], actor=ACTOR)
+    await service.ingest_nodes(
+        session_id, [_llm_node("n0", inputs=inputs)], actor=ACTOR
+    )
 
     nodes = await service.list_all_nodes(session_id, include_payloads=True, actor=ACTOR)
     assert nodes[0].inputs is not None
@@ -797,7 +923,9 @@ async def test_list_all_nodes_exclude_payloads_returns_no_payloads(
         node_repository, session_repository, task_repository, threshold_bytes=10
     )
     inputs = {"a": "i" * 50}
-    await service.ingest_nodes(session_id, [_llm_node(0, inputs=inputs)], actor=ACTOR)
+    await service.ingest_nodes(
+        session_id, [_llm_node("n0", inputs=inputs)], actor=ACTOR
+    )
 
     nodes = await service.list_all_nodes(
         session_id, include_payloads=False, actor=ACTOR

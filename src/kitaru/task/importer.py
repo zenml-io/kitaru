@@ -20,7 +20,6 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
-import httpx
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.imports import MAX_IMPORT_FAILURES, ImportFailure, ImportStats
@@ -363,14 +362,16 @@ def session_request(
 
 
 def _node_request(
-    node: ImportedNode, *, index: int, parent_index: int | None
+    node: ImportedNode,
+    external_id: str,
+    parent_external_id: str | None,
+    secondary_parent_external_ids: list[str],
 ) -> SessionNodeCreateRequest:
     """Convert an imported node to an ingest request."""
     return SessionNodeCreateRequest(
-        index=index,
-        parent_index=parent_index,
-        secondary_parent_indexes=node.secondary_parent_indexes,
-        external_id=node.external_id,
+        external_id=external_id,
+        parent_external_id=parent_external_id,
+        secondary_parent_external_ids=secondary_parent_external_ids,
         trace_id=node.trace_id,
         node_type=node.node_type,
         name=node.name,
@@ -397,11 +398,31 @@ def _node_request(
     )
 
 
+def _reject_duplicate_external_ids(external_ids: Iterable[str]) -> None:
+    """Raise SessionImportError when an external id repeats within a session."""
+    seen: set[str] = set()
+    for external_id in external_ids:
+        if external_id in seen:
+            raise SessionImportError(
+                f"Imported node external id '{external_id}' is not unique "
+                "within the session"
+            )
+        seen.add(external_id)
+
+
 def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
-    """Flatten an imported node tree into indexed ingest requests, depth-first.
+    """Flatten an imported node tree into ingest requests, depth-first.
+
+    A node without an external id gets one minted from its position, its
+    explicit index in the indexed representation or its depth-first position
+    in the tree representation.
 
     Args:
         nodes: Top-level imported nodes.
+
+    Raises:
+        SessionImportError: The node tree contains a cycle, or an external id
+            repeats within the session.
 
     Returns:
         Flat session node create requests in depth-first order.
@@ -415,11 +436,18 @@ def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
         indexed_nodes = sorted(
             nodes, key=lambda node: node.index if node.index is not None else -1
         )
+        external_ids = {
+            node.index: node.external_id or f"node-{node.index}"
+            for node in indexed_nodes
+            if node.index is not None
+        }
+        _reject_duplicate_external_ids(external_ids.values())
         direct = [
             _node_request(
                 node,
-                index=node.index,
-                parent_index=node.parent_index,
+                external_ids[node.index],
+                external_ids.get(node.parent_index),
+                [external_ids[i] for i in node.secondary_parent_indexes],
             )
             for node in indexed_nodes
             if node.index is not None
@@ -427,23 +455,33 @@ def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
         return SessionNodeBatchRequest(nodes=direct).nodes
 
     flattened: list[SessionNodeCreateRequest] = []
+    external_ids_by_position: list[str] = []
 
     active: set[int] = set()
-    stack: list[tuple[ImportedNode, int | None, bool]] = [
+    stack: list[tuple[ImportedNode, str | None, bool]] = [
         (node, None, False) for node in reversed(nodes)
     ]
     while stack:
-        node, parent_index, exiting = stack.pop()
+        node, parent_external_id, exiting = stack.pop()
         if exiting:
             active.remove(id(node))
             continue
         if id(node) in active:
             raise SessionImportError("Imported node tree contains a cycle")
         active.add(id(node))
-        index = len(flattened)
-        flattened.append(_node_request(node, index=index, parent_index=parent_index))
-        stack.append((node, parent_index, True))
-        stack.extend((child, index, False) for child in reversed(node.children))
+        external_id = node.external_id or f"node-{len(flattened)}"
+        external_ids_by_position.append(external_id)
+        flattened.append(
+            _node_request(
+                node,
+                external_id,
+                parent_external_id,
+                [external_ids_by_position[i] for i in node.secondary_parent_indexes],
+            )
+        )
+        stack.append((node, parent_external_id, True))
+        stack.extend((child, external_id, False) for child in reversed(node.children))
+    _reject_duplicate_external_ids(external_ids_by_position)
     return flattened
 
 
@@ -453,8 +491,11 @@ async def ingest_session(
     agent_id: uuid.UUID | None,
     provider: str | None,
     origin: SessionOrigin = SessionOrigin.IMPORTED,
-) -> SessionResponse | None:
-    """Create a session for one parsed import item and ingest its nodes.
+) -> SessionResponse:
+    """Create or reuse a session for one parsed import item and ingest its nodes.
+
+    A session whose external id already exists is reused instead of created,
+    and its nodes are ingested the same way as for a new session.
 
     Args:
         client: API client.
@@ -469,16 +510,10 @@ async def ingest_session(
         SessionImportError: The imported node tree is invalid.
 
     Returns:
-        Created session, None when a session with the external id already
-        exists.
+        Session the nodes were ingested into, new or reused.
     """
     request = session_request(parsed, agent_id, provider, origin)
-    try:
-        session = await client.sessions.create(request)
-    except APIError as exc:
-        if exc.status_code == httpx.codes.CONFLICT:
-            return None
-        raise
+    session = await client.sessions.create(request)
     nodes = flatten_nodes(parsed.nodes)
     for start in range(0, len(nodes), NODE_BATCH_SIZE):
         batch = nodes[start : start + NODE_BATCH_SIZE]
@@ -575,6 +610,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
 
     created = 0
     skipped = 0
+    ingested: set[str] = set()
     failed = 0
     limit_reached = False
     failures: list[ImportFailure] = []
@@ -616,10 +652,13 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
                         )
                     )
                     continue
-                if session is None:
+                # A session this run already ingested, or one another task
+                # created, received the batch but was not created here.
+                if item.external_id in ingested or session.task_id != task_uuid:
                     skipped += 1
                 else:
                     created += 1
+                ingested.add(item.external_id)
             if limit_reached:
                 break
     except SessionImportError as exc:

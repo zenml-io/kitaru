@@ -24,19 +24,25 @@ from kitaru.api_models.v1.session_node import (
 )
 
 
-def _node(index: int, parent_index: int | None) -> SessionNodeCreateRequest:
+def _node(
+    external_id: str,
+    parent_external_id: str | None = None,
+    secondary_parent_external_ids: list[str] | None = None,
+) -> SessionNodeCreateRequest:
     """Build a session node create request for the batch validator tests.
 
     Args:
-        index: Node index.
-        parent_index: Parent node index.
+        external_id: Node external id.
+        parent_external_id: Parent node external id.
+        secondary_parent_external_ids: Additional parent external ids.
 
     Returns:
         A minimal session node create request.
     """
     return SessionNodeCreateRequest(
-        index=index,
-        parent_index=parent_index,
+        external_id=external_id,
+        parent_external_id=parent_external_id,
+        secondary_parent_external_ids=secondary_parent_external_ids or [],
         node_type=NodeType.SPAN,
         name="node",
         status=NodeStatus.COMPLETED,
@@ -46,58 +52,61 @@ def _node(index: int, parent_index: int | None) -> SessionNodeCreateRequest:
     )
 
 
-def test_parent_index_before_index_accepted() -> None:
-    """Accept a batch where every parent_index precedes its own index."""
-    batch = SessionNodeBatchRequest(nodes=[_node(0, None), _node(1, 0)])
+def test_parent_before_child_accepted() -> None:
+    """Accept a batch carrying a parent ahead of its own node."""
+    batch = SessionNodeBatchRequest(nodes=[_node("a"), _node("b", "a")])
     assert len(batch.nodes) == 2
 
 
-def test_parent_index_equal_to_index_rejected() -> None:
-    """Reject a node whose parent_index equals its own index."""
+def test_parent_outside_batch_accepted() -> None:
+    """Accept a parent external id the batch does not carry."""
+    batch = SessionNodeBatchRequest(nodes=[_node("b", "stored")])
+    assert batch.nodes[0].parent_external_id == "stored"
+
+
+def test_self_parent_rejected() -> None:
+    """Reject a node naming itself as its parent."""
     with pytest.raises(ValidationError):
-        SessionNodeBatchRequest(nodes=[_node(0, 0)])
+        SessionNodeBatchRequest(nodes=[_node("a", "a")])
 
 
-def test_parent_index_after_index_rejected() -> None:
-    """Reject a node whose parent_index is greater than its own index."""
+def test_self_secondary_parent_rejected() -> None:
+    """Reject a node naming itself as a secondary parent."""
     with pytest.raises(ValidationError):
-        SessionNodeBatchRequest(nodes=[_node(0, None), _node(1, 2)])
+        SessionNodeBatchRequest(nodes=[_node("a", None, ["a"])])
 
 
-def test_negative_index_rejected() -> None:
-    """Reject a node with a negative index."""
+def test_batched_parent_after_child_accepted() -> None:
+    """Accept a node whose batched parent follows it."""
+    batch = SessionNodeBatchRequest(nodes=[_node("a", "b"), _node("b")])
+    assert batch.nodes[0].parent_external_id == "b"
+
+
+def test_batched_secondary_parent_after_child_accepted() -> None:
+    """Accept a node whose batched secondary parent follows it."""
+    batch = SessionNodeBatchRequest(nodes=[_node("a", None, ["b"]), _node("b")])
+    assert batch.nodes[0].secondary_parent_external_ids == ["b"]
+
+
+def test_repeated_external_id_rejected() -> None:
+    """Reject a batch repeating a node external id."""
     with pytest.raises(ValidationError):
-        _node(-1, None)
+        SessionNodeBatchRequest(nodes=[_node("a"), _node("a")])
 
 
-def test_negative_parent_index_rejected() -> None:
-    """Reject a node with a negative parent index."""
+def test_empty_external_id_rejected() -> None:
+    """Reject a node with an empty external id."""
     with pytest.raises(ValidationError):
-        _node(1, -1)
-
-
-def test_negative_secondary_parent_index_rejected() -> None:
-    """Reject a node with a negative secondary parent index."""
-    with pytest.raises(ValidationError):
-        SessionNodeCreateRequest(
-            index=1,
-            secondary_parent_indexes=[-1],
-            node_type=NodeType.SPAN,
-            name="node",
-            status=NodeStatus.COMPLETED,
-            inputs=None,
-            outputs=None,
-            attributes=None,
-        )
+        _node("")
 
 
 def test_batch_at_cap_accepted() -> None:
     """Accept a batch of exactly the maximum node count."""
-    batch = SessionNodeBatchRequest(nodes=[_node(i, None) for i in range(500)])
+    batch = SessionNodeBatchRequest(nodes=[_node(f"n{i}") for i in range(500)])
     assert len(batch.nodes) == 500
 
 
 def test_batch_over_cap_rejected() -> None:
     """Reject a batch larger than the maximum node count."""
     with pytest.raises(ValidationError):
-        SessionNodeBatchRequest(nodes=[_node(i, None) for i in range(501)])
+        SessionNodeBatchRequest(nodes=[_node(f"n{i}") for i in range(501)])

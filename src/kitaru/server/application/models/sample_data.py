@@ -37,7 +37,7 @@ class SampleSession(FrozenModel):
 class SampleHighlight(FrozenModel):
     """Sample highlight."""
 
-    node_index: int
+    node_external_id: str
     description: str
 
 
@@ -107,4 +107,4 @@ class SeededSession(FrozenModel):
     """Seeded session."""
 
     id: uuid.UUID
-    node_ids: dict[int, uuid.UUID]
+    node_ids: dict[str, uuid.UUID]

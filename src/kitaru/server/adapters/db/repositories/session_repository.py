@@ -289,6 +289,36 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         exclude = {column.key for column in deferred}
         return row.to_domain(exclude=exclude) if row is not None else None
 
+    async def get_by_external_id(
+        self,
+        imported_from: str | None,
+        external_id: str | None,
+        agent_id: uuid.UUID,
+        include_payloads: bool,
+    ) -> Session | None:
+        """Load the session registered under an import source and external id.
+
+        Args:
+            imported_from: Source system the session was imported from.
+            external_id: Id from the source system.
+            agent_id: Id of the agent the session belongs to.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
+
+        Returns:
+            Stored session, or ``None`` when the triple is unregistered.
+        """
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
+        statement = select(SessionORM).where(
+            SessionORM.imported_from == imported_from,
+            SessionORM.external_id == external_id,
+            SessionORM.agent_id == agent_id,
+        )
+        statement = statement.options(*(defer(column) for column in deferred))
+        row = (await self._session.scalars(statement)).one_or_none()
+        exclude = {column.key for column in deferred}
+        return row.to_domain(exclude=exclude) if row is not None else None
+
     async def query(
         self, session_filter: SessionFilter, include_payloads: bool
     ) -> tuple[list[Session], str | None]:

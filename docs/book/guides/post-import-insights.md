@@ -62,7 +62,7 @@ uv run kitaru import analyze <import-id> \
   --wait
 ```
 
-This creates a new job holding one analysis task per selected analyzer, scoped to the same sessions. Re-importing the file instead would skip every session as a duplicate and give the analyzer nothing to read. An import with no completed or failed sessions is rejected. SDK and REST consumers use `client.imports.analyze(...)` and `POST /api/v1/imports/{import_id}/analyze`.
+This creates a new job holding one analysis task per selected analyzer, scoped to the same sessions. Re-importing the file instead would report every session as `skipped` rather than `created`, and an analyzer only runs over the sessions an import creates, so it would have nothing to read. An import with no completed or failed sessions is rejected. SDK and REST consumers use `client.imports.analyze(...)` and `POST /api/v1/imports/{import_id}/analyze`.
 
 There is no command or MCP tool to run analyzers over arbitrary sessions outside an import. `kitaru insight create` stores a supplied insight. It does not run analysis.
 

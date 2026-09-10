@@ -13,7 +13,7 @@ function state(): RunState {
 }
 
 describe("adapter run state", () => {
-  it("isolates indexes, ledgers, and failures across invocations", () => {
+  it("isolates ledgers and failures across invocations", () => {
     const first = state();
     const second = state();
     first.setToolCall({
@@ -25,8 +25,6 @@ describe("adapter run state", () => {
     });
     first.storeFailure(new Error("first failed"));
 
-    expect(first.allocateNode()).toEqual({ index: 1 });
-    expect(second.allocateNode()).toEqual({ index: 1 });
     expect(second.getToolCall("same-call")).toBeUndefined();
     expect(second.failure).toBeUndefined();
   });

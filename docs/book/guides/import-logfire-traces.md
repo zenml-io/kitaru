@@ -166,7 +166,7 @@ Session metadata records the provenance you'll want when reading the import back
 
 ## Re-runs skip what is already there
 
-Every imported session records its source identity: `imported_from` (`logfire`) and an `external_id` of `<source_instance>:<session>`. That pair is unique per destination agent, so re-importing an overlapping export with the same identity **skips** what is already stored and reports it as `skipped`, not as an error. Skipped sessions are not refreshed with new nodes.
+Every imported session records its source identity: `imported_from` (`logfire`) and an `external_id` of `<source_instance>:<session>`. That pair is unique per destination agent, so re-importing an overlapping export with the same identity **adds** the new batch to the session that is already stored, reported as `skipped`, not as an error. Nodes are matched by their own external id: an existing node is replaced and a new one is added.
 
 It also means the grouping key matters: if you change `source_instance` or `join_on` between imports of the same records, the same conversation lands as a second session rather than deduping against the first.
 

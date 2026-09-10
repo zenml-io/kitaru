@@ -313,7 +313,9 @@ def _terminal_import_result(
         warnings.append(f"{stats.failed} item(s) failed to import.")
         warnings.extend(_format_import_failure(failure) for failure in stats.failures)
     if stats.skipped:
-        warnings.append(f"{stats.skipped} duplicate session(s) were skipped.")
+        warnings.append(
+            f"{stats.skipped} session(s) already existed and received the batch."
+        )
     if stats.limit_reached:
         warnings.append(
             f"Import stopped after reaching the limit of {stats.created} session(s)."

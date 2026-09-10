@@ -332,9 +332,9 @@ def _node(
     return SessionNodeResponse(
         id=_id(10_000 + index + int(str(session_id)[-3:], 16)),
         session_id=session_id,
-        index=index,
-        parent_index=None,
-        secondary_parent_indexes=[],
+        external_id=f"node-{index}",
+        parent_external_id=None,
+        secondary_parent_external_ids=[],
         secondary_parent_ids=[],
         node_type=node_type,
         name=tool_name or model or "node",
@@ -996,7 +996,7 @@ def test_contributing_session_limit_matches_candidate_contract() -> None:
         ProfilingConfig(max_contributing_sessions=1_001)
 
 
-def test_ordering_is_stable_across_session_and_node_order() -> None:
+def test_ordering_is_stable_across_session_order() -> None:
     one = _calls(
         1,
         [
@@ -1007,7 +1007,6 @@ def test_ordering_is_stable_across_session_and_node_order() -> None:
     two = _calls(2, [("b", {"x": 2}, NodeStatus.FAILED, {})])
     expected = profile_sessions([one, two]).model_dump_json()
 
-    one.nodes.reverse()
     actual = profile_sessions([two, one]).model_dump_json()
 
     assert actual == expected

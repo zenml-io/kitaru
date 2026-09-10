@@ -41,6 +41,7 @@ from kitaru_claude_agent_sdk import (
     KitaruRecordingError,
     UnsupportedReplayError,
 )
+from kitaru_claude_agent_sdk.recording import ROOT_EXTERNAL_ID
 
 from .conftest import FakeClient, nodes
 
@@ -293,7 +294,7 @@ async def test_prompt_override_is_recorded_on_the_root_span(
 
     assert fake.calls[0]["prompt"] == "candidate prompt"
     assert client.sessions.created[0].inputs == "baseline prompt"
-    root = {node.index: node for node in nodes(client)}[0]
+    root = {node.external_id: node for node in nodes(client)}[ROOT_EXTERNAL_ID]
     assert root.inputs == "baseline prompt"
     assert root.attributes["effective_prompt"] == "candidate prompt"
 

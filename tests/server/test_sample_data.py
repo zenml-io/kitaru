@@ -63,13 +63,13 @@ def test_nodes_are_ordered_parent_before_child() -> None:
     data = load_sample_data()
 
     for item in data.sessions:
-        seen: set[int] = set()
+        seen: set[str] = set()
         for node in item.nodes:
-            parents = list(node.secondary_parent_indexes)
-            if node.parent_index is not None:
-                parents.append(node.parent_index)
+            parents = list(node.secondary_parent_external_ids)
+            if node.parent_external_id is not None:
+                parents.append(node.parent_external_id)
             assert all(parent in seen for parent in parents)
-            seen.add(node.index)
+            seen.add(node.external_id)
 
 
 def test_one_session_fails_an_evaluation() -> None:
@@ -99,10 +99,10 @@ def test_derived_resources_reference_stored_sessions() -> None:
 
 
 def test_highlights_reference_stored_nodes() -> None:
-    """Pin every highlight to a node index the session stores."""
+    """Pin every highlight to a node external id the session stores."""
     data = load_sample_data()
-    indexes = {
-        item.session.external_id: {node.index for node in item.nodes}
+    node_external_ids = {
+        item.session.external_id: {node.external_id for node in item.nodes}
         for item in data.sessions
     }
 
@@ -110,7 +110,7 @@ def test_highlights_reference_stored_nodes() -> None:
         for question in item.questions:
             assert question.highlights
             for highlight in question.highlights:
-                assert highlight.node_index in indexes[item.external_id]
+                assert highlight.node_external_id in node_external_ids[item.external_id]
 
 
 def test_experiment_scores_with_the_registered_evaluator() -> None:

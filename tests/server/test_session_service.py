@@ -221,7 +221,7 @@ async def test_create_session_defaults_status_in_progress(
 ) -> None:
     """Default a session with no status to in_progress."""
     agent_id = uuid.uuid4()
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(agent_id=agent_id, origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -238,15 +238,15 @@ async def test_create_session_numbers_sessions_per_agent(
     """Number an agent's sessions sequentially, each agent counting alone."""
     agent_id = uuid.uuid4()
     other_agent_id = uuid.uuid4()
-    first = await service.create_session(
+    first, _ = await service.create_session(
         SessionCreate(agent_id=agent_id, origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
-    second = await service.create_session(
+    second, _ = await service.create_session(
         SessionCreate(agent_id=agent_id, origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
-    other = await service.create_session(
+    other, _ = await service.create_session(
         SessionCreate(agent_id=other_agent_id, origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -259,7 +259,7 @@ async def test_create_session_honors_explicit_status(
     service: SessionService,
 ) -> None:
     """Store an explicit initial status, for example an imported session."""
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.IMPORTED,
@@ -272,7 +272,7 @@ async def test_create_session_honors_explicit_status(
 
 async def test_get_session(service: SessionService) -> None:
     """Load a stored session by id."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -378,10 +378,10 @@ async def test_list_sessions_scoped_by_agent(service: SessionService) -> None:
     """List only the sessions of the requested agent."""
     agent_id = uuid.uuid4()
     other_agent_id = uuid.uuid4()
-    first = await service.create_session(
+    first, _ = await service.create_session(
         SessionCreate(agent_id=agent_id, origin=SessionOrigin.RECORDED), actor=ACTOR
     )
-    second = await service.create_session(
+    second, _ = await service.create_session(
         SessionCreate(agent_id=agent_id, origin=SessionOrigin.RECORDED), actor=ACTOR
     )
     await service.create_session(
@@ -410,7 +410,7 @@ async def test_list_sessions_filters_by_import_id(
     task, import_ = await _running_import_task(
         task_repository, import_repository, agent_id
     )
-    imported = await service.create_session(
+    imported, _ = await service.create_session(
         SessionCreate(origin=SessionOrigin.IMPORTED),
         actor=_task_principal(task.id),
     )
@@ -435,7 +435,7 @@ async def test_update_session_clears_outputs_with_explicit_null(
     service: SessionService,
 ) -> None:
     """Clear outputs with an explicit null passed alongside status."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.RECORDED,
@@ -456,7 +456,7 @@ async def test_update_session_omitted_fields_unchanged(
     service: SessionService,
 ) -> None:
     """Leave outputs unchanged when the command omits them."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.RECORDED,
@@ -478,7 +478,7 @@ async def test_update_session_metadata_replaced_whole(
     service: SessionService,
 ) -> None:
     """Replace metadata whole rather than merging keys."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.RECORDED,
@@ -494,7 +494,7 @@ async def test_update_session_metadata_replaced_whole(
 
 async def test_update_session_metadata_null_clears(service: SessionService) -> None:
     """Clear metadata to an empty dict with an explicit null."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, metadata={"a": 1}
         ),
@@ -510,7 +510,7 @@ async def test_update_session_status_transition_completes_session(
     service: SessionService,
 ) -> None:
     """Move an in_progress session to completed via the update endpoint."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -527,7 +527,7 @@ async def test_update_session_status_cannot_be_cleared(
     service: SessionService,
 ) -> None:
     """Reject an explicit null status."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -541,7 +541,7 @@ async def test_update_session_rejects_terminal_back_to_in_progress(
     service: SessionService,
 ) -> None:
     """Reject moving a terminal session back to in_progress."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -558,7 +558,7 @@ async def test_update_session_rejects_terminal_to_other_terminal(
     service: SessionService,
 ) -> None:
     """Reject moving a terminal session to another terminal status."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -575,7 +575,7 @@ async def test_update_session_rejects_any_update_on_finished_session(
     service: SessionService,
 ) -> None:
     """Reject a non-status update on a finished session."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -657,7 +657,7 @@ async def test_update_session_non_status_update_tracks_nothing(
         payload_store=build_payload_store().store,
         analytics=analytics,
     )
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -682,7 +682,7 @@ async def test_create_session_with_terminal_status_tracks_analytics_event(
         payload_store=build_payload_store().store,
         analytics=analytics,
     )
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.IMPORTED,
@@ -731,7 +731,7 @@ async def test_update_session_transition_with_analytics_none_is_safe(
     service: SessionService,
 ) -> None:
     """Transition a session to terminal without an analytics tracker configured."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -749,7 +749,7 @@ async def test_update_session_not_found(service: SessionService) -> None:
 
 async def test_delete_session(service: SessionService) -> None:
     """Delete a stored session."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -768,7 +768,7 @@ async def test_delete_session_restricted_by_replay_baseline(
     service: SessionService, replay_repository: FakeReplayRepository
 ) -> None:
     """Reject deleting a session that is a replay's baseline."""
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -785,30 +785,48 @@ async def test_delete_session_restricted_by_replay_baseline(
         await service.delete_session(created.id, actor=ACTOR)
 
 
-async def test_create_session_duplicate_external_id_conflict(
+async def test_create_session_returns_the_registered_external_id(
     service: SessionService,
 ) -> None:
-    """Reject a duplicate imported_from and external id pair under one agent."""
+    """Return the stored session for a repeated imported_from and external id."""
     agent_id = uuid.uuid4()
-    await service.create_session(
-        SessionCreate(
-            agent_id=agent_id,
-            origin=SessionOrigin.IMPORTED,
-            imported_from="langsmith",
-            external_id="run-1",
-        ),
-        actor=ACTOR,
+    command = SessionCreate(
+        agent_id=agent_id,
+        origin=SessionOrigin.IMPORTED,
+        imported_from="langsmith",
+        external_id="run-1",
+        name="first",
     )
-    with pytest.raises(Exception, match="already registered"):
-        await service.create_session(
-            SessionCreate(
-                agent_id=agent_id,
-                origin=SessionOrigin.IMPORTED,
-                imported_from="langsmith",
-                external_id="run-1",
-            ),
-            actor=ACTOR,
-        )
+    first, created = await service.create_session(command, actor=ACTOR)
+    assert created is True
+
+    second, created_again = await service.create_session(
+        command.model_copy(update={"name": "second"}), actor=ACTOR
+    )
+
+    assert created_again is False
+    assert second.id == first.id
+    assert second.name == "first"
+
+
+async def test_create_session_separates_agents_on_one_external_id(
+    service: SessionService,
+) -> None:
+    """Register one external id once per agent."""
+    command = SessionCreate(
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.IMPORTED,
+        imported_from="langsmith",
+        external_id="run-1",
+    )
+    first, _ = await service.create_session(command, actor=ACTOR)
+
+    second, created = await service.create_session(
+        command.model_copy(update={"agent_id": uuid.uuid4()}), actor=ACTOR
+    )
+
+    assert created is True
+    assert second.id != first.id
 
 
 async def test_create_session_helper_defaults(
@@ -863,7 +881,7 @@ async def test_create_session_rejects_a_stale_task_attempt(
             actor=stale_actor,
         )
     assert await repository.get_by_task_id(task.id, include_payloads=True) is None
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=_task_principal(task.id, attempt=task.attempt),
     )
@@ -880,7 +898,7 @@ async def test_create_session_links_the_session_to_its_agent_task(
     """Creating a session for a running agent task links it as the result session."""
     version = await _stored_agent_version(agent_repository, agent_version_repository)
     task = await _running_agent_task(task_repository, version.id)
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=_task_principal(task.id),
     )
@@ -907,7 +925,7 @@ async def test_create_session_links_the_replays_result_session(
         replay_config_id=uuid.uuid4(),
         baseline_session_id=uuid.uuid4(),
     )
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=_task_principal(task.id),
     )
@@ -946,11 +964,11 @@ async def test_create_session_links_many_sessions_to_an_import_task(
         task_repository, import_repository, uuid.uuid4()
     )
     actor = _task_principal(task.id)
-    first = await service.create_session(
+    first, _ = await service.create_session(
         SessionCreate(origin=SessionOrigin.IMPORTED),
         actor=actor,
     )
-    second = await service.create_session(
+    second, _ = await service.create_session(
         SessionCreate(origin=SessionOrigin.IMPORTED),
         actor=actor,
     )
@@ -969,7 +987,7 @@ async def test_create_session_infers_agent_and_version_from_an_agent_task(
     """An agent task's version and its owning agent land on the session."""
     version = await _stored_agent_version(agent_repository, agent_version_repository)
     task = await _running_agent_task(task_repository, version.id)
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=_task_principal(task.id),
     )
@@ -986,7 +1004,7 @@ async def test_create_session_accepts_the_agent_task_version_it_was_given(
     """A command repeating the task's own agent version is stored unchanged."""
     version = await _stored_agent_version(agent_repository, agent_version_repository)
     task = await _running_agent_task(task_repository, version.id)
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(
             agent_id=version.agent_id,
             agent_version_id=version.id,
@@ -1042,7 +1060,7 @@ async def test_create_session_infers_the_agent_from_a_version_without_a_task(
 ) -> None:
     """A task-less session naming only a version takes the version's agent."""
     version = await _stored_agent_version(agent_repository, agent_version_repository)
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(agent_version_id=version.id, origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -1104,7 +1122,7 @@ async def test_create_session_takes_the_imports_agent_and_version(
     task, import_ = await _running_import_task(
         task_repository, import_repository, version.agent_id, version.id
     )
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(origin=SessionOrigin.IMPORTED),
         actor=_task_principal(task.id),
     )
@@ -1121,7 +1139,7 @@ async def test_create_session_leaves_the_version_empty_for_a_versionless_import(
     """An import carrying no version creates sessions carrying none."""
     agent_id = uuid.uuid4()
     task, _ = await _running_import_task(task_repository, import_repository, agent_id)
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(origin=SessionOrigin.IMPORTED),
         actor=_task_principal(task.id),
     )
@@ -1186,7 +1204,7 @@ async def test_create_session_with_a_task_principal_binds_the_principals_task_id
             job_id=uuid.uuid4(),
         ),
     )
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=actor,
     )
@@ -1330,7 +1348,7 @@ async def test_create_session_offloads_over_threshold_inputs_and_outputs(
     )
     inputs = {"a": "x" * 50}
     outputs = {"b": "y" * 50}
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.RECORDED,
@@ -1362,7 +1380,7 @@ async def test_create_session_under_threshold_stays_inline(
     service, _, _ = _service_with_threshold(
         repository, task_repository, agent_version_repository, threshold_bytes=1024
     )
-    session = await service.create_session(
+    session, _ = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.RECORDED,
@@ -1391,7 +1409,7 @@ async def test_get_session_hydrates_offloaded_inputs_and_outputs(
     )
     inputs = {"a": "x" * 50}
     outputs = {"b": "y" * 50}
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.RECORDED,
@@ -1416,7 +1434,7 @@ async def test_update_session_offloads_new_outputs_above_threshold(
     service, _, _ = _service_with_threshold(
         repository, task_repository, agent_version_repository, threshold_bytes=10
     )
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
         actor=ACTOR,
     )
@@ -1443,7 +1461,7 @@ async def test_update_session_without_touching_outputs_preserves_offloaded_outpu
         repository, task_repository, agent_version_repository, threshold_bytes=10
     )
     outputs = {"b": "y" * 50}
-    created = await service.create_session(
+    created, _ = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, outputs=outputs
         ),

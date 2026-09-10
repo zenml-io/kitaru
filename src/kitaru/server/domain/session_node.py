@@ -22,25 +22,23 @@ from pydantic import Field
 
 from kitaru.api_models.v1.session import TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.server.domain.base import DomainModel, ValidationError
+from kitaru.server.domain.base import ConflictError, DomainModel
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import SessionRollups
 
 
-class SessionNodeParentNotFound(ValidationError):
-    """Raised when a node's parent_index does not match a stored or batched node."""
+class DuplicateSessionNodeExternalId(ConflictError):
+    """Raised when a session already holds another node with this external id."""
 
-    def __init__(self, index: int, parent_index: int) -> None:
+    def __init__(self, session_id: uuid.UUID) -> None:
         """Initialize the error.
 
         Args:
-            index: Index of the node whose parent reference did not resolve.
-            parent_index: Parent index that did not resolve.
+            session_id: Id of the session whose external ids collided.
         """
         super().__init__(
-            f"Node {index} references parent_index {parent_index}, which does "
-            "not match a stored or batched node"
+            f"Session {session_id} already holds a node with one of these external ids"
         )
 
 
@@ -51,8 +49,9 @@ class SessionNode(DomainModel):
     session_id: uuid.UUID
     parent_id: uuid.UUID | None = None
     secondary_parent_ids: list[uuid.UUID] = Field(default_factory=list)
-    index: int
-    external_id: str | None = None
+    external_id: str
+    parent_external_id: str | None = None
+    secondary_parent_external_ids: list[str] = Field(default_factory=list)
     trace_id: str | None = None
     node_type: NodeType
     name: str
@@ -60,6 +59,7 @@ class SessionNode(DomainModel):
     error: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    effective_started_at: datetime
     input_text_selector: str | None = None
     output_text_selector: str | None = None
     system_prompt_selector: str | None = None

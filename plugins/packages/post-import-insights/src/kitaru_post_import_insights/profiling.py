@@ -2093,9 +2093,8 @@ class SessionProfiler:
             ):
                 raise ValueError("session IDs must be unique")
             state.reset_payload_budget()
-            ordered_nodes = sorted(
-                session.nodes, key=lambda node: (node.index, str(node.id))
-            )
+            # The server returns nodes ordered by position already.
+            ordered_nodes = list(session.nodes)
             _scan_session(state, session, ordered_nodes)
             state.nodes_analyzed += len(ordered_nodes)
             state.payload_truncation_count += state.payload_budget.truncation_count

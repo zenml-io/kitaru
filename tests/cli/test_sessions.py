@@ -448,7 +448,7 @@ async def test_session_nodes_controls_payload_flag_and_filters() -> None:
         "filter": json.dumps(
             {"field": "node_type", "op": "in", "value": ["llm_call", "tool_call"]}
         ),
-        "sort": "index:asc",
+        "sort": "position:asc",
     }
     assert result.items == [{"id": str(resource.node.id), "index": 0, "inputs": None}]
     assert result.page == {
@@ -1111,7 +1111,7 @@ async def test_waited_session_import_returns_validated_stats_and_task_action(
     assert result.item["tagged_session_count"] == 4
     assert tag_calls == [(task.id, ["baseline", "discovery"])]
     assert not hasattr(client.requests[0], "tags")
-    assert result.warnings == ["2 duplicate session(s) were skipped."]
+    assert result.warnings == ["2 session(s) already existed and received the batch."]
     assert str(task.id) in result.next_actions[0]
     assert '"field":"task_id"' in result.next_actions[0]
 

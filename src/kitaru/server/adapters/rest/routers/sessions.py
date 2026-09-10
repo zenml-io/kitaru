@@ -16,7 +16,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.evaluation import EvaluationResponse
@@ -46,7 +46,6 @@ from kitaru.server.adapters.rest.mapping.evaluations import (
     session_evaluations_request_to_creates,
 )
 from kitaru.server.adapters.rest.mapping.session_nodes import (
-    referenced_parent_ids,
     session_node_batch_to_upserts,
     session_node_list_params_to_filter,
     session_node_to_response,
@@ -71,31 +70,40 @@ router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.post(
-    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 404, 409)
+    "",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_200_OK: {"model": SessionResponse, "description": "OK"},
+        **error_responses(400, 404, 409),
+    },
 )
 @idempotent
 async def create_session(
     body: SessionCreateRequest,
+    response: Response,
     service: Annotated[SessionService, Depends(get_session_service)],
     actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> SessionResponse:
     """Create a session.
 
     A task principal's session is always linked to its own task, regardless
-    of the request's task_id. Clients observe HTTP 201 on success, 409 when
-    the imported_from and external id pair is already registered, and 422 on
-    invalid input.
+    of the request's task_id. Clients observe HTTP 201 when the call creates
+    the session, 200 with the session already registered under the request's
+    imported_from and external id pair, and 422 on invalid input.
 
     Args:
         body: Session create request.
+        response: Response the status code is set on.
         service: Session service.
         actor: Caller context.
 
     Returns:
-        Created session.
+        Created or already registered session.
     """
     command = session_create_to_command(body)
-    session = await service.create_session(command, actor=actor)
+    session, created = await service.create_session(command, actor=actor)
+    if not created:
+        response.status_code = status.HTTP_200_OK
     return session_to_response(session)
 
 
@@ -216,11 +224,10 @@ async def ingest_session_nodes(
 ) -> list[SessionNodeResponse]:
     """Ingest a batch of session nodes.
 
-    An index already stored is replaced whole, matching the upsert
+    An external id already stored is replaced whole, matching the upsert
     semantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,
-    404 when no session has this id, 409 when the session does not
-    currently accept node ingestion, and 422 when a parent_index does not
-    resolve.
+    404 when no session has this id, and 409 when the session does not
+    currently accept node ingestion.
 
     Args:
         session_id: Id of the session to ingest into.
@@ -234,13 +241,7 @@ async def ingest_session_nodes(
     """
     batch = session_node_batch_to_upserts(body)
     nodes = await service.ingest_nodes(session_id, batch, actor=actor)
-    index_by_id = await service.get_indexes_by_ids(
-        session_id, referenced_parent_ids(nodes), actor=actor
-    )
-    return [
-        session_node_to_response(node, index_by_id, include_payloads=False)
-        for node in nodes
-    ]
+    return [session_node_to_response(node, include_payloads=False) for node in nodes]
 
 
 @router.get("/{session_id}/nodes", responses=error_responses(404))
@@ -250,7 +251,7 @@ async def list_session_nodes(
     actor: Annotated[AuthContext, Depends(authorize_with_task)],
     params: Annotated[SessionNodeListParams, Query()],
 ) -> Page[SessionNodeResponse]:
-    """List the nodes of a session, ordered by index ascending.
+    """List the nodes of a session, ordered by position ascending.
 
     Clients observe HTTP 200 on success, 403 when a task token neither owns
     nor reads this session, and 422 on invalid filters or pagination parameters.
@@ -262,17 +263,14 @@ async def list_session_nodes(
         params: Session node list params.
 
     Returns:
-        Page of session nodes, ordered by index.
+        Page of session nodes, ordered by position.
     """
     session_node_filter = session_node_list_params_to_filter(session_id, params)
     nodes, next_cursor = await service.list_nodes(session_node_filter, actor=actor)
-    index_by_id = await service.get_indexes_by_ids(
-        session_id, referenced_parent_ids(nodes), actor=actor
-    )
     return Page[SessionNodeResponse](
         items=[
             session_node_to_response(
-                node, index_by_id, include_payloads=session_node_filter.include_payloads
+                node, include_payloads=session_node_filter.include_payloads
             )
             for node in nodes
         ],
@@ -301,21 +299,15 @@ async def get_session_with_nodes(
         actor: Caller context.
 
     Returns:
-        Session with every node, ordered by index.
+        Session with every node, ordered by position.
     """
     session = await service.get_session(session_id, actor=actor)
     nodes = await node_service.list_all_nodes(
         session_id, include_payloads=True, actor=actor
     )
-    index_by_id = await node_service.get_indexes_by_ids(
-        session_id, referenced_parent_ids(nodes), actor=actor
-    )
     return SessionWithNodesResponse(
         session=session_to_detail_response(session),
-        nodes=[
-            session_node_to_response(node, index_by_id, include_payloads=True)
-            for node in nodes
-        ],
+        nodes=[session_node_to_response(node, include_payloads=True) for node in nodes],
     )
 
 

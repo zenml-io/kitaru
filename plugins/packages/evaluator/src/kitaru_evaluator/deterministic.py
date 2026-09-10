@@ -181,8 +181,13 @@ def _finding_result(
 
 
 def _analysis_nodes(view: SessionView) -> list[SessionNodeResponse]:
-    """Sort nodes for stable analysis and evidence presentation."""
-    return sorted(view.nodes, key=lambda node: (node.index, str(node.id)))
+    """Return session nodes in their materialized session order."""
+    return list(view.nodes)
+
+
+def _positions(nodes: list[SessionNodeResponse]) -> dict[uuid.UUID, int]:
+    """Map each node id to its position within the ordered node list."""
+    return {node.id: position for position, node in enumerate(nodes)}
 
 
 def _is_terminal(view: SessionView) -> bool:
@@ -284,11 +289,9 @@ def _resource_value(value: Decimal | int | None) -> str:
 def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
     """Describe materialized session completeness and internal consistency."""
     nodes = _analysis_nodes(session)
-    supplied_keys = [(node.index, str(node.id)) for node in session.nodes]
-    ordered = supplied_keys == sorted(supplied_keys)
-    index_counts = Counter(node.index for node in nodes)
-    duplicate_indexes = sorted(
-        index for index, count in index_counts.items() if count > 1
+    positions = _positions(nodes)
+    ordered = [node.id for node in session.nodes] == sorted(
+        node.id for node in session.nodes
     )
     duplicate_ids = sorted(
         node_id
@@ -296,56 +299,28 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
         if count > 1
     )
 
-    indexes = {node.index for node in nodes}
     ids = {node.id for node in nodes}
-    ids_by_index = {
-        node.index: node.id for node in nodes if index_counts[node.index] == 1
-    }
     parent_findings: list[dict[str, Any]] = []
     for node in nodes:
-        missing = sorted(
-            parent
-            for parent in [node.parent_index, *node.secondary_parent_indexes]
-            if parent is not None and parent not in indexes
-        )
-        nonpreceding = sorted(
-            parent
-            for parent in [node.parent_index, *node.secondary_parent_indexes]
-            if parent is not None and parent >= node.index
-        )
-        id_mismatches: list[dict[str, Any]] = []
-        if node.parent_index is None:
-            if node.parent_id is not None:
-                id_mismatches.append({"kind": "primary_without_index"})
-        elif node.parent_id != ids_by_index.get(node.parent_index):
-            id_mismatches.append({"kind": "primary_index_id_mismatch"})
-        if len(node.secondary_parent_indexes) != len(node.secondary_parent_ids):
-            id_mismatches.append({"kind": "secondary_cardinality_mismatch"})
-        for parent_index, parent_id in zip(
-            node.secondary_parent_indexes,
-            node.secondary_parent_ids,
-            strict=False,
-        ):
-            if parent_id != ids_by_index.get(parent_index):
-                id_mismatches.append(
-                    {
-                        "kind": "secondary_index_id_mismatch",
-                        "parent_index": parent_index,
-                    }
-                )
+        parents = [node.parent_id, *node.secondary_parent_ids]
         missing_ids = sorted(
             str(parent_id)
-            for parent_id in [node.parent_id, *node.secondary_parent_ids]
+            for parent_id in parents
             if parent_id is not None and parent_id not in ids
         )
-        if missing or nonpreceding or id_mismatches or missing_ids:
+        nonpreceding_ids = sorted(
+            str(parent_id)
+            for parent_id in parents
+            if parent_id is not None
+            and parent_id in positions
+            and positions[parent_id] >= positions[node.id]
+        )
+        if missing_ids or nonpreceding_ids:
             parent_findings.append(
                 {
-                    "id_mismatches": id_mismatches,
-                    "index": node.index,
+                    "index": positions[node.id],
                     "missing_ids": missing_ids,
-                    "missing_indexes": missing,
-                    "nonpreceding_indexes": nonpreceding,
+                    "nonpreceding_ids": nonpreceding_ids,
                 }
             )
 
@@ -356,7 +331,9 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
             and node.ended_at is not None
             and node.ended_at < node.started_at
         ):
-            chronology.append({"index": node.index, "kind": "negative_duration"})
+            chronology.append(
+                {"index": positions[node.id], "kind": "negative_duration"}
+            )
 
     payload_complete = sum(
         node.inputs is not None and node.outputs is not None for node in nodes
@@ -389,7 +366,7 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
     for node in nodes:
         if node.cost is not None and not _is_nonnegative_decimal(node.cost):
             resource_findings.append(
-                {"field": "cost", "index": node.index, "scope": "node"}
+                {"field": "cost", "index": positions[node.id], "scope": "node"}
             )
         if node.tokens is not None:
             for field, value in _token_fields(node.tokens).items():
@@ -397,7 +374,7 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
                     resource_findings.append(
                         {
                             "field": f"tokens.{field}",
-                            "index": node.index,
+                            "index": positions[node.id],
                             "scope": "node",
                         }
                     )
@@ -412,14 +389,14 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
             ),
             _float_result(
                 "node_order",
-                int(ordered and not duplicate_ids and not duplicate_indexes),
+                int(ordered and not duplicate_ids),
                 "Supplied node ordering and identity diagnostics.",
                 max_score=1,
             ),
             _finding_result(
                 "parent_linkage",
                 parent_findings,
-                "Nodes with missing or nonpreceding parent indexes.",
+                "Nodes with missing or nonpreceding parents.",
                 max_score=len(nodes),
             ),
             _finding_result(
@@ -672,7 +649,7 @@ def output_contract(
 
 
 def _tool_calls(session: SessionView) -> list[SessionNodeResponse]:
-    """Project tool calls in stable index and id order."""
+    """Project tool calls in session order."""
     return [
         node
         for node in _analysis_nodes(session)
@@ -693,6 +670,7 @@ def _tool_identity(node: SessionNodeResponse) -> tuple[str, str] | None:
 def _cycle_findings(
     calls: list[SessionNodeResponse],
     identities: list[tuple[str, str] | None],
+    positions: dict[uuid.UUID, int],
 ) -> list[dict[str, Any]]:
     """Detect left-maximal call cycles of period 2-5 repeated at least 3 times."""
     candidates: list[dict[str, Any]] = []
@@ -715,10 +693,10 @@ def _cycle_findings(
             if position - match_start >= 2 * period:
                 candidates.append(
                     {
-                        "end_index": calls[end - 1].index,
+                        "end_index": positions[calls[end - 1].id],
                         "period": period,
                         "repetitions": (end - match_start) // period,
-                        "start_index": calls[match_start].index,
+                        "start_index": positions[calls[match_start].id],
                         "tools": names[match_start : match_start + period],
                     }
                 )
@@ -743,6 +721,7 @@ def _cycle_findings(
 def trajectory_signals(session: SessionView) -> list[EvaluationResult]:
     """Describe exact retries, adjacent repetition, and bounded short cycles."""
     calls = _tool_calls(session)
+    positions = _positions(_analysis_nodes(session))
     identities = [_tool_identity(call) for call in calls]
     repeats: list[dict[str, Any]] = []
     retries: list[dict[str, Any]] = []
@@ -752,7 +731,7 @@ def trajectory_signals(session: SessionView) -> list[EvaluationResult]:
         if first_identity is None or first_identity != second_identity:
             continue
         evidence = {
-            "indexes": [first.index, second.index],
+            "indexes": [positions[first.id], positions[second.id]],
             "tool_name": first.tool_name,
         }
         repeats.append(evidence)
@@ -781,7 +760,7 @@ def trajectory_signals(session: SessionView) -> list[EvaluationResult]:
             ),
             _finding_result(
                 "short_cycles",
-                _cycle_findings(calls, identities),
+                _cycle_findings(calls, identities, positions),
                 "Repeated exact tool-call cycles.",
             ),
             _json_result(
@@ -802,23 +781,24 @@ def _is_empty(value: Any) -> bool:
 def tool_health(session: SessionView) -> list[EvaluationResult]:
     """Describe recorded tool failures and result-payload health."""
     calls = _tool_calls(session)
+    positions = _positions(_analysis_nodes(session))
     failed = [
-        {"index": node.index, "tool_name": node.tool_name}
+        {"index": positions[node.id], "tool_name": node.tool_name}
         for node in calls
         if node.status is NodeStatus.FAILED
     ]
     null = [
-        {"index": node.index, "tool_name": node.tool_name}
+        {"index": positions[node.id], "tool_name": node.tool_name}
         for node in calls
         if node.outputs is None
     ]
     empty = [
-        {"index": node.index, "tool_name": node.tool_name}
+        {"index": positions[node.id], "tool_name": node.tool_name}
         for node in calls
         if node.outputs is not None and _is_empty(node.outputs)
     ]
     inconsistent = [
-        {"index": node.index, "tool_name": node.tool_name}
+        {"index": positions[node.id], "tool_name": node.tool_name}
         for node in calls
         if (node.status is NodeStatus.FAILED and node.error is None)
         or (node.status is not NodeStatus.FAILED and node.error is not None)
@@ -832,7 +812,10 @@ def tool_health(session: SessionView) -> list[EvaluationResult]:
             and first.tool_name == second.tool_name
         ):
             repeated_failures.append(
-                {"indexes": [first.index, second.index], "tool_name": first.tool_name}
+                {
+                    "indexes": [positions[first.id], positions[second.id]],
+                    "tool_name": first.tool_name,
+                }
             )
     results: list[EvaluationResult] = []
     results.extend(
@@ -878,6 +861,7 @@ def timing_profile(
     """Describe wall-clock and node timing evidence without outlier labels."""
     limit = _validate_limit(evidence_limit)
     nodes = _analysis_nodes(session)
+    positions = _positions(nodes)
     intervals: list[tuple[datetime, datetime, SessionNodeResponse, Decimal]] = []
     invalid: list[dict[str, Any]] = []
     for node in nodes:
@@ -885,15 +869,15 @@ def timing_profile(
             continue
         duration = _duration(node.started_at, node.ended_at)
         if duration is None:
-            invalid.append({"index": node.index})
+            invalid.append({"index": positions[node.id]})
             continue
         intervals.append((node.started_at, node.ended_at, node, duration))
     slowest = [
-        {"duration_seconds": _format_decimal(duration), "index": node.index}
+        {"duration_seconds": _format_decimal(duration), "index": positions[node.id]}
         for _, _, node, duration in heapq.nsmallest(
             limit,
             intervals,
-            key=lambda item: (-item[3], item[2].index, str(item[2].id)),
+            key=lambda item: (-item[3], positions[item[2].id], str(item[2].id)),
         )
     ]
 
@@ -901,7 +885,7 @@ def timing_profile(
     active_heap: list[tuple[datetime, str]] = []
     active: set[str] = set()
     for started_at, ended_at, node, _ in sorted(
-        intervals, key=lambda item: (item[0], item[2].index, str(item[2].id))
+        intervals, key=lambda item: (item[0], positions[item[2].id], str(item[2].id))
     ):
         while active_heap and active_heap[0][0] <= started_at:
             _, node_id = heapq.heappop(active_heap)
@@ -1239,7 +1223,7 @@ def tool_policy(
 
 
 def _llm_calls(session: SessionView) -> list[SessionNodeResponse]:
-    """Project LLM calls in stable index and id order."""
+    """Project LLM calls in session order."""
     return [
         node for node in _analysis_nodes(session) if node.node_type is NodeType.LLM_CALL
     ]
@@ -1261,11 +1245,14 @@ def _get_tool_name_coverage(
 def llm_call_signals(session: SessionView) -> list[EvaluationResult]:
     """Describe exact LLM call repetition, failures, and metadata coverage."""
     calls = _llm_calls(session)
+    positions = _positions(_analysis_nodes(session))
     failed = [
-        {"index": node.index} for node in calls if node.status is NodeStatus.FAILED
+        {"index": positions[node.id]}
+        for node in calls
+        if node.status is NodeStatus.FAILED
     ]
     empty = [
-        {"index": node.index}
+        {"index": positions[node.id]}
         for node in calls
         if node.outputs is None or _is_empty(node.outputs)
     ]
@@ -1279,10 +1266,16 @@ def llm_call_signals(session: SessionView) -> list[EvaluationResult]:
             and complete
             and _canonical_json(previous[1]) == _canonical_json(normalized)
         ):
-            repeated.append({"indexes": [previous[0].index, call.index]})
+            repeated.append(
+                {"indexes": [positions[previous[0].id], positions[call.id]]}
+            )
         previous = call, normalized, complete and call.inputs is not None
     mismatches = [
-        {"index": node.index, "requested": node.requested_model, "served": node.model}
+        {
+            "index": positions[node.id],
+            "requested": node.requested_model,
+            "served": node.model,
+        }
         for node in calls
         if node.requested_model is not None
         and node.model is not None
@@ -1349,11 +1342,12 @@ def model_policy(
         raise ValueError("at least one model policy rule is required")
     results: list[EvaluationResult] = []
     calls = _llm_calls(session)
+    positions = _positions(_analysis_nodes(session))
     terminal = _is_terminal(session)
     can_pass = terminal and bool(calls)
     if models is not None:
         violations = [
-            {"index": node.index, "model": node.model}
+            {"index": positions[node.id], "model": node.model}
             for node in calls
             if node.model is not None and node.model not in models
         ]
@@ -1369,7 +1363,7 @@ def model_policy(
         )
     if providers is not None:
         violations = [
-            {"index": node.index, "provider": node.model_provider}
+            {"index": positions[node.id], "provider": node.model_provider}
             for node in calls
             if node.model_provider is not None and node.model_provider not in providers
         ]
@@ -1386,7 +1380,7 @@ def model_policy(
     if require_requested_model_match:
         mismatches = [
             {
-                "index": node.index,
+                "index": positions[node.id],
                 "requested": node.requested_model,
                 "served": node.model,
             }

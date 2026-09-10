@@ -16,6 +16,7 @@
 import json
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -118,9 +119,12 @@ async def session_id(client: httpx.AsyncClient) -> str:
     return created["id"]
 
 
-def _node(index: int, **overrides: object) -> dict[str, object]:
+def _node(position: int, **overrides: object) -> dict[str, object]:
     node: dict[str, object] = {
-        "index": index,
+        "external_id": f"n{position}",
+        "started_at": (
+            datetime(2026, 1, 1, tzinfo=UTC) + timedelta(minutes=position)
+        ).isoformat(),
         "node_type": "llm_call",
         "name": "call",
         "status": "completed",
@@ -150,7 +154,7 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
                 ),
                 _node(
                     1,
-                    parent_index=0,
+                    parent_external_id="n0",
                     node_type="tool_call",
                     tool_name="search",
                     inputs={"q": "hi"},
@@ -178,17 +182,6 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
     assert stored[0]["inputs"] == {"q": "hi", "system": "Follow policy."}
 
 
-async def test_ingest_nodes_unresolved_parent_index(
-    client: httpx.AsyncClient, session_id: str
-) -> None:
-    """Observe HTTP 422 when a parent_index does not resolve."""
-    response = await client.post(
-        f"/api/v1/sessions/{session_id}/nodes",
-        json={"nodes": [_node(1, parent_index=0)]},
-    )
-    assert response.status_code == 422
-
-
 async def test_ingest_nodes_session_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when no session has this id."""
     response = await client.post(
@@ -209,10 +202,10 @@ async def test_ingest_nodes_terminal_recorded_session_rejected(
     assert response.status_code == 409
 
 
-async def test_list_nodes_ordered_by_index(
+async def test_list_nodes_ordered_by_start_then_insertion(
     client: httpx.AsyncClient, session_id: str
 ) -> None:
-    """List nodes ordered by index ascending."""
+    """List nodes ordered by start time, then insertion."""
     await client.post(
         f"/api/v1/sessions/{session_id}/nodes",
         json={"nodes": [_node(2), _node(0), _node(1)]},
@@ -220,7 +213,10 @@ async def test_list_nodes_ordered_by_index(
     response = await client.get(f"/api/v1/sessions/{session_id}/nodes")
     assert response.status_code == 200
     items = response.json()["items"]
-    assert [item["index"] for item in items] == [0, 1, 2]
+    assert [item["external_id"] for item in items] == ["n0", "n1", "n2"]
+    assert "index" not in items[0]
+    assert "parent_index" not in items[0]
+    assert "secondary_parent_indexes" not in items[0]
 
 
 async def test_list_nodes_include_payloads_default_false(
@@ -298,7 +294,7 @@ async def test_list_nodes_pagination_walks_pages(
         json={"nodes": [_node(index) for index in range(5)]},
     )
 
-    collected: list[int] = []
+    collected: list[str] = []
     cursor = None
     while True:
         params: dict[str, Any] = {"size": 2}
@@ -309,12 +305,12 @@ async def test_list_nodes_pagination_walks_pages(
         )
         assert response.status_code == 200
         page = response.json()
-        collected.extend(item["index"] for item in page["items"])
+        collected.extend(item["external_id"] for item in page["items"])
         cursor = page["next_cursor"]
         if cursor is None:
             break
 
-    assert collected == [0, 1, 2, 3, 4]
+    assert collected == ["n0", "n1", "n2", "n3", "n4"]
 
 
 @pytest.mark.parametrize(
@@ -337,23 +333,30 @@ async def test_list_nodes_pagination_walks_pages(
 async def test_list_nodes_filters_types_before_pagination(
     client: httpx.AsyncClient, session_id: str, expression: dict[str, Any]
 ) -> None:
-    """Skip spans while preserving page size, indexes, and hidden parent links."""
+    """Skip spans while preserving page size, order, and hidden parent links."""
     path = f"/api/v1/sessions/{session_id}/nodes"
     response = await client.post(
         path,
         json={
             "nodes": [
                 _node(0, node_type="span", name="query"),
-                _node(1, node_type="span", name="HookEventMessage", parent_index=0),
-                _node(2, parent_index=1),
-                _node(3, node_type="span", name="SystemMessage", parent_index=0),
+                _node(
+                    1,
+                    node_type="span",
+                    name="HookEventMessage",
+                    parent_external_id="n0",
+                ),
+                _node(2, parent_external_id="n1"),
+                _node(
+                    3, node_type="span", name="SystemMessage", parent_external_id="n0"
+                ),
                 _node(
                     4,
                     node_type="tool_call",
-                    parent_index=2,
-                    secondary_parent_indexes=[3],
+                    parent_external_id="n2",
+                    secondary_parent_external_ids=["n3"],
                 ),
-                _node(5, parent_index=0),
+                _node(5, parent_external_id="n0"),
             ]
         },
     )
@@ -361,21 +364,23 @@ async def test_list_nodes_filters_types_before_pagination(
     params: dict[str, Any] = {
         "size": 2,
         "filter": json.dumps(expression),
-        "sort": "index:asc",
+        "sort": "position:asc",
     }
     response = await client.get(path, params=params)
     assert response.status_code == 200
     first = response.json()
-    assert [node["index"] for node in first["items"]] == [2, 4]
-    assert first["items"][0]["parent_index"] == 1
-    assert first["items"][1]["secondary_parent_indexes"] == [3]
+    assert [node["external_id"] for node in first["items"]] == ["n2", "n4"]
+    assert first["items"][0]["parent_external_id"] == "n1"
+    assert first["items"][1]["secondary_parent_external_ids"] == ["n3"]
     assert first["next_cursor"] is not None
     response = await client.get(path, params={**params, "cursor": first["next_cursor"]})
     assert response.status_code == 200
-    assert [node["index"] for node in response.json()["items"]] == [5]
+    assert [node["external_id"] for node in response.json()["items"]] == ["n5"]
     assert response.json()["next_cursor"] is None
     unfiltered = await client.get(path)
-    assert [node["index"] for node in unfiltered.json()["items"]] == list(range(6))
+    assert [node["external_id"] for node in unfiltered.json()["items"]] == [
+        f"n{position}" for position in range(6)
+    ]
     empty = await client.get(
         path,
         params={
@@ -407,11 +412,11 @@ async def test_list_nodes_rejects_invalid_filters(
     assert response.status_code == 422
 
 
-@pytest.mark.parametrize("sort", ["index:desc", "created:asc", "created:desc"])
+@pytest.mark.parametrize("sort", ["position:desc", "created:asc", "created:desc"])
 async def test_list_nodes_rejects_unsupported_sort(
     client: httpx.AsyncClient, session_id: str, sort: str
 ) -> None:
-    """Keep node pagination fixed to ascending indexes."""
+    """Keep node pagination fixed to ascending positions."""
     response = await client.get(
         f"/api/v1/sessions/{session_id}/nodes", params={"sort": sort}
     )
@@ -432,7 +437,9 @@ async def test_get_session_with_nodes_returns_every_node_unpaginated(
     assert response.status_code == 200
     body = response.json()
     assert body["session"]["id"] == session_id
-    assert [node["index"] for node in body["nodes"]] == list(range(45))
+    assert [node["external_id"] for node in body["nodes"]] == [
+        f"n{position}" for position in range(45)
+    ]
 
 
 async def test_get_session_with_nodes_populates_payloads(
@@ -452,21 +459,73 @@ async def test_get_session_with_nodes_populates_payloads(
     assert node["attributes"] == {"k": 1}
 
 
-async def test_get_session_with_nodes_resolves_parent_indexes(
+async def test_get_session_with_nodes_carries_the_parent_references(
     client: httpx.AsyncClient, session_id: str
 ) -> None:
-    """Resolve parent ids to their indexes across the whole session."""
+    """Carry both the stored parent reference and the resolved parent id."""
     await client.post(
         f"/api/v1/sessions/{session_id}/nodes",
-        json={"nodes": [_node(0), _node(1, parent_index=0)]},
+        json={"nodes": [_node(0), _node(1, parent_external_id="n0")]},
     )
 
     response = await client.get(f"/api/v1/sessions/{session_id}/full")
 
     assert response.status_code == 200
     nodes = response.json()["nodes"]
-    assert nodes[0]["parent_index"] is None
-    assert nodes[1]["parent_index"] == 0
+    assert nodes[0]["parent_external_id"] is None
+    assert nodes[0]["parent_id"] is None
+    assert nodes[1]["parent_external_id"] == "n0"
+    assert nodes[1]["parent_id"] == nodes[0]["id"]
+
+
+async def test_ingest_nodes_links_a_child_batched_before_its_parent(
+    client: httpx.AsyncClient, session_id: str
+) -> None:
+    """Link a child a batch carries ahead of its parent."""
+    response = await client.post(
+        f"/api/v1/sessions/{session_id}/nodes",
+        json={"nodes": [_node(1, parent_external_id="n0"), _node(0)]},
+    )
+
+    assert response.status_code == 200
+    child, parent = response.json()
+    assert child["parent_external_id"] == "n0"
+    assert child["parent_id"] == parent["id"]
+
+
+async def test_ingest_nodes_links_a_child_of_an_earlier_batch(
+    client: httpx.AsyncClient, session_id: str
+) -> None:
+    """Link a stored child once a later batch carries its parent."""
+    child = await client.post(
+        f"/api/v1/sessions/{session_id}/nodes",
+        json={"nodes": [_node(1, parent_external_id="n0")]},
+    )
+    assert child.json()[0]["parent_id"] is None
+
+    parent = await client.post(
+        f"/api/v1/sessions/{session_id}/nodes", json={"nodes": [_node(0)]}
+    )
+
+    response = await client.get(f"/api/v1/sessions/{session_id}/full")
+    nodes = {node["external_id"]: node for node in response.json()["nodes"]}
+    assert nodes["n1"]["parent_id"] == parent.json()[0]["id"]
+
+
+async def test_ingest_nodes_reads_an_unlinked_child_as_a_root(
+    client: httpx.AsyncClient, session_id: str
+) -> None:
+    """Read a child whose parent never landed with no parent id."""
+    await client.post(
+        f"/api/v1/sessions/{session_id}/nodes",
+        json={"nodes": [_node(1, parent_external_id="missing")]},
+    )
+
+    response = await client.get(f"/api/v1/sessions/{session_id}/full")
+
+    node = response.json()["nodes"][0]
+    assert node["parent_id"] is None
+    assert node["parent_external_id"] == "missing"
 
 
 async def test_get_session_with_nodes_session_not_found(

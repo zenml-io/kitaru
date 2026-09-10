@@ -55,17 +55,19 @@ class SessionsResource:
     ) -> SessionResponse:
         """Create a session.
 
+        A request whose imported_from and external id pair already exists
+        returns the existing session instead of creating a new one.
+
         Args:
             request: Session create request.
             idempotency_key: Idempotency key overriding the transport's
                 random default.
 
         Raises:
-            APIError: The request failed, including 409 for a duplicate
-                imported_from and external id pair.
+            APIError: The request failed.
 
         Returns:
-            Created session.
+            Created or existing session.
         """
         response = await self._client.request(
             "POST",
@@ -116,7 +118,7 @@ class SessionsResource:
     ) -> list[SessionNodeResponse]:
         """Ingest a batch of session nodes.
 
-        An index already stored is replaced whole.
+        An external id already stored is replaced whole.
 
         Args:
             session_id: Id of the session to ingest into.

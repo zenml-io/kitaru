@@ -345,19 +345,20 @@ def test_run_sync_preserves_result_and_records_lifecycle() -> None:
         "client:close",
     ]
     nodes = _nodes(client)
-    assert [(node.node_type, node.status, node.index) for node in nodes] == [
-        (NodeType.SPAN, NodeStatus.IN_PROGRESS, 0),
-        (NodeType.LLM_CALL, NodeStatus.COMPLETED, 1),
-        (NodeType.SPAN, NodeStatus.COMPLETED, 0),
+    assert [(node.node_type, node.status) for node in nodes] == [
+        (NodeType.SPAN, NodeStatus.IN_PROGRESS),
+        (NodeType.SPAN, NodeStatus.COMPLETED),
+        (NodeType.LLM_CALL, NodeStatus.COMPLETED),
     ]
-    assert nodes[0].index == nodes[-1].index
-    llm = next(node for node in nodes if node.node_type is NodeType.LLM_CALL)
+    assert nodes[0].external_id == capability_module.ROOT_EXTERNAL_ID
+    assert nodes[0].external_id == nodes[1].external_id
+    llm = nodes[2]
     assert llm.model_provider == "test"
     assert llm.cost is None
     assert llm.input_text_selector == "/0/parts/0/content"
     assert llm.output_text_selector == "/parts/0/content"
-    assert nodes[-1].input_text_selector == ""
-    assert nodes[-1].output_text_selector == ""
+    assert nodes[1].input_text_selector == ""
+    assert nodes[1].output_text_selector == ""
 
     original.run_sync("not recorded")
     assert len(_FakeClient.instances) == 1
@@ -880,7 +881,9 @@ async def test_many_concurrent_runs_keep_sessions_and_nodes_isolated() -> None:
     }
     for client in _FakeClient.instances:
         nodes = _nodes(client)
-        assert [node.index for node in nodes] == [0, 1, 0]
+        assert len(nodes) == 3
+        assert nodes[0].external_id == capability_module.ROOT_EXTERNAL_ID
+        assert nodes[2].external_id == capability_module.ROOT_EXTERNAL_ID
         assert client.sessions.updated[0][1].status is SessionStatus.COMPLETED
         assert client.closed
 
@@ -952,13 +955,17 @@ async def test_parallel_tool_calls_respect_batching_and_parentage() -> None:
     assert {call["value"] for call in real_calls} == set(range(tool_count))
     client = _FakeClient.instances[0]
     nodes = _nodes(client)
-    children = [node for node in nodes if node.index != 0]
+    children = [
+        node for node in nodes if node.external_id != capability_module.ROOT_EXTERNAL_ID
+    ]
     tool_nodes = [node for node in children if node.node_type is NodeType.TOOL_CALL]
     llm_nodes = [node for node in children if node.node_type is NodeType.LLM_CALL]
     assert len(tool_nodes) == tool_count
     assert len(llm_nodes) == 2
-    assert {node.index for node in children} == set(range(1, tool_count + 3))
-    assert {node.parent_index for node in tool_nodes} == {llm_nodes[0].index}
+    assert len({node.external_id for node in children}) == tool_count + 2
+    assert {node.parent_external_id for node in tool_nodes} == {
+        llm_nodes[0].external_id
+    }
     assert all(len(batch.nodes) <= 7 for _, batch in client.sessions.node_batches[1:])
     assert client.sessions.updated[0][1].status is SessionStatus.COMPLETED
     assert client.closed

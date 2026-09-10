@@ -77,10 +77,16 @@ SessionObserver = Callable[[SessionResponse], Awaitable[None] | None]
 
 FRAMEWORK = "openai-agents"
 ADAPTER_VERSION = "0.19"
+ROOT_EXTERNAL_ID = "root"
 MAX_STRING_BYTES = 16 * 1024
 MAX_DEPTH = 8
 MAX_COLLECTION_ITEMS = 100
 FINALIZATION_TIMEOUT_SECONDS = 2.0
+
+
+def _mint_external_id() -> str:
+    """Return a synthetic external id for a node with no provider identity."""
+    return str(uuid.uuid4())
 
 
 class KitaruRecordingError(RuntimeError):
@@ -174,7 +180,6 @@ class RunRecorder:
     session: SessionResponse | None = None
     started_at: datetime | None = None
     root_inputs: Any = None
-    next_index: int = 1
     buffer: list[SessionNodeCreateRequest] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     model_observations: list[_ModelObservation] = field(default_factory=list)
@@ -215,8 +220,8 @@ class RunRecorder:
             SessionNodeBatchRequest(
                 nodes=[
                     SessionNodeCreateRequest(
-                        index=0,
-                        parent_index=None,
+                        external_id=ROOT_EXTERNAL_ID,
+                        parent_external_id=None,
                         node_type=NodeType.SPAN,
                         name="run",
                         status=NodeStatus.IN_PROGRESS,
@@ -244,7 +249,7 @@ class RunRecorder:
         """Translate public result objects into stable buffered nodes."""
         raw_responses = result.raw_responses[:MAX_COLLECTION_ITEMS]
         new_items = result.new_items[:MAX_COLLECTION_ITEMS]
-        tool_parent_indexes: dict[str, int] = {}
+        tool_parent_external_ids: dict[str, str] = {}
         for position, response in enumerate(raw_responses):
             identity = response.response_id or f"model-{position}"
             if ("model", identity) in self._seen:
@@ -255,11 +260,11 @@ class RunRecorder:
                 if position < len(self.model_observations)
                 else None
             )
-            model_index = await self._append_node(
+            await self._append_node(
                 node_type=NodeType.LLM_CALL,
                 name="model",
-                parent_index=0,
-                external_id=response.response_id,
+                parent_external_id=ROOT_EXTERNAL_ID,
+                external_id=identity,
                 started_at=observation.started_at if observation else None,
                 ended_at=observation.ended_at if observation else None,
                 inputs=(
@@ -276,7 +281,7 @@ class RunRecorder:
             for output_item in response.output[:MAX_COLLECTION_ITEMS]:
                 output_id = _raw_id(output_item)
                 if output_id is not None:
-                    tool_parent_indexes[output_id] = model_index
+                    tool_parent_external_ids[output_id] = identity
 
         calls: list[ToolCallItem] = [
             item for item in new_items if isinstance(item, ToolCallItem)
@@ -296,8 +301,10 @@ class RunRecorder:
             await self._append_node(
                 node_type=NodeType.TOOL_CALL,
                 name=call.tool_name or _raw_type(call.raw_item) or "hosted_tool",
-                parent_index=tool_parent_indexes.get(call_id, 0),
-                external_id=call.call_id or _raw_id(call.raw_item),
+                parent_external_id=tool_parent_external_ids.get(
+                    call_id, ROOT_EXTERNAL_ID
+                ),
+                external_id=call.call_id or _raw_id(call.raw_item) or call_id,
                 started_at=None,
                 ended_at=None,
                 inputs=tool_inputs,
@@ -317,8 +324,8 @@ class RunRecorder:
             await self._append_node(
                 node_type=NodeType.SUBAGENT_CALL,
                 name="handoff",
-                parent_index=0,
-                external_id=_raw_id(item.raw_item),
+                parent_external_id=ROOT_EXTERNAL_ID,
+                external_id=identity,
                 started_at=None,
                 ended_at=None,
                 inputs={"source_agent": item.source_agent.name},
@@ -337,8 +344,8 @@ class RunRecorder:
             await self._append_node(
                 node_type=NodeType.SPAN,
                 name="unsupported_openai_item",
-                parent_index=0,
-                external_id=None,
+                parent_external_id=ROOT_EXTERNAL_ID,
+                external_id=identity,
                 started_at=None,
                 ended_at=None,
                 inputs=None,
@@ -352,7 +359,7 @@ class RunRecorder:
             await self._append_node(
                 node_type=NodeType.SPAN,
                 name="openai_capture_truncated",
-                parent_index=0,
+                parent_external_id=ROOT_EXTERNAL_ID,
                 external_id=None,
                 started_at=None,
                 ended_at=None,
@@ -377,8 +384,8 @@ class RunRecorder:
             SessionNodeBatchRequest(
                 nodes=[
                     SessionNodeCreateRequest(
-                        index=0,
-                        parent_index=None,
+                        external_id=ROOT_EXTERNAL_ID,
+                        parent_external_id=None,
                         node_type=NodeType.SPAN,
                         name="run",
                         status=NodeStatus.COMPLETED,
@@ -413,8 +420,8 @@ class RunRecorder:
                 SessionNodeBatchRequest(
                     nodes=[
                         SessionNodeCreateRequest(
-                            index=0,
-                            parent_index=None,
+                            external_id=ROOT_EXTERNAL_ID,
+                            parent_external_id=None,
                             node_type=NodeType.SPAN,
                             name="run",
                             status=NodeStatus.FAILED,
@@ -480,7 +487,7 @@ class RunRecorder:
         *,
         node_type: NodeType,
         name: str,
-        parent_index: int,
+        parent_external_id: str,
         external_id: str | None,
         started_at: datetime | None,
         ended_at: datetime | None,
@@ -490,15 +497,12 @@ class RunRecorder:
         tool_name: str | None = None,
         subagent_id: str | None = None,
         attributes: Any = None,
-    ) -> int:
+    ) -> None:
         async with self.lock:
-            index = self.next_index
-            self.next_index += 1
             self.buffer.append(
                 SessionNodeCreateRequest(
-                    index=index,
-                    parent_index=parent_index,
-                    external_id=external_id,
+                    external_id=external_id or _mint_external_id(),
+                    parent_external_id=parent_external_id,
                     node_type=node_type,
                     name=name,
                     status=NodeStatus.COMPLETED,
@@ -512,7 +516,6 @@ class RunRecorder:
                     attributes=attributes or {},
                 )
             )
-        return index
 
 
 class RecordingRunHooks(RunHooks[TContext], Generic[TContext]):

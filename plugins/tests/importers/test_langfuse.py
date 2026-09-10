@@ -323,8 +323,8 @@ def test_nests_tool_call_under_requesting_model_by_default() -> None:
     nodes = flatten_imported_nodes(session.nodes)
     tool = next(node for node in nodes if node.external_id == "trace-1:tool")
 
-    assert tool.parent_index == 1
-    assert tool.secondary_parent_indexes == [0]
+    assert tool.parent_external_id == "trace-1:generation"
+    assert tool.secondary_parent_external_ids == ["trace-1:root"]
     assert session.metadata["langfuse.inferred_tool_call_link_count"] == 1
 
 
@@ -355,8 +355,8 @@ def test_tool_call_link_inference_can_be_disabled() -> None:
         if node.external_id == "trace-1:tool"
     )
 
-    assert tool.parent_index == 0
-    assert tool.secondary_parent_indexes == []
+    assert tool.parent_external_id == "trace-1:root"
+    assert tool.secondary_parent_external_ids == []
     assert "langfuse.inferred_tool_call_link_count" not in session.metadata
 
 
@@ -397,8 +397,8 @@ def test_tool_call_link_inference_skips_ambiguous_ids() -> None:
         if node.external_id == "trace-1:tool"
     )
 
-    assert tool.parent_index == 0
-    assert tool.secondary_parent_indexes == []
+    assert tool.parent_external_id == "trace-1:root"
+    assert tool.secondary_parent_external_ids == []
     assert session.metadata["langfuse.inferred_tool_call_link_count"] == 0
 
 

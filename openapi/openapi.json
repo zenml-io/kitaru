@@ -4671,7 +4671,7 @@
             "type": "boolean"
           },
           "skipped": {
-            "description": "Sessions skipped as duplicates.",
+            "description": "Sessions that already existed and received the batch.",
             "title": "Skipped",
             "type": "integer"
           }
@@ -8556,7 +8556,7 @@
         "description": "Session node batch request.",
         "properties": {
           "nodes": {
-            "description": "Nodes to upsert, parent before child.",
+            "description": "Nodes to upsert, in any order.",
             "items": {
               "$ref": "#/components/schemas/SessionNodeCreateRequest"
             },
@@ -8621,22 +8621,10 @@
             "title": "Error"
           },
           "external_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Id from the source system.",
-            "title": "External Id"
-          },
-          "index": {
-            "description": "Position within the session, the wire identity.",
-            "minimum": 0.0,
-            "title": "Index",
-            "type": "integer"
+            "description": "Id from the source system, the wire identity.",
+            "minLength": 1,
+            "title": "External Id",
+            "type": "string"
           },
           "input_text_selector": {
             "anyOf": [
@@ -8722,18 +8710,17 @@
             "description": "Node outputs.",
             "title": "Outputs"
           },
-          "parent_index": {
+          "parent_external_id": {
             "anyOf": [
               {
-                "minimum": 0.0,
-                "type": "integer"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Index of the parent node.",
-            "title": "Parent Index"
+            "description": "External id of the parent node.",
+            "title": "Parent External Id"
           },
           "reasoning": {
             "anyOf": [
@@ -8759,13 +8746,12 @@
             "description": "Model requested by the call.",
             "title": "Requested Model"
           },
-          "secondary_parent_indexes": {
-            "description": "Indexes of additional parent nodes.",
+          "secondary_parent_external_ids": {
+            "description": "External ids of additional parent nodes.",
             "items": {
-              "minimum": 0.0,
-              "type": "integer"
+              "type": "string"
             },
-            "title": "Secondary Parent Indexes",
+            "title": "Secondary Parent External Ids",
             "type": "array"
           },
           "started_at": {
@@ -8846,7 +8832,7 @@
           }
         },
         "required": [
-          "index",
+          "external_id",
           "node_type",
           "name",
           "status",
@@ -8915,27 +8901,15 @@
             "title": "Error"
           },
           "external_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Id from the source system.",
-            "title": "External Id"
+            "title": "External Id",
+            "type": "string"
           },
           "id": {
             "description": "Node id.",
             "format": "uuid",
             "title": "Id",
             "type": "string"
-          },
-          "index": {
-            "description": "Position within the session.",
-            "title": "Index",
-            "type": "integer"
           },
           "input_text_selector": {
             "anyOf": [
@@ -9021,6 +8995,18 @@
             "description": "Node outputs, null unless include_payloads.",
             "title": "Outputs"
           },
+          "parent_external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External id of the parent node.",
+            "title": "Parent External Id"
+          },
           "parent_id": {
             "anyOf": [
               {
@@ -9033,18 +9019,6 @@
             ],
             "description": "Parent node.",
             "title": "Parent Id"
-          },
-          "parent_index": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Parent node index.",
-            "title": "Parent Index"
           },
           "reasoning": {
             "anyOf": [
@@ -9070,6 +9044,14 @@
             "description": "Model requested by the call.",
             "title": "Requested Model"
           },
+          "secondary_parent_external_ids": {
+            "description": "External ids of additional parent nodes.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Secondary Parent External Ids",
+            "type": "array"
+          },
           "secondary_parent_ids": {
             "description": "Additional parent nodes.",
             "items": {
@@ -9077,14 +9059,6 @@
               "type": "string"
             },
             "title": "Secondary Parent Ids",
-            "type": "array"
-          },
-          "secondary_parent_indexes": {
-            "description": "Secondary parent indexes.",
-            "items": {
-              "type": "integer"
-            },
-            "title": "Secondary Parent Indexes",
             "type": "array"
           },
           "session_id": {
@@ -9173,10 +9147,9 @@
         "required": [
           "id",
           "session_id",
-          "index",
-          "parent_index",
-          "secondary_parent_indexes",
           "secondary_parent_ids",
+          "external_id",
+          "secondary_parent_external_ids",
           "node_type",
           "name",
           "status",
@@ -9590,7 +9563,7 @@
         "description": "Session with nodes response.",
         "properties": {
           "nodes": {
-            "description": "Every node of the session, ordered by index ascending.",
+            "description": "Every node of the session, ordered by position ascending.",
             "items": {
               "$ref": "#/components/schemas/SessionNodeResponse"
             },
@@ -24546,7 +24519,7 @@
         ]
       },
       "post": {
-        "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 on success, 409 when\nthe imported_from and external id pair is already registered, and 422 on\ninvalid input.\n\nArgs:\n    body: Session create request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created session.",
+        "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 when the call creates\nthe session, 200 with the session already registered under the request's\nimported_from and external id pair, and 422 on invalid input.\n\nArgs:\n    body: Session create request.\n    response: Response the status code is set on.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created or already registered session.",
         "operationId": "create_session_api_v1_sessions_post",
         "parameters": [
           {
@@ -24577,6 +24550,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -25045,7 +25028,7 @@
     },
     "/api/v1/sessions/{session_id}/full": {
       "get": {
-        "description": "Get a session together with every one of its nodes.\n\nThe node list is not paginated, so one call carries a whole session.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 404 when no session has this id.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    node_service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Session with every node, ordered by index.",
+        "description": "Get a session together with every one of its nodes.\n\nThe node list is not paginated, so one call carries a whole session.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 404 when no session has this id.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    node_service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Session with every node, ordered by position.",
         "operationId": "get_session_with_nodes_api_v1_sessions__session_id__full_get",
         "parameters": [
           {
@@ -25129,7 +25112,7 @@
     },
     "/api/v1/sessions/{session_id}/nodes": {
       "get": {
-        "description": "List the nodes of a session, ordered by index ascending.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 422 on invalid filters or pagination parameters.\n\nArgs:\n    session_id: Id of the session.\n    service: Session node service.\n    actor: Caller context.\n    params: Session node list params.\n\nReturns:\n    Page of session nodes, ordered by index.",
+        "description": "List the nodes of a session, ordered by position ascending.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 422 on invalid filters or pagination parameters.\n\nArgs:\n    session_id: Id of the session.\n    service: Session node service.\n    actor: Caller context.\n    params: Session node list params.\n\nReturns:\n    Page of session nodes, ordered by position.",
         "operationId": "list_session_nodes_api_v1_sessions__session_id__nodes_get",
         "parameters": [
           {
@@ -25175,14 +25158,14 @@
             }
           },
           {
-            "description": "Nodes are ordered by ascending index.",
+            "description": "Nodes are ordered by start time, then insertion.",
             "in": "query",
             "name": "sort",
             "required": false,
             "schema": {
-              "const": "index:asc",
-              "default": "index:asc",
-              "description": "Nodes are ordered by ascending index.",
+              "const": "position:asc",
+              "default": "position:asc",
+              "description": "Nodes are ordered by start time, then insertion.",
               "title": "Sort",
               "type": "string"
             }
@@ -25295,7 +25278,7 @@
         ]
       },
       "post": {
-        "description": "Ingest a batch of session nodes.\n\nAn index already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, 409 when the session does not\ncurrently accept node ingestion, and 422 when a parent_index does not\nresolve.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with reasoning, inputs, outputs, and\n    attributes null.",
+        "description": "Ingest a batch of session nodes.\n\nAn external id already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, and 409 when the session does not\ncurrently accept node ingestion.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with reasoning, inputs, outputs, and\n    attributes null.",
         "operationId": "ingest_session_nodes_api_v1_sessions__session_id__nodes_post",
         "parameters": [
           {

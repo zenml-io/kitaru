@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated, Any, Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import AwareDatetime, Field, model_validator
 
@@ -50,17 +50,14 @@ class NodeStatus(StrEnum):
 class SessionNodeCreateRequest(RequestModel):
     """Session node create request."""
 
-    index: int = Field(
-        ge=0, description="Position within the session, the wire identity."
+    external_id: str = Field(
+        min_length=1, description="Id from the source system, the wire identity."
     )
-    parent_index: int | None = Field(
-        default=None, ge=0, description="Index of the parent node."
+    parent_external_id: str | None = Field(
+        default=None, description="External id of the parent node."
     )
-    secondary_parent_indexes: list[Annotated[int, Field(ge=0)]] = Field(
-        default_factory=list, description="Indexes of additional parent nodes."
-    )
-    external_id: str | None = Field(
-        default=None, description="Id from the source system."
+    secondary_parent_external_ids: list[str] = Field(
+        default_factory=list, description="External ids of additional parent nodes."
     )
     trace_id: str | None = Field(default=None, description="Distributed trace id.")
     node_type: NodeType = Field(description="Kind of work the node records.")
@@ -113,9 +110,9 @@ class SessionNodeCreateRequest(RequestModel):
 class SessionNodeListParams(FilterableListParams):
     """Session node list params."""
 
-    sort: Literal["index:asc"] = Field(
-        default="index:asc",
-        description="Nodes are ordered by ascending index.",
+    sort: Literal["position:asc"] = Field(
+        default="position:asc",
+        description="Nodes are ordered by start time, then insertion.",
     )
     include_payloads: bool = Field(
         default=False,
@@ -128,30 +125,31 @@ class SessionNodeBatchRequest(RequestModel):
 
     nodes: list[SessionNodeCreateRequest] = Field(
         max_length=500,
-        description="Nodes to upsert, parent before child.",
+        description="Nodes to upsert, in any order.",
     )
 
     @model_validator(mode="after")
-    def _parents_precede_children(self) -> Self:
-        """Require every node's parent indexes to precede its own index.
+    def _check_external_ids(self) -> Self:
+        """Require unique node external ids and no self-parent.
+
+        A parent external id the batch does not carry is left to the server,
+        which links it once the parent lands.
 
         Raises:
-            ValueError: A parent index does not precede its node's index, or
-                a node index repeats within the batch.
+            ValueError: A node names itself as a parent, or a node external
+                id repeats within the batch.
 
         Returns:
             The validated batch.
         """
-        indexes: set[int] = set()
+        seen: set[str] = set()
         for node in self.nodes:
-            parent_indexes = [node.parent_index, *node.secondary_parent_indexes]
-            if any(
-                parent is not None and parent >= node.index for parent in parent_indexes
-            ):
-                raise ValueError("parent indexes must be less than the node index")
-            if node.index in indexes:
-                raise ValueError("node indexes must be unique within a batch")
-            indexes.add(node.index)
+            parents = [node.parent_external_id, *node.secondary_parent_external_ids]
+            if node.external_id in parents:
+                raise ValueError("a node cannot be its own parent")
+            if node.external_id in seen:
+                raise ValueError("node external ids must be unique within a batch")
+            seen.add(node.external_id)
         return self
 
 
@@ -160,15 +158,16 @@ class SessionNodeResponse(ResponseModel):
 
     id: uuid.UUID = Field(description="Node id.")
     session_id: uuid.UUID = Field(description="Session this node belongs to.")
-    index: int = Field(description="Position within the session.")
-    parent_index: int | None = Field(description="Parent node index.")
-    secondary_parent_indexes: list[int] = Field(description="Secondary parent indexes.")
     parent_id: uuid.UUID | None = Field(default=None, description="Parent node.")
     secondary_parent_ids: list[uuid.UUID] = Field(
         description="Additional parent nodes."
     )
-    external_id: str | None = Field(
-        default=None, description="Id from the source system."
+    external_id: str = Field(description="Id from the source system.")
+    parent_external_id: str | None = Field(
+        default=None, description="External id of the parent node."
+    )
+    secondary_parent_external_ids: list[str] = Field(
+        description="External ids of additional parent nodes."
     )
     trace_id: str | None = Field(default=None, description="Distributed trace id.")
     node_type: NodeType = Field(description="Kind of work the node records.")
@@ -230,5 +229,5 @@ class SessionWithNodesResponse(ResponseModel):
 
     session: SessionDetailResponse = Field(description="Session.")
     nodes: list[SessionNodeResponse] = Field(
-        description="Every node of the session, ordered by index ascending."
+        description="Every node of the session, ordered by position ascending."
     )

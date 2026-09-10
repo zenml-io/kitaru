@@ -44,6 +44,7 @@ from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import (
+    DuplicateSessionExternalId,
     Session,
     SessionAgentMismatch,
     SessionAgentRequired,
@@ -97,7 +98,7 @@ class SessionService:
 
     async def create_session(
         self, command: SessionCreate, actor: AuthContext
-    ) -> Session:
+    ) -> tuple[Session, bool]:
         """Create a session owned by the caller.
 
         A task principal's session is linked to the principal's task, which
@@ -108,7 +109,9 @@ class SessionService:
         session. The task, or the import it runs, is the source of truth for
         the agent and the agent version. The session takes the next number of
         its agent, allocated outside the request transaction, so a failed
-        create leaves a gap.
+        create leaves a gap. A command repeating an imported_from and
+        external id pair returns the session already registered under it,
+        so a later import contributes to a session it did not create.
 
         Args:
             command: Fields for the new session.
@@ -133,11 +136,9 @@ class SessionService:
             AgentVersionAgentMismatch: The resolved agent version belongs to
                 another agent.
             AgentNotFound: No agent has the resolved id.
-            DuplicateSessionExternalId: The imported_from and external id pair is
-                already registered.
 
         Returns:
-            Created session.
+            Session and whether this call created it.
         """
         task_id = None
         task = None
@@ -194,7 +195,18 @@ class SessionService:
             [p for p in (session.inputs, session.outputs) if p is not None],
             session.owner_id,
         )
-        stored = await self._repository.create(session)
+        try:
+            stored = await self._repository.create(session)
+        except DuplicateSessionExternalId:
+            existing = await self._repository.get_by_external_id(
+                session.imported_from,
+                session.external_id,
+                agent_id,
+                include_payloads=False,
+            )
+            if existing is not None:
+                return existing, False
+            raise
         if isinstance(task, AgentTask):
             replay = await self._replays.get_by_job_id(task.job_id)
             if replay is not None:
@@ -206,7 +218,7 @@ class SessionService:
                 AnalyticsEvent.SESSION_COMPLETED,
                 analytics_events.build_session_completed_properties(stored),
             )
-        return stored
+        return stored, True
 
     async def _resolve_agent(
         self, command: SessionCreate, task: Task | None, import_: Import | None
@@ -380,7 +392,7 @@ class SessionService:
         ``Session.finish``. When the command sets none of them and no
         ``status``, the session's current status carries through as a no-op
         transition, which leaves those fields untouched. A task principal
-        writes only a session it owns.
+        writes only a session it owns or one with an imported origin.
 
         Args:
             session_id: Id of the session.
@@ -389,7 +401,8 @@ class SessionService:
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionAccessDenied: A task principal does not own the session.
+            SessionAccessDenied: A task principal neither owns the session
+                nor writes into an imported one.
             SessionNotUpdatable: The session is not in progress.
             SessionStatusCannotBeCleared: The command clears the status with
                 an explicit null.
@@ -400,7 +413,7 @@ class SessionService:
         session = await self._repository.get(
             session_id, include_payloads=False, exclusive=True
         )
-        check_task_session_write(session_id, session.task_id, actor)
+        check_task_session_write(session, actor)
         await check_task_attempt(actor, self._tasks)
         session.check_update()
         fields = command.model_fields_set

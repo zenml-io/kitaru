@@ -32,6 +32,7 @@ from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.client import KitaruAPIClient
 from kitaru_claude_agent_sdk.capability import KitaruRecordingError
 from kitaru_claude_agent_sdk.recording import (
+    ROOT_EXTERNAL_ID,
     InvocationRecorder,
     finalize_failure,
     finalize_terminal,
@@ -163,28 +164,28 @@ async def test_maps_typed_messages_and_correlates_tools_and_tasks(
     await finalize_terminal(recorder, _terminal())
 
     persisted = nodes(fake_client)
-    latest = {node.index: node for node in persisted}
-    assert [latest[index].node_type for index in sorted(latest)] == [
+    latest = {node.external_id: node for node in persisted}
+    assert [node.node_type for node in latest.values()] == [
         NodeType.SPAN,
         NodeType.SPAN,
         NodeType.LLM_CALL,
         NodeType.TOOL_CALL,
         NodeType.SUBAGENT_CALL,
     ]
-    model = latest[2]
+    model = latest["message-1"]
     assert model.external_id == "message-1"
     assert model.model == "claude-test"
     assert model.reasoning == "reasoning"
     assert model.tokens.input_tokens == 7
     assert model.tokens.output_tokens == 3
     assert "signature-secret" not in model.model_dump_json()
-    tool = latest[3]
+    tool = latest["tool-1"]
     assert tool.external_id == "tool-1"
-    assert tool.parent_index == model.index
+    assert tool.parent_external_id == model.external_id
     assert tool.outputs == "eligible"
-    task = latest[4]
+    task = latest["task-1"]
     assert task.external_id == "task-1"
-    assert task.parent_index == tool.index
+    assert task.parent_external_id == tool.external_id
     assert task.status is NodeStatus.COMPLETED
     assert task.outputs == {"summary": "finished"}
     assert "/secret/path" not in task.model_dump_json()
@@ -205,7 +206,7 @@ async def test_terminal_usage_is_session_aggregate_not_duplicate_llm_node(
     )
     await finalize_terminal(recorder, _terminal())
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     assert [node for node in latest.values() if node.node_type is NodeType.LLM_CALL]
     assert (
         sum(
@@ -215,12 +216,16 @@ async def test_terminal_usage_is_session_aggregate_not_duplicate_llm_node(
         )
         == 7
     )
-    root = latest[0]
+    root = latest[ROOT_EXTERNAL_ID]
     assert root.cost == Decimal("0.25")
     # The terminal totals already equal the per-call counts here, so the root
     # carries no remainder and the session cannot count this turn twice.
     assert root.tokens is None
-    assert all(node.cost is None for index, node in latest.items() if index != 0)
+    assert all(
+        node.cost is None
+        for external_id, node in latest.items()
+        if external_id != ROOT_EXTERNAL_ID
+    )
     assert fake_client.sessions.updated[-1][1].metadata == {
         "terminal": {
             "session_id": "session-1",
@@ -266,7 +271,7 @@ async def test_session_preserves_full_replay_input_while_root_is_bounded(
     await _recorder(fake_client, prompt)
 
     assert fake_client.sessions.created[0].inputs == prompt
-    root = {node.index: node for node in nodes(fake_client)}[0]
+    root = {node.external_id: node for node in nodes(fake_client)}[ROOT_EXTERNAL_ID]
     assert root.inputs == {"value": prompt[:-1], "truncated": True}
 
 
@@ -292,7 +297,7 @@ async def test_hook_and_stream_views_do_not_duplicate_tool_node(
         {"tool_use_id": "tool-1", "tool_name": "lookup"}, event="after"
     )
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     tools = [node for node in latest.values() if node.node_type is NodeType.TOOL_CALL]
     assert len(tools) == 1
     assert tools[0].attributes["hook_events"] == ["before", "after"]
@@ -314,14 +319,14 @@ async def test_stream_tool_use_reparents_hook_created_node(
         )
     )
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     model = next(
         node for node in latest.values() if node.node_type is NodeType.LLM_CALL
     )
     tool = next(
         node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
     )
-    assert tool.parent_index == model.index
+    assert tool.parent_external_id == model.external_id
 
 
 def _split_delivery(*blocks: Any) -> AssistantMessage:
@@ -347,19 +352,18 @@ async def test_split_turn_tool_delivery_stays_under_its_llm_call(
         _split_delivery(ToolUseBlock("tool-1", "lookup", {"q": 1}))
     )
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     model = next(
         node for node in latest.values() if node.node_type is NodeType.LLM_CALL
     )
     tools = [node for node in latest.values() if node.node_type is NodeType.TOOL_CALL]
-    assert sorted(latest) == [0, 1, 2]
+    assert len(latest) == 3
     assert len(tools) == 1
-    assert tools[0].parent_index == model.index
-    assert tools[0].parent_index < tools[0].index
+    assert tools[0].parent_external_id == model.external_id
     assert model.reasoning == "planning"
 
 
-async def test_split_turn_never_writes_one_message_id_at_two_indexes(
+async def test_split_turn_tool_hook_reparents_to_its_turn_once_delivered(
     fake_client: FakeClient,
 ) -> None:
     recorder = await _recorder(fake_client)
@@ -373,27 +377,19 @@ async def test_split_turn_never_writes_one_message_id_at_two_indexes(
         _split_delivery(ToolUseBlock("tool-1", "lookup", {"q": 1}))
     )
 
-    indexes_by_external_id: dict[str, set[int]] = {}
-    for node in nodes(fake_client):
-        if node.external_id is not None:
-            indexes_by_external_id.setdefault(node.external_id, set()).add(node.index)
-    assert all(len(indexes) == 1 for indexes in indexes_by_external_id.values())
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
+    assert len(latest) == 3
     model = next(
         node for node in latest.values() if node.node_type is NodeType.LLM_CALL
     )
     tool = next(
         node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
     )
-    assert model.index < tool.index
-    # The hook created the tool node before the turn arrived, so the turn took
-    # the index reserved below it and the tool node never moved.
-    assert tool.index == hooked.index
     assert tool.started_at == hooked.started_at
-    assert tool.parent_index == model.index
+    assert tool.parent_external_id == model.external_id
 
 
-async def test_split_turn_with_two_hooked_tools_keeps_every_parent_below_its_node(
+async def test_split_turn_with_two_hooked_tools_parents_both_under_the_turn(
     fake_client: FakeClient,
 ) -> None:
     recorder = await _recorder(fake_client)
@@ -410,18 +406,17 @@ async def test_split_turn_with_two_hooked_tools_keeps_every_parent_below_its_nod
         _split_delivery(ToolUseBlock("tool-2", "lookup", {"q": 2}))
     )
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     model = next(
         node for node in latest.values() if node.node_type is NodeType.LLM_CALL
     )
     tools = [node for node in latest.values() if node.node_type is NodeType.TOOL_CALL]
-    assert sorted(latest) == [0, 1, 2, 3]
+    assert len(latest) == 4
     assert len(tools) == 2
-    assert all(tool.parent_index == model.index for tool in tools)
-    assert all(node.parent_index < node.index for node in latest.values() if node.index)
+    assert all(tool.parent_external_id == model.external_id for tool in tools)
 
 
-async def test_hook_after_split_delivery_does_not_reserve_the_next_turn(
+async def test_new_turn_parents_to_its_tool_use_id_after_a_split_delivery(
     fake_client: FakeClient,
 ) -> None:
     recorder = await _recorder(fake_client)
@@ -442,17 +437,12 @@ async def test_hook_after_split_delivery_does_not_reserve_the_next_turn(
         )
     )
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     tool = next(
         node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
     )
-    child = next(
-        node
-        for node in latest.values()
-        if node.node_type is NodeType.LLM_CALL and node.external_id == "message-2"
-    )
-    assert child.parent_index == tool.index
-    assert tool.index < child.index
+    child = latest["message-2"]
+    assert child.parent_external_id == tool.external_id
 
 
 async def test_split_turn_merges_reasoning_and_text_into_one_node(
@@ -464,7 +454,7 @@ async def test_split_turn_merges_reasoning_and_text_into_one_node(
     )
     await recorder.record_message(_split_delivery(TextBlock("final answer")))
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     model = next(
         node for node in latest.values() if node.node_type is NodeType.LLM_CALL
     )
@@ -481,7 +471,7 @@ async def test_split_turn_keeps_text_when_tool_use_arrives_separately(
         _split_delivery(ToolUseBlock("tool-1", "lookup", {"q": 1}))
     )
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     model = next(
         node for node in latest.values() if node.node_type is NodeType.LLM_CALL
     )
@@ -489,7 +479,7 @@ async def test_split_turn_keeps_text_when_tool_use_arrives_separately(
         node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
     )
     assert model.outputs == {"text": ["looking that up"]}
-    assert tool.parent_index == model.index
+    assert tool.parent_external_id == model.external_id
 
 
 async def test_redelivered_identical_assistant_message_is_recorded_once(
@@ -501,7 +491,7 @@ async def test_redelivered_identical_assistant_message_is_recorded_once(
             _split_delivery(TextBlock("done"), ThinkingBlock("planning", "sig"))
         )
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     model_nodes = [
         node for node in latest.values() if node.node_type is NodeType.LLM_CALL
     ]
@@ -523,7 +513,7 @@ async def test_identical_blocks_in_one_delivery_are_preserved(
         )
     )
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     model = next(
         node for node in latest.values() if node.node_type is NodeType.LLM_CALL
     )
@@ -606,7 +596,7 @@ async def test_replayable_tool_records_effective_rewritten_arguments(
     if effective_before_stream:
         await record_stream_message()
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     tool = next(
         node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
     )
@@ -657,7 +647,7 @@ async def test_error_terminal_records_native_failure_fields(
 
     await finalize_terminal(recorder, _terminal(is_error=True))
 
-    root = {node.index: node for node in nodes(fake_client)}[0]
+    root = {node.external_id: node for node in nodes(fake_client)}[ROOT_EXTERNAL_ID]
     assert root.status is NodeStatus.FAILED
     assert root.error == "native failure"
     update = fake_client.sessions.updated[-1][1]
@@ -701,7 +691,7 @@ async def test_api_error_terminal_records_the_readable_cause_and_status(
         _failed_terminal(result="API Error: 529 Overloaded", api_error_status=529),
     )
 
-    root = {node.index: node for node in nodes(fake_client)}[0]
+    root = {node.external_id: node for node in nodes(fake_client)}[ROOT_EXTERNAL_ID]
     assert root.status is NodeStatus.FAILED
     assert root.error == "API Error: 529 Overloaded"
     update = fake_client.sessions.updated[-1][1]
@@ -721,7 +711,7 @@ async def test_failed_terminal_never_records_the_success_subtype_as_the_error(
 
     await finalize_terminal(recorder, _failed_terminal(subtype=subtype))
 
-    root = {node.index: node for node in nodes(fake_client)}[0]
+    root = {node.external_id: node for node in nodes(fake_client)}[ROOT_EXTERNAL_ID]
     assert root.error == expected
     assert fake_client.sessions.updated[-1][1].error == expected
 
@@ -735,7 +725,7 @@ async def test_failed_terminal_prefers_the_terminal_reason_over_the_subtype(
         recorder, _failed_terminal(subtype="error", terminal_reason="max_turns")
     )
 
-    root = {node.index: node for node in nodes(fake_client)}[0]
+    root = {node.external_id: node for node in nodes(fake_client)}[ROOT_EXTERNAL_ID]
     assert root.error == "max_turns"
 
 
@@ -749,7 +739,7 @@ async def test_failed_terminal_never_records_a_completed_reason_as_the_error(
     )
 
     expected = "Claude reported a failed result"
-    root = {node.index: node for node in nodes(fake_client)}[0]
+    root = {node.external_id: node for node in nodes(fake_client)}[ROOT_EXTERNAL_ID]
     assert root.error == expected
     assert fake_client.sessions.updated[-1][1].error == expected
 
@@ -777,8 +767,8 @@ async def test_terminal_output_tokens_reconcile_onto_the_root_span(
 
     await finalize_terminal(recorder, terminal)
 
-    latest = {node.index: node for node in nodes(fake_client)}
-    root = latest[0]
+    latest = {node.external_id: node for node in nodes(fake_client)}
+    root = latest[ROOT_EXTERNAL_ID]
     assert root.tokens is not None
     assert root.tokens.output_tokens == 132
     assert root.tokens.input_tokens == 0
@@ -809,8 +799,8 @@ async def test_recorded_tokens_above_the_terminal_total_are_never_negated(
 
     await finalize_terminal(recorder, terminal)
 
-    latest = {node.index: node for node in nodes(fake_client)}
-    root = latest[0]
+    latest = {node.external_id: node for node in nodes(fake_client)}
+    root = latest[ROOT_EXTERNAL_ID]
     assert root.tokens is not None
     assert root.tokens.input_tokens == 0
     assert root.tokens.output_tokens == 132
@@ -833,8 +823,8 @@ async def test_failure_without_a_terminal_leaves_root_span_tokens_unset(
 
     await finalize_failure(recorder, RuntimeError("native failure"))
 
-    latest = {node.index: node for node in nodes(fake_client)}
-    assert latest[0].tokens is None
+    latest = {node.external_id: node for node in nodes(fake_client)}
+    assert latest[ROOT_EXTERNAL_ID].tokens is None
     rollup = [node.tokens for node in latest.values() if node.tokens is not None]
     assert sum(tokens.output_tokens or 0 for tokens in rollup) == 3
 
@@ -878,8 +868,8 @@ async def test_root_span_records_the_bounded_prompt_sent_to_claude(
 
     await finalize_terminal(recorder, _terminal())
 
-    latest = {node.index: node for node in nodes(fake_client)}
-    assert latest[0].attributes["effective_prompt"] == {
+    latest = {node.external_id: node for node in nodes(fake_client)}
+    assert latest[ROOT_EXTERNAL_ID].attributes["effective_prompt"] == {
         "value": prompt[: 16 * 1024],
         "truncated": True,
     }
@@ -901,8 +891,8 @@ async def test_root_span_records_a_short_prompt_as_a_plain_string(
 
     await finalize_terminal(recorder, _terminal())
 
-    latest = {node.index: node for node in nodes(fake_client)}
-    assert latest[0].attributes["effective_prompt"] == "candidate prompt"
+    latest = {node.external_id: node for node in nodes(fake_client)}
+    assert latest[ROOT_EXTERNAL_ID].attributes["effective_prompt"] == "candidate prompt"
 
 
 async def test_native_error_is_primary_when_finalization_also_fails(
@@ -950,7 +940,7 @@ async def test_terminal_result_is_authoritative_and_diagnostics_are_bounded(
 
     await finalize_terminal(recorder, terminal)
 
-    root = {node.index: node for node in nodes(fake_client)}[0]
+    root = {node.external_id: node for node in nodes(fake_client)}[ROOT_EXTERNAL_ID]
     assert root.outputs == {"value": "x" * (16 * 1024), "truncated": True}
     assert fake_client.sessions.updated[-1][1].outputs == terminal.result
 
@@ -958,8 +948,8 @@ async def test_terminal_result_is_authoritative_and_diagnostics_are_bounded(
     error = RuntimeError("y" * (16 * 1024 + 1))
     await error_recorder.finalize(error=error)
 
-    latest = {node.index: node for node in nodes(fake_client)}
-    assert latest[0].error == "y" * (16 * 1024)
+    latest = {node.external_id: node for node in nodes(fake_client)}
+    assert latest[ROOT_EXTERNAL_ID].error == "y" * (16 * 1024)
     assert fake_client.sessions.updated[-1][1].error == "y" * (16 * 1024)
 
 
@@ -1125,7 +1115,7 @@ async def test_failure_finalization_marks_open_tool_and_task_nodes_failed(
 
     await finalize_failure(recorder, GeneratorExit())
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     child_nodes = [
         node
         for node in latest.values()
@@ -1155,9 +1145,9 @@ async def test_orphan_task_stop_after_cancellation_is_retained_under_root(
     )
     await recorder.finalize(error=asyncio.CancelledError())
 
-    latest = {node.index: node for node in nodes(fake_client)}
+    latest = {node.external_id: node for node in nodes(fake_client)}
     task = next(node for node in latest.values() if node.external_id == "orphan-task")
-    assert task.parent_index == 0
+    assert task.parent_external_id == ROOT_EXTERNAL_ID
     assert task.status is NodeStatus.FAILED
 
 
@@ -1181,7 +1171,7 @@ async def test_concurrent_recorders_keep_overlapping_ids_isolated() -> None:
 
     outputs = []
     for client in clients:
-        latest = {node.index: node for node in nodes(client)}
+        latest = {node.external_id: node for node in nodes(client)}
         outputs.append(
             next(
                 node.outputs
