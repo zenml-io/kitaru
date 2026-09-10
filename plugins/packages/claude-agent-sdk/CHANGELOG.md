@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0rc0
+## 0.1.0rc0 - 2026-09-10
 
 - Add one-shot string query recording through the public Claude Agent SDK message stream.
 - Add fresh root-input replay with prompt, system-prompt, and model overrides.

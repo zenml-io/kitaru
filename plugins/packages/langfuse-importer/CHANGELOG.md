@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-09-10
+
+- Require Kitaru 0.26.0 or later for the `api` and `adapter` extras. File-only parsing retains support for Kitaru 0.24.0 or later.
 
 - Support Langfuse SDK 4.15.2's renamed observation model field while retaining support for earlier SDK versions.
 - Standardize source identity precedence as `source_instance`, then `project_id`, then embedded project identity; trim strings, reject other types, and reject embedded conflicts even with overrides.

@@ -920,7 +920,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "kitaru", extras = ["cli", "mcp", "server", "worker"], specifier = ">=0.24.0" },
+    { name = "kitaru", extras = ["cli", "mcp", "server", "worker"], specifier = ">=0.25.0" },
     { name = "kitaru-langfuse-importer", specifier = ">=0.1.1" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], specifier = ">=0.1.0" },
     { name = "langfuse", specifier = ">=4.14,<5" },
