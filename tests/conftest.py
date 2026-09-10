@@ -2939,8 +2939,8 @@ class FakeSessionRepository:
 
     async def get_by_external_id(
         self,
-        imported_from: str | None,
-        external_id: str | None,
+        imported_from: str,
+        external_id: str,
         agent_id: uuid.UUID,
         include_payloads: bool,
     ) -> Session | None:
