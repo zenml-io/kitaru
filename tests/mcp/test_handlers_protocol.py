@@ -840,6 +840,7 @@ async def test_public_activity_preserves_typed_token_usage(
         node_type="llm_call",
         name="model",
         status="completed",
+        started_at=datetime(2026, 1, 1, tzinfo=UTC),
         tokens=usage,
         cost=Decimal("0.2500"),
         metadata={},

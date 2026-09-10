@@ -16,6 +16,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 
 from pydantic import Field
@@ -57,9 +58,8 @@ class SessionNode(DomainModel):
     name: str
     status: NodeStatus
     error: str | None = None
-    started_at: datetime | None = None
+    started_at: datetime
     ended_at: datetime | None = None
-    effective_started_at: datetime
     input_text_selector: str | None = None
     output_text_selector: str | None = None
     system_prompt_selector: str | None = None
@@ -79,6 +79,22 @@ class SessionNode(DomainModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created: datetime | None = None
     updated: datetime | None = None
+
+
+class PendingLinkKind(StrEnum):
+    """Pending link kind."""
+
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+
+
+class PendingParentLink(DomainModel):
+    """Pending parent link."""
+
+    session_id: uuid.UUID
+    parent_external_id: str
+    child_id: uuid.UUID
+    kind: PendingLinkKind
 
 
 def node_rollup_contribution(node: SessionNode | None) -> SessionRollups:

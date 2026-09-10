@@ -68,10 +68,7 @@ SESSION_NODE_REASONING_BLOB_ID_FOREIGN_KEY = foreign_key_name(
 )
 SESSION_NODE_CACHE_KEY_INDEX = index_name("session_node", ["cache_key"])
 SESSION_NODE_POSITION_INDEX = index_name(
-    "session_node", ["session_id", "effective_started_at", "id"]
-)
-SESSION_NODE_PARENT_EXTERNAL_ID_INDEX = index_name(
-    "session_node", ["session_id", "parent_external_id"]
+    "session_node", ["session_id", "started_at", "id"]
 )
 
 NODE_TYPE_LENGTH = 32
@@ -123,13 +120,8 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(
             SESSION_NODE_POSITION_INDEX,
             "session_id",
-            "effective_started_at",
+            "started_at",
             "id",
-        ),
-        Index(
-            SESSION_NODE_PARENT_EXTERNAL_ID_INDEX,
-            "session_id",
-            "parent_external_id",
         ),
     )
 
@@ -148,9 +140,8 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(NODE_STATUS_LENGTH))
     error: Mapped[str | None] = mapped_column(Text)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    effective_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     input_text_selector: Mapped[str | None] = mapped_column(Text)
     output_text_selector: Mapped[str | None] = mapped_column(Text)
     system_prompt_selector: Mapped[str | None] = mapped_column(Text)
@@ -227,7 +218,6 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.error = node.error
         self.started_at = node.started_at
         self.ended_at = node.ended_at
-        self.effective_started_at = node.effective_started_at
         self.input_text_selector = node.input_text_selector
         self.output_text_selector = node.output_text_selector
         self.system_prompt_selector = node.system_prompt_selector
@@ -302,7 +292,6 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,
-            effective_started_at=self.effective_started_at,
             input_text_selector=self.input_text_selector,
             output_text_selector=self.output_text_selector,
             system_prompt_selector=self.system_prompt_selector,

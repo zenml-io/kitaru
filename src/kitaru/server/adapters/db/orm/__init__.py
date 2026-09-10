@@ -46,6 +46,9 @@ from kitaru.server.adapters.db.orm.secret import SecretORM
 from kitaru.server.adapters.db.orm.server_settings import ServerSettingsORM
 from kitaru.server.adapters.db.orm.session import SessionORM
 from kitaru.server.adapters.db.orm.session_node import SessionNodeORM
+from kitaru.server.adapters.db.orm.session_node_pending_link import (
+    SessionNodePendingLinkORM,
+)
 from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
 from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.orm.worker import WorkerORM
@@ -81,6 +84,7 @@ __all__ = [
     "SecretORM",
     "ServerSettingsORM",
     "SessionNodeORM",
+    "SessionNodePendingLinkORM",
     "SessionORM",
     "TagLinkORM",
     "TagORM",

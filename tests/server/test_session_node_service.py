@@ -311,13 +311,12 @@ async def test_ingest_links_a_child_stored_by_an_earlier_batch(
     linked = next(node for node in nodes if node.external_id == "n1")
 
     assert linked.parent_id == parent[0].id
-    assert linked.effective_started_at == _start(0)
 
 
 async def test_ingest_links_a_secondary_parent_that_arrives_later(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
-    """Fill in a secondary parent id once a later batch carries its target."""
+    """Fill the secondary parent ids of a stored child once its parent lands."""
     child = await service.ingest_nodes(
         session_id,
         [_llm_node("n1", secondary_parent_external_ids=["n0"], started_at=_start(1))],
@@ -337,35 +336,103 @@ async def test_ingest_links_a_secondary_parent_that_arrives_later(
     assert linked.secondary_parent_external_ids == ["n0"]
 
 
+async def test_ingest_links_both_reference_kinds_of_one_child(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Link the primary and the secondary reference a later batch resolves."""
+    child = await service.ingest_nodes(
+        session_id,
+        [
+            _llm_node(
+                "n2",
+                parent_external_id="n0",
+                secondary_parent_external_ids=["n1"],
+                started_at=_start(2),
+            )
+        ],
+        actor=ACTOR,
+    )
+    assert child[0].parent_id is None
+    assert child[0].secondary_parent_ids == []
+
+    parents = await service.ingest_nodes(
+        session_id,
+        [_llm_node("n0", started_at=_start(0)), _llm_node("n1", started_at=_start(1))],
+        actor=ACTOR,
+    )
+    nodes = await service.list_all_nodes(
+        session_id, include_payloads=False, actor=ACTOR
+    )
+    linked = next(node for node in nodes if node.external_id == "n2")
+
+    assert linked.parent_id == parents[0].id
+    assert linked.secondary_parent_ids == [parents[1].id]
+
+
+async def test_ingest_replace_recomputes_the_pending_links(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Drop the pending links of a replaced node before recording the new ones."""
+    await service.ingest_nodes(
+        session_id,
+        [_llm_node("n2", parent_external_id="n0", started_at=_start(2))],
+        actor=ACTOR,
+    )
+    await service.ingest_nodes(
+        session_id,
+        [_llm_node("n2", parent_external_id="n1", started_at=_start(2))],
+        actor=ACTOR,
+    )
+
+    dropped = await service.ingest_nodes(
+        session_id, [_llm_node("n0", started_at=_start(0))], actor=ACTOR
+    )
+    nodes = await service.list_all_nodes(
+        session_id, include_payloads=False, actor=ACTOR
+    )
+    child = next(node for node in nodes if node.external_id == "n2")
+    assert child.parent_id is None
+    assert child.parent_external_id == "n1"
+
+    kept = await service.ingest_nodes(
+        session_id, [_llm_node("n1", started_at=_start(1))], actor=ACTOR
+    )
+    nodes = await service.list_all_nodes(
+        session_id, include_payloads=False, actor=ACTOR
+    )
+    child = next(node for node in nodes if node.external_id == "n2")
+
+    assert child.parent_id == kept[0].id
+    assert child.parent_id != dropped[0].id
+
+
 async def test_ingest_inherits_the_parent_start(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
-    """Position a node without a start time at its parent's effective start."""
+    """Fill the start time of a node that reports none from its parent."""
     batch = [
         _llm_node("n0", started_at=_start(0)),
         _llm_node("n1", parent_external_id="n0"),
     ]
     stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
-    assert stored[1].started_at is None
-    assert stored[1].effective_started_at == _start(0)
+    assert stored[1].started_at == _start(0)
 
 
-async def test_ingest_falls_back_to_the_row_start_without_a_parent(
+async def test_ingest_falls_back_to_now_without_a_parent(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
-    """Position a root node without a start time by its own row."""
+    """Fill the start time of a root node that reports none with the current time."""
     before = datetime.now(UTC)
     stored = await service.ingest_nodes(session_id, [_llm_node("n0")], actor=ACTOR)
 
-    assert stored[0].started_at is None
-    assert stored[0].effective_started_at >= before
+    assert stored[0].started_at >= before
 
 
 async def test_ingest_replace_keeps_the_position_of_a_started_node(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:
-    """Carry a resent start time into the effective start of the replacement."""
+    """Carry a resent start time into the replacement."""
     created = await service.ingest_nodes(
         session_id, [_llm_node("n0", started_at=_start(3))], actor=ACTOR
     )
@@ -374,7 +441,7 @@ async def test_ingest_replace_keeps_the_position_of_a_started_node(
     )
 
     assert replaced[0].id == created[0].id
-    assert replaced[0].effective_started_at == _start(3)
+    assert replaced[0].started_at == _start(3)
 
 
 async def test_ingest_replace_clears_omitted_fields(

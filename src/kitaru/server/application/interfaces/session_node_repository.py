@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.session_node import SessionNodeFilter
-from kitaru.server.domain.session_node import SessionNode
+from kitaru.server.domain.session_node import PendingParentLink, SessionNode
 
 
 class SessionNodeRepository(Protocol):
@@ -93,18 +93,31 @@ class SessionNodeRepository(Protocol):
         """
         ...
 
+    async def replace_pending_links(
+        self, child_ids: Sequence[uuid.UUID], links: Sequence[PendingParentLink]
+    ) -> None:
+        """Replace the pending parent links of the given children.
+
+        Args:
+            child_ids: Ids of the children whose pending links are dropped.
+            links: Pending links to store in their place.
+        """
+        ...
+
     async def link_pending_parents(
         self, session_id: uuid.UUID, parents: Sequence[SessionNode]
     ) -> list[SessionNode]:
-        """Link the stored nodes of a session whose references these parents resolve.
+        """Resolve the pending links of a session that name these parents.
+
+        A primary link sets the child's parent id and a secondary link
+        appends to its secondary parent ids. Every resolved link is dropped.
 
         Args:
             session_id: Id of the owning session.
-            parents: Nodes whose external ids the pending references may
-                name.
+            parents: Nodes whose external ids the pending links may name.
 
         Returns:
-            Relinked nodes, without payloads.
+            Linked children, without payloads.
         """
         ...
 

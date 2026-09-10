@@ -326,9 +326,7 @@ def _node(
     started_offset: int | None = None,
     duration: int = 1,
 ) -> SessionNodeResponse:
-    started_at = (
-        NOW + timedelta(seconds=started_offset) if started_offset is not None else None
-    )
+    started_at = NOW + timedelta(seconds=started_offset or 0)
     return SessionNodeResponse(
         id=_id(10_000 + index + int(str(session_id)[-3:], 16)),
         session_id=session_id,
@@ -340,7 +338,11 @@ def _node(
         name=tool_name or model or "node",
         status=status,
         started_at=started_at,
-        ended_at=started_at + timedelta(seconds=duration) if started_at else None,
+        ended_at=(
+            started_at + timedelta(seconds=duration)
+            if started_offset is not None
+            else None
+        ),
         inputs=inputs,
         outputs=outputs,
         requested_model=model,
