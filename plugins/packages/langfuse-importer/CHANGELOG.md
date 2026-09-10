@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Support Langfuse SDK 4.15.2's renamed observation model field while retaining support for earlier SDK versions.
 - Standardize source identity precedence as `source_instance`, then `project_id`, then embedded project identity; trim strings, reject other types, and reject embedded conflicts even with overrides.
 - Require an explicit source identity when an export has no project ID instead of deriving one from the filename; accept `project_id` as an alias for `source_instance` and include a CLI remedy in the error.
 - Remove the importer payload size cap. Uploads are bounded by the server blob limit only.
