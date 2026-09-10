@@ -32,8 +32,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      WRANGLER_VERSION: 4.95.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -83,21 +81,13 @@ jobs:
         working-directory: docs
       - name: Test redirect worker mapping
         run: node --test docs/worker/redirect.test.mjs
-      - name: Put the lockfile-pinned Wrangler on PATH
-        # wrangler-action installs Wrangler with `npm i` in the working directory,
-        # and npm cannot do that at this pnpm workspace root ("Cannot read
-        # properties of null (reading 'edgesOut')"), which failed every
-        # production deploy from 26 Aug to 3 Sep. The docs app pins wrangler as a
-        # dev dependency instead; with its bin dir on PATH the action's
-        # `npx --no-install wrangler --version` probe succeeds and it skips its
-        # own install.
-        if: >-
-          steps.sdk_generator.outputs.available == 'true' &&
-          ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-          github.event_name == 'workflow_dispatch')
+      - name: Validate Cloudflare deployment bundles
+        # Exercise the same lockfile-pinned binary on PRs before it can deploy.
+        if: steps.sdk_generator.outputs.available == 'true'
         run: |
-          echo "$GITHUB_WORKSPACE/docs/node_modules/.bin" >> "$GITHUB_PATH"
-          "$GITHUB_WORKSPACE/docs/node_modules/.bin/wrangler" --version
+          docs/node_modules/.bin/wrangler --version
+          docs/node_modules/.bin/wrangler deploy --dry-run
+          docs/node_modules/.bin/wrangler deploy --dry-run --config wrangler.redirect.toml
       - name: Deploy production docs
         # Push deploys only from main; a manual workflow_dispatch deploys whichever
         # branch it runs against, so docs can be shipped to production from develop.
@@ -105,15 +95,10 @@ jobs:
           steps.sdk_generator.outputs.available == 'true' &&
           ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
           github.event_name == 'workflow_dispatch')
-        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0  # v4.0.0
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # The repository root is a pnpm workspace. Letting the action infer
-          # pnpm makes its temporary Wrangler install fail at the workspace root.
-          packageManager: npm
-          wranglerVersion: ${{ env.WRANGLER_VERSION }}
-          command: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: docs/node_modules/.bin/wrangler deploy
       - name: Deploy redirect worker
         # The kitaru-site worker redirects kitaru.ai/docs/* to their new homes
         # (docs.zenml.io/kitaru, sdkdocs.kitaru.ai). It has no build output, so
@@ -122,13 +107,10 @@ jobs:
           steps.sdk_generator.outputs.available == 'true' &&
           ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
           github.event_name == 'workflow_dispatch')
-        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0  # v4.0.0
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          packageManager: npm
-          wranglerVersion: ${{ env.WRANGLER_VERSION }}
-          command: deploy --config wrangler.redirect.toml
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: docs/node_modules/.bin/wrangler deploy --config wrangler.redirect.toml
   notify-failure:
     # PR runs already surface as a red check; only the production deploy path
     # (push to main, manual dispatch) needs a Discord ping.
