@@ -98,8 +98,6 @@ def session_node_to_response(
     return SessionNodeResponse(
         id=node.id,
         session_id=node.session_id,
-        parent_id=node.parent_id,
-        secondary_parent_ids=node.secondary_parent_ids,
         external_id=node.external_id,
         parent_external_id=node.parent_external_id,
         secondary_parent_external_ids=node.secondary_parent_external_ids,

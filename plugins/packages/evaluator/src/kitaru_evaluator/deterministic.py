@@ -299,28 +299,28 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
         if count > 1
     )
 
-    ids = {node.id for node in nodes}
+    position_by_external_id = {node.external_id: positions[node.id] for node in nodes}
     parent_findings: list[dict[str, Any]] = []
     for node in nodes:
-        parents = [node.parent_id, *node.secondary_parent_ids]
-        missing_ids = sorted(
-            str(parent_id)
-            for parent_id in parents
-            if parent_id is not None and parent_id not in ids
+        parents = [node.parent_external_id, *node.secondary_parent_external_ids]
+        missing_parents = sorted(
+            parent
+            for parent in parents
+            if parent is not None and parent not in position_by_external_id
         )
-        nonpreceding_ids = sorted(
-            str(parent_id)
-            for parent_id in parents
-            if parent_id is not None
-            and parent_id in positions
-            and positions[parent_id] >= positions[node.id]
+        nonpreceding_parents = sorted(
+            parent
+            for parent in parents
+            if parent is not None
+            and parent in position_by_external_id
+            and position_by_external_id[parent] >= positions[node.id]
         )
-        if missing_ids or nonpreceding_ids:
+        if missing_parents or nonpreceding_parents:
             parent_findings.append(
                 {
                     "index": positions[node.id],
-                    "missing_ids": missing_ids,
-                    "nonpreceding_ids": nonpreceding_ids,
+                    "missing_parents": missing_parents,
+                    "nonpreceding_parents": nonpreceding_parents,
                 }
             )
 

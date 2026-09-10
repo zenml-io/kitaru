@@ -3289,11 +3289,10 @@ export interface paths {
          * Ingest Session Nodes
          * @description Ingest a batch of session nodes.
          *
-         *     An external id already stored is replaced whole and keeps its parent
-         *     references, matching the upsert semantics of ``POST /api/v1/workers``.
-         *     Clients observe HTTP 200 on success, 404 when no session has this id,
-         *     409 when the session does not currently accept node ingestion, and 422
-         *     when a node already stored is sent again with different parents.
+         *     An external id already stored is replaced whole, matching the upsert
+         *     semantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,
+         *     404 when no session has this id, and 409 when the session does not
+         *     currently accept node ingestion.
          *
          *     Args:
          *         session_id: Id of the session to ingest into.
@@ -9017,11 +9016,6 @@ export interface components {
              */
             parent_external_id?: string | null;
             /**
-             * Parent Id
-             * @description Parent node.
-             */
-            parent_id?: string | null;
-            /**
              * Reasoning
              * @description Visible reasoning, null unless payloads are included.
              */
@@ -9036,11 +9030,6 @@ export interface components {
              * @description External ids of additional parent nodes.
              */
             secondary_parent_external_ids: string[];
-            /**
-             * Secondary Parent Ids
-             * @description Additional parent nodes.
-             */
-            secondary_parent_ids: string[];
             /**
              * Session Id
              * Format: uuid

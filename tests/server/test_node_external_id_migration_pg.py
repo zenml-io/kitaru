@@ -38,9 +38,9 @@ from kitaru.server.domain.session import Session
 NODE_EXTERNAL_ID_REVISION = "020_node_external_id"
 PREVIOUS_REVISION = "019_import_max_sessions"
 
-PENDING_LINK_TABLE_EXISTS = text("""
-    SELECT count(*) FROM information_schema.tables
-    WHERE table_name = 'session_node_pending_link'
+SESSION_NODE_COLUMNS = text("""
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'session_node'
 """)
 
 INSERT_NODE = text("""
@@ -56,7 +56,7 @@ INSERT_NODE = text("""
 
 
 async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> None:
-    """Backfill identity and references, restoring indexes on downgrade."""
+    """Backfill identity and references, restoring the id links on downgrade."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     settings = db_settings()
@@ -139,13 +139,9 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
         assert references[child_id] == ("call-0", ["index-2"])
         assert references[orphan_id] == (None, [])
         async with engine.connect() as connection:
-            assert (await connection.execute(PENDING_LINK_TABLE_EXISTS)).scalar() == 1
-            pending = (
-                await connection.execute(
-                    text("SELECT count(*) FROM session_node_pending_link")
-                )
-            ).scalar()
-        assert pending == 0
+            columns = (await connection.execute(SESSION_NODE_COLUMNS)).scalars().all()
+        assert "parent_id" not in columns
+        assert "secondary_parent_ids" not in columns
 
         await alembic.downgrade(PREVIOUS_REVISION)
 
@@ -153,28 +149,24 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
         async with engine.connect() as connection:
             downgraded = (
                 await connection.execute(
-                    text('SELECT id, "index" FROM session_node ORDER BY "index"')
+                    text(
+                        'SELECT id, "index", parent_id, secondary_parent_ids '
+                        'FROM session_node ORDER BY "index"'
+                    )
                 )
             ).all()
         assert [row.id for row in downgraded] == [root_id, child_id, orphan_id]
         assert [row.index for row in downgraded] == [0, 1, 2]
+        links = {
+            row.id: (row.parent_id, row.secondary_parent_ids) for row in downgraded
+        }
+        assert links[root_id] == (None, [])
+        assert links[child_id] == (root_id, [str(orphan_id)])
+        assert links[orphan_id] == (None, [])
         async with engine.connect() as connection:
-            columns = (
-                (
-                    await connection.execute(
-                        text(
-                            "SELECT column_name FROM information_schema.columns "
-                            "WHERE table_name = 'session_node'"
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            columns = (await connection.execute(SESSION_NODE_COLUMNS)).scalars().all()
         assert "parent_external_id" not in columns
         assert "secondary_parent_external_ids" not in columns
-        async with engine.connect() as connection:
-            assert (await connection.execute(PENDING_LINK_TABLE_EXISTS)).scalar() == 0
     finally:
         await engine.dispose()
         await drop_test_database(settings)

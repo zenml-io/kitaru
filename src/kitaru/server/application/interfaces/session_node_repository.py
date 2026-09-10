@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.session_node import SessionNodeFilter
-from kitaru.server.domain.session_node import PendingParentLink, SessionNode
+from kitaru.server.domain.session_node import SessionNode
 
 
 class SessionNodeRepository(Protocol):
@@ -90,31 +90,6 @@ class SessionNodeRepository(Protocol):
 
         Returns:
             Every node of the session.
-        """
-        ...
-
-    async def add_pending_links(self, links: Sequence[PendingParentLink]) -> None:
-        """Store pending parent links.
-
-        Args:
-            links: Pending links to store.
-        """
-        ...
-
-    async def link_pending_parents(
-        self, session_id: uuid.UUID, parents: Sequence[SessionNode]
-    ) -> list[SessionNode]:
-        """Resolve the pending links of a session that name these parents.
-
-        A primary link sets the child's parent id and a secondary link
-        appends to its secondary parent ids. Every resolved link is dropped.
-
-        Args:
-            session_id: Id of the owning session.
-            parents: Nodes whose external ids the pending links may name.
-
-        Returns:
-            Linked children, without payloads.
         """
         ...
 

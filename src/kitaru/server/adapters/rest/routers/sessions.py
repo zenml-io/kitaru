@@ -215,11 +215,10 @@ async def ingest_session_nodes(
 ) -> list[SessionNodeResponse]:
     """Ingest a batch of session nodes.
 
-    An external id already stored is replaced whole and keeps its parent
-    references, matching the upsert semantics of ``POST /api/v1/workers``.
-    Clients observe HTTP 200 on success, 404 when no session has this id,
-    409 when the session does not currently accept node ingestion, and 422
-    when a node already stored is sent again with different parents.
+    An external id already stored is replaced whole, matching the upsert
+    semantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,
+    404 when no session has this id, and 409 when the session does not
+    currently accept node ingestion.
 
     Args:
         session_id: Id of the session to ingest into.

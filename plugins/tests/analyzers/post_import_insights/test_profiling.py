@@ -333,7 +333,6 @@ def _node(
         external_id=f"node-{index}",
         parent_external_id=None,
         secondary_parent_external_ids=[],
-        secondary_parent_ids=[],
         node_type=node_type,
         name=tool_name or model or "node",
         status=status,
