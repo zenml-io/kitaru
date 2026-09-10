@@ -22,6 +22,7 @@ from collections.abc import (
     AsyncGenerator,
     Callable,
     Collection,
+    Generator,
     Iterable,
     Mapping,
     Sequence,
@@ -454,6 +455,48 @@ def control_plane_settings(use_db: bool = False, **overrides: Any) -> APISetting
 _postgres_available: bool | None = None
 
 
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Select a stable file-based CI shard when explicitly configured."""
+    index_value = os.environ.get("KITARU_TEST_SHARD_INDEX", "")
+    count_value = os.environ.get("KITARU_TEST_SHARD_COUNT", "")
+    if not index_value and not count_value:
+        return
+    try:
+        index = int(index_value)
+        count = int(count_value)
+    except ValueError as error:
+        raise pytest.UsageError(
+            "KITARU_TEST_SHARD_INDEX and KITARU_TEST_SHARD_COUNT must both be integers"
+        ) from error
+    if count < 1 or not 0 <= index < count:
+        raise pytest.UsageError(
+            "KITARU_TEST_SHARD_COUNT must be positive and "
+            "KITARU_TEST_SHARD_INDEX must be in [0, count)"
+        )
+
+    selected: list[pytest.Item] = []
+    deselected: list[pytest.Item] = []
+    for item in items:
+        path = item.path.relative_to(config.rootpath).as_posix()
+        shard = int(hashlib.sha256(path.encode()).hexdigest(), 16) % count
+        (selected if shard == index else deselected).append(item)
+    items[:] = selected
+    config.hook.pytest_deselected(items=deselected)
+
+
+def pytest_sessionstart() -> None:
+    """Require PostgreSQL before collection when explicitly enabled."""
+    if os.environ.get("KITARU_TEST_REQUIRE_POSTGRES") != "1":
+        return
+    if not asyncio.run(postgres_available()):
+        raise pytest.UsageError(
+            "KITARU_TEST_REQUIRE_POSTGRES=1 but PostgreSQL is not reachable. "
+            "Start PostgreSQL and check KITARU_TEST_DB_HOST and KITARU_TEST_DB_PORT."
+        )
+
+
 async def postgres_available() -> bool:
     """Report whether the local test database accepts connections.
 
@@ -536,6 +579,43 @@ def reap_stale_test_databases() -> None:
     asyncio.run(_drop_stale_test_databases())
 
 
+_repository_template_name: str | None = None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def repository_database_template(
+    reap_stale_test_databases: None,
+) -> Generator[None, None, None]:
+    """Create one empty repository schema to copy into isolated test databases."""
+    global _repository_template_name
+    if not asyncio.run(postgres_available()):
+        yield
+        return
+    template_settings = db_settings()
+
+    async def create_template() -> None:
+        await DatabaseService.create_db(template_settings)
+        engine = create_async_engine(
+            DatabaseService.generate_database_uri(template_settings)
+        )
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+        finally:
+            # PostgreSQL can only copy a template with no open connections.
+            await engine.dispose()
+
+    try:
+        asyncio.run(create_template())
+        _repository_template_name = DatabaseService.application_database_name(
+            template_settings
+        )
+        yield
+    finally:
+        _repository_template_name = None
+        asyncio.run(drop_test_database(template_settings))
+
+
 async def drop_test_database(settings: APISettings) -> None:
     """Drop the database a test created.
 
@@ -599,11 +679,30 @@ async def pg_session_with_engine() -> AsyncGenerator[
         Session bound to the test database engine, and the engine itself.
     """
     settings = db_settings()
-    await DatabaseService.create_db(settings)
+    if _repository_template_name is None:
+        await DatabaseService.create_db(settings)
+    else:
+        database_name = DatabaseService.application_database_name(settings)
+        admin_engine = create_async_engine(
+            DatabaseService.generate_database_uri(settings, use_default_db=True)
+        )
+        try:
+            async with admin_engine.execution_options(
+                isolation_level="AUTOCOMMIT"
+            ).begin() as connection:
+                await connection.execute(
+                    text(
+                        f'CREATE DATABASE "{database_name}" '
+                        f'TEMPLATE "{_repository_template_name}"'
+                    )
+                )
+        finally:
+            await admin_engine.dispose()
     engine = create_async_engine(DatabaseService.generate_database_uri(settings))
     try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
+        if _repository_template_name is None:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
         session_factory = async_sessionmaker(
             bind=engine, class_=AsyncSession, expire_on_commit=False
         )

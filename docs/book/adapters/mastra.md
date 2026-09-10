@@ -1,5 +1,5 @@
 ---
-description: Record and replay non-streaming Mastra agent runs with the Kitaru TypeScript adapter
+description: Record Mastra agent runs, import existing trace exports, and replay with recorded conversation context
 icon: robot
 ---
 
@@ -10,6 +10,8 @@ The Kitaru Mastra adapter wraps an existing Mastra `Agent` and records each non-
 {% hint style="warning" %}
 `@zenml-io/kitaru-mastra` supports Node `>=22.22.0 <23` and `@mastra/core >=1.51.0 <1.65.0`. It supports non-streaming `Agent.generate()` only.
 {% endhint %}
+
+To bring in runs already recorded by Mastra, use [Import existing Mastra traces](#import-existing-mastra-traces). Importing an export does not require the original run to have used `KitaruAgent`.
 
 ## Install
 
@@ -109,7 +111,7 @@ The Mastra adapter supports these [tool policies](../guides/tool-policies.md) fo
 | `history` | Looks up a previous result using the tool name and JSON inputs. On a miss, `fail`, `passthrough`, and `error_result` behavior is supported. |
 | `llm` | Rejected before the tool executes; this policy is not supported in 0.1.0. |
 
-History matching is guaranteed only when both the recording and replay use this Mastra adapter. Another framework may apply schema defaults, coercion, or serialization differently, which changes the history key even when the logical tool call looks equivalent.
+History matching uses the tool name and original JSON arguments. The Mastra importer preserves the raw exported arguments and result for this lookup, including arguments that a tool schema later coerces or fills with defaults. Other import formats or frameworks may serialize arguments differently, so matching logical calls alone does not guarantee a history match.
 
 A completed history match replays its result, including `null`, without executing the live tool. A failed match throws `ToolPolicyError` with its stored error text and does not execute the live tool. Only a genuine miss follows the policy's `on_miss` behavior.
 
@@ -175,6 +177,78 @@ The adapter supports:
 - Schema-only structured output and per-run secondary structuring models with strict validation.
 
 It does not support streaming, workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, `prepareStep`, input processors, LLM tool policy, or TypeScript evaluators. `prepareStep` and input processors are rejected during replay because they can replace the model, prompt, or tools after policy preflight.
+
+## Import existing Mastra traces
+
+Use the Mastra importer when the run already exists in Mastra observability. Each full trace becomes one Kitaru session, with its source inputs, outputs, span hierarchy, model usage, and tool arguments and results. Invocations from the same thread remain separate sessions; `metadata.mastra.conversation_id` retains their shared identity. The importer does not join a conversation into one synthetic invocation.
+
+### Export and register
+
+Save the JSON response from Mastra's full `GET /observability/traces/{traceId}` endpoint, or serialize the storage `getTrace({traceId})` result. The verified format is Mastra core 1.51.0: an object with `traceId` and a `spans` array containing the root and descendants. To import several selected traces, save a JSON array of those complete responses. Trace-list summaries, `getTraceLight`, raw exporter events, and OpenTelemetry payloads are not accepted substitutes.
+
+The importer is not registered automatically under `kitaru/`. From a Kitaru source checkout containing `plugins/packages/mastra-importer`, upload the parser script once to your selected server:
+
+```bash
+kitaru importer register mastra-export \
+  --provider mastra \
+  --script plugins/packages/mastra-importer/src/kitaru_mastra_importer/importer.py \
+  --entrypoint parse
+```
+
+These commands use the server selected by `kitaru login`. Pass `--server URL` to select another server explicitly. Registration creates the importer and its first version; reuse that importer for subsequent uploads. A [worker](../concepts/workers.md) must be running to parse the file.
+
+### Import for inspection or replay
+
+Select an existing agent version that represents the exported run. For replay, its registered Node command must use the context-capable `KitaruAgent` described in [Memory behavior](#memory-behavior), with the same callable tool names and compatible schemas. An importer preserves the trace; it does not supply runnable agent code.
+
+For inspection and evaluation, import the file without replay parameters:
+
+```bash
+kitaru session import mastra-traces.json \
+  --importer mastra-export@latest \
+  --agent support-agent@latest \
+  --media-type application/json \
+  --wait
+```
+
+Default imports preserve the raw invocation input and set `metadata.mastra.replay.eligible` to `false`. The root input alone may omit recalled history, so do not treat it as complete replay context.
+
+For a known history-only memory invocation, choose the following mode **on the first import**:
+
+```bash
+kitaru session import mastra-traces.json \
+  --importer mastra-export@latest \
+  --agent support-agent@latest \
+  --params '{"replay_context":"history-only","source_namespace":"support-production"}' \
+  --media-type application/json \
+  --wait
+```
+
+`replay_context` declares that the original agent used history-only memory, without working, semantic, or observational memory, custom input processors, or `prepareStep`. The export does not prove these configuration choices; use this mode only when you know them. It preserves the original invocation under `supplied_messages` and puts the initial full model messages, including system instructions and recalled history, in a versioned `mastra_conversation_context` snapshot. Missing or ambiguous context and unfinished spans make the snapshot incomplete; the adapter rejects it before model execution. Prompt and system-instruction overrides on these snapshots are unsupported.
+
+List the imported sessions and inspect one before replaying:
+
+```bash
+kitaru session list --agent support-agent --origin imported --imported-from mastra
+kitaru session get <session-id> --output json
+```
+
+Check `metadata.mastra.replay.eligible` and its reasons. Eligibility metadata is advisory, not a server-enforced ban on replay. For an eligible snapshot, create a [replay](../concepts/replay.md) with an existing evaluator and baseline tool history:
+
+```bash
+kitaru replay create <session-id> \
+  --evaluator your-evaluator@latest \
+  --tool-policy '{"default":{"type":"history","scope":"baseline","on_miss":"fail"}}' \
+  --output json
+```
+
+The worker calls the model again with the saved context. A matching tool call returns its recorded result without executing the live tool; an unmatched call fails. Use the returned job ID with `kitaru job watch <job-id>` to follow completion.
+
+### Identity and limits
+
+Reimporting a trace skips the existing session rather than updating it. Keep `source_namespace` stable for one source deployment; it distinguishes deployments that might reuse trace IDs. Changing parameters alone does not upgrade a default import into a replay snapshot. If you already imported the trace without replay context, use a new explicit namespace to create a separate replay-ready copy.
+
+The importer accepts selected files only; it does not fetch traces or live memory. It preserves usage reported by the export without counting generation totals twice, and imports monetary cost only when the source explicitly identifies USD. Missing usage and cost remain missing. Malformed traces produce isolated import failures while valid neighboring traces continue. See [Importing sessions](../guides/importing-sessions.md) for import counts and failure inspection.
 
 ## Runnable example
 

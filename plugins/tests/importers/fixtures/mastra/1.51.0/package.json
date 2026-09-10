@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "@mastra/core": "1.51.0",
+    "@mastra/observability": "1.16.0",
+    "zod": "4.3.6"
+  }
+}

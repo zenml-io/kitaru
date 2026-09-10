@@ -1,0 +1,91 @@
+{
+  "model": "openai/gpt-4.1-mini",
+  "providerCalls": 2,
+  "executed": [
+    {
+      "value": 3
+    }
+  ],
+  "output": "Your secret code is ORBIT-47, and double 3 is 6.",
+  "requests": [
+    {
+      "path": "/v1/responses",
+      "model": "gpt-4.1-mini",
+      "input": [
+        {
+          "role": "system",
+          "content": "Use the prior conversation to recall the secret code. Call the double tool exactly once for the requested number. After the tool result, answer in one short sentence containing both the secret code and computed result. Never call the tool twice."
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "My secret code is ORBIT-47. Remember it for my next question."
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "What is my secret code, and what is double 3? Use the tool."
+            }
+          ]
+        }
+      ],
+      "max_output_tokens": 150
+    },
+    {
+      "path": "/v1/responses",
+      "model": "gpt-4.1-mini",
+      "input": [
+        {
+          "role": "system",
+          "content": "Use the prior conversation to recall the secret code. Call the double tool exactly once for the requested number. After the tool result, answer in one short sentence containing both the secret code and computed result. Never call the tool twice."
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "My secret code is ORBIT-47. Remember it for my next question."
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "What is my secret code, and what is double 3? Use the tool."
+            }
+          ]
+        },
+        {
+          "type": "function_call",
+          "call_id": "call_VdiYXhnlCCImYGfY1XerKLLF",
+          "name": "double",
+          "arguments": "{\"value\":3}"
+        },
+        {
+          "type": "function_call_output",
+          "call_id": "call_VdiYXhnlCCImYGfY1XerKLLF",
+          "output": "{\"doubled\":6}"
+        }
+      ],
+      "max_output_tokens": 150
+    }
+  ],
+  "configuration": {
+    "memory": "Native Mastra history only; lastMessages10; no semantic/working/observational memory, prepareStep, or custom processors",
+    "instructions": "Use the prior conversation to recall the secret code. Call the double tool exactly once for the requested number. After the tool result, answer in one short sentence containing both the secret code and computed result. Never call the tool twice."
+  },
+  "versions": {
+    "core": "1.51.0",
+    "observability": "1.16.0",
+    "zod": "4.3.6"
+  },
+  "command": "node generate.mjs"
+}

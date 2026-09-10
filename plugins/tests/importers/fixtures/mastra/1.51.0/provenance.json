@@ -1,0 +1,14 @@
+{
+  "description": "Unmodified JSON serialization of two storage.getTrace({traceId}) results produced by real Mastra Agent.generate calls against a deterministic local LanguageModelV2 implementation. No model service called. IDs/timestamps other than explicit traceIds are runtime generated.",
+  "versions": {
+    "@mastra/core": "1.51.0",
+    "@mastra/observability": "1.16.0",
+    "zod": "4.3.6"
+  },
+  "sourceContract": "https://unpkg.com/@mastra/core@1.51.0/dist/storage/domains/observability/tracing.d.ts",
+  "sourceSpanTypes": "https://unpkg.com/@mastra/core@1.51.0/dist/observability/types/tracing.d.ts",
+  "traceEnvelope": "Array is our selection envelope, not a Mastra server response. Each item is an untouched Mastra getTrace response: {traceId,spans}.",
+  "reproduce": "npm ci --cache /tmp/mastra-npm-cache && node generate.mjs",
+  "toolNormalization": "Model raw argument value is string 3. Mastra tool schema coerces to number and applies default label before execute. Span input retains original raw arguments. evidence.json records actual execute input and model prompt arrays.",
+  "cost": "No monetary cost fields emitted; synthetic usage values supplied by local model."
+}

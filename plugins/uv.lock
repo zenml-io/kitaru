@@ -25,6 +25,7 @@ members = [
     "kitaru-langgraph",
     "kitaru-langsmith-importer",
     "kitaru-logfire-importer",
+    "kitaru-mastra-importer",
     "kitaru-openai-agents",
     "kitaru-phoenix-importer",
     "kitaru-post-import-insights",
@@ -41,6 +42,7 @@ dev = [
     { name = "kitaru-langgraph", extras = ["deepagents"], editable = "packages/langgraph" },
     { name = "kitaru-langsmith-importer", extras = ["adapter"], editable = "packages/langsmith-importer" },
     { name = "kitaru-logfire-importer", extras = ["adapter"], editable = "packages/logfire-importer" },
+    { name = "kitaru-mastra-importer", editable = "packages/mastra-importer" },
     { name = "kitaru-openai-agents", editable = "packages/openai-agents" },
     { name = "kitaru-phoenix-importer", extras = ["adapter"], editable = "packages/phoenix-importer" },
     { name = "kitaru-post-import-insights", extras = ["openai"], editable = "packages/post-import-insights" },
@@ -1430,6 +1432,17 @@ requires-dist = [
     { name = "logfire", marker = "extra == 'api'", specifier = ">=4.35,<6" },
 ]
 provides-extras = ["api", "adapter"]
+
+[[package]]
+name = "kitaru-mastra-importer"
+version = "0.1.0"
+source = { editable = "packages/mastra-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-openai-agents"
