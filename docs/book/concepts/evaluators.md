@@ -9,7 +9,7 @@ Replay tells you what a change _did_; evaluators tell you whether it _helped_. A
 
 Because evaluators run against recorded sessions, they evaluate baselines, replays, and imported traces identically. The same evaluator you run over today's production traffic runs over the fork you're thinking about shipping.
 
-Evaluators can also declare a provider and connection schema, the same as analyzers and importers.
+An evaluator that calls a model or another external service can declare its provider and a connection schema, the environment variables its SDK reads, so a [connection](../guides/provider-connections.md) supplies the credentials at run time.
 
 ## The evaluator contract
 
