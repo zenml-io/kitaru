@@ -37,9 +37,6 @@ from kitaru.server.application.models.imports import (
 )
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
 from kitaru.server.application.services.analyzer_resolution import validate_analyzers
-from kitaru.server.application.services.connection_resolution import (
-    resolve_connection_id,
-)
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
 from kitaru.server.application.services.import_pipeline import (
     build_analysis_task,
@@ -48,6 +45,7 @@ from kitaru.server.application.services.import_pipeline import (
 from kitaru.server.application.services.plugin_resolution import (
     get_plugin_task_labels,
     resolve_plugin,
+    resolve_plugin_credentials,
     resolve_plugin_version,
 )
 from kitaru.server.application.services.task_transitions import TaskTransitions
@@ -145,18 +143,12 @@ class ImportService:
             payload_blob_id = payload.id
         # Only fetch talks to the provider, so a file import resolves no
         # connection and never needs the worker's credentials.
-        connection_id = (
-            await resolve_connection_id(
-                command.connection_id, plugin.provider, self._connections
+        if command.fetch_query is not None:
+            connection_id, requires_credentials = await resolve_plugin_credentials(
+                plugin, command.connection_id, self._connections
             )
-            if command.fetch_query is not None
-            else None
-        )
-        requires_credentials = (
-            command.fetch_query is not None
-            and plugin.connection_schema is not None
-            and connection_id is None
-        )
+        else:
+            connection_id, requires_credentials = None, False
         agent = await self._agents.get(command.agent_id)
         if command.agent_version_id is not None:
             await resolve_agent_id(
@@ -237,9 +229,7 @@ class ImportService:
         # The job was just created in this call and cannot have settled yet, so
         # the tasks skip add_tasks' settled check.
         tasks: list[Task] = [
-            await build_analysis_task(
-                analyzer, import_, job.id, self._plugins, len(sessions)
-            )
+            await build_analysis_task(analyzer, import_, job.id, len(sessions))
             for analyzer in analyzers
         ]
         await self._tasks.create_many(tasks)

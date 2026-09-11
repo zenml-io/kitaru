@@ -498,7 +498,6 @@ class ExperimentService:
             job_repository=self._jobs,
             task_repository=self._tasks,
             evaluation_repository=self._evaluations,
-            plugin_repository=self._plugin_repository,
             payload_store=self._payload_store,
         )
         counts = await self._replays.count_by_status(run.id)

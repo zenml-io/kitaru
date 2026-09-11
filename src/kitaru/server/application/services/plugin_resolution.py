@@ -13,15 +13,22 @@
 #  permissions and limitations under the License.
 """Generic plugin and plugin version resolution."""
 
+import uuid
+from collections.abc import Sequence
+
 from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL
-from kitaru.server.application.interfaces.plugin_repository import PluginRepository
-from kitaru.server.domain.names import get_namespace
-from kitaru.server.domain.plugin import (
-    Plugin,
-    PluginKind,
-    PluginNotFound,
-    PluginVersion,
+from kitaru.base import FrozenModel
+from kitaru.server.application.interfaces.connection_repository import (
+    ConnectionRepository,
 )
+from kitaru.server.application.interfaces.plugin_repository import PluginRepository
+from kitaru.server.application.services.connection_resolution import (
+    resolve_connection_id,
+)
+from kitaru.server.domain.base import ValidationError
+from kitaru.server.domain.names import get_namespace
+from kitaru.server.domain.plugin import Plugin, PluginKind, PluginVersion
+from kitaru.server.domain.replay_config import PluginConfig
 from kitaru.server.domain.task import RESERVED_LABEL_PREFIX
 
 
@@ -67,25 +74,98 @@ async def resolve_plugin_version(
     return await repository.get_version(plugin.id, number)
 
 
-async def has_connection_schema(
-    kind: PluginKind, name: str, plugin_repository: PluginRepository
-) -> bool:
-    """Report whether the named plugin declares a connection schema.
+class ResolvedPlugin(FrozenModel):
+    """Resolved plugin."""
+
+    plugin: Plugin
+    plugin_version: PluginVersion
+    connection_id: uuid.UUID | None
+    requires_credentials: bool
+
+
+async def resolve_plugin_credentials(
+    plugin: Plugin,
+    connection_id: uuid.UUID | None,
+    connection_repository: ConnectionRepository,
+) -> tuple[uuid.UUID | None, bool]:
+    """Resolve a plugin's connection and whether it needs the worker's credentials.
 
     Args:
-        kind: Plugin kind.
-        name: Plugin name.
-        plugin_repository: Plugin repository.
+        plugin: Plugin providing the connection provider and schema.
+        connection_id: Named connection, None resolves the provider's default.
+        connection_repository: Connection repository.
+
+    Raises:
+        ConnectionNotFound: No connection has the named id.
 
     Returns:
-        Whether the plugin declares a connection schema, False once the
-        plugin is deleted.
+        Resolved connection id and whether the claiming worker must hold the
+        provider's credentials.
     """
-    try:
-        plugin = await plugin_repository.get_by_name(kind, name)
-    except PluginNotFound:
-        return False
-    return plugin.connection_schema is not None
+    resolved = await resolve_connection_id(
+        connection_id, plugin.provider, connection_repository
+    )
+    requires_credentials = plugin.connection_schema is not None and resolved is None
+    return resolved, requires_credentials
+
+
+async def resolve_plugin_config(
+    name: str,
+    version: int | None,
+    kind: PluginKind,
+    connection_id: uuid.UUID | None,
+    plugin_repository: PluginRepository,
+    connection_repository: ConnectionRepository,
+) -> ResolvedPlugin:
+    """Resolve a plugin, its version, and its connection credentials together.
+
+    Args:
+        name: Plugin name.
+        version: Explicit version number, None resolves to the latest.
+        kind: Plugin kind.
+        connection_id: Named connection, None resolves the provider's default.
+        plugin_repository: Plugin repository, queried for the given kind.
+        connection_repository: Connection repository.
+
+    Raises:
+        PluginNotFound: No plugin has this kind and name.
+        PluginVersionNotFound: The resolved version has no matching plugin
+            version.
+        ConnectionNotFound: No connection has the named id.
+
+    Returns:
+        Resolved plugin, version, connection id, and credential requirement.
+    """
+    plugin = await resolve_plugin(name, kind, plugin_repository)
+    plugin_version = await resolve_plugin_version(plugin, version, plugin_repository)
+    connection_id, requires_credentials = await resolve_plugin_credentials(
+        plugin, connection_id, connection_repository
+    )
+    return ResolvedPlugin(
+        plugin=plugin,
+        plugin_version=plugin_version,
+        connection_id=connection_id,
+        requires_credentials=requires_credentials,
+    )
+
+
+def check_unique_plugin_versions(configs: Sequence[PluginConfig], label: str) -> None:
+    """Reject a resolved plugin version that appears more than once.
+
+    Args:
+        configs: Resolved plugin configs.
+        label: Plugin kind, used to name the list in the error message.
+
+    Raises:
+        ValidationError: Two configs resolve to the same plugin version.
+    """
+    seen_ids: set[uuid.UUID] = set()
+    for config in configs:
+        if config.plugin_version_id in seen_ids:
+            raise ValidationError(
+                f"An {label} version appears more than once in the {label} list"
+            )
+        seen_ids.add(config.plugin_version_id)
 
 
 PLUGIN_NAMESPACE_LABEL = f"{RESERVED_LABEL_PREFIX}plugin_namespace"

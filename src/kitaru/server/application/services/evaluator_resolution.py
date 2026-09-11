@@ -21,14 +21,9 @@ from kitaru.server.application.interfaces.connection_repository import (
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
-from kitaru.server.application.services.connection_resolution import (
-    resolve_connection_id,
-)
 from kitaru.server.application.services.plugin_resolution import (
-    get_plugin_task_labels,
-    has_connection_schema,
-    resolve_plugin,
-    resolve_plugin_version,
+    check_unique_plugin_versions,
+    resolve_plugin_config,
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.names import RESERVED_NAMESPACE
@@ -92,27 +87,27 @@ async def resolve_evaluator_config(
         Resolved evaluator config carrying the concrete version and its id.
     """
     _ = actor
-    plugin = await resolve_plugin(
-        config.evaluator, PluginKind.EVALUATOR, plugin_repository
+    resolved = await resolve_plugin_config(
+        config.evaluator,
+        config.version,
+        PluginKind.EVALUATOR,
+        None,
+        plugin_repository,
+        connection_repository,
     )
-    if plugin.agent_id is not None and plugin.agent_id != agent_id:
+    if resolved.plugin.agent_id is not None and resolved.plugin.agent_id != agent_id:
         raise ValidationError(
             f"Evaluator '{config.evaluator}' is scoped to a different agent"
         )
-    plugin_version = await resolve_plugin_version(
-        plugin, config.version, plugin_repository
-    )
     _validate_builtin_evaluator_params(config)
-    connection_id = await resolve_connection_id(
-        None, plugin.provider, connection_repository
-    )
     return EvaluatorConfig(
         evaluator=config.evaluator,
-        version=plugin_version.version,
+        version=resolved.plugin_version.version,
         params=config.params,
-        evaluator_version_id=plugin_version.id,
-        provider=plugin.provider,
-        connection_id=connection_id,
+        evaluator_version_id=resolved.plugin_version.id,
+        provider=resolved.plugin.provider,
+        connection_id=resolved.connection_id,
+        requires_credentials=resolved.requires_credentials,
     )
 
 
@@ -148,34 +143,5 @@ async def validate_evaluators(
         )
         for config in configs
     ]
-    seen_ids: set[uuid.UUID] = set()
-    for evaluator_config in resolved:
-        if evaluator_config.evaluator_version_id in seen_ids:
-            raise ValidationError(
-                "An evaluator version appears more than once in the evaluator list"
-            )
-        seen_ids.add(evaluator_config.evaluator_version_id)
+    check_unique_plugin_versions(resolved, "evaluator")
     return resolved
-
-
-async def get_evaluator_task_labels(
-    evaluator: EvaluatorConfig, plugin_repository: PluginRepository
-) -> dict[str, str]:
-    """Build the labels stamped on a task running an evaluator.
-
-    Args:
-        evaluator: Resolved evaluator config.
-        plugin_repository: Plugin repository, for the evaluator's connection
-            schema.
-
-    Returns:
-        Evaluation task labels.
-    """
-    return get_plugin_task_labels(
-        evaluator.evaluator,
-        evaluator.provider,
-        evaluator.connection_id is None
-        and await has_connection_schema(
-            PluginKind.EVALUATOR, evaluator.evaluator, plugin_repository
-        ),
-    )

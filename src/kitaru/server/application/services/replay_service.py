@@ -220,7 +220,6 @@ class ReplayService:
             job_repository=self._jobs,
             task_repository=self._tasks,
             evaluation_repository=self._evaluations,
-            plugin_repository=self._plugins,
             payload_store=self._payload_store,
         )
         if self._analytics is not None:

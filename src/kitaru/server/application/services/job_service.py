@@ -37,10 +37,8 @@ from kitaru.server.application.models.task import TaskFilter, TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
-from kitaru.server.application.services.evaluator_resolution import (
-    get_evaluator_task_labels,
-    validate_evaluators,
-)
+from kitaru.server.application.services.evaluator_resolution import validate_evaluators
+from kitaru.server.application.services.plugin_resolution import get_plugin_task_labels
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import Job, JobAlreadySettled, JobNotSettled
@@ -356,12 +354,6 @@ class JobService:
             actor,
         )
         job = await self.create_job(JobKind.EVALUATION, actor)
-        labels = {
-            evaluator.evaluator_version_id: await get_evaluator_task_labels(
-                evaluator, self._plugins
-            )
-            for evaluator in evaluators
-        }
         # The job was just created in this call and cannot have settled yet, so
         # each pair skips add_task's redundant per-iteration settled check.
         for session_id in command.input_session_ids:
@@ -372,7 +364,11 @@ class JobService:
                         plugin_version_id=evaluator.evaluator_version_id,
                         input_session_id=session_id,
                         connection_id=evaluator.connection_id,
-                        labels=labels[evaluator.evaluator_version_id],
+                        labels=get_plugin_task_labels(
+                            evaluator.evaluator,
+                            evaluator.provider,
+                            evaluator.requires_credentials,
+                        ),
                         params=evaluator.params,
                         on_failure=TaskOnFailure.CONTINUE,
                     )

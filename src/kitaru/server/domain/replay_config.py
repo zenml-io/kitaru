@@ -69,27 +69,44 @@ class ReplayOverride(FrozenModel):
     model_params: dict[str, Any] | None = None
 
 
-class EvaluatorConfig(FrozenModel):
+class PluginConfig(FrozenModel):
+    """Plugin config."""
+
+    version: int
+    params: dict[str, Any] = Field(default_factory=dict)
+    provider: str | None = None
+    connection_id: uuid.UUID | None = None
+    requires_credentials: bool = False
+
+    @property
+    def plugin_version_id(self) -> uuid.UUID:
+        """Id of the resolved plugin version."""
+        raise NotImplementedError
+
+
+class EvaluatorConfig(PluginConfig):
     """Evaluator config."""
 
     evaluator: NamespacedName
-    version: int
-    params: dict[str, Any] = Field(default_factory=dict)
     evaluator_version_id: uuid.UUID
-    provider: str | None = None
-    connection_id: uuid.UUID | None = None
+
+    @property
+    def plugin_version_id(self) -> uuid.UUID:
+        """Id of the resolved plugin version."""
+        return self.evaluator_version_id
 
 
-class AnalyzerConfig(FrozenModel):
+class AnalyzerConfig(PluginConfig):
     """Analyzer config."""
 
     analyzer: NamespacedName
     min_sessions: int | None = Field(default=None, ge=1)
-    version: int
-    params: dict[str, Any] = Field(default_factory=dict)
     analyzer_version_id: uuid.UUID
-    provider: str | None = None
-    connection_id: uuid.UUID | None = None
+
+    @property
+    def plugin_version_id(self) -> uuid.UUID:
+        """Id of the resolved plugin version."""
+        return self.analyzer_version_id
 
     def get_min_sessions(self) -> int:
         """Return the explicit minimum or the analyzer's default."""

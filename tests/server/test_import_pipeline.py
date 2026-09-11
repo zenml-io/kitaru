@@ -72,7 +72,7 @@ async def _evaluator(
     name: str,
     connection_id: uuid.UUID | None = None,
     provider: str | None = None,
-    connection_schema: dict[str, Any] | None = None,
+    requires_credentials: bool = False,
 ) -> EvaluatorConfig:
     plugin = await create_plugin(
         services.plugins,
@@ -80,7 +80,6 @@ async def _evaluator(
         kind=PluginKind.EVALUATOR,
         name=name,
         provider=provider,
-        connection_schema=connection_schema,
     )
     blob = await create_blob(services.blobs, ACTOR.account.id, content=name.encode())
     version = await services.plugins.create_version(
@@ -95,6 +94,7 @@ async def _evaluator(
         evaluator_version_id=version.id,
         provider=plugin.provider,
         connection_id=connection_id,
+        requires_credentials=requires_credentials,
     )
 
 
@@ -103,7 +103,7 @@ async def _analyzer(
     name: str,
     connection_id: uuid.UUID | None = None,
     provider: str | None = None,
-    connection_schema: dict[str, Any] | None = None,
+    requires_credentials: bool = False,
     min_sessions: int | None = None,
 ) -> AnalyzerConfig:
     plugin = await create_plugin(
@@ -112,7 +112,6 @@ async def _analyzer(
         kind=PluginKind.ANALYZER,
         name=name,
         provider=provider,
-        connection_schema=connection_schema,
     )
     blob = await create_blob(services.blobs, ACTOR.account.id, content=name.encode())
     version = await services.plugins.create_version(
@@ -128,6 +127,7 @@ async def _analyzer(
         analyzer_version_id=version.id,
         provider=plugin.provider,
         connection_id=connection_id,
+        requires_credentials=requires_credentials,
     )
 
 
@@ -344,7 +344,7 @@ async def test_evaluator_task_requires_credentials_without_a_connection(
 ) -> None:
     """An evaluator with a connection schema and no connection needs the worker's."""
     evaluator = await _evaluator(
-        services, "accuracy", provider="openai", connection_schema={"type": "object"}
+        services, "accuracy", provider="openai", requires_credentials=True
     )
 
     labels = await _single_evaluator_task_labels(services, evaluator)
@@ -361,7 +361,6 @@ async def test_evaluator_task_with_a_connection_requires_no_credentials(
         "accuracy",
         connection_id=uuid.uuid4(),
         provider="openai",
-        connection_schema={"type": "object"},
     )
 
     labels = await _single_evaluator_task_labels(services, evaluator)
@@ -652,7 +651,7 @@ async def test_analysis_task_requires_credentials_without_a_connection(
 ) -> None:
     """An analyzer with a connection schema and no connection needs the worker's."""
     analyzer = await _analyzer(
-        services, "trends", provider="openai", connection_schema={"type": "object"}
+        services, "trends", provider="openai", requires_credentials=True
     )
 
     labels = await _single_analysis_task_labels(services, analyzer)
@@ -669,7 +668,6 @@ async def test_analysis_task_with_a_connection_requires_no_credentials(
         "trends",
         connection_id=uuid.uuid4(),
         provider="openai",
-        connection_schema={"type": "object"},
     )
 
     labels = await _single_analysis_task_labels(services, analyzer)

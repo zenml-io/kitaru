@@ -7283,7 +7283,6 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_repository=sessions,
         import_repository=imports,
         insight_repository=insights,
-        plugin_repository=plugins,
     )
     transitions = TaskTransitions(
         task_repository=tasks,
