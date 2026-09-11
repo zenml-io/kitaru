@@ -154,7 +154,7 @@ Baseline history consumes matching results by occurrence. Concurrent calls with 
 
 ## Data and quality
 
-Kitaru stores prompts, tool arguments and results, model output, reasoning text, and failure summaries as trace data. The adapter limits the size of recorded values and excludes some provider-only fields. It does not add its own redaction policy. Filter data in your application when needed, and set suitable access and retention rules on the Kitaru server.
+Kitaru stores prompts, tool arguments and results, model output, reasoning text, and failure summaries as trace data. Visible reasoning text lives under `outputs.thinking`, and the node's `reasoning_selectors` point at it, for example `/thinking/0`, the same way `output_text_selector` points at the display text. The adapter limits the size of recorded values and excludes some provider-only fields. It does not add its own redaction policy. Filter data in your application when needed, and set suitable access and retention rules on the Kitaru server.
 
 The session's root node records the prompt string actually sent to Claude as the `effective_prompt` attribute. A replay that overrides the prompt keeps the baseline prompt in the session inputs, the shared Kitaru convention that lets a cohort compare arms on one task input, so the root attribute is where you read the text the model received. A prompt longer than the adapter's recorded-value limit is stored as `{"value": "...", "truncated": true}` rather than as a silently shortened string.
 
