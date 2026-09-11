@@ -830,14 +830,13 @@ async def test_analyze_import_returns_skip_without_sessions(
     response = await client.get(f"/api/v1/tasks/{task.id}")
     assert response.status_code == 200
     skipped = response.json()
-    assert skipped["status"] == "completed"
+    assert skipped["status"] == "skipped"
     assert skipped["attempt"] == 0
     assert skipped["worker_id"] is None
     assert skipped["started_at"] is None
     assert skipped["ended_at"] is not None
     assert skipped["error"] is None
     assert skipped["result"] == {
-        "status": "skipped",
         "reason": "insufficient_sessions",
         "eligible_sessions": 0,
         "min_sessions": 1,

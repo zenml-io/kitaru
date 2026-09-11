@@ -41,6 +41,7 @@ _FAILED_TASK_STATUSES = {
 }
 _TERMINAL_TASK_STATUSES = {
     TaskStatus.COMPLETED,
+    TaskStatus.SKIPPED,
     *_FAILED_TASK_STATUSES,
     TaskStatus.CANCELED,
 }

@@ -60,6 +60,7 @@ const TASK_STATUSES = new Set([
   "claimed",
   "running",
   "completed",
+  "skipped",
   "failed",
   "timed_out",
   "canceled",

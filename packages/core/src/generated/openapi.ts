@@ -9666,7 +9666,7 @@ export interface components {
          * @description Task status.
          * @enum {string}
          */
-        TaskStatus: "pending" | "claimed" | "running" | "completed" | "failed" | "timed_out" | "canceled" | "abandoned";
+        TaskStatus: "pending" | "claimed" | "running" | "completed" | "skipped" | "failed" | "timed_out" | "canceled" | "abandoned";
         /**
          * TaskUpdateRequest
          * @description Task update request.

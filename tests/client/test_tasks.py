@@ -150,7 +150,7 @@ async def test_task_result_preserves_json(
     task = await create_agent_task(services.tasks, job.id)
     result: dict[str, int | str] = {"eligible_sessions": 3, "min_sessions": 5}
     if skipped:
-        result.update(status="skipped", reason="insufficient_sessions")
+        result.update(reason="insufficient_sessions")
     task.result = result
     await services.tasks.update(task)
 
