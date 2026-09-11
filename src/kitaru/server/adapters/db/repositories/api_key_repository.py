@@ -23,7 +23,7 @@ from kitaru.server.adapters.db.orm.api_key import (
     API_KEY_NAME_UNIQUE_CONSTRAINT,
     ApiKeyORM,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.domain.api_key import (
@@ -115,7 +115,7 @@ class SQLApiKeyRepository(BaseSQLRepository[ApiKeyORM]):
             self._session,
             statement,
             api_key_filter,
-            id_column=ApiKeyORM.id,
+            IdOrder(ApiKeyORM.id, api_key_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

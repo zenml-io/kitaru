@@ -27,7 +27,7 @@ from kitaru.server.adapters.db.orm.plugin import (
     PluginORM,
     PluginVersionORM,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
 from kitaru.server.domain.agent import AgentNotFound
@@ -150,7 +150,10 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, plugin_filter, id_column=PluginORM.id
+            self._session,
+            statement,
+            plugin_filter,
+            IdOrder(PluginORM.id, plugin_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 
@@ -314,7 +317,10 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
             PluginVersionORM.plugin_id == version_filter.plugin_id
         )
         rows, next_cursor = await paginate(
-            self._session, statement, version_filter, id_column=PluginVersionORM.id
+            self._session,
+            statement,
+            version_filter,
+            IdOrder(PluginVersionORM.id, version_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

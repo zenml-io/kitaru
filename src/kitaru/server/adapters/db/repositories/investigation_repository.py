@@ -27,7 +27,7 @@ from kitaru.server.adapters.db.orm.investigation_session import (
     INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY,
     InvestigationSessionORM,
 )
-from kitaru.server.adapters.db.pagination import paginate, paginate_by_index
+from kitaru.server.adapters.db.pagination import IdOrder, IndexOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.investigation import (
     InvestigationFilter,
@@ -212,7 +212,7 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
             self._session,
             statement,
             investigation_filter,
-            id_column=InvestigationORM.id,
+            IdOrder(InvestigationORM.id, investigation_filter.sort),
         )
         counts = await self._load_session_counts([row.id for row in rows])
         return [row.to_domain(*counts.get(row.id, (0, 0))) for row in rows], next_cursor
@@ -321,11 +321,11 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
                     session_filter.expression, INVESTIGATION_SESSION_FILTER_BINDINGS
                 )
             )
-        rows, next_cursor = await paginate_by_index(
+        rows, next_cursor = await paginate(
             self._session,
             statement,
             session_filter,
-            index_column=InvestigationSessionORM.position,
+            IndexOrder(InvestigationSessionORM.position),
         )
         return [row.to_domain() for row in rows], next_cursor
 

@@ -31,7 +31,7 @@ from kitaru.server.adapters.db.orm.session_node import (
     SESSION_NODE_SESSION_ID_FOREIGN_KEY,
     SessionNodeORM,
 )
-from kitaru.server.adapters.db.pagination import paginate_by_started_at
+from kitaru.server.adapters.db.pagination import StartOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.domain.session import SessionNotFound
@@ -166,12 +166,11 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
                 )
             )
         statement = statement.options(*(defer(column) for column in deferred))
-        rows, next_cursor = await paginate_by_started_at(
+        rows, next_cursor = await paginate(
             self._session,
             statement,
             session_node_filter,
-            started_at_column=SessionNodeORM.started_at,
-            id_column=SessionNodeORM.id,
+            StartOrder(SessionNodeORM.started_at, SessionNodeORM.id),
         )
         exclude = {column.key for column in deferred}
         return [row.to_domain(exclude=exclude) for row in rows], next_cursor

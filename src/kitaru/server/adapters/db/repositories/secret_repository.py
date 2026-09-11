@@ -33,7 +33,7 @@ from kitaru.server.adapters.db.orm.secret import (
     SECRET_NAME_UNIQUE_CONSTRAINT,
     SecretORM,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.domain.base import NotFoundError
@@ -177,7 +177,7 @@ class SQLSecretRepository(BaseSQLRepository[SecretORM]):
             self._session,
             statement,
             secret_filter,
-            id_column=SecretORM.id,
+            IdOrder(SecretORM.id, secret_filter.sort),
         )
         return [
             row.to_domain(self._decrypt_values(row.values_encrypted)) for row in rows

@@ -22,7 +22,7 @@ from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.job import JobORM
 from kitaru.server.adapters.db.orm.task import TERMINAL_STATUS_VALUES, TaskORM
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.job import JobFilter
 from kitaru.server.domain.base import NotFoundError
@@ -177,7 +177,7 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
                 compile_filter_expression(job_filter.expression, JOB_FILTER_BINDINGS)
             )
         rows, next_cursor = await paginate(
-            self._session, statement, job_filter, id_column=JobORM.id
+            self._session, statement, job_filter, IdOrder(JobORM.id, job_filter.sort)
         )
         return [row.to_domain() for row in rows], next_cursor
 
