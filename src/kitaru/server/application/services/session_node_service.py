@@ -95,12 +95,11 @@ class SessionNodeService:
         """Upsert a batch of nodes on (session, external id).
 
         An external id already stored is replaced whole, keeping the node
-        id. ``parent_external_id`` and ``secondary_parent_external_ids`` are
-        stored as sent and resolved to node ids when the nodes are read, so
-        a parent may land after its children. The session's cost, tokens,
-        and call counts roll up by one atomic delta-based update covering
-        the whole batch. A task principal ingests only into a session it
-        owns.
+        id. ``parent_external_id`` and ``links`` are stored as sent and
+        resolved by the reader, so a parent may land after its children.
+        The session's cost, tokens, and call counts roll up by one atomic
+        delta-based update covering the whole batch. A task principal
+        ingests only into a session it owns.
 
         Args:
             session_id: Id of the session to ingest into.
@@ -147,7 +146,7 @@ class SessionNodeService:
                 session_id=session_id,
                 external_id=item.external_id,
                 parent_external_id=item.parent_external_id,
-                secondary_parent_external_ids=item.secondary_parent_external_ids,
+                links=item.links,
                 trace_id=item.trace_id,
                 node_type=item.node_type,
                 name=item.name,

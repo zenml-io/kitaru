@@ -41,7 +41,7 @@ def session_node_create_to_upsert(body: SessionNodeCreateRequest) -> SessionNode
     return SessionNodeUpsert(
         external_id=body.external_id,
         parent_external_id=body.parent_external_id,
-        secondary_parent_external_ids=body.secondary_parent_external_ids,
+        links=body.links,
         trace_id=body.trace_id,
         node_type=body.node_type,
         name=body.name,
@@ -100,7 +100,7 @@ def session_node_to_response(
         session_id=node.session_id,
         external_id=node.external_id,
         parent_external_id=node.parent_external_id,
-        secondary_parent_external_ids=node.secondary_parent_external_ids,
+        links=node.links,
         trace_id=node.trace_id,
         node_type=node.node_type,
         name=node.name,

@@ -17,6 +17,7 @@ import pytest
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.session_node import (
+    NodeLink,
     NodeStatus,
     NodeType,
     SessionNodeBatchRequest,
@@ -27,14 +28,14 @@ from kitaru.api_models.v1.session_node import (
 def _node(
     external_id: str,
     parent_external_id: str | None = None,
-    secondary_parent_external_ids: list[str] | None = None,
+    linked_external_ids: list[str] | None = None,
 ) -> SessionNodeCreateRequest:
     """Build a session node create request for the batch validator tests.
 
     Args:
         external_id: Node external id.
         parent_external_id: Parent node external id.
-        secondary_parent_external_ids: Additional parent external ids.
+        linked_external_ids: External ids the node links to.
 
     Returns:
         A minimal session node create request.
@@ -42,7 +43,10 @@ def _node(
     return SessionNodeCreateRequest(
         external_id=external_id,
         parent_external_id=parent_external_id,
-        secondary_parent_external_ids=secondary_parent_external_ids or [],
+        links=[
+            NodeLink(external_id=external_id, kind="parent")
+            for external_id in linked_external_ids or []
+        ],
         node_type=NodeType.SPAN,
         name="node",
         status=NodeStatus.COMPLETED,
@@ -70,8 +74,8 @@ def test_self_parent_rejected() -> None:
         SessionNodeBatchRequest(nodes=[_node("a", "a")])
 
 
-def test_self_secondary_parent_rejected() -> None:
-    """Reject a node naming itself as a secondary parent."""
+def test_self_link_rejected() -> None:
+    """Reject a node linking to itself."""
     with pytest.raises(ValidationError):
         SessionNodeBatchRequest(nodes=[_node("a", None, ["a"])])
 
@@ -82,10 +86,10 @@ def test_batched_parent_after_child_accepted() -> None:
     assert batch.nodes[0].parent_external_id == "b"
 
 
-def test_batched_secondary_parent_after_child_accepted() -> None:
-    """Accept a node whose batched secondary parent follows it."""
+def test_batched_link_target_after_node_accepted() -> None:
+    """Accept a node whose batched link target follows it."""
     batch = SessionNodeBatchRequest(nodes=[_node("a", None, ["b"]), _node("b")])
-    assert batch.nodes[0].secondary_parent_external_ids == ["b"]
+    assert batch.nodes[0].links == [NodeLink(external_id="b", kind="parent")]
 
 
 def test_repeated_external_id_rejected() -> None:

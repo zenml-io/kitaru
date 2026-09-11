@@ -354,7 +354,7 @@ async def test_list_nodes_filters_types_before_pagination(
                     4,
                     node_type="tool_call",
                     parent_external_id="n2",
-                    secondary_parent_external_ids=["n3"],
+                    links=[{"external_id": "n3", "kind": "parent"}],
                 ),
                 _node(5, parent_external_id="n0"),
             ]
@@ -371,7 +371,7 @@ async def test_list_nodes_filters_types_before_pagination(
     first = response.json()
     assert [node["external_id"] for node in first["items"]] == ["n2", "n4"]
     assert first["items"][0]["parent_external_id"] == "n1"
-    assert first["items"][1]["secondary_parent_external_ids"] == ["n3"]
+    assert first["items"][1]["links"] == [{"external_id": "n3", "kind": "parent"}]
     assert first["next_cursor"] is not None
     response = await client.get(path, params={**params, "cursor": first["next_cursor"]})
     assert response.status_code == 200
@@ -471,7 +471,7 @@ async def test_get_session_with_nodes_carries_the_parent_references(
                 _node(
                     2,
                     parent_external_id="missing",
-                    secondary_parent_external_ids=["n1"],
+                    links=[{"external_id": "n1", "kind": "parent"}],
                 ),
                 _node(0),
             ]
@@ -485,7 +485,7 @@ async def test_get_session_with_nodes_carries_the_parent_references(
     assert nodes["n0"]["parent_external_id"] is None
     assert nodes["n1"]["parent_external_id"] == "n0"
     assert nodes["n2"]["parent_external_id"] == "missing"
-    assert nodes["n2"]["secondary_parent_external_ids"] == ["n1"]
+    assert nodes["n2"]["links"] == [{"external_id": "n1", "kind": "parent"}]
 
 
 async def test_get_session_with_nodes_session_not_found(

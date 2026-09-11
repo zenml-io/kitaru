@@ -49,17 +49,17 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("parent_external_id", sa.Text(), nullable=True))
         batch_op.add_column(
             sa.Column(
-                "secondary_parent_external_ids",
+                "links",
                 postgresql.JSONB(astext_type=sa.Text()),
                 nullable=False,
                 server_default=sa.text("'[]'::jsonb"),
             )
         )
         # Existing rows take the empty list, new rows always carry the column.
-        batch_op.alter_column("secondary_parent_external_ids", server_default=None)
+        batch_op.alter_column("links", server_default=None)
 
-    # Restate the links the id columns carry as the references the source
-    # sent, which are resolved back to ids when a session is read.
+    # Restate the id columns as the references the source sent, a secondary
+    # parent becoming a link of kind parent.
     op.execute(
         sa.text("""
         UPDATE session_node AS n
@@ -72,9 +72,12 @@ def upgrade() -> None:
     op.execute(
         sa.text("""
         UPDATE session_node AS n
-        SET secondary_parent_external_ids = coalesce(
+        SET links = coalesce(
             (
-                SELECT jsonb_agg(p.external_id ORDER BY secondary.ordinality)
+                SELECT jsonb_agg(
+                    jsonb_build_object('external_id', p.external_id, 'kind', 'parent')
+                    ORDER BY secondary.ordinality
+                )
                 FROM jsonb_array_elements_text(n.secondary_parent_ids)
                     WITH ORDINALITY AS secondary(parent_id, ordinality)
                 JOIN session_node AS p ON p.id = secondary.parent_id::uuid
@@ -113,7 +116,8 @@ def downgrade() -> None:
         )
         batch_op.alter_column("secondary_parent_ids", server_default=None)
 
-    # Resolve the stored references back into the id columns.
+    # Resolve the stored references back into the id columns, every link
+    # becoming a secondary parent.
     op.execute(
         sa.text("""
         UPDATE session_node AS n
@@ -129,16 +133,16 @@ def downgrade() -> None:
         UPDATE session_node AS n
         SET secondary_parent_ids = coalesce(
             (
-                SELECT jsonb_agg(p.id::text ORDER BY secondary.ordinality)
-                FROM jsonb_array_elements_text(n.secondary_parent_external_ids)
-                    WITH ORDINALITY AS secondary(external_id, ordinality)
+                SELECT jsonb_agg(p.id::text ORDER BY link.ordinality)
+                FROM jsonb_array_elements(n.links)
+                    WITH ORDINALITY AS link(value, ordinality)
                 JOIN session_node AS p
                     ON p.session_id = n.session_id
-                    AND p.external_id = secondary.external_id
+                    AND p.external_id = link.value ->> 'external_id'
             ),
             '[]'::jsonb
         )
-        WHERE jsonb_array_length(n.secondary_parent_external_ids) > 0
+        WHERE jsonb_array_length(n.links) > 0
     """)
     )
 
@@ -166,5 +170,5 @@ def downgrade() -> None:
         )
         batch_op.alter_column("external_id", existing_type=sa.Text(), nullable=True)
         batch_op.drop_index(POSITION_INDEX)
-        batch_op.drop_column("secondary_parent_external_ids")
+        batch_op.drop_column("links")
         batch_op.drop_column("parent_external_id")

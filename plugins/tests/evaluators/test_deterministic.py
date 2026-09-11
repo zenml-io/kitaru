@@ -62,7 +62,7 @@ def _node(
         session_id=SESSION_ID,
         external_id=external_id,
         parent_external_id=parent_external_id,
-        secondary_parent_external_ids=[],
+        links=[],
         node_type=node_type,
         name=tool_name or model or external_id,
         status=status,

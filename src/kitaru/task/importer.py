@@ -32,6 +32,7 @@ from kitaru.api_models.v1.session import (
     TokenUsage,
 )
 from kitaru.api_models.v1.session_node import (
+    NodeLink,
     NodeStatus,
     NodeType,
     SessionNodeBatchRequest,
@@ -90,7 +91,7 @@ class ImportedNode(BaseModel):
 
     index: int | None = None
     parent_index: int | None = None
-    secondary_parent_indexes: list[int] = Field(default_factory=list)
+    links: list[NodeLink] = Field(default_factory=list)
     external_id: str | None = None
     trace_id: str | None = None
     node_type: NodeType
@@ -363,16 +364,13 @@ def session_request(
 
 
 def _node_request(
-    node: ImportedNode,
-    external_id: str,
-    parent_external_id: str | None,
-    secondary_parent_external_ids: list[str],
+    node: ImportedNode, external_id: str, parent_external_id: str | None
 ) -> SessionNodeCreateRequest:
     """Convert an imported node to an ingest request."""
     return SessionNodeCreateRequest(
         external_id=external_id,
         parent_external_id=parent_external_id,
-        secondary_parent_external_ids=secondary_parent_external_ids,
+        links=node.links,
         trace_id=node.trace_id,
         node_type=node.node_type,
         name=node.name,
@@ -445,10 +443,7 @@ def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
         _reject_duplicate_external_ids(external_ids.values())
         direct = [
             _node_request(
-                node,
-                external_ids[node.index],
-                external_ids.get(node.parent_index),
-                [external_ids[i] for i in node.secondary_parent_indexes],
+                node, external_ids[node.index], external_ids.get(node.parent_index)
             )
             for node in indexed_nodes
             if node.index is not None
@@ -472,14 +467,7 @@ def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
         active.add(id(node))
         external_id = node.external_id or f"node-{len(flattened)}"
         external_ids_by_position.append(external_id)
-        flattened.append(
-            _node_request(
-                node,
-                external_id,
-                parent_external_id,
-                [external_ids_by_position[i] for i in node.secondary_parent_indexes],
-            )
-        )
+        flattened.append(_node_request(node, external_id, parent_external_id))
         stack.append((node, parent_external_id, True))
         stack.extend((child, external_id, False) for child in reversed(node.children))
     _reject_duplicate_external_ids(external_ids_by_position)

@@ -34,7 +34,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.api_models.v1.session import TokenUsage
-from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.api_models.v1.session_node import NodeLink, NodeStatus, NodeType
 from kitaru.server.adapters.db.orm.base import (
     Base,
     TimestampMixin,
@@ -127,10 +127,10 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     session_id: Mapped[uuid.UUID]
     external_id: Mapped[str] = mapped_column(Text)
-    # Resolved to node ids when the session is read, so a reference may name
-    # a node that has not landed yet.
+    # Stored as sent and resolved by the reader, so a reference may name a
+    # node that has not landed yet.
     parent_external_id: Mapped[str | None] = mapped_column(Text)
-    secondary_parent_external_ids: Mapped[list[str]] = mapped_column(JSONB)
+    links: Mapped[list[dict[str, str]]] = mapped_column(JSONB)
     trace_id: Mapped[str | None] = mapped_column(Text)
     node_type: Mapped[str] = mapped_column(String(NODE_TYPE_LENGTH))
     name: Mapped[str] = mapped_column(Text)
@@ -202,7 +202,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.session_id = node.session_id
         self.external_id = node.external_id
         self.parent_external_id = node.parent_external_id
-        self.secondary_parent_external_ids = list(node.secondary_parent_external_ids)
+        self.links = [link.model_dump() for link in node.links]
         self.trace_id = node.trace_id
         self.node_type = node.node_type.value
         self.name = node.name
@@ -272,7 +272,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             session_id=self.session_id,
             external_id=self.external_id,
             parent_external_id=self.parent_external_id,
-            secondary_parent_external_ids=list(self.secondary_parent_external_ids),
+            links=[NodeLink.model_validate(link) for link in self.links],
             trace_id=self.trace_id,
             node_type=NodeType(self.node_type),
             name=self.name,

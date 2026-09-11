@@ -41,7 +41,7 @@ def _session() -> dict[str, Any]:
             {
                 "index": 0,
                 "parent_index": None,
-                "secondary_parent_indexes": [],
+                "links": [],
                 "external_id": "node-1",
                 "trace_id": "trace-1",
                 "node_type": "llm_call",

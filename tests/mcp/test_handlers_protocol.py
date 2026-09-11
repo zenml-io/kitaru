@@ -835,7 +835,7 @@ async def test_public_activity_preserves_typed_token_usage(
         id=uuid.uuid4(),
         session_id=session_id,
         external_id="call-0",
-        secondary_parent_external_ids=[],
+        links=[],
         node_type="llm_call",
         name="model",
         status="completed",

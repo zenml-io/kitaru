@@ -47,6 +47,17 @@ class NodeStatus(StrEnum):
     FAILED = "failed"
 
 
+class NodeLink(RequestModel):
+    """Node link."""
+
+    external_id: str = Field(
+        min_length=1, description="External id of the linked node."
+    )
+    kind: str = Field(
+        min_length=1, max_length=64, description="Relation the link states."
+    )
+
+
 class SessionNodeCreateRequest(RequestModel):
     """Session node create request."""
 
@@ -56,8 +67,8 @@ class SessionNodeCreateRequest(RequestModel):
     parent_external_id: str | None = Field(
         default=None, description="External id of the parent node."
     )
-    secondary_parent_external_ids: list[str] = Field(
-        default_factory=list, description="External ids of additional parent nodes."
+    links: list[NodeLink] = Field(
+        default_factory=list, description="Links to other nodes of the session."
     )
     trace_id: str | None = Field(default=None, description="Distributed trace id.")
     node_type: NodeType = Field(description="Kind of work the node records.")
@@ -130,23 +141,26 @@ class SessionNodeBatchRequest(RequestModel):
 
     @model_validator(mode="after")
     def _check_external_ids(self) -> Self:
-        """Require unique node external ids and no self-parent.
+        """Require unique node external ids and no self-reference.
 
         A parent external id the batch does not carry is left to the server,
         which links it once the parent lands.
 
         Raises:
-            ValueError: A node names itself as a parent, or a node external
-                id repeats within the batch.
+            ValueError: A node names itself as a parent or a link, or a node
+                external id repeats within the batch.
 
         Returns:
             The validated batch.
         """
         seen: set[str] = set()
         for node in self.nodes:
-            parents = [node.parent_external_id, *node.secondary_parent_external_ids]
-            if node.external_id in parents:
-                raise ValueError("a node cannot be its own parent")
+            references = [
+                node.parent_external_id,
+                *(link.external_id for link in node.links),
+            ]
+            if node.external_id in references:
+                raise ValueError("a node cannot reference itself")
             if node.external_id in seen:
                 raise ValueError("node external ids must be unique within a batch")
             seen.add(node.external_id)
@@ -162,9 +176,7 @@ class SessionNodeResponse(ResponseModel):
     parent_external_id: str | None = Field(
         default=None, description="External id of the parent node."
     )
-    secondary_parent_external_ids: list[str] = Field(
-        description="External ids of additional parent nodes."
-    )
+    links: list[NodeLink] = Field(description="Links to other nodes of the session.")
     trace_id: str | None = Field(default=None, description="Distributed trace id.")
     node_type: NodeType = Field(description="Kind of work the node records.")
     name: str = Field(description="Node name.")
