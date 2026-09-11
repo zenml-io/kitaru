@@ -68,6 +68,7 @@ from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.cache_keys import compute_tool_cache_key
+from kitaru.json_pointer import resolve_json_pointer
 from kitaru_pydantic_ai import (
     KitaruAgent,
     PydanticAIUsageSummary,
@@ -670,8 +671,39 @@ async def test_records_visible_model_reasoning() -> None:
 
     client = _FakeClient.instances[0]
     llm = next(node for node in _nodes(client) if node.node_type is NodeType.LLM_CALL)
-    assert llm.reasoning == "check the evidence"
+    assert llm.reasoning_selectors == ["/parts/0/content"]
+    found, value = resolve_json_pointer(llm.outputs, llm.reasoning_selectors[0])
+    assert found
+    assert value == "check the evidence"
     assert llm.output_text_selector == "/parts/1/content"
+
+
+async def test_records_every_reasoning_part_in_document_order() -> None:
+    def model(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        return ModelResponse(
+            parts=[
+                ThinkingPart("first thought"),
+                TextPart("interim"),
+                ThinkingPart("second thought"),
+                TextPart("answer"),
+            ]
+        )
+
+    agent = KitaruAgent(
+        Agent(FunctionModel(model)),
+        agent_id=uuid.uuid4(),
+    )
+
+    await agent.run("question")
+
+    client = _FakeClient.instances[0]
+    llm = next(node for node in _nodes(client) if node.node_type is NodeType.LLM_CALL)
+    assert llm.reasoning_selectors == ["/parts/0/content", "/parts/2/content"]
+    resolved = [
+        resolve_json_pointer(llm.outputs, selector)[1]
+        for selector in llm.reasoning_selectors
+    ]
+    assert resolved == ["first thought", "second thought"]
 
 
 async def test_replay_json_input_is_encoded_and_recorded_original(

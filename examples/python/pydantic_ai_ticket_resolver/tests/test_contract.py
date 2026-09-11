@@ -127,7 +127,7 @@ def test_checked_in_langfuse_export_contains_replayable_tool_traces() -> None:
         assert all(node.name != "resolve-ticket" for node in nodes)
         llm_nodes = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
         assert llm_nodes
-        assert any(node.reasoning for node in llm_nodes)
+        assert any(node.reasoning_selectors for node in llm_nodes)
         assert any(node.node_type is NodeType.TOOL_CALL for node in nodes)
 
 

@@ -51,7 +51,6 @@ from pydantic_ai.messages import (
     SystemPromptPart,
     TextContent,
     TextPart,
-    ThinkingPart,
     ToolCallPart,
     UploadedFile,
     UserContent,
@@ -288,12 +287,26 @@ def _system_prompt_selector(value: Any) -> str | None:
     return _part_selector(value, "system-prompt")
 
 
-def _get_response_reasoning(response: ModelResponse) -> str | None:
-    """Extract visible reasoning from a model response."""
-    reasoning = [
-        part.content for part in response.parts if isinstance(part, ThinkingPart)
-    ]
-    return "\n".join(reasoning) or None
+def _reasoning_selectors(value: Any, selector: str = "") -> list[str]:
+    """Select every visible reasoning PydanticAI message part in document order."""
+    matches: list[str] = []
+
+    def _collect(item: Any, path: str) -> None:
+        if isinstance(item, list):
+            for index, child in enumerate(item):
+                _collect(child, _child_selector(path, index))
+            return
+        if not isinstance(item, dict):
+            return
+        if item.get("part_kind") == "thinking":
+            content = item.get("content")
+            if isinstance(content, str) and content.strip():
+                matches.append(_child_selector(path, "content"))
+        for key, child in item.items():
+            _collect(child, _child_selector(path, key))
+
+    _collect(value, selector)
+    return matches
 
 
 def _error_text(error: BaseException) -> str:
@@ -720,7 +733,7 @@ class _KitaruCapability(AbstractCapability[Any]):
             input_text_selector=input_text_selector,
             output_text_selector=_output_text_selector(output_payload),
             system_prompt_selector=system_prompt_selector,
-            reasoning=_get_response_reasoning(response),
+            reasoning_selectors=_reasoning_selectors(output_payload),
             inputs=input_payload,
             outputs=output_payload,
             requested_model=requested_model,
