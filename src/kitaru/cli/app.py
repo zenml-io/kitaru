@@ -2031,6 +2031,13 @@ _CONNECTION_UPDATE_VALUE_PARAMETERS = (
                 "Analyzer whose connection schema drives the prompts.",
             ),
             ParameterSpec(
+                "--evaluator",
+                "reference",
+                "option",
+                False,
+                "Evaluator whose connection schema drives the prompts.",
+            ),
+            ParameterSpec(
                 "--provider", "string", "option", False, "Provider addressed directly."
             ),
             *_CONNECTION_VALUE_PARAMETERS,
@@ -2056,6 +2063,7 @@ async def connection_create(
     *,
     importer: str | None = None,
     analyzer: str | None = None,
+    evaluator: str | None = None,
     provider: str | None = None,
     set: list[str] | None = None,
     set_secret: list[str] | None = None,
@@ -2070,6 +2078,7 @@ async def connection_create(
             name,
             importer=importer,
             analyzer=analyzer,
+            evaluator=evaluator,
             provider=provider,
             values=set,
             secret_values=set_secret,
@@ -3520,7 +3529,7 @@ def _plugin_register_parameters(kind: str) -> tuple[ParameterSpec, ...]:
         parent.append(
             ParameterSpec("--provider", "string", "option", False, "Source provider.")
         )
-    if kind in {"importer", "analyzer"}:
+    if kind in {"importer", "analyzer", "evaluator"}:
         parent.append(
             ParameterSpec(
                 "--connection-schema",
@@ -3965,6 +3974,7 @@ async def evaluator_register(
     description: str | None = None,
     metadata: str | None = None,
     provider: str | None = None,
+    connection_schema: Path | None = None,
     agent_id: uuid.UUID | None = None,
     display_version: str | None = None,
 ) -> CommandResult:
@@ -3980,6 +3990,7 @@ async def evaluator_register(
         metadata=metadata,
         agent_id=agent_id,
         display_version=display_version,
+        connection_schema=connection_schema,
     )
 
 

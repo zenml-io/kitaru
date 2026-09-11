@@ -137,6 +137,32 @@ async def test_create_evaluator_with_provider(client: httpx.AsyncClient) -> None
     assert body["provider"] == "langfuse"
 
 
+async def test_create_evaluator_with_connection_schema(
+    client: httpx.AsyncClient,
+) -> None:
+    """Carry a connection schema through create and get."""
+    response = await client.post(
+        "/api/v1/evaluators",
+        json={"name": "accuracy", "connection_schema": {"type": "object"}},
+    )
+    assert response.status_code == 201
+    created = response.json()
+    assert created["connection_schema"] == {"type": "object"}
+
+    response = await client.get(f"/api/v1/evaluators/{created['id']}")
+    assert response.status_code == 200
+    assert response.json()["connection_schema"] == {"type": "object"}
+
+
+async def test_create_evaluator_without_connection_schema(
+    client: httpx.AsyncClient,
+) -> None:
+    """Return a null connection schema when none was given."""
+    response = await client.post("/api/v1/evaluators", json={"name": "accuracy"})
+    assert response.status_code == 201
+    assert response.json()["connection_schema"] is None
+
+
 async def test_list_evaluators(client: httpx.AsyncClient) -> None:
     """List evaluators newest-first with a name filter."""
     for name in ["accuracy", "relevance"]:
@@ -204,6 +230,25 @@ async def test_update_evaluator_explicit_null_clears_description(
     )
     assert response.status_code == 200
     assert response.json()["description"] is None
+
+
+async def test_update_evaluator_connection_schema(client: httpx.AsyncClient) -> None:
+    """Replace and then clear an evaluator's connection schema."""
+    created = (
+        await client.post("/api/v1/evaluators", json={"name": "accuracy"})
+    ).json()
+    response = await client.patch(
+        f"/api/v1/evaluators/{created['id']}",
+        json={"connection_schema": {"type": "object"}},
+    )
+    assert response.status_code == 200
+    assert response.json()["connection_schema"] == {"type": "object"}
+
+    response = await client.patch(
+        f"/api/v1/evaluators/{created['id']}", json={"connection_schema": None}
+    )
+    assert response.status_code == 200
+    assert response.json()["connection_schema"] is None
 
 
 async def test_update_evaluator_not_found(client: httpx.AsyncClient) -> None:

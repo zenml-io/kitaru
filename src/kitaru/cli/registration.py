@@ -757,36 +757,22 @@ def plugin_parent_request(
     connection_schema: Path | None = None,
 ) -> ImporterCreateRequest | EvaluatorCreateRequest | AnalyzerCreateRequest:
     """Build one kind-specific plugin parent request."""
-    parsed_metadata = parse_json_object(metadata, option="--metadata")
-    if kind in {"importer", "analyzer"}:
-        if agent_id is not None:
-            raise CLIError(
-                "invalid_arguments", "--agent-id is only valid for evaluators."
-            )
-        request_type = (
-            ImporterCreateRequest if kind == "importer" else AnalyzerCreateRequest
-        )
-        return request_type(
-            name=name,
-            description=description,
-            provider=provider,
-            metadata=parsed_metadata,
-            connection_schema=read_json_object(
-                connection_schema, option="--connection-schema"
-            ),
-        )
-    if connection_schema is not None:
-        raise CLIError(
-            "invalid_arguments",
-            "--connection-schema is only valid for importers and analyzers.",
-        )
-    return EvaluatorCreateRequest(
-        name=name,
-        description=description,
-        provider=provider,
-        metadata=parsed_metadata,
-        agent_id=agent_id,
-    )
+    if agent_id is not None and kind != "evaluator":
+        raise CLIError("invalid_arguments", "--agent-id is only valid for evaluators.")
+    kwargs: dict[str, Any] = {
+        "name": name,
+        "description": description,
+        "provider": provider,
+        "metadata": parse_json_object(metadata, option="--metadata"),
+        "connection_schema": read_json_object(
+            connection_schema, option="--connection-schema"
+        ),
+    }
+    if kind == "importer":
+        return ImporterCreateRequest(**kwargs)
+    if kind == "analyzer":
+        return AnalyzerCreateRequest(**kwargs)
+    return EvaluatorCreateRequest(**kwargs, agent_id=agent_id)
 
 
 def list_params(

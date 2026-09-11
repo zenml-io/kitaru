@@ -1064,6 +1064,19 @@
               "description": "Id of the agent this evaluator is scoped to, null for a global evaluator.",
               "title": "Agent Id"
             },
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "JSON Schema of the connection values this evaluator reads.",
+              "title": "Connection Schema"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -1158,6 +1171,7 @@
             "provider",
             "logo_url",
             "metadata",
+            "connection_schema",
             "latest_version",
             "agent_id"
           ],
@@ -12489,6 +12503,19 @@
           "additionalProperties": false,
           "description": "Create an evaluator parent.",
           "properties": {
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Connection Schema"
+            },
             "description": {
               "anyOf": [
                 {
@@ -12553,10 +12580,28 @@
           "additionalProperties": false,
           "description": "Sparsely update an evaluator parent.",
           "properties": {
+            "clear_connection_schema": {
+              "default": false,
+              "title": "Clear Connection Schema",
+              "type": "boolean"
+            },
             "clear_description": {
               "default": false,
               "title": "Clear Description",
               "type": "boolean"
+            },
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Connection Schema"
             },
             "description": {
               "anyOf": [
@@ -12823,6 +12868,19 @@
               "description": "Id of the agent this evaluator is scoped to, null for a global evaluator.",
               "title": "Agent Id"
             },
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "JSON Schema of the connection values this evaluator reads.",
+              "title": "Connection Schema"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -12917,6 +12975,7 @@
             "provider",
             "logo_url",
             "metadata",
+            "connection_schema",
             "latest_version",
             "agent_id"
           ],

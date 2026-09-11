@@ -301,21 +301,27 @@ def test_evaluator_parent_request_accepts_provider() -> None:
     assert request.provider == "demo-provider"
 
 
-def test_evaluator_parent_request_rejects_connection_schema(tmp_path: Path) -> None:
-    """Evaluator parents still reject a connection schema."""
+def test_evaluator_parent_request_accepts_connection_schema(tmp_path: Path) -> None:
+    """Evaluator parents carry provider connection metadata like analyzers."""
     schema = tmp_path / "connection.json"
     schema.write_text('{"type":"object","properties":{"API_KEY":{}}}')
 
-    with pytest.raises(CLIError, match="only valid for importers and analyzers"):
-        plugin_parent_request(
-            "evaluator",
-            "demo",
-            description=None,
-            provider=None,
-            metadata=None,
-            agent_id=None,
-            connection_schema=schema,
-        )
+    request = plugin_parent_request(
+        "evaluator",
+        "demo",
+        description=None,
+        provider="demo-provider",
+        metadata=None,
+        agent_id=None,
+        connection_schema=schema,
+    )
+
+    assert isinstance(request, EvaluatorCreateRequest)
+    assert request.provider == "demo-provider"
+    assert request.connection_schema == {
+        "type": "object",
+        "properties": {"API_KEY": {}},
+    }
 
 
 def test_cli_evaluator_register_forwards_provider(
@@ -354,6 +360,52 @@ def test_cli_evaluator_register_forwards_provider(
     assert len(client.evaluators.created_requests) == 1
     assert client.evaluators.created_requests[0].name == "demo"
     assert client.evaluators.created_requests[0].provider == "model-provider"
+
+
+def test_cli_evaluator_register_forwards_connection_schema(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The Cyclopts leaf forwards --connection-schema into the create request."""
+    client = StubClient()
+    script = tmp_path / "evaluator.py"
+    script.write_text("def evaluate(sessions, **params):\n    return []\n")
+    schema = tmp_path / "connection.json"
+    schema.write_text('{"type":"object","properties":{"API_KEY":{}}}')
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield client
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+
+    assert (
+        app_module.main(
+            [
+                "evaluator",
+                "register",
+                "demo",
+                "--script",
+                str(script),
+                "--entrypoint",
+                "evaluate",
+                "--provider",
+                "model-provider",
+                "--connection-schema",
+                str(schema),
+            ]
+        )
+        == 0
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["command"] == "evaluator.register"
+    assert len(client.evaluators.created_requests) == 1
+    assert client.evaluators.created_requests[0].name == "demo"
+    assert client.evaluators.created_requests[0].provider == "model-provider"
+    assert client.evaluators.created_requests[0].connection_schema == {
+        "type": "object",
+        "properties": {"API_KEY": {}},
+    }
 
 
 async def test_uploaded_blob_is_reported_when_version_registration_fails() -> None:

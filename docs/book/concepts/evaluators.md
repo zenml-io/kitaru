@@ -9,6 +9,8 @@ Replay tells you what a change _did_; evaluators tell you whether it _helped_. A
 
 Because evaluators run against recorded sessions, they evaluate baselines, replays, and imported traces identically. The same evaluator you run over today's production traffic runs over the fork you're thinking about shipping.
 
+Evaluators can also declare a provider and connection schema, the same as analyzers and importers.
+
 ## The evaluator contract
 
 An evaluator is a callable (a single Python file or an installable package) that receives the full session and returns results:

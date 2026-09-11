@@ -1202,6 +1202,7 @@ async def test_evaluation_start_protocol_returns_typed_receipt() -> None:
             provider=None,
             logo_url=None,
             metadata={},
+            connection_schema=None,
             latest_version=1,
             agent_id=None,
             created=now,
@@ -1300,6 +1301,17 @@ def test_evaluator_updates_require_explicit_non_conflicting_changes() -> None:
         EvaluatorUpdate(operation="update", evaluator_id=evaluator_id)
     with pytest.raises(ValidationError, match="metadata cannot be null"):
         EvaluatorUpdate(operation="update", evaluator_id=evaluator_id, metadata=None)
+    with pytest.raises(ValidationError, match="cannot be null without"):
+        EvaluatorUpdate(
+            operation="update", evaluator_id=evaluator_id, connection_schema=None
+        )
+    with pytest.raises(ValidationError, match="conflict"):
+        EvaluatorUpdate(
+            operation="update",
+            evaluator_id=evaluator_id,
+            connection_schema={"type": "object"},
+            clear_connection_schema=True,
+        )
     with pytest.raises(ValidationError, match="exactly one"):
         EvaluatorVersionUpdate(
             operation="update_version", evaluator_id=evaluator_id, version=1
@@ -1354,6 +1366,7 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
             operation="create",
             name="accuracy",
             provider="langfuse",
+            connection_schema={"type": "object"},
             idempotency_key="retry-evaluator-1",
         ),
     )
@@ -1365,6 +1378,15 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
             description=None,
             clear_description=True,
             metadata={"team": "evals"},
+            connection_schema={"type": "object"},
+        ),
+    )
+    await handle_evaluators_manage(
+        state,
+        EvaluatorUpdate(
+            operation="update",
+            evaluator_id=uuid.uuid4(),
+            clear_connection_schema=True,
         ),
     )
     await handle_evaluators_manage(
@@ -1393,6 +1415,7 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
     assert [name for name, _ in calls] == [
         "create",
         "update",
+        "update",
         "create_version",
         "update_version",
     ]
@@ -1401,17 +1424,22 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
         "description": None,
         "provider": "langfuse",
         "metadata": {},
+        "connection_schema": {"type": "object"},
     }
     assert cast(Any, calls[1][1]).model_dump(exclude_unset=True) == {
         "description": None,
         "metadata": {"team": "evals"},
+        "connection_schema": {"type": "object"},
     }
-    assert cast(Any, calls[2][1]).source.model_dump(mode="json") == {
+    assert cast(Any, calls[2][1]).model_dump(exclude_unset=True) == {
+        "connection_schema": None,
+    }
+    assert cast(Any, calls[3][1]).source.model_dump(mode="json") == {
         "type": "package",
         "requirement": "example==1.2.3",
         "entrypoint": "example:evaluate",
     }
-    assert cast(Any, calls[3][1]).model_dump(exclude_unset=True) == {
+    assert cast(Any, calls[4][1]).model_dump(exclude_unset=True) == {
         "display_version": None
     }
     assert create_idempotency_keys == ["retry-evaluator-1"]

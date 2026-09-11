@@ -31,15 +31,19 @@ async def handle_evaluators_manage(
                 description=request.description,
                 provider=request.provider,
                 metadata=request.metadata,
+                connection_schema=request.connection_schema,
             ),
             idempotency_key=request.idempotency_key,
         )
     if isinstance(request, EvaluatorUpdate):
         values = request.model_dump(
-            include={"description", "metadata"}, exclude_unset=True
+            include={"description", "metadata", "connection_schema"},
+            exclude_unset=True,
         )
         if request.clear_description:
             values["description"] = None
+        if request.clear_connection_schema:
+            values["connection_schema"] = None
         return await state.client.evaluators.update(
             request.evaluator_id, EvaluatorUpdateRequest.model_validate(values)
         )

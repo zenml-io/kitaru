@@ -82,6 +82,8 @@ kitaru evaluator register refund-quality \
   --script refund_quality_evaluator.py --entrypoint evaluate
 ```
 
+An evaluator that calls a provider, like the OpenAI judge above, can declare its provider and a [connection schema](provider-connections.md) on register with `--provider` and `--connection-schema`.
+
 Evaluators are versioned: re-registering with `kitaru evaluator version register refund-quality --script ...` creates version 2, and every evaluation row records exactly which version wrote it. Tightening a criterion never rewrites history: old rows keep their provenance, and you can evaluate any population again with the new version.
 
 ## Calibrate against human judgment

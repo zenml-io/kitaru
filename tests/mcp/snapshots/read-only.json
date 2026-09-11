@@ -1064,6 +1064,19 @@
               "description": "Id of the agent this evaluator is scoped to, null for a global evaluator.",
               "title": "Agent Id"
             },
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "JSON Schema of the connection values this evaluator reads.",
+              "title": "Connection Schema"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -1158,6 +1171,7 @@
             "provider",
             "logo_url",
             "metadata",
+            "connection_schema",
             "latest_version",
             "agent_id"
           ],

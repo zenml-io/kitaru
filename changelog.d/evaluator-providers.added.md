@@ -1,1 +1,1 @@
-- Evaluators accept an optional `provider`. Evaluation tasks receive the env and secret values of the provider's default connection when one exists.
+- Evaluators accept an optional `provider` and `connection_schema`. Evaluation tasks receive the env and secret values of the provider's default connection when one exists.

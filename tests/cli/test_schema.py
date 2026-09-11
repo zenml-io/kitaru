@@ -148,11 +148,17 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     }
     assert {"--provider", "--connection-schema"} <= analyzer_register_names
 
+    [evaluator_register] = describe_schema(("evaluator", "register"))
+    evaluator_register_names = {
+        parameter["name"] for parameter in evaluator_register["parameters"]
+    }
+    assert {"--provider", "--connection-schema"} <= evaluator_register_names
+
     [connection_create] = describe_schema(("connection", "create"))
     connection_create_names = {
         parameter["name"] for parameter in connection_create["parameters"]
     }
-    assert "--analyzer" in connection_create_names
+    assert {"--analyzer", "--evaluator"} <= connection_create_names
 
     [session_import] = describe_schema(("session", "import"))
     session_import_names = {
