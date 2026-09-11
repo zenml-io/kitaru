@@ -27,7 +27,7 @@ from kitaru.api_models.v1.base import (
     RequestModel,
 )
 from kitaru.api_models.v1.filter import FilterableListParams
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 
 MAX_NAME_LENGTH = 255
 

@@ -171,7 +171,7 @@ The CLI validates `--join-on` and adds it to the importer parameter object, reso
 
 ```python
 from kitaru.api_models.v1.imports import ImportCreateRequest
-from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 
 created_import = await client.imports.create(
     ImportCreateRequest(

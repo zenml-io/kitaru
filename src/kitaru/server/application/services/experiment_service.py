@@ -66,8 +66,8 @@ from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.plugin import EvaluatorConfig
 from kitaru.server.domain.replay_config import (
-    EvaluatorConfig,
     ReplayConfig,
     ReplayConfigInUse,
     ReplayOverride,

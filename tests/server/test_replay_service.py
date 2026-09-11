@@ -49,8 +49,8 @@ from kitaru.server.application.models.auth import (
     WorkerAuthContext,
     WorkerPrincipal,
 )
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.replay_service import ReplayService

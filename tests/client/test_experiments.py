@@ -34,7 +34,8 @@ from kitaru.api_models.v1.experiment import (
     ExperimentUpdateRequest,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
-from kitaru.api_models.v1.replay_config import EvaluatorConfig, ReplayOverride
+from kitaru.api_models.v1.plugin import EvaluatorConfig
+from kitaru.api_models.v1.replay_config import ReplayOverride
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (

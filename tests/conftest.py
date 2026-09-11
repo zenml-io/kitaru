@@ -217,8 +217,10 @@ from kitaru.server.domain.job import Job, JobNotFound
 from kitaru.server.domain.keys import generate_secret, hash_secret
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.plugin import (
+    AnalyzerConfig,
     DuplicatePluginName,
     DuplicatePluginVersion,
+    EvaluatorConfig,
     Plugin,
     PluginKind,
     PluginNotFound,
@@ -235,8 +237,6 @@ from kitaru.server.domain.replay import (
     ReplayNotFound,
 )
 from kitaru.server.domain.replay_config import (
-    AnalyzerConfig,
-    EvaluatorConfig,
     ReplayConfig,
     ReplayConfigInUse,
     ReplayConfigNotFound,

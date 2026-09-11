@@ -27,8 +27,7 @@ from kitaru.server.application.services.connection_resolution import (
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.names import get_namespace
-from kitaru.server.domain.plugin import Plugin, PluginKind, PluginVersion
-from kitaru.server.domain.replay_config import PluginConfig
+from kitaru.server.domain.plugin import Plugin, PluginConfig, PluginKind, PluginVersion
 from kitaru.server.domain.task import RESERVED_LABEL_PREFIX
 
 

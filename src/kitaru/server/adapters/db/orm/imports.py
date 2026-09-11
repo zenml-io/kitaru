@@ -32,7 +32,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
     unique_constraint_name,
 )
 from kitaru.server.domain.imports import Import
-from kitaru.server.domain.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.server.domain.plugin import AnalyzerConfig, EvaluatorConfig
 
 IMPORT_OWNER_ID_FOREIGN_KEY = foreign_key_name("import", ["owner_id"])
 IMPORT_JOB_ID_FOREIGN_KEY = foreign_key_name("import", ["job_id"])

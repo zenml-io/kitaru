@@ -26,7 +26,7 @@ from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.services.plugin_resolution import get_plugin_task_labels
 from kitaru.server.domain.imports import Import, ImportNotFound
-from kitaru.server.domain.replay_config import AnalyzerConfig
+from kitaru.server.domain.plugin import AnalyzerConfig
 from kitaru.server.domain.session import Session, SessionNotEvaluatable
 from kitaru.server.domain.task import AnalysisTask, EvaluationTask, ImportTask, Task
 from kitaru.server.filtering import FilterCondition

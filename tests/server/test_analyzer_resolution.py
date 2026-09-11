@@ -23,7 +23,7 @@ from conftest import (
     create_connection,
     create_plugin,
 )
-from kitaru.server.application.models.replay_config import AnalyzerConfigInput
+from kitaru.server.application.models.plugin import AnalyzerConfigInput
 from kitaru.server.application.services.analyzer_resolution import (
     resolve_analyzer_config,
     validate_analyzers,
@@ -35,12 +35,13 @@ from kitaru.server.application.services.plugin_resolution import (
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.connection import ConnectionNotFound
 from kitaru.server.domain.plugin import (
+    AnalyzerConfig,
+    EvaluatorConfig,
     PackagePluginSource,
     PluginKind,
     PluginNotFound,
     PluginVersionNotFound,
 )
-from kitaru.server.domain.replay_config import AnalyzerConfig, EvaluatorConfig
 
 OWNER_ID = uuid.uuid4()
 

@@ -39,7 +39,7 @@ from kitaru.server.application.models.experiment import (
     ExperimentFilter,
     ExperimentUpdate,
 )
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account

@@ -33,7 +33,7 @@ from kitaru.server.domain.base import (
     ValidationError,
 )
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.names import NamespacedName
+from kitaru.server.domain.plugin import EvaluatorConfig
 
 
 class ReplayConfigNotFound(NotFoundError):
@@ -67,57 +67,6 @@ class ReplayOverride(FrozenModel):
     system_prompt: str | None = None
     prompt: str | None = None
     model_params: dict[str, Any] | None = None
-
-
-class PluginConfig(FrozenModel):
-    """Plugin config."""
-
-    version: int
-    params: dict[str, Any] = Field(default_factory=dict)
-    provider: str | None = None
-    connection_id: uuid.UUID | None = None
-    requires_credentials: bool = False
-
-    @property
-    def plugin_version_id(self) -> uuid.UUID:
-        """Id of the resolved plugin version."""
-        raise NotImplementedError
-
-
-class EvaluatorConfig(PluginConfig):
-    """Evaluator config."""
-
-    evaluator: NamespacedName
-    evaluator_version_id: uuid.UUID
-
-    @property
-    def plugin_version_id(self) -> uuid.UUID:
-        """Id of the resolved plugin version."""
-        return self.evaluator_version_id
-
-
-class AnalyzerConfig(PluginConfig):
-    """Analyzer config."""
-
-    analyzer: NamespacedName
-    min_sessions: int | None = Field(default=None, ge=1)
-    analyzer_version_id: uuid.UUID
-
-    @property
-    def plugin_version_id(self) -> uuid.UUID:
-        """Id of the resolved plugin version."""
-        return self.analyzer_version_id
-
-    def get_min_sessions(self) -> int:
-        """Return the explicit minimum or the analyzer's default."""
-        if self.min_sessions is not None:
-            return self.min_sessions
-        if self.analyzer in {
-            "kitaru/post-import-insights",
-            "kitaru/openai-post-import-insights",
-        }:
-            return 5
-        return 1
 
 
 class StaticCase(FrozenModel):

@@ -8,7 +8,7 @@ from typing import Any, cast
 import pytest
 
 from kitaru.api_models.v1.imports import ApiImportSource, BlobImportSource
-from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.management import EvaluatorSelection

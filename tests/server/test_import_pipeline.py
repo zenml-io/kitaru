@@ -50,8 +50,12 @@ from kitaru.server.application.services.plugin_resolution import (
 )
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
-from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
-from kitaru.server.domain.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.server.domain.plugin import (
+    AnalyzerConfig,
+    EvaluatorConfig,
+    PluginKind,
+    ScriptPluginSource,
+)
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import AnalysisTask, EvaluationTask, ImportTask, Task
 from kitaru.server.domain.worker import Worker

@@ -33,7 +33,7 @@ from kitaru.api_models.v1.imports import (
     ImportStats,
 )
 from kitaru.api_models.v1.job import JobResponse, JobStatus
-from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 from kitaru.api_models.v1.session import (
     SessionListParams,
     SessionOrigin,

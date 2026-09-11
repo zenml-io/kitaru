@@ -44,7 +44,7 @@ from kitaru.server.application.models.imports import (
     ImportCreate,
     ImportFilter,
 )
-from kitaru.server.application.models.replay_config import (
+from kitaru.server.application.models.plugin import (
     AnalyzerConfigInput,
     EvaluatorConfigInput,
 )

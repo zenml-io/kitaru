@@ -57,8 +57,13 @@ from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.blob import Blob, BlobStorageBackend
 from kitaru.server.domain.imports import Import, ImportNotFound
 from kitaru.server.domain.job import Job
-from kitaru.server.domain.plugin import PackagePluginSource, Plugin, PluginKind
-from kitaru.server.domain.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.server.domain.plugin import (
+    AnalyzerConfig,
+    EvaluatorConfig,
+    PackagePluginSource,
+    Plugin,
+    PluginKind,
+)
 from kitaru.server.domain.session import Session
 from kitaru.server.filtering import FilterCondition
 

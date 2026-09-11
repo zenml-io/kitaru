@@ -44,7 +44,7 @@ from kitaru.server.application.models.job import (
     JobFilter,
     SessionRunCreate,
 )
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy, TaskUpdate
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (

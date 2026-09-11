@@ -25,14 +25,13 @@ from kitaru.api_models.v1.evaluator import (
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.job import JobResponse, JobStatus
-from kitaru.api_models.v1.plugin import ScriptPluginSource
+from kitaru.api_models.v1.plugin import EvaluatorConfig, ScriptPluginSource
 from kitaru.api_models.v1.replay import (
     ReplayCreateRequest,
     ReplayResponse,
     ReplayStatus,
 )
 from kitaru.api_models.v1.replay_config import (
-    EvaluatorConfig,
     HistoryConfig,
     HistoryScope,
     PassthroughConfig,

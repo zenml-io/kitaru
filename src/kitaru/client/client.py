@@ -29,6 +29,7 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunStatus,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay import (
     BaselineEvaluationMode,
     ReplayCreateRequest,
@@ -36,7 +37,6 @@ from kitaru.api_models.v1.replay import (
     ReplayStatus,
 )
 from kitaru.api_models.v1.replay_config import (
-    EvaluatorConfig,
     ReplayOverride,
     ToolPolicy,
 )

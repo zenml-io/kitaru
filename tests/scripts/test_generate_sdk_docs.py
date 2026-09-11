@@ -237,6 +237,11 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
     # Annotated discriminated-union alias; the four concrete configs are the
     # developer-facing entry points.
     "kitaru.api_models.v1.replay_config": frozenset({"ToolConfig"}),
+    # PluginSource and its two concrete sources are internal wire models used
+    # only by evaluator/analyzer/importer registration, not published.
+    "kitaru.api_models.v1.plugin": frozenset(
+        {"PluginSource", "ScriptPluginSource", "PackagePluginSource"}
+    ),
     # Annotated union aliases; the concrete filter models are published.
     "kitaru.api_models.v1.filter": frozenset({"Filter", "FilterParam"}),
     # Annotated discriminated-union alias plus the batch size cap.

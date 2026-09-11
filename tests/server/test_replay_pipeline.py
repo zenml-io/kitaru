@@ -49,8 +49,8 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.experiment import ExperimentCreate
 from kitaru.server.application.models.experiment_run import ExperimentRunCreate
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter, TaskUpdate
 from kitaru.server.application.services.plugin_resolution import PLUGIN_PROVIDER_LABEL
 from kitaru.server.domain.account import Account

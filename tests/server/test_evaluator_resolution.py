@@ -23,7 +23,7 @@ from conftest import (
     create_connection,
     create_plugin,
 )
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.services.evaluator_resolution import (
     resolve_evaluator_config,
     validate_evaluators,

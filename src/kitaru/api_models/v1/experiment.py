@@ -19,8 +19,8 @@ from pydantic import Field
 
 from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
 from kitaru.api_models.v1.filter import FilterableListParams
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay_config import (
-    EvaluatorConfig,
     ReplayOverride,
     ToolPolicy,
 )

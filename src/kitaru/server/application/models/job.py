@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.base import FrozenModel
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.base import ListFilter
 from kitaru.server.filtering import EQUALITY_OPS, FilterField
 

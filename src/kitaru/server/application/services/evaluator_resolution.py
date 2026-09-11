@@ -20,15 +20,14 @@ from kitaru.server.application.interfaces.connection_repository import (
 )
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.services.plugin_resolution import (
     check_unique_plugin_versions,
     resolve_plugin_config,
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.names import RESERVED_NAMESPACE
-from kitaru.server.domain.plugin import PluginKind
-from kitaru.server.domain.replay_config import EvaluatorConfig
+from kitaru.server.domain.plugin import EvaluatorConfig, PluginKind
 
 OUTPUT_CONTRACT_EVALUATOR = f"{RESERVED_NAMESPACE}/output-contract"
 

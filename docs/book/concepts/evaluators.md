@@ -101,7 +101,7 @@ Exactly one selection is required: explicit session IDs (arguments or `--session
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationBatchCreateRequest
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 
 job = await client.evaluations.create(
     EvaluationBatchCreateRequest(
