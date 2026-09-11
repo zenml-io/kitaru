@@ -1017,6 +1017,20 @@
           "additionalProperties": false,
           "description": "Evaluator config.",
           "properties": {
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Credential connection, an omitted value resolves to the provider's default.",
+              "title": "Connection Id"
+            },
             "evaluator": {
               "description": "Evaluator name.",
               "title": "Evaluator",
@@ -3448,6 +3462,20 @@
           "additionalProperties": false,
           "description": "Evaluator config.",
           "properties": {
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Credential connection, an omitted value resolves to the provider's default.",
+              "title": "Connection Id"
+            },
             "evaluator": {
               "description": "Evaluator name.",
               "title": "Evaluator",

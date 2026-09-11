@@ -74,6 +74,13 @@ class EvaluatorConfig(RequestModel):
     params: dict[str, JsonValue] = Field(
         default_factory=dict, description="Parameters passed to the evaluator."
     )
+    connection_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Credential connection, an omitted value resolves to the provider's "
+            "default."
+        ),
+    )
 
 
 class AnalyzerConfig(RequestModel):

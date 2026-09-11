@@ -336,6 +336,7 @@ async def import_sessions(
     tags: list[str] | None = None,
     evaluators: Sequence[str] | None = None,
     evaluator_params: Sequence[str] | None = None,
+    evaluator_connections: Sequence[str] | None = None,
     analyzers: Sequence[str] | None = None,
     analyzer_params: Sequence[str] | None = None,
     analyzer_connections: Sequence[str] | None = None,
@@ -358,6 +359,11 @@ async def import_sessions(
         raise CLIError(
             "invalid_arguments",
             "--evaluator-params requires at least one --evaluator.",
+        )
+    if evaluator_connections and not evaluators:
+        raise CLIError(
+            "invalid_arguments",
+            "--evaluator-connection requires at least one --evaluator.",
         )
     if analyzer_params and not analyzers:
         raise CLIError(
@@ -436,7 +442,7 @@ async def import_sessions(
     evaluator_identity: list[dict[str, Any]] = []
     if evaluators:
         configs, evaluator_identity, _ = await resolve_evaluator_configs(
-            client, evaluators, evaluator_params or []
+            client, evaluators, evaluator_params or [], evaluator_connections or []
         )
     analyzer_configs: list[AnalyzerConfig] = []
     analyzer_identity: list[dict[str, Any]] = []

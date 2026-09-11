@@ -29,6 +29,7 @@ from kitaru.server.application.services.evaluator_resolution import (
     validate_evaluators,
 )
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.domain.connection import ConnectionNotFound
 from kitaru.server.domain.plugin import (
     PackagePluginSource,
     PluginKind,
@@ -214,6 +215,44 @@ async def test_resolve_evaluator_config_unscoped_any_agent(
         config, repository, connections, agent_id=uuid.uuid4()
     )
     assert resolved.evaluator == "accuracy"
+
+
+async def test_resolve_named_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Resolve the connection explicitly named by the evaluator config."""
+    plugin = await create_plugin(
+        repository,
+        OWNER_ID,
+        kind=PluginKind.EVALUATOR,
+        name="accuracy",
+        provider="langfuse",
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version="v1")
+    connection = await create_connection(
+        connections, OWNER_ID, uuid.uuid4(), name="named"
+    )
+
+    config = EvaluatorConfigInput(evaluator="accuracy", connection_id=connection.id)
+    resolved = await resolve_evaluator_config(
+        config, repository, connections, agent_id=None
+    )
+    assert resolved.connection_id == connection.id
+    assert resolved.provider == "langfuse"
+
+
+async def test_resolve_missing_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Raise when the evaluator config names an unknown connection."""
+    plugin = await create_plugin(
+        repository, OWNER_ID, kind=PluginKind.EVALUATOR, name="accuracy"
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version="v1")
+
+    config = EvaluatorConfigInput(evaluator="accuracy", connection_id=uuid.uuid4())
+    with pytest.raises(ConnectionNotFound):
+        await resolve_evaluator_config(config, repository, connections, agent_id=None)
 
 
 async def test_resolve_default_connection(

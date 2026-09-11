@@ -5956,6 +5956,11 @@ export interface components {
          */
         EvaluatorConfig: {
             /**
+             * Connection Id
+             * @description Credential connection, an omitted value resolves to the provider's default.
+             */
+            connection_id?: string | null;
+            /**
              * Evaluator
              * @description Evaluator name.
              */

@@ -26,6 +26,7 @@ class PluginConfigInput(FrozenModel):
 
     version: int | None = None
     params: dict[str, Any] = Field(default_factory=dict)
+    connection_id: uuid.UUID | None = None
 
 
 class EvaluatorConfigInput(PluginConfigInput):
@@ -39,4 +40,3 @@ class AnalyzerConfigInput(PluginConfigInput):
 
     analyzer: str
     min_sessions: int | None = Field(default=None, ge=1)
-    connection_id: uuid.UUID | None = None

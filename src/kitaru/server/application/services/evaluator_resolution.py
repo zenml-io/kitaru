@@ -81,6 +81,7 @@ async def resolve_evaluator_config(
         PluginNotFound: No evaluator plugin has this name.
         PluginVersionNotFound: The resolved version has no matching plugin
             version.
+        ConnectionNotFound: No connection has the named id.
         ValidationError: The evaluator is scoped to a different agent.
 
     Returns:
@@ -91,7 +92,7 @@ async def resolve_evaluator_config(
         config.evaluator,
         config.version,
         PluginKind.EVALUATOR,
-        None,
+        config.connection_id,
         plugin_repository,
         connection_repository,
     )
@@ -131,6 +132,7 @@ async def validate_evaluators(
     Raises:
         PluginNotFound: A config names an unknown evaluator.
         PluginVersionNotFound: A config names an unknown version.
+        ConnectionNotFound: A config names an unknown connection.
         ValidationError: A config's evaluator is scoped to a different
             agent, or two configs resolve to the same evaluator version.
 

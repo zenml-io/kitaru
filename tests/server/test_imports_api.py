@@ -500,10 +500,48 @@ async def test_create_import_with_evaluators(
     assert response.status_code == 201
     created = response.json()
     assert created["evaluators"] == [
-        {"evaluator": "accuracy", "version": 1, "params": {"k": 1}}
+        {
+            "evaluator": "accuracy",
+            "version": 1,
+            "params": {"k": 1},
+            "connection_id": None,
+        }
     ]
     assert created["stats"] is None
     assert created["error"] is None
+
+
+async def test_create_import_with_a_named_evaluator_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Create an import whose evaluator config carries a named connection."""
+    await _importer_version(services)
+    await _evaluator_version(services, "accuracy")
+    connection = await create_connection(services.connections, ACCOUNT.id, uuid.uuid4())
+    body = await _import_request(
+        services,
+        evaluators=[{"evaluator": "accuracy", "connection_id": str(connection.id)}],
+    )
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["evaluators"][0]["connection_id"] == str(connection.id)
+
+
+async def test_create_import_not_found_for_unknown_evaluator_connection(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 404 for an evaluator config naming an unknown connection."""
+    await _importer_version(services)
+    await _evaluator_version(services, "accuracy")
+    body = await _import_request(
+        services,
+        evaluators=[{"evaluator": "accuracy", "connection_id": str(uuid.uuid4())}],
+    )
+
+    response = await client.post("/api/v1/imports", json=body)
+    assert response.status_code == 404
 
 
 async def test_create_import_not_found_for_unknown_evaluator(

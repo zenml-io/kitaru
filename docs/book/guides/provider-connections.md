@@ -88,6 +88,8 @@ kitaru session import sessions.jsonl \
 
 Repeat `--analyzer-connection ANALYZER@VERSION=CONNECTION` when different analyzers need different credentials. The analyzer token must exactly match one of the `--analyzer` values. On the REST API and the Python client, set `connection_id` on that analyzer's `AnalyzerConfig`.
 
+An evaluator named on an import, experiment, replay, or evaluation can name its own connection the same way, with `--evaluator-connection EVALUATOR@VERSION=CONNECTION`, or `connection_id` on its `EvaluatorConfig`.
+
 ## Resolution
 
 Each importer and analyzer connection resolves when the import is created, in this order:

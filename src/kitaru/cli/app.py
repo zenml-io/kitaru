@@ -2853,6 +2853,13 @@ async def annotation_delete(
                 False,
                 "Parameters for a selected evaluator token.",
             ),
+            ParameterSpec(
+                "--evaluator-connection",
+                "EVALUATOR@VERSION=CONNECTION[]",
+                "option",
+                False,
+                "Connection for a selected evaluator token.",
+            ),
             _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
@@ -2871,6 +2878,7 @@ async def experiment_create(
     override: str | None = None,
     tool_policy: str | None = None,
     evaluator_params: list[str] | None = None,
+    evaluator_connection: list[str] | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an experiment with exact evaluator versions."""
@@ -2884,6 +2892,7 @@ async def experiment_create(
             tool_policy=tool_policy,
             evaluators=evaluator,
             evaluator_params=evaluator_params,
+            evaluator_connections=evaluator_connection,
             idempotency_key=idempotency_key,
         )
 
@@ -2993,6 +3002,13 @@ async def experiment_get(experiment: str, /) -> CommandResult:
                 False,
                 "Parameters for a selected evaluator token.",
             ),
+            ParameterSpec(
+                "--evaluator-connection",
+                "EVALUATOR@VERSION=CONNECTION[]",
+                "option",
+                False,
+                "Connection for a selected evaluator token.",
+            ),
         ),
         read_only=False,
         side_effects=("mutates_remote_state",),
@@ -3012,6 +3028,7 @@ async def experiment_update(
     tool_policy: str | None = None,
     evaluator: list[str] | None = None,
     evaluator_params: list[str] | None = None,
+    evaluator_connection: list[str] | None = None,
 ) -> CommandResult:
     """Update selected fields on one exact experiment."""
     async with _open_asset_client() as client:
@@ -3026,6 +3043,7 @@ async def experiment_update(
             tool_policy=tool_policy,
             evaluators=evaluator,
             evaluator_params=evaluator_params,
+            evaluator_connections=evaluator_connection,
         )
 
 
@@ -3082,6 +3100,13 @@ async def experiment_delete(
                 "Parameters for a selected evaluator token.",
             ),
             ParameterSpec(
+                "--evaluator-connection",
+                "EVALUATOR@VERSION=CONNECTION[]",
+                "option",
+                False,
+                "Connection for a selected evaluator token.",
+            ),
+            ParameterSpec(
                 "--agent",
                 "AGENT@VERSION",
                 "option",
@@ -3124,6 +3149,7 @@ async def replay_create(
     *,
     evaluator: list[str],
     evaluator_params: list[str] | None = None,
+    evaluator_connection: list[str] | None = None,
     agent: str | None = None,
     override: str | None = None,
     tool_policy: str | None = None,
@@ -3139,6 +3165,7 @@ async def replay_create(
             baseline,
             evaluators=evaluator,
             evaluator_params=evaluator_params,
+            evaluator_connections=evaluator_connection,
             agent=agent,
             override=override,
             tool_policy=tool_policy,
@@ -4394,6 +4421,13 @@ async def analyzer_version_get(analyzer_version: str, /) -> CommandResult:
                 "Parameters for a selected evaluator token.",
             ),
             ParameterSpec(
+                "--evaluator-connection",
+                "EVALUATOR@VERSION=CONNECTION[]",
+                "option",
+                False,
+                "Connection for a selected evaluator token.",
+            ),
+            ParameterSpec(
                 "--analyzer",
                 "ANALYZER@VERSION[]",
                 "option",
@@ -4457,6 +4491,7 @@ async def session_import(
     tag: list[str] | None = None,
     evaluator: list[str] | None = None,
     evaluator_params: list[str] | None = None,
+    evaluator_connection: list[str] | None = None,
     analyzer: list[str] | None = None,
     analyzer_params: list[str] | None = None,
     analyzer_connection: list[str] | None = None,
@@ -4484,6 +4519,7 @@ async def session_import(
             tags=tag,
             evaluators=evaluator,
             evaluator_params=evaluator_params,
+            evaluator_connections=evaluator_connection,
             analyzers=analyzer,
             analyzer_params=analyzer_params,
             analyzer_connections=analyzer_connection,
@@ -4721,6 +4757,13 @@ async def session_nodes(
                 False,
                 "Parameters for a selected evaluator token.",
             ),
+            ParameterSpec(
+                "--evaluator-connection",
+                "EVALUATOR@VERSION=CONNECTION[]",
+                "option",
+                False,
+                "Connection for a selected evaluator token.",
+            ),
             *_WAIT_PARAMETERS,
             _IDEMPOTENCY_KEY_PARAMETER,
         ),
@@ -4748,6 +4791,7 @@ async def session_evaluate(
     ] = False,
     evaluator: list[str],
     evaluator_params: list[str] | None = None,
+    evaluator_connection: list[str] | None = None,
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,
@@ -4766,6 +4810,7 @@ async def session_evaluate(
             all_sessions=all_sessions,
             evaluators=evaluator,
             evaluator_params=evaluator_params,
+            evaluator_connections=evaluator_connection,
             wait=wait,
             interval=interval,
             timeout=timeout,

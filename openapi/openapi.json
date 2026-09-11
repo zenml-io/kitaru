@@ -3253,6 +3253,19 @@
         "additionalProperties": false,
         "description": "Evaluator config.",
         "properties": {
+          "connection_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Credential connection, an omitted value resolves to the provider's default.",
+            "title": "Connection Id"
+          },
           "evaluator": {
             "description": "Evaluator name.",
             "title": "Evaluator",

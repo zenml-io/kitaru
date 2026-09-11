@@ -468,6 +468,7 @@ async def resolve_evaluator_configs(
     client: Any,
     evaluator_tokens: Sequence[str],
     parameter_entries: Sequence[str],
+    connection_entries: Sequence[str] = (),
 ) -> tuple[list[EvaluatorConfig], list[dict[str, Any]], list[uuid.UUID]]:
     """Resolve exact evaluator configurations and bounded identities."""
     if not evaluator_tokens:
@@ -497,6 +498,29 @@ async def resolve_evaluator_configs(
             )
         params_by_token[token] = parse_json_object(value, option="--evaluator-params")
 
+    connections_by_token: dict[str, Any] = {}
+    for entry in connection_entries:
+        token, separator, reference = entry.partition("=")
+        if not separator or not token or not reference:
+            raise CLIError(
+                "invalid_arguments",
+                "--evaluator-connection must be EVALUATOR@VERSION=CONNECTION.",
+            )
+        if token not in selected:
+            raise CLIError(
+                "invalid_arguments",
+                f"--evaluator-connection token {token!r} is not a selected evaluator.",
+            )
+        if token in connections_by_token:
+            raise CLIError(
+                "invalid_arguments",
+                f"Connection for evaluator token {token!r} was provided more than "
+                "once.",
+            )
+        connections_by_token[token] = await resolve_asset(
+            client.connections, reference, "Connection"
+        )
+
     configs: list[EvaluatorConfig] = []
     identities: list[dict[str, Any]] = []
     version_ids: list[uuid.UUID] = []
@@ -512,21 +536,27 @@ async def resolve_evaluator_configs(
             )
         seen_versions.add(version.id)
         version_ids.append(version.id)
+        connection = connections_by_token.get(token)
         configs.append(
             EvaluatorConfig(
                 evaluator=parent.name,
                 version=version.version,
                 params=params_by_token.get(token, {}),
+                connection_id=None if connection is None else connection.id,
             )
         )
-        identities.append(
-            {
-                "id": str(parent.id),
-                "name": parent.name,
-                "version_id": str(version.id),
-                "version": version.version,
+        identity = {
+            "id": str(parent.id),
+            "name": parent.name,
+            "version_id": str(version.id),
+            "version": version.version,
+        }
+        if connection is not None:
+            identity["connection"] = {
+                "id": str(connection.id),
+                "name": connection.name,
             }
-        )
+        identities.append(identity)
     return configs, identities, version_ids
 
 

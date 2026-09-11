@@ -118,7 +118,7 @@ kitaru session import sessions.jsonl \
   --wait
 ```
 
-Use `--tag` with `--wait` to tag every created session. Use `--join-on` to group provider traces by a source value. Use `--params` for other provider-specific settings. Use `--max-sessions` to stop the import after it creates a set number of sessions. Use `--evaluator` to score every imported session once the import finishes, and `--evaluator-params` to pass parameters to a selected evaluator. Use `--analyzer` to run an [analyzer](../concepts/analyzers.md) over every imported session once the import finishes, `--analyzer-params` to pass parameters to a selected analyzer, and `--analyzer-connection` to select credentials for it:
+Use `--tag` with `--wait` to tag every created session. Use `--join-on` to group provider traces by a source value. Use `--params` for other provider-specific settings. Use `--max-sessions` to stop the import after it creates a set number of sessions. Use `--evaluator` to score every imported session once the import finishes, `--evaluator-params` to pass parameters to a selected evaluator, and `--evaluator-connection` to select credentials for it. Use `--analyzer` to run an [analyzer](../concepts/analyzers.md) over every imported session once the import finishes, `--analyzer-params` to pass parameters to a selected analyzer, and `--analyzer-connection` to select credentials for it:
 
 ```bash
 kitaru session import sessions.jsonl \
@@ -126,6 +126,7 @@ kitaru session import sessions.jsonl \
   --agent customer-service@latest \
   --evaluator accuracy@latest \
   --evaluator-params 'accuracy@latest={"threshold": 0.8}' \
+  --evaluator-connection accuracy@latest=model-provider-prod \
   --analyzer session-outcomes@latest \
   --analyzer-params 'session-outcomes@latest={"min_count": 5}' \
   --analyzer-connection session-outcomes@latest=model-provider-prod \
@@ -166,7 +167,7 @@ The selected value must be a non-empty string, number, or boolean. A missing, co
 
 ### SDK and REST
 
-The CLI validates `--join-on` and adds it to the importer parameter object, resolves each `--evaluator` into an entry of the `evaluators` list, and resolves each `--analyzer` plus any matching `--analyzer-connection` into an entry of the `analyzers` list. SDK callers pass the same `join_on` parameter, evaluator configs, and analyzer configs directly:
+The CLI validates `--join-on` and adds it to the importer parameter object, resolves each `--evaluator` plus any matching `--evaluator-connection` into an entry of the `evaluators` list, and resolves each `--analyzer` plus any matching `--analyzer-connection` into an entry of the `analyzers` list. SDK callers pass the same `join_on` parameter, evaluator configs, and analyzer configs directly:
 
 ```python
 from kitaru.api_models.v1.imports import ImportCreateRequest
@@ -180,7 +181,13 @@ created_import = await client.imports.create(
         agent_version_id=agent_version_id,
         payload_blob_id=blob_id,
         params={"join_on": "/metadata/customer/case_id"},
-        evaluators=[EvaluatorConfig(evaluator="accuracy", params={"threshold": 0.8})],
+        evaluators=[
+            EvaluatorConfig(
+                evaluator="accuracy",
+                params={"threshold": 0.8},
+                connection_id=evaluator_connection_id,
+            )
+        ],
         analyzers=[
             AnalyzerConfig(
                 analyzer="session-outcomes", connection_id=analyzer_connection_id
