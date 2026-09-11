@@ -310,3 +310,6 @@ replay-verify-reports/
 # OpenAPI baseline build output
 openapi/.build/
 src/kitaru/server/application/services/sample_data.json.gz
+
+# Per-user publish settings, see devtools/publish.env.example
+devtools/publish.env
