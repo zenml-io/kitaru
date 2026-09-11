@@ -20,6 +20,7 @@ import pytest
 
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
+from kitaru.json_pointer import resolve_json_pointer
 from kitaru.task.importer import ImportedSession
 from kitaru_jsonl_importer.importer import InvalidImport, parse
 
@@ -50,12 +51,18 @@ def _session() -> dict[str, Any]:
                 "input_text_selector": "/1/content",
                 "output_text_selector": "/0/content",
                 "system_prompt_selector": "/0/content",
-                "reasoning": "The source reports clear skies.",
+                "reasoning_selectors": ["/0/reasoning"],
                 "inputs": [
                     {"role": "system", "content": "Answer briefly."},
                     {"role": "user", "content": "How is the weather?"},
                 ],
-                "outputs": [{"role": "assistant", "content": "Sunny."}],
+                "outputs": [
+                    {
+                        "role": "assistant",
+                        "content": "Sunny.",
+                        "reasoning": "The source reports clear skies.",
+                    }
+                ],
                 "attributes": {},
                 "metadata": {},
             }
@@ -77,7 +84,11 @@ def test_parses_one_complete_session_per_line() -> None:
     assert session.nodes[0].input_text_selector == "/1/content"
     assert session.nodes[0].output_text_selector == "/0/content"
     assert session.nodes[0].system_prompt_selector == "/0/content"
-    assert session.nodes[0].reasoning == "The source reports clear skies."
+    node = session.nodes[0]
+    assert node.reasoning_selectors == ["/0/reasoning"]
+    found, value = resolve_json_pointer(node.outputs, node.reasoning_selectors[0])
+    assert found
+    assert value == "The source reports clear skies."
 
 
 def test_isolates_invalid_lines_and_forbids_unknown_fields() -> None:
