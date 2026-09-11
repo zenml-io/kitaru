@@ -85,19 +85,6 @@ def upgrade() -> None:
     """)
     )
 
-    # Nodes are positioned by their start time, so a node that reported none
-    # takes its parent's and keeps none when the parent has none either.
-    op.execute(
-        sa.text("""
-        UPDATE session_node AS n
-        SET started_at = p.started_at
-        FROM session_node AS p
-        WHERE p.id = n.parent_id
-            AND n.started_at IS NULL
-            AND p.started_at IS NOT NULL
-    """)
-    )
-
     with op.batch_alter_table("session_node", schema=None) as batch_op:
         batch_op.alter_column("external_id", existing_type=sa.Text(), nullable=False)
         batch_op.create_index(

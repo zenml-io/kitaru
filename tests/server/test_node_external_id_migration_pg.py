@@ -70,8 +70,7 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
         )
         created = datetime(2026, 5, 1, tzinfo=UTC)
         started_at = datetime(2026, 5, 1, 12, tzinfo=UTC)
-        # Fixed ids because the parent and its child share one start,
-        # which leaves the id as the only tie-break.
+        # Fixed ids because the untimed rows sort by id alone.
         root_id = uuid.UUID("00000000-0000-7000-8000-000000000001")
         child_id = uuid.UUID("00000000-0000-7000-8000-000000000002")
         orphan_id = uuid.UUID("00000000-0000-7000-8000-000000000003")
@@ -129,7 +128,7 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
             ).all()
         identities = {row.id: (row.external_id, row.started_at) for row in upgraded}
         assert identities[root_id] == ("call-0", started_at)
-        assert identities[child_id] == ("index-1", started_at)
+        assert identities[child_id] == ("index-1", None)
         assert identities[orphan_id] == ("index-2", None)
         references = {
             row.id: (row.parent_external_id, row.secondary_parent_external_ids)
