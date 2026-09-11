@@ -132,7 +132,7 @@ Per node, the importer preserves:
 - **Status**: a record with a non-empty `error` becomes a failed node carrying that error.
 - **Metadata**, allowlisted. Only session, conversation, model, and provider keys come across (`session_id`, `sessionId`, `thread_id`, `conversation_id`, `gen_ai.conversation.id`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.provider.name`, `model`, `provider`, `turn_index`). Everything else in `metadata` is dropped rather than copied wholesale into Kitaru.
 
-The importer also normalizes each node for the UI and for evaluators: it locates the user input text, the visible assistant output text, the system prompt on model calls, and any visible reasoning, recording pointers into the payload rather than copying the text. Reasoning and tool-call parts are excluded from what counts as visible output. When the export's metadata names a known framework (PydanticAI, LangGraph, OpenAI Agents, Google ADK, or the Claude Agent SDK), the session records it, provided the evidence points at exactly one.
+The importer also normalizes each node for the UI and for evaluators: it locates the user input text, the visible assistant output text, the system prompt on model calls, and any visible reasoning, recording selectors into the payload rather than copying the text. Reasoning and tool-call parts are excluded from what counts as visible output. When the export's metadata names a known framework (PydanticAI, LangGraph, OpenAI Agents, Google ADK, or the Claude Agent SDK), the session records it, provided the evidence points at exactly one.
 
 ### Grouping traces into sessions
 

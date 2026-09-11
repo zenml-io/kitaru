@@ -13,6 +13,9 @@
 #  permissions and limitations under the License.
 """Tests for session node API models."""
 
+import uuid
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -21,6 +24,7 @@ from kitaru.api_models.v1.session_node import (
     NodeType,
     SessionNodeBatchRequest,
     SessionNodeCreateRequest,
+    SessionNodeResponse,
 )
 
 
@@ -43,6 +47,32 @@ def _node(index: int, parent_index: int | None) -> SessionNodeCreateRequest:
         inputs=None,
         outputs=None,
         attributes=None,
+    )
+
+
+def _response(reasoning_selectors: list[str], outputs: Any) -> SessionNodeResponse:
+    """Build a session node response for the reasoning property tests.
+
+    Args:
+        reasoning_selectors: Pointers selecting visible reasoning.
+        outputs: Node outputs.
+
+    Returns:
+        A minimal session node response.
+    """
+    return SessionNodeResponse(
+        id=uuid.uuid4(),
+        session_id=uuid.uuid4(),
+        index=0,
+        parent_index=None,
+        secondary_parent_indexes=[],
+        secondary_parent_ids=[],
+        node_type=NodeType.LLM_CALL,
+        name="call",
+        status=NodeStatus.COMPLETED,
+        reasoning_selectors=reasoning_selectors,
+        outputs=outputs,
+        metadata={},
     )
 
 
@@ -101,3 +131,36 @@ def test_batch_over_cap_rejected() -> None:
     """Reject a batch larger than the maximum node count."""
     with pytest.raises(ValidationError):
         SessionNodeBatchRequest(nodes=[_node(i, None) for i in range(501)])
+
+
+def test_reasoning_joins_selected_strings() -> None:
+    """Join the strings the selectors pick out of the outputs by newline."""
+    response = _response(
+        ["/parts/0/content", "/parts/1/content"],
+        {"parts": [{"content": "first"}, {"content": "second"}]},
+    )
+    assert response.reasoning == "first\nsecond"
+
+
+def test_reasoning_skips_non_string_hits() -> None:
+    """Keep only the selectors that resolve to a string."""
+    response = _response(
+        ["/parts/0", "/parts/1/content"],
+        {"parts": [{"content": "first"}, {"content": "second"}]},
+    )
+    assert response.reasoning == "second"
+
+
+def test_reasoning_without_outputs() -> None:
+    """Resolve no reasoning when the outputs are absent."""
+    assert _response(["/parts/0/content"], None).reasoning is None
+
+
+def test_reasoning_without_selectors() -> None:
+    """Resolve no reasoning when the node names no selector."""
+    assert _response([], {"parts": [{"content": "first"}]}).reasoning is None
+
+
+def test_reasoning_ignores_unresolved_selector() -> None:
+    """Resolve no reasoning when no selector matches the outputs."""
+    assert _response(["/missing"], {"parts": []}).reasoning is None

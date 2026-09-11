@@ -207,15 +207,11 @@ def _node(index: int, **overrides: Any) -> SessionNode:
         "status": NodeStatus.COMPLETED,
     }
     values.update(overrides)
-    for field in ("reasoning", "inputs", "outputs", "attributes"):
+    for field in ("inputs", "outputs", "attributes"):
         value = values.get(field)
         if value is None or isinstance(value, Payload):
             continue
-        values[field] = (
-            Payload.from_text(value)
-            if field == "reasoning"
-            else Payload.from_json(value)
-        )
+        values[field] = Payload.from_json(value)
     return SessionNode(**values)
 
 

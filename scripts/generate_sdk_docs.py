@@ -125,6 +125,9 @@ PUBLIC_API: dict[str, ModuleSpec] = {
     "kitaru.task": ModuleSpec(
         symbols=frozenset({"get_task_id", "get_task_inputs"}),
     ),
+    "kitaru.json_pointer": ModuleSpec(
+        symbols=frozenset({"resolve_json_pointer"}),
+    ),
     # Container entries: kitaru.api_models and kitaru.api_models.v1 define no
     # developer-facing symbols themselves, but the attach step in
     # build_public_api requires every published module's parent to be

@@ -28,8 +28,13 @@ from claude_agent_sdk import (
 )
 
 from kitaru.api_models.v1.session import SessionStatus
-from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.api_models.v1.session_node import (
+    NodeStatus,
+    NodeType,
+    SessionNodeCreateRequest,
+)
 from kitaru.client import KitaruAPIClient
+from kitaru.json_pointer import resolve_json_pointer
 from kitaru_claude_agent_sdk.capability import KitaruRecordingError
 from kitaru_claude_agent_sdk.recording import (
     InvocationRecorder,
@@ -39,6 +44,16 @@ from kitaru_claude_agent_sdk.recording import (
 )
 
 from .conftest import FakeClient, nodes
+
+
+def _reasoning(node: SessionNodeCreateRequest) -> str | None:
+    """Resolve one node's reasoning selectors against its outputs."""
+    parts: list[str] = []
+    for selector in node.reasoning_selectors:
+        found, value = resolve_json_pointer(node.outputs, selector)
+        if found and isinstance(value, str):
+            parts.append(value)
+    return "\n".join(parts) if parts else None
 
 
 def _terminal(*, is_error: bool = False) -> ResultMessage:
@@ -174,7 +189,8 @@ async def test_maps_typed_messages_and_correlates_tools_and_tasks(
     model = latest[2]
     assert model.external_id == "message-1"
     assert model.model == "claude-test"
-    assert model.reasoning == "reasoning"
+    assert model.reasoning_selectors == ["/thinking/0"]
+    assert _reasoning(model) == "reasoning"
     assert model.tokens.input_tokens == 7
     assert model.tokens.output_tokens == 3
     assert "signature-secret" not in model.model_dump_json()
@@ -356,7 +372,7 @@ async def test_split_turn_tool_delivery_stays_under_its_llm_call(
     assert len(tools) == 1
     assert tools[0].parent_index == model.index
     assert tools[0].parent_index < tools[0].index
-    assert model.reasoning == "planning"
+    assert _reasoning(model) == "planning"
 
 
 async def test_split_turn_never_writes_one_message_id_at_two_indexes(
@@ -468,8 +484,8 @@ async def test_split_turn_merges_reasoning_and_text_into_one_node(
     model = next(
         node for node in latest.values() if node.node_type is NodeType.LLM_CALL
     )
-    assert model.reasoning == "weighing options"
-    assert model.outputs == {"text": ["final answer"]}
+    assert _reasoning(model) == "weighing options"
+    assert model.outputs == {"text": ["final answer"], "thinking": ["weighing options"]}
 
 
 async def test_split_turn_keeps_text_when_tool_use_arrives_separately(
@@ -488,7 +504,7 @@ async def test_split_turn_keeps_text_when_tool_use_arrives_separately(
     tool = next(
         node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
     )
-    assert model.outputs == {"text": ["looking that up"]}
+    assert model.outputs == {"text": ["looking that up"], "thinking": []}
     assert tool.parent_index == model.index
 
 
@@ -506,8 +522,8 @@ async def test_redelivered_identical_assistant_message_is_recorded_once(
         node for node in latest.values() if node.node_type is NodeType.LLM_CALL
     ]
     assert len(model_nodes) == 1
-    assert model_nodes[0].outputs == {"text": ["done"]}
-    assert model_nodes[0].reasoning == "planning"
+    assert model_nodes[0].outputs == {"text": ["done"], "thinking": ["planning"]}
+    assert _reasoning(model_nodes[0]) == "planning"
 
 
 async def test_identical_blocks_in_one_delivery_are_preserved(
@@ -527,8 +543,9 @@ async def test_identical_blocks_in_one_delivery_are_preserved(
     model = next(
         node for node in latest.values() if node.node_type is NodeType.LLM_CALL
     )
-    assert model.outputs == {"text": ["echo", "echo"]}
-    assert model.reasoning == "same\nsame"
+    assert model.outputs == {"text": ["echo", "echo"], "thinking": ["same", "same"]}
+    assert model.reasoning_selectors == ["/thinking/0", "/thinking/1"]
+    assert _reasoning(model) == "same\nsame"
 
 
 async def test_replayable_tool_preserves_full_arguments_for_history_key(

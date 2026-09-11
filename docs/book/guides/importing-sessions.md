@@ -43,7 +43,7 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 | `input_text_selector` | string or null | RFC 6901 JSON Pointer selecting the primary human-readable text inside `inputs`. |
 | `output_text_selector` | string or null | RFC 6901 JSON Pointer selecting the primary human-readable text inside `outputs`. |
 | `system_prompt_selector` | string or null | RFC 6901 JSON Pointer selecting the system prompt inside `inputs`. |
-| `reasoning` | string or null | Visible reasoning text when the source exports it. |
+| `reasoning_selectors` | string array | RFC 6901 JSON Pointers selecting visible reasoning strings inside `outputs`. |
 | `inputs`, `outputs` | any JSON value | Complete source payloads. Importers preserve message history, tool arguments, multimodal parts, and provider-specific content here. |
 | `requested_model`, `model`, `model_provider` | string or null | Requested model, served model, and model provider. |
 | `tokens` | object or null | Input, output, cached input, and reasoning token counts when reported. |
@@ -55,7 +55,7 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 
 Text selectors avoid copying potentially large values into separate columns. A selector is present only when the importer can identify one relevant string in the corresponding payload. A client resolves that [RFC 6901 JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901.html) when it loads the node payload and can show the complete `inputs` or `outputs` value for inspection. The selectors remain available in node list responses without loading the payload columns. `system_prompt_selector` resolves against `inputs`. A null selector means the importer could not choose one text value without guessing. The empty string is the JSON Pointer for the complete payload, which is useful when the payload itself is the selected string.
 
-`reasoning` contains visible text only. Redacted, encrypted, or unavailable reasoning remains null, while the provider payload stays in `inputs` or `outputs`. Token usage can also include `reasoning_tokens` when a provider reports the count.
+`reasoning_selectors` points at visible reasoning text only, wherever it lives inside `outputs`. A client resolves each pointer and joins the resulting strings with newlines, in order. Redacted, encrypted, or unavailable reasoning leaves the list empty, while the provider payload stays in `inputs` or `outputs`. Token usage can also include `reasoning_tokens` when a provider reports the count.
 
 ## Create Kitaru JSONL
 
@@ -89,9 +89,9 @@ The formatted object below represents one JSONL record. Serialize it onto one li
       "input_text_selector": "/1/content",
       "output_text_selector": "/0/content",
       "system_prompt_selector": "/0/content",
-      "reasoning": "The weather tool reports rain and a temperature of 18 C.",
+      "reasoning_selectors": ["/1/content"],
       "inputs": [{"role": "system", "content": "Answer in one sentence."}, {"role": "user", "content": "What is the weather in Delft?"}],
-      "outputs": [{"role": "assistant", "content": "Delft is rainy and 18 C."}],
+      "outputs": [{"role": "assistant", "content": "Delft is rainy and 18 C."}, {"role": "reasoning", "content": "The weather tool reports rain and a temperature of 18 C."}],
       "model": "claude-haiku-4-5-20251001",
       "model_provider": "anthropic",
       "tokens": {"input_tokens": 24, "output_tokens": 11, "cached_input_tokens": 0, "reasoning_tokens": 0},
@@ -242,7 +242,7 @@ Provider importers apply the same output contract to different source formats:
 | Mastra | Full `getTrace` JSON response or an array of responses | No grouping; each trace is one invocation |
 | Kitaru | One portable Kitaru session per JSONL line | No grouping; each line is one session |
 
-Normalization includes source identity, parent-child graph reconstruction, deterministic ordering, status and error mapping, model fields, token counts, cost, tool arguments and results, text selectors, visible `reasoning`, and framework detection. Source payloads remain in `inputs` and `outputs`. Session metadata reports normalization warnings and source completeness.
+Normalization includes source identity, parent-child graph reconstruction, deterministic ordering, status and error mapping, model fields, token counts, cost, tool arguments and results, text selectors, reasoning selectors, and framework detection. Source payloads remain in `inputs` and `outputs`. Session metadata reports normalization warnings and source completeness.
 
 Framework detection only sets `framework` when trace metadata identifies one supported framework without conflict. Unknown or sparse traces keep the field null.
 

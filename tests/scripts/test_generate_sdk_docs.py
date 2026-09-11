@@ -331,6 +331,7 @@ class TestAllowlistConfiguration:
         assert non_api_models == {
             "kitaru.client",
             "kitaru.client.resources",
+            "kitaru.json_pointer",
             "kitaru.task",
             "kitaru.task.analyzer",
             "kitaru.task.evaluator",

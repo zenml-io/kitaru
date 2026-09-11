@@ -63,7 +63,7 @@ class SessionNodeUpsert(FrozenModel):
     input_text_selector: str | None = None
     output_text_selector: str | None = None
     system_prompt_selector: str | None = None
-    reasoning: str | None = None
+    reasoning_selectors: list[str] = Field(default_factory=list)
     inputs: Any = None
     outputs: Any = None
     requested_model: str | None = None

@@ -98,12 +98,12 @@ def _get_system_selector(value: Any) -> str | None:
     return None
 
 
-def _get_reasoning(output: Any) -> str | None:
+def _get_reasoning_selectors(output: Any) -> list[str]:
     if not isinstance(output, dict):
-        return None
+        return []
     reasoning = output.get("reasoning")
     if isinstance(reasoning, str):
-        return reasoning
+        return ["/reasoning"]
     if (
         isinstance(reasoning, list)
         and reasoning
@@ -112,8 +112,8 @@ def _get_reasoning(output: Any) -> str | None:
             for part in reasoning
         )
     ):
-        return "\n".join(part["text"] for part in reasoning)
-    return None
+        return [f"/reasoning/{index}/text" for index in range(len(reasoning))]
+    return []
 
 
 def _get_cost(attributes: dict[str, Any]) -> Decimal | None:
@@ -272,7 +272,7 @@ def _normalize(
                 input_text_selector=_get_text_selector(span.input),
                 output_text_selector=_get_text_selector(span.output),
                 system_prompt_selector=_get_system_selector(span.input),
-                reasoning=_get_reasoning(span.output),
+                reasoning_selectors=_get_reasoning_selectors(span.output),
                 requested_model=attributes.get("model"),
                 model=attributes.get("responseModel") or attributes.get("model"),
                 model_provider=attributes.get("provider"),

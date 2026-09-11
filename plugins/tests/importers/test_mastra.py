@@ -18,6 +18,7 @@ from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError
+from kitaru.json_pointer import resolve_json_pointer
 from kitaru.task.importer import ImportedSession, flatten_nodes, ingest_session
 from kitaru_mastra_importer.importer import InvalidImport, parse
 
@@ -394,7 +395,10 @@ def test_preserves_explicit_reasoning_and_partial_usage(
     node = next(
         node for node in session.nodes if node.external_id == generation["spanId"]
     )
-    assert node.reasoning == "Use the recorded arithmetic result."
+    assert node.reasoning_selectors == ["/reasoning/0/text"]
+    found, value = resolve_json_pointer(node.outputs, node.reasoning_selectors[0])
+    assert found
+    assert value == "Use the recorded arithmetic result."
     assert (
         sum(node.tokens.input_tokens or 0 for node in session.nodes if node.tokens)
         == 41

@@ -28,6 +28,7 @@ from kitaru.api_models.v1.base import (
 )
 from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.session import SessionDetailResponse, TokenUsage
+from kitaru.json_pointer import resolve_json_pointer
 
 
 class NodeType(StrEnum):
@@ -87,8 +88,11 @@ class SessionNodeCreateRequest(RequestModel):
             "RFC 6901 JSON Pointer selecting the system prompt from node inputs."
         ),
     )
-    reasoning: str | None = Field(
-        default=None, description="Visible reasoning produced by the model call."
+    reasoning_selectors: list[str] = Field(
+        default_factory=list,
+        description=(
+            "RFC 6901 JSON Pointers selecting visible reasoning from node outputs."
+        ),
     )
     inputs: Any = Field(description="Node inputs.")
     outputs: Any = Field(description="Node outputs.")
@@ -119,7 +123,7 @@ class SessionNodeListParams(FilterableListParams):
     )
     include_payloads: bool = Field(
         default=False,
-        description="Include reasoning, inputs, outputs, and attributes.",
+        description="Include inputs, outputs, and attributes.",
     )
 
 
@@ -193,9 +197,11 @@ class SessionNodeResponse(ResponseModel):
             "RFC 6901 JSON Pointer selecting the system prompt from node inputs."
         ),
     )
-    reasoning: str | None = Field(
-        default=None,
-        description="Visible reasoning, null unless payloads are included.",
+    reasoning_selectors: list[str] = Field(
+        default_factory=list,
+        description=(
+            "RFC 6901 JSON Pointers selecting visible reasoning from node outputs."
+        ),
     )
     inputs: Any = Field(
         default=None, description="Node inputs, null unless include_payloads."
@@ -223,6 +229,23 @@ class SessionNodeResponse(ResponseModel):
         description="Arbitrary span attributes, null unless include_payloads.",
     )
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
+
+    @property
+    def reasoning(self) -> str | None:
+        """Stitch the visible reasoning the selectors pick out of the outputs.
+
+        Returns:
+            Selected reasoning joined by newlines, None when nothing resolves
+            to a string.
+        """
+        if self.outputs is None:
+            return None
+        parts: list[str] = []
+        for selector in self.reasoning_selectors:
+            found, value = resolve_json_pointer(self.outputs, selector)
+            if found and isinstance(value, str):
+                parts.append(value)
+        return "\n".join(parts) if parts else None
 
 
 class SessionWithNodesResponse(ResponseModel):

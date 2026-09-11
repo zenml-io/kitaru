@@ -760,8 +760,10 @@ class InvocationRecorder:
             started_at=turn.started_at,
             ended_at=turn.ended_at,
             inputs=None,
-            outputs={"text": list(turn.texts)},
-            reasoning="\n".join(turn.thoughts) or None,
+            outputs={"text": list(turn.texts), "thinking": list(turn.thoughts)},
+            reasoning_selectors=[
+                f"/thinking/{index}" for index in range(len(turn.thoughts))
+            ],
             model=turn.model,
             model_provider="anthropic",
             tokens=_get_token_usage(turn.usage),

@@ -3302,8 +3302,7 @@ export interface paths {
          *         actor: Caller context.
          *
          *     Returns:
-         *         Stored nodes in batch order, with reasoning, inputs, outputs, and
-         *         attributes null.
+         *         Stored nodes in batch order, with inputs, outputs, and attributes null.
          */
         post: operations["ingest_session_nodes_api_v1_sessions__session_id__nodes_post"];
         delete?: never;
@@ -8880,10 +8879,10 @@ export interface components {
              */
             parent_index?: number | null;
             /**
-             * Reasoning
-             * @description Visible reasoning produced by the model call.
+             * Reasoning Selectors
+             * @description RFC 6901 JSON Pointers selecting visible reasoning from node outputs.
              */
-            reasoning?: string | null;
+            reasoning_selectors?: string[];
             /**
              * Requested Model
              * @description Model requested by the call.
@@ -9032,10 +9031,10 @@ export interface components {
              */
             parent_index: number | null;
             /**
-             * Reasoning
-             * @description Visible reasoning, null unless payloads are included.
+             * Reasoning Selectors
+             * @description RFC 6901 JSON Pointers selecting visible reasoning from node outputs.
              */
-            reasoning?: string | null;
+            reasoning_selectors?: string[];
             /**
              * Requested Model
              * @description Model requested by the call.
@@ -19904,7 +19903,7 @@ export interface operations {
                 sort?: "index:asc";
                 /** @description Filter expression, JSON-encoded in the query string. */
                 filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
-                /** @description Include reasoning, inputs, outputs, and attributes. */
+                /** @description Include inputs, outputs, and attributes. */
                 include_payloads?: boolean;
             };
             header?: never;
