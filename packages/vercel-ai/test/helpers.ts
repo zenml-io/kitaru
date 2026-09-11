@@ -35,6 +35,18 @@ export function textResponse(text = "done") {
   };
 }
 
+export function reasoningResponse(text = "because", answer = "done") {
+  return {
+    content: [
+      { text, type: "reasoning" as const },
+      { text: answer, type: "text" as const },
+    ],
+    finishReason: { raw: "stop", unified: "stop" as const },
+    usage: TEST_USAGE,
+    warnings: [],
+  };
+}
+
 export function toolResponse(
   calls: Array<{ id: string; input?: string; name: string }>,
 ) {

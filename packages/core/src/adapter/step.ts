@@ -33,6 +33,7 @@ export interface NormalizedModelStep {
   modelSettings?: Record<string, JsonValue>;
   outputs: JsonValue;
   provider?: string;
+  reasoningSelectors?: string[];
   startedAt?: string;
   tokens?: SessionNodeCreateRequest["tokens"];
   tools: NormalizedToolCall[];
@@ -133,6 +134,7 @@ export async function recordNormalizedStep(
       parent_index: state.rootIndex,
       model_provider:
         provider === undefined ? undefined : providerFamily(provider),
+      reasoning_selectors: step.reasoningSelectors ?? [],
       requested_model: state.requestedModelId,
       started_at: startedAt,
       status: step.failed ? "failed" : "completed",

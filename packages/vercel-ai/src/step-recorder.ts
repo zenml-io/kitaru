@@ -142,6 +142,12 @@ function servedModelId(step: StepResult<ToolSet>): string {
   return step.response.modelId || step.model.modelId;
 }
 
+function stepReasoningSelectors(step: StepResult<ToolSet>): string[] {
+  return typeof step.reasoningText === "string" && step.reasoningText.length > 0
+    ? ["/reasoning_text"]
+    : [];
+}
+
 export async function recordVercelStep(
   state: AdapterRunState,
   step: StepResult<ToolSet>,
@@ -170,6 +176,7 @@ export async function recordVercelStep(
     modelSettings,
     outputs: stepOutputs(step, tools),
     provider: step.model.provider,
+    reasoningSelectors: stepReasoningSelectors(step),
     tokens,
     tools,
   });

@@ -6,6 +6,7 @@ import { createKitaruToolLoopAgent } from "../src/index.js";
 import {
   AGENT_ID,
   FakeClient,
+  reasoningResponse,
   replayEnvironment,
   replaySpec,
   textResponse,
@@ -80,6 +81,44 @@ describe("createKitaruToolLoopAgent", () => {
       { temperature: 0.2 },
       { temperature: 0.7 },
     ]);
+  });
+
+  it("selects the recorded reasoning text when a step reasons", async () => {
+    const client = new FakeClient();
+    const agent = createKitaruToolLoopAgent(
+      {
+        model: new MockLanguageModelV4({
+          doGenerate: reasoningResponse(),
+        }),
+      },
+      { agentId: AGENT_ID, client, environment: {} },
+    );
+
+    await agent.generate({ prompt: "Help" });
+
+    const modelNodes = client.nodeBatches.flatMap((batch) =>
+      batch.nodes.filter((node) => node.node_type === "llm_call"),
+    );
+    expect(modelNodes.map((node) => node.reasoning_selectors)).toEqual([
+      ["/reasoning_text"],
+    ]);
+  });
+
+  it("selects no reasoning text when a step does not reason", async () => {
+    const client = new FakeClient();
+    const agent = createKitaruToolLoopAgent(
+      {
+        model: new MockLanguageModelV4({ doGenerate: textResponse("done") }),
+      },
+      { agentId: AGENT_ID, client, environment: {} },
+    );
+
+    await agent.generate({ prompt: "Help" });
+
+    const modelNodes = client.nodeBatches.flatMap((batch) =>
+      batch.nodes.filter((node) => node.node_type === "llm_call"),
+    );
+    expect(modelNodes.map((node) => node.reasoning_selectors)).toEqual([[]]);
   });
 
   it("records caller model settings without applying replay bounds", async () => {
