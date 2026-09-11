@@ -158,19 +158,21 @@ def _plugin_properties(plugin: Plugin | None) -> dict[str, Any]:
 
 
 def build_import_completed_properties(
-    task: ImportTask, plugin: Plugin | None
+    task: ImportTask, plugin: Plugin | None, import_: Import
 ) -> dict[str, Any]:
     """Build the properties of an import task's transition to a terminal status.
 
     Args:
         task: Import task that transitioned to a terminal status.
         plugin: Importer plugin the task ran.
+        import_: Import the task ran.
 
     Returns:
         Event properties.
     """
     properties: dict[str, Any] = {
         "status": task.status.value,
+        "import_source": "api" if import_.fetch_query is not None else "blob",
         **_plugin_properties(plugin),
         **_duration_properties(task.started_at, task.ended_at),
     }
