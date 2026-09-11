@@ -354,7 +354,9 @@ class JobService:
                         job_id=job.id,
                         plugin_version_id=evaluator.evaluator_version_id,
                         input_session_id=session_id,
-                        labels=get_plugin_task_labels(evaluator.evaluator),
+                        labels=get_plugin_task_labels(
+                            evaluator.evaluator, evaluator.provider
+                        ),
                         params=evaluator.params,
                         on_failure=TaskOnFailure.CONTINUE,
                     )

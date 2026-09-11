@@ -31,6 +31,9 @@ class EvaluatorCreateRequest(RequestModel):
 
     name: str = Field(description="Evaluator name.")
     description: str | None = Field(default=None, description="Evaluator description.")
+    provider: str | None = Field(
+        default=None, description="External service this evaluator calls."
+    )
     logo_url: str | None = Field(default=None, description="Evaluator logo URL.")
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict, description="Arbitrary metadata."
@@ -68,6 +71,7 @@ class EvaluatorResponse(TimestampedResponseModel):
     id: uuid.UUID = Field(description="Evaluator id.")
     name: str = Field(description="Evaluator name.")
     description: str | None = Field(description="Evaluator description.")
+    provider: str | None = Field(description="External service this evaluator calls.")
     logo_url: str | None = Field(description="Evaluator logo URL.")
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
     latest_version: int = Field(

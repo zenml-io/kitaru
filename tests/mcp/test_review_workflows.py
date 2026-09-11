@@ -1199,6 +1199,7 @@ async def test_evaluation_start_protocol_returns_typed_receipt() -> None:
             owner_id=uuid.uuid4(),
             name="accuracy",
             description=None,
+            provider=None,
             logo_url=None,
             metadata={},
             latest_version=1,
@@ -1350,7 +1351,10 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
     await handle_evaluators_manage(
         state,
         EvaluatorCreate(
-            operation="create", name="accuracy", idempotency_key="retry-evaluator-1"
+            operation="create",
+            name="accuracy",
+            provider="langfuse",
+            idempotency_key="retry-evaluator-1",
         ),
     )
     await handle_evaluators_manage(
@@ -1392,6 +1396,12 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
         "create_version",
         "update_version",
     ]
+    assert cast(Any, calls[0][1]).model_dump(exclude_unset=True) == {
+        "name": "accuracy",
+        "description": None,
+        "provider": "langfuse",
+        "metadata": {},
+    }
     assert cast(Any, calls[1][1]).model_dump(exclude_unset=True) == {
         "description": None,
         "metadata": {"team": "evals"},

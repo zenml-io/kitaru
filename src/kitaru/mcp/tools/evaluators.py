@@ -29,6 +29,7 @@ async def handle_evaluators_manage(
             EvaluatorCreateRequest(
                 name=request.name,
                 description=request.description,
+                provider=request.provider,
                 metadata=request.metadata,
             ),
             idempotency_key=request.idempotency_key,

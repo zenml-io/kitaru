@@ -3516,10 +3516,11 @@ def _plugin_register_parameters(kind: str) -> tuple[ParameterSpec, ...]:
         ),
         ParameterSpec("--metadata", "JSON object", "option", False, "Parent metadata."),
     ]
-    if kind in {"importer", "analyzer"}:
+    if kind in {"importer", "analyzer", "evaluator"}:
         parent.append(
             ParameterSpec("--provider", "string", "option", False, "Source provider.")
         )
+    if kind in {"importer", "analyzer"}:
         parent.append(
             ParameterSpec(
                 "--connection-schema",
@@ -3963,6 +3964,7 @@ async def evaluator_register(
     entrypoint: str | None = None,
     description: str | None = None,
     metadata: str | None = None,
+    provider: str | None = None,
     agent_id: uuid.UUID | None = None,
     display_version: str | None = None,
 ) -> CommandResult:
@@ -3974,7 +3976,7 @@ async def evaluator_register(
         package=package,
         entrypoint=entrypoint,
         description=description,
-        provider=None,
+        provider=provider,
         metadata=metadata,
         agent_id=agent_id,
         display_version=display_version,

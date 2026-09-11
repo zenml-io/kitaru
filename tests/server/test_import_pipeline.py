@@ -67,9 +67,15 @@ def services() -> ReplayServices:
     return build_replay_services()
 
 
-async def _evaluator(services: ReplayServices, name: str) -> EvaluatorConfig:
+async def _evaluator(
+    services: ReplayServices, name: str, provider: str | None = None
+) -> EvaluatorConfig:
     plugin = await create_plugin(
-        services.plugins, ACTOR.account.id, kind=PluginKind.EVALUATOR, name=name
+        services.plugins,
+        ACTOR.account.id,
+        kind=PluginKind.EVALUATOR,
+        name=name,
+        provider=provider,
     )
     blob = await create_blob(services.blobs, ACTOR.account.id, content=name.encode())
     version = await services.plugins.create_version(
@@ -82,6 +88,7 @@ async def _evaluator(services: ReplayServices, name: str) -> EvaluatorConfig:
         version=version.version,
         params={"threshold": 0.5},
         evaluator_version_id=version.id,
+        provider=plugin.provider,
     )
 
 
@@ -260,6 +267,29 @@ async def test_completed_import_appends_one_task_per_session_and_evaluator(
         for session in sessions
         for evaluator in evaluators
     }
+
+
+async def test_evaluator_tasks_carry_the_provider_label(
+    services: ReplayServices,
+) -> None:
+    """A session's evaluator task carries its evaluator's provider label."""
+    evaluator = await _evaluator(services, "accuracy", provider="langfuse")
+    import_, import_task = await _import_with_task(services, [evaluator])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+
+    evaluator_tasks = await _evaluator_tasks(services, import_task.job_id)
+    assert all(
+        task.labels[PLUGIN_PROVIDER_LABEL] == "langfuse" for task in evaluator_tasks
+    )
 
 
 async def test_in_progress_session_is_skipped(services: ReplayServices) -> None:

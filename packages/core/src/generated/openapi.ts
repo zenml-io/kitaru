@@ -6005,6 +6005,11 @@ export interface components {
              * @description Evaluator name.
              */
             name: string;
+            /**
+             * Provider
+             * @description External service this evaluator calls.
+             */
+            provider?: string | null;
         };
         /**
          * EvaluatorResponse
@@ -6060,6 +6065,11 @@ export interface components {
              * @description Id of the owning account, null for a default plugin.
              */
             owner_id: string | null;
+            /**
+             * Provider
+             * @description External service this evaluator calls.
+             */
+            provider: string | null;
             /**
              * Updated
              * Format: date-time

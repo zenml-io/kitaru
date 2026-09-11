@@ -775,17 +775,17 @@ def plugin_parent_request(
                 connection_schema, option="--connection-schema"
             ),
         )
-    if provider is not None:
-        raise CLIError(
-            "invalid_arguments", "--provider is only valid for importers and analyzers."
-        )
     if connection_schema is not None:
         raise CLIError(
             "invalid_arguments",
             "--connection-schema is only valid for importers and analyzers.",
         )
     return EvaluatorCreateRequest(
-        name=name, description=description, metadata=parsed_metadata, agent_id=agent_id
+        name=name,
+        description=description,
+        provider=provider,
+        metadata=parsed_metadata,
+        agent_id=agent_id,
     )
 
 

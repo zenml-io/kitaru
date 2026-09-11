@@ -23,6 +23,7 @@ class EvaluatorCreate(MCPModel):
     operation: Literal["create"]
     name: str = Field(min_length=1)
     description: str | None = None
+    provider: str | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
     idempotency_key: str | None = Field(
         default=None,

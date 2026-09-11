@@ -4757,8 +4757,7 @@ async def create_plugin(
         kind: Plugin kind.
         name: Plugin name.
         description: Plugin description.
-        provider: Source system, evaluators and analyzers must leave this
-            unset.
+        provider: Source system.
         metadata: Arbitrary metadata.
         agent_id: Agent the plugin is scoped to, importers and analyzers
             must leave this unset.

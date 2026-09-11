@@ -138,18 +138,6 @@ class PluginVersionIdNotFound(NotFoundError):
         super().__init__(f"Plugin version {plugin_version_id} was not found")
 
 
-class InvalidPluginProvider(ValidationError):
-    """Raised when a plugin kind that does not carry a provider has one set."""
-
-    def __init__(self, kind: PluginKind) -> None:
-        """Initialize the error.
-
-        Args:
-            kind: Kind that does not carry a provider.
-        """
-        super().__init__(f"{kind.value.capitalize()} plugins do not carry a provider")
-
-
 class InvalidPluginAgentScope(ValidationError):
     """Raised when a plugin kind that does not carry an agent id has one set."""
 
@@ -307,20 +295,6 @@ class Plugin(DomainModel):
         """
         if self.name.startswith(RESERVED_NAMESPACE + NAMESPACE_SEPARATOR):
             raise DefaultPluginReadOnly(self.name)
-
-    @model_validator(mode="after")
-    def _check_provider(self) -> "Plugin":
-        """Reject a provider on an evaluator plugin.
-
-        Raises:
-            InvalidPluginProvider: The kind is evaluator and provider is set.
-
-        Returns:
-            The validated plugin.
-        """
-        if self.kind is PluginKind.EVALUATOR and self.provider is not None:
-            raise InvalidPluginProvider(self.kind)
-        return self
 
     @model_validator(mode="after")
     def _check_agent_id(self) -> "Plugin":

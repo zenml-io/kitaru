@@ -98,6 +98,7 @@ async def resolve_evaluator_config(
         version=plugin_version.version,
         params=config.params,
         evaluator_version_id=plugin_version.id,
+        provider=plugin.provider,
     )
 
 

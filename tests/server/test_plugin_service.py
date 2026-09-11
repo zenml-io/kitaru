@@ -43,7 +43,6 @@ from kitaru.server.domain.blob import BlobNotFound
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     InvalidPluginAgentScope,
-    InvalidPluginProvider,
     PackagePluginSource,
     Plugin,
     PluginKind,
@@ -274,17 +273,17 @@ async def test_create_plugin_reserved_name(evaluator_service: PluginService) -> 
     assert plugins == []
 
 
-async def test_create_plugin_evaluator_rejects_provider(
+async def test_create_plugin_evaluator_allows_provider(
     evaluator_service: PluginService,
 ) -> None:
-    """Reject a provider on an evaluator plugin."""
-    with pytest.raises(InvalidPluginProvider):
-        await evaluator_service.create_plugin(
-            PluginCreate(
-                name="accuracy", description=None, provider="langfuse", metadata={}
-            ),
-            actor=ACTOR,
-        )
+    """Store the provider on an evaluator plugin."""
+    plugin = await evaluator_service.create_plugin(
+        PluginCreate(
+            name="accuracy", description=None, provider="langfuse", metadata={}
+        ),
+        actor=ACTOR,
+    )
+    assert plugin.provider == "langfuse"
 
 
 async def test_create_plugin_importer_allows_provider(

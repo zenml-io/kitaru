@@ -71,6 +71,24 @@ async def test_resolve_explicit_version(repository: FakePluginRepository) -> Non
     assert resolved.evaluator_version_id == first.id
 
 
+async def test_resolve_evaluator_config_carries_the_provider(
+    repository: FakePluginRepository,
+) -> None:
+    """Resolve the evaluator plugin's provider onto the config."""
+    plugin = await create_plugin(
+        repository,
+        OWNER_ID,
+        kind=PluginKind.EVALUATOR,
+        name="accuracy",
+        provider="langfuse",
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version="v1")
+
+    config = EvaluatorConfigInput(evaluator="accuracy")
+    resolved = await resolve_evaluator_config(config, repository, agent_id=None)
+    assert resolved.provider == "langfuse"
+
+
 async def test_resolve_missing_evaluator(repository: FakePluginRepository) -> None:
     """Raise when no evaluator plugin has the config's name."""
     config = EvaluatorConfigInput(evaluator="missing")

@@ -3334,6 +3334,18 @@
             "description": "Evaluator name.",
             "title": "Name",
             "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External service this evaluator calls.",
+            "title": "Provider"
           }
         },
         "required": [
@@ -3423,6 +3435,18 @@
             "description": "Id of the owning account, null for a default plugin.",
             "title": "Owner Id"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External service this evaluator calls.",
+            "title": "Provider"
+          },
           "updated": {
             "description": "Last modification time.",
             "format": "date-time",
@@ -3437,6 +3461,7 @@
           "id",
           "name",
           "description",
+          "provider",
           "logo_url",
           "metadata",
           "latest_version",

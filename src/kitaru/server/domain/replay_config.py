@@ -76,6 +76,7 @@ class EvaluatorConfig(FrozenModel):
     version: int
     params: dict[str, Any] = Field(default_factory=dict)
     evaluator_version_id: uuid.UUID
+    provider: str | None = None
 
 
 class AnalyzerConfig(FrozenModel):

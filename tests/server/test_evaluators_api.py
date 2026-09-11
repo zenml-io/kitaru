@@ -107,7 +107,7 @@ async def test_create_evaluator(client: httpx.AsyncClient) -> None:
     assert body["description"] == "Scores accuracy"
     assert body["metadata"] == {"a": 1}
     assert body["latest_version"] == 0
-    assert "provider" not in body
+    assert body["provider"] is None
 
 
 async def test_create_evaluator_duplicate_name(client: httpx.AsyncClient) -> None:
@@ -127,12 +127,14 @@ async def test_create_evaluator_reserved_name(client: httpx.AsyncClient) -> None
     assert response.status_code == 422
 
 
-async def test_create_evaluator_rejects_provider(client: httpx.AsyncClient) -> None:
-    """Observe HTTP 422 when the request carries a provider field."""
+async def test_create_evaluator_with_provider(client: httpx.AsyncClient) -> None:
+    """Create an evaluator with a provider and observe HTTP 201."""
     response = await client.post(
         "/api/v1/evaluators", json={"name": "accuracy", "provider": "langfuse"}
     )
-    assert response.status_code == 422
+    assert response.status_code == 201
+    body = response.json()
+    assert body["provider"] == "langfuse"
 
 
 async def test_list_evaluators(client: httpx.AsyncClient) -> None:
