@@ -32,6 +32,7 @@ from conftest import (
     build_payload_store,
     override_idempotency,
 )
+from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -144,9 +145,12 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
                     input_text_selector="/q",
                     output_text_selector="/answer",
                     system_prompt_selector="/system",
-                    reasoning="The greeting matches the request.",
+                    reasoning_selectors=["/thoughts"],
                     inputs={"q": "hi", "system": "Follow policy."},
-                    outputs={"answer": "hello"},
+                    outputs={
+                        "answer": "hello",
+                        "thoughts": "The greeting matches the request.",
+                    },
                 ),
                 _node(
                     1,
@@ -166,15 +170,15 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
     assert items[0]["input_text_selector"] == "/q"
     assert items[0]["output_text_selector"] == "/answer"
     assert items[0]["system_prompt_selector"] == "/system"
+    assert items[0]["reasoning_selectors"] == ["/thoughts"]
     # Ingest responses carry no payloads.
-    assert items[0]["reasoning"] is None
     assert items[0]["inputs"] is None
     listed = await client.get(
         f"/api/v1/sessions/{session_id}/nodes",
         params={"include_payloads": "true"},
     )
     stored = listed.json()["items"]
-    assert stored[0]["reasoning"] == "The greeting matches the request."
+    assert stored[0]["reasoning_selectors"] == ["/thoughts"]
     assert stored[0]["inputs"] == {"q": "hi", "system": "Follow policy."}
 
 
@@ -236,9 +240,12 @@ async def test_list_nodes_include_payloads_default_false(
                     input_text_selector="/q",
                     output_text_selector="/answer",
                     system_prompt_selector="/system",
-                    reasoning="The greeting matches the request.",
+                    reasoning_selectors=["/thoughts"],
                     inputs={"q": "hi", "system": "Follow policy."},
-                    outputs={"answer": "hello"},
+                    outputs={
+                        "answer": "hello",
+                        "thoughts": "The greeting matches the request.",
+                    },
                     attributes={"k": 1},
                 )
             ]
@@ -252,13 +259,14 @@ async def test_list_nodes_include_payloads_default_false(
     assert item["input_text_selector"] == "/q"
     assert item["output_text_selector"] == "/answer"
     assert item["system_prompt_selector"] == "/system"
-    assert item["reasoning"] is None
+    assert item["reasoning_selectors"] == ["/thoughts"]
+    assert item["outputs"] is None
 
 
 async def test_list_nodes_include_payloads_true(
     client: httpx.AsyncClient, session_id: str
 ) -> None:
-    """Populate reasoning, inputs, outputs, and attributes when requested."""
+    """Populate inputs, outputs, and attributes when requested."""
     await client.post(
         f"/api/v1/sessions/{session_id}/nodes",
         json={
@@ -268,9 +276,9 @@ async def test_list_nodes_include_payloads_true(
                     input_text_selector="/q",
                     output_text_selector="/answer",
                     system_prompt_selector="/system",
-                    reasoning="Visible reasoning.",
+                    reasoning_selectors=["/thoughts"],
                     inputs={"q": "hi", "system": "Follow policy."},
-                    outputs={"answer": "hello"},
+                    outputs={"answer": "hello", "thoughts": "Visible reasoning."},
                     attributes={"k": 1},
                 )
             ]
@@ -284,9 +292,39 @@ async def test_list_nodes_include_payloads_true(
     assert item["input_text_selector"] == "/q"
     assert item["output_text_selector"] == "/answer"
     assert item["system_prompt_selector"] == "/system"
-    assert item["reasoning"] == "Visible reasoning."
+    assert item["reasoning_selectors"] == ["/thoughts"]
+    assert item["outputs"] == {"answer": "hello", "thoughts": "Visible reasoning."}
     assert item["inputs"] == {"q": "hi", "system": "Follow policy."}
     assert item["attributes"] == {"k": 1}
+
+
+async def test_reasoning_selectors_round_trip(
+    client: httpx.AsyncClient, session_id: str
+) -> None:
+    """Store several reasoning selectors and read them back with the outputs."""
+    await client.post(
+        f"/api/v1/sessions/{session_id}/nodes",
+        json={
+            "nodes": [
+                _node(
+                    0,
+                    reasoning_selectors=["/parts/0/content", "/parts/1/content"],
+                    outputs={
+                        "parts": [{"content": "first"}, {"content": "second"}],
+                    },
+                )
+            ]
+        },
+    )
+    response = await client.get(
+        f"/api/v1/sessions/{session_id}/nodes", params={"include_payloads": "true"}
+    )
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["reasoning_selectors"] == ["/parts/0/content", "/parts/1/content"]
+    assert item["outputs"] == {"parts": [{"content": "first"}, {"content": "second"}]}
+    node = SessionNodeResponse.model_validate(item)
+    assert node.reasoning == "first\nsecond"
 
 
 async def test_list_nodes_pagination_walks_pages(

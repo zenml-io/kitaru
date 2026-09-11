@@ -63,7 +63,7 @@ class SessionNode(DomainModel):
     input_text_selector: str | None = None
     output_text_selector: str | None = None
     system_prompt_selector: str | None = None
-    reasoning: Payload | None = None
+    reasoning_selectors: list[str] = Field(default_factory=list)
     inputs: Payload | None = None
     outputs: Payload | None = None
     requested_model: str | None = None

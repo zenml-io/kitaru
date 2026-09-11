@@ -625,18 +625,16 @@ async def test_ingest_offloads_over_threshold_payloads(
     task_repository: FakeTaskRepository,
     session_id: uuid.UUID,
 ) -> None:
-    """Offload reasoning, inputs, outputs, and attributes above the threshold."""
+    """Offload inputs, outputs, and attributes above the threshold."""
     service, blob_repository, _ = _service_with_threshold(
         node_repository, session_repository, task_repository, threshold_bytes=10
     )
-    reasoning = "r" * 50
     inputs = {"a": "i" * 50}
     outputs = {"b": "o" * 50}
     attributes = {"c": "attr" * 50}
     batch = [
         _llm_node(
             0,
-            reasoning=reasoning,
             inputs=inputs,
             outputs=outputs,
             attributes=attributes,
@@ -647,8 +645,6 @@ async def test_ingest_offloads_over_threshold_payloads(
     raw = (
         await node_repository.get_by_indexes(session_id, [0], include_payloads=True)
     )[0]
-    assert raw.reasoning is not None
-    assert raw.reasoning.blob_id is not None
     assert raw.inputs is not None
     assert raw.inputs.blob_id is not None
     assert raw.outputs is not None
@@ -660,9 +656,6 @@ async def test_ingest_offloads_over_threshold_payloads(
     assert inputs_blob.owner_id == ACTOR.account.id
     assert inputs_blob.media_type == PayloadMediaType.JSON
     assert inputs_blob.stored_in == BlobStorageBackend.DATABASE
-
-    reasoning_blob = await blob_repository.get(raw.reasoning.blob_id)
-    assert reasoning_blob.media_type == PayloadMediaType.TEXT
 
 
 async def test_ingest_under_threshold_stays_inline(
@@ -676,16 +669,13 @@ async def test_ingest_under_threshold_stays_inline(
         node_repository, session_repository, task_repository, threshold_bytes=1024
     )
     batch = [
-        _llm_node(0, reasoning="short", inputs={"a": 1}, attributes={"c": 3}),
+        _llm_node(0, inputs={"a": 1}, attributes={"c": 3}),
     ]
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
     raw = (
         await node_repository.get_by_indexes(session_id, [0], include_payloads=True)
     )[0]
-    assert raw.reasoning is not None
-    assert raw.reasoning.value == "short"
-    assert raw.reasoning.blob_id is None
     assert raw.inputs is not None
     assert raw.inputs.value == {"a": 1}
     assert raw.inputs.blob_id is None

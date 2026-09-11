@@ -288,12 +288,18 @@ def _llm_node(
         input_text_selector="/1/content",
         output_text_selector=None if failed else "/0/content",
         system_prompt_selector="/0/content",
-        reasoning=None if failed else llm.reasoning,
+        reasoning_selectors=[] if failed else ["/0/reasoning"],
         inputs=messages,
         outputs=(
             None
             if failed
-            else [{"role": "assistant", "content": output_text or llm.text}]
+            else [
+                {
+                    "role": "assistant",
+                    "content": output_text or llm.text,
+                    "reasoning": llm.reasoning,
+                }
+            ]
         ),
         requested_model=requested_model,
         model=model,

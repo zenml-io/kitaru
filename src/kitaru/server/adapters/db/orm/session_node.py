@@ -66,9 +66,6 @@ SESSION_NODE_OUTPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name(
 SESSION_NODE_ATTRIBUTES_BLOB_ID_FOREIGN_KEY = foreign_key_name(
     "session_node", ["attributes_blob_id"]
 )
-SESSION_NODE_REASONING_BLOB_ID_FOREIGN_KEY = foreign_key_name(
-    "session_node", ["reasoning_blob_id"]
-)
 SESSION_NODE_CACHE_KEY_INDEX = index_name("session_node", ["cache_key"])
 
 NODE_TYPE_LENGTH = 32
@@ -112,11 +109,6 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["blob.id"],
             name=SESSION_NODE_ATTRIBUTES_BLOB_ID_FOREIGN_KEY,
         ),
-        ForeignKeyConstraint(
-            ["reasoning_blob_id"],
-            ["blob.id"],
-            name=SESSION_NODE_REASONING_BLOB_ID_FOREIGN_KEY,
-        ),
         Index(
             SESSION_NODE_CACHE_KEY_INDEX,
             "cache_key",
@@ -141,8 +133,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     input_text_selector: Mapped[str | None] = mapped_column(Text)
     output_text_selector: Mapped[str | None] = mapped_column(Text)
     system_prompt_selector: Mapped[str | None] = mapped_column(Text)
-    reasoning: Mapped[str | None] = mapped_column(Text)
-    reasoning_blob_id: Mapped[uuid.UUID | None]
+    reasoning_selectors: Mapped[list[str]] = mapped_column(JSONB)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     inputs_blob_id: Mapped[uuid.UUID | None]
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
@@ -195,7 +186,6 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             node: Session node carrying the desired field values.
         """
         tokens = node.tokens
-        reasoning, reasoning_blob_id = split_payload(node.reasoning)
         inputs, inputs_blob_id = split_payload(node.inputs)
         outputs, outputs_blob_id = split_payload(node.outputs)
         attributes, attributes_blob_id = split_payload(node.attributes)
@@ -216,8 +206,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.input_text_selector = node.input_text_selector
         self.output_text_selector = node.output_text_selector
         self.system_prompt_selector = node.system_prompt_selector
-        self.reasoning = reasoning
-        self.reasoning_blob_id = reasoning_blob_id
+        self.reasoning_selectors = node.reasoning_selectors
         self.inputs = inputs
         self.inputs_blob_id = inputs_blob_id
         self.outputs = outputs
@@ -289,15 +278,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             input_text_selector=self.input_text_selector,
             output_text_selector=self.output_text_selector,
             system_prompt_selector=self.system_prompt_selector,
-            reasoning=(
-                payload_from_columns(
-                    self.reasoning,
-                    self.reasoning_blob_id,
-                    media_type=PayloadMediaType.TEXT,
-                )
-                if "reasoning" not in exclude
-                else None
-            ),
+            reasoning_selectors=self.reasoning_selectors,
             inputs=(
                 payload_from_columns(
                     self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON

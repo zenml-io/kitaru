@@ -4918,18 +4918,13 @@
               "description": "Parent node index.",
               "title": "Parent Index"
             },
-            "reasoning": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Visible reasoning, null unless payloads are included.",
-              "title": "Reasoning"
+            "reasoning_selectors": {
+              "description": "RFC 6901 JSON Pointers selecting visible reasoning from node outputs.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Reasoning Selectors",
+              "type": "array"
             },
             "requested_model": {
               "anyOf": [

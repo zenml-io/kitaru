@@ -3310,7 +3310,6 @@ class FakeSessionNodeRepository:
             stored.append(
                 row.model_copy(
                     update={
-                        "reasoning": None,
                         "inputs": None,
                         "outputs": None,
                         "attributes": None,

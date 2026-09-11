@@ -40,7 +40,6 @@ RECORDED_HISTORY_ORIGINS = [SessionOrigin.RECORDED.value, SessionOrigin.IMPORTED
 FINISHED_NODE_STATUSES = [NodeStatus.COMPLETED.value, NodeStatus.FAILED.value]
 
 PAYLOAD_COLUMNS = (
-    SessionNodeORM.reasoning,
     SessionNodeORM.inputs,
     SessionNodeORM.outputs,
     SessionNodeORM.attributes,
@@ -49,7 +48,6 @@ PAYLOAD_COLUMNS = (
 # Tool lookups replay only the stored result, so every payload column
 # except outputs stays unread.
 TOOL_LOOKUP_DEFERRED_COLUMNS = (
-    SessionNodeORM.reasoning,
     SessionNodeORM.inputs,
     SessionNodeORM.attributes,
 )
@@ -68,8 +66,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         Args:
             session_id: Id of the owning session.
             indexes: Indexes to load.
-            include_payloads: Whether to read reasoning, inputs, outputs,
-                and attributes.
+            include_payloads: Whether to read inputs, outputs, and attributes.
 
         Returns:
             Stored nodes keyed by index, missing indexes omitted.
@@ -166,8 +163,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
 
         Args:
             session_id: Id of the owning session.
-            include_payloads: Whether to read reasoning, inputs, outputs,
-                and attributes.
+            include_payloads: Whether to read inputs, outputs, and attributes.
 
         Returns:
             Every node of the session.

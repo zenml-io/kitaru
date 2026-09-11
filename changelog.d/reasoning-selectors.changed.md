@@ -1,0 +1,1 @@
+- Session nodes now carry `reasoning_selectors`, a list of RFC 6901 JSON Pointers into the node outputs, instead of the `reasoning` text field. The migration drops the `reasoning` column and the reasoning text it held.

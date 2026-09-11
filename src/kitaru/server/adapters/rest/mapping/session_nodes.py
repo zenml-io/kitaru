@@ -54,7 +54,7 @@ def session_node_create_to_upsert(body: SessionNodeCreateRequest) -> SessionNode
         input_text_selector=body.input_text_selector,
         output_text_selector=body.output_text_selector,
         system_prompt_selector=body.system_prompt_selector,
-        reasoning=body.reasoning,
+        reasoning_selectors=body.reasoning_selectors,
         inputs=body.inputs,
         outputs=body.outputs,
         requested_model=body.requested_model,
@@ -138,11 +138,7 @@ def session_node_to_response(
         input_text_selector=node.input_text_selector,
         output_text_selector=node.output_text_selector,
         system_prompt_selector=node.system_prompt_selector,
-        reasoning=(
-            node.reasoning.value
-            if include_payloads and node.reasoning is not None
-            else None
-        ),
+        reasoning_selectors=node.reasoning_selectors,
         inputs=(
             node.inputs.value if include_payloads and node.inputs is not None else None
         ),

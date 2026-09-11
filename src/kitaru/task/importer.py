@@ -102,7 +102,7 @@ class ImportedNode(BaseModel):
     input_text_selector: str | None = None
     output_text_selector: str | None = None
     system_prompt_selector: str | None = None
-    reasoning: str | None = None
+    reasoning_selectors: list[str] = Field(default_factory=list)
     inputs: Any
     outputs: Any
     requested_model: str | None = None
@@ -381,7 +381,7 @@ def _node_request(
         input_text_selector=node.input_text_selector,
         output_text_selector=node.output_text_selector,
         system_prompt_selector=node.system_prompt_selector,
-        reasoning=node.reasoning,
+        reasoning_selectors=node.reasoning_selectors,
         inputs=node.inputs,
         outputs=node.outputs,
         requested_model=node.requested_model,

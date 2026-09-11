@@ -47,7 +47,7 @@ from kitaru.server.domain.session_node import (
 
 
 def _get_node_payloads(nodes: list[SessionNode]) -> list[Payload]:
-    """Gather the reasoning, inputs, outputs, and attributes payloads of a batch.
+    """Gather the inputs, outputs, and attributes payloads of a batch.
 
     Args:
         nodes: Nodes to gather payloads from.
@@ -58,7 +58,7 @@ def _get_node_payloads(nodes: list[SessionNode]) -> list[Payload]:
     return [
         payload
         for node in nodes
-        for payload in (node.reasoning, node.inputs, node.outputs, node.attributes)
+        for payload in (node.inputs, node.outputs, node.attributes)
         if payload is not None
     ]
 
@@ -183,9 +183,7 @@ class SessionNodeService:
                 input_text_selector=item.input_text_selector,
                 output_text_selector=item.output_text_selector,
                 system_prompt_selector=item.system_prompt_selector,
-                reasoning=Payload.from_text(item.reasoning)
-                if item.reasoning is not None
-                else None,
+                reasoning_selectors=item.reasoning_selectors,
                 inputs=Payload.from_json(item.inputs)
                 if item.inputs is not None
                 else None,
@@ -316,7 +314,7 @@ class SessionNodeService:
         return await self._repository.get_indexes_by_ids(session_id, node_ids)
 
     async def _resolve_payloads(self, nodes: list[SessionNode]) -> None:
-        """Resolve reasoning, inputs, outputs, and attributes refs across nodes.
+        """Resolve inputs, outputs, and attributes refs across nodes.
 
         Args:
             nodes: Nodes to resolve, mutated in place.

@@ -229,8 +229,7 @@ async def ingest_session_nodes(
         actor: Caller context.
 
     Returns:
-        Stored nodes in batch order, with reasoning, inputs, outputs, and
-        attributes null.
+        Stored nodes in batch order, with inputs, outputs, and attributes null.
     """
     batch = session_node_batch_to_upserts(body)
     nodes = await service.ingest_nodes(session_id, batch, actor=actor)
