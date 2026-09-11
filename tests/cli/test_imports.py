@@ -342,6 +342,44 @@ async def test_analyze_waits_for_terminal_tasks(
     assert result.next_actions[0].startswith("kitaru insight list")
 
 
+async def test_analyze_reports_a_skipped_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Analyze with --wait reports a skipped analyzer task as skipped."""
+    client = StubImportClient()
+    events: list[tuple[str, Any]] = []
+    job = _job(JobStatus.COMPLETED)
+    task = _task(job, status=TaskStatus.SKIPPED)
+
+    async def wait_for_terminal_tasks(*args: Any, **kwargs: Any) -> Any:
+        assert args[1] == client.job.id
+        return job, [task]
+
+    monkeypatch.setattr(
+        imports.receipts, "wait_for_terminal_tasks", wait_for_terminal_tasks
+    )
+    monkeypatch.setattr(
+        imports, "emit_event", lambda event, item: events.append((event, item))
+    )
+
+    result = await imports.analyze_import(
+        client,
+        client.import_id,
+        analyzers=["clustering@2"],
+        analyzer_params=None,
+        analyzer_connections=None,
+        wait=True,
+        interval=None,
+        timeout=None,
+    )
+
+    assert result.event == "terminal"
+    assert result.item["terminal"] is True
+    assert result.item["tasks"] == [
+        {"id": str(task.id), "status": "skipped", "error": None}
+    ]
+
+
 async def test_analyze_raises_for_a_failed_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

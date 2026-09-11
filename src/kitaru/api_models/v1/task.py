@@ -59,6 +59,7 @@ class TaskStatus(StrEnum):
     CLAIMED = "claimed"
     RUNNING = "running"
     COMPLETED = "completed"
+    SKIPPED = "skipped"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
     CANCELED = "canceled"

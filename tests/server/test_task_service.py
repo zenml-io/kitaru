@@ -77,6 +77,7 @@ from kitaru.server.domain.imports import Import
 from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
+    IllegalTaskStatusTransition,
     ImportTask,
     Task,
     TaskAttemptMismatch,
@@ -664,6 +665,20 @@ async def test_update_task_requires_status(services: JobAndTaskServices) -> None
         await services.task_service.update_task(
             task.id,
             TaskUpdate(),
+            actor=build_task_actor(ACTOR.account, task.id, 0, uuid.uuid4()),
+        )
+
+
+async def test_update_task_rejects_skipped_status(
+    services: JobAndTaskServices,
+) -> None:
+    """An update to skipped is rejected, since only the server skips a task."""
+    job_id = await _pending_job(services)
+    task = await create_agent_task(services.tasks, job_id)
+    with pytest.raises(IllegalTaskStatusTransition):
+        await services.task_service.update_task(
+            task.id,
+            TaskUpdate(status=TaskStatus.SKIPPED),
             actor=build_task_actor(ACTOR.account, task.id, 0, uuid.uuid4()),
         )
 

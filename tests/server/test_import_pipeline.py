@@ -331,13 +331,8 @@ async def test_import_creating_no_sessions_records_analysis_skip(
     assert stored.stats.created == 0
     assert await _evaluator_tasks(services, import_task.job_id) == []
     (analysis_task,) = await _analysis_tasks(services, import_task.job_id)
-    assert analysis_task.status is TaskStatus.COMPLETED
-    assert analysis_task.result == {
-        "status": "skipped",
-        "reason": "insufficient_sessions",
-        "eligible_sessions": 0,
-        "min_sessions": 1,
-    }
+    assert analysis_task.status is TaskStatus.SKIPPED
+    assert analysis_task.result is None
     job = await services.jobs.get(import_task.job_id)
     assert job.status is JobStatus.COMPLETED
 
@@ -618,24 +613,18 @@ async def test_all_analyzers_skip_without_eligible_sessions(
     )
     analysis_tasks = await _analysis_tasks(services, import_task.job_id)
     assert len(analysis_tasks) == 2
-    minimum_by_version = {
-        analyzer.analyzer_version_id: 5,
-        custom.analyzer_version_id: 1,
+    assert {task.plugin_version_id for task in analysis_tasks} == {
+        analyzer.analyzer_version_id,
+        custom.analyzer_version_id,
     }
     for task in analysis_tasks:
-        minimum = minimum_by_version[task.plugin_version_id]
-        assert task.status is TaskStatus.COMPLETED
+        assert task.status is TaskStatus.SKIPPED
         assert task.attempt == 0
         assert task.worker_id is None
         assert task.started_at is None
         assert task.ended_at is not None
         assert task.error is None
-        assert task.result == {
-            "status": "skipped",
-            "reason": "insufficient_sessions",
-            "eligible_sessions": 0,
-            "min_sessions": minimum,
-        }
+        assert task.result is None
     await _claim_and_start(services, worker, 0)
     assert (await services.jobs.get(import_task.job_id)).status is JobStatus.COMPLETED
 
@@ -710,7 +699,7 @@ async def test_job_settles_only_after_analysis_tasks_drain(
     job = await services.jobs.get(import_task.job_id)
     assert job.status is JobStatus.RUNNING
     tasks = await _analysis_tasks(services, import_task.job_id)
-    assert {task.status for task in tasks} == {TaskStatus.PENDING, TaskStatus.COMPLETED}
+    assert {task.status for task in tasks} == {TaskStatus.PENDING, TaskStatus.SKIPPED}
 
     (analysis_task,) = await _claim_and_start(services, worker, 1)
     await _finish(
@@ -772,13 +761,8 @@ async def test_builtin_analyzer_minimum_sessions(
 
     (task,) = await _analysis_tasks(services, import_task.job_id)
     if eligible_count < (minimum or 5):
-        assert task.status is TaskStatus.COMPLETED
-        assert task.result == {
-            "status": "skipped",
-            "reason": "insufficient_sessions",
-            "eligible_sessions": eligible_count,
-            "min_sessions": 5,
-        }
+        assert task.status is TaskStatus.SKIPPED
+        assert task.result is None
         await _claim_and_start(services, worker, 0)
         assert (
             await services.jobs.get(import_task.job_id)

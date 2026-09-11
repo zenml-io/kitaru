@@ -14,6 +14,7 @@
 """End-to-end tests for insight recording off completed analysis tasks."""
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -33,9 +34,11 @@ from conftest import (
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.task import TaskStatus
+from kitaru.server.application.events import TaskTerminal
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.insight import InsightFilter
 from kitaru.server.application.models.task import TaskUpdate
+from kitaru.server.application.services.insight_recording import record_task_insights
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.insight import Insight
@@ -195,6 +198,22 @@ async def test_failed_task_writes_nothing(services: ReplayServices) -> None:
 
     await _complete(
         services, task, TaskUpdate(status=TaskStatus.FAILED, error="analysis failed")
+    )
+
+    assert await _agent_insights(services, agent.id) == []
+
+
+async def test_skipped_task_writes_nothing(services: ReplayServices) -> None:
+    """A skipped analysis task writes no insight."""
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    version = await _analyzer_version(services)
+    task = await _analysis_task_with_job(services, agent, version.id)
+    task.skip_if_insufficient_sessions(0, 1, datetime.now(UTC))
+
+    await record_task_insights(
+        TaskTerminal(task=task, previous_status=TaskStatus.PENDING),
+        services.insights,
+        services.jobs,
     )
 
     assert await _agent_insights(services, agent.id) == []

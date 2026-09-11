@@ -1360,6 +1360,24 @@ def test_terminal_import_accepts_followup_tasks(
     assert result["item"]["stats"]["created"] == 3
 
 
+def test_terminal_import_accepts_a_skipped_analyzer_followup_task(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A skipped analyzer follow-up task does not affect the import receipt."""
+    job = _job(JobStatus.COMPLETED)
+    importer = _task(job, result={"created": 3, "skipped": 0, "failed": 0})
+    analyzer = _task(job, kind=TaskKind.ANALYZER, status=TaskStatus.SKIPPED)
+    tasks = [importer, analyzer]
+
+    exit_code, result = _run_terminal_import(tmp_path, monkeypatch, capsys, job, tasks)
+
+    assert exit_code == 0
+    assert result["item"]["task"]["id"] == str(importer.id)
+    assert result["item"]["stats"]["created"] == 3
+
+
 @pytest.mark.parametrize("importer_count", [0, 2])
 def test_terminal_import_requires_exactly_one_importer(
     tmp_path: Path,
