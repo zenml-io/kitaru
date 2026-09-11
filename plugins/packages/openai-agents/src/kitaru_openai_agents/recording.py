@@ -247,9 +247,15 @@ class RunRecorder:
 
     async def reconcile(self, result: RunResult | RunErrorDetails) -> None:
         """Translate public result objects into stable buffered nodes."""
+        if self.started_at is None:
+            raise RuntimeError("Recorder session was not started")
+        run_started_at = self.started_at
         raw_responses = result.raw_responses[:MAX_COLLECTION_ITEMS]
         new_items = result.new_items[:MAX_COLLECTION_ITEMS]
         tool_parent_external_ids: dict[str, str] = {}
+        # Result items carry no timing, so a node takes the start of the
+        # model call that produced it, or of the run.
+        model_started_at: dict[str, datetime] = {}
         for position, response in enumerate(raw_responses):
             identity = response.response_id or f"model-{position}"
             if ("model", identity) in self._seen:
@@ -260,12 +266,15 @@ class RunRecorder:
                 if position < len(self.model_observations)
                 else None
             )
+            model_started_at[identity] = (
+                observation.started_at if observation else run_started_at
+            )
             await self._append_node(
                 node_type=NodeType.LLM_CALL,
                 name="model",
                 parent_external_id=ROOT_EXTERNAL_ID,
                 external_id=identity,
-                started_at=observation.started_at if observation else None,
+                started_at=model_started_at[identity],
                 ended_at=observation.ended_at if observation else None,
                 inputs=(
                     {
@@ -298,14 +307,13 @@ class RunRecorder:
             self._seen.add(("tool", call_id))
             output = outputs.get(call.call_id)
             tool_inputs, tool_attributes = _capture_tool_input(call)
+            parent_external_id = tool_parent_external_ids.get(call_id, ROOT_EXTERNAL_ID)
             await self._append_node(
                 node_type=NodeType.TOOL_CALL,
                 name=call.tool_name or _raw_type(call.raw_item) or "hosted_tool",
-                parent_external_id=tool_parent_external_ids.get(
-                    call_id, ROOT_EXTERNAL_ID
-                ),
+                parent_external_id=parent_external_id,
                 external_id=call.call_id or _raw_id(call.raw_item) or call_id,
-                started_at=None,
+                started_at=model_started_at.get(parent_external_id, run_started_at),
                 ended_at=None,
                 inputs=tool_inputs,
                 outputs=_capture(output.output) if output is not None else None,
@@ -326,7 +334,7 @@ class RunRecorder:
                 name="handoff",
                 parent_external_id=ROOT_EXTERNAL_ID,
                 external_id=identity,
-                started_at=None,
+                started_at=run_started_at,
                 ended_at=None,
                 inputs={"source_agent": item.source_agent.name},
                 outputs={"target_agent": target_name},
@@ -346,7 +354,7 @@ class RunRecorder:
                 name="unsupported_openai_item",
                 parent_external_id=ROOT_EXTERNAL_ID,
                 external_id=identity,
-                started_at=None,
+                started_at=run_started_at,
                 ended_at=None,
                 inputs=None,
                 outputs=None,
@@ -361,7 +369,7 @@ class RunRecorder:
                 name="openai_capture_truncated",
                 parent_external_id=ROOT_EXTERNAL_ID,
                 external_id=None,
-                started_at=None,
+                started_at=run_started_at,
                 ended_at=None,
                 inputs=None,
                 outputs=None,
@@ -489,7 +497,7 @@ class RunRecorder:
         name: str,
         parent_external_id: str,
         external_id: str | None,
-        started_at: datetime | None,
+        started_at: datetime,
         ended_at: datetime | None,
         inputs: Any,
         outputs: Any,
