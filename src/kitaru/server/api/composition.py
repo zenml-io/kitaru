@@ -134,6 +134,7 @@ def register_subscribers(
             replay_repository=replay_repository,
             experiment_repository=experiment_repository,
             task_repository=task_repository,
+            plugin_repository=plugin_repository,
         ),
     )
     dispatcher.register(

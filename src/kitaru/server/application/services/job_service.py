@@ -20,6 +20,9 @@ from kitaru.api_models.v1.task import TaskOnFailure
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
+from kitaru.server.application.interfaces.connection_repository import (
+    ConnectionRepository,
+)
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.session_repository import SessionRepository
@@ -34,9 +37,9 @@ from kitaru.server.application.models.task import TaskFilter, TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
-from kitaru.server.application.services.evaluator_resolution import validate_evaluators
-from kitaru.server.application.services.plugin_resolution import (
-    get_plugin_task_labels,
+from kitaru.server.application.services.evaluator_resolution import (
+    get_evaluator_task_labels,
+    validate_evaluators,
 )
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
@@ -127,6 +130,7 @@ class JobService:
         session_repository: SessionRepository,
         agent_version_repository: AgentVersionRepository,
         plugin_repository: PluginRepository,
+        connection_repository: ConnectionRepository,
         transitions: TaskTransitions,
         policy: TaskPolicy,
     ) -> None:
@@ -138,6 +142,8 @@ class JobService:
             session_repository: Session repository.
             agent_version_repository: Agent version repository.
             plugin_repository: Plugin repository, for evaluator resolution.
+            connection_repository: Connection repository, for evaluator
+                resolution.
             transitions: Task transition dispatch.
             policy: Task execution policy.
         """
@@ -146,6 +152,7 @@ class JobService:
         self._sessions = session_repository
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
+        self._connections = connection_repository
         self._transitions = transitions
         self._policy = policy
 
@@ -342,9 +349,19 @@ class JobService:
         if len(agent_ids) > 1:
             raise ValidationError("Input sessions must belong to a single agent")
         evaluators = await validate_evaluators(
-            command.evaluators, self._plugins, next(iter(agent_ids)), actor
+            command.evaluators,
+            self._plugins,
+            self._connections,
+            next(iter(agent_ids)),
+            actor,
         )
         job = await self.create_job(JobKind.EVALUATION, actor)
+        labels = {
+            evaluator.evaluator_version_id: await get_evaluator_task_labels(
+                evaluator, self._plugins
+            )
+            for evaluator in evaluators
+        }
         # The job was just created in this call and cannot have settled yet, so
         # each pair skips add_task's redundant per-iteration settled check.
         for session_id in command.input_session_ids:
@@ -354,9 +371,8 @@ class JobService:
                         job_id=job.id,
                         plugin_version_id=evaluator.evaluator_version_id,
                         input_session_id=session_id,
-                        labels=get_plugin_task_labels(
-                            evaluator.evaluator, evaluator.provider
-                        ),
+                        connection_id=evaluator.connection_id,
+                        labels=labels[evaluator.evaluator_version_id],
                         params=evaluator.params,
                         on_failure=TaskOnFailure.CONTINUE,
                     )

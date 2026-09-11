@@ -20,6 +20,9 @@ from kitaru.api_models.v1.replay_config import HistoryScope
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
+from kitaru.server.application.interfaces.connection_repository import (
+    ConnectionRepository,
+)
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationRepository,
 )
@@ -82,6 +85,7 @@ class ReplayService:
         session_node_repository: SessionNodeRepository,
         agent_version_repository: AgentVersionRepository,
         plugin_repository: PluginRepository,
+        connection_repository: ConnectionRepository,
         payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
     ) -> None:
@@ -101,6 +105,8 @@ class ReplayService:
                 lookup.
             agent_version_repository: Agent version repository.
             plugin_repository: Plugin repository, for evaluator resolution.
+            connection_repository: Connection repository, for evaluator
+                resolution.
             payload_store: Payload store, for the baseline session's inputs
                 and the tool lookup's node output.
             analytics: Analytics tracker, None skips tracking.
@@ -115,6 +121,7 @@ class ReplayService:
         self._session_nodes = session_node_repository
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
+        self._connections = connection_repository
         self._payload_store = payload_store
         self._analytics = analytics
 
@@ -185,7 +192,11 @@ class ReplayService:
             agent_version_id, self._agent_versions
         )
         evaluators = await validate_evaluators(
-            command.evaluators, self._plugins, baseline.agent_id, actor
+            command.evaluators,
+            self._plugins,
+            self._connections,
+            baseline.agent_id,
+            actor,
         )
         config = ReplayConfig(
             owner_id=actor.account.id,
@@ -209,6 +220,7 @@ class ReplayService:
             job_repository=self._jobs,
             task_repository=self._tasks,
             evaluation_repository=self._evaluations,
+            plugin_repository=self._plugins,
             payload_store=self._payload_store,
         )
         if self._analytics is not None:

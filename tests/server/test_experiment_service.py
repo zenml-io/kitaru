@@ -798,6 +798,7 @@ async def test_create_experiment_tracks_experiment_created(
     service = ExperimentService(
         repository=services.experiments,
         plugin_repository=services.plugins,
+        connection_repository=services.connections,
         experiment_run_repository=services.experiment_runs,
         agent_repository=services.agents,
         cohort_version_repository=services.cohort_versions,

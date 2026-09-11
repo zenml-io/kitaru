@@ -25,11 +25,15 @@ from kitaru.server.application.interfaces.plugin_repository import PluginReposit
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.session import SessionFilter
+from kitaru.server.application.services.evaluator_resolution import (
+    get_evaluator_task_labels,
+)
 from kitaru.server.application.services.plugin_resolution import (
     get_plugin_task_labels,
+    has_connection_schema,
 )
 from kitaru.server.domain.imports import Import, ImportNotFound
-from kitaru.server.domain.plugin import PluginKind, PluginNotFound
+from kitaru.server.domain.plugin import PluginKind
 from kitaru.server.domain.replay_config import AnalyzerConfig
 from kitaru.server.domain.session import Session, SessionNotEvaluatable
 from kitaru.server.domain.task import AnalysisTask, EvaluationTask, ImportTask, Task
@@ -85,6 +89,12 @@ async def record_import_outcome(
         return
     # A retry can report zero new sessions after an earlier attempt stored them.
     sessions = await query_evaluatable_sessions(import_.id, session_repository)
+    labels = {
+        evaluator.evaluator_version_id: await get_evaluator_task_labels(
+            evaluator, plugin_repository
+        )
+        for evaluator in import_.evaluators
+    }
     fan_out_tasks: list[Task] = []
     for session in sessions:
         for evaluator in import_.evaluators:
@@ -93,9 +103,8 @@ async def record_import_outcome(
                     job_id=task.job_id,
                     plugin_version_id=evaluator.evaluator_version_id,
                     input_session_id=session.id,
-                    labels=get_plugin_task_labels(
-                        evaluator.evaluator, evaluator.provider
-                    ),
+                    connection_id=evaluator.connection_id,
+                    labels=labels[evaluator.evaluator_version_id],
                     params=evaluator.params,
                     on_failure=TaskOnFailure.CONTINUE,
                 )
@@ -170,7 +179,9 @@ async def build_analysis_task(
             analyzer.analyzer,
             analyzer.provider,
             analyzer.connection_id is None
-            and await _has_connection_schema(analyzer.analyzer, plugin_repository),
+            and await has_connection_schema(
+                PluginKind.ANALYZER, analyzer.analyzer, plugin_repository
+            ),
         ),
         on_failure=TaskOnFailure.CONTINUE,
     )
@@ -178,23 +189,3 @@ async def build_analysis_task(
         eligible_session_count, analyzer.get_min_sessions(), datetime.now(UTC)
     )
     return task
-
-
-async def _has_connection_schema(
-    name: str, plugin_repository: PluginRepository
-) -> bool:
-    """Report whether the named analyzer declares a connection schema.
-
-    Args:
-        name: Analyzer name.
-        plugin_repository: Plugin repository.
-
-    Returns:
-        Whether the analyzer declares a connection schema, False once the
-        analyzer is deleted.
-    """
-    try:
-        plugin = await plugin_repository.get_by_name(PluginKind.ANALYZER, name)
-    except PluginNotFound:
-        return False
-    return plugin.connection_schema is not None

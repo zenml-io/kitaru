@@ -16,7 +16,12 @@
 from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.domain.names import get_namespace
-from kitaru.server.domain.plugin import Plugin, PluginKind, PluginVersion
+from kitaru.server.domain.plugin import (
+    Plugin,
+    PluginKind,
+    PluginNotFound,
+    PluginVersion,
+)
 from kitaru.server.domain.task import RESERVED_LABEL_PREFIX
 
 
@@ -60,6 +65,27 @@ async def resolve_plugin_version(
     """
     number = version if version is not None else plugin.latest_version
     return await repository.get_version(plugin.id, number)
+
+
+async def has_connection_schema(
+    kind: PluginKind, name: str, plugin_repository: PluginRepository
+) -> bool:
+    """Report whether the named plugin declares a connection schema.
+
+    Args:
+        kind: Plugin kind.
+        name: Plugin name.
+        plugin_repository: Plugin repository.
+
+    Returns:
+        Whether the plugin declares a connection schema, False once the
+        plugin is deleted.
+    """
+    try:
+        plugin = await plugin_repository.get_by_name(kind, name)
+    except PluginNotFound:
+        return False
+    return plugin.connection_schema is not None
 
 
 PLUGIN_NAMESPACE_LABEL = f"{RESERVED_LABEL_PREFIX}plugin_namespace"

@@ -163,7 +163,7 @@ class ImportService:
                 command.agent_version_id, agent.id, self._agent_versions
             )
         evaluators = await validate_evaluators(
-            command.evaluators, self._plugins, agent.id, actor
+            command.evaluators, self._plugins, self._connections, agent.id, actor
         )
         analyzers = await validate_analyzers(
             command.analyzers, self._plugins, self._connections, actor

@@ -15,10 +15,18 @@
 
 import uuid
 
+from kitaru.server.application.interfaces.connection_repository import (
+    ConnectionRepository,
+)
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.services.connection_resolution import (
+    resolve_connection_id,
+)
 from kitaru.server.application.services.plugin_resolution import (
+    get_plugin_task_labels,
+    has_connection_schema,
     resolve_plugin,
     resolve_plugin_version,
 )
@@ -58,6 +66,7 @@ def _validate_builtin_evaluator_params(config: EvaluatorConfigInput) -> None:
 async def resolve_evaluator_config(
     config: EvaluatorConfigInput,
     plugin_repository: PluginRepository,
+    connection_repository: ConnectionRepository,
     agent_id: uuid.UUID | None,
     actor: AuthContext | None = None,
 ) -> EvaluatorConfig:
@@ -68,6 +77,7 @@ async def resolve_evaluator_config(
     Args:
         config: Evaluator config awaiting resolution.
         plugin_repository: Plugin repository, queried for the evaluator kind.
+        connection_repository: Connection repository.
         agent_id: Caller's agent context, must match a scoped evaluator's
             agent id.
         actor: Caller context, unused, ownership is provenance only.
@@ -93,18 +103,23 @@ async def resolve_evaluator_config(
         plugin, config.version, plugin_repository
     )
     _validate_builtin_evaluator_params(config)
+    connection_id = await resolve_connection_id(
+        None, plugin.provider, connection_repository
+    )
     return EvaluatorConfig(
         evaluator=config.evaluator,
         version=plugin_version.version,
         params=config.params,
         evaluator_version_id=plugin_version.id,
         provider=plugin.provider,
+        connection_id=connection_id,
     )
 
 
 async def validate_evaluators(
     configs: list[EvaluatorConfigInput],
     plugin_repository: PluginRepository,
+    connection_repository: ConnectionRepository,
     agent_id: uuid.UUID | None,
     actor: AuthContext | None = None,
 ) -> list[EvaluatorConfig]:
@@ -113,6 +128,7 @@ async def validate_evaluators(
     Args:
         configs: Evaluator configs awaiting resolution.
         plugin_repository: Plugin repository, queried for the evaluator kind.
+        connection_repository: Connection repository.
         agent_id: Caller's agent context, must match a scoped evaluator's
             agent id.
         actor: Caller context, unused, ownership is provenance only.
@@ -127,7 +143,9 @@ async def validate_evaluators(
         Resolved evaluator configs.
     """
     resolved = [
-        await resolve_evaluator_config(config, plugin_repository, agent_id, actor)
+        await resolve_evaluator_config(
+            config, plugin_repository, connection_repository, agent_id, actor
+        )
         for config in configs
     ]
     seen_ids: set[uuid.UUID] = set()
@@ -138,3 +156,26 @@ async def validate_evaluators(
             )
         seen_ids.add(evaluator_config.evaluator_version_id)
     return resolved
+
+
+async def get_evaluator_task_labels(
+    evaluator: EvaluatorConfig, plugin_repository: PluginRepository
+) -> dict[str, str]:
+    """Build the labels stamped on a task running an evaluator.
+
+    Args:
+        evaluator: Resolved evaluator config.
+        plugin_repository: Plugin repository, for the evaluator's connection
+            schema.
+
+    Returns:
+        Evaluation task labels.
+    """
+    return get_plugin_task_labels(
+        evaluator.evaluator,
+        evaluator.provider,
+        evaluator.connection_id is None
+        and await has_connection_schema(
+            PluginKind.EVALUATOR, evaluator.evaluator, plugin_repository
+        ),
+    )

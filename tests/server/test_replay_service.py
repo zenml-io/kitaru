@@ -934,6 +934,7 @@ def _replay_service_with_analytics(
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,
         plugin_repository=services.plugins,
+        connection_repository=services.connections,
         payload_store=services.payload_store,
         analytics=analytics,
     )
@@ -953,6 +954,7 @@ def _replay_service_with_payload_store(
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,
         plugin_repository=services.plugins,
+        connection_repository=services.connections,
         payload_store=payload_store,
     )
 

@@ -32,14 +32,15 @@ from kitaru.server.application.interfaces.experiment_repository import (
     ExperimentRepository,
 )
 from kitaru.server.application.interfaces.job_repository import JobRepository
+from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.payload_store import PayloadStore
-from kitaru.server.application.services.job_service import get_agent_task_labels
-from kitaru.server.application.services.plugin_resolution import (
-    get_plugin_task_labels,
+from kitaru.server.application.services.evaluator_resolution import (
+    get_evaluator_task_labels,
 )
+from kitaru.server.application.services.job_service import get_agent_task_labels
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig
@@ -59,6 +60,7 @@ async def create_replay_pipelines(
     job_repository: JobRepository,
     task_repository: TaskRepository,
     evaluation_repository: EvaluationRepository,
+    plugin_repository: PluginRepository,
     payload_store: PayloadStore,
 ) -> list[Replay]:
     """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
@@ -83,6 +85,8 @@ async def create_replay_pipelines(
         task_repository: Task repository.
         evaluation_repository: Evaluation repository, for the ``IF_MISSING``
             adoption lookup and links.
+        plugin_repository: Plugin repository, for the evaluators' connection
+            schemas.
         payload_store: Payload store, for the baseline sessions' inputs.
 
     Raises:
@@ -122,6 +126,12 @@ async def create_replay_pipelines(
         evaluator.evaluator_version_id: hash_params(evaluator.params)
         for evaluator in config.evaluators
     }
+    labels = {
+        evaluator.evaluator_version_id: await get_evaluator_task_labels(
+            evaluator, plugin_repository
+        )
+        for evaluator in config.evaluators
+    }
     tasks: list[Task] = []
     adopted_links: list[tuple[uuid.UUID, uuid.UUID]] = []
     for job, baseline, replay in zip(jobs, baselines, replays, strict=True):
@@ -154,9 +164,8 @@ async def create_replay_pipelines(
                     job_id=job.id,
                     plugin_version_id=evaluator.evaluator_version_id,
                     input_session_id=baseline.id,
-                    labels=get_plugin_task_labels(
-                        evaluator.evaluator, evaluator.provider
-                    ),
+                    connection_id=evaluator.connection_id,
+                    labels=labels[evaluator.evaluator_version_id],
                     params=evaluator.params,
                     on_failure=TaskOnFailure.ABORT,
                 )
@@ -173,6 +182,7 @@ async def append_result_evaluations(
     replay_repository: ReplayRepository,
     experiment_repository: ExperimentRepository,
     task_repository: TaskRepository,
+    plugin_repository: PluginRepository,
 ) -> None:
     """Append the replay's result evaluator tasks when its agent task completes.
 
@@ -189,6 +199,8 @@ async def append_result_evaluations(
         replay_repository: Replay repository.
         experiment_repository: Experiment repository, for the replay config.
         task_repository: Task repository.
+        plugin_repository: Plugin repository, for the evaluators' connection
+            schemas.
     """
     task = event.task
     if not isinstance(task, AgentTask) or task.status is not TaskStatus.COMPLETED:
@@ -203,7 +215,8 @@ async def append_result_evaluations(
             job_id=task.job_id,
             plugin_version_id=evaluator.evaluator_version_id,
             input_session_id=replay.result_session_id,
-            labels=get_plugin_task_labels(evaluator.evaluator, evaluator.provider),
+            connection_id=evaluator.connection_id,
+            labels=await get_evaluator_task_labels(evaluator, plugin_repository),
             params=evaluator.params,
             on_failure=TaskOnFailure.ABORT,
         )

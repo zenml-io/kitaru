@@ -32,9 +32,6 @@ from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
-from kitaru.server.application.services.connection_resolution import (
-    resolve_connection_id,
-)
 from kitaru.server.domain.connection import ConnectionNotFound
 from kitaru.server.domain.imports import Import, ImportWithoutImporterVersion
 from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
@@ -168,17 +165,18 @@ class TaskSpecBuilder:
         Raises:
             PluginVersionIdNotFound: The task names an unknown plugin version.
             BlobNotFound: The script plugin names an unknown blob.
-            SecretNotFound: The connection names an unknown secret.
 
         Returns:
             Execution spec.
         """
         plugin_version = await self._plugins.get_version_by_id(task.plugin_version_id)
         plugin = await self._plugins.get(plugin_version.plugin_id)
-        connection_id = await resolve_connection_id(
-            None, plugin.provider, self._connections
-        )
-        env, secret_env = await self._get_connection_env(connection_id, task.env)
+        try:
+            env, secret_env = await self._get_connection_env(
+                task.connection_id, task.env
+            )
+        except ConnectionNotFound:
+            env, secret_env = task.env, {}
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.EVALUATOR,
