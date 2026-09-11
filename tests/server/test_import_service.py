@@ -946,11 +946,7 @@ async def test_analyze_import_skips_without_eligible_sessions(
     assert (await services.jobs.get(job.id)).status is JobStatus.COMPLETED
     (task,) = await _analysis_tasks(services, job.id)
     assert task.status is TaskStatus.SKIPPED
-    assert task.result == {
-        "reason": "insufficient_sessions",
-        "eligible_sessions": 0,
-        "min_sessions": 1,
-    }
+    assert task.result is None
 
 
 async def test_analyze_import_mixes_skipped_and_runnable_analyzers(

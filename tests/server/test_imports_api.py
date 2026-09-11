@@ -836,11 +836,7 @@ async def test_analyze_import_returns_skip_without_sessions(
     assert skipped["started_at"] is None
     assert skipped["ended_at"] is not None
     assert skipped["error"] is None
-    assert skipped["result"] == {
-        "reason": "insufficient_sessions",
-        "eligible_sessions": 0,
-        "min_sessions": 1,
-    }
+    assert skipped["result"] is None
 
 
 async def test_analyze_import_rejects_an_empty_analyzer_list(

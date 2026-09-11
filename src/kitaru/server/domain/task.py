@@ -673,14 +673,6 @@ class ImportTask(Task):
             raise InvalidTaskResult(f"Task {self.id} requires a result")
 
 
-class _AnalysisSkippedResult(FrozenModel):
-    """Analysis skipped result."""
-
-    reason: Literal["insufficient_sessions"] = "insufficient_sessions"
-    eligible_sessions: int = Field(ge=0)
-    min_sessions: int = Field(ge=1)
-
-
 class AnalysisTask(Task):
     """Analysis task."""
 
@@ -703,11 +695,7 @@ class AnalysisTask(Task):
         if eligible_sessions >= min_sessions:
             return
         self._require_status({TaskStatus.PENDING}, TaskStatus.SKIPPED)
-        result = _AnalysisSkippedResult(
-            eligible_sessions=eligible_sessions, min_sessions=min_sessions
-        )
         self.status = TaskStatus.SKIPPED
-        self.result = result.model_dump(mode="json")
         self.ended_at = now
 
     @property
