@@ -23,6 +23,7 @@ def _decode_reference_token(token: str) -> str | None:
     """Decode one RFC 6901 reference token, None when its escapes are invalid."""
     if _INVALID_ESCAPE.search(token):
         return None
+    # Decode ~1 before ~0 so an escaped tilde never turns into a slash.
     return token.replace("~1", "/").replace("~0", "~")
 
 
@@ -51,6 +52,7 @@ def resolve_json_pointer(document: Any, pointer: str) -> tuple[bool, Any]:
             isinstance(current, list)
             and token.isascii()
             and token.isdigit()
+            # Array indexes allow no leading zeros, so "01" never means 1.
             and (token == "0" or not token.startswith("0"))
             and int(token) < len(current)
         ):
