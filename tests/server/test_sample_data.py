@@ -65,7 +65,7 @@ def test_nodes_are_ordered_parent_before_child() -> None:
     for item in data.sessions:
         seen: set[str] = set()
         for node in item.nodes:
-            parents = list(node.secondary_parent_external_ids)
+            parents = [link.external_id for link in node.links]
             if node.parent_external_id is not None:
                 parents.append(node.parent_external_id)
             assert all(parent in seen for parent in parents)

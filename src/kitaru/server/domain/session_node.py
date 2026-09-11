@@ -21,7 +21,7 @@ from typing import Any
 from pydantic import Field
 
 from kitaru.api_models.v1.session import TokenUsage
-from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.api_models.v1.session_node import NodeLink, NodeStatus, NodeType
 from kitaru.server.domain.base import ConflictError, DomainModel
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.payload import Payload
@@ -49,7 +49,7 @@ class SessionNode(DomainModel):
     session_id: uuid.UUID
     external_id: str
     parent_external_id: str | None = None
-    secondary_parent_external_ids: list[str] = Field(default_factory=list)
+    links: list[NodeLink] = Field(default_factory=list)
     trace_id: str | None = None
     node_type: NodeType
     name: str

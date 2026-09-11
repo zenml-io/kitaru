@@ -332,7 +332,7 @@ def _node(
         session_id=session_id,
         external_id=f"node-{index}",
         parent_external_id=None,
-        secondary_parent_external_ids=[],
+        links=[],
         node_type=node_type,
         name=tool_name or model or "node",
         status=status,

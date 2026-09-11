@@ -68,7 +68,7 @@
       "nodes": [
         {
           "parent_external_id": null,
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "3a7be91cef57eac0fa037593368e8dca:ce0d75952a2646bf",
           "trace_id": "3a7be91cef57eac0fa037593368e8dca",
           "node_type": "span",
@@ -289,7 +289,7 @@
         },
         {
           "parent_external_id": "3a7be91cef57eac0fa037593368e8dca:ce0d75952a2646bf",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "3a7be91cef57eac0fa037593368e8dca:a21c3d2822d58582",
           "trace_id": "3a7be91cef57eac0fa037593368e8dca",
           "node_type": "llm_call",
@@ -583,8 +583,11 @@
         },
         {
           "parent_external_id": "3a7be91cef57eac0fa037593368e8dca:a21c3d2822d58582",
-          "secondary_parent_external_ids": [
-            "3a7be91cef57eac0fa037593368e8dca:ce0d75952a2646bf"
+          "links": [
+            {
+              "external_id": "3a7be91cef57eac0fa037593368e8dca:ce0d75952a2646bf",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "3a7be91cef57eac0fa037593368e8dca:156e999a29358676",
           "trace_id": "3a7be91cef57eac0fa037593368e8dca",
@@ -649,8 +652,11 @@
         },
         {
           "parent_external_id": "3a7be91cef57eac0fa037593368e8dca:a21c3d2822d58582",
-          "secondary_parent_external_ids": [
-            "3a7be91cef57eac0fa037593368e8dca:ce0d75952a2646bf"
+          "links": [
+            {
+              "external_id": "3a7be91cef57eac0fa037593368e8dca:ce0d75952a2646bf",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "3a7be91cef57eac0fa037593368e8dca:2889b808cf5c2246",
           "trace_id": "3a7be91cef57eac0fa037593368e8dca",
@@ -708,7 +714,7 @@
         },
         {
           "parent_external_id": "3a7be91cef57eac0fa037593368e8dca:ce0d75952a2646bf",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "3a7be91cef57eac0fa037593368e8dca:7dfbf497d96d19fa",
           "trace_id": "3a7be91cef57eac0fa037593368e8dca",
           "node_type": "llm_call",
@@ -1075,8 +1081,11 @@
         },
         {
           "parent_external_id": "3a7be91cef57eac0fa037593368e8dca:7dfbf497d96d19fa",
-          "secondary_parent_external_ids": [
-            "3a7be91cef57eac0fa037593368e8dca:ce0d75952a2646bf"
+          "links": [
+            {
+              "external_id": "3a7be91cef57eac0fa037593368e8dca:ce0d75952a2646bf",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "3a7be91cef57eac0fa037593368e8dca:4b6c82d56841b871",
           "trace_id": "3a7be91cef57eac0fa037593368e8dca",
@@ -1131,7 +1140,7 @@
         },
         {
           "parent_external_id": "3a7be91cef57eac0fa037593368e8dca:ce0d75952a2646bf",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "3a7be91cef57eac0fa037593368e8dca:631dcb13e8533ce2",
           "trace_id": "3a7be91cef57eac0fa037593368e8dca",
           "node_type": "llm_call",
@@ -1616,7 +1625,7 @@
       "nodes": [
         {
           "parent_external_id": null,
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:e64e8356ed5066fb",
           "trace_id": "e9cee08541fbe4e7fdbd01582eeb5f72",
           "node_type": "span",
@@ -1822,7 +1831,7 @@
         },
         {
           "parent_external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:e64e8356ed5066fb",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:e92092eb99420b14",
           "trace_id": "e9cee08541fbe4e7fdbd01582eeb5f72",
           "node_type": "llm_call",
@@ -2112,8 +2121,11 @@
         },
         {
           "parent_external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:e92092eb99420b14",
-          "secondary_parent_external_ids": [
-            "e9cee08541fbe4e7fdbd01582eeb5f72:e64e8356ed5066fb"
+          "links": [
+            {
+              "external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:e64e8356ed5066fb",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:2b0098e5e7af3444",
           "trace_id": "e9cee08541fbe4e7fdbd01582eeb5f72",
@@ -2178,7 +2190,7 @@
         },
         {
           "parent_external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:e64e8356ed5066fb",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:9e19550e0b8a7d70",
           "trace_id": "e9cee08541fbe4e7fdbd01582eeb5f72",
           "node_type": "llm_call",
@@ -2529,8 +2541,11 @@
         },
         {
           "parent_external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:9e19550e0b8a7d70",
-          "secondary_parent_external_ids": [
-            "e9cee08541fbe4e7fdbd01582eeb5f72:e64e8356ed5066fb"
+          "links": [
+            {
+              "external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:e64e8356ed5066fb",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:fbb09f331df62a6c",
           "trace_id": "e9cee08541fbe4e7fdbd01582eeb5f72",
@@ -2584,7 +2599,7 @@
         },
         {
           "parent_external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:e64e8356ed5066fb",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "e9cee08541fbe4e7fdbd01582eeb5f72:73c9d13aae00f55b",
           "trace_id": "e9cee08541fbe4e7fdbd01582eeb5f72",
           "node_type": "llm_call",
@@ -3053,7 +3068,7 @@
       "nodes": [
         {
           "parent_external_id": null,
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "27179f27a94184377502dd9adf77f637:b88763121b6944b6",
           "trace_id": "27179f27a94184377502dd9adf77f637",
           "node_type": "span",
@@ -3274,7 +3289,7 @@
         },
         {
           "parent_external_id": "27179f27a94184377502dd9adf77f637:b88763121b6944b6",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "27179f27a94184377502dd9adf77f637:2abda7a163d1e57a",
           "trace_id": "27179f27a94184377502dd9adf77f637",
           "node_type": "llm_call",
@@ -3560,8 +3575,11 @@
         },
         {
           "parent_external_id": "27179f27a94184377502dd9adf77f637:2abda7a163d1e57a",
-          "secondary_parent_external_ids": [
-            "27179f27a94184377502dd9adf77f637:b88763121b6944b6"
+          "links": [
+            {
+              "external_id": "27179f27a94184377502dd9adf77f637:b88763121b6944b6",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "27179f27a94184377502dd9adf77f637:23ed78979b514225",
           "trace_id": "27179f27a94184377502dd9adf77f637",
@@ -3619,8 +3637,11 @@
         },
         {
           "parent_external_id": "27179f27a94184377502dd9adf77f637:2abda7a163d1e57a",
-          "secondary_parent_external_ids": [
-            "27179f27a94184377502dd9adf77f637:b88763121b6944b6"
+          "links": [
+            {
+              "external_id": "27179f27a94184377502dd9adf77f637:b88763121b6944b6",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "27179f27a94184377502dd9adf77f637:678ff4b4daa342d0",
           "trace_id": "27179f27a94184377502dd9adf77f637",
@@ -3685,7 +3706,7 @@
         },
         {
           "parent_external_id": "27179f27a94184377502dd9adf77f637:b88763121b6944b6",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "27179f27a94184377502dd9adf77f637:95b13b6755a9f1ab",
           "trace_id": "27179f27a94184377502dd9adf77f637",
           "node_type": "llm_call",
@@ -4048,8 +4069,11 @@
         },
         {
           "parent_external_id": "27179f27a94184377502dd9adf77f637:95b13b6755a9f1ab",
-          "secondary_parent_external_ids": [
-            "27179f27a94184377502dd9adf77f637:b88763121b6944b6"
+          "links": [
+            {
+              "external_id": "27179f27a94184377502dd9adf77f637:b88763121b6944b6",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "27179f27a94184377502dd9adf77f637:e08a9e22b2ef3535",
           "trace_id": "27179f27a94184377502dd9adf77f637",
@@ -4104,7 +4128,7 @@
         },
         {
           "parent_external_id": "27179f27a94184377502dd9adf77f637:b88763121b6944b6",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "27179f27a94184377502dd9adf77f637:fa25dabc15e7c481",
           "trace_id": "27179f27a94184377502dd9adf77f637",
           "node_type": "llm_call",
@@ -4589,7 +4613,7 @@
       "nodes": [
         {
           "parent_external_id": null,
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "98b7711322547b11465d20f30464568a:4616ee2500ef1eec",
           "trace_id": "98b7711322547b11465d20f30464568a",
           "node_type": "span",
@@ -4806,7 +4830,7 @@
         },
         {
           "parent_external_id": "98b7711322547b11465d20f30464568a:4616ee2500ef1eec",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "98b7711322547b11465d20f30464568a:1d3aa5f09ddc8551",
           "trace_id": "98b7711322547b11465d20f30464568a",
           "node_type": "llm_call",
@@ -5086,8 +5110,11 @@
         },
         {
           "parent_external_id": "98b7711322547b11465d20f30464568a:1d3aa5f09ddc8551",
-          "secondary_parent_external_ids": [
-            "98b7711322547b11465d20f30464568a:4616ee2500ef1eec"
+          "links": [
+            {
+              "external_id": "98b7711322547b11465d20f30464568a:4616ee2500ef1eec",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "98b7711322547b11465d20f30464568a:055fbd59bbc7b781",
           "trace_id": "98b7711322547b11465d20f30464568a",
@@ -5152,8 +5179,11 @@
         },
         {
           "parent_external_id": "98b7711322547b11465d20f30464568a:1d3aa5f09ddc8551",
-          "secondary_parent_external_ids": [
-            "98b7711322547b11465d20f30464568a:4616ee2500ef1eec"
+          "links": [
+            {
+              "external_id": "98b7711322547b11465d20f30464568a:4616ee2500ef1eec",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "98b7711322547b11465d20f30464568a:200378d448d6b9a2",
           "trace_id": "98b7711322547b11465d20f30464568a",
@@ -5211,7 +5241,7 @@
         },
         {
           "parent_external_id": "98b7711322547b11465d20f30464568a:4616ee2500ef1eec",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "98b7711322547b11465d20f30464568a:1b2994b658d211ed",
           "trace_id": "98b7711322547b11465d20f30464568a",
           "node_type": "llm_call",
@@ -5570,8 +5600,11 @@
         },
         {
           "parent_external_id": "98b7711322547b11465d20f30464568a:1b2994b658d211ed",
-          "secondary_parent_external_ids": [
-            "98b7711322547b11465d20f30464568a:4616ee2500ef1eec"
+          "links": [
+            {
+              "external_id": "98b7711322547b11465d20f30464568a:4616ee2500ef1eec",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "98b7711322547b11465d20f30464568a:59bb69a47edbd2a1",
           "trace_id": "98b7711322547b11465d20f30464568a",
@@ -5626,7 +5659,7 @@
         },
         {
           "parent_external_id": "98b7711322547b11465d20f30464568a:4616ee2500ef1eec",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "98b7711322547b11465d20f30464568a:daf6bd4a124abf37",
           "trace_id": "98b7711322547b11465d20f30464568a",
           "node_type": "llm_call",
@@ -6107,7 +6140,7 @@
       "nodes": [
         {
           "parent_external_id": null,
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "64bb27219f226e7dc6bd9e0bea3d749c:194ab55d770f4f0f",
           "trace_id": "64bb27219f226e7dc6bd9e0bea3d749c",
           "node_type": "span",
@@ -6295,7 +6328,7 @@
         },
         {
           "parent_external_id": "64bb27219f226e7dc6bd9e0bea3d749c:194ab55d770f4f0f",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "64bb27219f226e7dc6bd9e0bea3d749c:3f808a567daba5b1",
           "trace_id": "64bb27219f226e7dc6bd9e0bea3d749c",
           "node_type": "llm_call",
@@ -6593,8 +6626,11 @@
         },
         {
           "parent_external_id": "64bb27219f226e7dc6bd9e0bea3d749c:3f808a567daba5b1",
-          "secondary_parent_external_ids": [
-            "64bb27219f226e7dc6bd9e0bea3d749c:194ab55d770f4f0f"
+          "links": [
+            {
+              "external_id": "64bb27219f226e7dc6bd9e0bea3d749c:194ab55d770f4f0f",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "64bb27219f226e7dc6bd9e0bea3d749c:691f464116dfa363",
           "trace_id": "64bb27219f226e7dc6bd9e0bea3d749c",
@@ -6645,8 +6681,11 @@
         },
         {
           "parent_external_id": "64bb27219f226e7dc6bd9e0bea3d749c:3f808a567daba5b1",
-          "secondary_parent_external_ids": [
-            "64bb27219f226e7dc6bd9e0bea3d749c:194ab55d770f4f0f"
+          "links": [
+            {
+              "external_id": "64bb27219f226e7dc6bd9e0bea3d749c:194ab55d770f4f0f",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "64bb27219f226e7dc6bd9e0bea3d749c:f59b5a736f65bd11",
           "trace_id": "64bb27219f226e7dc6bd9e0bea3d749c",
@@ -6697,7 +6736,7 @@
         },
         {
           "parent_external_id": "64bb27219f226e7dc6bd9e0bea3d749c:194ab55d770f4f0f",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "64bb27219f226e7dc6bd9e0bea3d749c:d92ef2ecc26b7abf",
           "trace_id": "64bb27219f226e7dc6bd9e0bea3d749c",
           "node_type": "llm_call",
@@ -7032,8 +7071,11 @@
         },
         {
           "parent_external_id": "64bb27219f226e7dc6bd9e0bea3d749c:d92ef2ecc26b7abf",
-          "secondary_parent_external_ids": [
-            "64bb27219f226e7dc6bd9e0bea3d749c:194ab55d770f4f0f"
+          "links": [
+            {
+              "external_id": "64bb27219f226e7dc6bd9e0bea3d749c:194ab55d770f4f0f",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "64bb27219f226e7dc6bd9e0bea3d749c:81aa8d5feeb0e07a",
           "trace_id": "64bb27219f226e7dc6bd9e0bea3d749c",
@@ -7087,7 +7129,7 @@
         },
         {
           "parent_external_id": "64bb27219f226e7dc6bd9e0bea3d749c:194ab55d770f4f0f",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "64bb27219f226e7dc6bd9e0bea3d749c:9ec26ae8c613a690",
           "trace_id": "64bb27219f226e7dc6bd9e0bea3d749c",
           "node_type": "llm_call",
@@ -7536,7 +7578,7 @@
       "nodes": [
         {
           "parent_external_id": null,
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "9a9037078509710905bbdbd27442baca:fffff0f635930ea6",
           "trace_id": "9a9037078509710905bbdbd27442baca",
           "node_type": "span",
@@ -7796,7 +7838,7 @@
         },
         {
           "parent_external_id": "9a9037078509710905bbdbd27442baca:fffff0f635930ea6",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "9a9037078509710905bbdbd27442baca:af064c6adef203da",
           "trace_id": "9a9037078509710905bbdbd27442baca",
           "node_type": "llm_call",
@@ -8082,8 +8124,11 @@
         },
         {
           "parent_external_id": "9a9037078509710905bbdbd27442baca:af064c6adef203da",
-          "secondary_parent_external_ids": [
-            "9a9037078509710905bbdbd27442baca:fffff0f635930ea6"
+          "links": [
+            {
+              "external_id": "9a9037078509710905bbdbd27442baca:fffff0f635930ea6",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "9a9037078509710905bbdbd27442baca:ab3f6ca68deecf39",
           "trace_id": "9a9037078509710905bbdbd27442baca",
@@ -8148,7 +8193,7 @@
         },
         {
           "parent_external_id": "9a9037078509710905bbdbd27442baca:fffff0f635930ea6",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "9a9037078509710905bbdbd27442baca:1d1540796a11ed88",
           "trace_id": "9a9037078509710905bbdbd27442baca",
           "node_type": "llm_call",
@@ -8487,8 +8532,11 @@
         },
         {
           "parent_external_id": "9a9037078509710905bbdbd27442baca:1d1540796a11ed88",
-          "secondary_parent_external_ids": [
-            "9a9037078509710905bbdbd27442baca:fffff0f635930ea6"
+          "links": [
+            {
+              "external_id": "9a9037078509710905bbdbd27442baca:fffff0f635930ea6",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "9a9037078509710905bbdbd27442baca:5c6d9f01b4e70fb9",
           "trace_id": "9a9037078509710905bbdbd27442baca",
@@ -8539,7 +8587,7 @@
         },
         {
           "parent_external_id": "9a9037078509710905bbdbd27442baca:fffff0f635930ea6",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "9a9037078509710905bbdbd27442baca:8fbf83a9ff895768",
           "trace_id": "9a9037078509710905bbdbd27442baca",
           "node_type": "llm_call",
@@ -8921,8 +8969,11 @@
         },
         {
           "parent_external_id": "9a9037078509710905bbdbd27442baca:8fbf83a9ff895768",
-          "secondary_parent_external_ids": [
-            "9a9037078509710905bbdbd27442baca:fffff0f635930ea6"
+          "links": [
+            {
+              "external_id": "9a9037078509710905bbdbd27442baca:fffff0f635930ea6",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "9a9037078509710905bbdbd27442baca:82295d2e0f43d75b",
           "trace_id": "9a9037078509710905bbdbd27442baca",
@@ -8976,8 +9027,11 @@
         },
         {
           "parent_external_id": "9a9037078509710905bbdbd27442baca:8fbf83a9ff895768",
-          "secondary_parent_external_ids": [
-            "9a9037078509710905bbdbd27442baca:fffff0f635930ea6"
+          "links": [
+            {
+              "external_id": "9a9037078509710905bbdbd27442baca:fffff0f635930ea6",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "9a9037078509710905bbdbd27442baca:d312ae7deb1c25be",
           "trace_id": "9a9037078509710905bbdbd27442baca",
@@ -9035,7 +9089,7 @@
         },
         {
           "parent_external_id": "9a9037078509710905bbdbd27442baca:fffff0f635930ea6",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "9a9037078509710905bbdbd27442baca:a2441757226ace0b",
           "trace_id": "9a9037078509710905bbdbd27442baca",
           "node_type": "llm_call",
@@ -9559,7 +9613,7 @@
       "nodes": [
         {
           "parent_external_id": null,
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "54a4881757149774ff11ce66270b89ea:a5b355bc67e2159b",
           "trace_id": "54a4881757149774ff11ce66270b89ea",
           "node_type": "span",
@@ -9787,7 +9841,7 @@
         },
         {
           "parent_external_id": "54a4881757149774ff11ce66270b89ea:a5b355bc67e2159b",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "54a4881757149774ff11ce66270b89ea:4a65f642e5b92dee",
           "trace_id": "54a4881757149774ff11ce66270b89ea",
           "node_type": "llm_call",
@@ -10081,8 +10135,11 @@
         },
         {
           "parent_external_id": "54a4881757149774ff11ce66270b89ea:4a65f642e5b92dee",
-          "secondary_parent_external_ids": [
-            "54a4881757149774ff11ce66270b89ea:a5b355bc67e2159b"
+          "links": [
+            {
+              "external_id": "54a4881757149774ff11ce66270b89ea:a5b355bc67e2159b",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "54a4881757149774ff11ce66270b89ea:53c055b2087ba874",
           "trace_id": "54a4881757149774ff11ce66270b89ea",
@@ -10149,8 +10206,11 @@
         },
         {
           "parent_external_id": "54a4881757149774ff11ce66270b89ea:4a65f642e5b92dee",
-          "secondary_parent_external_ids": [
-            "54a4881757149774ff11ce66270b89ea:a5b355bc67e2159b"
+          "links": [
+            {
+              "external_id": "54a4881757149774ff11ce66270b89ea:a5b355bc67e2159b",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "54a4881757149774ff11ce66270b89ea:7defbe6db8dc75f5",
           "trace_id": "54a4881757149774ff11ce66270b89ea",
@@ -10201,7 +10261,7 @@
         },
         {
           "parent_external_id": "54a4881757149774ff11ce66270b89ea:a5b355bc67e2159b",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "54a4881757149774ff11ce66270b89ea:82ba091fc1b4cced",
           "trace_id": "54a4881757149774ff11ce66270b89ea",
           "node_type": "llm_call",
@@ -10567,8 +10627,11 @@
         },
         {
           "parent_external_id": "54a4881757149774ff11ce66270b89ea:82ba091fc1b4cced",
-          "secondary_parent_external_ids": [
-            "54a4881757149774ff11ce66270b89ea:a5b355bc67e2159b"
+          "links": [
+            {
+              "external_id": "54a4881757149774ff11ce66270b89ea:a5b355bc67e2159b",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "54a4881757149774ff11ce66270b89ea:32a7f07a65920edc",
           "trace_id": "54a4881757149774ff11ce66270b89ea",
@@ -10623,7 +10686,7 @@
         },
         {
           "parent_external_id": "54a4881757149774ff11ce66270b89ea:a5b355bc67e2159b",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "54a4881757149774ff11ce66270b89ea:19c2059802b8df50",
           "trace_id": "54a4881757149774ff11ce66270b89ea",
           "node_type": "llm_call",
@@ -11115,7 +11178,7 @@
       "nodes": [
         {
           "parent_external_id": null,
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "9772e0ecbfbe704a79a457a50b384efc:fb79d62d908a7856",
           "trace_id": "9772e0ecbfbe704a79a457a50b384efc",
           "node_type": "span",
@@ -11309,7 +11372,7 @@
         },
         {
           "parent_external_id": "9772e0ecbfbe704a79a457a50b384efc:fb79d62d908a7856",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "9772e0ecbfbe704a79a457a50b384efc:58cba3503821be86",
           "trace_id": "9772e0ecbfbe704a79a457a50b384efc",
           "node_type": "llm_call",
@@ -11587,8 +11650,11 @@
         },
         {
           "parent_external_id": "9772e0ecbfbe704a79a457a50b384efc:58cba3503821be86",
-          "secondary_parent_external_ids": [
-            "9772e0ecbfbe704a79a457a50b384efc:fb79d62d908a7856"
+          "links": [
+            {
+              "external_id": "9772e0ecbfbe704a79a457a50b384efc:fb79d62d908a7856",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "9772e0ecbfbe704a79a457a50b384efc:d9bb395c31942809",
           "trace_id": "9772e0ecbfbe704a79a457a50b384efc",
@@ -11653,7 +11719,7 @@
         },
         {
           "parent_external_id": "9772e0ecbfbe704a79a457a50b384efc:fb79d62d908a7856",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "9772e0ecbfbe704a79a457a50b384efc:cf2a3f28e37e68fc",
           "trace_id": "9772e0ecbfbe704a79a457a50b384efc",
           "node_type": "llm_call",
@@ -11992,8 +12058,11 @@
         },
         {
           "parent_external_id": "9772e0ecbfbe704a79a457a50b384efc:cf2a3f28e37e68fc",
-          "secondary_parent_external_ids": [
-            "9772e0ecbfbe704a79a457a50b384efc:fb79d62d908a7856"
+          "links": [
+            {
+              "external_id": "9772e0ecbfbe704a79a457a50b384efc:fb79d62d908a7856",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "9772e0ecbfbe704a79a457a50b384efc:5764579c2bf7eb83",
           "trace_id": "9772e0ecbfbe704a79a457a50b384efc",
@@ -12047,7 +12116,7 @@
         },
         {
           "parent_external_id": "9772e0ecbfbe704a79a457a50b384efc:fb79d62d908a7856",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "9772e0ecbfbe704a79a457a50b384efc:879d59b6373a066c",
           "trace_id": "9772e0ecbfbe704a79a457a50b384efc",
           "node_type": "llm_call",
@@ -12504,7 +12573,7 @@
       "nodes": [
         {
           "parent_external_id": null,
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "376f258b19272ec970021002cc0d3c97:563dc5a18b6743d7",
           "trace_id": "376f258b19272ec970021002cc0d3c97",
           "node_type": "span",
@@ -12740,7 +12809,7 @@
         },
         {
           "parent_external_id": "376f258b19272ec970021002cc0d3c97:563dc5a18b6743d7",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "376f258b19272ec970021002cc0d3c97:77db908c26bda0f3",
           "trace_id": "376f258b19272ec970021002cc0d3c97",
           "node_type": "llm_call",
@@ -13018,8 +13087,11 @@
         },
         {
           "parent_external_id": "376f258b19272ec970021002cc0d3c97:77db908c26bda0f3",
-          "secondary_parent_external_ids": [
-            "376f258b19272ec970021002cc0d3c97:563dc5a18b6743d7"
+          "links": [
+            {
+              "external_id": "376f258b19272ec970021002cc0d3c97:563dc5a18b6743d7",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "376f258b19272ec970021002cc0d3c97:b5a591fc94a0533e",
           "trace_id": "376f258b19272ec970021002cc0d3c97",
@@ -13084,7 +13156,7 @@
         },
         {
           "parent_external_id": "376f258b19272ec970021002cc0d3c97:563dc5a18b6743d7",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "376f258b19272ec970021002cc0d3c97:e31b78c255101c2e",
           "trace_id": "376f258b19272ec970021002cc0d3c97",
           "node_type": "llm_call",
@@ -13411,8 +13483,11 @@
         },
         {
           "parent_external_id": "376f258b19272ec970021002cc0d3c97:e31b78c255101c2e",
-          "secondary_parent_external_ids": [
-            "376f258b19272ec970021002cc0d3c97:563dc5a18b6743d7"
+          "links": [
+            {
+              "external_id": "376f258b19272ec970021002cc0d3c97:563dc5a18b6743d7",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "376f258b19272ec970021002cc0d3c97:76da5b8d8d229fec",
           "trace_id": "376f258b19272ec970021002cc0d3c97",
@@ -13470,7 +13545,7 @@
         },
         {
           "parent_external_id": "376f258b19272ec970021002cc0d3c97:563dc5a18b6743d7",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "376f258b19272ec970021002cc0d3c97:8e44523d7b8c9be4",
           "trace_id": "376f258b19272ec970021002cc0d3c97",
           "node_type": "llm_call",
@@ -13840,8 +13915,11 @@
         },
         {
           "parent_external_id": "376f258b19272ec970021002cc0d3c97:8e44523d7b8c9be4",
-          "secondary_parent_external_ids": [
-            "376f258b19272ec970021002cc0d3c97:563dc5a18b6743d7"
+          "links": [
+            {
+              "external_id": "376f258b19272ec970021002cc0d3c97:563dc5a18b6743d7",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "376f258b19272ec970021002cc0d3c97:da0fc5500d9b5d11",
           "trace_id": "376f258b19272ec970021002cc0d3c97",
@@ -13896,7 +13974,7 @@
         },
         {
           "parent_external_id": "376f258b19272ec970021002cc0d3c97:563dc5a18b6743d7",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "376f258b19272ec970021002cc0d3c97:3f88d9e62826749f",
           "trace_id": "376f258b19272ec970021002cc0d3c97",
           "node_type": "llm_call",
@@ -14396,7 +14474,7 @@
       "nodes": [
         {
           "parent_external_id": null,
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e",
           "trace_id": "5998a91ffcea5f0fed28ca9aac4cdc94",
           "node_type": "span",
@@ -14675,7 +14753,7 @@
         },
         {
           "parent_external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:33dda14c549c07dd",
           "trace_id": "5998a91ffcea5f0fed28ca9aac4cdc94",
           "node_type": "llm_call",
@@ -14973,8 +15051,11 @@
         },
         {
           "parent_external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:33dda14c549c07dd",
-          "secondary_parent_external_ids": [
-            "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e"
+          "links": [
+            {
+              "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:3efa338c601d6aae",
           "trace_id": "5998a91ffcea5f0fed28ca9aac4cdc94",
@@ -15025,8 +15106,11 @@
         },
         {
           "parent_external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:33dda14c549c07dd",
-          "secondary_parent_external_ids": [
-            "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e"
+          "links": [
+            {
+              "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:5faf0b4f98ac6f26",
           "trace_id": "5998a91ffcea5f0fed28ca9aac4cdc94",
@@ -15084,7 +15168,7 @@
         },
         {
           "parent_external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:7cc0e243c4f63fe3",
           "trace_id": "5998a91ffcea5f0fed28ca9aac4cdc94",
           "node_type": "llm_call",
@@ -15448,8 +15532,11 @@
         },
         {
           "parent_external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:7cc0e243c4f63fe3",
-          "secondary_parent_external_ids": [
-            "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e"
+          "links": [
+            {
+              "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:1bfa135d3fadaaa7",
           "trace_id": "5998a91ffcea5f0fed28ca9aac4cdc94",
@@ -15514,8 +15601,11 @@
         },
         {
           "parent_external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:7cc0e243c4f63fe3",
-          "secondary_parent_external_ids": [
-            "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e"
+          "links": [
+            {
+              "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:cb0c61e70ff68563",
           "trace_id": "5998a91ffcea5f0fed28ca9aac4cdc94",
@@ -15573,7 +15663,7 @@
         },
         {
           "parent_external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:eeb77714530f6b7c",
           "trace_id": "5998a91ffcea5f0fed28ca9aac4cdc94",
           "node_type": "llm_call",
@@ -15996,8 +16086,11 @@
         },
         {
           "parent_external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:eeb77714530f6b7c",
-          "secondary_parent_external_ids": [
-            "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e"
+          "links": [
+            {
+              "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e",
+              "kind": "source_parent"
+            }
           ],
           "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:69b5e898129600ab",
           "trace_id": "5998a91ffcea5f0fed28ca9aac4cdc94",
@@ -16052,7 +16145,7 @@
         },
         {
           "parent_external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:e4622406fe405f2e",
-          "secondary_parent_external_ids": [],
+          "links": [],
           "external_id": "5998a91ffcea5f0fed28ca9aac4cdc94:9ffe8a1388b5149b",
           "trace_id": "5998a91ffcea5f0fed28ca9aac4cdc94",
           "node_type": "llm_call",

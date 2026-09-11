@@ -31,9 +31,9 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 
 | Node field | Type | Meaning |
 |---|---|---|
-| `index` | integer | Stable position within the session import. Parents must have lower indexes. |
-| `parent_index` | integer or null | Primary parent. |
-| `secondary_parent_indexes` | integer array | Additional parents for graph joins. |
+| `index` | integer | Stable position within the session import. |
+| `parent_index` | integer or null | Index of the parent node. |
+| `links` | link array | Links to other nodes of the session, each with the target's `external_id` and a `kind`. |
 | `external_id`, `trace_id` | string or null | Source node and trace identities. |
 | `node_type` | `llm_call`, `tool_call`, `subagent_call`, or `span` | Work represented by the node. |
 | `name` | string | Display name. |
@@ -78,7 +78,7 @@ The formatted object below represents one JSONL record. Serialize it onto one li
     {
       "index": 0,
       "parent_index": null,
-      "secondary_parent_indexes": [],
+      "links": [],
       "external_id": "model-call-42",
       "trace_id": "trace-42",
       "node_type": "llm_call",
@@ -102,7 +102,7 @@ The formatted object below represents one JSONL record. Serialize it onto one li
 }
 ```
 
-Node indexes do not need to be contiguous. Every `parent_index` and `secondary_parent_indexes` value must be lower than the child index. A node index must be unique within its session.
+Node indexes do not need to be contiguous, and a parent may carry a higher index than its child. A node index must be unique within its session. A link names its target by `external_id`, and a node without one is addressable as `node-<index>`.
 
 ## Import a file
 

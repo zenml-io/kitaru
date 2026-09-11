@@ -302,7 +302,7 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
     position_by_external_id = {node.external_id: positions[node.id] for node in nodes}
     parent_findings: list[dict[str, Any]] = []
     for node in nodes:
-        parents = [node.parent_external_id, *node.secondary_parent_external_ids]
+        parents = [node.parent_external_id, *(link.external_id for link in node.links)]
         missing_parents = sorted(
             parent
             for parent in parents
@@ -319,8 +319,8 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
             parent_findings.append(
                 {
                     "index": positions[node.id],
-                    "missing_parents": missing_parents,
-                    "nonpreceding_parents": nonpreceding_parents,
+                    "missing_references": missing_parents,
+                    "nonpreceding_references": nonpreceding_parents,
                 }
             )
 
@@ -396,7 +396,7 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
             _finding_result(
                 "parent_linkage",
                 parent_findings,
-                "Nodes with missing or nonpreceding parents.",
+                "Nodes with missing or nonpreceding parents or links.",
                 max_score=len(nodes),
             ),
             _finding_result(

@@ -121,7 +121,7 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
                 await connection.execute(
                     text(
                         "SELECT id, external_id, started_at, "
-                        "parent_external_id, secondary_parent_external_ids "
+                        "parent_external_id, links "
                         "FROM session_node ORDER BY started_at, id"
                     )
                 )
@@ -130,12 +130,12 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
         assert identities[root_id] == ("call-0", started_at)
         assert identities[child_id] == ("index-1", None)
         assert identities[orphan_id] == ("index-2", None)
-        references = {
-            row.id: (row.parent_external_id, row.secondary_parent_external_ids)
-            for row in upgraded
-        }
+        references = {row.id: (row.parent_external_id, row.links) for row in upgraded}
         assert references[root_id] == (None, [])
-        assert references[child_id] == ("call-0", ["index-2"])
+        assert references[child_id] == (
+            "call-0",
+            [{"external_id": "index-2", "kind": "parent"}],
+        )
         assert references[orphan_id] == (None, [])
         async with engine.connect() as connection:
             columns = (await connection.execute(SESSION_NODE_COLUMNS)).scalars().all()
@@ -165,7 +165,7 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
         async with engine.connect() as connection:
             columns = (await connection.execute(SESSION_NODE_COLUMNS)).scalars().all()
         assert "parent_external_id" not in columns
-        assert "secondary_parent_external_ids" not in columns
+        assert "links" not in columns
     finally:
         await engine.dispose()
         await drop_test_database(settings)

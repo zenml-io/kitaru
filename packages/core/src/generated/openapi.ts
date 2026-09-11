@@ -7535,6 +7535,22 @@ export interface components {
             value: unknown;
         };
         /**
+         * NodeLink
+         * @description Node link.
+         */
+        NodeLink: {
+            /**
+             * External Id
+             * @description External id of the linked node.
+             */
+            external_id: string;
+            /**
+             * Kind
+             * @description Relation the link states.
+             */
+            kind: string;
+        };
+        /**
          * NodeStatus
          * @description Session node status.
          * @enum {string}
@@ -8828,6 +8844,11 @@ export interface components {
              */
             inputs: unknown;
             /**
+             * Links
+             * @description Links to other nodes of the session.
+             */
+            links?: components["schemas"]["NodeLink"][];
+            /**
              * Metadata
              * @description Arbitrary metadata.
              */
@@ -8883,11 +8904,6 @@ export interface components {
              * @description Model requested by the call.
              */
             requested_model?: string | null;
-            /**
-             * Secondary Parent External Ids
-             * @description External ids of additional parent nodes.
-             */
-            secondary_parent_external_ids?: string[];
             /**
              * Started At
              * @description Time the node started.
@@ -8970,6 +8986,11 @@ export interface components {
              */
             inputs?: unknown;
             /**
+             * Links
+             * @description Links to other nodes of the session.
+             */
+            links: components["schemas"]["NodeLink"][];
+            /**
              * Metadata
              * @description Arbitrary metadata.
              */
@@ -9025,11 +9046,6 @@ export interface components {
              * @description Model requested by the call.
              */
             requested_model?: string | null;
-            /**
-             * Secondary Parent External Ids
-             * @description External ids of additional parent nodes.
-             */
-            secondary_parent_external_ids: string[];
             /**
              * Session Id
              * Format: uuid

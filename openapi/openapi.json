@@ -6071,6 +6071,31 @@
         "title": "ManualAnnotationCreateRequest",
         "type": "object"
       },
+      "NodeLink": {
+        "additionalProperties": false,
+        "description": "Node link.",
+        "properties": {
+          "external_id": {
+            "description": "External id of the linked node.",
+            "minLength": 1,
+            "title": "External Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Relation the link states.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "external_id",
+          "kind"
+        ],
+        "title": "NodeLink",
+        "type": "object"
+      },
       "NodeStatus": {
         "description": "Session node status.",
         "enum": [
@@ -8642,6 +8667,14 @@
             "description": "Node inputs.",
             "title": "Inputs"
           },
+          "links": {
+            "description": "Links to other nodes of the session.",
+            "items": {
+              "$ref": "#/components/schemas/NodeLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Arbitrary metadata.",
@@ -8745,14 +8778,6 @@
             ],
             "description": "Model requested by the call.",
             "title": "Requested Model"
-          },
-          "secondary_parent_external_ids": {
-            "description": "External ids of additional parent nodes.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Secondary Parent External Ids",
-            "type": "array"
           },
           "started_at": {
             "anyOf": [
@@ -8927,6 +8952,14 @@
             "description": "Node inputs, null unless include_payloads.",
             "title": "Inputs"
           },
+          "links": {
+            "description": "Links to other nodes of the session.",
+            "items": {
+              "$ref": "#/components/schemas/NodeLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Arbitrary metadata.",
@@ -9031,14 +9064,6 @@
             "description": "Model requested by the call.",
             "title": "Requested Model"
           },
-          "secondary_parent_external_ids": {
-            "description": "External ids of additional parent nodes.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Secondary Parent External Ids",
-            "type": "array"
-          },
           "session_id": {
             "description": "Session this node belongs to.",
             "format": "uuid",
@@ -9126,7 +9151,7 @@
           "id",
           "session_id",
           "external_id",
-          "secondary_parent_external_ids",
+          "links",
           "node_type",
           "name",
           "status",
