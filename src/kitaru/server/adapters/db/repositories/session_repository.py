@@ -49,7 +49,7 @@ from kitaru.server.adapters.db.orm.session import (
     SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
     SessionORM,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.agent import AgentNotFound
@@ -313,7 +313,10 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         statement = statement.options(*(defer(column) for column in deferred))
 
         rows, next_cursor = await paginate(
-            self._session, statement, session_filter, id_column=SessionORM.id
+            self._session,
+            statement,
+            session_filter,
+            IdOrder(SessionORM.id, session_filter.sort),
         )
         exclude = {column.key for column in deferred}
         return [row.to_domain(exclude=exclude) for row in rows], next_cursor

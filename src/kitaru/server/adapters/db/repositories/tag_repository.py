@@ -38,7 +38,7 @@ from kitaru.server.adapters.db.orm.tag import (
     TagLinkORM,
     TagORM,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.tag import TagFilter
 from kitaru.server.domain.agent_version import AgentVersionNotFound
@@ -127,7 +127,7 @@ class SQLTagRepository(BaseSQLRepository[TagORM]):
                 compile_filter_expression(tag_filter.expression, TAG_FILTER_BINDINGS)
             )
         rows, next_cursor = await paginate(
-            self._session, statement, tag_filter, id_column=TagORM.id
+            self._session, statement, tag_filter, IdOrder(TagORM.id, tag_filter.sort)
         )
         return [row.to_domain() for row in rows], next_cursor
 

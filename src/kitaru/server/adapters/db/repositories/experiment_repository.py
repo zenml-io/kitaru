@@ -32,7 +32,7 @@ from kitaru.server.adapters.db.orm.experiment import (
     ReplayConfigORM,
 )
 from kitaru.server.adapters.db.orm.replay import REPLAY_REPLAY_CONFIG_ID_FOREIGN_KEY
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.experiment import ExperimentFilter
 from kitaru.server.domain.agent import AgentNotFound
@@ -138,7 +138,10 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, experiment_filter, id_column=ExperimentORM.id
+            self._session,
+            statement,
+            experiment_filter,
+            IdOrder(ExperimentORM.id, experiment_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

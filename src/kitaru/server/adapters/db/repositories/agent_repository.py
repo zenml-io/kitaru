@@ -23,7 +23,7 @@ from sqlalchemy.orm import InstrumentedAttribute, defer
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.agent import AGENT_NAME_UNIQUE_CONSTRAINT, AgentORM
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.domain.agent import (
@@ -139,7 +139,10 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, agent_filter, id_column=AgentORM.id
+            self._session,
+            statement,
+            agent_filter,
+            IdOrder(AgentORM.id, agent_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

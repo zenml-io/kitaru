@@ -23,7 +23,7 @@ from kitaru.server.adapters.db.orm.account import (
     ACCOUNT_NAME_UNIQUE_CONSTRAINT,
     AccountORM,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.domain.account import (
@@ -172,7 +172,7 @@ class SQLAccountRepository(BaseSQLRepository[AccountORM]):
             self._session,
             statement,
             account_filter,
-            id_column=AccountORM.id,
+            IdOrder(AccountORM.id, account_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

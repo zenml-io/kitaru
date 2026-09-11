@@ -101,13 +101,13 @@ def _view(
                 SessionNodeResponse(
                     id=uuid.UUID(f"01990000-0000-7000-8000-{200 + number:012d}"),
                     session_id=session_id,
-                    index=0,
-                    parent_index=None,
-                    secondary_parent_indexes=[],
-                    secondary_parent_ids=[],
+                    external_id=f"node-{number}",
+                    parent_external_id=None,
+                    links=[],
                     node_type=NodeType.TOOL_CALL,
                     name="lookup_order",
                     status=NodeStatus.FAILED,
+                    started_at=datetime.now(UTC),
                     inputs={"order_id": "123"},
                     outputs=None,
                     tool_name="lookup_order",
@@ -598,7 +598,7 @@ async def test_empty_ids_return_without_client_or_model_initialization(
 
 @pytest.mark.parametrize(
     "invalid",
-    ["agent", "import", "origin", "duplicate", "node_session", "node_id", "node_index"],
+    ["agent", "import", "origin", "duplicate", "node_session", "node_id"],
 )
 async def test_late_invalid_session_prevents_model_initialization(
     client: StubClient, monkeypatch: pytest.MonkeyPatch, invalid: str
@@ -615,9 +615,7 @@ async def test_late_invalid_session_prevents_model_initialization(
     elif invalid == "node_session":
         late.nodes[0].session_id = uuid.uuid4()
     else:
-        second = late.nodes[0].model_copy(
-            update={"index": 1} if invalid == "node_id" else {"id": uuid.uuid4()}
-        )
+        second = late.nodes[0].model_copy(update={"external_id": "duplicate-node"})
         late.nodes.append(second)
 
     ids = client.add([_view(number) for number in range(1, 302)] + [late])

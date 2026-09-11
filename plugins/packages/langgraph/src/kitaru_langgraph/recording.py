@@ -41,6 +41,7 @@ from .capture import CaptureBudget, CapturePolicy, capture_execution_view, captu
 
 ADAPTER_VERSION = version("kitaru-langgraph")
 FRAMEWORK = "langgraph"
+ROOT_EXTERNAL_ID = "root"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -61,8 +62,8 @@ class RecordingFailure:
 class PendingRun:
     """Public callback data retained until a run completes."""
 
-    index: int
-    parent_index: int
+    external_id: str
+    parent_external_id: str
     name: str
     started_at: datetime
     inputs: Any
@@ -95,10 +96,9 @@ class InvocationRecorder:
     session_id: uuid.UUID
     started_at: datetime
     budget: CaptureBudget
-    next_index: int = 1
     history_occurrences: dict[str, int] = field(default_factory=dict)
     buffer: list[tuple[SessionNodeCreateRequest, int]] = field(default_factory=list)
-    run_indexes: dict[uuid.UUID, int] = field(default_factory=dict)
+    run_external_ids: dict[uuid.UUID, str] = field(default_factory=dict)
     pending_runs: dict[uuid.UUID, PendingRun] = field(default_factory=dict)
     failure: RecordingFailure | None = None
     writes_disabled: bool = False
@@ -165,8 +165,8 @@ class InvocationRecorder:
                 SessionNodeBatchRequest(
                     nodes=[
                         SessionNodeCreateRequest(
-                            index=0,
-                            parent_index=None,
+                            external_id=ROOT_EXTERNAL_ID,
+                            parent_external_id=None,
                             node_type=NodeType.SPAN,
                             name="invoke",
                             status=NodeStatus.IN_PROGRESS,
@@ -213,14 +213,10 @@ class InvocationRecorder:
             self.failure = RecordingFailure(stage, type(error).__name__)
         self.writes_disabled = True
 
-    async def allocate_index(self) -> int | None:
-        """Allocate one bounded child index."""
+    async def reserve_node_budget(self) -> bool:
+        """Reserve one bounded child node slot."""
         async with self.lock:
-            if self.writes_disabled or not self.budget.reserve_node():
-                return None
-            index = self.next_index
-            self.next_index += 1
-            return index
+            return not self.writes_disabled and self.budget.reserve_node()
 
     async def buffer_node(self, node: SessionNodeCreateRequest) -> None:
         """Buffer one node and contain any post-delegation persistence failure."""
@@ -265,19 +261,19 @@ class InvocationRecorder:
         """Map the outer graph to root or persist a nested public ancestor."""
         if self.writes_disabled:
             return
-        if parent_run_id is None and not self.run_indexes:
-            self.run_indexes[run_id] = 0
+        if parent_run_id is None and not self.run_external_ids:
+            self.run_external_ids[run_id] = ROOT_EXTERNAL_ID
             return
-        index = await self.allocate_index()
-        if index is None:
+        if not await self.reserve_node_budget():
             return
-        parent_index = self.run_indexes.get(parent_run_id, 0)
+        external_id = str(run_id)
+        parent_external_id = self.run_external_ids.get(parent_run_id, ROOT_EXTERNAL_ID)
         started_at = datetime.now(UTC)
         captured = capture_value(inputs, self.policy)
-        self.run_indexes[run_id] = index
+        self.run_external_ids[run_id] = external_id
         self.pending_runs[run_id] = PendingRun(
-            index=index,
-            parent_index=parent_index,
+            external_id=external_id,
+            parent_external_id=parent_external_id,
             name=name,
             started_at=started_at,
             inputs=captured.value,
@@ -286,9 +282,8 @@ class InvocationRecorder:
         )
         await self.persist_node(
             SessionNodeCreateRequest(
-                index=index,
-                parent_index=parent_index,
-                external_id=str(run_id),
+                external_id=external_id,
+                parent_external_id=parent_external_id,
                 node_type=NodeType.SPAN,
                 name=name,
                 status=NodeStatus.IN_PROGRESS,
@@ -304,14 +299,13 @@ class InvocationRecorder:
     ) -> None:
         """Update one nested public ancestor when it completes."""
         pending = self.pending_runs.pop(run_id, None)
-        if pending is None or pending.index == 0 or self.writes_disabled:
+        if pending is None or self.writes_disabled:
             return
         output_capture = capture_value(outputs, self.policy)
         await self.persist_node(
             SessionNodeCreateRequest(
-                index=pending.index,
-                parent_index=pending.parent_index,
-                external_id=str(run_id),
+                external_id=pending.external_id,
+                parent_external_id=pending.parent_external_id,
                 node_type=NodeType.SPAN,
                 name=pending.name,
                 status=NodeStatus.FAILED if error is not None else NodeStatus.COMPLETED,
@@ -336,13 +330,14 @@ class InvocationRecorder:
         """Reserve one observable model or tool call."""
         if run_id in self.pending_runs:
             return
-        index = await self.allocate_index()
-        if index is None:
+        if not await self.reserve_node_budget():
             return
         captured = capture_value(inputs, self.policy)
         self.pending_runs[run_id] = PendingRun(
-            index=index,
-            parent_index=self.run_indexes.get(parent_run_id, 0),
+            external_id=str(run_id),
+            parent_external_id=self.run_external_ids.get(
+                parent_run_id, ROOT_EXTERNAL_ID
+            ),
             name=name,
             started_at=datetime.now(UTC),
             inputs=captured.value,
@@ -382,9 +377,8 @@ class InvocationRecorder:
             output = capture_value(outputs, self.policy).value
         await self.buffer_node(
             SessionNodeCreateRequest(
-                index=pending.index,
-                parent_index=pending.parent_index,
-                external_id=str(run_id),
+                external_id=pending.external_id,
+                parent_external_id=pending.parent_external_id,
                 node_type=pending.node_type,
                 name=pending.name,
                 status=NodeStatus.FAILED if error is not None else NodeStatus.COMPLETED,
@@ -411,8 +405,7 @@ class InvocationRecorder:
         error: BaseException | None = None,
     ) -> None:
         """Record a middleware short-circuit that emits no live callback."""
-        index = await self.allocate_index()
-        if index is None:
+        if not await self.reserve_node_budget():
             return
         input_capture = capture_value(arguments, self.policy)
         if error is None:
@@ -430,9 +423,8 @@ class InvocationRecorder:
             output = None
         await self.buffer_node(
             SessionNodeCreateRequest(
-                index=index,
-                parent_index=0,
                 external_id=tool_call_id,
+                parent_external_id=ROOT_EXTERNAL_ID,
                 node_type=NodeType.TOOL_CALL,
                 name=tool_name,
                 status=NodeStatus.FAILED if error is not None else NodeStatus.COMPLETED,
@@ -493,8 +485,8 @@ class InvocationRecorder:
         if self.failure is None:
             try:
                 root = SessionNodeCreateRequest(
-                    index=0,
-                    parent_index=None,
+                    external_id=ROOT_EXTERNAL_ID,
+                    parent_external_id=None,
                     node_type=NodeType.SPAN,
                     name="invoke",
                     status=node_status,

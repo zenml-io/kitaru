@@ -22,7 +22,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import Field
 
 from kitaru.api_models.v1.session import TokenUsage
-from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.api_models.v1.session_node import NodeLink, NodeStatus, NodeType
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
 from kitaru.server.filtering import EQUALITY_OPS, FilterField
@@ -31,28 +31,26 @@ from kitaru.server.filtering import EQUALITY_OPS, FilterField
 class SessionNodeFilter(ListFilter):
     """Session node list filter.
 
-    Ordered by index ascending rather than the created-descending default,
-    since a node's wire identity and its position in its session are the
-    same thing.
+    Ordered by position ascending rather than the created-descending
+    default, so a client reads a session's nodes in the order they ran.
     """
 
-    sortable_fields: ClassVar[frozenset[str]] = frozenset({"index"})
+    sortable_fields: ClassVar[frozenset[str]] = frozenset({"position"})
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "node_type": FilterField(value_type=NodeType, ops=EQUALITY_OPS),
     }
 
     session_id: uuid.UUID
     include_payloads: bool = False
-    sort: Literal["index:asc"] = "index:asc"
+    sort: Literal["position:asc"] = "position:asc"
 
 
 class SessionNodeUpsert(FrozenModel):
     """Session node upsert command."""
 
-    index: int
-    parent_index: int | None = None
-    secondary_parent_indexes: list[int] = Field(default_factory=list)
-    external_id: str | None = None
+    external_id: str
+    parent_external_id: str | None = None
+    links: list[NodeLink] = Field(default_factory=list)
     trace_id: str | None = None
     node_type: NodeType
     name: str

@@ -4092,6 +4092,31 @@
           "title": "LLMConfig",
           "type": "object"
         },
+        "NodeLink": {
+          "additionalProperties": false,
+          "description": "Node link.",
+          "properties": {
+            "external_id": {
+              "description": "External id of the linked node.",
+              "minLength": 1,
+              "title": "External Id",
+              "type": "string"
+            },
+            "kind": {
+              "description": "Relation the link states.",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          "required": [
+            "external_id",
+            "kind"
+          ],
+          "title": "NodeLink",
+          "type": "object"
+        },
         "NodeStatus": {
           "description": "Session node status.",
           "enum": [
@@ -4778,28 +4803,15 @@
               "title": "Error"
             },
             "external_id": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
               "description": "Id from the source system.",
-              "title": "External Id"
+              "title": "External Id",
+              "type": "string"
             },
             "id": {
               "description": "Node id.",
               "format": "uuid",
               "title": "Id",
               "type": "string"
-            },
-            "index": {
-              "description": "Position within the session.",
-              "title": "Index",
-              "type": "integer"
             },
             "input_text_selector": {
               "anyOf": [
@@ -4818,6 +4830,14 @@
               "default": null,
               "description": "Node inputs, null unless include_payloads.",
               "title": "Inputs"
+            },
+            "links": {
+              "description": "Links to other nodes of the session.",
+              "items": {
+                "$ref": "#/$defs/NodeLink"
+              },
+              "title": "Links",
+              "type": "array"
             },
             "metadata": {
               "additionalProperties": true,
@@ -4892,10 +4912,9 @@
               "description": "Node outputs, null unless include_payloads.",
               "title": "Outputs"
             },
-            "parent_id": {
+            "parent_external_id": {
               "anyOf": [
                 {
-                  "format": "uuid",
                   "type": "string"
                 },
                 {
@@ -4903,20 +4922,8 @@
                 }
               ],
               "default": null,
-              "description": "Parent node.",
-              "title": "Parent Id"
-            },
-            "parent_index": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Parent node index.",
-              "title": "Parent Index"
+              "description": "External id of the parent node.",
+              "title": "Parent External Id"
             },
             "reasoning": {
               "anyOf": [
@@ -4943,23 +4950,6 @@
               "default": null,
               "description": "Model requested by the call.",
               "title": "Requested Model"
-            },
-            "secondary_parent_ids": {
-              "description": "Additional parent nodes.",
-              "items": {
-                "format": "uuid",
-                "type": "string"
-              },
-              "title": "Secondary Parent Ids",
-              "type": "array"
-            },
-            "secondary_parent_indexes": {
-              "description": "Secondary parent indexes.",
-              "items": {
-                "type": "integer"
-              },
-              "title": "Secondary Parent Indexes",
-              "type": "array"
             },
             "session_id": {
               "description": "Session this node belongs to.",
@@ -5053,10 +5043,8 @@
           "required": [
             "id",
             "session_id",
-            "index",
-            "parent_index",
-            "secondary_parent_indexes",
-            "secondary_parent_ids",
+            "external_id",
+            "links",
             "node_type",
             "name",
             "status",

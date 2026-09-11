@@ -127,7 +127,7 @@ def _investigation_session(
                 highlights=[
                     InvestigationSessionHighlight(
                         selector=AnnotationSelector(
-                            node_id=seeded.node_ids[highlight.node_index]
+                            node_id=seeded.node_ids[highlight.node_external_id]
                         ),
                         description=highlight.description,
                     )
@@ -266,7 +266,7 @@ class SampleDataSeeder:
             assert external_id is not None
             seeded[external_id] = SeededSession(
                 id=session.id,
-                node_ids={node.index: node.id for node in nodes},
+                node_ids={node.external_id: node.id for node in nodes},
             )
         return seeded
 

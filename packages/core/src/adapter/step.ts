@@ -2,6 +2,7 @@ import { toRecorderJson } from "../json.js";
 import type { JsonValue, SessionNodeCreateRequest } from "../types.js";
 import { providerFamily } from "./provider.js";
 import type { AdapterRunState } from "./run-state.js";
+import { ROOT_NODE_EXTERNAL_ID } from "./run-state.js";
 
 type ToolLedgerEntry = NonNullable<ReturnType<AdapterRunState["getToolCall"]>>;
 
@@ -69,7 +70,7 @@ function policyAttributesFromLedger(
 function toolNode(
   state: AdapterRunState,
   call: NormalizedToolCall,
-  parentIndex: number,
+  parentExternalId: string,
   endedAt: string,
 ): SessionNodeCreateRequest {
   const ledgerEntry = state.getToolCall(call.callId);
@@ -81,7 +82,6 @@ function toolNode(
       ledgerEntry !== undefined &&
       ledgerEntry.outcome !== "completed");
   return {
-    ...state.allocateNode(),
     attributes: toolCallAttributes(
       policyAttributesFromLedger(ledgerEntry),
       call.inputsLossy === true || ledgerEntry?.inputsLossy === true,
@@ -98,7 +98,7 @@ function toolNode(
     name: call.toolName,
     node_type: "tool_call",
     outputs: call.result?.output ?? ledgerEntry?.output ?? null,
-    parent_index: parentIndex,
+    parent_external_id: parentExternalId,
     started_at: call.startedAt ?? ledgerEntry?.startedAt,
     status: failed ? "failed" : "completed",
     tool_name: call.toolName,
@@ -112,10 +112,11 @@ export async function recordNormalizedStep(
   await state.enqueueStep(async () => {
     const endedAt = step.endedAt ?? new Date().toISOString();
     const startedAt = step.startedAt ?? state.takeStepStart(endedAt);
-    const llmAllocation = state.allocateNode();
+    // Not every framework reports a provider response id (Mastra's response
+    // is optional), and the wire identity still has to be unique per session.
+    const externalId = step.externalId ?? globalThis.crypto.randomUUID();
     const provider = step.provider;
     const llmNode: SessionNodeCreateRequest = {
-      ...llmAllocation,
       attributes:
         provider === undefined
           ? step.attributes
@@ -123,14 +124,14 @@ export async function recordNormalizedStep(
       cost: step.cost ?? null,
       ended_at: endedAt,
       error: step.failed ? (step.error ?? "Model step failed") : null,
-      external_id: step.externalId,
+      external_id: externalId,
       inputs: step.inputs,
       model: step.model,
       model_params: step.modelSettings ?? state.effectiveModelSettings,
       name: "model_request",
       node_type: "llm_call",
       outputs: step.outputs,
-      parent_index: state.rootIndex,
+      parent_external_id: ROOT_NODE_EXTERNAL_ID,
       model_provider:
         provider === undefined ? undefined : providerFamily(provider),
       requested_model: state.requestedModelId,
@@ -143,9 +144,7 @@ export async function recordNormalizedStep(
     );
     const nodes = [
       llmNode,
-      ...step.tools.map((call) =>
-        toolNode(state, call, llmAllocation.index, endedAt),
-      ),
+      ...step.tools.map((call) => toolNode(state, call, externalId, endedAt)),
     ];
 
     await state.client.upsertSessionNodes(state.sessionId, { nodes });
@@ -162,7 +161,6 @@ export async function flushFailedPolicyOutcomes(
   }
   const endedAt = new Date().toISOString();
   const nodes: SessionNodeCreateRequest[] = failedEntries.map((entry) => ({
-    ...state.allocateNode(),
     attributes: toolCallAttributes(
       entry.policy === undefined
         ? {}
@@ -176,7 +174,7 @@ export async function flushFailedPolicyOutcomes(
     name: entry.toolName,
     node_type: "tool_call",
     outputs: entry.output ?? null,
-    parent_index: state.rootIndex,
+    parent_external_id: ROOT_NODE_EXTERNAL_ID,
     started_at: entry.startedAt,
     status: "failed",
     tool_name: entry.toolName,

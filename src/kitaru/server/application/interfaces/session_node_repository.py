@@ -14,7 +14,7 @@
 """Session node repository interface."""
 
 import uuid
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.session_node import SessionNodeFilter
@@ -24,29 +24,32 @@ from kitaru.server.domain.session_node import SessionNode
 class SessionNodeRepository(Protocol):
     """Session node persistence operations."""
 
-    async def get_by_indexes(
-        self, session_id: uuid.UUID, indexes: Sequence[int], include_payloads: bool
-    ) -> dict[int, SessionNode]:
-        """Bulk-load the stored nodes of a session at the given indexes.
+    async def get_by_external_ids(
+        self,
+        session_id: uuid.UUID,
+        external_ids: Sequence[str],
+        include_payloads: bool,
+    ) -> dict[str, SessionNode]:
+        """Bulk-load the stored nodes of a session under the given external ids.
 
         Args:
             session_id: Id of the owning session.
-            indexes: Indexes to load.
+            external_ids: External ids to load.
             include_payloads: Whether to read the inputs, outputs, and
                 attributes.
 
         Returns:
-            Stored nodes keyed by index, missing indexes omitted.
+            Stored nodes keyed by external id, missing ids omitted.
         """
         ...
 
     async def upsert_batch(
         self, session_id: uuid.UUID, nodes: list[SessionNode]
     ) -> list[SessionNode]:
-        """Insert or replace nodes upserted on (session, index).
+        """Insert or replace nodes upserted on (session, external id).
 
-        Each node's id is inserted as given for a new index and preserved as
-        given for a replaced index, both resolved by the caller.
+        Each node's id is inserted as given for a new external id and
+        preserved as given for a replaced one, both resolved by the caller.
 
         Args:
             session_id: Id of the owning session.
@@ -54,6 +57,8 @@ class SessionNodeRepository(Protocol):
 
         Raises:
             SessionNotFound: No session has this id.
+            DuplicateSessionNodeExternalId: An external id of the batch is
+                already held by another node of the session.
 
         Returns:
             Stored nodes in batch order, without payloads.
@@ -63,7 +68,7 @@ class SessionNodeRepository(Protocol):
     async def query(
         self, session_node_filter: SessionNodeFilter
     ) -> tuple[list[SessionNode], str | None]:
-        """Query the nodes of a session, ordered by index ascending.
+        """Query the nodes of a session, ordered by position ascending.
 
         Args:
             session_node_filter: Filter and pagination parameters.
@@ -76,7 +81,7 @@ class SessionNodeRepository(Protocol):
     async def list_all(
         self, session_id: uuid.UUID, include_payloads: bool
     ) -> list[SessionNode]:
-        """Read every node of a session, ordered by index ascending.
+        """Read every node of a session, ordered by position ascending.
 
         Args:
             session_id: Id of the owning session.
@@ -88,17 +93,17 @@ class SessionNodeRepository(Protocol):
         """
         ...
 
-    async def get_indexes_by_ids(
-        self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
-    ) -> dict[uuid.UUID, int]:
-        """Bulk-load the index of the named nodes of a session, keyed by node id.
+    async def exists_in_session(
+        self, session_id: uuid.UUID, node_id: uuid.UUID
+    ) -> bool:
+        """Report whether a node belongs to a session.
 
         Args:
             session_id: Id of the owning session.
-            node_ids: Ids to look up.
+            node_id: Id of the node.
 
         Returns:
-            Each requested node id mapped to its index, missing ids omitted.
+            Whether the node belongs to the session.
         """
         ...
 
@@ -114,14 +119,14 @@ class SessionNodeRepository(Protocol):
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         ...
 
     async def find_nth_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str, occurrence: int
     ) -> SessionNode | None:
-        """Find the nth finished node with a cache key in one session, in index order.
+        """Find the nth finished node of a session with a cache key, in position order.
 
         Only completed and failed tool calls are candidates, so the
         occurrence offset counts finished calls only. Only the outputs
@@ -130,7 +135,7 @@ class SessionNodeRepository(Protocol):
         Args:
             session_id: Id of the session to search.
             cache_key: Tool call cache key to match.
-            occurrence: Zero-based match position in index order.
+            occurrence: Zero-based match position in position order.
 
         Returns:
             Matching node at the position, or ``None`` on a miss.
@@ -151,7 +156,7 @@ class SessionNodeRepository(Protocol):
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         ...
 
@@ -167,6 +172,6 @@ class SessionNodeRepository(Protocol):
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         ...

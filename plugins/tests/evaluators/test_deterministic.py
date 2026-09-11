@@ -35,11 +35,11 @@ _DEFAULT_OUTPUT = object()
 
 
 def _node(
-    index: int,
+    ordinal: int,
     *,
     node_type: NodeType = NodeType.TOOL_CALL,
     status: NodeStatus = NodeStatus.COMPLETED,
-    parent_index: int | None = None,
+    parent_ordinal: int | None = None,
     started_at: datetime | None = None,
     ended_at: datetime | None = None,
     inputs: Any = None,
@@ -53,18 +53,18 @@ def _node(
     cost: Decimal | None = None,
 ) -> SessionNodeResponse:
     """Build a deterministic session node fixture."""
+    external_id = f"node-{ordinal}"
+    parent_external_id = (
+        f"node-{parent_ordinal}" if parent_ordinal is not None else None
+    )
     return SessionNodeResponse(
-        id=uuid.UUID(int=index + 100),
+        id=uuid.UUID(int=ordinal + 100),
         session_id=SESSION_ID,
-        index=index,
-        parent_index=parent_index,
-        parent_id=(
-            uuid.UUID(int=parent_index + 100) if parent_index is not None else None
-        ),
-        secondary_parent_indexes=[],
-        secondary_parent_ids=[],
+        external_id=external_id,
+        parent_external_id=parent_external_id,
+        links=[],
         node_type=node_type,
-        name=tool_name or model or f"node-{index}",
+        name=tool_name or model or external_id,
         status=status,
         error=error,
         started_at=started_at,
@@ -350,7 +350,7 @@ def test_session_diagnostics_localizes_integrity_findings() -> None:
     nodes = [
         _node(
             2,
-            parent_index=9,
+            parent_ordinal=9,
             tool_name="later",
             started_at=NOW + timedelta(seconds=3),
             ended_at=NOW + timedelta(seconds=2),
@@ -367,10 +367,10 @@ def test_session_diagnostics_localizes_integrity_findings() -> None:
 
 
 def test_session_diagnostics_checks_parent_ids_and_invalid_resources() -> None:
-    """Localize inconsistent linkage and malformed resource evidence."""
+    """Localize an unresolved parent reference and malformed resource evidence."""
     parent = _node(0, outputs={})
-    child = _node(1, parent_index=0, outputs={}).model_copy(
-        update={"parent_id": uuid.UUID(int=999), "cost": Decimal("-1")}
+    child = _node(1, parent_ordinal=99, outputs={}).model_copy(
+        update={"cost": Decimal("-1")}
     )
     results = _by_name(
         evaluators.session_diagnostics(_view([parent, child], cost=Decimal("-1")))

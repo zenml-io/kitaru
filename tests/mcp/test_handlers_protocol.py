@@ -834,13 +834,12 @@ async def test_public_activity_preserves_typed_token_usage(
     node = SessionNodeResponse(
         id=uuid.uuid4(),
         session_id=session_id,
-        index=0,
-        parent_index=None,
-        secondary_parent_indexes=[],
-        secondary_parent_ids=[],
+        external_id="call-0",
+        links=[],
         node_type="llm_call",
         name="model",
         status="completed",
+        started_at=datetime(2026, 1, 1, tzinfo=UTC),
         tokens=usage,
         cost=Decimal("0.2500"),
         metadata={},
@@ -929,5 +928,5 @@ async def test_public_activity_forwards_session_node_filters(
         "cursor": "node-cursor",
         "include_payloads": True,
         "filter": json.dumps(filters) if filters else None,
-        "sort": "index:asc",
+        "sort": "position:asc",
     }

@@ -41,7 +41,7 @@ def _session() -> dict[str, Any]:
             {
                 "index": 0,
                 "parent_index": None,
-                "secondary_parent_indexes": [],
+                "links": [],
                 "external_id": "node-1",
                 "trace_id": "trace-1",
                 "node_type": "llm_call",
@@ -176,7 +176,12 @@ def test_flat_chain_is_not_subject_to_nested_depth_limit() -> None:
     value = _session()
     node = value["nodes"][0]
     value["nodes"] = [
-        node | {"index": index, "parent_index": index - 1 if index else None}
+        node
+        | {
+            "index": index,
+            "parent_index": index - 1 if index else None,
+            "external_id": f"node-{index}",
+        }
         for index in range(128)
     ]
     [session] = list(parse(json.dumps(value).encode(), {}))

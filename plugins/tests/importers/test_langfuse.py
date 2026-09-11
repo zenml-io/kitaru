@@ -21,7 +21,7 @@ import pytest
 
 import kitaru_langfuse_importer.importer as langfuse_module
 from kitaru.api_models.v1.session import SessionStatus
-from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.api_models.v1.session_node import NodeLink, NodeStatus, NodeType
 from kitaru.task.importer import (
     ImportedNode,
     ImportedSession,
@@ -323,8 +323,8 @@ def test_nests_tool_call_under_requesting_model_by_default() -> None:
     nodes = flatten_imported_nodes(session.nodes)
     tool = next(node for node in nodes if node.external_id == "trace-1:tool")
 
-    assert tool.parent_index == 1
-    assert tool.secondary_parent_indexes == [0]
+    assert tool.parent_external_id == "trace-1:generation"
+    assert tool.links == [NodeLink(external_id="trace-1:root", kind="source_parent")]
     assert session.metadata["langfuse.inferred_tool_call_link_count"] == 1
 
 
@@ -355,8 +355,8 @@ def test_tool_call_link_inference_can_be_disabled() -> None:
         if node.external_id == "trace-1:tool"
     )
 
-    assert tool.parent_index == 0
-    assert tool.secondary_parent_indexes == []
+    assert tool.parent_external_id == "trace-1:root"
+    assert tool.links == []
     assert "langfuse.inferred_tool_call_link_count" not in session.metadata
 
 
@@ -397,8 +397,8 @@ def test_tool_call_link_inference_skips_ambiguous_ids() -> None:
         if node.external_id == "trace-1:tool"
     )
 
-    assert tool.parent_index == 0
-    assert tool.secondary_parent_indexes == []
+    assert tool.parent_external_id == "trace-1:root"
+    assert tool.links == []
     assert session.metadata["langfuse.inferred_tool_call_link_count"] == 0
 
 

@@ -14,7 +14,7 @@
 """SQL session node repository."""
 
 import uuid
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 
 from sqlalchemy import Select, select
 from sqlalchemy.orm import defer
@@ -27,14 +27,18 @@ from kitaru.server.adapters.db.orm.cohort_version_session import (
 )
 from kitaru.server.adapters.db.orm.session import SessionORM
 from kitaru.server.adapters.db.orm.session_node import (
+    SESSION_NODE_SESSION_ID_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SESSION_NODE_SESSION_ID_FOREIGN_KEY,
     SessionNodeORM,
 )
-from kitaru.server.adapters.db.pagination import paginate_by_index
+from kitaru.server.adapters.db.pagination import StartOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.domain.session import SessionNotFound
-from kitaru.server.domain.session_node import SessionNode
+from kitaru.server.domain.session_node import (
+    DuplicateSessionNodeExternalId,
+    SessionNode,
+)
 
 RECORDED_HISTORY_ORIGINS = [SessionOrigin.RECORDED.value, SessionOrigin.IMPORTED.value]
 FINISHED_NODE_STATUSES = [NodeStatus.COMPLETED.value, NodeStatus.FAILED.value]
@@ -60,36 +64,39 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
 
     orm_class = SessionNodeORM
 
-    async def get_by_indexes(
-        self, session_id: uuid.UUID, indexes: Sequence[int], include_payloads: bool
-    ) -> dict[int, SessionNode]:
-        """Bulk-load the stored nodes of a session at the given indexes.
+    async def get_by_external_ids(
+        self,
+        session_id: uuid.UUID,
+        external_ids: Sequence[str],
+        include_payloads: bool,
+    ) -> dict[str, SessionNode]:
+        """Bulk-load the stored nodes of a session under the given external ids.
 
         Args:
             session_id: Id of the owning session.
-            indexes: Indexes to load.
+            external_ids: External ids to load.
             include_payloads: Whether to read reasoning, inputs, outputs,
                 and attributes.
 
         Returns:
-            Stored nodes keyed by index, missing indexes omitted.
+            Stored nodes keyed by external id, missing ids omitted.
         """
-        if not indexes:
+        if not external_ids:
             return {}
         deferred = () if include_payloads else PAYLOAD_COLUMNS
         statement = select(SessionNodeORM).where(
             SessionNodeORM.session_id == session_id,
-            SessionNodeORM.index.in_(indexes),
+            SessionNodeORM.external_id.in_(external_ids),
         )
         statement = statement.options(*(defer(column) for column in deferred))
         rows = (await self._session.scalars(statement)).all()
         exclude = {column.key for column in deferred}
-        return {row.index: row.to_domain(exclude=exclude) for row in rows}
+        return {row.external_id: row.to_domain(exclude=exclude) for row in rows}
 
     async def upsert_batch(
         self, session_id: uuid.UUID, nodes: list[SessionNode]
     ) -> list[SessionNode]:
-        """Insert or replace nodes upserted on (session, index).
+        """Insert or replace nodes upserted on (session, external id).
 
         The rows already stored under a batch's ids are found through one
         bulk id lookup, so an insert or a whole-row replace never issues a
@@ -101,6 +108,8 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
 
         Raises:
             SessionNotFound: No session has this id.
+            DuplicateSessionNodeExternalId: An external id of the batch is
+                already held by another node of the session.
 
         Returns:
             Stored nodes in batch order, without payloads.
@@ -122,7 +131,14 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
                 row.apply_domain(node)
             stored_rows.append(row)
         await self._flush(
-            {SESSION_NODE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(session_id)}
+            {
+                SESSION_NODE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(
+                    session_id
+                ),
+                SESSION_NODE_SESSION_ID_EXTERNAL_ID_UNIQUE_CONSTRAINT: (
+                    lambda: DuplicateSessionNodeExternalId(session_id)
+                ),
+            }
         )
         exclude = {column.key for column in PAYLOAD_COLUMNS}
         return [row.to_domain(exclude=exclude) for row in stored_rows]
@@ -130,7 +146,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
     async def query(
         self, session_node_filter: SessionNodeFilter
     ) -> tuple[list[SessionNode], str | None]:
-        """Query the nodes of a session, ordered by index ascending.
+        """Query the nodes of a session, ordered by position ascending.
 
         Args:
             session_node_filter: Filter and pagination parameters.
@@ -150,11 +166,11 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
                 )
             )
         statement = statement.options(*(defer(column) for column in deferred))
-        rows, next_cursor = await paginate_by_index(
+        rows, next_cursor = await paginate(
             self._session,
             statement,
             session_node_filter,
-            index_column=SessionNodeORM.index,
+            StartOrder(SessionNodeORM.started_at, SessionNodeORM.id),
         )
         exclude = {column.key for column in deferred}
         return [row.to_domain(exclude=exclude) for row in rows], next_cursor
@@ -162,7 +178,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
     async def list_all(
         self, session_id: uuid.UUID, include_payloads: bool
     ) -> list[SessionNode]:
-        """Read every node of a session, ordered by index ascending.
+        """Read every node of a session, ordered by position ascending.
 
         Args:
             session_id: Id of the owning session.
@@ -176,33 +192,36 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         statement = (
             select(SessionNodeORM)
             .where(SessionNodeORM.session_id == session_id)
-            .order_by(SessionNodeORM.index)
+            .order_by(
+                SessionNodeORM.started_at.asc().nulls_last(), SessionNodeORM.id.asc()
+            )
             .options(*(defer(column) for column in deferred))
         )
         rows = (await self._session.scalars(statement)).all()
         exclude = {column.key for column in deferred}
         return [row.to_domain(exclude=exclude) for row in rows]
 
-    async def get_indexes_by_ids(
-        self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
-    ) -> dict[uuid.UUID, int]:
-        """Bulk-load the index of the named nodes of a session, keyed by node id.
+    async def exists_in_session(
+        self, session_id: uuid.UUID, node_id: uuid.UUID
+    ) -> bool:
+        """Report whether a node belongs to a session.
 
         Args:
             session_id: Id of the owning session.
-            node_ids: Ids to look up.
+            node_id: Id of the node.
 
         Returns:
-            Each requested node id mapped to its index, missing ids omitted.
+            Whether the node belongs to the session.
         """
-        if not node_ids:
-            return {}
-        statement = select(SessionNodeORM.id, SessionNodeORM.index).where(
-            SessionNodeORM.session_id == session_id,
-            SessionNodeORM.id.in_(node_ids),
+        statement = select(
+            select(SessionNodeORM.id)
+            .where(
+                SessionNodeORM.id == node_id,
+                SessionNodeORM.session_id == session_id,
+            )
+            .exists()
         )
-        rows = (await self._session.execute(statement)).all()
-        return {node_id: index for node_id, index in rows}
+        return bool(await self._session.scalar(statement))
 
     async def _latest_match(
         self, statement: Select[tuple[SessionNodeORM]]
@@ -213,13 +232,18 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             statement: Filtered select, ordering and limit not yet applied.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
+        # Reverse of the ascending position order, where a node without a
+        # start time sorts last, so the nulls lead the descending scan.
         statement = (
             statement.options(
                 *(defer(column) for column in TOOL_LOOKUP_DEFERRED_COLUMNS)
             )
-            .order_by(SessionNodeORM.id.desc())
+            .order_by(
+                SessionNodeORM.started_at.desc().nulls_first(),
+                SessionNodeORM.id.desc(),
+            )
             .limit(1)
         )
         row = (await self._session.scalars(statement)).one_or_none()
@@ -236,7 +260,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         return await self._latest_match(
             select(SessionNodeORM).where(
@@ -249,7 +273,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
     async def find_nth_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str, occurrence: int
     ) -> SessionNode | None:
-        """Find the nth finished node with a cache key in one session, in index order.
+        """Find the nth finished node of a session with a cache key, in position order.
 
         Only completed and failed tool calls are candidates, so the
         occurrence offset counts finished calls only.
@@ -257,7 +281,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         Args:
             session_id: Id of the session to search.
             cache_key: Tool call cache key to match.
-            occurrence: Zero-based match position in index order.
+            occurrence: Zero-based match position in position order.
 
         Returns:
             Matching node at the position, or ``None`` on a miss.
@@ -270,7 +294,9 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
                 SessionNodeORM.status.in_(FINISHED_NODE_STATUSES),
             )
             .options(*(defer(column) for column in TOOL_LOOKUP_DEFERRED_COLUMNS))
-            .order_by(SessionNodeORM.index)
+            .order_by(
+                SessionNodeORM.started_at.asc().nulls_last(), SessionNodeORM.id.asc()
+            )
             .offset(occurrence)
             .limit(1)
         )
@@ -291,7 +317,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         return await self._latest_match(
             select(SessionNodeORM)
@@ -314,7 +340,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         return await self._latest_match(
             select(SessionNodeORM)

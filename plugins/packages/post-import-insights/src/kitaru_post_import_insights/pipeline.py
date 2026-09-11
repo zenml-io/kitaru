@@ -594,16 +594,12 @@ def validate_session(
     if session.import_id != context.source_import.import_id:
         raise ValueError("every session must belong to the context source import")
     node_ids: set[uuid.UUID] = set()
-    node_indexes: set[int] = set()
     for node in item.nodes:
         if node.session_id != session.id:
             raise ValueError("every node must belong to its enclosing session")
         if node.id in node_ids:
             raise ValueError("node IDs must be unique within a session")
-        if node.index in node_indexes:
-            raise ValueError("node indexes must be unique within a session")
         node_ids.add(node.id)
-        node_indexes.add(node.index)
 
 
 def _finalize_result(

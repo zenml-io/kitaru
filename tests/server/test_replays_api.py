@@ -23,6 +23,7 @@ import pytest
 from conftest import (
     ReplayServices,
     build_replay_services,
+    build_session_node,
     create_agent,
     create_agent_version,
     create_blob,
@@ -49,7 +50,6 @@ from kitaru.server.domain.replay_config import (
     ReplayConfig,
     ToolPolicy,
 )
-from kitaru.server.domain.session_node import SessionNode
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
@@ -411,9 +411,9 @@ async def test_tool_lookup_match_carries_status_and_error(
     await services.session_nodes.upsert_batch(
         baseline_session_id,
         [
-            SessionNode(
-                session_id=baseline_session_id,
-                index=0,
+            build_session_node(
+                baseline_session_id,
+                "call-0",
                 node_type=NodeType.TOOL_CALL,
                 name="search",
                 status=NodeStatus.FAILED,
@@ -446,9 +446,9 @@ async def test_tool_lookup_completed_null_is_a_match(
     await services.session_nodes.upsert_batch(
         baseline_session_id,
         [
-            SessionNode(
-                session_id=baseline_session_id,
-                index=0,
+            build_session_node(
+                baseline_session_id,
+                "call-0",
                 node_type=NodeType.TOOL_CALL,
                 name="search",
                 status=NodeStatus.COMPLETED,

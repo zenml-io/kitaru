@@ -115,7 +115,6 @@ This is what makes "export the last 24 hours every night" safe. It also means th
 ## Limitations
 
 - **Only what the export contains.** Anything LangSmith did not record (intermediate state, code, environment) is not recoverable from the file.
-- **Imported threads are frozen.** Once a thread is imported, later traces in the same thread are skipped by dedup rather than appended. Import a thread after it is finished, or scope `join_on` to something that closes.
 - **Partial graphs import with a warning.** A trace with more than one root run, a run whose parent is missing from the export, or model output containing `tool_calls` with no corresponding tool runs all set `source_completeness: partial` and add a line to `normalization_warnings`. The session still imports.
 - **A bad trace is isolated, not fatal.** A run with no trace id or run id, a trace with conflicting project identities or conflicting thread values, or a trace missing your chosen `join_on` value is reported as a failure and the rest of the file still imports. A malformed file (invalid JSON, non-UTF-8, or empty) fails the task as a whole.
 - **Replay needs your code.** Imported sessions replay like recorded ones, but only if the agent version whose code produced the runs is registered with a run command. No trace export contains the code.

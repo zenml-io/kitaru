@@ -79,6 +79,12 @@ _SAFE_OPTION_FIELDS = frozenset(
     }
 )
 _SUCCESS_STATES = frozenset({"success", "completed"})
+ROOT_EXTERNAL_ID = "root"
+
+
+def _mint_external_id() -> str:
+    """Return a synthetic external id for a node with no provider identity."""
+    return str(uuid.uuid4())
 
 
 @dataclass(frozen=True)
@@ -317,15 +323,12 @@ class InvocationRecorder:
     safe_options: dict[str, Any]
     effective_prompt: Any = None
     replayable_tool_names: frozenset[str] = frozenset()
-    next_index: int = 1
     finalized: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    _message_indexes: dict[str, int] = field(default_factory=dict, repr=False)
     _assistant_turns: dict[str, _AssistantTurn] = field(
         default_factory=dict, repr=False
     )
     _recorded_turns: list[_AssistantTurn] = field(default_factory=list, repr=False)
-    _pending_turn_index: int | None = field(default=None, repr=False)
     _tool_cache_keys: dict[str, str] = field(default_factory=dict, repr=False)
     _effective_tool_inputs: dict[str, dict[str, Any]] = field(
         default_factory=dict, repr=False
@@ -393,8 +396,8 @@ class InvocationRecorder:
         try:
             await recorder._persist(
                 SessionNodeCreateRequest(
-                    index=0,
-                    parent_index=None,
+                    external_id=ROOT_EXTERNAL_ID,
+                    parent_external_id=None,
                     node_type=NodeType.SPAN,
                     name="query",
                     status=NodeStatus.IN_PROGRESS,
@@ -483,16 +486,10 @@ class InvocationRecorder:
                         attributes["replay"] = replay_event
             node = self._tool_nodes.get(tool_id)
             if node is None:
-                # A stored node can never move: the server keeps one row per
-                # (session, external_id), so rewriting the turn at a lower
-                # index would collide with the row it left behind. Hold an
-                # index below this tool node for the turn that requested it,
-                # which the CLI may deliver after this hook.
-                self._reserve_turn_index()
                 node = self._new_node(
                     node_type=NodeType.TOOL_CALL,
                     name=tool_name or "tool",
-                    parent_index=0,
+                    parent_external_id=ROOT_EXTERNAL_ID,
                     external_id=tool_id,
                     status=NodeStatus.IN_PROGRESS,
                     inputs=(
@@ -626,8 +623,8 @@ class InvocationRecorder:
                 try:
                     await self._persist(
                         SessionNodeCreateRequest(
-                            index=0,
-                            parent_index=None,
+                            external_id=ROOT_EXTERNAL_ID,
+                            parent_external_id=None,
                             node_type=NodeType.SPAN,
                             name="query",
                             status=(
@@ -744,14 +741,12 @@ class InvocationRecorder:
         return failed_nodes
 
     async def _record_assistant(self, message: AssistantMessage) -> None:
-        identity = message.message_id or message.uuid
+        identity = message.message_id or message.uuid or _mint_external_id()
         observed_at = datetime.now(UTC)
-        model_index = self._resolve_assistant_index(message, identity)
         turn = self._get_assistant_turn(identity, observed_at)
         turn.merge(message, observed_at=observed_at)
         model_node = SessionNodeCreateRequest(
-            index=model_index,
-            parent_index=self._parent_for(message.parent_tool_use_id),
+            parent_external_id=self._parent_for(message.parent_tool_use_id),
             external_id=identity,
             node_type=NodeType.LLM_CALL,
             name="assistant",
@@ -773,45 +768,19 @@ class InvocationRecorder:
         await self._persist(model_node)
         for block in message.content:
             if isinstance(block, ToolUseBlock):
-                await self._record_tool_use(block, model_index)
+                await self._record_tool_use(block, identity)
             elif isinstance(block, ToolResultBlock):
                 await self._record_tool_result(block)
 
-    def _resolve_assistant_index(
-        self, message: AssistantMessage, identity: str | None
-    ) -> int:
-        """Return the index for one turn, reusing it on every later delivery."""
-        cached = self._message_indexes.get(identity) if identity else None
-        if cached is not None:
-            if any(isinstance(block, ToolUseBlock) for block in message.content):
-                # A hook may arrive after an earlier delivery already created
-                # this turn. Its reservation belongs to this cached turn and
-                # must not be handed to the next assistant message.
-                self._pending_turn_index = None
-            return cached
-        index = self._pending_turn_index
-        if index is None:
-            index = self.next_index
-            self.next_index += 1
-        else:
-            self._pending_turn_index = None
-        if identity:
-            self._message_indexes[identity] = index
-        return index
-
     def _get_assistant_turn(
-        self, identity: str | None, observed_at: datetime
+        self, identity: str, observed_at: datetime
     ) -> _AssistantTurn:
         """Return the accumulator for one assistant turn, creating it when absent."""
-        turn = self._assistant_turns.get(identity) if identity else None
+        turn = self._assistant_turns.get(identity)
         if turn is None:
-            # A delivery with no identity gets its own node, so it also gets
-            # its own accumulator, and every accumulator is one llm_call node
-            # the terminal-token reconciliation must subtract exactly once.
             turn = _AssistantTurn(started_at=observed_at, ended_at=observed_at)
             self._recorded_turns.append(turn)
-            if identity:
-                self._assistant_turns[identity] = turn
+            self._assistant_turns[identity] = turn
         return turn
 
     async def _record_user(self, message: UserMessage) -> None:
@@ -820,7 +789,7 @@ class InvocationRecorder:
                 "user_message",
                 external_id=message.uuid,
                 attributes={"content": _capture(message.content)},
-                parent_index=self._parent_for(message.parent_tool_use_id),
+                parent_external_id=self._parent_for(message.parent_tool_use_id),
             )
             return
         non_results = 0
@@ -834,10 +803,12 @@ class InvocationRecorder:
                 "user_message",
                 external_id=message.uuid,
                 attributes={"content_blocks": non_results},
-                parent_index=self._parent_for(message.parent_tool_use_id),
+                parent_external_id=self._parent_for(message.parent_tool_use_id),
             )
 
-    async def _record_tool_use(self, block: ToolUseBlock, parent_index: int) -> None:
+    async def _record_tool_use(
+        self, block: ToolUseBlock, parent_external_id: str
+    ) -> None:
         node = self._tool_nodes.get(block.id)
         if block.id in self._effective_tool_inputs:
             cache_key = self._tool_cache_keys.get(block.id)
@@ -861,7 +832,7 @@ class InvocationRecorder:
             node = self._new_node(
                 node_type=NodeType.TOOL_CALL,
                 name=block.name,
-                parent_index=parent_index,
+                parent_external_id=parent_external_id,
                 external_id=block.id,
                 status=NodeStatus.IN_PROGRESS,
                 inputs=inputs,
@@ -873,14 +844,7 @@ class InvocationRecorder:
             node = node.model_copy(
                 update={
                     "name": block.name,
-                    # A hook allocates this node before the turn is delivered,
-                    # and the turn reserves an index below it, so the turn is
-                    # the parent. Keep the root when that ordering did not
-                    # hold: relocating a stored node would collide with the
-                    # (session, external_id) row it left behind.
-                    "parent_index": (
-                        parent_index if parent_index < node.index else node.parent_index
-                    ),
+                    "parent_external_id": parent_external_id,
                     "inputs": inputs,
                     "tool_name": block.name,
                     "attributes": {
@@ -917,7 +881,7 @@ class InvocationRecorder:
             node = self._new_node(
                 node_type=NodeType.TOOL_CALL,
                 name="tool",
-                parent_index=0,
+                parent_external_id=ROOT_EXTERNAL_ID,
                 external_id=block.tool_use_id,
                 status=(NodeStatus.FAILED if block.is_error else NodeStatus.COMPLETED),
                 inputs=None,
@@ -952,7 +916,7 @@ class InvocationRecorder:
         node = self._new_node(
             node_type=NodeType.SUBAGENT_CALL,
             name=message.description,
-            parent_index=self._parent_for(message.tool_use_id),
+            parent_external_id=self._parent_for(message.tool_use_id),
             external_id=message.task_id,
             status=NodeStatus.IN_PROGRESS,
             inputs={"description": _capture(message.description)},
@@ -1007,7 +971,7 @@ class InvocationRecorder:
             name=message.description
             if isinstance(message, TaskProgressMessage)
             else "task",
-            parent_index=self._parent_for(message.tool_use_id),
+            parent_external_id=self._parent_for(message.tool_use_id),
             external_id=message.task_id,
             status=NodeStatus.IN_PROGRESS,
             inputs=None,
@@ -1023,13 +987,13 @@ class InvocationRecorder:
         *,
         external_id: str | None,
         attributes: dict[str, Any],
-        parent_index: int = 0,
+        parent_external_id: str = ROOT_EXTERNAL_ID,
     ) -> None:
         await self._persist(
             self._new_node(
                 node_type=NodeType.SPAN,
                 name=name,
-                parent_index=parent_index,
+                parent_external_id=parent_external_id,
                 external_id=external_id,
                 status=NodeStatus.COMPLETED,
                 inputs=None,
@@ -1039,25 +1003,21 @@ class InvocationRecorder:
         )
 
     def _new_node(self, **values: Any) -> SessionNodeCreateRequest:
-        index = self.next_index
-        self.next_index += 1
         now = datetime.now(UTC)
         values.setdefault("started_at", now)
         if values.get("status") is not NodeStatus.IN_PROGRESS:
             values.setdefault("ended_at", now)
-        return SessionNodeCreateRequest(index=index, **values)
+        if not values.get("external_id"):
+            values["external_id"] = _mint_external_id()
+        return SessionNodeCreateRequest(**values)
 
-    def _reserve_turn_index(self) -> None:
-        """Hold one index for an assistant turn the CLI has not delivered."""
-        if self._pending_turn_index is None:
-            self._pending_turn_index = self.next_index
-            self.next_index += 1
-
-    def _parent_for(self, external_id: str | None) -> int:
-        if external_id is None:
-            return 0
-        node = self._tool_nodes.get(external_id) or self._task_nodes.get(external_id)
-        return node.index if node is not None else 0
+    def _parent_for(self, external_id: str | None) -> str:
+        """Return the known parent's own external id, falling back to the root."""
+        if external_id is not None and (
+            external_id in self._tool_nodes or external_id in self._task_nodes
+        ):
+            return external_id
+        return ROOT_EXTERNAL_ID
 
     async def _persist(self, node: SessionNodeCreateRequest) -> None:
         await self.client.sessions.ingest_nodes(
@@ -1126,6 +1086,7 @@ async def finalize_failure(
 
 
 __all__ = [
+    "ROOT_EXTERNAL_ID",
     "InvocationRecorder",
     "ResolvedRunInput",
     "finalize_failure",

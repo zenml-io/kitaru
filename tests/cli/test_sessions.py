@@ -448,7 +448,7 @@ async def test_session_nodes_controls_payload_flag_and_filters() -> None:
         "filter": json.dumps(
             {"field": "node_type", "op": "in", "value": ["llm_call", "tool_call"]}
         ),
-        "sort": "index:asc",
+        "sort": "position:asc",
     }
     assert result.items == [{"id": str(resource.node.id), "index": 0, "inputs": None}]
     assert result.page == {

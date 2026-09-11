@@ -267,7 +267,7 @@ describe("KitaruClient", () => {
     );
   });
 
-  it("retries node upsert with the identical body and node indexes", async () => {
+  it("retries node upsert with the identical body and external ids", async () => {
     const storedNode = {
       id: NODE_ID,
       node_type: "llm_call",
@@ -285,7 +285,7 @@ describe("KitaruClient", () => {
       nodes: [
         {
           attributes: {},
-          index: 1,
+          external_id: "call-1",
           inputs: null,
           name: "model_request",
           node_type: "llm_call",
@@ -324,7 +324,7 @@ describe("KitaruClient", () => {
       nodes: [
         {
           attributes: {},
-          index: 1,
+          external_id: "call-1",
           inputs: null,
           name: "lookup",
           node_type: "tool_call",

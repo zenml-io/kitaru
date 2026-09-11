@@ -3249,7 +3249,7 @@ export interface paths {
          *         actor: Caller context.
          *
          *     Returns:
-         *         Session with every node, ordered by index.
+         *         Session with every node, ordered by position.
          */
         get: operations["get_session_with_nodes_api_v1_sessions__session_id__full_get"];
         put?: never;
@@ -3269,7 +3269,7 @@ export interface paths {
         };
         /**
          * List Session Nodes
-         * @description List the nodes of a session, ordered by index ascending.
+         * @description List the nodes of a session, ordered by position ascending.
          *
          *     Clients observe HTTP 200 on success, 403 when a task token neither owns
          *     nor reads this session, and 422 on invalid filters or pagination parameters.
@@ -3281,7 +3281,7 @@ export interface paths {
          *         params: Session node list params.
          *
          *     Returns:
-         *         Page of session nodes, ordered by index.
+         *         Page of session nodes, ordered by position.
          */
         get: operations["list_session_nodes_api_v1_sessions__session_id__nodes_get"];
         put?: never;
@@ -3289,11 +3289,10 @@ export interface paths {
          * Ingest Session Nodes
          * @description Ingest a batch of session nodes.
          *
-         *     An index already stored is replaced whole, matching the upsert
+         *     An external id already stored is replaced whole, matching the upsert
          *     semantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,
-         *     404 when no session has this id, 409 when the session does not
-         *     currently accept node ingestion, and 422 when a parent_index does not
-         *     resolve.
+         *     404 when no session has this id, and 409 when the session does not
+         *     currently accept node ingestion.
          *
          *     Args:
          *         session_id: Id of the session to ingest into.
@@ -7536,6 +7535,22 @@ export interface components {
             value: unknown;
         };
         /**
+         * NodeLink
+         * @description Node link.
+         */
+        NodeLink: {
+            /**
+             * External Id
+             * @description External id of the linked node.
+             */
+            external_id: string;
+            /**
+             * Kind
+             * @description Relation the link states.
+             */
+            kind: string;
+        };
+        /**
          * NodeStatus
          * @description Session node status.
          * @enum {string}
@@ -8784,7 +8799,7 @@ export interface components {
         SessionNodeBatchRequest: {
             /**
              * Nodes
-             * @description Nodes to upsert, parent before child.
+             * @description Nodes to upsert, in any order.
              */
             nodes: components["schemas"]["SessionNodeCreateRequest"][];
         };
@@ -8815,14 +8830,9 @@ export interface components {
             error?: string | null;
             /**
              * External Id
-             * @description Id from the source system.
+             * @description Id from the source system, the wire identity.
              */
-            external_id?: string | null;
-            /**
-             * Index
-             * @description Position within the session, the wire identity.
-             */
-            index: number;
+            external_id: string;
             /**
              * Input Text Selector
              * @description RFC 6901 JSON Pointer selecting display text from node inputs.
@@ -8833,6 +8843,11 @@ export interface components {
              * @description Node inputs.
              */
             inputs: unknown;
+            /**
+             * Links
+             * @description Links to other nodes of the session.
+             */
+            links?: components["schemas"]["NodeLink"][];
             /**
              * Metadata
              * @description Arbitrary metadata.
@@ -8875,10 +8890,10 @@ export interface components {
              */
             outputs: unknown;
             /**
-             * Parent Index
-             * @description Index of the parent node.
+             * Parent External Id
+             * @description External id of the parent node.
              */
-            parent_index?: number | null;
+            parent_external_id?: string | null;
             /**
              * Reasoning
              * @description Visible reasoning produced by the model call.
@@ -8889,11 +8904,6 @@ export interface components {
              * @description Model requested by the call.
              */
             requested_model?: string | null;
-            /**
-             * Secondary Parent Indexes
-             * @description Indexes of additional parent nodes.
-             */
-            secondary_parent_indexes?: number[];
             /**
              * Started At
              * @description Time the node started.
@@ -8958,18 +8968,13 @@ export interface components {
              * External Id
              * @description Id from the source system.
              */
-            external_id?: string | null;
+            external_id: string;
             /**
              * Id
              * Format: uuid
              * @description Node id.
              */
             id: string;
-            /**
-             * Index
-             * @description Position within the session.
-             */
-            index: number;
             /**
              * Input Text Selector
              * @description RFC 6901 JSON Pointer selecting display text from node inputs.
@@ -8980,6 +8985,11 @@ export interface components {
              * @description Node inputs, null unless include_payloads.
              */
             inputs?: unknown;
+            /**
+             * Links
+             * @description Links to other nodes of the session.
+             */
+            links: components["schemas"]["NodeLink"][];
             /**
              * Metadata
              * @description Arbitrary metadata.
@@ -9022,15 +9032,10 @@ export interface components {
              */
             outputs?: unknown;
             /**
-             * Parent Id
-             * @description Parent node.
+             * Parent External Id
+             * @description External id of the parent node.
              */
-            parent_id?: string | null;
-            /**
-             * Parent Index
-             * @description Parent node index.
-             */
-            parent_index: number | null;
+            parent_external_id?: string | null;
             /**
              * Reasoning
              * @description Visible reasoning, null unless payloads are included.
@@ -9041,16 +9046,6 @@ export interface components {
              * @description Model requested by the call.
              */
             requested_model?: string | null;
-            /**
-             * Secondary Parent Ids
-             * @description Additional parent nodes.
-             */
-            secondary_parent_ids: string[];
-            /**
-             * Secondary Parent Indexes
-             * @description Secondary parent indexes.
-             */
-            secondary_parent_indexes: number[];
             /**
              * Session Id
              * Format: uuid
@@ -9304,7 +9299,7 @@ export interface components {
         SessionWithNodesResponse: {
             /**
              * Nodes
-             * @description Every node of the session, ordered by index ascending.
+             * @description Every node of the session, ordered by position ascending.
              */
             nodes: components["schemas"]["SessionNodeResponse"][];
             /** @description Session. */
@@ -19900,8 +19895,8 @@ export interface operations {
                 cursor?: string | null;
                 /** @description Items per page. */
                 size?: number;
-                /** @description Nodes are ordered by ascending index. */
-                sort?: "index:asc";
+                /** @description Nodes are ordered by start time, then insertion. */
+                sort?: "position:asc";
                 /** @description Filter expression, JSON-encoded in the query string. */
                 filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
                 /** @description Include reasoning, inputs, outputs, and attributes. */

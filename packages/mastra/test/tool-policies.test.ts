@@ -387,13 +387,12 @@ describe("replay tool policies", () => {
 
     expect(execute).not.toHaveBeenCalled();
     const batches = api.nodeBatches();
-    const rootIndex = batches[0]?.[0]?.index;
     const failedTool = batches
       .flat()
       .find((node) => node.node_type === "tool_call");
     expect(failedTool).toMatchObject({
       error: "No static result for tool 'normalize'",
-      parent_index: rootIndex,
+      parent_external_id: "run",
       status: "failed",
     });
   });

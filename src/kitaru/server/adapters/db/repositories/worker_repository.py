@@ -21,7 +21,7 @@ from sqlalchemy import select, update
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.worker import WorkerORM
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.domain.base import NotFoundError
@@ -126,7 +126,10 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, worker_filter, id_column=WorkerORM.id
+            self._session,
+            statement,
+            worker_filter,
+            IdOrder(WorkerORM.id, worker_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

@@ -44,6 +44,7 @@ function nodeId(index: number): string {
 export function installTestApi(options: TestApiOptions = {}): TestApi {
   const calls: ApiCall[] = [];
   const sessionIds: string[] = [];
+  let nextNode = 0;
   const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
@@ -71,8 +72,8 @@ export function installTestApi(options: TestApiOptions = {}): TestApi {
       const nodes = Array.isArray(body?.nodes) ? body.nodes : [];
       return jsonResponse(
         nodes.map((node) => ({
-          id: nodeId(Number((node as Record<string, unknown>).index)),
-          index: (node as Record<string, unknown>).index,
+          id: nodeId(nextNode++),
+          external_id: (node as Record<string, unknown>).external_id,
           node_type: (node as Record<string, unknown>).node_type,
           status: (node as Record<string, unknown>).status,
         })),

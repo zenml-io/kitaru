@@ -811,6 +811,25 @@ async def test_create_session_duplicate_external_id_conflict(
         )
 
 
+async def test_create_session_separates_agents_on_one_external_id(
+    service: SessionService,
+) -> None:
+    """Register one external id once per agent."""
+    command = SessionCreate(
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.IMPORTED,
+        imported_from="langsmith",
+        external_id="run-1",
+    )
+    first = await service.create_session(command, actor=ACTOR)
+
+    second = await service.create_session(
+        command.model_copy(update={"agent_id": uuid.uuid4()}), actor=ACTOR
+    )
+
+    assert second.id != first.id
+
+
 async def test_create_session_helper_defaults(
     repository: FakeSessionRepository,
 ) -> None:

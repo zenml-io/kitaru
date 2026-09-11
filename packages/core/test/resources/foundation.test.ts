@@ -287,14 +287,14 @@ describe("foundation resources", () => {
     );
     const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
 
-    await client.sessions.listNodes(ID, { filter, sort: "index:asc" });
+    await client.sessions.listNodes(ID, { filter, sort: "position:asc" });
 
     const url = new URL(String(fetch.mock.calls[0]?.[0]));
     expect(url.pathname).toBe(`/api/v1/sessions/${ID}/nodes`);
     expect(url.searchParams.get("filter")).toBe(
       filter == null ? null : JSON.stringify(filter),
     );
-    expect(url.searchParams.get("sort")).toBe("index:asc");
+    expect(url.searchParams.get("sort")).toBe("position:asc");
   });
 
   it("creates a session run and validates its returned job", async () => {

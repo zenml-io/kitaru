@@ -20,7 +20,11 @@ from dataclasses import dataclass
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from conftest import pg_session_with_engine, postgres_available
+from conftest import (
+    build_session_node,
+    pg_session_with_engine,
+    postgres_available,
+)
 from kitaru.api_models.v1.insight import TextInsightData
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin
@@ -85,7 +89,6 @@ from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig, default_tool_policy
 from kitaru.server.domain.session import Session, SessionNotFound
-from kitaru.server.domain.session_node import SessionNode
 
 
 @dataclass
@@ -192,9 +195,9 @@ async def test_session_missing_agent_version(setup: Setup) -> None:
 async def test_session_nodes_missing_session(setup: Setup) -> None:
     """Translate the session foreign key on node upsert."""
     session_id = uuid.uuid4()
-    node = SessionNode(
-        session_id=session_id,
-        index=0,
+    node = build_session_node(
+        session_id,
+        "call-0",
         node_type=NodeType.LLM_CALL,
         name="call",
         status=NodeStatus.COMPLETED,
