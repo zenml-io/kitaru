@@ -37,7 +37,7 @@ from kitaru.server.adapters.db.orm.task import (
     TERMINAL_STATUS_VALUES,
     TaskORM,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.base import NotFoundError
@@ -213,7 +213,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                 compile_filter_expression(task_filter.expression, TASK_FILTER_BINDINGS)
             )
         rows, next_cursor = await paginate(
-            self._session, statement, task_filter, id_column=TaskORM.id
+            self._session, statement, task_filter, IdOrder(TaskORM.id, task_filter.sort)
         )
         return [row.to_domain() for row in rows], next_cursor
 
