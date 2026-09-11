@@ -194,8 +194,6 @@ PUBLIC_API: dict[str, ModuleSpec] = {
     "kitaru.api_models.v1.replay_config": ModuleSpec(
         symbols=frozenset(
             {
-                "EvaluatorConfig",
-                "AnalyzerConfig",
                 "HistoryConfig",
                 "PassthroughConfig",
                 "StaticConfig",
@@ -208,6 +206,9 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "StaticMatchMode",
             }
         ),
+    ),
+    "kitaru.api_models.v1.plugin": ModuleSpec(
+        symbols=frozenset({"EvaluatorConfig", "AnalyzerConfig"}),
     ),
     "kitaru.api_models.v1.job": ModuleSpec(
         symbols=frozenset(

@@ -20,7 +20,7 @@ from typing import Any, ClassVar
 from pydantic import Field
 
 from kitaru.base import FrozenModel
-from kitaru.server.application.models.replay_config import (
+from kitaru.server.application.models.plugin import (
     AnalyzerConfigInput,
     EvaluatorConfigInput,
 )

@@ -149,7 +149,12 @@ async def test_create_forwards_all_supported_fields_and_next_actions() -> None:
             "tools": {},
         },
         "evaluators": [
-            {"evaluator": "quality", "version": 3, "params": {"threshold": 0.8}}
+            {
+                "evaluator": "quality",
+                "version": 3,
+                "params": {"threshold": 0.8},
+                "connection_id": None,
+            }
         ],
         "baseline_evaluation_mode": "if_missing",
     }
@@ -180,7 +185,14 @@ async def test_create_omits_server_decided_optional_fields() -> None:
     [request] = client.create_calls
     assert request.model_dump(mode="json", exclude_unset=True) == {
         "baseline_session_id": str(client.baseline_id),
-        "evaluators": [{"evaluator": "quality", "version": 3, "params": {}}],
+        "evaluators": [
+            {
+                "evaluator": "quality",
+                "version": 3,
+                "params": {},
+                "connection_id": None,
+            }
+        ],
         "baseline_evaluation_mode": "none",
     }
 

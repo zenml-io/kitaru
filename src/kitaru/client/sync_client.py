@@ -23,9 +23,9 @@ from typing import Any, TypeVar
 from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.experiment import ExperimentResponse
 from kitaru.api_models.v1.experiment_run import ExperimentRunResponse
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayResponse
 from kitaru.api_models.v1.replay_config import (
-    EvaluatorConfig,
     ReplayOverride,
     ToolPolicy,
 )

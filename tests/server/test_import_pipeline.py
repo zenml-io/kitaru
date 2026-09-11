@@ -50,8 +50,12 @@ from kitaru.server.application.services.plugin_resolution import (
 )
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
-from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
-from kitaru.server.domain.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.server.domain.plugin import (
+    AnalyzerConfig,
+    EvaluatorConfig,
+    PluginKind,
+    ScriptPluginSource,
+)
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import AnalysisTask, EvaluationTask, ImportTask, Task
 from kitaru.server.domain.worker import Worker
@@ -67,9 +71,19 @@ def services() -> ReplayServices:
     return build_replay_services()
 
 
-async def _evaluator(services: ReplayServices, name: str) -> EvaluatorConfig:
+async def _evaluator(
+    services: ReplayServices,
+    name: str,
+    connection_id: uuid.UUID | None = None,
+    provider: str | None = None,
+    requires_credentials: bool = False,
+) -> EvaluatorConfig:
     plugin = await create_plugin(
-        services.plugins, ACTOR.account.id, kind=PluginKind.EVALUATOR, name=name
+        services.plugins,
+        ACTOR.account.id,
+        kind=PluginKind.EVALUATOR,
+        name=name,
+        provider=provider,
     )
     blob = await create_blob(services.blobs, ACTOR.account.id, content=name.encode())
     version = await services.plugins.create_version(
@@ -82,6 +96,9 @@ async def _evaluator(services: ReplayServices, name: str) -> EvaluatorConfig:
         version=version.version,
         params={"threshold": 0.5},
         evaluator_version_id=version.id,
+        provider=plugin.provider,
+        connection_id=connection_id,
+        requires_credentials=requires_credentials,
     )
 
 
@@ -90,7 +107,7 @@ async def _analyzer(
     name: str,
     connection_id: uuid.UUID | None = None,
     provider: str | None = None,
-    connection_schema: dict[str, Any] | None = None,
+    requires_credentials: bool = False,
     min_sessions: int | None = None,
 ) -> AnalyzerConfig:
     plugin = await create_plugin(
@@ -99,7 +116,6 @@ async def _analyzer(
         kind=PluginKind.ANALYZER,
         name=name,
         provider=provider,
-        connection_schema=connection_schema,
     )
     blob = await create_blob(services.blobs, ACTOR.account.id, content=name.encode())
     version = await services.plugins.create_version(
@@ -115,6 +131,7 @@ async def _analyzer(
         analyzer_version_id=version.id,
         provider=plugin.provider,
         connection_id=connection_id,
+        requires_credentials=requires_credentials,
     )
 
 
@@ -260,6 +277,110 @@ async def test_completed_import_appends_one_task_per_session_and_evaluator(
         for session in sessions
         for evaluator in evaluators
     }
+
+
+async def test_evaluator_tasks_carry_the_provider_label(
+    services: ReplayServices,
+) -> None:
+    """A session's evaluator task carries its evaluator's provider label."""
+    evaluator = await _evaluator(services, "accuracy", provider="langfuse")
+    import_, import_task = await _import_with_task(services, [evaluator])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+
+    evaluator_tasks = await _evaluator_tasks(services, import_task.job_id)
+    assert all(
+        task.labels[PLUGIN_PROVIDER_LABEL] == "langfuse" for task in evaluator_tasks
+    )
+
+
+async def test_evaluator_tasks_carry_their_connection_id(
+    services: ReplayServices,
+) -> None:
+    """A session's evaluator task carries its evaluator's connection id."""
+    evaluator = await _evaluator(services, "accuracy", connection_id=uuid.uuid4())
+    import_, import_task = await _import_with_task(services, [evaluator])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+
+    evaluator_tasks = await _evaluator_tasks(services, import_task.job_id)
+    assert all(
+        task.connection_id == evaluator.connection_id for task in evaluator_tasks
+    )
+
+
+async def _single_evaluator_task_labels(
+    services: ReplayServices, evaluator: EvaluatorConfig
+) -> dict[str, str]:
+    """Complete an import naming one evaluator and return its task's labels."""
+    import_, import_task = await _import_with_task(services, [evaluator])
+    await _imported_session(services, import_)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(status=TaskStatus.COMPLETED, result=STATS),
+    )
+    (task,) = await _evaluator_tasks(services, import_task.job_id)
+    return task.labels
+
+
+async def test_evaluator_task_requires_credentials_without_a_connection(
+    services: ReplayServices,
+) -> None:
+    """An evaluator with a connection schema and no connection needs the worker's."""
+    evaluator = await _evaluator(
+        services, "accuracy", provider="openai", requires_credentials=True
+    )
+
+    labels = await _single_evaluator_task_labels(services, evaluator)
+
+    assert labels[REQUIRES_CREDENTIALS_LABEL] == "openai"
+
+
+async def test_evaluator_task_with_a_connection_requires_no_credentials(
+    services: ReplayServices,
+) -> None:
+    """An evaluator resolving a connection carries its credentials itself."""
+    evaluator = await _evaluator(
+        services,
+        "accuracy",
+        connection_id=uuid.uuid4(),
+        provider="openai",
+    )
+
+    labels = await _single_evaluator_task_labels(services, evaluator)
+
+    assert REQUIRES_CREDENTIALS_LABEL not in labels
+
+
+async def test_evaluator_task_without_a_schema_requires_no_credentials(
+    services: ReplayServices,
+) -> None:
+    """An evaluator declaring no connection schema stamps no requires label."""
+    evaluator = await _evaluator(services, "accuracy", provider="openai")
+
+    labels = await _single_evaluator_task_labels(services, evaluator)
+
+    assert REQUIRES_CREDENTIALS_LABEL not in labels
 
 
 async def test_in_progress_session_is_skipped(services: ReplayServices) -> None:
@@ -534,7 +655,7 @@ async def test_analysis_task_requires_credentials_without_a_connection(
 ) -> None:
     """An analyzer with a connection schema and no connection needs the worker's."""
     analyzer = await _analyzer(
-        services, "trends", provider="openai", connection_schema={"type": "object"}
+        services, "trends", provider="openai", requires_credentials=True
     )
 
     labels = await _single_analysis_task_labels(services, analyzer)
@@ -551,7 +672,6 @@ async def test_analysis_task_with_a_connection_requires_no_credentials(
         "trends",
         connection_id=uuid.uuid4(),
         provider="openai",
-        connection_schema={"type": "object"},
     )
 
     labels = await _single_analysis_task_labels(services, analyzer)

@@ -18,7 +18,12 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import DiscriminatedRequestModel
+from kitaru.api_models.v1.base import (
+    DiscriminatedRequestModel,
+    JsonValue,
+    PlainStr,
+    RequestModel,
+)
 
 
 class ScriptPluginSource(DiscriminatedRequestModel):
@@ -40,3 +45,45 @@ class PackagePluginSource(DiscriminatedRequestModel):
 PluginSource = Annotated[
     ScriptPluginSource | PackagePluginSource, Field(discriminator="type")
 ]
+
+
+class EvaluatorConfig(RequestModel):
+    """Evaluator config."""
+
+    evaluator: PlainStr = Field(description="Evaluator name.")
+    version: int | None = Field(
+        default=None,
+        description="Evaluator version, an omitted value resolves to latest.",
+    )
+    params: dict[str, JsonValue] = Field(
+        default_factory=dict, description="Parameters passed to the evaluator."
+    )
+    connection_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Credential connection, an omitted value resolves to the provider's "
+            "default."
+        ),
+    )
+
+
+class AnalyzerConfig(RequestModel):
+    """Analyzer config."""
+
+    analyzer: PlainStr = Field(description="Analyzer name.")
+    min_sessions: int | None = Field(
+        default=None,
+        ge=1,
+        description="Session minimum (built-in insights: 5; others: 1).",
+    )
+    version: int | None = Field(
+        default=None,
+        description="Analyzer version; defaults to latest.",
+    )
+    params: dict[str, JsonValue] = Field(
+        default_factory=dict, description="Plugin arguments."
+    )
+    connection_id: uuid.UUID | None = Field(
+        default=None,
+        description="Credential connection; defaults to the provider's default.",
+    )

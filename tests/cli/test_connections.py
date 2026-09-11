@@ -86,6 +86,14 @@ class StubConnectionClient:
                 "connection_schema": connection_schema,
             },
         )
+        self.evaluator = StubModel(
+            uuid.uuid4(),
+            {
+                "name": "tone-judge",
+                "provider": "model-provider",
+                "connection_schema": connection_schema,
+            },
+        )
         self.connection = StubModel(
             uuid.uuid4(),
             {
@@ -103,6 +111,7 @@ class StubConnectionClient:
         self.deleted: list[uuid.UUID] = []
         self.importers = self._Importers(self)
         self.analyzers = self._Analyzers(self)
+        self.evaluators = self._Evaluators(self)
         self.connections = self._Connections(self)
 
     class _Importers:
@@ -128,6 +137,18 @@ class StubConnectionClient:
         async def list(self, params: Any) -> Any:
             assert params.size == 2
             return SimpleNamespace(items=[self.owner.analyzer], next_cursor=None)
+
+    class _Evaluators:
+        def __init__(self, owner: "StubConnectionClient") -> None:
+            self.owner = owner
+
+        async def get(self, evaluator_id: uuid.UUID) -> StubModel:
+            assert evaluator_id == self.owner.evaluator.id
+            return self.owner.evaluator
+
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            return SimpleNamespace(items=[self.owner.evaluator], next_cursor=None)
 
     class _Connections:
         def __init__(self, owner: "StubConnectionClient") -> None:
@@ -354,16 +375,44 @@ async def test_create_from_an_analyzer_schema() -> None:
     assert request.env == {"LANGFUSE_BASE_URL": "https://self.hosted"}
 
 
+async def test_create_from_an_evaluator_schema() -> None:
+    """An evaluator schema supplies its provider and connection values."""
+    client = StubConnectionClient(connection_schema=_SCHEMA)
+
+    await connections.create_connection(
+        client,
+        "model-provider-prod",
+        importer=None,
+        evaluator="tone-judge",
+        provider=None,
+        values=["LANGFUSE_BASE_URL=https://self.hosted"],
+        secret_values=[
+            "LANGFUSE_PUBLIC_KEY=pk-live",
+            "LANGFUSE_SECRET_KEY=sk-live",
+        ],
+        default=False,
+        non_interactive=True,
+    )
+
+    [request] = client.created
+    assert request.provider == "model-provider"
+    assert request.env == {"LANGFUSE_BASE_URL": "https://self.hosted"}
+
+
 @pytest.mark.parametrize(
-    ("importer", "analyzer", "provider"),
+    ("importer", "analyzer", "evaluator", "provider"),
     [
-        (None, None, None),
-        ("zenml/langfuse", None, "langfuse"),
-        (None, "model-judge", "model-provider"),
+        (None, None, None, None),
+        ("zenml/langfuse", None, None, "langfuse"),
+        (None, "model-judge", None, "model-provider"),
+        (None, None, "tone-judge", "model-provider"),
     ],
 )
 async def test_create_requires_exactly_one_source(
-    importer: str | None, analyzer: str | None, provider: str | None
+    importer: str | None,
+    analyzer: str | None,
+    evaluator: str | None,
+    provider: str | None,
 ) -> None:
     """The plugin and provider options are mutually exclusive."""
     client = StubConnectionClient(connection_schema=_SCHEMA)
@@ -374,6 +423,7 @@ async def test_create_requires_exactly_one_source(
             "langfuse-prod",
             importer=importer,
             analyzer=analyzer,
+            evaluator=evaluator,
             provider=provider,
             values=None,
             secret_values=None,

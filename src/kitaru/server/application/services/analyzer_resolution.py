@@ -13,24 +13,17 @@
 #  permissions and limitations under the License.
 """Analyzer config resolution against the plugin registry."""
 
-import uuid
-
 from kitaru.server.application.interfaces.connection_repository import (
     ConnectionRepository,
 )
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.replay_config import AnalyzerConfigInput
-from kitaru.server.application.services.connection_resolution import (
-    resolve_connection_id,
-)
+from kitaru.server.application.models.plugin import AnalyzerConfigInput
 from kitaru.server.application.services.plugin_resolution import (
-    resolve_plugin,
-    resolve_plugin_version,
+    check_unique_plugin_versions,
+    resolve_plugin_config,
 )
-from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.plugin import PluginKind
-from kitaru.server.domain.replay_config import AnalyzerConfig
+from kitaru.server.domain.plugin import AnalyzerConfig, PluginKind
 
 
 async def resolve_analyzer_config(
@@ -59,23 +52,23 @@ async def resolve_analyzer_config(
         Resolved analyzer config carrying the concrete version and its id.
     """
     _ = actor
-    plugin = await resolve_plugin(
-        config.analyzer, PluginKind.ANALYZER, plugin_repository
-    )
-    plugin_version = await resolve_plugin_version(
-        plugin, config.version, plugin_repository
-    )
-    connection_id = await resolve_connection_id(
-        config.connection_id, plugin.provider, connection_repository
+    resolved = await resolve_plugin_config(
+        config.analyzer,
+        config.version,
+        PluginKind.ANALYZER,
+        config.connection_id,
+        plugin_repository,
+        connection_repository,
     )
     return AnalyzerConfig(
         analyzer=config.analyzer,
         min_sessions=config.min_sessions,
-        version=plugin_version.version,
+        version=resolved.plugin_version.version,
         params=config.params,
-        analyzer_version_id=plugin_version.id,
-        provider=plugin.provider,
-        connection_id=connection_id,
+        analyzer_version_id=resolved.plugin_version.id,
+        provider=resolved.plugin.provider,
+        connection_id=resolved.connection_id,
+        requires_credentials=resolved.requires_credentials,
     )
 
 
@@ -108,11 +101,5 @@ async def validate_analyzers(
         )
         for config in configs
     ]
-    seen_ids: set[uuid.UUID] = set()
-    for analyzer_config in resolved:
-        if analyzer_config.analyzer_version_id in seen_ids:
-            raise ValidationError(
-                "An analyzer version appears more than once in the analyzer list"
-            )
-        seen_ids.add(analyzer_config.analyzer_version_id)
+    check_unique_plugin_versions(resolved, "analyzer")
     return resolved

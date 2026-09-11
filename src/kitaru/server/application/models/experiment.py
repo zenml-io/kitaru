@@ -19,7 +19,7 @@ from typing import ClassVar
 
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.base import FrozenModel
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.base import ListFilter
 from kitaru.server.domain.replay_config import ReplayOverride, ToolPolicy
 from kitaru.server.filtering import EQUALITY_OPS, STRING_OPS, FilterField

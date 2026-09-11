@@ -26,6 +26,7 @@ from conftest import (
     create_analysis_task,
     create_blob,
     create_connection,
+    create_evaluation_task,
     create_import,
     create_import_task,
     create_job,
@@ -44,6 +45,8 @@ from kitaru.server.domain.task import (
     AnalysisTaskDetails,
     ApiImportSourceSpec,
     BlobImportSourceSpec,
+    EvaluationTask,
+    EvaluationTaskDetails,
     ImportTask,
     ImportTaskDetails,
     ScriptPluginSpec,
@@ -317,6 +320,101 @@ async def test_analysis_spec_ignores_a_deleted_connection(
             plugin_version_id=version.id,
             agent_id=agent.id,
             import_id=uuid.uuid4(),
+            connection_id=connection_id,
+            env={"REGION": "eu"},
+        )
+    )
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert spec.env == {"REGION": "eu"}
+    assert spec.secret_env == {}
+
+
+async def test_evaluation_spec_uses_the_recorded_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """An evaluation task injects its recorded connection's env and secrets."""
+    plugin = await create_plugin(
+        services.plugins,
+        ACTOR.account.id,
+        PluginKind.EVALUATOR,
+        name="accuracy",
+        provider="langfuse",
+    )
+    code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="score"),
+        display_version=None,
+    )
+    connection_id = await store_connection(
+        services,
+        env={"LANGFUSE_BASE_URL": "https://cloud", "REGION": "eu"},
+    )
+    job = await create_job(services.jobs, ACTOR.account.id)
+    task = await create_evaluation_task(
+        services.tasks,
+        job.id,
+        plugin_version_id=version.id,
+        connection_id=connection_id,
+    )
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert spec.env == {
+        "LANGFUSE_BASE_URL": "https://cloud",
+        "REGION": "eu",
+    }
+    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk"}
+
+
+async def test_evaluation_spec_without_a_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """An evaluation task with no recorded connection injects nothing extra."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.EVALUATOR, name="accuracy"
+    )
+    code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="score"),
+        display_version=None,
+    )
+    job = await create_job(services.jobs, ACTOR.account.id)
+    task = await create_evaluation_task(
+        services.tasks, job.id, plugin_version_id=version.id
+    )
+
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+
+    assert isinstance(spec.details, EvaluationTaskDetails)
+    assert spec.env == task.env
+    assert spec.secret_env == {}
+
+
+async def test_evaluation_spec_ignores_a_deleted_connection(
+    services: JobAndTaskServices,
+) -> None:
+    """A deleted evaluation connection contributes no environment values."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.EVALUATOR, name="accuracy"
+    )
+    code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
+    version = await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=code_blob.id, entrypoint="score"),
+        display_version=None,
+    )
+    connection_id = await store_connection(services)
+    await services.connections.delete(connection_id)
+    job = await create_job(services.jobs, ACTOR.account.id)
+    task = await services.tasks.create(
+        EvaluationTask(
+            job_id=job.id,
+            plugin_version_id=version.id,
+            input_session_id=uuid.uuid4(),
             connection_id=connection_id,
             env={"REGION": "eu"},
         )

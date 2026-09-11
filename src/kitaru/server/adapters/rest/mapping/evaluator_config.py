@@ -13,9 +13,9 @@
 #  permissions and limitations under the License.
 """Evaluator config DTO conversions."""
 
-from kitaru.api_models.v1.replay_config import EvaluatorConfig as WireEvaluatorConfig
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
-from kitaru.server.domain.replay_config import EvaluatorConfig as DomainEvaluatorConfig
+from kitaru.api_models.v1.plugin import EvaluatorConfig as WireEvaluatorConfig
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
+from kitaru.server.domain.plugin import EvaluatorConfig as DomainEvaluatorConfig
 
 
 def evaluator_config_to_wire(config: DomainEvaluatorConfig) -> WireEvaluatorConfig:
@@ -29,7 +29,10 @@ def evaluator_config_to_wire(config: DomainEvaluatorConfig) -> WireEvaluatorConf
         params.
     """
     return WireEvaluatorConfig(
-        evaluator=config.evaluator, version=config.version, params=config.params
+        evaluator=config.evaluator,
+        version=config.version,
+        params=config.params,
+        connection_id=config.connection_id,
     )
 
 
@@ -43,5 +46,8 @@ def evaluator_config_input(config: WireEvaluatorConfig) -> EvaluatorConfigInput:
         Evaluator config awaiting resolution.
     """
     return EvaluatorConfigInput(
-        evaluator=config.evaluator, version=config.version, params=config.params
+        evaluator=config.evaluator,
+        version=config.version,
+        params=config.params,
+        connection_id=config.connection_id,
     )

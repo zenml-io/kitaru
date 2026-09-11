@@ -23,14 +23,20 @@ from conftest import (
     create_connection,
     create_plugin,
 )
-from kitaru.server.application.models.replay_config import AnalyzerConfigInput
+from kitaru.server.application.models.plugin import AnalyzerConfigInput
 from kitaru.server.application.services.analyzer_resolution import (
     resolve_analyzer_config,
     validate_analyzers,
 )
+from kitaru.server.application.services.plugin_resolution import (
+    check_unique_plugin_versions,
+    resolve_plugin_credentials,
+)
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.connection import ConnectionNotFound
 from kitaru.server.domain.plugin import (
+    AnalyzerConfig,
+    EvaluatorConfig,
     PackagePluginSource,
     PluginKind,
     PluginNotFound,
@@ -240,3 +246,117 @@ async def test_resolve_missing_connection(
             repository,
             connections,
         )
+
+
+async def test_resolve_plugin_credentials_requires_credentials_without_a_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Report that a connection schema with no resolved connection needs credentials."""
+    plugin = await create_plugin(
+        repository,
+        OWNER_ID,
+        kind=PluginKind.ANALYZER,
+        name="trends",
+        provider="openai",
+        connection_schema={"type": "object"},
+    )
+
+    connection_id, requires_credentials = await resolve_plugin_credentials(
+        plugin, None, connections
+    )
+
+    assert connection_id is None
+    assert requires_credentials is True
+
+
+async def test_resolve_plugin_credentials_resolves_a_named_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Resolve the named connection and report no credentials are needed."""
+    plugin = await create_plugin(
+        repository,
+        OWNER_ID,
+        kind=PluginKind.ANALYZER,
+        name="trends",
+        provider="openai",
+        connection_schema={"type": "object"},
+    )
+    connection = await create_connection(connections, OWNER_ID, uuid.uuid4())
+
+    connection_id, requires_credentials = await resolve_plugin_credentials(
+        plugin, connection.id, connections
+    )
+
+    assert connection_id == connection.id
+    assert requires_credentials is False
+
+
+async def test_resolve_plugin_credentials_without_a_schema(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Report no credentials are needed when the plugin has no connection schema."""
+    plugin = await create_plugin(
+        repository, OWNER_ID, kind=PluginKind.ANALYZER, name="trends"
+    )
+
+    connection_id, requires_credentials = await resolve_plugin_credentials(
+        plugin, None, connections
+    )
+
+    assert connection_id is None
+    assert requires_credentials is False
+
+
+async def test_resolve_plugin_credentials_missing_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Raise when the named connection does not exist."""
+    plugin = await create_plugin(
+        repository, OWNER_ID, kind=PluginKind.ANALYZER, name="trends"
+    )
+
+    with pytest.raises(ConnectionNotFound):
+        await resolve_plugin_credentials(plugin, uuid.uuid4(), connections)
+
+
+def test_check_unique_plugin_versions_accepts_distinct_versions() -> None:
+    """Accept configs that resolve to distinct plugin versions."""
+    configs = [
+        AnalyzerConfig(analyzer="trends", version=1, analyzer_version_id=uuid.uuid4()),
+        AnalyzerConfig(
+            analyzer="outliers", version=1, analyzer_version_id=uuid.uuid4()
+        ),
+    ]
+    check_unique_plugin_versions(configs, "analyzer")
+
+
+def test_check_unique_plugin_versions_rejects_a_repeated_version() -> None:
+    """Reject two configs resolving to the same plugin version."""
+    version_id = uuid.uuid4()
+    configs = [
+        AnalyzerConfig(analyzer="trends", version=1, analyzer_version_id=version_id),
+        AnalyzerConfig(analyzer="trends", version=2, analyzer_version_id=version_id),
+    ]
+    with pytest.raises(
+        ValidationError,
+        match="An analyzer version appears more than once in the analyzer list",
+    ):
+        check_unique_plugin_versions(configs, "analyzer")
+
+
+def test_check_unique_plugin_versions_uses_the_given_label() -> None:
+    """Name the given label, not a hardcoded plugin kind, in the error."""
+    version_id = uuid.uuid4()
+    configs = [
+        EvaluatorConfig(
+            evaluator="accuracy", version=1, evaluator_version_id=version_id
+        ),
+        EvaluatorConfig(
+            evaluator="accuracy", version=2, evaluator_version_id=version_id
+        ),
+    ]
+    with pytest.raises(
+        ValidationError,
+        match="An evaluator version appears more than once in the evaluator list",
+    ):
+        check_unique_plugin_versions(configs, "evaluator")

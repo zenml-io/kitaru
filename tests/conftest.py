@@ -217,8 +217,10 @@ from kitaru.server.domain.job import Job, JobNotFound
 from kitaru.server.domain.keys import generate_secret, hash_secret
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.plugin import (
+    AnalyzerConfig,
     DuplicatePluginName,
     DuplicatePluginVersion,
+    EvaluatorConfig,
     Plugin,
     PluginKind,
     PluginNotFound,
@@ -235,8 +237,6 @@ from kitaru.server.domain.replay import (
     ReplayNotFound,
 )
 from kitaru.server.domain.replay_config import (
-    AnalyzerConfig,
-    EvaluatorConfig,
     ReplayConfig,
     ReplayConfigInUse,
     ReplayConfigNotFound,
@@ -4757,8 +4757,7 @@ async def create_plugin(
         kind: Plugin kind.
         name: Plugin name.
         description: Plugin description.
-        provider: Source system, evaluators and analyzers must leave this
-            unset.
+        provider: Source system.
         metadata: Arbitrary metadata.
         agent_id: Agent the plugin is scoped to, importers and analyzers
             must leave this unset.
@@ -6792,6 +6791,7 @@ async def create_evaluation_task(
     job_id: uuid.UUID,
     plugin_version_id: uuid.UUID | None = None,
     input_session_id: uuid.UUID | None = None,
+    connection_id: uuid.UUID | None = None,
     params: dict[str, Any] | None = None,
     labels: dict[str, str] | None = None,
     on_failure: TaskOnFailure = TaskOnFailure.CONTINUE,
@@ -6803,6 +6803,7 @@ async def create_evaluation_task(
         job_id: Id of the owning job.
         plugin_version_id: Evaluator version the task runs.
         input_session_id: Session being scored.
+        connection_id: Connection injected into the task environment.
         params: Parameters passed to the evaluator.
         labels: Labels matched by worker scope selectors.
         on_failure: Effect of a hard failure on the job.
@@ -6818,6 +6819,7 @@ async def create_evaluation_task(
         input_session_id=(
             input_session_id if input_session_id is not None else uuid.uuid4()
         ),
+        connection_id=connection_id,
         params=params if params is not None else {},
         labels=labels if labels is not None else {},
         on_failure=on_failure,
@@ -7157,6 +7159,7 @@ def build_job_and_task_services(
         session_repository=substrate.sessions,
         agent_version_repository=substrate.agent_versions,
         plugin_repository=substrate.plugins,
+        connection_repository=substrate.connections,
         transitions=transitions,
         policy=task_policy,
     )
@@ -7217,6 +7220,7 @@ class ReplayServices(NamedTuple):
     tags: FakeTagRepository
     imports: FakeImportRepository
     insights: FakeInsightRepository
+    connections: FakeConnectionRepository
     transitions: TaskTransitions
     payload_store: PayloadStore
 
@@ -7279,7 +7283,6 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_repository=sessions,
         import_repository=imports,
         insight_repository=insights,
-        plugin_repository=plugins,
     )
     transitions = TaskTransitions(
         task_repository=tasks,
@@ -7314,6 +7317,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_repository=sessions,
         agent_version_repository=agent_versions,
         plugin_repository=plugins,
+        connection_repository=connections,
         transitions=transitions,
         policy=task_policy,
     )
@@ -7321,6 +7325,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     experiment_service = ExperimentService(
         repository=experiments,
         plugin_repository=plugins,
+        connection_repository=connections,
         experiment_run_repository=experiment_runs,
         agent_repository=agents,
         cohort_version_repository=cohort_versions,
@@ -7344,6 +7349,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_node_repository=session_nodes,
         agent_version_repository=agent_versions,
         plugin_repository=plugins,
+        connection_repository=connections,
         payload_store=payload_store,
     )
     experiment_run_service = ExperimentRunService(
@@ -7377,6 +7383,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         tags=tags,
         imports=imports,
         insights=insights,
+        connections=connections,
         transitions=transitions,
         payload_store=payload_store,
     )

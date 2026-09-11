@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 
 from kitaru.api_models.v1.evaluator import EvaluatorResponse, EvaluatorVersionResponse
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.management import EvaluatorSelection

@@ -28,6 +28,7 @@ from conftest import (
     create_blob,
     create_cohort,
     create_cohort_version,
+    create_connection,
     create_evaluation_task,
     create_job,
     create_plugin,
@@ -48,9 +49,10 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.experiment import ExperimentCreate
 from kitaru.server.application.models.experiment_run import ExperimentRunCreate
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter, TaskUpdate
+from kitaru.server.application.services.plugin_resolution import PLUGIN_PROVIDER_LABEL
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
     AgentVersion,
@@ -268,6 +270,93 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
         bundle.replay.id, actor=ACTOR
     )
     assert final_bundle.replay.result_session_id == result_session.id
+
+
+async def test_baseline_and_result_evaluator_tasks_carry_connection_and_labels(
+    services: ReplayServices,
+) -> None:
+    """Baseline and result evaluator tasks carry the evaluator's resolved connection."""
+    agent_version = await _agent_version_with_run_spec(services)
+    plugin = await create_plugin(
+        services.plugins,
+        ACTOR.account.id,
+        kind=PluginKind.EVALUATOR,
+        name="accuracy",
+        provider="langfuse",
+    )
+    blob = await create_blob(services.blobs, ACTOR.account.id, content=b"accuracy")
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=blob.id, entrypoint="score"),
+        display_version=None,
+    )
+    connection = await create_connection(
+        services.connections,
+        ACTOR.account.id,
+        uuid.uuid4(),
+        provider="langfuse",
+        default=True,
+    )
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    baseline_task = next(task for task in tasks if isinstance(task, EvaluationTask))
+    assert baseline_task.connection_id == connection.id
+    assert baseline_task.labels[PLUGIN_PROVIDER_LABEL] == "langfuse"
+
+    agent_task = next(task for task in tasks if isinstance(task, AgentTask))
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    await services.task_service.update_task(
+        agent_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
+    )
+    result_session = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=agent_version.agent_id,
+        agent_version_id=agent_version.id,
+        origin=SessionOrigin.REPLAY,
+        task_id=agent_task.id,
+    )
+    result_session.status = SessionStatus.COMPLETED
+    await services.sessions.update(result_session)
+    replay_with_task = await services.replays.get_by_job_id(
+        get_replay_job_id(bundle.replay)
+    )
+    assert replay_with_task is not None
+    replay_with_task.link_result_session(result_session.id)
+    await services.replays.update(replay_with_task)
+    await services.task_service.update_task(
+        agent_task.id,
+        TaskUpdate(status=TaskStatus.COMPLETED),
+        actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
+    )
+
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    result_task = next(
+        task
+        for task in tasks
+        if isinstance(task, EvaluationTask)
+        and task.input_session_id == result_session.id
+    )
+    assert result_task.connection_id == connection.id
+    assert result_task.labels[PLUGIN_PROVIDER_LABEL] == "langfuse"
 
 
 async def test_standalone_replay_stamps_the_job_kind_replay(

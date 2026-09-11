@@ -99,7 +99,7 @@ Use the existing evaluation request and pin the registered version. This example
 import uuid
 
 from kitaru.api_models.v1.evaluation import EvaluationBatchCreateRequest
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.client.api_client import KitaruAPIClient
 
 

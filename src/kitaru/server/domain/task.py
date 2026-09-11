@@ -605,6 +605,7 @@ class EvaluationTask(Task):
 
     plugin_version_id: uuid.UUID
     input_session_id: uuid.UUID
+    connection_id: uuid.UUID | None = None
     params: dict[str, Any] = Field(default_factory=dict)
 
     @property

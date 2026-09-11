@@ -642,7 +642,12 @@ async def test_session_import_forwards_evaluators(tmp_path: Path) -> None:
 
     [request] = client.requests
     assert request.model_dump(mode="json")["evaluators"] == [
-        {"evaluator": "quality", "version": 3, "params": {"threshold": 0.8}}
+        {
+            "evaluator": "quality",
+            "version": 3,
+            "params": {"threshold": 0.8},
+            "connection_id": None,
+        }
     ]
     assert result.item["evaluators"] == [
         {
@@ -652,6 +657,34 @@ async def test_session_import_forwards_evaluators(tmp_path: Path) -> None:
             "version": 3,
         }
     ]
+
+
+async def test_session_import_forwards_evaluator_connections(tmp_path: Path) -> None:
+    """Import resolves a connection for each selected evaluator token."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    result = await sessions.import_sessions(
+        client,
+        payload,
+        importer="jsonl@2",
+        agent="assistant@3",
+        params=None,
+        evaluators=["quality@3"],
+        evaluator_connections=["quality@3=langfuse-prod"],
+        media_type="application/jsonl",
+        wait=False,
+        interval=None,
+        timeout=None,
+    )
+
+    [request] = client.requests
+    assert request.evaluators[0].connection_id == client.connection.id
+    assert result.item["evaluators"][0]["connection"] == {
+        "id": str(client.connection.id),
+        "name": "langfuse-prod",
+    }
 
 
 async def test_session_import_forwards_analyzers(tmp_path: Path) -> None:
@@ -738,6 +771,32 @@ async def test_session_import_rejects_evaluator_params_without_evaluator(
             agent="assistant@3",
             params=None,
             evaluator_params=['quality@3={"threshold": 0.8}'],
+            media_type="application/jsonl",
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.uploads == []
+
+
+async def test_session_import_rejects_evaluator_connection_without_evaluator(
+    tmp_path: Path,
+) -> None:
+    """Evaluator connections require a selected evaluator token."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            evaluator_connections=["quality@3=langfuse-prod"],
             media_type="application/jsonl",
             wait=False,
             interval=None,

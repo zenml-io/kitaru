@@ -224,6 +224,7 @@ async def evaluate_sessions(
     all_sessions: bool = False,
     evaluators: list[str],
     evaluator_params: list[str] | None,
+    evaluator_connections: list[str] | None = None,
     wait: bool,
     interval: float | None,
     timeout: float | None,
@@ -251,6 +252,7 @@ async def evaluate_sessions(
         client,
         evaluators,
         evaluator_params or [],
+        evaluator_connections or [],
     )
 
     identity = {

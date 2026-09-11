@@ -23,12 +23,12 @@ import pytest
 
 from kitaru.api_models.v1.agent import AgentListParams, AgentResponse
 from kitaru.api_models.v1.base import Page
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay import (
     BaselineEvaluationMode,
     ReplayResponse,
     ReplayStatus,
 )
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import NotFoundError
 from kitaru.client.sync_client import KitaruSyncClient

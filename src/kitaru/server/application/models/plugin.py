@@ -97,3 +97,24 @@ class PluginUpdate(FrozenModel):
     logo_url: str | None = None
     metadata: dict[str, Any] | None = None
     connection_schema: dict[str, Any] | None = None
+
+
+class PluginConfigInput(FrozenModel):
+    """Plugin config awaiting resolution."""
+
+    version: int | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+    connection_id: uuid.UUID | None = None
+
+
+class EvaluatorConfigInput(PluginConfigInput):
+    """Evaluator config awaiting resolution."""
+
+    evaluator: str
+
+
+class AnalyzerConfigInput(PluginConfigInput):
+    """Analyzer config awaiting resolution."""
+
+    analyzer: str
+    min_sessions: int | None = Field(default=None, ge=1)

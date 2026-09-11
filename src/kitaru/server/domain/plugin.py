@@ -138,18 +138,6 @@ class PluginVersionIdNotFound(NotFoundError):
         super().__init__(f"Plugin version {plugin_version_id} was not found")
 
 
-class InvalidPluginProvider(ValidationError):
-    """Raised when a plugin kind that does not carry a provider has one set."""
-
-    def __init__(self, kind: PluginKind) -> None:
-        """Initialize the error.
-
-        Args:
-            kind: Kind that does not carry a provider.
-        """
-        super().__init__(f"{kind.value.capitalize()} plugins do not carry a provider")
-
-
 class InvalidPluginAgentScope(ValidationError):
     """Raised when a plugin kind that does not carry an agent id has one set."""
 
@@ -309,20 +297,6 @@ class Plugin(DomainModel):
             raise DefaultPluginReadOnly(self.name)
 
     @model_validator(mode="after")
-    def _check_provider(self) -> "Plugin":
-        """Reject a provider on an evaluator plugin.
-
-        Raises:
-            InvalidPluginProvider: The kind is evaluator and provider is set.
-
-        Returns:
-            The validated plugin.
-        """
-        if self.kind is PluginKind.EVALUATOR and self.provider is not None:
-            raise InvalidPluginProvider(self.kind)
-        return self
-
-    @model_validator(mode="after")
     def _check_agent_id(self) -> "Plugin":
         """Reject an agent id on an importer or analyzer plugin.
 
@@ -393,3 +367,54 @@ class PluginVersion(DomainModel):
             display_version: New display version.
         """
         self.display_version = display_version
+
+
+class PluginConfig(FrozenModel):
+    """Plugin config."""
+
+    version: int
+    params: dict[str, Any] = Field(default_factory=dict)
+    provider: str | None = None
+    connection_id: uuid.UUID | None = None
+    requires_credentials: bool = False
+
+    @property
+    def plugin_version_id(self) -> uuid.UUID:
+        """Id of the resolved plugin version."""
+        raise NotImplementedError
+
+
+class EvaluatorConfig(PluginConfig):
+    """Evaluator config."""
+
+    evaluator: NamespacedName
+    evaluator_version_id: uuid.UUID
+
+    @property
+    def plugin_version_id(self) -> uuid.UUID:
+        """Id of the resolved plugin version."""
+        return self.evaluator_version_id
+
+
+class AnalyzerConfig(PluginConfig):
+    """Analyzer config."""
+
+    analyzer: NamespacedName
+    min_sessions: int | None = Field(default=None, ge=1)
+    analyzer_version_id: uuid.UUID
+
+    @property
+    def plugin_version_id(self) -> uuid.UUID:
+        """Id of the resolved plugin version."""
+        return self.analyzer_version_id
+
+    def get_min_sessions(self) -> int:
+        """Return the explicit minimum or the analyzer's default."""
+        if self.min_sessions is not None:
+            return self.min_sessions
+        if self.analyzer in {
+            "kitaru/post-import-insights",
+            "kitaru/openai-post-import-insights",
+        }:
+            return 5
+        return 1

@@ -41,12 +41,12 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunResponse,
     ExperimentRunStatus,
 )
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay import (
     BaselineEvaluationMode,
     ReplayResponse,
     ReplayStatus,
 )
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import SessionCreateRequest, SessionOrigin
 from kitaru.api_models.v1.session_node import (
     NodeStatus,

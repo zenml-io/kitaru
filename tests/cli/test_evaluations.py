@@ -239,14 +239,24 @@ class StubEvaluationClient:
         self.judge_version = SimpleNamespace(
             id=uuid.uuid4(), evaluator_id=self.judge.id, version=1
         )
+        self.connection = SimpleNamespace(id=uuid.uuid4(), name="model-provider-prod")
         self.job = _job()
         self.requests: list[EvaluationBatchCreateRequest] = []
         self.create_idempotency_keys: list[str | None] = []
         self.create_error = create_error
         self.evaluators = self._Evaluators(self)
         self.evaluations = self._Evaluations(self)
+        self.connections = self._Connections(self)
         self.selected_sessions = [SimpleNamespace(id=uuid.uuid4())]
         self.sessions = self._Sessions(self)
+
+    class _Connections:
+        def __init__(self, owner: "StubEvaluationClient") -> None:
+            self.owner = owner
+
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            return SimpleNamespace(items=[self.owner.connection], next_cursor=None)
 
     class _Sessions:
         def __init__(self, owner: "StubEvaluationClient") -> None:
@@ -319,8 +329,18 @@ async def test_resolve_evaluator_configs_pins_latest_and_returns_identities() ->
     )
 
     assert [config.model_dump(mode="json") for config in configs] == [
-        {"evaluator": "quality", "version": 2, "params": {"threshold": 0.7}},
-        {"evaluator": "judge", "version": 1, "params": {}},
+        {
+            "evaluator": "quality",
+            "version": 2,
+            "params": {"threshold": 0.7},
+            "connection_id": None,
+        },
+        {
+            "evaluator": "judge",
+            "version": 1,
+            "params": {},
+            "connection_id": None,
+        },
     ]
     assert identities == [
         {
@@ -338,6 +358,44 @@ async def test_resolve_evaluator_configs_pins_latest_and_returns_identities() ->
     ]
     assert version_ids == [client.quality_version.id, client.judge_version.id]
     assert all(isinstance(version_id, uuid.UUID) for version_id in version_ids)
+
+
+async def test_resolve_evaluator_configs_carries_a_named_connection() -> None:
+    """A selected evaluator connection resolves into the evaluator config."""
+    client = StubEvaluationClient()
+
+    configs, identities, _ = await registration.resolve_evaluator_configs(
+        client,
+        ["quality@2"],
+        [],
+        ["quality@2=model-provider-prod"],
+    )
+
+    assert configs[0].connection_id == client.connection.id
+    assert identities[0]["connection"] == {
+        "id": str(client.connection.id),
+        "name": "model-provider-prod",
+    }
+
+
+async def test_resolve_evaluator_configs_rejects_malformed_connection_entry() -> None:
+    """A connection entry without EVALUATOR@VERSION=CONNECTION shape fails."""
+    client = StubEvaluationClient()
+
+    with pytest.raises(CLIError, match="must be EVALUATOR@VERSION=CONNECTION"):
+        await registration.resolve_evaluator_configs(
+            client, ["quality@2"], [], ["quality@2"]
+        )
+
+
+async def test_resolve_evaluator_configs_rejects_unselected_connection_token() -> None:
+    """A connection for a token outside the selected evaluators fails."""
+    client = StubEvaluationClient()
+
+    with pytest.raises(CLIError, match="is not a selected evaluator"):
+        await registration.resolve_evaluator_configs(
+            client, ["quality@2"], [], ["judge@1=model-provider-prod"]
+        )
 
 
 @pytest.mark.parametrize(
@@ -452,8 +510,18 @@ async def test_evaluate_sessions_builds_one_exact_cartesian_request(
     request = client.requests[0]
     assert request.input_session_ids == [positional, from_file]
     assert [config.model_dump(mode="json") for config in request.evaluators] == [
-        {"evaluator": "quality", "version": 2, "params": {"threshold": 0.7}},
-        {"evaluator": "judge", "version": 1, "params": {}},
+        {
+            "evaluator": "quality",
+            "version": 2,
+            "params": {"threshold": 0.7},
+            "connection_id": None,
+        },
+        {
+            "evaluator": "judge",
+            "version": 1,
+            "params": {},
+            "connection_id": None,
+        },
     ]
     assert result.event == "created"
     assert result.item["session_ids"] == [str(positional), str(from_file)]

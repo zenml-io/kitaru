@@ -37,9 +37,7 @@ from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.job_service import get_agent_task_labels
-from kitaru.server.application.services.plugin_resolution import (
-    get_plugin_task_labels,
-)
+from kitaru.server.application.services.plugin_resolution import get_plugin_task_labels
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig
@@ -154,7 +152,12 @@ async def create_replay_pipelines(
                     job_id=job.id,
                     plugin_version_id=evaluator.evaluator_version_id,
                     input_session_id=baseline.id,
-                    labels=get_plugin_task_labels(evaluator.evaluator),
+                    connection_id=evaluator.connection_id,
+                    labels=get_plugin_task_labels(
+                        evaluator.evaluator,
+                        evaluator.provider,
+                        evaluator.requires_credentials,
+                    ),
                     params=evaluator.params,
                     on_failure=TaskOnFailure.ABORT,
                 )
@@ -201,7 +204,10 @@ async def append_result_evaluations(
             job_id=task.job_id,
             plugin_version_id=evaluator.evaluator_version_id,
             input_session_id=replay.result_session_id,
-            labels=get_plugin_task_labels(evaluator.evaluator),
+            connection_id=evaluator.connection_id,
+            labels=get_plugin_task_labels(
+                evaluator.evaluator, evaluator.provider, evaluator.requires_credentials
+            ),
             params=evaluator.params,
             on_failure=TaskOnFailure.ABORT,
         )

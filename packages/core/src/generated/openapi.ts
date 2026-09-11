@@ -5956,6 +5956,11 @@ export interface components {
          */
         EvaluatorConfig: {
             /**
+             * Connection Id
+             * @description Credential connection, an omitted value resolves to the provider's default.
+             */
+            connection_id?: string | null;
+            /**
              * Evaluator
              * @description Evaluator name.
              */
@@ -5984,6 +5989,13 @@ export interface components {
              */
             agent_id?: string | null;
             /**
+             * Connection Schema
+             * @description JSON Schema of the connection values this evaluator reads.
+             */
+            connection_schema?: {
+                [key: string]: unknown;
+            } | null;
+            /**
              * Description
              * @description Evaluator description.
              */
@@ -6005,6 +6017,11 @@ export interface components {
              * @description Evaluator name.
              */
             name: string;
+            /**
+             * Provider
+             * @description External service this evaluator calls.
+             */
+            provider?: string | null;
         };
         /**
          * EvaluatorResponse
@@ -6016,6 +6033,13 @@ export interface components {
              * @description Id of the agent this evaluator is scoped to, null for a global evaluator.
              */
             agent_id: string | null;
+            /**
+             * Connection Schema
+             * @description JSON Schema of the connection values this evaluator reads.
+             */
+            connection_schema: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Created
              * Format: date-time
@@ -6061,6 +6085,11 @@ export interface components {
              */
             owner_id: string | null;
             /**
+             * Provider
+             * @description External service this evaluator calls.
+             */
+            provider: string | null;
+            /**
              * Updated
              * Format: date-time
              * @description Last modification time.
@@ -6072,6 +6101,13 @@ export interface components {
          * @description Evaluator update request.
          */
         EvaluatorUpdateRequest: {
+            /**
+             * Connection Schema
+             * @description New connection schema.
+             */
+            connection_schema?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Description
              * @description New evaluator description.

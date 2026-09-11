@@ -20,8 +20,8 @@ import pytest
 from kitaru.api_models.v1.replay_config import HistoryScope, ToolPolicyOnMiss
 from kitaru.server.domain.agent_version import RuntimeCapabilities
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.domain.plugin import EvaluatorConfig
 from kitaru.server.domain.replay_config import (
-    EvaluatorConfig,
     HistoryConfig,
     PassthroughConfig,
     ReplayConfig,

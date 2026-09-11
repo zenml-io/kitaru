@@ -1017,6 +1017,20 @@
           "additionalProperties": false,
           "description": "Evaluator config.",
           "properties": {
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Credential connection, an omitted value resolves to the provider's default.",
+              "title": "Connection Id"
+            },
             "evaluator": {
               "description": "Evaluator name.",
               "title": "Evaluator",
@@ -1063,6 +1077,19 @@
               ],
               "description": "Id of the agent this evaluator is scoped to, null for a global evaluator.",
               "title": "Agent Id"
+            },
+            "connection_schema": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "JSON Schema of the connection values this evaluator reads.",
+              "title": "Connection Schema"
             },
             "created": {
               "description": "Creation time.",
@@ -1129,6 +1156,18 @@
               "description": "Id of the owning account, null for a default plugin.",
               "title": "Owner Id"
             },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "External service this evaluator calls.",
+              "title": "Provider"
+            },
             "updated": {
               "description": "Last modification time.",
               "format": "date-time",
@@ -1143,8 +1182,10 @@
             "id",
             "name",
             "description",
+            "provider",
             "logo_url",
             "metadata",
+            "connection_schema",
             "latest_version",
             "agent_id"
           ],
@@ -3421,6 +3462,20 @@
           "additionalProperties": false,
           "description": "Evaluator config.",
           "properties": {
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Credential connection, an omitted value resolves to the provider's default.",
+              "title": "Connection Id"
+            },
             "evaluator": {
               "description": "Evaluator name.",
               "title": "Evaluator",

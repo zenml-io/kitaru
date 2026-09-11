@@ -117,7 +117,14 @@ async def test_create_experiment(client: httpx.AsyncClient, agent_id: str) -> No
     assert body["agent_id"] == agent_id
     assert body["override"] is None
     assert body["tool_policy"] == {"default": {"type": "passthrough"}, "tools": {}}
-    assert body["evaluators"] == [{"evaluator": "accuracy", "version": 1, "params": {}}]
+    assert body["evaluators"] == [
+        {
+            "evaluator": "accuracy",
+            "version": 1,
+            "params": {},
+            "connection_id": None,
+        }
+    ]
     assert uuid.UUID(body["id"])
 
 
@@ -380,7 +387,12 @@ async def test_update_experiment_new_evaluators_replaces_config(
     assert response.status_code == 200
     body = response.json()
     assert body["evaluators"] == [
-        {"evaluator": "relevance", "version": 1, "params": {}}
+        {
+            "evaluator": "relevance",
+            "version": 1,
+            "params": {},
+            "connection_id": None,
+        }
     ]
 
 

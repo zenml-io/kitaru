@@ -20,7 +20,7 @@ from pydantic import Field
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.base import FrozenModel
 from kitaru.server.application.models.agent import AgentCreate
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.session import SessionCreate
 from kitaru.server.application.models.session_node import SessionNodeUpsert
 from kitaru.server.domain.replay_config import ToolPolicy

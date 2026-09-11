@@ -49,8 +49,8 @@ from kitaru.server.application.models.auth import (
     WorkerAuthContext,
     WorkerPrincipal,
 )
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.replay_service import ReplayService
@@ -934,6 +934,7 @@ def _replay_service_with_analytics(
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,
         plugin_repository=services.plugins,
+        connection_repository=services.connections,
         payload_store=services.payload_store,
         analytics=analytics,
     )
@@ -953,6 +954,7 @@ def _replay_service_with_payload_store(
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,
         plugin_repository=services.plugins,
+        connection_repository=services.connections,
         payload_store=payload_store,
     )
 
