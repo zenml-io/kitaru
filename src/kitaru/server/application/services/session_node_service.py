@@ -14,7 +14,6 @@
 """Session node use cases."""
 
 import uuid
-from datetime import datetime
 
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.cache_keys import compute_tool_cache_key
@@ -43,26 +42,6 @@ from kitaru.server.domain.session_node import (
     SessionNode,
     node_rollup_contribution,
 )
-
-
-def _resolve_started_at(
-    started_at: datetime | None, parent: SessionNode | None
-) -> datetime | None:
-    """Derive the start time a node is positioned by.
-
-    Args:
-        started_at: Start time the node reports, if any.
-        parent: Resolved parent node, if any.
-
-    Returns:
-        Start time to store, None when neither the node nor a resolved
-        parent reports one.
-    """
-    if started_at is not None:
-        return started_at
-    if parent is not None:
-        return parent.started_at
-    return None
 
 
 def _get_node_payloads(nodes: list[SessionNode]) -> list[Payload]:
@@ -150,27 +129,15 @@ class SessionNodeService:
         if not batch:
             return []
 
-        # A node without a start time takes its parent's, and the parent may
-        # be stored from an earlier batch, so the bulk fetch covers the
-        # parent references as well as the batch's own external ids.
-        referenced_external_ids: set[str] = set()
-        for item in batch:
-            referenced_external_ids.add(item.external_id)
-            if item.parent_external_id is not None:
-                referenced_external_ids.add(item.parent_external_id)
-
         existing_by_external_id = await self._repository.get_by_external_ids(
-            session_id, sorted(referenced_external_ids), include_payloads=False
+            session_id,
+            sorted({item.external_id for item in batch}),
+            include_payloads=False,
         )
-        known_by_external_id = dict(existing_by_external_id)
 
         resolved: list[SessionNode] = []
         for item in batch:
-            parent = None
-            if item.parent_external_id is not None:
-                parent = known_by_external_id.get(item.parent_external_id)
             existing_node = existing_by_external_id.get(item.external_id)
-            started_at = _resolve_started_at(item.started_at, parent)
             cache_key = None
             if item.node_type == NodeType.TOOL_CALL and item.tool_name is not None:
                 cache_key = compute_tool_cache_key(item.tool_name, item.inputs)
@@ -186,7 +153,7 @@ class SessionNodeService:
                 name=item.name,
                 status=item.status,
                 error=item.error,
-                started_at=started_at,
+                started_at=item.started_at,
                 ended_at=item.ended_at,
                 input_text_selector=item.input_text_selector,
                 output_text_selector=item.output_text_selector,
@@ -215,7 +182,6 @@ class SessionNodeService:
                 metadata=item.metadata,
             )
             resolved.append(node)
-            known_by_external_id[item.external_id] = node
 
         deltas = [
             rollup_delta(

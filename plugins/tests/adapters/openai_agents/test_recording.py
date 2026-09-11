@@ -16,6 +16,7 @@
 import asyncio
 import json
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
 from unittest.mock import AsyncMock
@@ -498,7 +499,7 @@ async def test_flush_restores_all_nodes_after_a_batch_failure(
             name=f"observation-{index}",
             parent_external_id=ROOT_EXTERNAL_ID,
             external_id=None,
-            started_at=None,
+            started_at=datetime.now(UTC),
             ended_at=None,
             inputs=None,
             outputs=None,
@@ -699,7 +700,7 @@ async def test_reconciles_tools_hosted_calls_and_handoffs_by_public_ids() -> Non
     assert nodes[4].parent_external_id == ROOT_EXTERNAL_ID
     assert nodes[5].status is NodeStatus.COMPLETED
     for node in nodes[1:5]:
-        assert node.started_at is None
+        assert node.started_at == recorder.started_at
         assert node.ended_at is None
 
 
@@ -860,7 +861,14 @@ async def test_same_name_tool_calls_match_outputs_and_parents_by_call_id() -> No
         ("call-1", "first", "response-1"),
         ("call-2", "second", "response-2"),
     ]
-    assert all(node.started_at is None for node in tool_nodes)
+    model_starts = {
+        node.external_id: node.started_at
+        for node in nodes
+        if node.node_type is NodeType.LLM_CALL
+    }
+    assert [node.started_at for node in tool_nodes] == [
+        model_starts[node.parent_external_id] for node in tool_nodes
+    ]
     assert all(node.ended_at is None for node in tool_nodes)
 
 
