@@ -358,7 +358,9 @@ class TaskTransitions:
             self._analytics.track(
                 job.owner_id,
                 AnalyticsEvent.IMPORT_COMPLETED,
-                analytics_events.build_import_completed_properties(task, plugin),
+                analytics_events.build_import_completed_properties(
+                    task, plugin, import_
+                ),
             )
         elif isinstance(task, EvaluationTask):
             self._analytics.track(

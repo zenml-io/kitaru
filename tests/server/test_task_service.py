@@ -73,6 +73,7 @@ from kitaru.server.domain.hook import (
     SetupCommandHook,
     TeardownCommandHook,
 )
+from kitaru.server.domain.imports import Import
 from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
@@ -956,8 +957,34 @@ async def test_apply_status_importer_terminal_tracks_import_completed() -> None:
     assert tracked_event == AnalyticsEvent.IMPORT_COMPLETED
     assert tracked_properties["status"] == "completed"
     assert "plugin_version_id" not in tracked_properties
+    assert tracked_properties["import_source"] == "blob"
     assert tracked_properties["session_count"] == 3
     assert tracked_properties["duration_seconds"] >= 0.0
+
+
+async def test_apply_status_importer_terminal_tracks_api_import_source() -> None:
+    """Name the api import source on the import event of a fetched import."""
+    analytics = _RecordingAnalytics()
+    transitions, tasks, jobs, imports = _build_transitions(analytics)
+    job = await create_job(jobs, ACTOR.account.id)
+    import_ = await imports.create(
+        Import(
+            owner_id=ACTOR.account.id,
+            job_id=job.id,
+            agent_id=uuid.uuid4(),
+            importer_version_id=uuid.uuid4(),
+            fetch_query={},
+        )
+    )
+    task = await create_import_task(tasks, job.id, import_id=import_.id)
+    await create_agent_task(tasks, job.id)
+
+    completed = await _complete_task(transitions, task, result={"created": 1})
+
+    assert completed.status is TaskStatus.COMPLETED
+    _, tracked_event, tracked_properties = analytics.tracked[0]
+    assert tracked_event == AnalyticsEvent.IMPORT_COMPLETED
+    assert tracked_properties["import_source"] == "api"
 
 
 async def test_apply_status_evaluator_terminal_tracks_evaluation_completed() -> None:
