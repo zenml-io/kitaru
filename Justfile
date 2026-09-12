@@ -115,9 +115,9 @@ fuzz-api-models:
 fuzz-mcp:
     HYPOTHESIS_PROFILE=nightly uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py tests/cli/test_redaction_properties.py --hypothesis-show-statistics
 
-# Heavy property-test run for adapter capture and codec contracts
+# Heavy property-test run for adapter capture, codec, and record/replay contracts
 fuzz-adapters:
-    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/adapters/langgraph/test_capture_properties.py plugins/tests/adapters/langgraph/test_codec.py plugins/tests/adapters/claude_agent_sdk/test_codec.py --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/adapters/langgraph/test_capture_properties.py plugins/tests/adapters/langgraph/test_codec.py plugins/tests/adapters/claude_agent_sdk/test_codec.py plugins/tests/adapters/pydantic_ai/test_record_replay_properties.py plugins/tests/adapters/openai_agents/test_record_replay_properties.py --hypothesis-show-statistics
 
 # Heavy grammar-aware property tests for recursive JSON list filters
 fuzz-filters:
