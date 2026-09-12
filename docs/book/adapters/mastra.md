@@ -166,6 +166,10 @@ Compile the agent into a Node command, register that command as the agent versio
 
 The same entrypoint records a baseline session and executes replay jobs. Do not set replay environment variables manually around concurrent calls because environment variables are process-wide.
 
+## Evaluation
+
+Run native Mastra scorers against stored and replayed sessions with the [TypeScript evaluator bridge](../guides/typescript-evaluators.md). Supply an explicit mapping from the recorded session to your scorer input and deploy a pinned Node artifact on the worker.
+
 ## Supported boundary
 
 The adapter supports:
@@ -176,7 +180,7 @@ The adapter supports:
 - Passthrough, static, and same-adapter history tool policies.
 - Schema-only structured output and per-run secondary structuring models with strict validation.
 
-It does not support streaming, workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, `prepareStep`, input processors, LLM tool policy, or TypeScript evaluators. `prepareStep` and input processors are rejected during replay because they can replace the model, prompt, or tools after policy preflight.
+It does not support streaming, workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, `prepareStep`, input processors, or LLM tool policy. `prepareStep` and input processors are rejected during replay because they can replace the model, prompt, or tools after policy preflight.
 
 ## Import existing Mastra traces
 
