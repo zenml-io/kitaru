@@ -92,6 +92,40 @@ async def test_failure_note_redacts_nested_ids_and_credentials() -> None:
     assert raw_token not in notes
 
 
+async def test_requested_action_redacts_ids_and_credentials() -> None:
+    """Sanitize replay inputs before adding them to a failure receipt."""
+    raw_id = "018f7777-1234-7abc-8123-123456789abc"
+    other_id = "018f8888-5678-7def-9234-abcdef123456"
+    raw_token = "live-worker-token"
+    receipt = SequenceReceipt()
+    async with httpx.AsyncClient() as client:
+        runtime = SequenceRuntime(client, receipt)
+        runtime.bind_id("agent_0", raw_id)
+        runtime.set_credential(CredentialRole.WORKER, raw_token)
+        runtime.record_requested_action(
+            SequenceAction(
+                name="update_agent",
+                target="agent_0",
+                arguments={
+                    "resource": f"/agents/{raw_id}",
+                    "related": other_id,
+                    "authorization": f"Bearer {raw_token}",
+                    "password": "plain-secret",
+                },
+            )
+        )
+
+    serialized = receipt.serialize()
+    assert "<$ref:agent_0>" in serialized
+    assert "<unbound-uuid>" in serialized
+    assert '"authorization": "<redacted>"' in serialized
+    assert '"password": "<redacted>"' in serialized
+    assert raw_id not in serialized
+    assert other_id not in serialized
+    assert raw_token not in serialized
+    assert "plain-secret" not in serialized
+
+
 def test_failure_note_does_not_intercept_interrupt() -> None:
     """Propagate an interruption without turning it into a receipt failure."""
     receipt = SequenceReceipt()

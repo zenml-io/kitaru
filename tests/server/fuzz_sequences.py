@@ -25,6 +25,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from conftest import lifespan_client, local_settings
+from kitaru.server.api.config import APISettings
 
 _ACCOUNT_PASSWORD = "sequence-secret"
 _SECRET_FIELDS = frozenset(
@@ -50,6 +51,10 @@ class CredentialRole(StrEnum):
 
     ACCOUNT = "account"
     WORKER = "worker"
+    TASK_ATTEMPT_1 = "task_attempt_1"
+    TASK_ATTEMPT_2 = "task_attempt_2"
+    TASK_ATTEMPT_3 = "task_attempt_3"
+    FOREIGN_TASK = "foreign_task"
 
 
 class SequenceAction(BaseModel):
@@ -75,8 +80,13 @@ class SequenceStepReceipt(BaseModel):
 class SequenceReceipt(BaseModel):
     """Sanitized evidence needed to understand and replay a sequence."""
 
+    requested_actions: list[SequenceAction] = Field(default_factory=list)
     steps: list[SequenceStepReceipt] = Field(default_factory=list)
     successful_operations: int = 0
+
+    def _record_requested_action(self, action: SequenceAction) -> None:
+        """Store one already-sanitized caller action before execution begins."""
+        self.requested_actions.append(action)
 
     def record_step(
         self,
@@ -156,10 +166,12 @@ class SequenceRuntime:
         receipt: SequenceReceipt,
         *,
         database_name: str | None = None,
+        settings: APISettings | None = None,
     ) -> None:
         self.client = client
         self.receipt = receipt
         self.database_name = database_name
+        self.settings = settings
         self._ids: dict[str, str] = {}
         self._credentials: dict[CredentialRole, str] = {}
 
@@ -190,6 +202,21 @@ class SequenceRuntime:
         except KeyError as exc:
             raise AssertionError(f"Credential role is not bound: {role}") from exc
         return {"Authorization": f"Bearer {credential}"}
+
+    def record_requested_action(self, action: SequenceAction) -> None:
+        """Record one caller action after sanitizing its replay arguments."""
+        sanitized_arguments = self.sanitize(action.arguments)
+        if not isinstance(sanitized_arguments, dict):
+            raise AssertionError(
+                "Sanitized sequence action arguments must be a mapping"
+            )
+        self.receipt._record_requested_action(
+            SequenceAction(
+                name=action.name,
+                target=action.target,
+                arguments=sanitized_arguments,
+            )
+        )
 
     def sanitize(self, value: Any) -> Any:
         """Replace live ids and secrets with replayable symbolic values."""
@@ -284,13 +311,20 @@ async def report_cleanup_failures(
 @asynccontextmanager
 async def isolate_sequence(
     receipt: SequenceReceipt,
+    **settings_overrides: Any,
 ) -> AsyncGenerator[SequenceRuntime, None]:
-    """Run one API sequence in one fresh database and authenticated lifespan."""
-    settings = local_settings(
-        use_db=True,
-        DEFAULT_ACCOUNT_PASSWORD=_ACCOUNT_PASSWORD,
-        TASK_SWEEP_INTERVAL_SECONDS=0,
-    )
+    """Run one API sequence in one fresh database and authenticated lifespan.
+
+    Args:
+        receipt: Receipt populated by the isolated sequence.
+        **settings_overrides: Server settings for the isolated lifespan.
+    """
+    settings_values: dict[str, Any] = {
+        "DEFAULT_ACCOUNT_PASSWORD": _ACCOUNT_PASSWORD,
+        "TASK_SWEEP_INTERVAL_SECONDS": 0,
+        **settings_overrides,
+    }
+    settings = local_settings(use_db=True, **settings_values)
     manager = lifespan_client(settings)
     async with report_cleanup_failures(manager) as client:
         response = await client.post(
@@ -305,6 +339,7 @@ async def isolate_sequence(
             client,
             receipt,
             database_name=settings.DB_NAME,
+            settings=settings,
         )
         runtime.set_credential(
             CredentialRole.ACCOUNT,
