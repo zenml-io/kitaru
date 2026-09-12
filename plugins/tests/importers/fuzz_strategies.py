@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Hypothesis strategies for importer fuzzing."""
 
+import copy
 import json
 from pathlib import Path
 from types import ModuleType
@@ -26,6 +27,7 @@ import kitaru_jsonl_importer.importer as kitaru_jsonl
 import kitaru_langfuse_importer.importer as langfuse
 import kitaru_langsmith_importer.importer as langsmith
 import kitaru_logfire_importer.importer as logfire
+import kitaru_mastra_importer.importer as mastra
 import kitaru_phoenix_importer.importer as phoenix
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -35,6 +37,7 @@ IMPORTERS: dict[str, ModuleType] = {
     "braintrust": braintrust,
     "langsmith": langsmith,
     "logfire": logfire,
+    "mastra": mastra,
     "phoenix": phoenix,
     "jsonl": kitaru_jsonl,
 }
@@ -344,6 +347,187 @@ def _phoenix_records() -> SearchStrategy[list[dict[str, Any]]]:
     return st.lists(span, min_size=1, max_size=20)
 
 
+_MASTRA_JSON = st.recursive(
+    st.none()
+    | st.booleans()
+    | st.integers(min_value=-1_000, max_value=1_000)
+    | st.text(alphabet="abcdefghijklmnopqrstuvwxyz /~", max_size=20),
+    lambda children: (
+        st.lists(children, max_size=3)
+        | st.dictionaries(
+            st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=8),
+            children,
+            max_size=3,
+        )
+    ),
+    max_leaves=8,
+)
+
+
+@st.composite
+def _build_mastra_records(draw: st.DrawFn) -> list[dict[str, Any]]:
+    """Build valid, bounded Mastra getTrace response trees."""
+    traces = []
+    for trace_index in range(draw(st.integers(min_value=2, max_value=4))):
+        trace_id = f"trace{trace_index}"
+        span_count = draw(st.integers(min_value=2, max_value=10))
+        span_ids = [f"{trace_id}-span{index}" for index in range(span_count)]
+        spans = []
+        for index, span_id in enumerate(span_ids):
+            if index == 0:
+                span_type = "agent_run"
+                parent_id = None
+            elif index == 1:
+                span_type = "model_generation"
+                parent_id = span_ids[0]
+            else:
+                span_type = draw(
+                    st.sampled_from(
+                        [
+                            "model_generation",
+                            "model_step",
+                            "model_inference",
+                            "model_chunk",
+                            "tool_call",
+                            "mcp_tool_call",
+                            "custom_span",
+                        ]
+                    )
+                )
+                parent_id = draw(st.sampled_from(span_ids[:index]))
+            if index == 0:
+                input_value = [
+                    {
+                        "role": "user",
+                        "content": draw(
+                            st.text(alphabet="abcdefghijklmnopqrstuvwxyz ", max_size=20)
+                        ),
+                    }
+                ]
+            elif index == 1:
+                input_value = {
+                    "messages": [
+                        {"role": "system", "content": "Follow instructions."},
+                        {
+                            "role": "user",
+                            "content": draw(
+                                st.text(
+                                    alphabet="abcdefghijklmnopqrstuvwxyz ", max_size=20
+                                )
+                            ),
+                        },
+                    ]
+                }
+            else:
+                input_value = draw(_MASTRA_JSON)
+            usage = draw(
+                st.fixed_dictionaries(
+                    {},
+                    optional={
+                        "inputTokens": st.integers(min_value=0, max_value=1_000),
+                        "outputTokens": st.integers(min_value=0, max_value=1_000),
+                        "inputDetails": st.fixed_dictionaries(
+                            {},
+                            optional={
+                                "cacheRead": st.integers(min_value=0, max_value=1_000)
+                            },
+                        ),
+                        "outputDetails": st.fixed_dictionaries(
+                            {},
+                            optional={
+                                "reasoning": st.integers(min_value=0, max_value=1_000)
+                            },
+                        ),
+                    },
+                )
+            )
+            attributes: dict[str, Any] = {
+                "usage": usage,
+                "model": "fixture-model",
+                "provider": "fixture-provider",
+                "parameters": {},
+            }
+            if span_type == "model_step":
+                attributes["stepIndex"] = draw(st.integers(min_value=0, max_value=20))
+            elif span_type == "model_chunk":
+                attributes["sequenceNumber"] = draw(
+                    st.integers(min_value=0, max_value=20)
+                )
+            if draw(st.booleans()):
+                attributes["costContext"] = {
+                    "estimatedCost": str(
+                        draw(
+                            st.decimals(
+                                min_value=0,
+                                max_value=100,
+                                allow_nan=False,
+                                allow_infinity=False,
+                                places=4,
+                            )
+                        )
+                    ),
+                    "costUnit": "USD",
+                }
+            span = {
+                "traceId": trace_id,
+                "spanId": span_id,
+                "parentSpanId": parent_id,
+                "name": f"span-{index}",
+                "spanType": span_type,
+                "isEvent": False,
+                "startedAt": "2026-01-01T00:00:00Z",
+                "endedAt": "2026-01-01T00:00:01Z",
+                "input": input_value,
+                "output": draw(_MASTRA_JSON),
+                "attributes": attributes,
+                "metadata": {"threadId": "fixture-thread"},
+            }
+            if span_type in {"tool_call", "mcp_tool_call"}:
+                span["entityId"] = "generated-tool"
+            spans.append(span)
+        traces.append({"traceId": trace_id, "spans": spans})
+    return traces
+
+
+@st.composite
+def mutate_mastra_structure(
+    draw: st.DrawFn,
+) -> tuple[list[dict[str, Any]], str]:
+    """Apply one documented structural fault to an otherwise valid export."""
+    records = draw(_build_mastra_records())
+    problem, expected_error = draw(
+        st.sampled_from(
+            [
+                ("missing_parent", "parent span is missing"),
+                ("duplicate", "duplicate spanId"),
+                ("cycle", "disconnected cycle"),
+                ("depth", "exceeds 64 levels"),
+            ]
+        )
+    )
+    spans = records[0]["spans"]
+    if problem == "missing_parent":
+        spans[1]["parentSpanId"] = "not-exported"
+    elif problem == "duplicate":
+        spans.append(copy.deepcopy(spans[1]))
+    elif problem == "cycle":
+        spans[1]["parentSpanId"] = spans[-1]["spanId"]
+        spans[-1]["parentSpanId"] = spans[1]["spanId"]
+    else:
+        template = spans[1]
+        records[0]["spans"] = [spans[0]]
+        for index in range(1, 65):
+            span = copy.deepcopy(template)
+            span["spanId"] = f"{records[0]['traceId']}-deep-{index}"
+            span["parentSpanId"] = (
+                spans[0]["spanId"]
+                if index == 1
+                else f"{records[0]['traceId']}-deep-{index - 1}"
+            )
+            records[0]["spans"].append(span)
+    return records, expected_error
+
+
 def _kitaru_jsonl_records() -> SearchStrategy[list[dict[str, Any]]]:
     keys = [
         "status",
@@ -465,6 +649,7 @@ _RECORD_STRATEGIES = {
     "braintrust": _braintrust_records,
     "langsmith": _langsmith_records,
     "logfire": _logfire_records,
+    "mastra": _build_mastra_records,
     "phoenix": _phoenix_records,
     "jsonl": _kitaru_jsonl_records,
 }
@@ -479,14 +664,14 @@ def encode_records(name: str, records: list[dict[str, Any]]) -> bytes:
     """Serialize records in the container shape each importer accepts."""
     if name in {"langfuse", "logfire", "jsonl"}:
         return b"\n".join(json.dumps(r).encode() for r in records)
-    # braintrust, langsmith, phoenix accept a JSON array (langfuse also accepts one).
+    # braintrust, langsmith, mastra, and phoenix accept a JSON array.
     return json.dumps(records).encode()
 
 
 _PATH_SELECTORS = st.from_regex(r"(/?[a-z_]{1,8}){1,4}", fullmatch=True)
 
 
-def importer_params() -> SearchStrategy[dict[str, Any]]:
+def importer_params(name: str) -> SearchStrategy[dict[str, Any]]:
     """Generate the user-controlled parameter dict.
 
     Values are weighted toward ones the importers accept. A parameter of the
@@ -495,6 +680,16 @@ def importer_params() -> SearchStrategy[dict[str, Any]]:
     record-normalizing code these properties are about. `invalid_params()`
     covers the rejection paths separately.
     """
+    if name == "mastra":
+        return st.fixed_dictionaries(
+            {},
+            optional={
+                "source_namespace": st.text(
+                    alphabet="abcdefghijklmnopqrstuvwxyz-", min_size=1, max_size=20
+                ),
+                "replay_context": st.just("history-only"),
+            },
+        )
     return st.fixed_dictionaries(
         {},
         optional={
@@ -523,8 +718,33 @@ def importer_params() -> SearchStrategy[dict[str, Any]]:
     )
 
 
-def invalid_params() -> SearchStrategy[dict[str, Any]]:
-    """Generate parameter dicts whose values have the wrong type."""
+def invalid_params(name: str) -> SearchStrategy[dict[str, Any]]:
+    """Generate parameter dictionaries each importer should reject."""
+    if name == "mastra":
+        return st.one_of(
+            st.fixed_dictionaries({"unknown": adversarial_json_value(1)}),
+            st.fixed_dictionaries(
+                {
+                    "source_namespace": st.one_of(
+                        st.just(""),
+                        st.just("   "),
+                        st.integers(),
+                        st.booleans(),
+                        st.lists(st.integers(), max_size=2),
+                    )
+                }
+            ),
+            st.fixed_dictionaries(
+                {
+                    "replay_context": st.one_of(
+                        st.sampled_from(["", "full", "history"]),
+                        st.integers(),
+                        st.booleans(),
+                        st.lists(st.integers(), max_size=2),
+                    )
+                }
+            ),
+        )
     return st.fixed_dictionaries(
         {},
         optional={

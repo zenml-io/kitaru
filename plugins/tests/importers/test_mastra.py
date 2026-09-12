@@ -273,6 +273,49 @@ def test_duplicate_trace_is_skipped_but_conflicting_copy_fails(
     ] == [traces[1]["traceId"]]
 
 
+def test_malformed_conflicting_trace_is_order_independent(
+    traces: list[dict[str, Any]],
+) -> None:
+    """Report one conflict regardless of which duplicate appears first."""
+    valid = traces[0]
+    malformed = copy.deepcopy(valid)
+    del malformed["spans"][0]["spanId"]
+
+    for records in ([valid, malformed], [malformed, valid]):
+        [failure] = _parse(records)
+        assert isinstance(failure, ImportFailure)
+        assert failure.external_id == valid["traceId"]
+        assert failure.error == "conflicting duplicate traceId in export"
+
+
+def test_large_trace_is_not_limited_by_ingest_batch_size(
+    traces: list[dict[str, Any]],
+) -> None:
+    """Normalize more nodes than fit in one session-node API request."""
+    trace = traces[0]
+    root = next(span for span in trace["spans"] if span["parentSpanId"] is None)
+    trace["spans"] = [root]
+    for index in range(500):
+        trace["spans"].append(
+            {
+                "traceId": trace["traceId"],
+                "spanId": f"large-span-{index}",
+                "parentSpanId": root["spanId"],
+                "name": f"large-span-{index}",
+                "spanType": "custom_span",
+                "startedAt": "2026-01-01T00:00:00Z",
+                "endedAt": "2026-01-01T00:00:01Z",
+                "input": {},
+                "output": {},
+                "attributes": {},
+            }
+        )
+
+    [session] = _get_sessions(trace)
+
+    assert len(flatten_nodes(session.nodes)) == 501
+
+
 @pytest.mark.parametrize(
     "params", [{"unknown": True}, {"source_namespace": ""}, {"source_namespace": 1}]
 )

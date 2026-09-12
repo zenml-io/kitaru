@@ -13,7 +13,10 @@
 #  permissions and limitations under the License.
 """Property tests for the importer `parse()` contract."""
 
+import copy
 import json
+from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -29,11 +32,21 @@ from .fuzz_strategies import (
     garbage_bytes,
     importer_params,
     invalid_params,
+    mutate_mastra_structure,
     mutated_seed_lines,
     records_for,
 )
 
 IMPORTER_NAMES = sorted(IMPORTERS)
+
+
+def test_all_importers_have_fuzz_strategies() -> None:
+    """Keep the shared fuzz registry aligned with importer packages."""
+    packages = {
+        path.name.removesuffix("-importer")
+        for path in (Path(__file__).parents[2] / "packages").glob("*-importer")
+    }
+    assert set(IMPORTERS) == packages
 
 
 def _assert_contract(name: str, content: bytes, params: dict[str, Any]) -> None:
@@ -49,10 +62,11 @@ def _assert_contract(name: str, content: bytes, params: dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize("name", IMPORTER_NAMES)
-@given(content=garbage_bytes(), params=importer_params())
+@given(content=garbage_bytes(), data=st.data())
 def test_parse_contract_on_garbage(
-    name: str, content: bytes, params: dict[str, Any]
+    name: str, content: bytes, data: st.DataObject
 ) -> None:
+    params = data.draw(importer_params(name))
     _assert_contract(name, content, params)
 
 
@@ -60,7 +74,7 @@ def test_parse_contract_on_garbage(
 @given(data=st.data())
 def test_parse_contract_on_records(name: str, data: st.DataObject) -> None:
     records = data.draw(records_for(name))
-    params = data.draw(importer_params())
+    params = data.draw(importer_params(name))
     _assert_contract(name, encode_records(name, records), params)
 
 
@@ -68,12 +82,16 @@ def test_parse_contract_on_records(name: str, data: st.DataObject) -> None:
 @given(data=st.data())
 def test_parse_contract_on_invalid_params(name: str, data: st.DataObject) -> None:
     """Cover the parameter-validation branches `importer_params()` avoids."""
+    params = data.draw(invalid_params(name))
+    if name == "mastra":
+        with pytest.raises(IMPORTERS[name].InvalidImport):
+            list(IMPORTERS[name].parse(b"{}", params))
+        return
     records = data.draw(records_for(name))
-    params = data.draw(invalid_params())
     _assert_contract(name, encode_records(name, records), params)
 
 
-@given(content=mutated_seed_lines(), params=importer_params())
+@given(content=mutated_seed_lines(), params=importer_params("langfuse"))
 def test_langfuse_contract_on_mutated_seed(
     content: bytes, params: dict[str, Any]
 ) -> None:
@@ -82,17 +100,31 @@ def test_langfuse_contract_on_mutated_seed(
 
 def _parse_outcomes(
     name: str, content: bytes, params: dict[str, Any]
-) -> tuple[list[str], list[str | None]] | None:
+) -> tuple[list[dict[str, Any]], list[tuple[str | None, str]]] | None:
     module = IMPORTERS[name]
     try:
         items = list(module.parse(content, params))
     except module.InvalidImport:
         return None
     return (
-        sorted(item.external_id for item in items if isinstance(item, ImportedSession)),
         sorted(
-            (item.external_id for item in items if isinstance(item, ImportFailure)),
-            key=lambda external_id: (external_id is not None, external_id or ""),
+            (
+                item.model_dump(mode="json")
+                for item in items
+                if isinstance(item, ImportedSession)
+            ),
+            key=lambda session: (
+                session["external_id"],
+                json.dumps(session, sort_keys=True),
+            ),
+        ),
+        sorted(
+            (
+                (item.external_id, type(item).__name__)
+                for item in items
+                if isinstance(item, ImportFailure)
+            ),
+            key=lambda failure: (failure[0] is not None, failure[0] or "", failure[1]),
         ),
     )
 
@@ -102,7 +134,7 @@ def _parse_outcomes(
 def test_grouping_is_order_independent(name: str, data: st.DataObject) -> None:
     """Which records form a session must not depend on record order."""
     records = data.draw(records_for(name))
-    params = data.draw(importer_params())
+    params = data.draw(importer_params(name))
     # A full st.permutations() draw costs entropy proportional to the record
     # list and trips Hypothesis's data_too_large health check under the
     # derandomized "ci" profile. Reversing and rotating changes which record
@@ -111,9 +143,201 @@ def test_grouping_is_order_independent(name: str, data: st.DataObject) -> None:
     rotation = data.draw(st.integers(0, max(0, len(records) - 1)))
     reordered = list(reversed(records))
     reordered = reordered[rotation:] + reordered[:rotation]
+    if name == "mastra":
+        reordered = copy.deepcopy(reordered)
+        for trace in reordered:
+            trace["spans"].reverse()
     assert _parse_outcomes(
         name, encode_records(name, records), params
     ) == _parse_outcomes(name, encode_records(name, reordered), params)
+
+
+@given(data=st.data())
+def test_mastra_valid_records_reach_normalization(data: st.DataObject) -> None:
+    """Generated Mastra data must exercise normalization, not only rejection."""
+    records = data.draw(records_for("mastra"))
+    params = data.draw(importer_params("mastra"))
+    items = list(IMPORTERS["mastra"].parse(encode_records("mastra", records), params))
+    assert len(items) == len(records)
+    assert all(isinstance(item, ImportedSession) for item in items)
+    sessions = {
+        item.metadata["mastra"]["trace_id"]: item
+        for item in items
+        if isinstance(item, ImportedSession)
+    }
+    for trace in records:
+        session = sessions[trace["traceId"]]
+        source = {span["spanId"]: span for span in trace["spans"]}
+        nodes = flatten_nodes(session.nodes)
+        assert {node.external_id for node in nodes} == set(source)
+        by_index = {node.index: node.external_id for node in nodes}
+        for node in nodes:
+            raw = source[node.external_id]
+            assert node.trace_id == trace["traceId"]
+            assert by_index.get(node.parent_index) == raw["parentSpanId"]
+            assert node.inputs == raw["input"]
+            assert node.outputs == raw["output"]
+            assert node.attributes == raw["attributes"]
+
+
+@given(case=mutate_mastra_structure(), params=importer_params("mastra"))
+def test_mastra_structural_failure_is_contained(
+    case: tuple[list[dict[str, Any]], str],
+    params: dict[str, Any],
+) -> None:
+    """Reject one malformed trace while preserving every valid neighbor."""
+    records, expected_error = case
+    items = list(IMPORTERS["mastra"].parse(encode_records("mastra", records), params))
+    failures = [item for item in items if isinstance(item, ImportFailure)]
+    sessions = [item for item in items if isinstance(item, ImportedSession)]
+    assert len(failures) == 1
+    assert failures[0].external_id == records[0]["traceId"]
+    assert expected_error in failures[0].error
+    assert {session.metadata["mastra"]["trace_id"] for session in sessions} == {
+        trace["traceId"] for trace in records[1:]
+    }
+
+
+@given(data=st.data())
+def test_mastra_duplicate_trace_contract(data: st.DataObject) -> None:
+    """Deduplicate exact traces and suppress a conflicting trace ID."""
+    records = data.draw(records_for("mastra"))
+    params = data.draw(importer_params("mastra"))
+    original = records[0]
+    exact_items = list(
+        IMPORTERS["mastra"].parse(
+            encode_records("mastra", [original, copy.deepcopy(original)]), params
+        )
+    )
+    assert [
+        item.metadata["mastra"]["trace_id"]
+        for item in exact_items
+        if isinstance(item, ImportedSession)
+    ] == [original["traceId"]]
+
+    conflicting = copy.deepcopy(original)
+    conflicting["spans"][0]["name"] += "-conflicting"
+    items = list(
+        IMPORTERS["mastra"].parse(
+            encode_records("mastra", [original, conflicting, *records[1:]]), params
+        )
+    )
+    failures = [item for item in items if isinstance(item, ImportFailure)]
+    assert len(failures) == 1
+    assert failures[0].external_id == original["traceId"]
+    assert "conflicting duplicate traceId" in failures[0].error
+    assert {
+        item.metadata["mastra"]["trace_id"]
+        for item in items
+        if isinstance(item, ImportedSession)
+    } == {trace["traceId"] for trace in records[1:]}
+
+
+_TOKEN_FIELDS = {
+    "input_tokens": ("inputTokens", None),
+    "output_tokens": ("outputTokens", None),
+    "cached_input_tokens": ("cacheRead", "inputDetails"),
+    "reasoning_tokens": ("reasoning", "outputDetails"),
+}
+_TOKEN_COUNTS = st.dictionaries(
+    st.sampled_from(sorted(_TOKEN_FIELDS)),
+    st.integers(min_value=0, max_value=10_000),
+    max_size=len(_TOKEN_FIELDS),
+)
+_COST = st.none() | st.decimals(
+    min_value=0, max_value=100, allow_nan=False, allow_infinity=False, places=4
+)
+
+
+def _build_mastra_usage(counts: dict[str, int]) -> dict[str, Any]:
+    usage: dict[str, Any] = {}
+    for normalized, (source, detail) in _TOKEN_FIELDS.items():
+        if normalized not in counts:
+            continue
+        target = usage.setdefault(detail, {}) if detail else usage
+        target[source] = counts[normalized]
+    return usage
+
+
+def _build_usage_attributes(
+    counts: dict[str, int], cost: Decimal | None
+) -> dict[str, Any]:
+    attributes: dict[str, Any] = {"usage": _build_mastra_usage(counts)}
+    if cost is not None:
+        attributes["costContext"] = {
+            "estimatedCost": str(cost),
+            "costUnit": "USD",
+        }
+    return attributes
+
+
+@given(
+    generation=_TOKEN_COUNTS,
+    step=_TOKEN_COUNTS,
+    inference=_TOKEN_COUNTS,
+    generation_cost=_COST,
+    step_cost=_COST,
+    inference_cost=_COST,
+)
+def test_mastra_usage_uses_nearest_aggregate_once(
+    generation: dict[str, int],
+    step: dict[str, int],
+    inference: dict[str, int],
+    generation_cost: Decimal | None,
+    step_cost: Decimal | None,
+    inference_cost: Decimal | None,
+) -> None:
+    """Aggregate each token and cost field once, with field-level fallback."""
+    trace_id = "usage-trace"
+    span_levels = (
+        ("agent_run", {}, None),
+        ("model_generation", generation, generation_cost),
+        ("model_step", step, step_cost),
+        ("model_inference", inference, inference_cost),
+    )
+    spans = []
+    for index, (span_type, counts, cost) in enumerate(span_levels):
+        spans.append(
+            {
+                "traceId": trace_id,
+                "spanId": f"span-{index}",
+                "parentSpanId": f"span-{index - 1}" if index else None,
+                "name": span_type,
+                "spanType": span_type,
+                "startedAt": "2026-01-01T00:00:00Z",
+                "endedAt": "2026-01-01T00:00:01Z",
+                "input": {},
+                "output": {},
+                "attributes": _build_usage_attributes(counts, cost),
+            }
+        )
+    session = next(
+        item
+        for item in IMPORTERS["mastra"].parse(
+            encode_records("mastra", [{"traceId": trace_id, "spans": spans}]), {}
+        )
+        if isinstance(item, ImportedSession)
+    )
+    for field in _TOKEN_FIELDS:
+        expected = next(
+            (level[field] for level in (generation, step, inference) if field in level),
+            0,
+        )
+        actual = sum(
+            getattr(node.tokens, field) or 0
+            for node in session.nodes
+            if node.tokens is not None
+        )
+        assert actual == expected
+    expected_cost = next(
+        (
+            cost
+            for cost in (generation_cost, step_cost, inference_cost)
+            if cost is not None
+        ),
+        Decimal(0),
+    )
+    assert sum((node.cost or Decimal(0)) for node in session.nodes) == expected_cost
 
 
 def _assert_order_independent(name: str, rows: list[dict[str, Any]]) -> None:
