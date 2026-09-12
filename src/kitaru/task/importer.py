@@ -424,7 +424,12 @@ def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
             for node in indexed_nodes
             if node.index is not None
         ]
-        return SessionNodeBatchRequest(nodes=direct).nodes
+        indexes = [node.index for node in direct]
+        if len(indexes) != len(set(indexes)):
+            raise ValueError("node indexes must be unique")
+        for start in range(0, len(direct), NODE_BATCH_SIZE):
+            SessionNodeBatchRequest(nodes=direct[start : start + NODE_BATCH_SIZE])
+        return direct
 
     flattened: list[SessionNodeCreateRequest] = []
 

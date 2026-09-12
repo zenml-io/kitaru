@@ -370,6 +370,33 @@ def test_flatten_nodes_preserves_explicit_wire_indexes() -> None:
     assert flattened[1].parent_index == 4
 
 
+def test_flatten_nodes_accepts_large_explicit_index_set() -> None:
+    """Validate a whole imported session independently of API batch limits."""
+    nodes = [
+        imported_node(str(index)).model_copy(
+            update={"index": index, "parent_index": index - 1 if index else None}
+        )
+        for index in range(501)
+    ]
+
+    flattened = flatten_nodes(nodes)
+
+    assert [node.index for node in flattened] == list(range(501))
+    assert [node.parent_index for node in flattened] == [None, *range(500)]
+
+
+def test_flatten_nodes_rejects_duplicate_indexes_across_batches() -> None:
+    """Reject duplicate indexes even when API-sized validation splits them."""
+    nodes = [
+        imported_node(str(index)).model_copy(update={"index": index})
+        for index in range(501)
+    ]
+    nodes[-1] = nodes[-1].model_copy(update={"index": NODE_BATCH_SIZE - 1})
+
+    with pytest.raises(ValueError, match="node indexes must be unique"):
+        flatten_nodes(nodes)
+
+
 def test_flatten_nodes_handles_deep_acyclic_tree() -> None:
     """Flatten deep plugin trees without depending on Python recursion depth."""
     root = imported_node("0")
