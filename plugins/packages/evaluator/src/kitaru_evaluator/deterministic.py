@@ -16,7 +16,7 @@ import uuid
 from collections import Counter
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import MAX_EMAX, MIN_EMIN, Decimal, InvalidOperation, localcontext
 from enum import Enum
 from itertools import pairwise
 from typing import Any
@@ -254,22 +254,23 @@ def sum_decimals(values: list[Decimal]) -> Decimal:
     """Sum finite decimals exactly without using the ambient decimal context."""
     if not values:
         return Decimal(0)
-    parts: list[tuple[int, tuple[int, ...], int]] = []
+    parts: list[tuple[tuple[int, ...], int]] = []
     for value in values:
         decimal_tuple = value.as_tuple()
         if not isinstance(decimal_tuple.exponent, int):
             raise ValueError("number must be finite")
-        parts.append((decimal_tuple.sign, decimal_tuple.digits, decimal_tuple.exponent))
-    minimum_exponent = min(exponent for _, _, exponent in parts)
-    total = 0
-    for sign, digits, exponent in parts:
-        coefficient = int("".join(str(digit) for digit in digits) or "0")
-        if sign:
-            coefficient = -coefficient
-        total += coefficient * 10 ** (exponent - minimum_exponent)
-    sign = 1 if total < 0 else 0
-    digits = tuple(int(digit) for digit in str(abs(total))) if total else (0,)
-    return Decimal((sign, digits, minimum_exponent))
+        parts.append((decimal_tuple.digits, decimal_tuple.exponent))
+    minimum_exponent = min(exponent for _, exponent in parts)
+    maximum_digit_position = max(exponent + len(digits) for digits, exponent in parts)
+    precision = max(
+        1,
+        maximum_digit_position - minimum_exponent + len(str(len(values))),
+    )
+    with localcontext() as context:
+        context.prec = precision
+        context.Emax = MAX_EMAX
+        context.Emin = MIN_EMIN
+        return sum(values, start=Decimal(0))
 
 
 def _resource_value(value: Decimal | int | None) -> str:
