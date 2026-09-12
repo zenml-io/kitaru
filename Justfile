@@ -115,6 +115,10 @@ fuzz-filters:
 fuzz-api:
     HYPOTHESIS_PROFILE=nightly KITARU_FUZZ=1 KITARU_FUZZ_RANDOM=1 KITARU_FUZZ_MAX_EXAMPLES=400 uv run --extra server --group fuzz pytest tests/server/test_fuzz_api.py -p no:randomly --hypothesis-show-statistics
 
+# Run isolated successful agent/version API sequences against PostgreSQL
+fuzz-api-sequences MAX_EXAMPLES="25" MAX_ACTIONS="15":
+    KITARU_FUZZ_API_SEQUENCES=1 KITARU_TEST_REQUIRE_POSTGRES=1 KITARU_FUZZ_API_SEQUENCE_MAX_EXAMPLES={{ MAX_EXAMPLES }} KITARU_FUZZ_API_SEQUENCE_MAX_ACTIONS={{ MAX_ACTIONS }} uv run --extra server --group fuzz pytest tests/server/test_fuzz_api_sequences.py -p no:randomly --hypothesis-show-statistics
+
 # Check Alembic migrations against the ORM schema (requires docker compose up -d db)
 migration-check:
     uv run python scripts/check_migrations.py
