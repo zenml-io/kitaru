@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed capture byte-budget accounting for enum values while retaining bounded unwrapping.
+
 ## 0.1.2
 
 - Mark captured mapping-key coercion and collisions as non-replayable, preserve nested tuples in tool results, and reject malformed stored outcomes without executing the live tool.
