@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, overload
 
 import pytest
@@ -94,6 +95,64 @@ def test_capture_preserves_ordinary_string_mapping() -> None:
     assert captured.value == value
     assert captured.replayable
     assert not captured.reasons
+
+
+def test_enum_value_uses_its_encoded_byte_budget_once() -> None:
+    class Status(Enum):
+        ZERO = 0
+
+    captured = capture_value(Status.ZERO, CapturePolicy(max_field_bytes=1))
+
+    assert captured.value == 0
+    assert captured.encoded_bytes == 1
+    assert captured.replayable
+    assert not captured.reasons
+
+
+def test_nested_enum_unwrapping_is_bounded() -> None:
+    value: Any = 0
+    for index in range(1_100):
+        value = next(iter(Enum(f"Status{index}", {"VALUE": value})))
+
+    within_limit = capture_value(value, CapturePolicy(max_field_bytes=1_100))
+    over_limit = capture_value(value, CapturePolicy(max_field_bytes=1_099))
+
+    assert within_limit.value == 0
+    assert within_limit.encoded_bytes == 1
+    assert within_limit.replayable
+    assert not within_limit.reasons
+    assert over_limit.value == {"__kitaru_capture__": "max_field_bytes"}
+    assert over_limit.reasons == ("max_field_bytes",)
+    assert over_limit.lossy and over_limit.truncated and not over_limit.replayable
+
+
+def test_cyclic_enum_value_is_contained() -> None:
+    class Cyclic(Enum):
+        VALUE = 0
+
+    Cyclic.VALUE._value_ = Cyclic.VALUE
+
+    captured = capture_value(Cyclic.VALUE, CapturePolicy())
+
+    assert captured.value == {"__kitaru_capture__": "cycle"}
+    assert captured.reasons == ("cycle",)
+    assert captured.lossy and not captured.truncated and not captured.replayable
+
+
+def test_cyclic_enum_markers_consume_shared_work_budget() -> None:
+    class Cyclic(Enum):
+        VALUE = 0
+
+    Cyclic.VALUE._value_ = Cyclic.VALUE
+
+    captured = capture_value(
+        [Cyclic.VALUE, Cyclic.VALUE], CapturePolicy(max_field_bytes=2)
+    )
+
+    assert captured.value == {"__kitaru_capture__": "max_field_bytes"}
+    assert set(captured.reasons) == {"cycle", "max_field_bytes"}
+    assert len(captured.reasons) == 2
+    assert captured.lossy and captured.truncated and not captured.replayable
 
 
 @dataclass

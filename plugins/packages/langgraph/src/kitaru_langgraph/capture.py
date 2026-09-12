@@ -195,6 +195,20 @@ def _convert(
     if depth > policy.max_depth:
         reasons.append("max_depth")
         return {"__kitaru_capture__": "max_depth"}
+    if isinstance(value, Enum):
+        seen_enums: set[int] = set()
+        while isinstance(value, Enum):
+            identity = id(value)
+            if identity in seen_enums:
+                reasons.append("cycle")
+                return {"__kitaru_capture__": "cycle"}
+            if seen_enums:
+                if work_remaining[0] <= 0:
+                    reasons.append("max_field_bytes")
+                    return {"__kitaru_capture__": "max_field_bytes"}
+                work_remaining[0] -= 1
+            seen_enums.add(identity)
+            value = value.value
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
@@ -204,15 +218,6 @@ def _convert(
         return value
     if isinstance(value, (UUID, datetime, date, Decimal)):
         return str(value)
-    if isinstance(value, Enum):
-        return _convert(
-            value.value,
-            policy=policy,
-            depth=depth,
-            reasons=reasons,
-            active_ids=active_ids,
-            work_remaining=work_remaining,
-        )
     if isinstance(value, BaseModel):
         value = value.model_dump(mode="python", warnings=False)
     elif is_dataclass(value) and not isinstance(value, type):
