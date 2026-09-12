@@ -51,6 +51,33 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
+  - id: mastra-adaptive-conversation
+    path: examples/typescript/mastra_adaptive_conversation
+    public_docs: [examples/README.md]
+    owner_area: Bounded adaptive transcript generation and Python contract evaluation
+    coverage:
+      deterministic_pytest:
+        status: not_applicable
+        notes: Conversation behavior is covered by the example Vitest suite in the TypeScript CI job.
+      local_smoke:
+        status: covered
+        command: pnpm --filter @zenml-io/kitaru-example-mastra-adaptive-conversation test
+        requires_server: false
+        timeout_seconds: 60
+        notes: Covers branching, repeat isolation, overrides, input fallback, and bounded failures.
+      live_provider:
+        status: manual_only
+        provider: openai
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 900
+        cost_class: low
+        command: uv run python examples/typescript/mastra_adaptive_conversation/demo.py
+        waiver:
+          reason: Two bounded conversations call a paid OpenAI target through a temporary local server and worker.
+          reviewer_action: Run the documented demo and inspect both transcript and Python evaluator results.
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: mastra-support-triage
     path: examples/typescript/mastra_support_triage
     public_docs: [docs/book/adapters/mastra.md, packages/mastra/README.md]
