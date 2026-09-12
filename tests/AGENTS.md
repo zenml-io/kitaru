@@ -50,7 +50,7 @@ For local reproduction, prefix the normal base pytest command with `KITARU_TEST_
 
 ## Property-based tests
 
-Hypothesis tests live next to the surface they cover: `plugins/tests/importers/test_fuzz_parse.py` (importer `parse()` contract), `tests/mcp/test_fuzz_tools.py` (MCP tool boundary, requests generated from each tool's JSON schema), `tests/cli/test_redaction_properties.py`, `tests/server/test_fuzz_filters.py` (recursive JSON list filters), and `plugins/tests/adapters/langgraph/test_capture_properties.py`.
+Hypothesis tests live next to the surface they cover: `plugins/tests/importers/test_fuzz_parse.py` (importer `parse()` contract), `tests/mcp/test_fuzz_tools.py` (MCP tool boundary, requests generated from each tool's JSON schema), `tests/cli/test_redaction_properties.py`, `tests/server/test_fuzz_filters.py` (recursive JSON list filters), `tests/server/test_fuzz_api_sequences.py` (isolated successful agent/version API sequences), and `plugins/tests/adapters/langgraph/test_capture_properties.py`.
 
 Three profiles are registered in each root's `conftest.py` and selected with `HYPOTHESIS_PROFILE`: `dev` (100 examples, default locally), `ci` (50 examples, fixed seed; default when `CI` is set, so PR runs are deterministic), and `nightly` (2000 examples, random; used by `just fuzz` and the `fuzz-nightly` workflow — `fuzz-importers`, `fuzz-mcp`, and `fuzz-filters` cover their named property-test surfaces). `@given` tests are sync; call async code with `asyncio.run` inside the body.
 
@@ -71,3 +71,5 @@ The only assertion is that the server never answers 5xx. One database is shared 
 Known defects are listed in `KNOWN_FAILURES` keyed by method and path, with the issue number as the reason, and skip rather than mask everything behind them in the same operation. Delete an entry as part of closing its issue.
 
 `KITARU_FUZZ_MAX_EXAMPLES` sets depth (default 25) and `KITARU_FUZZ_RANDOM=1` turns off `derandomize` so a nightly explores fresh inputs; the default stays derandomized so a failure reproduces. `KITARU_FUZZ_CAPTURE` writes captured tracebacks to a JSONL file. Findings scale steeply with depth, so prefer nightly depth over a shallow gate.
+
+`tests/server/test_fuzz_api_sequences.py` gives each complete generated action list a fresh PostgreSQL database, application lifespan, and authenticated client. It records symbolic resource IDs and credential roles so a shrunk failure can be replayed without retaining database IDs or tokens. Schemathesis validates observed responses against the committed OpenAPI schema; ordinary Hypothesis action lists keep prerequisites valid and isolation explicit. Opt in with `just fuzz-api-sequences`, or pass smaller bounds such as `just fuzz-api-sequences 5 5` for a smoke run. The explicit suite fails rather than skips when PostgreSQL is unavailable.
