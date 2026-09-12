@@ -97,15 +97,27 @@ test *ARGS:
     uv run pytest {{ ARGS }}
 
 # Run all property tests with the heavy nightly profile
-fuzz: fuzz-importers fuzz-mcp fuzz-filters fuzz-api
+fuzz: fuzz-importers fuzz-evaluators fuzz-api-models fuzz-mcp fuzz-adapters fuzz-filters fuzz-api
 
-# Heavy property-test run for the plugins tree (importer parse() contract, LangGraph capture)
+# Heavy property-test run for importer parse() and normalization contracts
 fuzz-importers:
-    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/importers/test_fuzz_parse.py plugins/tests/adapters/langgraph/test_capture_properties.py --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/importers/test_fuzz_parse.py plugins/tests/importers/test_normalization_properties.py --hypothesis-show-statistics
+
+# Heavy property-test run for deterministic evaluator arithmetic
+fuzz-evaluators:
+    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/evaluators/test_numeric_properties.py --hypothesis-show-statistics
+
+# Heavy property-test run for selected API model wire contracts
+fuzz-api-models:
+    HYPOTHESIS_PROFILE=nightly uv run --extra server pytest tests/api_models/test_wire_properties.py --hypothesis-show-statistics
 
 # Heavy property-test run for the core tree (MCP tool boundary, credential redaction)
 fuzz-mcp:
     HYPOTHESIS_PROFILE=nightly uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py tests/cli/test_redaction_properties.py --hypothesis-show-statistics
+
+# Heavy property-test run for adapter capture and codec contracts
+fuzz-adapters:
+    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/adapters/langgraph/test_capture_properties.py plugins/tests/adapters/langgraph/test_codec.py plugins/tests/adapters/claude_agent_sdk/test_codec.py --hypothesis-show-statistics
 
 # Heavy grammar-aware property tests for recursive JSON list filters
 fuzz-filters:
