@@ -14,6 +14,7 @@
 """Property tests for CLI and MCP credential redaction."""
 
 import json
+from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -57,11 +58,24 @@ _secret_keys = st.sampled_from(
     ]
 )
 
-
-@pytest.mark.parametrize("redact_data", _REDACTORS)
-@given(value=_json)
-def test_never_raises_and_is_json(redact_data: Any, value: Any) -> None:
-    json.dumps(redact_data(value))
+_inline_secret = st.builds(
+    lambda prefix, secret: f"before {prefix}{secret} after",
+    st.sampled_from(["KITKEY_", "ZENPROKEY_", "Bearer "]),
+    st.text(min_size=8, max_size=20, alphabet="abcdef0123456789"),
+)
+_idempotent_roots = st.recursive(
+    st.none()
+    | st.booleans()
+    | st.integers()
+    | st.text(max_size=30)
+    | _inline_secret
+    | st.just("***"),
+    lambda children: (
+        st.lists(children, max_size=4)
+        | st.dictionaries(st.text(max_size=12), children, max_size=4)
+    ),
+    max_leaves=12,
+)
 
 
 @pytest.mark.parametrize("redact_data", _REDACTORS)
@@ -138,6 +152,22 @@ def test_mixed_keys_survive_json_and_repeated_redaction(
     assert redact_data(output) == output
 
 
+@given(value=_idempotent_roots)
+def test_root_shapes_are_idempotent_and_inputs_are_unchanged(value: Any) -> None:
+    original = deepcopy(value)
+
+    output = cli_redact(value)
+
+    assert cli_redact(output) == output
+    assert value == original
+    json.dumps(output)
+
+
+def test_cli_and_mcp_export_the_shared_redactor() -> None:
+    """Keep the single property corpus valid for both public aliases."""
+    assert cli_redact is mcp_redact
+
+
 @pytest.mark.parametrize("redact_data", _REDACTORS)
 @pytest.mark.parametrize("key", [1, True, (1,)])
 @pytest.mark.parametrize("reverse", [False, True])
@@ -164,6 +194,7 @@ def test_cycles_are_bounded_but_shared_values_remain_visible(redact_data: Any) -
     assert "hidden" not in json.dumps(output)
     assert output["first"] == output["second"] == {"visible": 1, "password": "***"}
     assert "cycle" in output["cycle"]
+    assert redact_data(output) == output
     assert sequence[0] is mapping and mapping["cycle"] is sequence
 
 
@@ -173,9 +204,11 @@ def test_depth_boundary_is_bounded(redact_data: Any, depth: int) -> None:
     value: Any = "visible"
     for _ in range(depth):
         value = [value]
-    serialized = json.dumps(redact_data(value))
+    output = redact_data(value)
+    serialized = json.dumps(output)
     assert ("visible" in serialized) == (depth < 64)
     assert len(serialized) < 200
+    assert redact_data(output) == output
 
 
 @pytest.mark.parametrize("redact_data", _REDACTORS)

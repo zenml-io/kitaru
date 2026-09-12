@@ -22,9 +22,18 @@ jobs:
           - name: importers
             sync-command: uv sync --project plugins --frozen --all-packages
             recipe: fuzz-importers
+          - name: evaluators
+            sync-command: uv sync --project plugins --frozen --all-packages
+            recipe: fuzz-evaluators
+          - name: api-models
+            sync-command: uv sync --frozen --extra server
+            recipe: fuzz-api-models
           - name: mcp
-            sync-command: uv sync --frozen --extra server --extra mcp
+            sync-command: uv sync --frozen --extra server --extra cli --extra mcp
             recipe: fuzz-mcp
+          - name: adapters
+            sync-command: uv sync --project plugins --frozen --all-packages
+            recipe: fuzz-adapters
           - name: filters
             sync-command: uv sync --frozen --extra server
             recipe: fuzz-filters
