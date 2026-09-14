@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Node external id Alembic revision.
 
-Revision ID: 020_node_external_id
-Revises: 019_import_max_sessions
+Revision ID: 021_node_external_id
+Revises: 020_reasoning_selectors
 Create Date: 2026-09-10
 
 """
@@ -24,8 +24,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = "020_node_external_id"
-down_revision = "019_import_max_sessions"
+revision = "021_node_external_id"
+down_revision = "020_reasoning_selectors"
 branch_labels = None
 depends_on = None
 

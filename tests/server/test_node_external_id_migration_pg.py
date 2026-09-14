@@ -35,8 +35,8 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.session import Session
 
-NODE_EXTERNAL_ID_REVISION = "020_node_external_id"
-PREVIOUS_REVISION = "019_import_max_sessions"
+NODE_EXTERNAL_ID_REVISION = "021_node_external_id"
+PREVIOUS_REVISION = "020_reasoning_selectors"
 
 SESSION_NODE_COLUMNS = text("""
     SELECT column_name FROM information_schema.columns
@@ -46,11 +46,12 @@ SESSION_NODE_COLUMNS = text("""
 INSERT_NODE = text("""
     INSERT INTO session_node (
         id, session_id, parent_id, secondary_parent_ids, "index", external_id,
-        node_type, name, status, started_at, metadata, created, updated
+        node_type, name, status, started_at, reasoning_selectors, metadata,
+        created, updated
     ) VALUES (
         :id, :session_id, :parent_id, cast(:secondary_parent_ids AS jsonb),
         :index, :external_id, 'llm_call', 'call', 'completed', :started_at,
-        '{}'::jsonb, :created, :created
+        '[]'::jsonb, '{}'::jsonb, :created, :created
     )
 """)
 
