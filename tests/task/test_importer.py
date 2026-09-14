@@ -404,7 +404,7 @@ def test_flatten_nodes_handles_deep_acyclic_tree() -> None:
     assert [node.external_id for node in flattened] == [str(i) for i in range(1_200)]
     assert [node.parent_external_id for node in flattened] == [
         None,
-        *[f"node-{i}" for i in range(1_199)],
+        *[str(i) for i in range(1_199)],
     ]
     for node in flattened:
         json.loads(node.model_dump_json())
