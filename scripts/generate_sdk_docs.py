@@ -162,6 +162,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "SessionNodeListParams",
                 "SessionNodeResponse",
                 "SessionWithNodesResponse",
+                "NodeLink",
                 "NodeType",
                 "NodeStatus",
             }

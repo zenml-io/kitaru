@@ -8,7 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, Mock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -167,6 +167,15 @@ def test_namespace_changes_identity_without_changing_source_trace(
     assert namespaced.nodes == original.nodes
 
 
+async def _ingest(
+    client: KitaruAPIClient, session: ImportedSession, agent_id: UUID
+) -> SessionResponse:
+    """Ingest one parsed session and require it to be stored."""
+    stored = await ingest_session(client, session, agent_id, "mastra")
+    assert stored is not None
+    return stored
+
+
 async def test_reimport_ingests_nodes_into_the_existing_session(
     traces: list[dict[str, Any]],
 ) -> None:
@@ -186,14 +195,8 @@ async def test_reimport_ingests_nodes_into_the_existing_session(
     client.sessions.create = AsyncMock(side_effect=create)
     client.sessions.ingest_nodes = AsyncMock()
     agent_id = uuid4()
-    first = [
-        await ingest_session(client, s, agent_id, "mastra")
-        for s in _get_sessions(traces)
-    ]
-    second = [
-        await ingest_session(client, s, agent_id, "mastra")
-        for s in _get_sessions(traces)
-    ]
+    first = [await _ingest(client, s, agent_id) for s in _get_sessions(traces)]
+    second = [await _ingest(client, s, agent_id) for s in _get_sessions(traces)]
     assert [session.id for session in second] == [session.id for session in first]
     assert len(stored) == 2
     assert client.sessions.ingest_nodes.await_count == 4
