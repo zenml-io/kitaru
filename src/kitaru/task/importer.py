@@ -89,10 +89,9 @@ class ImportedNode(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    index: int | None = None
-    parent_index: int | None = None
-    links: list[NodeLink] = Field(default_factory=list)
     external_id: str | None = None
+    parent_external_id: str | None = None
+    links: list[NodeLink] = Field(default_factory=list)
     trace_id: str | None = None
     node_type: NodeType
     name: str
@@ -410,52 +409,28 @@ def _reject_duplicate_external_ids(external_ids: Iterable[str]) -> None:
 
 
 def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
-    """Flatten an imported node tree into ingest requests, depth-first.
+    """Flatten imported nodes into ingest requests, depth-first.
 
-    A node without an external id gets one minted from its position, its
-    explicit index in the indexed representation or its depth-first position
-    in the tree representation.
+    A top-level node names its parent by ``parent_external_id``, a nested
+    node's parent is the node it nests under, and a node without an external
+    id gets one minted from its depth-first position.
 
     Args:
         nodes: Top-level imported nodes.
 
     Raises:
-        SessionImportError: The node tree contains a cycle, or an external id
-            repeats within the session.
+        SessionImportError: The node tree contains a cycle, a nested node
+            names a parent, or an external id repeats within the session.
 
     Returns:
         Flat session node create requests in depth-first order.
     """
-    explicit_indexes = [node.index is not None for node in nodes]
-    if any(explicit_indexes):
-        if not all(explicit_indexes) or any(node.children for node in nodes):
-            raise SessionImportError(
-                "Indexed imported nodes must all have indexes and cannot have children"
-            )
-        indexed_nodes = sorted(
-            nodes, key=lambda node: node.index if node.index is not None else -1
-        )
-        external_ids = {
-            node.index: node.external_id or f"node-{node.index}"
-            for node in indexed_nodes
-            if node.index is not None
-        }
-        _reject_duplicate_external_ids(external_ids.values())
-        direct = [
-            _node_request(
-                node, external_ids[node.index], external_ids.get(node.parent_index)
-            )
-            for node in indexed_nodes
-            if node.index is not None
-        ]
-        return SessionNodeBatchRequest(nodes=direct).nodes
-
     flattened: list[SessionNodeCreateRequest] = []
     external_ids_by_position: list[str] = []
 
     active: set[int] = set()
     stack: list[tuple[ImportedNode, str | None, bool]] = [
-        (node, None, False) for node in reversed(nodes)
+        (node, node.parent_external_id, False) for node in reversed(nodes)
     ]
     while stack:
         node, parent_external_id, exiting = stack.pop()
@@ -469,7 +444,12 @@ def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
         external_ids_by_position.append(external_id)
         flattened.append(_node_request(node, external_id, parent_external_id))
         stack.append((node, parent_external_id, True))
-        stack.extend((child, external_id, False) for child in reversed(node.children))
+        for child in reversed(node.children):
+            if child.parent_external_id is not None:
+                raise SessionImportError(
+                    "Imported node nested under a parent cannot name another parent"
+                )
+            stack.append((child, external_id, False))
     _reject_duplicate_external_ids(external_ids_by_position)
     return flattened
 

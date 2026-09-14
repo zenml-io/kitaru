@@ -363,34 +363,29 @@ def test_flatten_nodes_assigns_depth_first_external_ids_and_parents() -> None:
     assert by_name["second-root"].parent_external_id is None
 
 
-def test_flatten_nodes_indexed_mode_maps_parent_index_to_external_id() -> None:
-    """Keep the flat Kitaru JSONL representation and map indexes to external ids."""
+def test_flatten_nodes_keeps_a_top_level_parent_reference() -> None:
+    """Carry the parent a top-level node names, in the order given."""
     nodes = [
-        imported_node("child").model_copy(update={"index": 7, "parent_index": 4}),
-        imported_node("root").model_copy(update={"index": 4}),
-    ]
-
-    flattened = flatten_nodes(nodes)
-
-    assert [node.external_id for node in flattened] == ["node-4", "node-7"]
-    assert flattened[1].parent_external_id == "node-4"
-
-
-def test_flatten_nodes_indexed_mode_prefers_a_node_s_own_external_id() -> None:
-    """Map an explicit parent index to the parent node's own external id."""
-    nodes = [
-        imported_node("root").model_copy(
-            update={"index": 0, "external_id": "root-ext"}
-        ),
         imported_node("child").model_copy(
-            update={"index": 1, "parent_index": 0, "external_id": "child-ext"}
+            update={"external_id": "child-ext", "parent_external_id": "root-ext"}
         ),
+        imported_node("root").model_copy(update={"external_id": "root-ext"}),
     ]
 
     flattened = flatten_nodes(nodes)
 
-    assert [node.external_id for node in flattened] == ["root-ext", "child-ext"]
-    assert flattened[1].parent_external_id == "root-ext"
+    assert [node.external_id for node in flattened] == ["child-ext", "root-ext"]
+    assert flattened[0].parent_external_id == "root-ext"
+    assert flattened[1].parent_external_id is None
+
+
+def test_flatten_nodes_rejects_a_nested_node_naming_a_parent() -> None:
+    """Reject a nested node that also names a parent by external id."""
+    child = imported_node("child").model_copy(update={"parent_external_id": "x"})
+    nodes = [imported_node("root", children=[child])]
+
+    with pytest.raises(SessionImportError, match="nested"):
+        flatten_nodes(nodes)
 
 
 def test_flatten_nodes_handles_deep_acyclic_tree() -> None:
@@ -468,11 +463,11 @@ def test_flatten_nodes_rejects_a_duplicate_external_id() -> None:
         flatten_nodes(nodes)
 
 
-def test_flatten_nodes_rejects_a_duplicate_external_id_in_indexed_mode() -> None:
-    """Reject two indexed nodes in the same session sharing an external id."""
+def test_flatten_nodes_rejects_a_duplicate_external_id_at_top_level() -> None:
+    """Reject two top-level nodes in the same session sharing an external id."""
     nodes = [
-        imported_node("left").model_copy(update={"index": 0, "external_id": "dup"}),
-        imported_node("right").model_copy(update={"index": 1, "external_id": "dup"}),
+        imported_node("left").model_copy(update={"external_id": "dup"}),
+        imported_node("right").model_copy(update={"external_id": "dup"}),
     ]
 
     with pytest.raises(SessionImportError, match="not unique"):

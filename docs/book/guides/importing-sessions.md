@@ -31,7 +31,7 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 
 | Node field | Type | Meaning |
 |---|---|---|
-| `index` | integer | Stable position within the session import. |
+| `index` | integer | Identity of the node within the session import, unique per session. |
 | `parent_index` | integer or null | Index of the parent node. |
 | `links` | link array | Links to other nodes of the session, each with the target's `external_id` and a `kind`. |
 | `external_id`, `trace_id` | string or null | Source node and trace identities. |
@@ -102,7 +102,7 @@ The formatted object below represents one JSONL record. Serialize it onto one li
 }
 ```
 
-Node indexes do not need to be contiguous, and a parent may carry a higher index than its child. A node index must be unique within its session. A link names its target by `external_id`, and a node without one is addressable as `node-<index>`.
+Node indexes do not need to be contiguous, and a parent may carry a higher index than its child. A node without an `external_id` gets `node-<index>`, which is also how a link names it.
 
 ## Import a file
 

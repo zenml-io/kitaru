@@ -182,6 +182,35 @@ def test_surrogates_and_decoder_recursion_isolate_lines() -> None:
         item.model_dump_json()
 
 
+def test_parse_maps_indexes_to_external_ids() -> None:
+    """Mint an external id from the index and resolve parent indexes."""
+    value = _session()
+    node = value["nodes"][0]
+    value["nodes"] = [
+        node | {"index": 3, "parent_index": None, "external_id": None},
+        node | {"index": 5, "parent_index": 3, "external_id": "child"},
+    ]
+
+    [session] = list(parse(json.dumps(value).encode(), {}))
+
+    assert isinstance(session, ImportedSession)
+    assert [(n.external_id, n.parent_external_id) for n in session.nodes] == [
+        ("node-3", None),
+        ("child", "node-3"),
+    ]
+
+
+def test_parse_rejects_a_parent_index_naming_no_node() -> None:
+    """Fail the record when a parent index has no node."""
+    value = _session()
+    value["nodes"][0]["parent_index"] = 9
+
+    [failure] = list(parse(json.dumps(value).encode(), {}))
+
+    assert isinstance(failure, ImportFailure)
+    assert "parent_index 9 names no node" in failure.error
+
+
 def test_flat_chain_is_not_subject_to_nested_depth_limit() -> None:
     """Accept a 128-node indexed chain without building a nested tree."""
     value = _session()
