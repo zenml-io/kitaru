@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Support PydanticAI 2.41 through 2.43 in addition to the existing 2.14 through 2.40 minor lines.
+
 ## 0.2.1 - 2026-09-10
 
 - Support PydanticAI 2.37 through 2.40 in addition to the existing 2.14 through 2.36 minor lines.
