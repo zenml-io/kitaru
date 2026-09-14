@@ -7906,6 +7906,18 @@
       "ServerInfoResponse": {
         "description": "Server info response.",
         "properties": {
+          "analytics_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the server sends analytics events.",
+            "title": "Analytics Enabled"
+          },
           "auth_scheme": {
             "$ref": "#/components/schemas/AuthScheme",
             "description": "Scheme used to authenticate requests."

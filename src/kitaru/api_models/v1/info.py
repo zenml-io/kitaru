@@ -54,3 +54,7 @@ class ServerInfoResponse(ResponseModel):
         default=None,
         description="Control plane API the server accepts credentials from.",
     )
+    analytics_enabled: bool | None = Field(
+        default=None,
+        description="Whether the server sends analytics events.",
+    )
