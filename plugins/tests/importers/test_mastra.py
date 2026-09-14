@@ -17,7 +17,6 @@ from kitaru.api_models.v1.session import SessionCreateRequest, SessionResponse
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.exceptions import APIError
 from kitaru.json_pointer import resolve_json_pointer
 from kitaru.task.importer import ImportedSession, flatten_nodes, ingest_session
 from kitaru_mastra_importer.importer import InvalidImport, parse

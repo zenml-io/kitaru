@@ -8755,17 +8755,13 @@
             "description": "External id of the parent node.",
             "title": "Parent External Id"
           },
-          "reasoning": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Visible reasoning produced by the model call.",
-            "title": "Reasoning"
+          "reasoning_selectors": {
+            "description": "RFC 6901 JSON Pointers selecting visible reasoning from node outputs.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasoning Selectors",
+            "type": "array"
           },
           "requested_model": {
             "anyOf": [
@@ -9040,17 +9036,13 @@
             "description": "External id of the parent node.",
             "title": "Parent External Id"
           },
-          "reasoning": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Visible reasoning, null unless payloads are included.",
-            "title": "Reasoning"
+          "reasoning_selectors": {
+            "description": "RFC 6901 JSON Pointers selecting visible reasoning from node outputs.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasoning Selectors",
+            "type": "array"
           },
           "requested_model": {
             "anyOf": [
@@ -25190,13 +25182,13 @@
             }
           },
           {
-            "description": "Include reasoning, inputs, outputs, and attributes.",
+            "description": "Include inputs, outputs, and attributes.",
             "in": "query",
             "name": "include_payloads",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Include reasoning, inputs, outputs, and attributes.",
+              "description": "Include inputs, outputs, and attributes.",
               "title": "Include Payloads",
               "type": "boolean"
             }
@@ -25270,7 +25262,7 @@
         ]
       },
       "post": {
-        "description": "Ingest a batch of session nodes.\n\nAn external id already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, and 409 when the session does not\ncurrently accept node ingestion.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with reasoning, inputs, outputs, and\n    attributes null.",
+        "description": "Ingest a batch of session nodes.\n\nAn external id already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, and 409 when the session does not\ncurrently accept node ingestion.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with inputs, outputs, and attributes null.",
         "operationId": "ingest_session_nodes_api_v1_sessions__session_id__nodes_post",
         "parameters": [
           {
