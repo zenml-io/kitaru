@@ -255,7 +255,6 @@ from kitaru.server.domain.session import (
     SessionRollups,
 )
 from kitaru.server.domain.session_node import (
-    DuplicateSessionNodeExternalId,
     SessionNode,
 )
 from kitaru.server.domain.tag import (
@@ -3391,22 +3390,9 @@ class FakeSessionNodeRepository:
             session_id: Id of the owning session.
             nodes: Fully resolved nodes to store, in batch order.
 
-        Raises:
-            DuplicateSessionNodeExternalId: An external id of the batch is
-                already held by another node of the session.
-
         Returns:
             Stored nodes in batch order, without payloads.
         """
-        held_by_external_id = {
-            node.external_id: node.id
-            for node in self._nodes.values()
-            if node.session_id == session_id
-        }
-        for node in nodes:
-            held = held_by_external_id.get(node.external_id)
-            if held is not None and held != node.id:
-                raise DuplicateSessionNodeExternalId(session_id)
         stored: list[SessionNode] = []
         for node in nodes:
             existing = self._nodes.get(node.id)

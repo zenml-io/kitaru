@@ -27,7 +27,6 @@ from kitaru.server.adapters.db.orm.cohort_version_session import (
 )
 from kitaru.server.adapters.db.orm.session import SessionORM
 from kitaru.server.adapters.db.orm.session_node import (
-    SESSION_NODE_SESSION_ID_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SESSION_NODE_SESSION_ID_FOREIGN_KEY,
     SessionNodeORM,
 )
@@ -35,10 +34,7 @@ from kitaru.server.adapters.db.pagination import StartOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.domain.session import SessionNotFound
-from kitaru.server.domain.session_node import (
-    DuplicateSessionNodeExternalId,
-    SessionNode,
-)
+from kitaru.server.domain.session_node import SessionNode
 
 RECORDED_HISTORY_ORIGINS = [SessionOrigin.RECORDED.value, SessionOrigin.IMPORTED.value]
 FINISHED_NODE_STATUSES = [NodeStatus.COMPLETED.value, NodeStatus.FAILED.value]
@@ -105,8 +101,6 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
 
         Raises:
             SessionNotFound: No session has this id.
-            DuplicateSessionNodeExternalId: An external id of the batch is
-                already held by another node of the session.
 
         Returns:
             Stored nodes in batch order, without payloads.
@@ -128,14 +122,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
                 row.apply_domain(node)
             stored_rows.append(row)
         await self._flush(
-            {
-                SESSION_NODE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(
-                    session_id
-                ),
-                SESSION_NODE_SESSION_ID_EXTERNAL_ID_UNIQUE_CONSTRAINT: (
-                    lambda: DuplicateSessionNodeExternalId(session_id)
-                ),
-            }
+            {SESSION_NODE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(session_id)}
         )
         exclude = {column.key for column in PAYLOAD_COLUMNS}
         return [row.to_domain(exclude=exclude) for row in stored_rows]

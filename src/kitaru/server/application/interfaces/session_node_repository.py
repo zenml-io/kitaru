@@ -57,8 +57,6 @@ class SessionNodeRepository(Protocol):
 
         Raises:
             SessionNotFound: No session has this id.
-            DuplicateSessionNodeExternalId: An external id of the batch is
-                already held by another node of the session.
 
         Returns:
             Stored nodes in batch order, without payloads.

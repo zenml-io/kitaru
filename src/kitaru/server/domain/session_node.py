@@ -22,24 +22,10 @@ from pydantic import Field
 
 from kitaru.api_models.v1.session import TokenUsage
 from kitaru.api_models.v1.session_node import NodeLink, NodeStatus, NodeType
-from kitaru.server.domain.base import ConflictError, DomainModel
+from kitaru.server.domain.base import DomainModel
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import SessionRollups
-
-
-class DuplicateSessionNodeExternalId(ConflictError):
-    """Raised when a session already holds another node with this external id."""
-
-    def __init__(self, session_id: uuid.UUID) -> None:
-        """Initialize the error.
-
-        Args:
-            session_id: Id of the session whose external ids collided.
-        """
-        super().__init__(
-            f"Session {session_id} already holds a node with one of these external ids"
-        )
 
 
 class SessionNode(DomainModel):

@@ -64,7 +64,6 @@ from kitaru.server.domain.cohort_version import CohortVersion
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.session_node import (
-    DuplicateSessionNodeExternalId,
     SessionNode,
 )
 from kitaru.server.filtering import (
@@ -332,19 +331,6 @@ async def test_upsert_batch_replaces_existing_row_preserving_id(
         session_id, ["n0"], include_payloads=True
     )
     assert loaded["n0"].name == "second"
-
-
-async def test_upsert_batch_rejects_an_external_id_held_by_another_node(
-    setup: Setup,
-) -> None:
-    """Translate the session external id constraint into a domain conflict."""
-    repository, session_id, _ = setup
-    await repository.upsert_batch(session_id, [_node(0, session_id=session_id)])
-
-    with pytest.raises(DuplicateSessionNodeExternalId):
-        await repository.upsert_batch(
-            session_id, [_node(1, session_id=session_id, external_id="n0")]
-        )
 
 
 async def test_upsert_batch_replace_clears_omitted_fields(setup: Setup) -> None:
