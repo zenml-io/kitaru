@@ -89,7 +89,7 @@ class ImportedNode(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    external_id: str | None = None
+    external_id: str
     parent_external_id: str | None = None
     links: list[NodeLink] = Field(default_factory=list)
     trace_id: str | None = None
@@ -363,11 +363,11 @@ def session_request(
 
 
 def _node_request(
-    node: ImportedNode, external_id: str, parent_external_id: str | None
+    node: ImportedNode, parent_external_id: str | None
 ) -> SessionNodeCreateRequest:
     """Convert an imported node to an ingest request."""
     return SessionNodeCreateRequest(
-        external_id=external_id,
+        external_id=node.external_id,
         parent_external_id=parent_external_id,
         links=node.links,
         trace_id=node.trace_id,
@@ -411,9 +411,8 @@ def _reject_duplicate_external_ids(external_ids: Iterable[str]) -> None:
 def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
     """Flatten imported nodes into ingest requests, depth-first.
 
-    A top-level node names its parent by ``parent_external_id``, a nested
-    node's parent is the node it nests under, and a node without an external
-    id gets one minted from its depth-first position.
+    A top-level node names its parent by ``parent_external_id`` and a nested
+    node's parent is the node it nests under.
 
     Args:
         nodes: Top-level imported nodes.
@@ -426,7 +425,6 @@ def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
         Flat session node create requests in depth-first order.
     """
     flattened: list[SessionNodeCreateRequest] = []
-    external_ids_by_position: list[str] = []
 
     active: set[int] = set()
     stack: list[tuple[ImportedNode, str | None, bool]] = [
@@ -440,17 +438,15 @@ def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
         if id(node) in active:
             raise SessionImportError("Imported node tree contains a cycle")
         active.add(id(node))
-        external_id = node.external_id or f"node-{len(flattened)}"
-        external_ids_by_position.append(external_id)
-        flattened.append(_node_request(node, external_id, parent_external_id))
+        flattened.append(_node_request(node, parent_external_id))
         stack.append((node, parent_external_id, True))
         for child in reversed(node.children):
             if child.parent_external_id is not None:
                 raise SessionImportError(
                     "Imported node nested under a parent cannot name another parent"
                 )
-            stack.append((child, external_id, False))
-    _reject_duplicate_external_ids(external_ids_by_position)
+            stack.append((child, node.external_id, False))
+    _reject_duplicate_external_ids(request.external_id for request in flattened)
     return flattened
 
 

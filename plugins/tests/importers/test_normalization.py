@@ -58,6 +58,7 @@ def test_join_path_preserves_numeric_object_keys(importer: ModuleType) -> None:
 def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -> None:
     """Keep each provider plugin responsible for its normalized node fields."""
     node = ImportedNode(
+        external_id="model-request",
         node_type=NodeType.LLM_CALL,
         name="model request",
         status=NodeStatus.COMPLETED,
@@ -74,6 +75,7 @@ def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -
         attributes={},
     )
     later_node = ImportedNode(
+        external_id="later-model-request",
         node_type=NodeType.LLM_CALL,
         name="later model request",
         status=NodeStatus.COMPLETED,

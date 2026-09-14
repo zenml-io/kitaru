@@ -336,6 +336,7 @@ def imported_node(
         Imported node.
     """
     return ImportedNode(
+        external_id=name,
         node_type=NodeType.LLM_CALL,
         name=name,
         status=NodeStatus.COMPLETED,

@@ -334,8 +334,8 @@ async def test_retry_rate_limited_gives_up_and_passes_other_errors() -> None:
         await retry_rate_limited(_other, _retry_after)
 
 
-def test_flatten_nodes_assigns_depth_first_external_ids_and_parents() -> None:
-    """Mint external ids and map parents to them in depth-first order."""
+def test_flatten_nodes_walks_depth_first_and_maps_parents() -> None:
+    """Flatten a tree depth-first, each child naming the node it nests under."""
     tree = [
         imported_node(
             "root",
@@ -350,11 +350,11 @@ def test_flatten_nodes_assigns_depth_first_external_ids_and_parents() -> None:
     by_name = {request.name: request for request in flattened}
 
     assert [request.external_id for request in flattened] == [
-        "node-0",
-        "node-1",
-        "node-2",
-        "node-3",
-        "node-4",
+        "root",
+        "child-1",
+        "grandchild",
+        "child-2",
+        "second-root",
     ]
     assert by_name["root"].parent_external_id is None
     assert by_name["child-1"].parent_external_id == by_name["root"].external_id
@@ -401,9 +401,7 @@ def test_flatten_nodes_handles_deep_acyclic_tree() -> None:
 
     assert len(flattened) == 1_200
     assert [node.name for node in flattened] == [str(i) for i in range(1_200)]
-    assert [node.external_id for node in flattened] == [
-        f"node-{i}" for i in range(1_200)
-    ]
+    assert [node.external_id for node in flattened] == [str(i) for i in range(1_200)]
     assert [node.parent_external_id for node in flattened] == [
         None,
         *[f"node-{i}" for i in range(1_199)],
@@ -424,32 +422,6 @@ def test_flatten_nodes_rejects_object_cycles(cycle_length: int) -> None:
 
     with pytest.raises(SessionImportError, match="cycle"):
         flatten_nodes([root])
-
-
-def test_flatten_nodes_allows_shared_child_outside_ancestor_path() -> None:
-    """Preserve repeated subtrees that do not form an ancestor cycle."""
-    child = imported_node("shared")
-
-    flattened = flatten_nodes(
-        [
-            imported_node("left", children=[child]),
-            imported_node("right", children=[child]),
-        ]
-    )
-
-    assert [node.name for node in flattened] == ["left", "shared", "right", "shared"]
-    assert [node.external_id for node in flattened] == [
-        "node-0",
-        "node-1",
-        "node-2",
-        "node-3",
-    ]
-    assert [node.parent_external_id for node in flattened] == [
-        None,
-        "node-0",
-        None,
-        "node-2",
-    ]
 
 
 def test_flatten_nodes_rejects_a_duplicate_external_id() -> None:
@@ -627,6 +599,7 @@ def parse(payload: bytes, params: dict):
         metadata={},
         nodes=[
             ImportedNode(
+                external_id="call-1",
                 node_type=NodeType.LLM_CALL,
                 name="call-1",
                 status=NodeStatus.COMPLETED,
