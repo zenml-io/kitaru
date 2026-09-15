@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.device import DeviceORM
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.domain.base import NotFoundError
@@ -115,7 +115,7 @@ class SQLDeviceRepository(BaseSQLRepository[DeviceORM]):
             self._session,
             statement,
             device_filter,
-            id_column=DeviceORM.id,
+            IdOrder(DeviceORM.id, device_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

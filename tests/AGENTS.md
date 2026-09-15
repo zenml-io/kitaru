@@ -54,7 +54,7 @@ Hypothesis tests live next to the surface they cover: `plugins/tests/importers/t
 
 Three profiles are registered in each root's `conftest.py` and selected with `HYPOTHESIS_PROFILE`: `dev` (100 examples, default locally), `ci` (50 examples, fixed seed; default when `CI` is set, so PR runs are deterministic), and `nightly` (2000 examples, random; used by `just fuzz` and the `fuzz-nightly` workflow — `fuzz-importers`, `fuzz-mcp`, and `fuzz-filters` cover their named property-test surfaces). `@given` tests are sync; call async code with `asyncio.run` inside the body.
 
-Known bugs are pinned with `@pytest.mark.xfail(strict=True, reason="<issue>")` example tests, and the generators exclude the matching input class with a comment naming the same issue. Fixing the bug makes the xfail fail; remove the marker and the generator exclusion in the same PR. Failing examples are saved under `.hypothesis/examples` and replayed first on the next run.
+Known bugs are pinned with `@pytest.mark.xfail(strict=True, raises=..., reason="<issue>")` example tests, where `raises=` names the specific failure (a `pytest.RaisesExc` matcher when the exception type alone cannot tell it apart) so that a different failure still fails the run, and the generators exclude the matching input class with a comment naming the same issue. Fixing the bug makes the xfail fail; remove the marker and the generator exclusion in the same PR. Failing examples are saved under `.hypothesis/examples` and replayed first on the next run.
 
 Mark generated-input MCP tests with `mcp_fuzz`. PR CI runs those properties on Python 3.14 only; fixed MCP regression tests continue on every supported Python version. The nightly MCP fuzz job remains on Python 3.12.
 

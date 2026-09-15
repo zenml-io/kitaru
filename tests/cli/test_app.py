@@ -143,6 +143,28 @@ def test_root_help_validates_explicit_output(output, capsys) -> None:
     assert payload["error"]["kind"] == "invalid_arguments"
 
 
+@pytest.mark.parametrize(
+    ("argv", "culprit"),
+    [
+        (["schema", "-foo", "--output", "json"], "-foo"),
+        (["agent", "get", "-xo"], "-xo"),
+        (["session", "list", "--size", "-5o"], "--size"),
+    ],
+)
+def test_hyphen_leading_typo_is_not_blamed_on_output_flag(
+    argv, culprit, capsys
+) -> None:
+    """A mistyped hyphen-leading token is not blamed on the global `-o` flag."""
+    # The root parser accepts hyphen-leading tokens next to the global `-o`, and
+    # cyclopts before 4.25.1 split such a token into combined short flags.
+    assert app_module.main(argv) == 2
+
+    message = json.loads(capsys.readouterr().err)["error"]["message"]
+    assert culprit in message
+    assert "-o " not in message
+    assert "--output" not in message
+
+
 def test_bare_root_emits_structured_skill_onboarding_for_machines(
     monkeypatch, capsys
 ) -> None:

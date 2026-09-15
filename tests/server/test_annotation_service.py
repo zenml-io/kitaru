@@ -24,6 +24,7 @@ from conftest import (
     FakeInvestigationRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
+    build_session_node,
     create_agent,
     create_session,
 )
@@ -52,7 +53,6 @@ from kitaru.server.domain.investigation import (
     InvestigationSessionNotFound,
 )
 from kitaru.server.domain.session import SessionNotFound
-from kitaru.server.domain.session_node import SessionNode
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -247,9 +247,9 @@ async def test_create_manual_annotation_valid_selector_node(
     session_id: uuid.UUID,
 ) -> None:
     """Accept a selector naming a node that belongs to the session."""
-    node = SessionNode(
-        session_id=session_id,
-        index=0,
+    node = build_session_node(
+        session_id,
+        "call-0",
         node_type=NodeType.LLM_CALL,
         name="call",
         status=NodeStatus.COMPLETED,

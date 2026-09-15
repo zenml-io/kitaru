@@ -23,7 +23,7 @@ from kitaru.server.adapters.db.filtering import (
     compile_filter_expression,
 )
 from kitaru.server.adapters.db.orm.imports import ImportORM
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.imports import ImportFilter
 from kitaru.server.domain.base import NotFoundError
@@ -112,7 +112,10 @@ class SQLImportRepository(BaseSQLRepository[ImportORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, import_filter, id_column=ImportORM.id
+            self._session,
+            statement,
+            import_filter,
+            IdOrder(ImportORM.id, import_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

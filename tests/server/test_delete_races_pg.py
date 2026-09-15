@@ -188,7 +188,7 @@ async def _session_node(client: httpx.AsyncClient, session_id: str) -> str:
         json={
             "nodes": [
                 {
-                    "index": 0,
+                    "external_id": "n0",
                     "node_type": "llm_call",
                     "name": "call",
                     "status": "completed",

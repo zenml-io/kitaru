@@ -203,7 +203,7 @@ If the consumer stops the stream early and Kitaru then fails to close the sessio
 
 ## Data and evaluation
 
-Kitaru stores prompts, tool arguments and results, model output, reasoning text, and failure summaries as trace data. The adapter limits the size of recorded values and excludes provider-only fields such as thinking signatures. It does not add its own redaction policy. Decide what your application may send to Claude and its tools, and give the resulting Kitaru data the same access and retention controls as the source data.
+Kitaru stores prompts, tool arguments and results, model output, reasoning text, and failure summaries as trace data. Visible reasoning text lives under `outputs.thinking`, and the node's `reasoning_selectors` point at it, for example `/thinking/0`, the same way `output_text_selector` points at the display text. The adapter limits the size of recorded values and excludes provider-only fields such as thinking signatures. It does not add its own redaction policy. Decide what your application may send to Claude and its tools, and give the resulting Kitaru data the same access and retention controls as the source data.
 
 The session's root node records the prompt string that was actually sent to Claude as the `effective_prompt` attribute, next to the recorded `options`. A replay that overrides the prompt keeps the baseline prompt in `session.inputs`, which is the shared Kitaru convention that lets a cohort compare arms on one task input, so the root attribute is where you read the text the model received. A prompt longer than the adapter's recorded-value limit is stored as `{"value": "...", "truncated": true}` rather than as a silently shortened string, the same shape Kitaru uses for every other oversized recorded value.
 

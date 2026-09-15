@@ -5,6 +5,7 @@ from types import ModuleType
 import pytest
 
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.json_pointer import resolve_json_pointer
 from kitaru.task.importer import ImportedNode
 from kitaru_braintrust_importer import importer as braintrust
 from kitaru_langfuse_importer import importer as langfuse
@@ -57,6 +58,7 @@ def test_join_path_preserves_numeric_object_keys(importer: ModuleType) -> None:
 def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -> None:
     """Keep each provider plugin responsible for its normalized node fields."""
     node = ImportedNode(
+        external_id="model-request",
         node_type=NodeType.LLM_CALL,
         name="model request",
         status=NodeStatus.COMPLETED,
@@ -73,6 +75,7 @@ def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -
         attributes={},
     )
     later_node = ImportedNode(
+        external_id="later-model-request",
         node_type=NodeType.LLM_CALL,
         name="later model request",
         status=NodeStatus.COMPLETED,
@@ -86,7 +89,10 @@ def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -
     assert node.input_text_selector == "/messages/1/content"
     assert node.output_text_selector == "/messages/0/content"
     assert node.system_prompt_selector == "/messages/0/content"
-    assert node.reasoning == "The tracking event says shipped."
+    assert node.reasoning_selectors == ["/reasoning"]
+    found, value = resolve_json_pointer(node.outputs, node.reasoning_selectors[0])
+    assert found
+    assert value == "The tracking event says shipped."
     assert later_node.system_prompt_selector == "/messages/0/content"
 
 

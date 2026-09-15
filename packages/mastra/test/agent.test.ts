@@ -86,12 +86,12 @@ describe("KitaruAgent", () => {
     const rootBatches = api.nodeBatches();
     expect(rootBatches[0]?.[0]).toMatchObject({
       name: "run",
-      index: 0,
+      external_id: "run",
       outputs: null,
       status: "in_progress",
     });
     expect(rootBatches.at(-1)?.[0]).toMatchObject({
-      index: rootBatches[0]?.[0]?.index,
+      external_id: "run",
       outputs: { finish_reason: null, step_count: 0, text: null },
       status: "completed",
     });

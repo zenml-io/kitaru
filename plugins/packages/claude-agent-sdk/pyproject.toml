@@ -24,7 +24,7 @@ classifiers = [
 keywords = ["ai-agents", "anthropic", "claude-agent-sdk", "kitaru", "recording", "replay"]
 dependencies = [
     "claude-agent-sdk>=0.2.149,<0.3",
-    "kitaru>=0.23.0",
+    "kitaru==0.26.0+dev",
 ]
 
 [project.urls]

@@ -23,6 +23,7 @@ from conftest import (
     ReplayServices,
     build_payload_store,
     build_replay_services,
+    build_session_node,
     create_agent,
     create_agent_task,
     create_agent_version,
@@ -391,9 +392,9 @@ def _cache_node(
     status: NodeStatus = NodeStatus.COMPLETED,
     error: str | None = None,
 ) -> SessionNode:
-    return SessionNode(
-        session_id=session_id,
-        index=index,
+    return build_session_node(
+        session_id,
+        f"call-{index}",
         node_type=NodeType.TOOL_CALL,
         name="search",
         status=status,
@@ -983,9 +984,9 @@ async def test_tool_lookup_hydrates_an_offloaded_output(
         data_store=data_store,
     )
     cache_key = "a" * 64
-    node = SessionNode(
-        session_id=baseline.id,
-        index=0,
+    node = build_session_node(
+        baseline.id,
+        "call-0",
         node_type=NodeType.TOOL_CALL,
         name="search",
         status=NodeStatus.COMPLETED,

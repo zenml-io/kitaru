@@ -290,7 +290,7 @@ async def test_evaluator_flow_end_to_end(
         SessionNodeBatchRequest(
             nodes=[
                 SessionNodeCreateRequest(
-                    index=0,
+                    external_id="call-1",
                     node_type=NodeType.LLM_CALL,
                     name="call-1",
                     status=NodeStatus.COMPLETED,

@@ -50,7 +50,7 @@ The Langfuse importer parses **Langfuse JSONL exports**, with uploads capped by 
 | --- | --- |
 | `source_instance` | Stable source project identity. Required for file uploads without an embedded project ID, unless `project_id` is supplied instead. Takes precedence over `project_id` and embedded identity. |
 | `project_id` | Provider-native alias for `source_instance`, used when `source_instance` is absent or empty. |
-| `infer_tool_call_links` | Optional boolean, default `true`. The importer matches tool-call ids emitted by a generation with `gen_ai.tool.call.id` on tool observations, nests each unambiguous tool call under the requesting generation, and retains its original Langfuse parent as a secondary parent. Unmatched or ambiguous ids remain unchanged. Set this to `false` to keep only the source observation hierarchy. |
+| `infer_tool_call_links` | Optional boolean, default `true`. The importer matches tool-call ids emitted by a generation with `gen_ai.tool.call.id` on tool observations, nests each unambiguous tool call under the requesting generation, and keeps its original Langfuse parent as a link of kind `source_parent`. Unmatched or ambiguous ids remain unchanged. Set this to `false` to keep only the source observation hierarchy. |
 
 For UI and events exports without project IDs, pass `--params '{"source_instance":"my-langfuse-project"}'` or `--params '{"project_id":"my-langfuse-project"}'`. SDK and REST callers supply the same parameters on import creation. Keep the value stable across exports of the same project; filenames do not determine identity. If earlier imports used a filename stem as their identity, supply that same value explicitly to preserve deduplication.
 
@@ -81,7 +81,7 @@ The worker installs the package's `api` extra for an API import, which carries t
 
 ## Dedup: one session per (imported_from, external_id) per agent
 
-Every imported session records `imported_from` (`langfuse`) and an `external_id` combining the selected source identity with the source session ID. This pair is unique per destination agent, so re-importing an overlapping export with the same identity **skips** what's already stored; the stats report it as `skipped`, not as an error. Skipped sessions are not updated with new nodes.
+Every imported session records `imported_from` (`langfuse`) and an `external_id` combining the selected source identity with the source session ID. This pair is unique per destination agent, so re-importing an overlapping export with the same identity **skips** what's already stored. The stats report it as `skipped`, not as an error. Skipped sessions are not updated with new nodes.
 
 ## No importer for your format?
 

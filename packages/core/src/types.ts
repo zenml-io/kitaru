@@ -137,6 +137,6 @@ export interface SessionListParams {
 }
 
 export interface SessionNodeListParams extends ListParams {
-  sort?: "index:asc";
+  sort?: "position:asc";
   includePayloads?: boolean;
 }

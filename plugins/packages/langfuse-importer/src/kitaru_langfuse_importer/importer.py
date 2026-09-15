@@ -22,6 +22,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -31,12 +32,13 @@ from pydantic_core import PydanticSerializationError
 
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
-from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.api_models.v1.session_node import NodeLink, NodeStatus, NodeType
 from kitaru.task.importer import (
     ImportedNode,
     ImportedSession,
 )
 
+SOURCE_PARENT_LINK_KIND = "source_parent"
 MAX_TREE_DEPTH = 64
 MAX_TOOL_SCAN_DEPTH = 64
 _TRACE_SHAPE = "trace"
@@ -395,16 +397,16 @@ def _system_prompt_match(value: Any) -> _TextMatch | None:
     return found[-1] if found else None
 
 
-def _reasoning(value: Any) -> str | None:
-    """Return visible reasoning from a provider payload."""
+def _reasoning_selectors(value: Any) -> list[str]:
+    """Return the JSON Pointers selecting visible reasoning in a provider payload."""
     found: list[str] = []
 
-    def _collect(item: Any, depth: int = 0) -> None:
+    def _collect(item: Any, selector: str = "", depth: int = 0) -> None:
         if depth > 12:
             return
         if isinstance(item, list):
-            for child in item:
-                _collect(child, depth + 1)
+            for index, child in enumerate(item):
+                _collect(child, _child_selector(selector, index), depth + 1)
             return
         if not isinstance(item, dict):
             return
@@ -413,17 +415,23 @@ def _reasoning(value: Any) -> str | None:
         if kind in {"reasoning", "reasoning-content", "thinking", "thought"}:
             for key in ("text", "content", "summary"):
                 if key in item and (
-                    match := _content_match(item[key], depth=depth + 1)
+                    match := _content_match(
+                        item[key], _child_selector(selector, key), depth + 1
+                    )
                 ):
-                    found.append(match.text)
+                    found.append(match.selector)
         for key in ("reasoning", "reasoning_content", "thinking", "thought"):
-            if key in item and (match := _content_match(item[key], depth=depth + 1)):
-                found.append(match.text)
-        for child in item.values():
-            _collect(child, depth + 1)
+            if key in item and (
+                match := _content_match(
+                    item[key], _child_selector(selector, key), depth + 1
+                )
+            ):
+                found.append(match.selector)
+        for key, child in item.items():
+            _collect(child, _child_selector(selector, key), depth + 1)
 
     _collect(value)
-    return found[-1] if found else None
+    return found
 
 
 def _detect_framework(value: Any) -> str | None:
@@ -464,7 +472,7 @@ def _populate_node_fields(nodes: list[ImportedNode]) -> None:
             node.system_prompt_selector = (
                 system_prompt.selector if system_prompt is not None else None
             )
-            node.reasoning = _reasoning(node.outputs) or _reasoning(node.inputs)
+            node.reasoning_selectors = _reasoning_selectors(node.outputs)
 
 
 class InvalidImport(ValueError):
@@ -1089,27 +1097,18 @@ def _flatten_node_tree(roots: list[ImportedNode]) -> list[ImportedNode]:
     return flattened
 
 
-def _apply_secondary_parent_indexes(
-    roots: list[ImportedNode], secondary_parents: dict[str, list[str]]
+def _apply_source_parent_links(
+    roots: list[ImportedNode], source_parents: dict[str, list[str]]
 ) -> None:
-    """Resolve secondary external ids to depth-first ingestion indexes."""
-    flattened = _flatten_node_tree(roots)
-
-    index_by_external_id = {
-        node.external_id: index
-        for index, node in enumerate(flattened)
-        if node.external_id is not None
-    }
-    for index, node in enumerate(flattened):
-        inferred_indexes = {
-            parent_index
-            for external_id in secondary_parents.get(node.external_id or "", [])
-            if (parent_index := index_by_external_id.get(external_id)) is not None
-            and parent_index < index
-        }
-        node.secondary_parent_indexes = sorted(
-            {*node.secondary_parent_indexes, *inferred_indexes}
-        )
+    """Link each re-parented node to the parent the source recorded."""
+    for node in _flatten_node_tree(roots):
+        node.links = [
+            *node.links,
+            *(
+                NodeLink(external_id=external_id, kind=SOURCE_PARENT_LINK_KIND)
+                for external_id in source_parents.get(node.external_id or "", [])
+            ),
+        ]
 
 
 def _validate_node_graph(nodes_with_parents: list[tuple[str, str | None]]) -> None:
@@ -1181,7 +1180,7 @@ def _validate_model_fields(record: dict[str, Any]) -> None:
 
 def _build_node_tree(
     nodes_with_parents: list[tuple[ImportedNode, str | None]],
-    secondary_parents: dict[str, list[str]] | None = None,
+    source_parents: dict[str, list[str]] | None = None,
 ) -> list[ImportedNode]:
     """Build and validate the parsed-node tree."""
     if any(node.external_id is None for node, _ in nodes_with_parents):
@@ -1207,8 +1206,8 @@ def _build_node_tree(
             roots.append(node)
     if nodes_with_parents and not roots:
         raise InvalidImport("The imported node graph contains no root node")
-    if secondary_parents:
-        _apply_secondary_parent_indexes(roots, secondary_parents)
+    if source_parents:
+        _apply_source_parent_links(roots, source_parents)
     return roots
 
 
@@ -1467,7 +1466,7 @@ class LangfuseJSONLImporter:
         inferred_parents = (
             _infer_tool_call_parents(raw_nodes) if infer_tool_call_links else {}
         )
-        secondary_parents = {
+        source_parents = {
             source_node_id: [parent_source_id]
             for source_node_id, parent_source_id, _ in raw_nodes
             if source_node_id in inferred_parents
@@ -1544,7 +1543,7 @@ class LangfuseJSONLImporter:
 
         nodes = [node for node, _ in nodes_with_parents]
         _populate_node_fields(nodes)
-        node_tree = _build_node_tree(nodes_with_parents, secondary_parents)
+        node_tree = _build_node_tree(nodes_with_parents, source_parents)
         latest_turn = turns[-1]
         latest_root = root_by_trace[latest_turn.trace_id]
         latest_root_status = _node_status(latest_root)
@@ -1670,8 +1669,9 @@ class LangfuseJSONLImporter:
         """
         from .api import fetch
 
-        async for payload in fetch(query):
-            yield payload
+        async with aclosing(fetch(query)) as payloads:
+            async for payload in payloads:
+                yield payload
 
 
 importer = LangfuseJSONLImporter()
