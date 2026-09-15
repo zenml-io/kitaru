@@ -125,7 +125,7 @@ dev = [
     "ruff>=0.16.2",
     "ty>=0.0.72",
     "yamlfix",
-    "pytest>=8.0",
+    "pytest>=8.4",
     "import-linter>=2.0",
     "pytest-asyncio>=1.4.0",
     "griffe>=1.13.0,<2.0.0",
