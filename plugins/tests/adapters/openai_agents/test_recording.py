@@ -16,6 +16,7 @@
 import asyncio
 import json
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
 from unittest.mock import AsyncMock
@@ -48,6 +49,7 @@ from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.client import KitaruAPIClient
 from kitaru_openai_agents import KitaruRunner
 from kitaru_openai_agents.recording import (
+    ROOT_EXTERNAL_ID,
     KitaruRecordingError,
     RunRecorder,
     UnsupportedInterruptionError,
@@ -166,11 +168,13 @@ async def test_records_complete_session_and_model_node(
     nodes = _nodes(client)
 
     assert result.final_output == "deterministic result"
-    assert [node.index for node in nodes] == [0, 1, 0]
+    assert len(nodes) == 3
+    assert nodes[0].external_id == ROOT_EXTERNAL_ID
+    assert nodes[2].external_id == ROOT_EXTERNAL_ID
     assert nodes[0].node_type is NodeType.SPAN
     assert nodes[0].status is NodeStatus.IN_PROGRESS
     assert nodes[1].node_type is NodeType.LLM_CALL
-    assert nodes[1].parent_index == 0
+    assert nodes[1].parent_external_id == ROOT_EXTERNAL_ID
     assert nodes[1].status is NodeStatus.COMPLETED
     assert nodes[2].node_type is NodeType.SPAN
     assert nodes[2].status is NodeStatus.COMPLETED
@@ -344,7 +348,10 @@ async def test_concurrent_runs_on_one_agent_keep_sessions_isolated(
     assert len(_FakeClient.instances) == 2
     assert len({client.session_id for client in _FakeClient.instances}) == 2
     for client in _FakeClient.instances:
-        assert [node.index for node in _nodes(client)] == [0, 1, 0]
+        nodes = _nodes(client)
+        assert len(nodes) == 3
+        assert nodes[0].external_id == ROOT_EXTERNAL_ID
+        assert nodes[2].external_id == ROOT_EXTERNAL_ID
         assert client.closed
 
 
@@ -490,9 +497,9 @@ async def test_flush_restores_all_nodes_after_a_batch_failure(
         await recorder._append_node(
             node_type=NodeType.SPAN,
             name=f"observation-{index}",
-            parent_index=0,
+            parent_external_id=ROOT_EXTERNAL_ID,
             external_id=None,
-            started_at=None,
+            started_at=datetime.now(UTC),
             ended_at=None,
             inputs=None,
             outputs=None,
@@ -512,7 +519,11 @@ async def test_flush_restores_all_nodes_after_a_batch_failure(
     with pytest.raises(OSError, match="batch failed"):
         await recorder.flush()
 
-    assert [node.index for node in recorder.buffer] == [1, 2, 3]
+    assert [node.name for node in recorder.buffer] == [
+        "observation-0",
+        "observation-1",
+        "observation-2",
+    ]
     monkeypatch.setattr(client.sessions, "ingest_nodes", ingest_nodes)
     await recorder.flush()
     assert recorder.buffer == []
@@ -683,13 +694,13 @@ async def test_reconciles_tools_hosted_calls_and_handoffs_by_public_ids() -> Non
     assert tool.outputs == {"forecast": "sunny"}
     assert nodes[3].external_id == "hosted-1"
     assert nodes[4].subagent_id == "target"
-    assert nodes[1].parent_index == 0
-    assert nodes[2].parent_index == 1
-    assert nodes[3].parent_index == 0
-    assert nodes[4].parent_index == 0
+    assert nodes[1].parent_external_id == ROOT_EXTERNAL_ID
+    assert nodes[2].parent_external_id == nodes[1].external_id
+    assert nodes[3].parent_external_id == ROOT_EXTERNAL_ID
+    assert nodes[4].parent_external_id == ROOT_EXTERNAL_ID
     assert nodes[5].status is NodeStatus.COMPLETED
     for node in nodes[1:5]:
-        assert node.started_at is None
+        assert node.started_at == recorder.started_at
         assert node.ended_at is None
 
 
@@ -845,12 +856,19 @@ async def test_same_name_tool_calls_match_outputs_and_parents_by_call_id() -> No
     tool_nodes = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
 
     assert [
-        (node.external_id, node.outputs, node.parent_index) for node in tool_nodes
+        (node.external_id, node.outputs, node.parent_external_id) for node in tool_nodes
     ] == [
-        ("call-1", "first", 1),
-        ("call-2", "second", 2),
+        ("call-1", "first", "response-1"),
+        ("call-2", "second", "response-2"),
     ]
-    assert all(node.started_at is None for node in tool_nodes)
+    model_starts = {
+        node.external_id: node.started_at
+        for node in nodes
+        if node.node_type is NodeType.LLM_CALL
+    }
+    assert [node.started_at for node in tool_nodes] == [
+        model_starts[node.parent_external_id] for node in tool_nodes
+    ]
     assert all(node.ended_at is None for node in tool_nodes)
 
 

@@ -32,7 +32,7 @@ from kitaru.server.adapters.db.orm.cohort import (
 from kitaru.server.adapters.db.orm.experiment_run import (
     EXPERIMENT_RUN_COHORT_VERSION_ID_FOREIGN_KEY,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.cohort import CohortFilter
 from kitaru.server.domain.agent import AgentNotFound
@@ -129,7 +129,10 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, cohort_filter, id_column=CohortORM.id
+            self._session,
+            statement,
+            cohort_filter,
+            IdOrder(CohortORM.id, cohort_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

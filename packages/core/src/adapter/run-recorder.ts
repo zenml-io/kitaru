@@ -9,6 +9,7 @@ import { recordedPayloadJson } from "./recorded-json.js";
 import {
   type AdapterClient,
   type AdapterRunState,
+  ROOT_NODE_EXTERNAL_ID,
   RunState,
 } from "./run-state.js";
 import { flushFailedPolicyOutcomes } from "./step.js";
@@ -34,12 +35,12 @@ function rootNode(
     attributes: {},
     ended_at: options.endedAt,
     error: options.error,
-    index: state.rootIndex,
+    external_id: ROOT_NODE_EXTERNAL_ID,
     inputs: state.effectiveInput,
     name: "run",
     node_type: "span",
     outputs: options.output ?? null,
-    parent_index: null,
+    parent_external_id: null,
     started_at: options.startedAt,
     status: options.status,
   };

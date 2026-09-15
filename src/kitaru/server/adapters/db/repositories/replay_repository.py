@@ -30,7 +30,7 @@ from kitaru.server.adapters.db.orm.replay import (
     REPLAY_RUN_BASELINE_UNIQUE_CONSTRAINT,
     ReplayORM,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.replay import ReplayFilter, ReplayStatusCounts
 from kitaru.server.domain.base import DomainError, NotFoundError
@@ -207,7 +207,10 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, replay_filter, id_column=ReplayORM.id
+            self._session,
+            statement,
+            replay_filter,
+            IdOrder(ReplayORM.id, replay_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

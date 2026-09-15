@@ -21,6 +21,7 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -253,6 +254,23 @@ def _is_missing_identity(value: Any) -> bool:
     if not isinstance(value, str):
         return False
     return value.strip().casefold() in {"[redacted]", "[scrubbed]"}
+
+
+def get_default_join_value(record: dict[str, Any]) -> str | None:
+    """Resolve the session join value at the default join paths for one record.
+
+    Args:
+        record: Logfire record to resolve, such as a root span row.
+
+    Returns:
+        Value at the first default join path with a usable identity, None
+        when no default join path resolves.
+    """
+    for path in _DEFAULT_JOIN_PATHS:
+        value = _path_value(record, path)
+        if not _is_missing_identity(value):
+            return str(value)
+    return None
 
 
 def _join_value(
@@ -863,8 +881,9 @@ class LogfireRecordsImporter:
         """Fetch parser payloads from the Logfire API."""
         from .api import fetch
 
-        async for payload in fetch(query):
-            yield payload
+        async with aclosing(fetch(query)) as payloads:
+            async for payload in payloads:
+                yield payload
 
 
 importer = LogfireRecordsImporter()

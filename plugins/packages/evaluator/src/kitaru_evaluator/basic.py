@@ -10,11 +10,11 @@ from kitaru_evaluator.deterministic import sum_decimals
 
 def cost(session: SessionView) -> EvaluationResult:
     """Report the total recorded cost of a session."""
-    root_nodes = [node for node in session.nodes if node.parent_id is None]
+    root_nodes = [node for node in session.nodes if node.parent_external_id is None]
     direct_nodes = [
         node
         for node in session.nodes
-        if node.node_type is not NodeType.SPAN or node.parent_id is not None
+        if node.node_type is not NodeType.SPAN or node.parent_external_id is not None
     ]
     llm_costs_are_complete = all(
         node.cost is not None and node.cost.is_finite() and node.cost >= 0

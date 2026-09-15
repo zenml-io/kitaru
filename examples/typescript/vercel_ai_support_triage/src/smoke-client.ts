@@ -14,6 +14,8 @@ import type { AdapterClient } from "@zenml-io/kitaru/adapter";
 const SESSION_ID = "018f0000-0000-7000-8000-000000000201";
 
 export class SmokeClient implements AdapterClient {
+  #nodeCount = 0;
+
   async createSession(request: SessionCreateRequest): Promise<SessionResponse> {
     return {
       id: SESSION_ID,
@@ -53,8 +55,8 @@ export class SmokeClient implements AdapterClient {
     request: SessionNodeBatchRequest,
   ): Promise<SessionNodeResponse[]> {
     return request.nodes.map((node) => ({
-      id: `018f0000-0000-7000-8001-${String(node.index + 500).padStart(12, "0")}`,
-      index: node.index,
+      id: `018f0000-0000-7000-8001-${String(this.#nodeCount++ + 500).padStart(12, "0")}`,
+      external_id: node.external_id,
       node_type: node.node_type,
       status: node.status,
     })) as SessionNodeResponse[];

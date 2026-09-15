@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated, Any, Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import AwareDatetime, Field, model_validator
 
@@ -28,6 +28,7 @@ from kitaru.api_models.v1.base import (
 )
 from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.session import SessionDetailResponse, TokenUsage
+from kitaru.json_pointer import resolve_json_pointer
 
 
 class NodeType(StrEnum):
@@ -47,20 +48,28 @@ class NodeStatus(StrEnum):
     FAILED = "failed"
 
 
+class NodeLink(RequestModel):
+    """Node link."""
+
+    external_id: str = Field(
+        min_length=1, description="External id of the linked node."
+    )
+    kind: str = Field(
+        min_length=1, max_length=64, description="Relation the link states."
+    )
+
+
 class SessionNodeCreateRequest(RequestModel):
     """Session node create request."""
 
-    index: int = Field(
-        ge=0, description="Position within the session, the wire identity."
+    external_id: str = Field(
+        min_length=1, description="Id from the source system, the wire identity."
     )
-    parent_index: int | None = Field(
-        default=None, ge=0, description="Index of the parent node."
+    parent_external_id: str | None = Field(
+        default=None, description="External id of the parent node."
     )
-    secondary_parent_indexes: list[Annotated[int, Field(ge=0)]] = Field(
-        default_factory=list, description="Indexes of additional parent nodes."
-    )
-    external_id: str | None = Field(
-        default=None, description="Id from the source system."
+    links: list[NodeLink] = Field(
+        default_factory=list, description="Links to other nodes of the session."
     )
     trace_id: str | None = Field(default=None, description="Distributed trace id.")
     node_type: NodeType = Field(description="Kind of work the node records.")
@@ -87,8 +96,11 @@ class SessionNodeCreateRequest(RequestModel):
             "RFC 6901 JSON Pointer selecting the system prompt from node inputs."
         ),
     )
-    reasoning: str | None = Field(
-        default=None, description="Visible reasoning produced by the model call."
+    reasoning_selectors: list[str] = Field(
+        default_factory=list,
+        description=(
+            "RFC 6901 JSON Pointers selecting visible reasoning from node outputs."
+        ),
     )
     inputs: Any = Field(description="Node inputs.")
     outputs: Any = Field(description="Node outputs.")
@@ -113,13 +125,13 @@ class SessionNodeCreateRequest(RequestModel):
 class SessionNodeListParams(FilterableListParams):
     """Session node list params."""
 
-    sort: Literal["index:asc"] = Field(
-        default="index:asc",
-        description="Nodes are ordered by ascending index.",
+    sort: Literal["position:asc"] = Field(
+        default="position:asc",
+        description="Nodes are ordered by start time, then insertion.",
     )
     include_payloads: bool = Field(
         default=False,
-        description="Include reasoning, inputs, outputs, and attributes.",
+        description="Include inputs, outputs, and attributes.",
     )
 
 
@@ -128,30 +140,34 @@ class SessionNodeBatchRequest(RequestModel):
 
     nodes: list[SessionNodeCreateRequest] = Field(
         max_length=500,
-        description="Nodes to upsert, parent before child.",
+        description="Nodes to upsert, in any order.",
     )
 
     @model_validator(mode="after")
-    def _parents_precede_children(self) -> Self:
-        """Require every node's parent indexes to precede its own index.
+    def _check_external_ids(self) -> Self:
+        """Require unique node external ids and no self-reference.
+
+        A parent external id the batch does not carry is left to the server,
+        which links it once the parent lands.
 
         Raises:
-            ValueError: A parent index does not precede its node's index, or
-                a node index repeats within the batch.
+            ValueError: A node names itself as a parent or a link, or a node
+                external id repeats within the batch.
 
         Returns:
             The validated batch.
         """
-        indexes: set[int] = set()
+        seen: set[str] = set()
         for node in self.nodes:
-            parent_indexes = [node.parent_index, *node.secondary_parent_indexes]
-            if any(
-                parent is not None and parent >= node.index for parent in parent_indexes
-            ):
-                raise ValueError("parent indexes must be less than the node index")
-            if node.index in indexes:
-                raise ValueError("node indexes must be unique within a batch")
-            indexes.add(node.index)
+            references = [
+                node.parent_external_id,
+                *(link.external_id for link in node.links),
+            ]
+            if node.external_id in references:
+                raise ValueError("a node cannot reference itself")
+            if node.external_id in seen:
+                raise ValueError("node external ids must be unique within a batch")
+            seen.add(node.external_id)
         return self
 
 
@@ -160,16 +176,11 @@ class SessionNodeResponse(ResponseModel):
 
     id: uuid.UUID = Field(description="Node id.")
     session_id: uuid.UUID = Field(description="Session this node belongs to.")
-    index: int = Field(description="Position within the session.")
-    parent_index: int | None = Field(description="Parent node index.")
-    secondary_parent_indexes: list[int] = Field(description="Secondary parent indexes.")
-    parent_id: uuid.UUID | None = Field(default=None, description="Parent node.")
-    secondary_parent_ids: list[uuid.UUID] = Field(
-        description="Additional parent nodes."
+    external_id: str = Field(description="Id from the source system.")
+    parent_external_id: str | None = Field(
+        default=None, description="External id of the parent node."
     )
-    external_id: str | None = Field(
-        default=None, description="Id from the source system."
-    )
+    links: list[NodeLink] = Field(description="Links to other nodes of the session.")
     trace_id: str | None = Field(default=None, description="Distributed trace id.")
     node_type: NodeType = Field(description="Kind of work the node records.")
     name: str = Field(description="Node name.")
@@ -193,9 +204,11 @@ class SessionNodeResponse(ResponseModel):
             "RFC 6901 JSON Pointer selecting the system prompt from node inputs."
         ),
     )
-    reasoning: str | None = Field(
-        default=None,
-        description="Visible reasoning, null unless payloads are included.",
+    reasoning_selectors: list[str] = Field(
+        default_factory=list,
+        description=(
+            "RFC 6901 JSON Pointers selecting visible reasoning from node outputs."
+        ),
     )
     inputs: Any = Field(
         default=None, description="Node inputs, null unless include_payloads."
@@ -224,11 +237,28 @@ class SessionNodeResponse(ResponseModel):
     )
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
 
+    @property
+    def reasoning(self) -> str | None:
+        """Stitch the visible reasoning the selectors pick out of the outputs.
+
+        Returns:
+            Selected reasoning joined by newlines, None when nothing resolves
+            to a string.
+        """
+        if self.outputs is None:
+            return None
+        parts: list[str] = []
+        for selector in self.reasoning_selectors:
+            found, value = resolve_json_pointer(self.outputs, selector)
+            if found and isinstance(value, str):
+                parts.append(value)
+        return "\n".join(parts) if parts else None
+
 
 class SessionWithNodesResponse(ResponseModel):
     """Session with nodes response."""
 
     session: SessionDetailResponse = Field(description="Session.")
     nodes: list[SessionNodeResponse] = Field(
-        description="Every node of the session, ordered by index ascending."
+        description="Every node of the session, ordered by position ascending."
     )
