@@ -32,6 +32,7 @@ export {
 export type { RunRecorderOptions } from "./run-recorder.js";
 export { RunRecorder } from "./run-recorder.js";
 export type { AdapterClient, AdapterRunState } from "./run-state.js";
+export { ROOT_NODE_EXTERNAL_ID } from "./run-state.js";
 export type {
   NormalizedModelStep,
   NormalizedToolCall,

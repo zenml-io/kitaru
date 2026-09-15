@@ -94,7 +94,8 @@ class _FakeSpans:
         self._fake.project_identifiers.append(project_identifier)
         self._fake.limits.append(limit)
         if trace_ids is not None:
-            assert len(trace_ids) == 1
+            batch = list(trace_ids)
+            self._fake.batches.append(batch)
             self._fake.in_flight += 1
             self._fake.peak_in_flight = max(
                 self._fake.peak_in_flight, self._fake.in_flight
@@ -102,13 +103,16 @@ class _FakeSpans:
             try:
                 if self._fake.fetch_delays:
                     await asyncio.sleep(self._fake.fetch_delays.pop(0))
-                self._fake.requested.append(trace_ids[0])
                 self._fake.events.append("get-spans")
-                assert self._fake.span_builders, "unexpected span query"
-                builder = self._fake.span_builders.pop(0)
-                if isinstance(builder, Exception):
-                    raise builder
-                return builder(trace_ids[0])
+                spans: list[dict[str, Any]] = []
+                for trace_id in batch:
+                    assert self._fake.span_builders, "unexpected span query"
+                    builder = self._fake.span_builders.pop(0)
+                    self._fake.requested.append(trace_id)
+                    if isinstance(builder, Exception):
+                        raise builder
+                    spans.extend(builder(trace_id))
+                return spans
             finally:
                 self._fake.in_flight -= 1
 
@@ -134,6 +138,7 @@ class FakePhoenix:
     def __init__(self) -> None:
         self.span_builders: list[SpansBuilder] = []
         self.requested: list[str] = []
+        self.batches: list[list[str]] = []
         self.project_identifiers: list[str] = []
         self.limits: list[int] = []
         self.events: list[str] = []

@@ -1,2 +1,0 @@
-- Importers now normalize explicitly indexed sessions with more than 500 nodes before sending them in API-sized batches.
-- Mastra imports now report one conflict failure for inconsistent copies of a trace regardless of export order.

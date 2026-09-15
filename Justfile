@@ -97,11 +97,15 @@ test *ARGS:
     uv run pytest {{ ARGS }}
 
 # Run all property tests with the heavy nightly profile
-fuzz: fuzz-importers fuzz-mcp fuzz-filters fuzz-api
+fuzz: fuzz-importers fuzz-evaluators fuzz-mcp fuzz-filters fuzz-api
 
 # Heavy property-test run for the plugins tree (importer parse() contract, LangGraph capture)
 fuzz-importers:
     HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/importers/test_fuzz_parse.py plugins/tests/adapters/langgraph/test_capture_properties.py --hypothesis-show-statistics
+
+# Heavy property-test run for deterministic evaluator pointer and arithmetic contracts
+fuzz-evaluators:
+    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/evaluators/test_deterministic_properties.py --hypothesis-show-statistics
 
 # Heavy property-test run for the core tree (MCP tool boundary, credential redaction)
 fuzz-mcp:
@@ -110,6 +114,10 @@ fuzz-mcp:
 # Heavy grammar-aware property tests for recursive JSON list filters
 fuzz-filters:
     HYPOTHESIS_PROFILE=nightly uv run --extra server pytest tests/server/test_fuzz_filters.py --hypothesis-show-statistics
+
+# Compare generated filter results with PostgreSQL in isolated databases
+fuzz-filters-pg MAX_EXAMPLES="25":
+    KITARU_FUZZ_POSTGRES=1 KITARU_TEST_REQUIRE_POSTGRES=1 KITARU_FUZZ_PG_MAX_EXAMPLES={{ MAX_EXAMPLES }} uv run --extra server pytest tests/server/test_fuzz_filters_pg.py --hypothesis-show-statistics
 
 # Heavy API fuzzing run against a live server (requires docker compose up -d db)
 fuzz-api:

@@ -20,6 +20,7 @@ import pytest
 
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
+from kitaru.json_pointer import resolve_json_pointer
 from kitaru.task.importer import ImportedSession
 from kitaru_jsonl_importer.importer import InvalidImport, parse
 
@@ -41,7 +42,7 @@ def _session() -> dict[str, Any]:
             {
                 "index": 0,
                 "parent_index": None,
-                "secondary_parent_indexes": [],
+                "links": [],
                 "external_id": "node-1",
                 "trace_id": "trace-1",
                 "node_type": "llm_call",
@@ -50,12 +51,18 @@ def _session() -> dict[str, Any]:
                 "input_text_selector": "/1/content",
                 "output_text_selector": "/0/content",
                 "system_prompt_selector": "/0/content",
-                "reasoning": "The source reports clear skies.",
+                "reasoning_selectors": ["/0/reasoning"],
                 "inputs": [
                     {"role": "system", "content": "Answer briefly."},
                     {"role": "user", "content": "How is the weather?"},
                 ],
-                "outputs": [{"role": "assistant", "content": "Sunny."}],
+                "outputs": [
+                    {
+                        "role": "assistant",
+                        "content": "Sunny.",
+                        "reasoning": "The source reports clear skies.",
+                    }
+                ],
                 "attributes": {},
                 "metadata": {},
             }
@@ -77,7 +84,11 @@ def test_parses_one_complete_session_per_line() -> None:
     assert session.nodes[0].input_text_selector == "/1/content"
     assert session.nodes[0].output_text_selector == "/0/content"
     assert session.nodes[0].system_prompt_selector == "/0/content"
-    assert session.nodes[0].reasoning == "The source reports clear skies."
+    node = session.nodes[0]
+    assert node.reasoning_selectors == ["/0/reasoning"]
+    found, value = resolve_json_pointer(node.outputs, node.reasoning_selectors[0])
+    assert found
+    assert value == "The source reports clear skies."
 
 
 def test_isolates_invalid_lines_and_forbids_unknown_fields() -> None:
@@ -171,12 +182,46 @@ def test_surrogates_and_decoder_recursion_isolate_lines() -> None:
         item.model_dump_json()
 
 
+def test_parse_maps_indexes_to_external_ids() -> None:
+    """Mint an external id from the index and resolve parent indexes."""
+    value = _session()
+    node = value["nodes"][0]
+    value["nodes"] = [
+        node | {"index": 3, "parent_index": None, "external_id": None},
+        node | {"index": 5, "parent_index": 3, "external_id": "child"},
+    ]
+
+    [session] = list(parse(json.dumps(value).encode(), {}))
+
+    assert isinstance(session, ImportedSession)
+    assert [(n.external_id, n.parent_external_id) for n in session.nodes] == [
+        ("node-3", None),
+        ("child", "node-3"),
+    ]
+
+
+def test_parse_rejects_a_parent_index_naming_no_node() -> None:
+    """Fail the record when a parent index has no node."""
+    value = _session()
+    value["nodes"][0]["parent_index"] = 9
+
+    [failure] = list(parse(json.dumps(value).encode(), {}))
+
+    assert isinstance(failure, ImportFailure)
+    assert "parent_index 9 names no node" in failure.error
+
+
 def test_flat_chain_is_not_subject_to_nested_depth_limit() -> None:
     """Accept a 128-node indexed chain without building a nested tree."""
     value = _session()
     node = value["nodes"][0]
     value["nodes"] = [
-        node | {"index": index, "parent_index": index - 1 if index else None}
+        node
+        | {
+            "index": index,
+            "parent_index": index - 1 if index else None,
+            "external_id": f"node-{index}",
+        }
         for index in range(128)
     ]
     [session] = list(parse(json.dumps(value).encode(), {}))

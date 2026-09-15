@@ -415,6 +415,22 @@ def test_run_raises_an_ingest_error_after_the_function(
     assert client.sessions.batches == []
 
 
+def test_run_raises_a_create_error_after_the_function(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raise the session create error after the function has completed."""
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
+    client.sessions.create_error = APIError(
+        httpx.codes.SERVICE_UNAVAILABLE, "backend unavailable"
+    )
+
+    with pytest.raises(APIError, match="backend unavailable"):
+        adapter.run(lambda: adapter.events.append("func"))
+
+    assert "func" in adapter.events
+    assert client.sessions.batches == []
+
+
 def test_run_rejects_an_already_imported_trace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

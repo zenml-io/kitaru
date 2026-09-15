@@ -34,7 +34,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.api_models.v1.session import TokenUsage
-from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.api_models.v1.session_node import NodeLink, NodeStatus, NodeType
 from kitaru.server.adapters.db.orm.base import (
     Base,
     TimestampMixin,
@@ -50,9 +50,6 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session_node import SessionNode
 
-SESSION_NODE_SESSION_ID_INDEX_UNIQUE_CONSTRAINT = unique_constraint_name(
-    "session_node", ["session_id", "index"]
-)
 SESSION_NODE_SESSION_ID_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session_node", ["session_id", "external_id"]
 )
@@ -66,10 +63,10 @@ SESSION_NODE_OUTPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name(
 SESSION_NODE_ATTRIBUTES_BLOB_ID_FOREIGN_KEY = foreign_key_name(
     "session_node", ["attributes_blob_id"]
 )
-SESSION_NODE_REASONING_BLOB_ID_FOREIGN_KEY = foreign_key_name(
-    "session_node", ["reasoning_blob_id"]
-)
 SESSION_NODE_CACHE_KEY_INDEX = index_name("session_node", ["cache_key"])
+SESSION_NODE_POSITION_INDEX = index_name(
+    "session_node", ["session_id", "started_at", "id"]
+)
 
 NODE_TYPE_LENGTH = 32
 NODE_STATUS_LENGTH = 32
@@ -81,11 +78,6 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "session_node"
     __table_args__ = (
-        UniqueConstraint(
-            "session_id",
-            "index",
-            name=SESSION_NODE_SESSION_ID_INDEX_UNIQUE_CONSTRAINT,
-        ),
         UniqueConstraint(
             "session_id",
             "external_id",
@@ -112,25 +104,25 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["blob.id"],
             name=SESSION_NODE_ATTRIBUTES_BLOB_ID_FOREIGN_KEY,
         ),
-        ForeignKeyConstraint(
-            ["reasoning_blob_id"],
-            ["blob.id"],
-            name=SESSION_NODE_REASONING_BLOB_ID_FOREIGN_KEY,
-        ),
         Index(
             SESSION_NODE_CACHE_KEY_INDEX,
             "cache_key",
             postgresql_where=text("cache_key IS NOT NULL"),
         ),
+        Index(
+            SESSION_NODE_POSITION_INDEX,
+            "session_id",
+            "started_at",
+            "id",
+        ),
     )
 
     session_id: Mapped[uuid.UUID]
-    # Validated at ingestion to reference a node of the same session, which
-    # a foreign key cannot express.
-    parent_id: Mapped[uuid.UUID | None]
-    secondary_parent_ids: Mapped[list[str]] = mapped_column(JSONB)
-    index: Mapped[int]
-    external_id: Mapped[str | None] = mapped_column(Text)
+    external_id: Mapped[str] = mapped_column(Text)
+    # Stored as sent and resolved by the reader, so a reference may name a
+    # node that has not landed yet.
+    parent_external_id: Mapped[str | None] = mapped_column(Text)
+    links: Mapped[list[dict[str, str]]] = mapped_column(JSONB)
     trace_id: Mapped[str | None] = mapped_column(Text)
     node_type: Mapped[str] = mapped_column(String(NODE_TYPE_LENGTH))
     name: Mapped[str] = mapped_column(Text)
@@ -141,8 +133,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     input_text_selector: Mapped[str | None] = mapped_column(Text)
     output_text_selector: Mapped[str | None] = mapped_column(Text)
     system_prompt_selector: Mapped[str | None] = mapped_column(Text)
-    reasoning: Mapped[str | None] = mapped_column(Text)
-    reasoning_blob_id: Mapped[uuid.UUID | None]
+    reasoning_selectors: Mapped[list[str]] = mapped_column(JSONB)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     inputs_blob_id: Mapped[uuid.UUID | None]
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
@@ -195,17 +186,13 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             node: Session node carrying the desired field values.
         """
         tokens = node.tokens
-        reasoning, reasoning_blob_id = split_payload(node.reasoning)
         inputs, inputs_blob_id = split_payload(node.inputs)
         outputs, outputs_blob_id = split_payload(node.outputs)
         attributes, attributes_blob_id = split_payload(node.attributes)
         self.session_id = node.session_id
-        self.parent_id = node.parent_id
-        self.secondary_parent_ids = [
-            str(parent_id) for parent_id in node.secondary_parent_ids
-        ]
-        self.index = node.index
         self.external_id = node.external_id
+        self.parent_external_id = node.parent_external_id
+        self.links = [link.model_dump() for link in node.links]
         self.trace_id = node.trace_id
         self.node_type = node.node_type.value
         self.name = node.name
@@ -216,8 +203,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.input_text_selector = node.input_text_selector
         self.output_text_selector = node.output_text_selector
         self.system_prompt_selector = node.system_prompt_selector
-        self.reasoning = reasoning
-        self.reasoning_blob_id = reasoning_blob_id
+        self.reasoning_selectors = node.reasoning_selectors
         self.inputs = inputs
         self.inputs_blob_id = inputs_blob_id
         self.outputs = outputs
@@ -273,12 +259,9 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return SessionNode(
             id=self.id,
             session_id=self.session_id,
-            parent_id=self.parent_id,
-            secondary_parent_ids=[
-                uuid.UUID(parent_id) for parent_id in self.secondary_parent_ids
-            ],
-            index=self.index,
             external_id=self.external_id,
+            parent_external_id=self.parent_external_id,
+            links=[NodeLink.model_validate(link) for link in self.links],
             trace_id=self.trace_id,
             node_type=NodeType(self.node_type),
             name=self.name,
@@ -289,15 +272,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             input_text_selector=self.input_text_selector,
             output_text_selector=self.output_text_selector,
             system_prompt_selector=self.system_prompt_selector,
-            reasoning=(
-                payload_from_columns(
-                    self.reasoning,
-                    self.reasoning_blob_id,
-                    media_type=PayloadMediaType.TEXT,
-                )
-                if "reasoning" not in exclude
-                else None
-            ),
+            reasoning_selectors=self.reasoning_selectors,
             inputs=(
                 payload_from_columns(
                     self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON

@@ -21,6 +21,7 @@ import pytest
 
 from conftest import (
     FakeBlobRepository,
+    build_session_node,
     pg_session,
     pg_session_with_engine,
     postgres_available,
@@ -66,7 +67,6 @@ from kitaru.server.domain.plugin import (
     ScriptPluginSource,
 )
 from kitaru.server.domain.session import Session
-from kitaru.server.domain.session_node import SessionNode
 from kitaru.server.domain.task import ImportTask
 
 Setup = tuple[BlobRepository, uuid.UUID]
@@ -326,9 +326,9 @@ async def test_delete_in_use_by_session_node() -> None:
         await session_node_repository.upsert_batch(
             stored_session.id,
             [
-                SessionNode(
-                    session_id=stored_session.id,
-                    index=0,
+                build_session_node(
+                    stored_session.id,
+                    "call-0",
                     node_type=NodeType.LLM_CALL,
                     name="call",
                     status=NodeStatus.COMPLETED,
