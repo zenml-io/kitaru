@@ -8,7 +8,7 @@
     "node": ">=22.22.0 <23"
   },
   "dependencies": {
-    "@ai-sdk/openai": "4.0.20",
+    "@ai-sdk/openai": "4.0.66",
     "@zenml-io/kitaru": "workspace:*",
     "@zenml-io/kitaru-mastra": "workspace:*",
     "@mastra/core": "1.66.0",
