@@ -357,40 +357,6 @@ class TaskService:
                 partial(Task.abandon, error=stale_abandon_error(task.attempt), now=now),
             )
 
-    async def list_expired_pending_job_ids(self, cutoff: datetime) -> list[uuid.UUID]:
-        """Read the ids of pending jobs created before a cutoff.
-
-        Takes no lock.
-
-        Args:
-            cutoff: Bound the job's creation must be older than.
-
-        Returns:
-            Ids of the expired pending jobs in ascending order.
-        """
-        return await self._jobs.list_expired_pending_ids(
-            cutoff, self._policy.sweep_batch_limit
-        )
-
-    async def expire_pending_job(
-        self, job_id: uuid.UUID, cutoff: datetime, error: str, now: datetime
-    ) -> None:
-        """Cancel one pending job's tasks and settle it if still unclaimed.
-
-        Locks the job's live task rows, then its job row. A job a worker
-        claimed, or one created after the cutoff, is left alone.
-
-        Args:
-            job_id: Id of the candidate job.
-            cutoff: Bound the job's creation must be older than.
-            error: Error the job settles with.
-            now: Current time.
-
-        Raises:
-            DBAPIError: Another transaction holds one of the task rows.
-        """
-        await self._transitions.expire_pending_job(job_id, cutoff, error, now)
-
     async def list_unpropagated_cancel_job_ids(self) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.
 
