@@ -115,8 +115,8 @@ examples:
       - docs/book/adapters/vercel-ai.md
       - packages/core/README.md
       - packages/vercel-ai/README.md
-    owner_area: standalone TypeScript returns agent walkthrough from recording through
-      replayed experiment
+    owner_area: TypeScript returns agent walkthrough from recording through replayed
+      experiment
     coverage:
       deterministic_pytest:
         status: covered
@@ -130,8 +130,7 @@ examples:
           test:e2e
         requires_server: true
         timeout_seconds: 600
-        notes: The TypeScript ticket resolver CI job runs this complete standalone
-          validation.
+        notes: The TypeScript CI job runs this complete validation.
       live_provider:
         status: manual_only
         provider: openai

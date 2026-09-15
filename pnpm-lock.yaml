@@ -60,6 +60,21 @@ importers:
         specifier: 7.0.99
         version: 7.0.99(zod@4.4.3)
 
+  examples/typescript/vercel_ai_ticket_resolver:
+    dependencies:
+      '@ai-sdk/openai':
+        specifier: 4.0.66
+        version: 4.0.66(zod@4.4.3)
+      '@zenml-io/kitaru':
+        specifier: workspace:*
+        version: link:../../../packages/core
+      '@zenml-io/kitaru-vercel-ai':
+        specifier: workspace:*
+        version: link:../../../packages/vercel-ai
+      ai:
+        specifier: 7.0.99
+        version: 7.0.99(zod@4.4.3)
+
   packages/core: {}
 
   packages/mastra:

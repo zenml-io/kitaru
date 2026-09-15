@@ -6,7 +6,7 @@ All customers, orders, shipments, and actions are synthetic. Every invocation ge
 
 The default `MockLanguageModelV4` path is scripted. Its recordings use the requested model ID `openai/gpt-5-nano` and fixed synthetic token counts. Token figures are scripted rather than measured, while cost remains unavailable because this example does not configure a price calculator. Its fixed outcomes prove the adapter, recording, evaluation, cohort, and replay workflow. They do not prove that prompting caused a real model to improve. The optional OpenAI path is paid, non-deterministic evidence to inspect and never promises the fixed result table below.
 
-From the repository root, enter the standalone example directory before running the commands below unless a command says otherwise:
+From the repository root, enter the example directory before running the commands below unless a command says otherwise:
 
 ```bash
 cd examples/typescript/vercel_ai_ticket_resolver
@@ -16,20 +16,17 @@ cd examples/typescript/vercel_ai_ticket_resolver
 
 Use Node 22, Python 3.11 or newer, pnpm, uv, jq, Docker, and a source checkout of this repository. Python and uv are still required because Kitaru's current evaluator and worker ABI is Python, even though the agent itself is TypeScript.
 
-Build the local TypeScript packages without registering this standalone example in the root workspace, then install and verify the example:
+This example is a member of the repository's pnpm workspace. Install the workspace from the repository root, build the local TypeScript packages the example depends on, then verify the example:
 
 ```bash
 pnpm --dir ../../.. install --frozen-lockfile
 pnpm --dir ../../.. --filter @zenml-io/kitaru build
 pnpm --dir ../../.. --filter @zenml-io/kitaru-vercel-ai build
-CI=true pnpm --ignore-workspace install --frozen-lockfile
 pnpm build
 pnpm test
 pnpm typecheck
 pnpm lint
 ```
-
-`CI=true` keeps the standalone install non-interactive. Without it, pnpm refuses to remove a `node_modules` directory left by a root workspace install and aborts with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`.
 
 With PostgreSQL reachable on the configured Kitaru test database port, run the provider-free live API, evaluator, cohort, and replay proof:
 
@@ -548,7 +545,7 @@ The database volume retains Kitaru resources. `.state/` retains local evidence i
 
 ## Focused validation
 
-These commands stay inside the standalone example and require no provider credential or running Kitaru server:
+These commands stay inside the example directory and require no provider credential or running Kitaru server:
 
 ```bash
 pnpm build

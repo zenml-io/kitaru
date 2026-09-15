@@ -20,14 +20,8 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.66",
-    "@zenml-io/kitaru": "link:../../../packages/core",
-    "@zenml-io/kitaru-vercel-ai": "link:../../../packages/vercel-ai",
+    "@zenml-io/kitaru": "workspace:*",
+    "@zenml-io/kitaru-vercel-ai": "workspace:*",
     "ai": "7.0.99"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "2.3.11",
-    "@types/node": "22.20.2",
-    "typescript": "5.9.3",
-    "vitest": "4.1.11"
   }
 }

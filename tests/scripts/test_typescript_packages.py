@@ -200,7 +200,7 @@ def test_typescript_ci_owns_cross_language_tests() -> None:
     assert typescript_job.count("pnpm install --frozen-lockfile") == 1
 
 
-def test_typescript_ci_validates_the_standalone_ticket_resolver() -> None:
+def test_typescript_ci_validates_the_ticket_resolver() -> None:
     workflow_source = CI_WORKFLOW_PATH.read_text()
     job = workflow_source.split("\n  typescript:\n", maxsplit=1)[1].split(
         "\n  typos:\n", maxsplit=1
@@ -210,7 +210,6 @@ def test_typescript_ci_validates_the_standalone_ticket_resolver() -> None:
     assert "run: pnpm install --frozen-lockfile" in job
     assert "pnpm --filter @zenml-io/kitaru build" in job
     assert "pnpm --filter @zenml-io/kitaru-vercel-ai build" in job
-    assert "CI=true pnpm --ignore-workspace install --frozen-lockfile" in job
     for command in (
         "pnpm build",
         "pnpm test",
