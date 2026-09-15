@@ -168,13 +168,13 @@ class KitaruClient:
     ) -> AgentRegistrationResult:
         """Create an agent and its initial version.
 
-        The operation sends separate agent and version requests. An
+        The operation sends separate agent and version requests. If the agent is
+        created but the initial version request raises an ordinary exception,
         ``AgentRegistrationError`` records the created agent, exact version
-        request, and version idempotency key when the second request raises an
-        ordinary exception. Cancellation still propagates, with the agent id
-        and version idempotency key attached as an exception note. The method
-        does not roll back the agent or start a fresh version request with a
-        different idempotency key.
+        request, and version idempotency key. Cancellation still propagates,
+        with the agent id and version idempotency key attached as an exception
+        note. The method does not roll back the agent or start a fresh version
+        request with a different idempotency key.
 
         Args:
             name: New agent name.
