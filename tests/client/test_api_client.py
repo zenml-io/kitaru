@@ -160,6 +160,44 @@ async def test_fresh_idempotency_key_per_request() -> None:
     assert len(keys) == 2
 
 
+async def test_normalizes_explicit_idempotency_key() -> None:
+    """Normalize an explicit idempotency key before sending it."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    client = mock_api_client(handler)
+    await client.request(
+        "POST",
+        "/api/v1/users",
+        json={"name": "alice"},
+        idempotency_key=" caller-key ",
+    )
+    assert requests[0].headers[IDEMPOTENCY_KEY_HEADER] == "caller-key"
+
+
+@pytest.mark.parametrize("key", [" ", "line\nbreak", "a" * 256])
+async def test_rejects_invalid_explicit_idempotency_key(key: str) -> None:
+    """Reject an invalid explicit idempotency key before sending a request."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    client = mock_api_client(handler)
+    with pytest.raises(ValueError, match="Invalid idempotency_key"):
+        await client.request(
+            "POST",
+            "/api/v1/users",
+            json={"name": "alice"},
+            idempotency_key=key,
+        )
+    assert requests == []
+
+
 async def test_idempotency_key_stamped_only_for_post() -> None:
     """Stamp the idempotency key for POST, not other methods."""
     requests: list[httpx.Request] = []

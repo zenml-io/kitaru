@@ -58,7 +58,7 @@ from kitaru.api_models.v1.session import (
     SessionResponse,
 )
 from kitaru.api_models.v1.session_node import SessionNodeResponse
-from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.api_client import KitaruAPIClient, validate_idempotency_key
 from kitaru.client.exceptions import (
     AgentRegistrationError,
     KitaruClientError,
@@ -80,34 +80,6 @@ TERMINAL_EXPERIMENT_RUN_STATUSES = frozenset(
 NamedT = TypeVar("NamedT", AgentResponse, ExperimentResponse)
 ListParamsT = TypeVar("ListParamsT", AgentListParams, ExperimentListParams)
 StatusT = TypeVar("StatusT", ReplayResponse, ExperimentRunResponse)
-
-_MAX_IDEMPOTENCY_KEY_LENGTH = 255
-
-
-def _validate_idempotency_key(key: str | None, parameter: str) -> str | None:
-    """Validate and normalize an idempotency key.
-
-    Args:
-        key: Idempotency key, or None to use the default behavior.
-        parameter: Public parameter name used in validation errors.
-
-    Raises:
-        ValueError: The key is empty, too long, or contains non-printable
-            characters.
-
-    Returns:
-        Normalized key, or None when no key was supplied.
-    """
-    if key is None:
-        return None
-    normalized = key.strip()
-    if (
-        not normalized
-        or len(normalized) > _MAX_IDEMPOTENCY_KEY_LENGTH
-        or not normalized.isprintable()
-    ):
-        raise ValueError(f"Invalid {parameter}.")
-    return normalized
 
 
 class AgentRegistrationResult(BaseModel):
@@ -229,10 +201,10 @@ class KitaruClient:
             run_spec=run_spec,
             capabilities=capabilities,
         )
-        agent_idempotency_key = _validate_idempotency_key(
+        agent_idempotency_key = validate_idempotency_key(
             agent_idempotency_key, "agent_idempotency_key"
         )
-        version_idempotency_key = _validate_idempotency_key(
+        version_idempotency_key = validate_idempotency_key(
             version_idempotency_key, "version_idempotency_key"
         ) or str(uuid.uuid4())
         if agent_idempotency_key == version_idempotency_key:
@@ -292,7 +264,7 @@ class KitaruClient:
             run_spec=run_spec,
             capabilities=capabilities,
         )
-        idempotency_key = _validate_idempotency_key(idempotency_key, "idempotency_key")
+        idempotency_key = validate_idempotency_key(idempotency_key, "idempotency_key")
         agent_id = (
             agent if isinstance(agent, uuid.UUID) else (await self.get_agent(agent)).id
         )
