@@ -526,6 +526,7 @@ async def _execute_action(
             assert payload["id"] == version_id
             assert payload["agent_id"] == runtime.resolve_id(model["agent"])
             assert payload["version"] == model["version"]
+            assert payload["display_version"] == model["display_version"]
             assert payload["description"] == model["description"]
         if action.name == "delete_version" and response.status_code == 204:
             model["alive"] = False
