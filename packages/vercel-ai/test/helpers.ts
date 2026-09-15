@@ -35,6 +35,18 @@ export function textResponse(text = "done") {
   };
 }
 
+export function reasoningResponse(text = "because", answer = "done") {
+  return {
+    content: [
+      { text, type: "reasoning" as const },
+      { text: answer, type: "text" as const },
+    ],
+    finishReason: { raw: "stop", unified: "stop" as const },
+    usage: TEST_USAGE,
+    warnings: [],
+  };
+}
+
 export function toolResponse(
   calls: Array<{ id: string; input?: string; name: string }>,
 ) {
@@ -125,13 +137,17 @@ export class FakeClient implements AdapterClient {
     request: SessionNodeBatchRequest,
   ): Promise<SessionNodeResponse[]> {
     const index = this.nodeBatches.length;
+    const offset = this.nodeBatches.reduce(
+      (total, batch) => total + batch.nodes.length,
+      0,
+    );
     this.nodeBatches.push(request);
     if (this.#options.failNodeBatch?.(request, index)) {
       throw new Error("node upload failed");
     }
-    return request.nodes.map((node) => ({
-      id: `018f0000-0000-7000-8001-${String(node.index + 300).padStart(12, "0")}`,
-      index: node.index,
+    return request.nodes.map((node, position) => ({
+      id: `018f0000-0000-7000-8001-${String(offset + position + 300).padStart(12, "0")}`,
+      external_id: node.external_id,
       node_type: node.node_type,
       status: node.status,
     })) as SessionNodeResponse[];

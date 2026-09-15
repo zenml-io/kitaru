@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Emit `reasoning_selectors` pointing at Claude's thinking blocks in node outputs instead of extracted `reasoning` text.
+
+### Release context
+
+- Requires the unreleased session node `reasoning_selectors` field in core from [PR #1078](https://github.com/zenml-io/kitaru/pull/1078). Replace `kitaru==0.26.0+dev` with the selected compatible published core version before releasing.
+
 ## 0.1.0rc0 - 2026-09-10
 
 - Add one-shot string query recording through the public Claude Agent SDK message stream.

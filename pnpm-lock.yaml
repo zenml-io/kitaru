@@ -33,8 +33,8 @@ importers:
         specifier: 4.0.20
         version: 4.0.20(zod@3.25.76)
       '@mastra/core':
-        specifier: 1.64.0
-        version: 1.64.0(ai@7.0.85(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        specifier: 1.66.0
+        version: 1.66.0(ai@7.0.85(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
       '@zenml-io/kitaru':
         specifier: workspace:*
         version: link:../../../packages/core
@@ -69,8 +69,8 @@ importers:
         version: link:../core
     devDependencies:
       '@mastra/core':
-        specifier: 1.64.0
-        version: 1.64.0(ai@7.0.85(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        specifier: 1.66.0
+        version: 1.66.0(ai@7.0.85(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
       zod:
         specifier: 3.25.76
         version: 3.25.76
@@ -262,14 +262,14 @@ packages:
     resolution: {integrity: sha512-qC72D4+CDdjGqJvkFMMEAtancHUQ7/d/tAiHf64z8MopFDmcrtbcJuerDtFceuAfQJ2pDSfCKCtbqoGBNnwg0w==}
     engines: {node: '>=8'}
 
-  '@mastra/core@1.64.0':
-    resolution: {integrity: sha512-+fuvDeORYWIb+SJrGQlXQi6r1JCxd05g3SNCDepnO910j4uqxMWf5s22Ta0sRSR5zbKRx2NUZoWPAfQt2xF4hQ==}
+  '@mastra/core@1.66.0':
+    resolution: {integrity: sha512-ocK4DgZfZaeZzx9O3t23n8mbghqG3R4zXiZbPQoXMFaNVpVB8GawyFRX6fS3QW479QXzcpH+iN4NriOGcBXg7g==}
     engines: {node: '>=22.13.0'}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  '@mastra/schema-compat@1.3.8':
-    resolution: {integrity: sha512-uGGQlb/QAIgghHf/FQLfnpHbUMXWWJDFlv0FQ/p0K6TjT8OVdWC9uNPdwQmFYu8Fzut4Z+LmzNkJ5S378/41Ew==}
+  '@mastra/schema-compat@1.3.9':
+    resolution: {integrity: sha512-9qoxJzODLwUwGod2g5nv6yT7Nd2ImSAydz+699Gvxj8u8Jwg6icBMbS7cqk/DFQZlZvJED0N0w6kxkp+Ay/qcg==}
     engines: {node: '>=22.13.0'}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -1724,7 +1724,7 @@ snapshots:
     dependencies:
       '@lukeed/csprng': 1.1.0
 
-  '@mastra/core@1.64.0(ai@7.0.85(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.66.0(ai@7.0.85(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
@@ -1735,7 +1735,7 @@ snapshots:
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.4'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.8(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.9(zod@3.25.76)
       '@modelcontextprotocol/server': 2.0.0
       '@sindresorhus/slugify': 2.2.1
       '@standard-schema/spec': 1.1.0
@@ -1768,7 +1768,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@mastra/schema-compat@1.3.8(zod@3.25.76)':
+  '@mastra/schema-compat@1.3.9(zod@3.25.76)':
     dependencies:
       json-schema-to-zod: 2.8.1
       zod: 3.25.76

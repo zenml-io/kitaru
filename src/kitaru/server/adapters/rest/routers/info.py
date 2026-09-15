@@ -62,4 +62,5 @@ async def get_info(
         server_url=settings.SERVER_URL.rstrip("/") or None,
         dashboard_url=settings.DASHBOARD_URL.rstrip("/") or None,
         control_plane_api_url=control_plane_api_url,
+        analytics_enabled=settings.ANALYTICS_OPT_IN,
     )

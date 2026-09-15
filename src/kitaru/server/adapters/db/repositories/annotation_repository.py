@@ -26,7 +26,7 @@ from kitaru.server.adapters.db.orm.annotation import (
     AnnotationORM,
 )
 from kitaru.server.adapters.db.orm.investigation_session import InvestigationSessionORM
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.annotation import AnnotationFilter
 from kitaru.server.domain.annotation import Annotation, AnnotationNotFound
@@ -149,7 +149,10 @@ class SQLAnnotationRepository(BaseSQLRepository[AnnotationORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, annotation_filter, id_column=AnnotationORM.id
+            self._session,
+            statement,
+            annotation_filter,
+            IdOrder(AnnotationORM.id, annotation_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

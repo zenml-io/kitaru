@@ -62,13 +62,13 @@ def test_cost_uses_root_span_when_llm_cost_is_missing() -> None:
         SessionNodeResponse.model_construct(
             id=root_id,
             node_type=NodeType.SPAN,
-            parent_id=None,
+            parent_external_id=None,
             name="agent run",
             cost=Decimal("0.0125"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="model request",
             cost=None,
         ),
@@ -87,19 +87,19 @@ def test_cost_prefers_call_costs_over_aggregate_root() -> None:
         SessionNodeResponse.model_construct(
             id=root_id,
             node_type=NodeType.SPAN,
-            parent_id=None,
+            parent_external_id=None,
             name="agent run",
             cost=Decimal("0.04"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="first model request",
             cost=Decimal("0.01"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="second model request",
             cost=Decimal("0.015"),
         ),
@@ -118,19 +118,19 @@ def test_cost_includes_priced_tool_calls_with_complete_llm_costs() -> None:
         SessionNodeResponse.model_construct(
             id=root_id,
             node_type=NodeType.SPAN,
-            parent_id=None,
+            parent_external_id=None,
             name="agent run",
             cost=Decimal("0.05"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="model request",
             cost=Decimal("0.01"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.TOOL_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="paid search",
             cost=Decimal("0.02"),
         ),
@@ -149,19 +149,19 @@ def test_cost_includes_priced_child_spans_with_complete_llm_costs() -> None:
         SessionNodeResponse.model_construct(
             id=root_id,
             node_type=NodeType.SPAN,
-            parent_id=None,
+            parent_external_id=None,
             name="agent run",
             cost=Decimal("0.05"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="model request",
             cost=Decimal("0.01"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.SPAN,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="paid child operation",
             cost=Decimal("0.02"),
         ),
@@ -201,13 +201,13 @@ def test_cost_uses_root_aggregate_when_tool_cost_is_missing() -> None:
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="model request",
             cost=Decimal("0.01"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.TOOL_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="paid search",
             cost=None,
         ),
@@ -238,13 +238,13 @@ def test_cost_excludes_multiple_root_span_aggregates() -> None:
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=first_root_id,
+            parent_external_id="first_root_id",
             name="first model request",
             cost=Decimal("0.01"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=second_root_id,
+            parent_external_id="second_root_id",
             name="second model request",
             cost=Decimal("0.02"),
         ),
@@ -275,13 +275,13 @@ def test_cost_uses_multiple_root_span_aggregates_when_llm_costs_are_missing() ->
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=first_root_id,
+            parent_external_id="first_root_id",
             name="first model request",
             cost=None,
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=second_root_id,
+            parent_external_id="second_root_id",
             name="second model request",
             cost=None,
         ),
@@ -305,13 +305,13 @@ def test_cost_sums_direct_costs_without_ambient_decimal_rounding() -> None:
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="first model request",
             cost=Decimal("1.23"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.TOOL_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="paid search",
             cost=Decimal("0.004"),
         ),
@@ -344,7 +344,7 @@ def test_cost_sums_root_aggregates_without_ambient_decimal_rounding() -> None:
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=first_root_id,
+            parent_external_id="first_root_id",
             name="missing model request",
             cost=None,
         ),
@@ -365,19 +365,19 @@ def test_cost_uses_root_span_when_call_rollup_is_partial() -> None:
         SessionNodeResponse.model_construct(
             id=root_id,
             node_type=NodeType.SPAN,
-            parent_id=None,
+            parent_external_id=None,
             name="agent run",
             cost=Decimal("0.03"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="recorded model request",
             cost=Decimal("0.01"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=root_id,
+            parent_external_id="root_id",
             name="missing model request",
             cost=None,
         ),
@@ -449,7 +449,7 @@ def test_cost_reports_unavailable_for_zero_root_rollup() -> None:
     view.nodes = [
         SessionNodeResponse.model_construct(
             node_type=NodeType.SPAN,
-            parent_id=None,
+            parent_external_id=None,
             name="agent run",
             cost=Decimal("0"),
         ),
@@ -472,13 +472,13 @@ def test_cost_reports_unavailable_for_partial_root_rollup() -> None:
     view.nodes = [
         SessionNodeResponse.model_construct(
             node_type=NodeType.SPAN,
-            parent_id=None,
+            parent_external_id=None,
             name="recorded agent run",
             cost=Decimal("0.01"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.SPAN,
-            parent_id=None,
+            parent_external_id=None,
             name="missing agent run",
             cost=None,
         ),
@@ -501,7 +501,7 @@ def test_cost_reports_unavailable_for_nested_span_rollup() -> None:
     view.nodes = [
         SessionNodeResponse.model_construct(
             node_type=NodeType.SPAN,
-            parent_id=uuid.uuid4(),
+            parent_external_id="nested-parent",
             name="nested operation",
             cost=Decimal("0.01"),
         ),
@@ -524,13 +524,13 @@ def test_cost_reports_unavailable_for_unpriced_sibling_root() -> None:
     view.nodes = [
         SessionNodeResponse.model_construct(
             node_type=NodeType.SPAN,
-            parent_id=None,
+            parent_external_id=None,
             name="recorded agent run",
             cost=Decimal("0.01"),
         ),
         SessionNodeResponse.model_construct(
             node_type=NodeType.LLM_CALL,
-            parent_id=None,
+            parent_external_id=None,
             name="unpriced root call",
             cost=None,
         ),

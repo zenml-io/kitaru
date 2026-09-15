@@ -178,7 +178,7 @@ async def test_ingest_and_list_nodes_persist_across_requests(
         json={
             "nodes": [
                 {
-                    "index": 0,
+                    "external_id": "n0",
                     "node_type": "llm_call",
                     "name": "call",
                     "status": "completed",
@@ -190,8 +190,8 @@ async def test_ingest_and_list_nodes_persist_across_requests(
                     "metadata": {},
                 },
                 {
-                    "index": 1,
-                    "parent_index": 0,
+                    "external_id": "n1",
+                    "parent_external_id": "n0",
                     "node_type": "tool_call",
                     "name": "search",
                     "status": "completed",
@@ -206,7 +206,7 @@ async def test_ingest_and_list_nodes_persist_across_requests(
     )
     assert response.status_code == 200
     nodes = response.json()
-    assert nodes[1]["parent_id"] == nodes[0]["id"]
+    assert nodes[1]["parent_external_id"] == "n0"
     assert nodes[1]["cache_key"] is not None
 
     session = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
@@ -217,7 +217,7 @@ async def test_ingest_and_list_nodes_persist_across_requests(
     response = await client.get(f"/api/v1/sessions/{created['id']}/nodes")
     assert response.status_code == 200
     items = response.json()["items"]
-    assert [item["index"] for item in items] == [0, 1]
+    assert [item["external_id"] for item in items] == ["n0", "n1"]
     assert items[0]["inputs"] is None
 
     response = await client.get(
@@ -243,7 +243,7 @@ async def test_ingest_into_terminal_recorded_session_rejected(
         json={
             "nodes": [
                 {
-                    "index": 0,
+                    "external_id": "n0",
                     "node_type": "span",
                     "name": "x",
                     "status": "completed",
@@ -314,7 +314,7 @@ async def test_large_payload_offload_round_trips_through_the_api() -> None:
             json={
                 "nodes": [
                     {
-                        "index": 0,
+                        "external_id": "n0",
                         "node_type": "llm_call",
                         "name": "call",
                         "status": "completed",
