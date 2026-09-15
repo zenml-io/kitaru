@@ -253,13 +253,14 @@ async function contextFor(testCase: EffectiveInputsCase) {
 // expectations come from the server's own effective_inputs rather than from a
 // second reading of the same rule.
 describe("recorded inputs against the server's rule", () => {
-  it.each(
-    effectiveInputsFixture.cases.map((c) => [c.name, c] as const),
-  )("matches the Python effective inputs for %s", async (_name, testCase) => {
-    const context = await contextFor(testCase);
+  it.each(effectiveInputsFixture.cases.map((c) => [c.name, c] as const))(
+    "matches the Python effective inputs for %s",
+    async (_name, testCase) => {
+      const context = await contextFor(testCase);
 
-    expect(context.effectiveInput).toEqual(testCase.expected);
-  });
+      expect(context.effectiveInput).toEqual(testCase.expected);
+    },
+  );
 });
 
 describe("runtime inputs handed to the agent", () => {

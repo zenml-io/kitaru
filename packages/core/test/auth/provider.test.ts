@@ -48,8 +48,9 @@ describe("credential providers", () => {
       renewCredential: renew,
     };
     const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) => {
-      const authorization = (init?.headers as Record<string, string>)
-        .Authorization;
+      const authorization = (
+        init?.headers as Record<string, string> | undefined
+      )?.Authorization;
       return authorization === "Bearer fresh"
         ? jsonResponse({ ok: true })
         : jsonResponse({ detail: "unauthorized" }, 401);

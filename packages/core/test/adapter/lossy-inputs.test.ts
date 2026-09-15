@@ -110,28 +110,30 @@ describe("history lookup of lossily converted tool arguments", () => {
     });
   });
 
-  it.each(
-    COLLIDING_PAIRS,
-  )("converts %s to one value that no longer identifies either call", (_name, recorded, other) => {
-    const convertedRecorded = boundedRecorderConversion(recorded, "input");
-    const convertedOther = boundedRecorderConversion(other, "input");
+  it.each(COLLIDING_PAIRS)(
+    "converts %s to one value that no longer identifies either call",
+    (_name, recorded, other) => {
+      const convertedRecorded = boundedRecorderConversion(recorded, "input");
+      const convertedOther = boundedRecorderConversion(other, "input");
 
-    expect(convertedRecorded.value).toEqual(convertedOther.value);
-    expect(convertedRecorded.lossy).toBe(true);
-    expect(convertedOther.lossy).toBe(true);
-  });
+      expect(convertedRecorded.value).toEqual(convertedOther.value);
+      expect(convertedRecorded.lossy).toBe(true);
+      expect(convertedOther.lossy).toBe(true);
+    },
+  );
 
-  it.each(
-    COLLIDING_PAIRS,
-  )("refuses to answer a call whose arguments lost %s", async (_name, recorded, other) => {
-    const { client, run } = runWithHistory(recorded);
+  it.each(COLLIDING_PAIRS)(
+    "refuses to answer a call whose arguments lost %s",
+    async (_name, recorded, other) => {
+      const { client, run } = runWithHistory(recorded);
 
-    await expect(decideToolCall(run, toolInput(other))).rejects.toThrow(
-      ToolPolicyMissError,
-    );
-    // The lookup never happened, so no recorded result could come back.
-    expect(client.lookups).toEqual([]);
-  });
+      await expect(decideToolCall(run, toolInput(other))).rejects.toThrow(
+        ToolPolicyMissError,
+      );
+      // The lookup never happened, so no recorded result could come back.
+      expect(client.lookups).toEqual([]);
+    },
+  );
 
   it("still answers a call whose arguments converted losslessly", async () => {
     const inputs = { limit: 3, query: "weather" };

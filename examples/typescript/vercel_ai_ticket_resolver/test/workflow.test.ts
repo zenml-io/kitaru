@@ -69,16 +69,14 @@ function manifest(): WorkflowManifest {
 }
 
 describe("canonical workflow preflight", () => {
-  it.each([
-    "21.99.0",
-    "22.21.9",
-    "23.0.0",
-    "not-a-version",
-  ])("rejects unsupported Node %s", (version) => {
-    expect(() => assertSupportedNodeVersion(version)).toThrow(
-      "Node >=22.22.0 <23",
-    );
-  });
+  it.each(["21.99.0", "22.21.9", "23.0.0", "not-a-version"])(
+    "rejects unsupported Node %s",
+    (version) => {
+      expect(() => assertSupportedNodeVersion(version)).toThrow(
+        "Node >=22.22.0 <23",
+      );
+    },
+  );
 
   it("accepts the pinned Node runtime", () => {
     expect(() => assertSupportedNodeVersion("22.22.3")).not.toThrow();
@@ -152,36 +150,39 @@ describe("canonical workflow manifest", () => {
     ["account_id", id(90)],
     ["auth_scheme", "local"],
     ["version", "0.23.0"],
-  ] as const)("rejects a changed server %s before any remote mutation", async (field, value) => {
-    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
-    const store = new WorkflowManifestStore(directory);
-    const state = manifest();
-    state.server = { ...state.server, [field]: value };
-    await store.save(state);
-    const createAgent = vi.fn();
-    const client = {
-      accounts: { getCurrent: vi.fn(async () => ({ id: id(1) })) },
-      agents: { create: createAgent },
-      info: {
-        get: vi.fn(async () => ({
-          auth_scheme: "control_plane",
-          version: "0.22.0",
-        })),
-      },
-    } as unknown as KitaruClient;
-
-    await expect(
-      runWorkflow(
-        parseWorkflowArguments(["--state-dir", directory]),
-        { KITARU_API_URL: "https://kitaru.example" },
-        {
-          createClient: async () => client,
-          readSourceMaterial: async () => sourceMaterial,
+  ] as const)(
+    "rejects a changed server %s before any remote mutation",
+    async (field, value) => {
+      const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+      const store = new WorkflowManifestStore(directory);
+      const state = manifest();
+      state.server = { ...state.server, [field]: value };
+      await store.save(state);
+      const createAgent = vi.fn();
+      const client = {
+        accounts: { getCurrent: vi.fn(async () => ({ id: id(1) })) },
+        agents: { create: createAgent },
+        info: {
+          get: vi.fn(async () => ({
+            auth_scheme: "control_plane",
+            version: "0.22.0",
+          })),
         },
-      ),
-    ).rejects.toThrow("belongs to another server or account");
-    expect(createAgent).not.toHaveBeenCalled();
-  });
+      } as unknown as KitaruClient;
+
+      await expect(
+        runWorkflow(
+          parseWorkflowArguments(["--state-dir", directory]),
+          { KITARU_API_URL: "https://kitaru.example" },
+          {
+            createClient: async () => client,
+            readSourceMaterial: async () => sourceMaterial,
+          },
+        ),
+      ).rejects.toThrow("belongs to another server or account");
+      expect(createAgent).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects a changed stored agent version before resuming work", async () => {
     const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
@@ -453,35 +454,36 @@ describe("canonical workflow manifest", () => {
         retries: new Set(["agent"]),
       },
     },
-  ])("rejects $label recovery when no operation is pending", async ({
-    recovery,
-  }) => {
-    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
-    const store = new WorkflowManifestStore(directory);
-    const state = manifest();
-    await store.save(state);
-    const create = vi.fn(async () => ({ id: id(60) }));
+  ])(
+    "rejects $label recovery when no operation is pending",
+    async ({ recovery }) => {
+      const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+      const store = new WorkflowManifestStore(directory);
+      const state = manifest();
+      await store.save(state);
+      const create = vi.fn(async () => ({ id: id(60) }));
 
-    await expect(
-      runJournaledMutation(
-        {
-          adopt: create,
-          commit: () => {},
-          create,
-          fingerprintInput: { name: "fresh-operation" },
-          key: "agent",
-          kind: "agent",
-          manifest: state,
-          stage: "baseline",
-          store,
-          validate: () => {},
-        },
-        recovery,
-      ),
-    ).rejects.toThrow("requires an existing pending operation");
-    expect(create).not.toHaveBeenCalled();
-    expect((await store.load())?.pending_operation).toBeNull();
-  });
+      await expect(
+        runJournaledMutation(
+          {
+            adopt: create,
+            commit: () => {},
+            create,
+            fingerprintInput: { name: "fresh-operation" },
+            key: "agent",
+            kind: "agent",
+            manifest: state,
+            stage: "baseline",
+            store,
+            validate: () => {},
+          },
+          recovery,
+        ),
+      ).rejects.toThrow("requires an existing pending operation");
+      expect(create).not.toHaveBeenCalled();
+      expect((await store.load())?.pending_operation).toBeNull();
+    },
+  );
 
   it("rejects a recovery key that does not match the pending operation", async () => {
     const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
@@ -938,28 +940,31 @@ describe("canonical workflow manifest", () => {
     ["failed", "evaluation", "baseline_evaluation"],
     ["canceled", "replay", "experiment_runs"],
     ["completed", "replay", "baseline_evaluation"],
-  ] as const)("persists failed state for %s %s jobs", async (status, actualKind, stage) => {
-    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
-    const store = new WorkflowManifestStore(directory);
-    const state = manifest();
-    state.phase = stage;
-    state.stages[stage].status = "awaiting_worker";
-    await store.save(state);
-    const expectedKind =
-      stage === "baseline_evaluation" ? "evaluation" : "replay";
-    const job = {
-      error: status === "completed" ? null : "worker stopped",
-      id: id(50),
-      kind: actualKind,
-      status,
-    } as Parameters<typeof verifyCompletedJob>[0];
+  ] as const)(
+    "persists failed state for %s %s jobs",
+    async (status, actualKind, stage) => {
+      const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+      const store = new WorkflowManifestStore(directory);
+      const state = manifest();
+      state.phase = stage;
+      state.stages[stage].status = "awaiting_worker";
+      await store.save(state);
+      const expectedKind =
+        stage === "baseline_evaluation" ? "evaluation" : "replay";
+      const job = {
+        error: status === "completed" ? null : "worker stopped",
+        id: id(50),
+        kind: actualKind,
+        status,
+      } as Parameters<typeof verifyCompletedJob>[0];
 
-    await expect(
-      verifyCompletedJob(job, expectedKind, state, store, stage),
-    ).rejects.toThrow(`Expected completed ${expectedKind} job`);
-    expect((await store.load())?.phase).toBe(stage);
-    expect((await store.load())?.stages[stage].status).toBe("failed");
-  });
+      await expect(
+        verifyCompletedJob(job, expectedKind, state, store, stage),
+      ).rejects.toThrow(`Expected completed ${expectedKind} job`);
+      expect((await store.load())?.phase).toBe(stage);
+      expect((await store.load())?.stages[stage].status).toBe("failed");
+    },
+  );
 });
 
 describe("review annotation recovery", () => {

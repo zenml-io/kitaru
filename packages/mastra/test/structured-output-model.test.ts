@@ -159,28 +159,37 @@ describe("secondary structured-output model recording", () => {
     [{ errorStrategy: "warn" }, {}],
     [{ useAgent: true }, { useAgent: undefined }],
     [{ errorStrategy: "warn" }, { errorStrategy: undefined }],
-  ])("rejects unsupported structuring options inherited from defaults: %s", async (defaults, callerOptions) => {
-    const api = installTestApi();
-    const parent = makeModel("parent");
-    const secondary = makeModel("secondary");
-    const agent = wrap(
-      new Agent({
-        id: "inherited",
-        name: "inherited",
-        instructions: "Answer",
-        model: parent.model,
-        defaultOptions: { structuredOutput: { schema, ...defaults } } as never,
-      }),
-    );
-    await expect(
-      agent.generate("question", {
-        structuredOutput: { schema, model: secondary.model, ...callerOptions },
-      }),
-    ).rejects.toThrow();
-    expect(parent.calls).toHaveLength(0);
-    expect(secondary.calls).toHaveLength(0);
-    expect(api.calls).toHaveLength(0);
-  });
+  ])(
+    "rejects unsupported structuring options inherited from defaults: %s",
+    async (defaults, callerOptions) => {
+      const api = installTestApi();
+      const parent = makeModel("parent");
+      const secondary = makeModel("secondary");
+      const agent = wrap(
+        new Agent({
+          id: "inherited",
+          name: "inherited",
+          instructions: "Answer",
+          model: parent.model,
+          defaultOptions: {
+            structuredOutput: { schema, ...defaults },
+          } as never,
+        }),
+      );
+      await expect(
+        agent.generate("question", {
+          structuredOutput: {
+            schema,
+            model: secondary.model,
+            ...callerOptions,
+          },
+        }),
+      ).rejects.toThrow();
+      expect(parent.calls).toHaveLength(0);
+      expect(secondary.calls).toHaveLength(0);
+      expect(api.calls).toHaveLength(0);
+    },
+  );
 
   it("preserves native output but fails recording when the secondary stream ends without a finish event", async () => {
     const api = installTestApi();
@@ -237,37 +246,37 @@ describe("secondary structured-output model recording", () => {
     ).toMatchObject({ status: "completed" });
   });
 
-  it.each([
-    "warn",
-    "fallback",
-  ] as const)("rejects secondary errorStrategy %s before execution", async (errorStrategy) => {
-    const api = installTestApi();
-    const parent = makeModel("parent");
-    const secondary = makeModel("secondary");
-    const agent = wrap(
-      new Agent({
-        id: "strategy",
-        name: "strategy",
-        instructions: "Answer",
-        model: parent.model,
-      }),
-    );
-    const structuredOutput =
-      errorStrategy === "fallback"
-        ? {
-            schema,
-            model: secondary.model,
-            errorStrategy,
-            fallbackValue: { answer: "unavailable" },
-          }
-        : { schema, model: secondary.model, errorStrategy };
-    await expect(
-      agent.generate("question", { structuredOutput }),
-    ).rejects.toThrow("errorStrategy");
-    expect(parent.calls).toHaveLength(0);
-    expect(secondary.calls).toHaveLength(0);
-    expect(api.calls).toHaveLength(0);
-  });
+  it.each(["warn", "fallback"] as const)(
+    "rejects secondary errorStrategy %s before execution",
+    async (errorStrategy) => {
+      const api = installTestApi();
+      const parent = makeModel("parent");
+      const secondary = makeModel("secondary");
+      const agent = wrap(
+        new Agent({
+          id: "strategy",
+          name: "strategy",
+          instructions: "Answer",
+          model: parent.model,
+        }),
+      );
+      const structuredOutput =
+        errorStrategy === "fallback"
+          ? {
+              schema,
+              model: secondary.model,
+              errorStrategy,
+              fallbackValue: { answer: "unavailable" },
+            }
+          : { schema, model: secondary.model, errorStrategy };
+      await expect(
+        agent.generate("question", { structuredOutput }),
+      ).rejects.toThrow("errorStrategy");
+      expect(parent.calls).toHaveLength(0);
+      expect(secondary.calls).toHaveLength(0);
+      expect(api.calls).toHaveLength(0);
+    },
+  );
 
   it("keeps recording isolated when invocations share the same secondary model", async () => {
     const api = installTestApi();
