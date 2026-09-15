@@ -15,9 +15,11 @@
 
 import uuid
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 
 from sqlalchemy import not_, or_, select
 
+from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.job import JobORM
@@ -126,6 +128,28 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
         """
         rows = await self._load_by_ids(job_ids, exclusive=True)
         return {job_id: row.to_domain() for job_id, row in rows.items()}
+
+    async def list_expired_pending_ids(
+        self, cutoff: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of pending jobs older than the cutoff.
+
+        Rows are read without locking.
+
+        Args:
+            cutoff: Jobs created before this are read.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the pending jobs in ascending order.
+        """
+        statement = (
+            select(JobORM.id)
+            .where(JobORM.status == JobStatus.PENDING.value, JobORM.created < cutoff)
+            .order_by(JobORM.id.asc())
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
 
     async def list_unpropagated_cancel_ids(self, limit: int) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.

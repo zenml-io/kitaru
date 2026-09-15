@@ -23,23 +23,28 @@ from functools import partial
 from typing import TypeVar
 
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.adapters.db.errors import is_lock_not_available
 from kitaru.server.adapters.rest.dependencies import (
     get_idempotency_key_repository,
+    get_job_service,
     get_server_analytics,
     get_task_service,
 )
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.services.job_service import JobService
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.database.service import DatabaseService
+from kitaru.server.domain.job import pending_timeout_error
 
 logger = logging.getLogger(__name__)
 
-SweepUnit = Callable[[TaskService], Awaitable[None]]
+S = TypeVar("S")
 T = TypeVar("T")
+ServiceBuilder = Callable[[AsyncSession, AsyncEngine, APISettings, ServerAnalytics], S]
 
 # Bound on the batches one tick drains, so a large backlog cannot keep a tick
 # running past the next interval.
@@ -81,25 +86,27 @@ async def _run_unit(
     database: DatabaseService,
     settings: APISettings,
     analytics: AnalyticsClient,
-    unit: SweepUnit,
+    build: ServiceBuilder[S],
+    unit: Callable[[S], Awaitable[None]],
     label: str,
 ) -> None:
     """Run one sweep unit in its own transaction and commit it.
 
-    Builds the task service the same way a request does, so a settlement the
-    unit applies dispatches through the same event subscribers.
+    Builds the service the same way a request does, so a settlement the unit
+    applies dispatches through the same event subscribers.
 
     Args:
         database: Database service the unit opens a session against.
         settings: API settings for this process.
         analytics: Analytics client for this process.
+        build: Service factory the unit runs against.
         unit: Work to run against the service.
         label: Name of the unit for the failure log.
     """
 
     async def body(session: AsyncSession) -> None:
         tracker = get_server_analytics(session, analytics)
-        await unit(get_task_service(session, database.engine, settings, tracker))
+        await unit(build(session, database.engine, settings, tracker))
 
     await _run_transaction(database, body, label)
 
@@ -140,28 +147,37 @@ async def _read_candidates(
     settings: APISettings,
     analytics: AnalyticsClient,
     now: datetime,
-) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-    """Read the stale task ids and the canceling job ids without locking.
+    pending_cutoff: datetime,
+) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
+    """Read the stale task ids, the canceling job ids, and the expired pending job ids.
+
+    Takes no lock.
 
     Args:
         database: Database service the read opens a session against.
         settings: API settings for this process.
         analytics: Analytics client for this process.
         now: Current time.
+        pending_cutoff: Bound a pending job's creation must be older than.
 
     Returns:
-        Stale task ids and job ids owing a cancel propagation.
+        Stale task ids, job ids owing a cancel propagation, and pending job
+        ids the timeout has expired.
     """
     async for session in database.get_async_session():
         try:
             tracker = get_server_analytics(session, analytics)
-            service = get_task_service(session, database.engine, settings, tracker)
-            task_ids = await service.list_stale_task_ids(now)
-            job_ids = await service.list_unpropagated_cancel_job_ids()
-            return task_ids, job_ids
+            tasks = get_task_service(session, database.engine, settings, tracker)
+            jobs = get_job_service(session, database.engine, settings, tracker)
+            task_ids = await tasks.list_stale_task_ids(now)
+            job_ids = await tasks.list_unpropagated_cancel_job_ids()
+            expired_pending_job_ids = await jobs.list_expired_pending_job_ids(
+                pending_cutoff
+            )
+            return task_ids, job_ids, expired_pending_job_ids
         finally:
             await session.rollback()
-    return [], []
+    return [], [], []
 
 
 async def sweep_once(
@@ -169,7 +185,7 @@ async def sweep_once(
     settings: APISettings,
     analytics: AnalyticsClient,
 ) -> None:
-    """Propagate pending job cancels and rescue stale tasks, one item per transaction.
+    """Propagate cancels, expire unclaimed jobs, and rescue stale tasks per item.
 
     A candidate another replica already holds is skipped and picked up on a
     later tick. A failing item logs and leaves the remaining items to run.
@@ -180,7 +196,11 @@ async def sweep_once(
         analytics: Analytics client for this process.
     """
     now = datetime.now(UTC)
-    task_ids, job_ids = await _read_candidates(database, settings, analytics, now)
+    pending_cutoff = now - timedelta(seconds=settings.JOB_PENDING_TIMEOUT_SECONDS)
+    pending_error = pending_timeout_error(settings.JOB_PENDING_TIMEOUT_SECONDS)
+    task_ids, job_ids, expired_pending_job_ids = await _read_candidates(
+        database, settings, analytics, now, pending_cutoff
+    )
     # Propagate first. The rescue chooses between canceling and requeuing by
     # reading the task's own cancel_requested_at, so a stale task of a
     # canceling job whose stamp has not landed yet is requeued instead of
@@ -191,14 +211,31 @@ async def sweep_once(
             database,
             settings,
             analytics,
+            get_task_service,
             partial(TaskService.propagate_job_cancel, job_id=job_id),
             f"cancel propagation for job {job_id}",
+        )
+    for job_id in expired_pending_job_ids:
+        await _run_unit(
+            database,
+            settings,
+            analytics,
+            get_job_service,
+            partial(
+                JobService.expire_pending_job,
+                job_id=job_id,
+                cutoff=pending_cutoff,
+                error=pending_error,
+                now=now,
+            ),
+            f"pending timeout for job {job_id}",
         )
     for task_id in task_ids:
         await _run_unit(
             database,
             settings,
             analytics,
+            get_task_service,
             partial(TaskService.sweep_stale_task, task_id=task_id, now=now),
             f"stale task {task_id}",
         )

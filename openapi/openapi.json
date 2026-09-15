@@ -5908,7 +5908,7 @@
                 "type": "null"
               }
             ],
-            "description": "First counted task failure's error.",
+            "description": "Error the job settled with.",
             "title": "Error"
           },
           "id": {
