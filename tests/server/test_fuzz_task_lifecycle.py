@@ -138,7 +138,7 @@ def _task_attempt_sequences(draw: st.DrawFn) -> list[SequenceAction]:
         elif model.status == "running":
             choices = ["complete", "fail", "cancel_job", "foreign_start"]
             if not model.has_result_session:
-                choices.append("link_result_session")
+                choices.extend(["link_result_session", "completion_rejected"])
             if model.attempt < 3:
                 choices.append("stale_reclaim")
             else:
@@ -606,6 +606,7 @@ async def _run(
         ["start", "complete"],
         ["stale_reclaim", "complete"],
         ["start", "link_result_session", "stale_reclaim", "complete"],
+        ["start", "completion_rejected"],
         ["cancel_job", "acknowledge_cancel", "completion_rejected"],
         ["start", "cancel_job", "acknowledge_cancel", "completion_rejected"],
         ["start", "cancel_job", "complete"],
