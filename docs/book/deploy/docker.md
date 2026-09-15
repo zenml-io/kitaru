@@ -53,6 +53,7 @@ Operational knobs with sensible defaults; raise or lower them deliberately:
 | `KITARU_SERVER_PAYLOAD_OFFLOAD_THRESHOLD_BYTES` | 20 KiB | Session/node payload size above which it moves to blob storage |
 | `KITARU_SERVER_TASK_HEARTBEAT_TIMEOUT_SECONDS` | 60 | How long a silent worker holds a task before it's requeued |
 | `KITARU_SERVER_TASK_RETRY_LIMIT` | 3 | Attempts before a stale task is abandoned |
+| `KITARU_SERVER_JOB_PENDING_TIMEOUT_SECONDS` | 3600 | How long a job waits unclaimed before it's canceled |
 | `KITARU_SERVER_EVALUATOR_TASK_TIMEOUT_SECONDS` | 300 | Per-evaluator process timeout |
 | `KITARU_SERVER_IMPORTER_TASK_TIMEOUT_SECONDS` | 600 | Per-import process timeout |
 | `KITARU_SERVER_EVALUATION_PAIR_LIMIT` | 100 | Max (session × evaluator) pairs per batch request |

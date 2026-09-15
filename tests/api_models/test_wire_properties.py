@@ -367,18 +367,26 @@ def _session_response_inputs(
 def _node_create_inputs(
     draw: st.DrawFn,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    index = draw(st.integers(1, 1000))
     kwargs: dict[str, Any] = {
-        "index": index,
-        "parent_index": draw(st.one_of(st.none(), st.integers(0, index - 1))),
-        "secondary_parent_indexes": draw(
-            st.lists(st.integers(0, index - 1), max_size=3, unique=True)
+        "external_id": draw(_NONEMPTY_TEXT),
+        "parent_external_id": draw(st.one_of(st.none(), _NONEMPTY_TEXT)),
+        "links": draw(
+            st.lists(
+                st.fixed_dictionaries(
+                    {
+                        "external_id": _NONEMPTY_TEXT,
+                        "kind": _NONEMPTY_TEXT,
+                    }
+                ),
+                max_size=3,
+            )
         ),
         "node_type": draw(st.sampled_from(list(NodeType))),
         "name": draw(_SAFE_TEXT),
         "status": draw(st.sampled_from(list(NodeStatus))),
         "started_at": draw(st.one_of(st.none(), _AWARE_DATETIMES)),
         "ended_at": draw(st.one_of(st.none(), _AWARE_DATETIMES)),
+        "reasoning_selectors": draw(st.lists(_SAFE_TEXT, max_size=3)),
         "inputs": draw(JSON_VALUES),
         "outputs": draw(JSON_VALUES),
         "attributes": draw(JSON_VALUES),
@@ -400,15 +408,11 @@ def _node_response_inputs(
         "id": draw(st.uuids()),
         "session_id": draw(st.uuids()),
         **request_kwargs,
-        "parent_id": draw(_OPTIONAL_UUIDS),
-        "secondary_parent_ids": draw(st.lists(st.uuids(), max_size=3, unique=True)),
-        "external_id": None,
         "trace_id": None,
         "error": None,
         "input_text_selector": None,
         "output_text_selector": None,
         "system_prompt_selector": None,
-        "reasoning": None,
         "requested_model": None,
         "model": None,
         "model_provider": None,

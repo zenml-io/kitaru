@@ -8,7 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, Mock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -17,7 +17,7 @@ from kitaru.api_models.v1.session import SessionCreateRequest, SessionResponse
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.exceptions import APIError
+from kitaru.json_pointer import resolve_json_pointer
 from kitaru.task.importer import ImportedSession, flatten_nodes, ingest_session
 from kitaru_mastra_importer.importer import InvalidImport, parse
 
@@ -64,13 +64,9 @@ def test_preserves_invocations_and_graph_independent_of_export_order(
         source = {span["spanId"]: span for span in trace["spans"]}
         nodes = flatten_nodes(session.nodes)
         assert len(nodes) == len(source)
-        by_index = {node.index: node.external_id for node in nodes}
         for node in nodes:
             assert node.trace_id == trace["traceId"]
-            assert (
-                by_index.get(node.parent_index)
-                == source[node.external_id]["parentSpanId"]
-            )
+            assert node.parent_external_id == source[node.external_id]["parentSpanId"]
         assert session.framework == "mastra"
 
 
@@ -170,7 +166,16 @@ def test_namespace_changes_identity_without_changing_source_trace(
     assert namespaced.nodes == original.nodes
 
 
-async def test_reimport_skips_sessions_and_does_not_ingest_nodes_twice(
+async def _ingest(
+    client: KitaruAPIClient, session: ImportedSession, agent_id: UUID
+) -> SessionResponse:
+    """Ingest one parsed session and require it to be stored."""
+    stored = await ingest_session(client, session, agent_id, "mastra")
+    assert stored is not None
+    return stored
+
+
+async def test_reimport_ingests_nodes_into_the_existing_session(
     traces: list[dict[str, Any]],
 ) -> None:
     client = Mock(spec=KitaruAPIClient)
@@ -179,7 +184,7 @@ async def test_reimport_skips_sessions_and_does_not_ingest_nodes_twice(
     async def create(request: SessionCreateRequest) -> SessionResponse:
         key = (request.imported_from, request.external_id)
         if key in stored:
-            raise APIError(409, "Session already exists")
+            return stored[key]
         session = Mock(spec=SessionResponse)
         session.id = uuid4()
         stored[key] = session
@@ -189,20 +194,19 @@ async def test_reimport_skips_sessions_and_does_not_ingest_nodes_twice(
     client.sessions.create = AsyncMock(side_effect=create)
     client.sessions.ingest_nodes = AsyncMock()
     agent_id = uuid4()
-    first = [
-        await ingest_session(client, s, agent_id, "mastra")
-        for s in _get_sessions(traces)
-    ]
-    second = [
-        await ingest_session(client, s, agent_id, "mastra")
-        for s in _get_sessions(traces)
-    ]
-    assert all(session is not None for session in first)
-    assert second == [None, None]
+    first = [await _ingest(client, s, agent_id) for s in _get_sessions(traces)]
+    second = [await _ingest(client, s, agent_id) for s in _get_sessions(traces)]
+    assert [session.id for session in second] == [session.id for session in first]
     assert len(stored) == 2
-    assert client.sessions.ingest_nodes.await_count == 2
+    assert client.sessions.ingest_nodes.await_count == 4
     batches = client.sessions.ingest_nodes.await_args_list
-    assert [len(call.args[1].nodes) for call in batches] == [10, 5]
+    assert [call.args[0] for call in batches] == [
+        first[0].id,
+        first[1].id,
+        first[0].id,
+        first[1].id,
+    ]
+    assert [len(call.args[1].nodes) for call in batches] == [10, 5, 10, 5]
 
 
 @pytest.mark.parametrize(
@@ -271,6 +275,54 @@ def test_duplicate_trace_is_skipped_but_conflicting_copy_fails(
     assert [
         item.external_id for item in results if isinstance(item, ImportedSession)
     ] == [traces[1]["traceId"]]
+
+
+def test_malformed_conflicting_trace_is_order_independent(
+    traces: list[dict[str, Any]],
+) -> None:
+    """Report one conflict regardless of which duplicate appears first."""
+    valid = traces[0]
+    malformed = copy.deepcopy(valid)
+    del malformed["spans"][0]["spanId"]
+
+    for records in ([valid, malformed], [malformed, valid]):
+        [failure] = _parse(records)
+        assert isinstance(failure, ImportFailure)
+        assert failure.external_id == valid["traceId"]
+        assert failure.error == "conflicting duplicate traceId in export"
+
+
+def test_large_trace_normalizes_every_span(
+    traces: list[dict[str, Any]],
+) -> None:
+    """Preserve every span in a trace larger than one ingest batch."""
+    trace = traces[0]
+    root = next(span for span in trace["spans"] if span["parentSpanId"] is None)
+    trace["spans"] = [root]
+    for index in range(500):
+        trace["spans"].append(
+            {
+                "traceId": trace["traceId"],
+                "spanId": f"large-span-{index}",
+                "parentSpanId": root["spanId"],
+                "name": f"large-span-{index}",
+                "spanType": "custom_span",
+                "startedAt": "2026-01-01T00:00:00Z",
+                "endedAt": "2026-01-01T00:00:01Z",
+                "input": {},
+                "output": {},
+                "attributes": {},
+            }
+        )
+
+    [session] = _get_sessions(trace)
+
+    nodes = flatten_nodes(session.nodes)
+    assert len(nodes) == 501
+    assert {node.external_id for node in nodes} == {
+        root["spanId"],
+        *(f"large-span-{index}" for index in range(500)),
+    }
 
 
 @pytest.mark.parametrize(
@@ -394,7 +446,10 @@ def test_preserves_explicit_reasoning_and_partial_usage(
     node = next(
         node for node in session.nodes if node.external_id == generation["spanId"]
     )
-    assert node.reasoning == "Use the recorded arithmetic result."
+    assert node.reasoning_selectors == ["/reasoning/0/text"]
+    found, value = resolve_json_pointer(node.outputs, node.reasoning_selectors[0])
+    assert found
+    assert value == "Use the recorded arithmetic result."
     assert (
         sum(node.tokens.input_tokens or 0 for node in session.nodes if node.tokens)
         == 41

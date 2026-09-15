@@ -23,6 +23,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -298,16 +299,16 @@ def _system_prompt_match(value: Any) -> _TextMatch | None:
     return found[-1] if found else None
 
 
-def _reasoning(value: Any) -> str | None:
-    """Return visible reasoning from a provider payload."""
+def _reasoning_selectors(value: Any) -> list[str]:
+    """Return the JSON Pointers selecting visible reasoning in a provider payload."""
     found: list[str] = []
 
-    def _collect(item: Any, depth: int = 0) -> None:
+    def _collect(item: Any, selector: str = "", depth: int = 0) -> None:
         if depth > 12:
             return
         if isinstance(item, list):
-            for child in item:
-                _collect(child, depth + 1)
+            for index, child in enumerate(item):
+                _collect(child, _child_selector(selector, index), depth + 1)
             return
         if not isinstance(item, dict):
             return
@@ -316,17 +317,23 @@ def _reasoning(value: Any) -> str | None:
         if kind in {"reasoning", "reasoning-content", "thinking", "thought"}:
             for key in ("text", "content", "summary"):
                 if key in item and (
-                    match := _content_match(item[key], depth=depth + 1)
+                    match := _content_match(
+                        item[key], _child_selector(selector, key), depth + 1
+                    )
                 ):
-                    found.append(match.text)
+                    found.append(match.selector)
         for key in ("reasoning", "reasoning_content", "thinking", "thought"):
-            if key in item and (match := _content_match(item[key], depth=depth + 1)):
-                found.append(match.text)
-        for child in item.values():
-            _collect(child, depth + 1)
+            if key in item and (
+                match := _content_match(
+                    item[key], _child_selector(selector, key), depth + 1
+                )
+            ):
+                found.append(match.selector)
+        for key, child in item.items():
+            _collect(child, _child_selector(selector, key), depth + 1)
 
     _collect(value)
-    return found[-1] if found else None
+    return found
 
 
 def _detect_framework(value: Any) -> str | None:
@@ -366,7 +373,7 @@ def _populate_node_fields(nodes: list[ImportedNode]) -> None:
             node.system_prompt_selector = (
                 system_prompt.selector if system_prompt is not None else None
             )
-            node.reasoning = _reasoning(node.outputs) or _reasoning(node.inputs)
+            node.reasoning_selectors = _reasoning_selectors(node.outputs)
 
 
 class InvalidImport(ValueError):
@@ -561,7 +568,7 @@ def _metadata(record: dict[str, Any]) -> dict[str, Any]:
     return {key: metadata[key] for key in _ALLOWED_METADATA if key in metadata}
 
 
-def _session_id(record: dict[str, Any]) -> str | None:
+def get_session_id(record: dict[str, Any]) -> str | None:
     """Extract the configured Braintrust session identifier."""
     metadata = _dict(record.get("metadata"))
     for field in _SESSION_FIELDS:
@@ -575,7 +582,7 @@ def _join_value(record: dict[str, Any], params: dict[str, Any], trace_id: str) -
     """Resolve the session grouping value for one trace root."""
     selected = params.get("join_on")
     if selected is None:
-        return _session_id(record) or trace_id
+        return get_session_id(record) or trace_id
     if not isinstance(selected, str):
         raise InvalidImport("join_on must be a dotted path or JSON pointer")
     value = _path_value(record, selected)
@@ -1153,8 +1160,9 @@ class BraintrustProjectLogImporter:
         """Fetch parser payloads from the Braintrust API."""
         from .api import fetch
 
-        async for payload in fetch(query):
-            yield payload
+        async with aclosing(fetch(query)) as payloads:
+            async for payload in payloads:
+                yield payload
 
 
 importer = BraintrustProjectLogImporter()

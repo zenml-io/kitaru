@@ -349,7 +349,7 @@ describe("structured output provider streams", () => {
       "failed",
       "completed",
     ]);
-    expect(new Set(test.nodes().map((node) => node.index)).size).toBe(2);
+    expect(new Set(test.nodes().map((node) => node.external_id)).size).toBe(2);
     expect(attempts).toBe(2);
   });
 });

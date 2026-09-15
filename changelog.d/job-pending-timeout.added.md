@@ -1,0 +1,1 @@
+- Jobs that no worker claims within `KITARU_SERVER_JOB_PENDING_TIMEOUT_SECONDS` (default 3600) are canceled by the background sweep with the error "Job was not claimed within N seconds".

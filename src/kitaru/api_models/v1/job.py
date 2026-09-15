@@ -56,9 +56,7 @@ class JobResponse(OwnedResponseModel):
         default=None, description="Time the job started."
     )
     ended_at: datetime | None = Field(default=None, description="Time the job settled.")
-    error: str | None = Field(
-        default=None, description="First counted task failure's error."
-    )
+    error: str | None = Field(default=None, description="Error the job settled with.")
 
 
 class JobListParams(FilterableListParams):

@@ -56,3 +56,10 @@ async def test_control_plane_api_url_drops_its_trailing_slash() -> None:
 
     assert payload["auth_scheme"] == AuthScheme.CONTROL_PLANE.value
     assert payload["control_plane_api_url"] == "https://cp.example.com"
+
+
+async def test_analytics_enabled_reflects_the_opt_in_setting() -> None:
+    """Report whether the server sends analytics events."""
+    payload = await _get_info(local_settings(ANALYTICS_OPT_IN=False))
+
+    assert payload["analytics_enabled"] is False

@@ -33,7 +33,7 @@ from kitaru.server.adapters.db.orm.agent_version_secret import (
 from kitaru.server.adapters.db.orm.experiment_run import (
     EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.domain.agent import AgentNotFound
@@ -296,7 +296,10 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, agent_version_filter, id_column=AgentVersionORM.id
+            self._session,
+            statement,
+            agent_version_filter,
+            IdOrder(AgentVersionORM.id, agent_version_filter.sort),
         )
         secret_ids_by_version = await self._load_secret_ids_bulk(
             [row.id for row in rows]

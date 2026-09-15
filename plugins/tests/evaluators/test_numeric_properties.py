@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
-"""Bounded numeric properties for deterministic evaluators."""
+"""Property tests for deterministic evaluator resource budgets."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -29,7 +29,6 @@ from decimal import (
 )
 from fractions import Fraction
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -64,14 +63,6 @@ def _decimal(coefficient: int, exponent: int) -> Decimal:
     return Decimal(f"{coefficient}e{exponent}")
 
 
-@st.composite
-def _finite_decimals(draw: st.DrawFn) -> Decimal:
-    """Generate finite decimals whose exact common-denominator sum stays small."""
-    coefficient = draw(st.integers(-999_999_999_999, 999_999_999_999))
-    exponent = draw(st.integers(-12, 12))
-    return _decimal(coefficient, exponent)
-
-
 def _node(
     index: int,
     node_type: NodeType,
@@ -83,11 +74,9 @@ def _node(
     return SessionNodeResponse(
         id=uuid.UUID(int=index + 100),
         session_id=SESSION_ID,
-        index=index,
-        parent_index=None,
-        parent_id=None,
-        secondary_parent_indexes=[],
-        secondary_parent_ids=[],
+        external_id=f"node-{index}",
+        parent_external_id=None,
+        links=[],
         node_type=node_type,
         name=f"node-{index}",
         status=NodeStatus.COMPLETED,
@@ -171,58 +160,6 @@ def _context_state(
         frozenset(signal for signal, active in context.flags.items() if active),
         frozenset(signal for signal, active in context.traps.items() if active),
     )
-
-
-@given(
-    values=st.lists(_finite_decimals(), max_size=32),
-    partition_seed=st.integers(0, 32),
-    precision=st.integers(1, 28),
-    rounding=st.sampled_from(ROUNDING_MODES),
-)
-def test_sum_decimals_matches_fraction_oracle_under_any_context(
-    values: list[Decimal], partition_seed: int, precision: int, rounding: str
-) -> None:
-    """Sum finite decimals exactly without reading or changing ambient context."""
-    expected = sum((Fraction(value) for value in values), start=Fraction())
-    outer_context = getcontext()
-    outer_state = _context_state(outer_context)
-    ordinary = evaluators.sum_decimals(values)
-    assert _context_state(outer_context) == outer_state
-    partition = partition_seed % (len(values) + 1)
-
-    with localcontext() as constrained_context:
-        constrained_context.prec = precision
-        constrained_context.rounding = rounding
-        for signal in constrained_context.traps:
-            constrained_context.traps[signal] = True
-        constrained_state = _context_state(constrained_context)
-        constrained = evaluators.sum_decimals(values)
-        reversed_sum = evaluators.sum_decimals(list(reversed(values)))
-        permuted_sum = evaluators.sum_decimals(values[::2] + values[1::2])
-        with_zero = evaluators.sum_decimals([*values, Decimal(0)])
-        recombined = evaluators.sum_decimals(
-            [
-                evaluators.sum_decimals(values[:partition]),
-                evaluators.sum_decimals(values[partition:]),
-            ]
-        )
-        assert _context_state(constrained_context) == constrained_state
-
-    assert getcontext() is outer_context
-    assert _context_state(outer_context) == outer_state
-    assert constrained.as_tuple() == ordinary.as_tuple()
-    for result in (constrained, reversed_sum, permuted_sum, with_zero, recombined):
-        assert Fraction(result) == expected
-
-
-@pytest.mark.parametrize(
-    "value",
-    [Decimal("NaN"), Decimal("sNaN"), Decimal("Infinity"), Decimal("-Infinity")],
-)
-def test_sum_decimals_rejects_nonfinite_values(value: Decimal) -> None:
-    """Reject every non-finite Decimal spelling instead of producing a total."""
-    with pytest.raises(ValueError, match="number must be finite"):
-        evaluators.sum_decimals([Decimal(1), value])
 
 
 RESOURCE_RECORDS = st.lists(

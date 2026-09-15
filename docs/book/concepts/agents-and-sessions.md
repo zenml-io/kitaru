@@ -34,6 +34,16 @@ kitaru agent version register support-agent \
 
 Register a new version when the code changes. An [experiment](experiments.md) is precisely "replay this cohort on that agent version and see what moved."
 
+Credentials the agent needs at run time, such as a model provider key, go into a [secret](../deploy/secrets.md) rather than `--env`. Reference the secret in the version, and the worker injects each of its keys as an environment variable when it runs the agent:
+
+```bash
+kitaru agent version register support-agent \
+  --command "python support.py" \
+  --secret-id <openai-secret-id>
+```
+
+In a spec document the same reference is `run_spec.secret_ids`.
+
 ## Runtime capabilities
 
 The run spec also declares what the runtime can do during a re-run. `runtime_capabilities` holds two booleans, both `true` by default: `overrides`, whether the runtime can apply [replay](replay.md) overrides (model, prompts, model params), and `tool_policies`, whether it can apply non-passthrough [tool policies](../guides/tool-policies.md). Both work by intercepting model and tool calls inside the agent process. Some runtimes execute the agent for real and cannot intercept anything, and the server cannot tell that from the run command, so the version declares it.

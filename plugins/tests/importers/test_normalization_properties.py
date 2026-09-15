@@ -13,7 +13,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import kitaru_braintrust_importer.importer as braintrust
-import kitaru_jsonl_importer.importer as kitaru_jsonl
 import kitaru_langfuse_importer.importer as langfuse
 import kitaru_langsmith_importer.importer as langsmith
 import kitaru_logfire_importer.importer as logfire
@@ -157,13 +156,7 @@ def _session_nodes(
 def _parent_identities(
     nodes: dict[str, SessionNodeCreateRequest],
 ) -> dict[str, str | None]:
-    by_index = {
-        (node.trace_id, node.index): identity for identity, node in nodes.items()
-    }
-    return {
-        identity: by_index.get((node.trace_id, node.parent_index))
-        for identity, node in nodes.items()
-    }
+    return {identity: node.parent_external_id for identity, node in nodes.items()}
 
 
 @pytest.mark.parametrize("provider", sorted(_PROVIDERS))
@@ -198,6 +191,7 @@ def test_accepted_provider_forests_conserve_nodes_and_usage(
         for node in trace.nodes
     }
     assert _parent_identities(actual) == expected_parents
+    assert all(node.links == [] for node in actual.values())
     for identity, source in expected.items():
         node = actual[identity]
         expected_tokens = (
@@ -249,72 +243,8 @@ def test_braintrust_joined_traces_preserve_nodes_and_roots(
         if node.parent_id is None
     }
     assert {node.external_id for node in session.nodes} == expected_roots
-    assert all(node.parent_index is None for node in session.nodes)
-
-
-def _flat_session(trace: LogicalTrace) -> dict[str, Any]:
-    indexes = {node.node_id: index for index, node in enumerate(trace.nodes)}
-    return {
-        "status": "completed",
-        "name": trace.trace_id,
-        "inputs": {},
-        "outputs": {},
-        "external_id": trace.trace_id,
-        "metadata": {},
-        "nodes": [
-            {
-                "index": index,
-                "parent_index": (
-                    indexes[node.parent_id] if node.parent_id is not None else None
-                ),
-                "external_id": node.node_id,
-                "trace_id": trace.trace_id,
-                "node_type": "span",
-                "name": node.node_id,
-                "status": "completed",
-                "inputs": {},
-                "outputs": {},
-                "tokens": (
-                    None
-                    if node.input_tokens is None and node.output_tokens is None
-                    else {
-                        "input_tokens": node.input_tokens,
-                        "output_tokens": node.output_tokens,
-                    }
-                ),
-                "cost": node.cost,
-                "attributes": {},
-                "metadata": {},
-            }
-            for index, node in enumerate(trace.nodes)
-        ],
-    }
-
-
-@given(
-    traces=st.lists(
-        generate_logical_trace(prefix="jsonl"),
-        min_size=1,
-        max_size=3,
-        unique_by=lambda trace: trace.trace_id,
-    )
-)
-def test_jsonl_sessions_conserve_flat_indexed_membership(
-    traces: list[LogicalTrace],
-) -> None:
-    """Use each record's indexed membership instead of source line count."""
-    payload = b"\n".join(json.dumps(_flat_session(trace)).encode() for trace in traces)
-
-    items = list(kitaru_jsonl.parse(payload, {}))
-
-    actual = _session_nodes(items)
-    assert set(actual) == {node.node_id for trace in traces for node in trace.nodes}
-    assert {
-        item.external_id for item in items if isinstance(item, ImportedSession)
-    } == {trace.trace_id for trace in traces}
-    assert _parent_identities(actual) == {
-        node.node_id: node.parent_id for trace in traces for node in trace.nodes
-    }
+    assert all(node.parent_external_id is None for node in session.nodes)
+    assert all(node.links == [] for node in nodes)
 
 
 def _mastra_trace(trace: LogicalTrace) -> dict[str, Any]:
@@ -371,6 +301,7 @@ def test_mastra_conserves_reordered_spans_and_collapses_identical_traces(
     assert _parent_identities(actual) == {
         node.node_id: node.parent_id for node in trace.nodes
     }
+    assert all(node.links == [] for node in actual.values())
     for source in trace.nodes:
         node = actual[source.node_id]
         assert node.cost == (Decimal(source.cost) if source.cost is not None else None)
@@ -545,7 +476,8 @@ def test_provider_graph_policy_preserves_neighboring_sessions(
             in " ".join(repaired.metadata["normalization_warnings"]).lower()
         )
         [node] = flatten_nodes(repaired.nodes)
-        assert node.parent_index is None
+        assert node.parent_external_id is None
+        assert node.links == []
     else:
         assert session_ids == neighbor_ids
         [failure] = failures
@@ -590,29 +522,6 @@ def test_provider_invalid_cost_preserves_neighboring_sessions(
     [failure] = [item for item in items if isinstance(item, ImportFailure)]
     assert failure.external_id == "bad"
     assert "finite" in failure.error.lower() or "nonnegative" in failure.error.lower()
-
-
-@given(invalid_cost=st.sampled_from(["NaN", "Infinity", "-1", -1]))
-def test_jsonl_invalid_usage_isolated_between_valid_sessions(invalid_cost: Any) -> None:
-    """Keep JSONL line isolation for unsafe accounting values."""
-    before = LogicalTrace("before", (LogicalNode("before", None, 0, 0, "0"),))
-    after = LogicalTrace("after", (LogicalNode("after", None, 0, 0, "0"),))
-    bad = _flat_session(before)
-    bad["external_id"] = "bad"
-    bad["nodes"][0]["cost"] = invalid_cost
-    payload = b"\n".join(
-        json.dumps(record).encode()
-        for record in (_flat_session(before), bad, _flat_session(after))
-    )
-
-    items = list(kitaru_jsonl.parse(payload, {}))
-
-    assert [type(item) for item in items] == [
-        ImportedSession,
-        ImportFailure,
-        ImportedSession,
-    ]
-    assert [items[0].external_id, items[2].external_id] == ["before", "after"]
 
 
 @given(trace=generate_logical_trace(prefix="mastra-bad"))

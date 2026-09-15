@@ -297,7 +297,7 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
         json={
             "nodes": [
                 {
-                    "index": 0,
+                    "external_id": "n0",
                     "node_type": "tool_call",
                     "name": "search",
                     "status": "completed",

@@ -14,6 +14,7 @@
 """Job use cases and the job-and-task composition the command endpoints run."""
 
 import uuid
+from datetime import datetime
 
 from kitaru.api_models.v1.job import JobKind
 from kitaru.api_models.v1.task import TaskOnFailure
@@ -229,6 +230,40 @@ class JobService:
         if job.settled:
             raise JobAlreadySettled(job_id)
         return await self._transitions.cancel_job(job_id)
+
+    async def list_expired_pending_job_ids(self, cutoff: datetime) -> list[uuid.UUID]:
+        """Read the ids of pending jobs created before a cutoff.
+
+        Takes no lock.
+
+        Args:
+            cutoff: Bound the job's creation must be older than.
+
+        Returns:
+            Ids of the expired pending jobs in ascending order.
+        """
+        return await self._repository.list_expired_pending_ids(
+            cutoff, self._policy.sweep_batch_limit
+        )
+
+    async def expire_pending_job(
+        self, job_id: uuid.UUID, cutoff: datetime, error: str, now: datetime
+    ) -> None:
+        """Cancel one pending job's tasks and settle it if still unclaimed.
+
+        Locks the job's live task rows, then its job row. A job a worker
+        claimed, or one created after the cutoff, is left alone.
+
+        Args:
+            job_id: Id of the candidate job.
+            cutoff: Bound the job's creation must be older than.
+            error: Error the job settles with.
+            now: Current time.
+
+        Raises:
+            DBAPIError: Another transaction holds one of the task rows.
+        """
+        await self._transitions.expire_pending_job(job_id, cutoff, error, now)
 
     async def delete_job(self, job_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a settled job, cascading its tasks.

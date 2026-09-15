@@ -188,7 +188,7 @@ kitaru agent version register support-agent \
   --env KITARU_AGENT_ID="$KITARU_AGENT_ID"
 ```
 
-Start a worker with access to the compiled program, its Node dependencies, model credentials, and any systems used by passthrough tools:
+Start a worker with access to the compiled program, its Node dependencies, model credentials, and any systems used by passthrough tools. Model credentials can instead be attached to the version as a [secret](../deploy/secrets.md) with `--secret-id`, so they do not need to live in every worker's environment:
 
 ```bash
 kitaru worker start

@@ -98,12 +98,12 @@ def _get_system_selector(value: Any) -> str | None:
     return None
 
 
-def _get_reasoning(output: Any) -> str | None:
+def _get_reasoning_selectors(output: Any) -> list[str]:
     if not isinstance(output, dict):
-        return None
+        return []
     reasoning = output.get("reasoning")
     if isinstance(reasoning, str):
-        return reasoning
+        return ["/reasoning"]
     if (
         isinstance(reasoning, list)
         and reasoning
@@ -112,8 +112,8 @@ def _get_reasoning(output: Any) -> str | None:
             for part in reasoning
         )
     ):
-        return "\n".join(part["text"] for part in reasoning)
-    return None
+        return [f"/reasoning/{index}/text" for index in range(len(reasoning))]
+    return []
 
 
 def _get_cost(attributes: dict[str, Any]) -> Decimal | None:
@@ -231,7 +231,6 @@ def _normalize(
 ) -> ImportedSession:
     spans = _get_ordered_spans(trace)
     root = spans[0]
-    indexes = {span.spanId: index for index, span in enumerate(spans)}
     by_id = {span.spanId: span for span in spans}
     usage = {
         span.spanId: (
@@ -241,7 +240,7 @@ def _normalize(
         for span in spans
     }
     nodes = []
-    for index, span in enumerate(spans):
+    for span in spans:
         attributes = span.attributes or {}
         tokens, cost = _get_accounted_usage(span, by_id, usage)
         node_type = {
@@ -251,9 +250,10 @@ def _normalize(
         }.get(span.spanType, NodeType.SPAN)
         nodes.append(
             ImportedNode(
-                index=index,
-                parent_index=indexes.get(span.parentSpanId),
                 external_id=span.spanId,
+                parent_external_id=(
+                    span.parentSpanId if span.parentSpanId in by_id else None
+                ),
                 trace_id=span.traceId,
                 node_type=node_type,
                 name=span.name,
@@ -272,7 +272,7 @@ def _normalize(
                 input_text_selector=_get_text_selector(span.input),
                 output_text_selector=_get_text_selector(span.output),
                 system_prompt_selector=_get_system_selector(span.input),
-                reasoning=_get_reasoning(span.output),
+                reasoning_selectors=_get_reasoning_selectors(span.output),
                 requested_model=attributes.get("model"),
                 model=attributes.get("responseModel") or attributes.get("model"),
                 model_provider=attributes.get("provider"),
@@ -401,6 +401,26 @@ def _normalize(
     return session
 
 
+def _build_failure(
+    line: int, external_id: str | None, error: Exception | str
+) -> ImportFailure:
+    """Build a JSON-safe failure for one source trace."""
+    return ImportFailure(
+        line=line,
+        external_id=(
+            external_id.encode("utf-8", errors="backslashreplace").decode()
+            if external_id is not None
+            else None
+        ),
+        error=str(error).encode("utf-8", errors="backslashreplace").decode(),
+    )
+
+
+def _get_failure_line(failure: ImportFailure) -> int:
+    """Get the source position used to order import failures."""
+    return failure.line or 0
+
+
 def parse(
     payload: bytes, params: dict[str, Any]
 ) -> Iterator[ImportedSession | ImportFailure]:
@@ -438,8 +458,9 @@ def parse(
     if not records:
         raise InvalidImport("Mastra export contains no traces")
     sessions: list[ImportedSession] = []
-    seen: dict[str, str] = {}
-    conflicting_ids: set[str] = set()
+    failures: list[ImportFailure] = []
+    unique: dict[str, tuple[int, str, dict[str, Any]]] = {}
+    conflicting_ids: dict[str, int] = {}
     for line, record in enumerate(records, 1):
         external_id = None
         try:
@@ -450,14 +471,11 @@ def parse(
                 external_id = None
                 raise ValueError("traceId must be a nonempty string")
             signature = json.dumps(record, sort_keys=True, allow_nan=False)
-            if external_id in seen:
-                if signature == seen[external_id]:
-                    continue
-                conflicting_ids.add(external_id)
-                raise ValueError("conflicting duplicate traceId in export")
-            seen[external_id] = signature
-            session = _normalize(record, namespace, mode == "history-only")
-            sessions.append(session)
+            previous = unique.get(external_id)
+            if previous is None:
+                unique[external_id] = (line, signature, record)
+            elif signature != previous[1]:
+                conflicting_ids.setdefault(external_id, line)
         except (
             ValueError,
             TypeError,
@@ -465,16 +483,24 @@ def parse(
             InvalidOperation,
             PydanticSerializationError,
         ) as exc:
-            yield ImportFailure(
-                line=line,
-                external_id=(
-                    external_id.encode("utf-8", errors="backslashreplace").decode()
-                    if external_id is not None
-                    else None
-                ),
-                error=str(exc).encode("utf-8", errors="backslashreplace").decode(),
-            )
+            failures.append(_build_failure(line, external_id, exc))
+    failures.extend(
+        _build_failure(line, external_id, "conflicting duplicate traceId in export")
+        for external_id, line in conflicting_ids.items()
+    )
+    for external_id, (line, _, record) in unique.items():
+        if external_id in conflicting_ids:
+            continue
+        try:
+            sessions.append(_normalize(record, namespace, mode == "history-only"))
+        except (
+            ValueError,
+            TypeError,
+            RecursionError,
+            InvalidOperation,
+            PydanticSerializationError,
+        ) as exc:
+            failures.append(_build_failure(line, external_id, exc))
+    yield from sorted(failures, key=_get_failure_line)
     sessions.sort(key=lambda session: (session.started_at, session.external_id))
-    for session in sessions:
-        if session.metadata["mastra"]["trace_id"] not in conflicting_ids:
-            yield session
+    yield from sessions
