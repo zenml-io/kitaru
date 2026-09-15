@@ -27,6 +27,18 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@types/node@22.20.1)(vite@8.1.5(@types/node@22.20.1))
 
+  examples/typescript/mastra_adaptive_conversation:
+    dependencies:
+      '@ai-sdk/openai':
+        specifier: 4.0.20
+        version: 4.0.20(zod@4.4.3)
+      '@mastra/core':
+        specifier: 1.64.0
+        version: 1.64.0(ai@7.0.85(zod@4.4.3))(express@5.2.1)(zod@4.4.3)
+      '@zenml-io/kitaru':
+        specifier: workspace:*
+        version: link:../../../packages/core
+
   examples/typescript/mastra_support_triage:
     dependencies:
       '@ai-sdk/openai':
@@ -680,10 +692,6 @@ packages:
   etag@1.8.1:
     resolution: {integrity: sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==}
     engines: {node: '>= 0.6'}
-
-  eventsource-parser@3.1.0:
-    resolution: {integrity: sha512-kJezFj9YFAMLeORyi7aCLxLbD5/qWMQnoMVlVPyHIll7lgRJCc3JVln9Vgl9nwQi0YkMnhdGTMNn7CkRRAptMg==}
-    engines: {node: '>=18.0.0'}
 
   eventsource-parser@3.1.1:
     resolution: {integrity: sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ==}
@@ -1592,12 +1600,19 @@ snapshots:
       eventsource-parser: 3.1.1
       zod: 3.25.76
 
+  '@ai-sdk/provider-utils@4.0.40(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.14
+      '@standard-schema/spec': 1.1.0
+      eventsource-parser: 3.1.1
+      zod: 4.4.3
+
   '@ai-sdk/provider-utils@5.0.12(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 4.0.3
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
-      eventsource-parser: 3.1.0
+      eventsource-parser: 3.1.1
       zod: 3.25.76
 
   '@ai-sdk/provider-utils@5.0.12(zod@4.4.3)':
@@ -1605,7 +1620,7 @@ snapshots:
       '@ai-sdk/provider': 4.0.3
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
-      eventsource-parser: 3.1.0
+      eventsource-parser: 3.1.1
       zod: 4.4.3
 
   '@ai-sdk/provider-utils@5.0.13(zod@3.25.76)':
@@ -1615,6 +1630,14 @@ snapshots:
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.1
       zod: 3.25.76
+
+  '@ai-sdk/provider-utils@5.0.13(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.4
+      '@standard-schema/spec': 1.1.0
+      '@workflow/serde': 4.1.0
+      eventsource-parser: 3.1.1
+      zod: 4.4.3
 
   '@ai-sdk/provider-utils@5.0.34(zod@3.25.76)':
     dependencies:
@@ -1768,10 +1791,60 @@ snapshots:
       - supports-color
       - utf-8-validate
 
+  '@mastra/core@1.64.0(ai@7.0.85(zod@4.4.3))(express@5.2.1)(zod@4.4.3)':
+    dependencies:
+      '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
+      '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.4.3)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@4.4.3)'
+      '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
+      '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
+      '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.4'
+      '@isaacs/ttlcache': 2.1.5
+      '@lukeed/uuid': 2.0.1
+      '@mastra/schema-compat': 1.3.8(zod@4.4.3)
+      '@modelcontextprotocol/server': 2.0.0
+      '@sindresorhus/slugify': 2.2.1
+      '@standard-schema/spec': 1.1.0
+      ajv: 8.20.0
+      chat: 4.34.0(ai@7.0.85(zod@4.4.3))(zod@4.4.3)
+      croner: 10.0.1
+      dotenv: 17.4.2
+      execa: 9.6.1
+      fastq: 1.20.1
+      gray-matter: 4.0.3
+      ignore: 7.0.6
+      jpeg-js: 0.4.4
+      json-schema: 0.4.0
+      lru-cache: 11.5.2
+      p-map: 7.0.6
+      p-retry: 7.1.1
+      picomatch: 4.0.5
+      posthog-node: 5.46.1
+      tokenx: 1.3.0
+      ws: 8.21.1
+      xxhash-wasm: 1.1.0
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@bufbuild/protobuf'
+      - '@grpc/grpc-js'
+      - ai
+      - bufferutil
+      - express
+      - rxjs
+      - supports-color
+      - utf-8-validate
+
   '@mastra/schema-compat@1.3.8(zod@3.25.76)':
     dependencies:
       json-schema-to-zod: 2.8.1
       zod: 3.25.76
+      zod-from-json-schema: 0.5.6
+
+  '@mastra/schema-compat@1.3.8(zod@4.4.3)':
+    dependencies:
+      json-schema-to-zod: 2.8.1
+      zod: 4.4.3
       zod-from-json-schema: 0.5.6
 
   '@modelcontextprotocol/core@2.0.0':
@@ -2065,6 +2138,21 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  chat@4.34.0(ai@7.0.85(zod@4.4.3))(zod@4.4.3):
+    dependencies:
+      '@workflow/serde': 4.1.0-beta.2
+      mdast-util-to-string: 4.0.0
+      remark-gfm: 4.0.1
+      remark-parse: 11.0.0
+      remark-stringify: 11.0.0
+      remend: 1.3.0
+      unified: 11.0.5
+    optionalDependencies:
+      ai: 7.0.85(zod@4.4.3)
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
+
   colorette@1.4.0: {}
 
   content-disposition@1.1.0:
@@ -2154,8 +2242,6 @@ snapshots:
 
   etag@1.8.1:
     optional: true
-
-  eventsource-parser@3.1.0: {}
 
   eventsource-parser@3.1.1: {}
 
