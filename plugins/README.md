@@ -8,6 +8,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 
 | Directory | Distribution | Contents |
 |---|---|---|
+| `atif-importer` | `kitaru-atif-importer` | ATIF trajectories and Harbor rollout results (development, manually registered) |
 | `braintrust-importer` | `kitaru-braintrust-importer` | Braintrust importer and importer-backed adapter |
 | `claude-agent-sdk` | `kitaru-claude-agent-sdk` | Claude Agent SDK recording and replay adapter |
 | `evaluator` | `kitaru-evaluator` | All built-in evaluators |

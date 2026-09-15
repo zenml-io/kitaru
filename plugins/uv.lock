@@ -17,6 +17,7 @@ exclude-newer-span = "P3D"
 
 [manifest]
 members = [
+    "kitaru-atif-importer",
     "kitaru-braintrust-importer",
     "kitaru-claude-agent-sdk",
     "kitaru-evaluator",
@@ -36,6 +37,7 @@ members = [
 dev = [
     { name = "hypothesis", specifier = ">=6.165" },
     { name = "kitaru", extras = ["server"], editable = "../" },
+    { name = "kitaru-atif-importer", editable = "packages/atif-importer" },
     { name = "kitaru-braintrust-importer", extras = ["adapter"], editable = "packages/braintrust-importer" },
     { name = "kitaru-claude-agent-sdk", editable = "packages/claude-agent-sdk" },
     { name = "kitaru-langfuse-importer", extras = ["adapter"], editable = "packages/langfuse-importer" },
@@ -1268,6 +1270,17 @@ dev = [
     { name = "yamlfix" },
 ]
 fuzz = [{ name = "schemathesis", specifier = ">=4.25,<5" }]
+
+[[package]]
+name = "kitaru-atif-importer"
+version = "0.1.0"
+source = { editable = "packages/atif-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-braintrust-importer"

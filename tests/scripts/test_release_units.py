@@ -27,6 +27,7 @@ INVENTORY_PATH = REPO_ROOT / "release" / "release-units.toml"
 
 EXPECTED_UNITS = {
     "kitaru": "kitaru",
+    "atif-importer": "kitaru-atif-importer",
     "braintrust-importer": "kitaru-braintrust-importer",
     "claude-agent-sdk": "kitaru-claude-agent-sdk",
     "evaluator": "kitaru-evaluator",
@@ -624,7 +625,7 @@ def test_plugin_matrix_is_generated_from_the_plugin_units_in_three_shards() -> N
 
     shards = matrix["include"]
     assert [shard["shard"] for shard in shards] == ["1/3", "2/3", "3/3"]
-    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [5, 4, 4]
+    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [5, 5, 4]
     assert [
         package_path
         for shard in shards
@@ -869,7 +870,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 14 release units."),
+        (["validate"], "Validated 15 release units."),
         (
             [
                 "propose-core-version",
