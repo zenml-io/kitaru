@@ -15,9 +15,40 @@
 
 import httpx
 
+from kitaru.api_models.v1.agent import AgentResponse
+from kitaru.api_models.v1.agent_version import AgentVersionCreateRequest
+
 
 class KitaruClientError(Exception):
     """Kitaru client error."""
+
+
+class AgentRegistrationError(KitaruClientError):
+    """Initial-version request failure after successful agent creation."""
+
+    def __init__(
+        self,
+        agent: AgentResponse,
+        version_request: AgentVersionCreateRequest,
+        version_idempotency_key: str,
+        cause: Exception,
+    ) -> None:
+        """Initialize the error.
+
+        Args:
+            agent: Successfully created agent.
+            version_request: Exact initial-version request.
+            version_idempotency_key: Idempotency key used for the version request.
+            cause: Original request error.
+        """
+        super().__init__(
+            f"Agent {agent.id} was created, but its initial version request did not "
+            f"return successfully: {cause}"
+        )
+        self.agent = agent
+        self.version_request = version_request
+        self.version_idempotency_key = version_idempotency_key
+        self.cause = cause
 
 
 class APIError(KitaruClientError):

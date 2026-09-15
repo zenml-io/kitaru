@@ -21,7 +21,17 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kitaru.api_models.v1.agent import AgentListParams, AgentResponse
+from kitaru.api_models.v1.agent import (
+    AgentCreateRequest,
+    AgentListParams,
+    AgentResponse,
+)
+from kitaru.api_models.v1.agent_version import (
+    AgentCapabilities,
+    AgentVersionCreateRequest,
+    AgentVersionResponse,
+    RunSpec,
+)
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay import (
@@ -30,7 +40,7 @@ from kitaru.api_models.v1.replay import (
     ReplayStatus,
 )
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.exceptions import NotFoundError
+from kitaru.client.exceptions import AgentRegistrationError, NotFoundError
 from kitaru.client.sync_client import KitaruSyncClient
 
 
@@ -48,6 +58,25 @@ def _agent_response(**overrides: Any) -> AgentResponse:
     }
     values.update(overrides)
     return AgentResponse(**values)
+
+
+def _agent_version_response(**overrides: Any) -> AgentVersionResponse:
+    """Build an agent version response with sensible defaults."""
+    now = datetime.now(UTC)
+    values: dict[str, Any] = {
+        "id": uuid.uuid4(),
+        "owner_id": uuid.uuid4(),
+        "created": now,
+        "updated": now,
+        "agent_id": uuid.uuid4(),
+        "version": 1,
+        "display_version": None,
+        "description": None,
+        "run_spec": RunSpec(command="python agent.py"),
+        "capabilities": AgentCapabilities(),
+    }
+    values.update(overrides)
+    return AgentVersionResponse(**values)
 
 
 def _replay_response(**overrides: Any) -> ReplayResponse:
@@ -103,6 +132,110 @@ def test_get_agent_by_name(
     loaded = client.get_agent("assistant")
 
     assert loaded == agent
+
+
+def test_register_agent_forwards_all_inputs(
+    mock_client: tuple[KitaruAPIClient, KitaruSyncClient],
+) -> None:
+    """Expose synchronous parity for new-agent registration."""
+    api_client, client = mock_client
+    run_spec = RunSpec(command="python agent.py")
+    capabilities = AgentCapabilities(tools=["search"])
+    agent = _agent_response()
+    version = _agent_version_response(agent_id=agent.id)
+    api_client.agents.create = AsyncMock(return_value=agent)
+    api_client.agents.create_version = AsyncMock(return_value=version)
+
+    result = client.register_agent(
+        "assistant",
+        run_spec,
+        description="Parent",
+        display_version="v1",
+        version_description="Initial",
+        capabilities=capabilities,
+        agent_idempotency_key="agent-key",
+        version_idempotency_key="version-key",
+    )
+
+    assert result.agent == agent
+    assert result.version == version
+    api_client.agents.create.assert_awaited_once_with(
+        AgentCreateRequest(name="assistant", description="Parent"),
+        idempotency_key="agent-key",
+    )
+    api_client.agents.create_version.assert_awaited_once_with(
+        agent.id,
+        AgentVersionCreateRequest(
+            display_version="v1",
+            description="Initial",
+            run_spec=run_spec,
+            capabilities=capabilities,
+        ),
+        idempotency_key="version-key",
+    )
+
+
+def test_register_agent_version_forwards_all_inputs(
+    mock_client: tuple[KitaruAPIClient, KitaruSyncClient],
+) -> None:
+    """Expose synchronous parity for existing-agent registration."""
+    api_client, client = mock_client
+    run_spec = RunSpec(command="python agent.py")
+    agent = _agent_response()
+    version = _agent_version_response(agent_id=agent.id, version=2)
+    api_client.agents.list = AsyncMock(
+        return_value=Page(items=[agent], next_cursor=None)
+    )
+    api_client.agents.create_version = AsyncMock(return_value=version)
+
+    result = client.register_agent_version(
+        "assistant",
+        run_spec,
+        display_version="v2",
+        description="Second",
+        capabilities=AgentCapabilities(skills=["review"]),
+        idempotency_key="version-key",
+    )
+
+    assert result == version
+    api_client.agents.create_version.assert_awaited_once_with(
+        agent.id,
+        AgentVersionCreateRequest(
+            display_version="v2",
+            description="Second",
+            run_spec=run_spec,
+            capabilities=AgentCapabilities(skills=["review"]),
+        ),
+        idempotency_key="version-key",
+    )
+
+
+def test_register_agent_reports_partial_failure(
+    mock_client: tuple[KitaruAPIClient, KitaruSyncClient],
+) -> None:
+    """Expose the async registration recovery payload synchronously."""
+    api_client, client = mock_client
+    agent = _agent_response()
+    run_spec = RunSpec(command="python agent.py")
+    cause = RuntimeError("response lost")
+    api_client.agents.create = AsyncMock(return_value=agent)
+    api_client.agents.create_version = AsyncMock(side_effect=cause)
+
+    with pytest.raises(AgentRegistrationError) as exc_info:
+        client.register_agent("assistant", run_spec)
+
+    assert exc_info.value.agent == agent
+    assert exc_info.value.version_request == AgentVersionCreateRequest(
+        run_spec=run_spec
+    )
+    assert uuid.UUID(exc_info.value.version_idempotency_key)
+    assert exc_info.value.cause is cause
+    api_client.agents.create.assert_awaited_once()
+    api_client.agents.create_version.assert_awaited_once_with(
+        agent.id,
+        exc_info.value.version_request,
+        idempotency_key=exc_info.value.version_idempotency_key,
+    )
 
 
 def test_get_agent_by_name_not_found(

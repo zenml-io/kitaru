@@ -20,7 +20,19 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from types import TracebackType
 from typing import TypeVar
 
-from kitaru.api_models.v1.agent import AgentListParams, AgentResponse
+from pydantic import BaseModel
+
+from kitaru.api_models.v1.agent import (
+    AgentCreateRequest,
+    AgentListParams,
+    AgentResponse,
+)
+from kitaru.api_models.v1.agent_version import (
+    AgentCapabilities,
+    AgentVersionCreateRequest,
+    AgentVersionResponse,
+    RunSpec,
+)
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.experiment import ExperimentListParams, ExperimentResponse
 from kitaru.api_models.v1.experiment_run import (
@@ -46,8 +58,12 @@ from kitaru.api_models.v1.session import (
     SessionResponse,
 )
 from kitaru.api_models.v1.session_node import SessionNodeResponse
-from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.exceptions import KitaruClientError, NotFoundError
+from kitaru.client.api_client import KitaruAPIClient, validate_idempotency_key
+from kitaru.client.exceptions import (
+    AgentRegistrationError,
+    KitaruClientError,
+    NotFoundError,
+)
 
 TERMINAL_REPLAY_STATUSES = frozenset(
     {ReplayStatus.COMPLETED, ReplayStatus.FAILED, ReplayStatus.CANCELED}
@@ -64,6 +80,13 @@ TERMINAL_EXPERIMENT_RUN_STATUSES = frozenset(
 NamedT = TypeVar("NamedT", AgentResponse, ExperimentResponse)
 ListParamsT = TypeVar("ListParamsT", AgentListParams, ExperimentListParams)
 StatusT = TypeVar("StatusT", ReplayResponse, ExperimentRunResponse)
+
+
+class AgentRegistrationResult(BaseModel):
+    """Result of creating an agent and its initial version."""
+
+    agent: AgentResponse
+    version: AgentVersionResponse
 
 
 class KitaruClient:
@@ -129,6 +152,135 @@ class KitaruClient:
             return await self._api_client.agents.get(agent)
         return await self._get_by_name(
             "agent", agent, AgentListParams, self._api_client.agents.list
+        )
+
+    async def register_agent(
+        self,
+        name: str,
+        run_spec: RunSpec,
+        *,
+        description: str | None = None,
+        display_version: str | None = None,
+        version_description: str | None = None,
+        capabilities: AgentCapabilities | None = None,
+        agent_idempotency_key: str | None = None,
+        version_idempotency_key: str | None = None,
+    ) -> AgentRegistrationResult:
+        """Create an agent and its initial version.
+
+        The operation sends separate agent and version requests. If the agent is
+        created but the initial version request raises an ordinary exception,
+        ``AgentRegistrationError`` records the created agent, exact version
+        request, and version idempotency key. Cancellation still propagates,
+        with the agent id and version idempotency key attached as an exception
+        note. The method does not roll back the agent or start a fresh version
+        request with a different idempotency key.
+
+        Args:
+            name: New agent name.
+            run_spec: Run spec for the initial version.
+            description: Agent description.
+            display_version: Human-readable designator for the initial version.
+            version_description: Initial version description.
+            capabilities: Initial version capabilities.
+            agent_idempotency_key: Idempotency key for agent creation.
+            version_idempotency_key: Idempotency key for version creation.
+
+        Raises:
+            ValueError: A request field is invalid or the two idempotency keys
+                are equal after normalization.
+            APIError: An idempotency key is invalid or agent creation failed.
+            AgentRegistrationError: The agent was created but the initial
+                version request raised an ordinary exception.
+
+        Returns:
+            Created agent and initial version.
+        """
+        agent_request = AgentCreateRequest(name=name, description=description)
+        version_request = AgentVersionCreateRequest(
+            display_version=display_version,
+            description=version_description,
+            run_spec=run_spec,
+            capabilities=capabilities,
+        )
+        # Both keys must be valid and distinct before either write is sent.
+        agent_idempotency_key = validate_idempotency_key(
+            agent_idempotency_key, "agent_idempotency_key"
+        )
+        version_idempotency_key = validate_idempotency_key(
+            version_idempotency_key, "version_idempotency_key"
+        ) or str(uuid.uuid4())
+        if agent_idempotency_key == version_idempotency_key:
+            raise ValueError(
+                "agent_idempotency_key and version_idempotency_key must differ."
+            )
+
+        agent = await self._api_client.agents.create(
+            agent_request,
+            idempotency_key=agent_idempotency_key,
+        )
+        try:
+            version = await self._api_client.agents.create_version(
+                agent.id,
+                version_request,
+                idempotency_key=version_idempotency_key,
+            )
+        except asyncio.CancelledError as error:
+            error.add_note(
+                f"Agent {agent.id} was created before registration was canceled. "
+                f"The initial-version request used idempotency key "
+                f"{version_idempotency_key!r}."
+            )
+            raise
+        except Exception as error:
+            raise AgentRegistrationError(
+                agent=agent,
+                version_request=version_request,
+                version_idempotency_key=version_idempotency_key,
+                cause=error,
+            ) from error
+        agent = agent.model_copy(update={"latest_version": version.version})
+        return AgentRegistrationResult(agent=agent, version=version)
+
+    async def register_agent_version(
+        self,
+        agent: uuid.UUID | str,
+        run_spec: RunSpec,
+        *,
+        display_version: str | None = None,
+        description: str | None = None,
+        capabilities: AgentCapabilities | None = None,
+        idempotency_key: str | None = None,
+    ) -> AgentVersionResponse:
+        """Create the next version of an existing agent.
+
+        Args:
+            agent: Id or exact name of the agent.
+            run_spec: Run spec for the new version.
+            display_version: Human-readable version designator.
+            description: Version description.
+            capabilities: Version capabilities.
+            idempotency_key: Idempotency key for version creation.
+
+        Raises:
+            ValueError: A request field is invalid.
+            APIError: The idempotency key, agent lookup, or version creation
+                failed.
+
+        Returns:
+            Created agent version.
+        """
+        version_request = AgentVersionCreateRequest(
+            display_version=display_version,
+            description=description,
+            run_spec=run_spec,
+            capabilities=capabilities,
+        )
+        agent_id = (
+            agent if isinstance(agent, uuid.UUID) else (await self.get_agent(agent)).id
+        )
+        return await self._api_client.agents.create_version(
+            agent_id, version_request, idempotency_key=idempotency_key
         )
 
     def list_agents(self) -> AsyncIterator[AgentResponse]:

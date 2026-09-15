@@ -21,6 +21,11 @@ from types import TracebackType
 from typing import Any, TypeVar
 
 from kitaru.api_models.v1.agent import AgentResponse
+from kitaru.api_models.v1.agent_version import (
+    AgentCapabilities,
+    AgentVersionResponse,
+    RunSpec,
+)
 from kitaru.api_models.v1.experiment import ExperimentResponse
 from kitaru.api_models.v1.experiment_run import ExperimentRunResponse
 from kitaru.api_models.v1.plugin import EvaluatorConfig
@@ -32,7 +37,7 @@ from kitaru.api_models.v1.replay_config import (
 from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
 from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.client import KitaruClient
+from kitaru.client.client import AgentRegistrationResult, KitaruClient
 
 T = TypeVar("T")
 
@@ -133,6 +138,92 @@ class KitaruSyncClient:
             Stored agent.
         """
         return self._run(self._client.get_agent(agent))
+
+    def register_agent(
+        self,
+        name: str,
+        run_spec: RunSpec,
+        *,
+        description: str | None = None,
+        display_version: str | None = None,
+        version_description: str | None = None,
+        capabilities: AgentCapabilities | None = None,
+        agent_idempotency_key: str | None = None,
+        version_idempotency_key: str | None = None,
+    ) -> AgentRegistrationResult:
+        """Create an agent and its initial version.
+
+        Args:
+            name: New agent name.
+            run_spec: Run spec for the initial version.
+            description: Agent description.
+            display_version: Human-readable designator for the initial version.
+            version_description: Initial version description.
+            capabilities: Initial version capabilities.
+            agent_idempotency_key: Idempotency key for agent creation.
+            version_idempotency_key: Idempotency key for version creation.
+
+        Raises:
+            ValueError: A request field is invalid or the two idempotency keys
+                are equal after normalization.
+            APIError: An idempotency key is invalid or agent creation failed.
+            AgentRegistrationError: The agent was created but the initial
+                version request raised an ordinary exception.
+
+        Returns:
+            Created agent and initial version.
+        """
+        return self._run(
+            self._client.register_agent(
+                name,
+                run_spec,
+                description=description,
+                display_version=display_version,
+                version_description=version_description,
+                capabilities=capabilities,
+                agent_idempotency_key=agent_idempotency_key,
+                version_idempotency_key=version_idempotency_key,
+            )
+        )
+
+    def register_agent_version(
+        self,
+        agent: uuid.UUID | str,
+        run_spec: RunSpec,
+        *,
+        display_version: str | None = None,
+        description: str | None = None,
+        capabilities: AgentCapabilities | None = None,
+        idempotency_key: str | None = None,
+    ) -> AgentVersionResponse:
+        """Create the next version of an existing agent.
+
+        Args:
+            agent: Id or exact name of the agent.
+            run_spec: Run spec for the new version.
+            display_version: Human-readable version designator.
+            description: Version description.
+            capabilities: Version capabilities.
+            idempotency_key: Idempotency key for version creation.
+
+        Raises:
+            ValueError: A request field is invalid.
+            APIError: The idempotency key, agent lookup, or version creation
+                failed.
+
+        Returns:
+            Created agent version.
+        """
+        return self._run(
+            self._client.register_agent_version(
+                agent,
+                run_spec,
+                display_version=display_version,
+                description=description,
+                capabilities=capabilities,
+                idempotency_key=idempotency_key,
+            )
+        )
 
     def list_agents(self) -> Iterator[AgentResponse]:
         """Iterate over all agents.

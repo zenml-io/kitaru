@@ -13,10 +13,11 @@
 #  permissions and limitations under the License.
 """Round-trip tests for the async user-facing Kitaru client."""
 
+import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -34,6 +35,12 @@ from conftest import (
     override_idempotency,
 )
 from kitaru.api_models.v1.agent import AgentCreateRequest, AgentResponse
+from kitaru.api_models.v1.agent_version import (
+    AgentCapabilities,
+    AgentVersionCreateRequest,
+    AgentVersionResponse,
+    RunSpec,
+)
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.experiment import ExperimentResponse
 from kitaru.api_models.v1.experiment_run import (
@@ -56,7 +63,12 @@ from kitaru.api_models.v1.session_node import (
 )
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.client import KitaruClient
-from kitaru.client.exceptions import KitaruClientError, NotFoundError
+from kitaru.client.exceptions import (
+    AgentRegistrationError,
+    APIError,
+    KitaruClientError,
+    NotFoundError,
+)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -91,6 +103,25 @@ def _agent_response(**overrides: Any) -> AgentResponse:
     }
     values.update(overrides)
     return AgentResponse(**values)
+
+
+def _agent_version_response(**overrides: Any) -> AgentVersionResponse:
+    """Build an agent version response with sensible defaults."""
+    now = datetime.now(UTC)
+    values: dict[str, Any] = {
+        "id": uuid.uuid4(),
+        "owner_id": uuid.uuid4(),
+        "created": now,
+        "updated": now,
+        "agent_id": uuid.uuid4(),
+        "version": 1,
+        "display_version": None,
+        "description": None,
+        "run_spec": RunSpec(command="python agent.py"),
+        "capabilities": AgentCapabilities(),
+    }
+    values.update(overrides)
+    return AgentVersionResponse(**values)
 
 
 def _experiment_response(**overrides: Any) -> ExperimentResponse:
@@ -224,6 +255,213 @@ async def test_get_agent_by_id(
     created = await api_client.agents.create(AgentCreateRequest(name="assistant"))
     loaded = await client.get_agent(created.id)
     assert loaded == created
+
+
+async def test_register_agent_creates_parent_and_initial_version() -> None:
+    """Build both requests and return both created records."""
+    api_client, client = _mock_client()
+    run_spec = RunSpec(command="python agent.py")
+    capabilities = AgentCapabilities(tools=["search"], skills=["research"])
+    agent = _agent_response(name="assistant", description="Parent", latest_version=0)
+    version = _agent_version_response(agent_id=agent.id)
+    api_client.agents.create = AsyncMock(return_value=agent)
+    api_client.agents.create_version = AsyncMock(return_value=version)
+
+    result = await client.register_agent(
+        "assistant",
+        run_spec,
+        description="Parent",
+        display_version="2026-09-13",
+        version_description="Initial version",
+        capabilities=capabilities,
+        agent_idempotency_key="agent-key",
+        version_idempotency_key="version-key",
+    )
+
+    assert result.agent == agent.model_copy(update={"latest_version": version.version})
+    assert result.version == version
+    api_client.agents.create.assert_awaited_once_with(
+        AgentCreateRequest(name="assistant", description="Parent"),
+        idempotency_key="agent-key",
+    )
+    api_client.agents.create_version.assert_awaited_once_with(
+        agent.id,
+        AgentVersionCreateRequest(
+            display_version="2026-09-13",
+            description="Initial version",
+            run_spec=run_spec,
+            capabilities=capabilities,
+        ),
+        idempotency_key="version-key",
+    )
+
+
+@pytest.mark.parametrize("reference", [uuid.uuid4(), "assistant"])
+async def test_register_agent_version_resolves_agent_reference(
+    reference: uuid.UUID | str,
+) -> None:
+    """Resolve an id or exact name before creating the next version."""
+    api_client, client = _mock_client()
+    run_spec = RunSpec(command="python agent.py")
+    agent = _agent_response()
+    version = _agent_version_response(agent_id=agent.id, version=2)
+    api_client.agents.get = AsyncMock(return_value=agent)
+    api_client.agents.list = AsyncMock(
+        return_value=Page(items=[agent], next_cursor=None)
+    )
+    api_client.agents.create_version = AsyncMock(return_value=version)
+
+    result = await client.register_agent_version(
+        reference,
+        run_spec,
+        display_version="v2",
+        description="Second version",
+        capabilities=AgentCapabilities(mcp_servers=["docs"]),
+        idempotency_key="version-key",
+    )
+
+    assert result == version
+    if isinstance(reference, uuid.UUID):
+        api_client.agents.get.assert_not_awaited()
+        api_client.agents.list.assert_not_awaited()
+    else:
+        api_client.agents.list.assert_awaited_once()
+        api_client.agents.get.assert_not_awaited()
+    api_client.agents.create_version.assert_awaited_once_with(
+        reference if isinstance(reference, uuid.UUID) else agent.id,
+        AgentVersionCreateRequest(
+            display_version="v2",
+            description="Second version",
+            run_spec=run_spec,
+            capabilities=AgentCapabilities(mcp_servers=["docs"]),
+        ),
+        idempotency_key="version-key",
+    )
+
+
+async def test_register_agent_reports_partial_failure_without_retry() -> None:
+    """Preserve the exact recovery request when version outcome is inconclusive."""
+    api_client, client = _mock_client()
+    agent = _agent_response()
+    cause = RuntimeError("version failed")
+    run_spec = RunSpec(command="python agent.py")
+    api_client.agents.create = AsyncMock(return_value=agent)
+    api_client.agents.create_version = AsyncMock(side_effect=cause)
+    api_client.agents.delete = AsyncMock()
+
+    with pytest.raises(AgentRegistrationError) as exc_info:
+        await client.register_agent("assistant", run_spec)
+
+    assert exc_info.value.agent == agent
+    assert exc_info.value.version_request == AgentVersionCreateRequest(
+        run_spec=run_spec
+    )
+    assert uuid.UUID(exc_info.value.version_idempotency_key)
+    assert exc_info.value.cause is cause
+    assert exc_info.value.__cause__ is cause
+    api_client.agents.create.assert_awaited_once()
+    api_client.agents.create_version.assert_awaited_once_with(
+        agent.id,
+        exc_info.value.version_request,
+        idempotency_key=exc_info.value.version_idempotency_key,
+    )
+    api_client.agents.delete.assert_not_awaited()
+
+
+async def test_register_agent_preserves_recovery_data_on_cancellation() -> None:
+    """Keep cancellation semantics and attach the partial registration details."""
+    api_client, client = _mock_client()
+    agent = _agent_response(latest_version=0)
+    api_client.agents.create = AsyncMock(return_value=agent)
+    api_client.agents.create_version = AsyncMock(side_effect=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await client.register_agent("assistant", RunSpec(command="python agent.py"))
+
+    version_call = api_client.agents.create_version.await_args
+    assert version_call is not None
+    version_key = version_call.kwargs["idempotency_key"]
+    assert any(
+        str(agent.id) in note and version_key in note
+        for note in exc_info.value.__notes__
+    )
+
+
+async def test_register_agent_validates_version_request_before_dispatch() -> None:
+    """Reject invalid version fields before creating the parent agent."""
+    api_client, client = _mock_client()
+    api_client.agents.create = AsyncMock()
+    api_client.agents.create_version = AsyncMock()
+
+    with pytest.raises(ValueError):
+        await client.register_agent(
+            "assistant",
+            RunSpec(command="python agent.py"),
+            display_version=cast(Any, {"invalid": "value"}),
+        )
+
+    api_client.agents.create.assert_not_awaited()
+    api_client.agents.create_version.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("agent_key", "version_key"),
+    [
+        (" ", None),
+        (None, "\n"),
+    ],
+)
+async def test_register_agent_validates_keys_before_dispatch(
+    agent_key: str | None,
+    version_key: str | None,
+) -> None:
+    """Reject invalid idempotency keys before creating either resource."""
+    api_client, client = _mock_client()
+    api_client.agents.create = AsyncMock()
+    api_client.agents.create_version = AsyncMock()
+
+    with pytest.raises(APIError):
+        await client.register_agent(
+            "assistant",
+            RunSpec(command="python agent.py"),
+            agent_idempotency_key=agent_key,
+            version_idempotency_key=version_key,
+        )
+
+    api_client.agents.create.assert_not_awaited()
+    api_client.agents.create_version.assert_not_awaited()
+
+
+async def test_register_agent_rejects_equal_keys_before_dispatch() -> None:
+    """Keep the two account-wide idempotency keys distinct."""
+    api_client, client = _mock_client()
+    api_client.agents.create = AsyncMock()
+    api_client.agents.create_version = AsyncMock()
+
+    with pytest.raises(ValueError, match="must differ"):
+        await client.register_agent(
+            "assistant",
+            RunSpec(command="python agent.py"),
+            agent_idempotency_key=" registration-key ",
+            version_idempotency_key="registration-key",
+        )
+
+    api_client.agents.create.assert_not_awaited()
+    api_client.agents.create_version.assert_not_awaited()
+
+
+async def test_register_agent_propagates_parent_failure_unchanged() -> None:
+    """Do not wrap a failure before any agent was created."""
+    api_client, client = _mock_client()
+    cause = RuntimeError("parent failed")
+    api_client.agents.create = AsyncMock(side_effect=cause)
+    api_client.agents.create_version = AsyncMock()
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await client.register_agent("assistant", RunSpec(command="python agent.py"))
+
+    assert exc_info.value is cause
+    api_client.agents.create_version.assert_not_awaited()
 
 
 async def test_get_agent_by_name(
