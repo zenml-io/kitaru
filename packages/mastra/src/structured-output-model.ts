@@ -7,6 +7,7 @@ import {
   MAX_RECORDED_STRING_CHARS,
   projectRecordedMetadata,
   providerFamily,
+  ROOT_NODE_EXTERNAL_ID,
   resolveCost,
 } from "@zenml-io/kitaru/adapter";
 
@@ -167,10 +168,9 @@ export async function prepareStructuredOutputModel(
             tokens,
           });
           const node: SessionNodeCreateRequest = {
-            ...state.allocateNode(),
             name: "structured_output",
             node_type: "llm_call",
-            parent_index: state.rootIndex,
+            parent_external_id: ROOT_NODE_EXTERNAL_ID,
             started_at: startedAt,
             ended_at: endedAt,
             status: failed ? "failed" : "completed",
@@ -181,7 +181,9 @@ export async function prepareStructuredOutputModel(
             model: servedModelId,
             model_provider: providerFamily(model.provider),
             model_params: getModelParams(parameters),
-            external_id: responseId,
+            // Not every provider reports a response id, and the wire identity
+            // still has to be unique per session.
+            external_id: responseId ?? globalThis.crypto.randomUUID(),
             inputs: boundedRecorderJson(
               parameters.prompt,
               "structured output prompt",

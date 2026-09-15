@@ -277,6 +277,32 @@ class SequenceRuntime:
             invariants=invariants,
         )
 
+    async def request_action(
+        self,
+        *,
+        action: SequenceAction,
+        credential_role: CredentialRole,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Send a generated action request and record transport failures."""
+        try:
+            return await self.client.request(method, url, **kwargs)
+        except Exception as exc:
+            self.receipt.record_step(
+                action=SequenceAction(
+                    name=action.name,
+                    target=action.target,
+                    arguments=self.sanitize(action.arguments),
+                ),
+                credential_role=credential_role,
+                status=0,
+                response={"exception": type(exc).__name__},
+                invariants=["request_failed"],
+            )
+            raise
+
 
 @asynccontextmanager
 async def report_cleanup_failures(

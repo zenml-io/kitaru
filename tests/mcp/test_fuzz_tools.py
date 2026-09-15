@@ -25,7 +25,7 @@ import pytest
 from hypothesis import Phase, given, settings
 from hypothesis import strategies as st
 from hypothesis_jsonschema import from_schema
-from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from mcp.types import CallToolResult, TextContent
 from mcp_fakes import EchoClient, NullClient, build_server_context
 from pydantic import TypeAdapter, ValidationError
@@ -293,7 +293,22 @@ def test_schema_valid_request_with_marker_never_leaks(
 _INTERNAL = "zenml-io/zenml-internal#139"
 
 
-@pytest.mark.xfail(strict=True, reason=_INTERNAL)
+def _is_validation_rejection(exc: BaseException) -> bool:
+    """Return whether every failure in `exc` is a tool call rejected at validation."""
+    # Hypothesis raises an ExceptionGroup when one run finds several distinct bugs.
+    if isinstance(exc, BaseExceptionGroup):
+        return all(_is_validation_rejection(inner) for inner in exc.exceptions)
+    return isinstance(exc, ToolError) and isinstance(exc.__cause__, ValidationError)
+
+
+# Pin the known failures so a different exception, such as a crash, fails the run.
+_REJECTED_AT_VALIDATION = pytest.RaisesExc(Exception, check=_is_validation_rejection)
+_CRASHED_ON_RECURSION = pytest.RaisesExc(
+    UnexpectedToolError, check=lambda exc: isinstance(exc.__cause__, RecursionError)
+)
+
+
+@pytest.mark.xfail(strict=True, raises=_REJECTED_AT_VALIDATION, reason=_INTERNAL)
 @pytest.mark.mcp_fuzz
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
@@ -317,7 +332,7 @@ def test_schema_invalid_request_never_raises(
     assert result.is_error or result.structured_content is not None
 
 
-@pytest.mark.xfail(strict=True, reason=_INTERNAL)
+@pytest.mark.xfail(strict=True, raises=_REJECTED_AT_VALIDATION, reason=_INTERNAL)
 def test_invalid_request_response_is_enveloped() -> None:
     server, context = server_context_for(CapabilityMode.READ_ONLY)
     request = {
@@ -328,7 +343,7 @@ def test_invalid_request_response_is_enveloped() -> None:
     assert_envelope(call(server, context, "kitaru_activity_read", request))
 
 
-@pytest.mark.xfail(strict=True, reason=_INTERNAL)
+@pytest.mark.xfail(strict=True, raises=_CRASHED_ON_RECURSION, reason=_INTERNAL)
 def test_deep_free_form_value_is_enveloped() -> None:
     value: dict[str, Any] = {}
     cursor = value

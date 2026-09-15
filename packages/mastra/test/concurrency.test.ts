@@ -93,12 +93,13 @@ describe("concurrent wrapper runs", () => {
     expect(callbackEvents.sort()).toEqual(["a", "b"]);
     expect(api.sessionIds).toHaveLength(2);
 
-    const roots = api.sessionIds.map((sessionId) => {
-      const batches = api.nodeBatches(sessionId);
-      expect(batches.map((batch) => batch[0]?.index)).toEqual([0, 1, 0]);
-      return batches[0]?.[0]?.index;
-    });
-    expect(roots).toEqual([0, 0]);
+    const externalIds = api.sessionIds.map((sessionId) =>
+      api.nodeBatches(sessionId).map((batch) => batch[0]?.external_id),
+    );
+    expect(externalIds).toEqual([
+      ["run", "response-tool", "run"],
+      ["run", "response-tool", "run"],
+    ]);
 
     const tools = api.sessionIds.map((sessionId) =>
       api

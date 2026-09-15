@@ -34,7 +34,7 @@ from kitaru.server.adapters.db.orm.experiment_run import (
     EXPERIMENT_RUN_NUMBER_UNIQUE_CONSTRAINT,
     ExperimentRunORM,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.experiment_run import ExperimentRunFilter
 from kitaru.server.domain.agent_version import AgentVersionNotFound
@@ -163,7 +163,10 @@ class SQLExperimentRunRepository(BaseSQLRepository[ExperimentRunORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, run_filter, id_column=ExperimentRunORM.id
+            self._session,
+            statement,
+            run_filter,
+            IdOrder(ExperimentRunORM.id, run_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

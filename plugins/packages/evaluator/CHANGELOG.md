@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Deterministic evaluators now sum finite decimal values exactly across wide exponent ranges.
+
 ## 0.1.3
 
 - Emit numeric score scales from built-in evaluators and remove retry hash results.

@@ -295,7 +295,14 @@ async def _execute_action(
         path = "/api/v1/agents"
         method = "POST"
         body = {"name": arguments["name"], "description": arguments["description"]}
-        response = await runtime.client.post(path, json=body, headers=headers)
+        response = await runtime.request_action(
+            action=action,
+            credential_role=role,
+            method="POST",
+            url=path,
+            json=body,
+            headers=headers,
+        )
         binding_error = _bind_created_id(runtime, target, response)
         runtime.record_response(
             action=action,
@@ -338,8 +345,13 @@ async def _execute_action(
             if action.name == "update_agent"
             else None
         )
-        response = await runtime.client.request(
-            method, concrete_path, json=body, headers=headers
+        response = await runtime.request_action(
+            action=action,
+            credential_role=role,
+            method=method,
+            url=concrete_path,
+            json=body,
+            headers=headers,
         )
         expected_status = 200 if model["alive"] else 404
         if action.name == "delete_agent":
@@ -372,7 +384,13 @@ async def _execute_action(
 
     if action.name == "list_agents":
         path = "/api/v1/agents"
-        response = await runtime.client.get(path, headers=headers)
+        response = await runtime.request_action(
+            action=action,
+            credential_role=role,
+            method="GET",
+            url=path,
+            headers=headers,
+        )
         runtime.record_response(
             action=action,
             credential_role=role,
@@ -401,7 +419,14 @@ async def _execute_action(
             "display_version": arguments["display_version"],
             "description": arguments["description"],
         }
-        response = await runtime.client.post(concrete_path, json=body, headers=headers)
+        response = await runtime.request_action(
+            action=action,
+            credential_role=role,
+            method="POST",
+            url=concrete_path,
+            json=body,
+            headers=headers,
+        )
         binding_error = _bind_created_id(runtime, target, response)
         runtime.record_response(
             action=action,
@@ -466,8 +491,13 @@ async def _execute_action(
             if action.name == "update_version"
             else None
         )
-        response = await runtime.client.request(
-            method, concrete_path, json=body, headers=headers
+        response = await runtime.request_action(
+            action=action,
+            credential_role=role,
+            method=method,
+            url=concrete_path,
+            json=body,
+            headers=headers,
         )
         expected_status = 200 if model["alive"] else 404
         if action.name == "delete_version":
@@ -496,6 +526,7 @@ async def _execute_action(
             assert payload["id"] == version_id
             assert payload["agent_id"] == runtime.resolve_id(model["agent"])
             assert payload["version"] == model["version"]
+            assert payload["display_version"] == model["display_version"]
             assert payload["description"] == model["description"]
         if action.name == "delete_version" and response.status_code == 204:
             model["alive"] = False
@@ -524,7 +555,13 @@ async def _execute_action(
         agent_id = runtime.resolve_id(target)
         path = "/api/v1/agents/{agent_id}/versions"
         concrete_path = f"/api/v1/agents/{agent_id}/versions"
-        response = await runtime.client.get(concrete_path, headers=headers)
+        response = await runtime.request_action(
+            action=action,
+            credential_role=role,
+            method="GET",
+            url=concrete_path,
+            headers=headers,
+        )
         runtime.record_response(
             action=action,
             credential_role=role,
@@ -708,6 +745,52 @@ async def test_schema_failure_carries_the_failing_response_receipt() -> None:
     notes = "\n".join(raised.value.__notes__)
     assert "Sequence receipt:\n{" in notes
     assert "not-a-uuid" in notes
+
+
+async def test_request_exception_records_sanitized_failing_action() -> None:
+    """Retain the crashing action without leaking its bound credential."""
+    raw_token = "live-test-secret"
+    failure = RuntimeError(f"handler exposed {raw_token}")
+
+    async def raise_request_exception(request: httpx.Request) -> httpx.Response:
+        _ = request
+        raise failure
+
+    receipt = SequenceReceipt()
+    transport = httpx.MockTransport(raise_request_exception)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        runtime = SequenceRuntime(client, receipt)
+        runtime.set_credential(CredentialRole.ACCOUNT, raw_token)
+        with (
+            pytest.raises(RuntimeError) as raised,
+            annotate_sequence_failure(receipt),
+        ):
+            await _execute_action(
+                runtime,
+                _action(
+                    "create_agent",
+                    "agent_0",
+                    name="crashing-agent",
+                    description=raw_token,
+                ),
+                {},
+            )
+
+    assert raised.value is failure
+    assert len(receipt.steps) == 1
+    step = receipt.steps[0]
+    assert step.action.name == "create_agent"
+    assert step.action.target == "agent_0"
+    assert step.action.arguments["description"] == {"$credential": "account"}
+    assert step.status == 0
+    assert step.response == {"exception": "RuntimeError"}
+    assert step.invariants == ["request_failed"]
+    notes = "\n".join(raised.value.__notes__)
+    assert '"name": "create_agent"' in notes
+    assert raw_token not in notes
 
 
 async def test_duplicate_created_id_is_recorded_without_leaking_uuid() -> None:

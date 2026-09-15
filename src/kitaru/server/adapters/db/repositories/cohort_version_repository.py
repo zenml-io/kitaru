@@ -33,7 +33,7 @@ from kitaru.server.adapters.db.orm.cohort_version_session import (
 from kitaru.server.adapters.db.orm.experiment_run import (
     EXPERIMENT_RUN_COHORT_VERSION_ID_FOREIGN_KEY,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.cohort import CohortVersionFilter
 from kitaru.server.domain.base import NotFoundError
@@ -197,7 +197,10 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, version_filter, id_column=CohortVersionORM.id
+            self._session,
+            statement,
+            version_filter,
+            IdOrder(CohortVersionORM.id, version_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

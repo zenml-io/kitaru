@@ -214,6 +214,22 @@ class TaskTransitions:
         if not tasks or not all(task.terminal for task in tasks):
             return job
         status, error = _settlement_outcome(tasks)
+        return await self._settle_and_dispatch(job, status, error, tasks)
+
+    async def _settle_and_dispatch(
+        self, job: Job, status: JobStatus, error: str | None, tasks: list[Task]
+    ) -> Job:
+        """Settle a locked job, track its completion, persist it, and dispatch it.
+
+        Args:
+            job: Job loaded under its row lock.
+            status: Terminal status to settle on.
+            error: Error the job settled with.
+            tasks: Every task of the job, for the analytics event.
+
+        Returns:
+            Stored job, settled.
+        """
         job.settle(status, error, datetime.now(UTC))
         if self._analytics is not None:
             self._analytics.track(
@@ -319,6 +335,35 @@ class TaskTransitions:
         stored = await self._jobs.update_many(settled)
         if dispatch:
             await self._dispatcher.dispatch(JobsSettled(jobs=stored))
+
+    async def expire_pending_job(
+        self, job_id: uuid.UUID, cutoff: datetime, error: str, now: datetime
+    ) -> None:
+        """Cancel a job's pending tasks and settle it canceled if still unclaimed.
+
+        Locks the job's live task rows in the same order as
+        ``request_jobs_cancel``, then its job row. A job no longer pending, or
+        one created after the cutoff, is left untouched.
+
+        Args:
+            job_id: Id of the job.
+            cutoff: Bound the job's creation must be older than.
+            error: Error the job settles with.
+            now: Current time.
+
+        Raises:
+            DBAPIError: Another transaction holds one of the task rows.
+        """
+        await self._tasks.lock_by_jobs([job_id], nowait=True)
+        job = await self._jobs.get(job_id, exclusive=True)
+        assert job.created is not None
+        if job.status is not JobStatus.PENDING or job.created >= cutoff:
+            return
+        await self._tasks.stamp_cancel_requested([job_id], now)
+        await self._cancel_pending_tasks([job_id], now)
+        job.request_cancel(now)
+        tasks = await self._tasks.list_by_job(job_id)
+        await self._settle_and_dispatch(job, JobStatus.CANCELED, error, tasks)
 
     async def cancel_job(self, job_id: uuid.UUID) -> Job:
         """Stamp the cancel request on a job and settle it if that drained it.

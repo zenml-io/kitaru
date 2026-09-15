@@ -23,7 +23,7 @@ from kitaru.server.adapters.db.orm.connection import (
     CONNECTION_NAME_UNIQUE_CONSTRAINT,
     ConnectionORM,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.connection import ConnectionFilter
 from kitaru.server.domain.base import NotFoundError
@@ -150,7 +150,10 @@ class SQLConnectionRepository(BaseSQLRepository[ConnectionORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, connection_filter, id_column=ConnectionORM.id
+            self._session,
+            statement,
+            connection_filter,
+            IdOrder(ConnectionORM.id, connection_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

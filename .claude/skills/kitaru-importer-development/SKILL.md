@@ -15,12 +15,12 @@ Implement `parse(payload: bytes, params: dict[str, Any])` as an iterator of `Imp
 
 - Choose and document the source-to-session boundary.
 - Derive a stable source `external_id`; Kitaru deduplicates using the importer provider and this ID.
-- Preserve source inputs and outputs. Populate selectors, models, tokens, costs, reasoning, framework, attributes, and metadata only when the export supports them without guessing.
+- Preserve source inputs and outputs. Populate selectors, models, tokens, costs, reasoning selectors, framework, attributes, and metadata only when the export supports them without guessing.
 - Yield `ImportFailure` for an isolated bad record. An exception raised while starting or advancing the parser ends the import task.
 - Preserve valid node ordering and graph relationships. Use either nested nodes or the flat indexed form accepted by `flatten_nodes`; follow that function's validation rules.
 - Validate provider parameters and keep normalization or grouping provenance in metadata when it changes how the source is interpreted.
 
-Use representative provider exports as fixtures. Cover malformed records, missing or duplicate IDs, grouping, ordering, parent links, model and tool normalization, reasoning visibility, selector escaping, and stable re-import behavior as applicable.
+Use representative provider exports as fixtures. Cover malformed records, missing or duplicate IDs, grouping, ordering, parent links, model and tool normalization, reasoning selectors, selector escaping, and stable re-import behavior as applicable.
 
 ## Importer-backed adapter
 

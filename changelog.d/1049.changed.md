@@ -1,0 +1,1 @@
+- Changed API imports to create sessions while traces are still being fetched. Each session is ingested as soon as its traces arrive, and `--max-sessions` stops fetching instead of only stopping ingestion.

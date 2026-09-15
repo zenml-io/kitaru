@@ -25,12 +25,14 @@ from sqlalchemy.exc import DBAPIError
 
 from conftest import (
     FakeIdempotencyKeyRepository,
+    JobAndTaskServices,
     build_job_and_task_services,
     local_settings,
 )
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.api import task_sweeper
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.database.service import DatabaseService
 
@@ -78,17 +80,24 @@ class _StubDatabase:
         yield session
 
 
-def _stub_sweeper_wiring(monkeypatch: pytest.MonkeyPatch, service: TaskService) -> None:
-    """Bind the sweeper's per-transaction service build to one fake-backed service.
+def _stub_sweeper_wiring(
+    monkeypatch: pytest.MonkeyPatch, services: JobAndTaskServices
+) -> None:
+    """Bind the sweeper's per-transaction service builds to fake-backed services.
 
     Args:
         monkeypatch: Patcher for the sweeper module.
-        service: Service every sweep unit runs against.
+        services: Services every sweep unit runs against.
     """
     monkeypatch.setattr(
         task_sweeper, "get_server_analytics", lambda *args, **kwargs: None
     )
-    monkeypatch.setattr(task_sweeper, "get_task_service", lambda *args: service)
+    monkeypatch.setattr(
+        task_sweeper, "get_task_service", lambda *args: services.task_service
+    )
+    monkeypatch.setattr(
+        task_sweeper, "get_job_service", lambda *args: services.job_service
+    )
     monkeypatch.setattr(
         task_sweeper,
         "get_idempotency_key_repository",
@@ -96,17 +105,21 @@ def _stub_sweeper_wiring(monkeypatch: pytest.MonkeyPatch, service: TaskService) 
     )
 
 
-async def test_sweep_once_propagates_before_rescuing(
+async def test_sweep_once_propagates_before_expiring_before_rescuing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Every cancel propagation runs before the first stale rescue.
+    """Every cancel propagation runs before expiry, and expiry before rescue.
 
     Rescuing first would requeue a stale task of a canceling job, because the
     rescue reads the task's own cancel stamp, which the propagation has not
     written yet.
     """
     services = build_job_and_task_services()
-    task_id, job_id = uuid.uuid4(), uuid.uuid4()
+    task_id, canceling_job_id, expired_job_id = (
+        uuid.uuid4(),
+        uuid.uuid4(),
+        uuid.uuid4(),
+    )
     calls: list[str] = []
 
     async def record_sweep(
@@ -117,13 +130,25 @@ async def test_sweep_once_propagates_before_rescuing(
     async def record_propagate(self: TaskService, job_id: uuid.UUID) -> None:
         calls.append("propagate")
 
-    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-        return [task_id], [job_id]
+    async def record_expire(
+        self: TaskService,
+        job_id: uuid.UUID,
+        cutoff: datetime,
+        error: str,
+        now: datetime,
+    ) -> None:
+        calls.append("expire")
+
+    async def candidates(
+        *args: Any,
+    ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
+        return [task_id], [canceling_job_id], [expired_job_id]
 
     monkeypatch.setattr(TaskService, "sweep_stale_task", record_sweep)
     monkeypatch.setattr(TaskService, "propagate_job_cancel", record_propagate)
+    monkeypatch.setattr(JobService, "expire_pending_job", record_expire)
     monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
-    _stub_sweeper_wiring(monkeypatch, services.task_service)
+    _stub_sweeper_wiring(monkeypatch, services)
 
     await task_sweeper.sweep_once(
         cast(DatabaseService, _StubDatabase()),
@@ -131,7 +156,7 @@ async def test_sweep_once_propagates_before_rescuing(
         AnalyticsClient(enabled=False),
     )
 
-    assert calls == ["propagate", "rescue"]
+    assert calls == ["propagate", "expire", "rescue"]
 
 
 async def test_sweep_once_continues_after_a_failing_item(
@@ -149,12 +174,14 @@ async def test_sweep_once_continues_after_a_failing_item(
         if task_id == first:
             raise RuntimeError("boom")
 
-    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-        return [first, second], []
+    async def candidates(
+        *args: Any,
+    ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
+        return [first, second], [], []
 
     monkeypatch.setattr(TaskService, "sweep_stale_task", failing_sweep)
     monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
-    _stub_sweeper_wiring(monkeypatch, services.task_service)
+    _stub_sweeper_wiring(monkeypatch, services)
     database = _StubDatabase()
 
     await task_sweeper.sweep_once(
@@ -181,12 +208,14 @@ async def test_sweep_once_skips_a_job_whose_task_rows_are_held(
         if job_id == held:
             raise _lock_not_available_error()
 
-    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-        return [], [held, free]
+    async def candidates(
+        *args: Any,
+    ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
+        return [], [held, free], []
 
     monkeypatch.setattr(TaskService, "propagate_job_cancel", failing_propagate)
     monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
-    _stub_sweeper_wiring(monkeypatch, services.task_service)
+    _stub_sweeper_wiring(monkeypatch, services)
     database = _StubDatabase()
 
     await task_sweeper.sweep_once(
