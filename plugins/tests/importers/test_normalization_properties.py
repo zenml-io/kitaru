@@ -147,13 +147,12 @@ def _session_nodes(
     assert len(sessions) > 0, items
     assert not [item for item in items if isinstance(item, ImportFailure)], items
     nodes = [node for session in sessions for node in flatten_nodes(session.nodes)]
-    identities = [node.external_id for node in nodes]
-    assert all(identity is not None for identity in identities)
-    assert len(identities) == len(set(identities))
-    return {node.external_id: node for node in nodes if node.external_id is not None}
+    nodes_by_external_id = {node.external_id: node for node in nodes}
+    assert len(nodes_by_external_id) == len(nodes)
+    return nodes_by_external_id
 
 
-def _parent_identities(
+def _parent_external_ids(
     nodes: dict[str, SessionNodeCreateRequest],
 ) -> dict[str, str | None]:
     return {identity: node.parent_external_id for identity, node in nodes.items()}
@@ -190,7 +189,7 @@ def test_accepted_provider_forests_conserve_nodes_and_usage(
         for trace in traces
         for node in trace.nodes
     }
-    assert _parent_identities(actual) == expected_parents
+    assert _parent_external_ids(actual) == expected_parents
     assert all(node.links == [] for node in actual.values())
     for identity, source in expected.items():
         node = actual[identity]
@@ -298,7 +297,7 @@ def test_mastra_conserves_reordered_spans_and_collapses_identical_traces(
     assert set(actual) == {node.node_id for node in trace.nodes}
     [session] = [item for item in items if isinstance(item, ImportedSession)]
     assert session.external_id == trace.trace_id
-    assert _parent_identities(actual) == {
+    assert _parent_external_ids(actual) == {
         node.node_id: node.parent_id for node in trace.nodes
     }
     assert all(node.links == [] for node in actual.values())

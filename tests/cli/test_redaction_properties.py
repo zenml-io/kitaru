@@ -30,8 +30,6 @@ from pydantic import BaseModel
 from kitaru.cli.redaction import redact_data as cli_redact
 from kitaru.mcp.redaction import redact_data as mcp_redact
 
-_REDACTORS = [pytest.param(cli_redact, id="cli"), pytest.param(mcp_redact, id="mcp")]
-
 _json = st.recursive(
     st.none() | st.booleans() | st.integers() | st.text(max_size=30),
     lambda c: (
@@ -78,62 +76,53 @@ _idempotent_roots = st.recursive(
 )
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
 @given(
     key=_secret_keys,
     secret=st.text(min_size=8, max_size=20, alphabet="abcdef0123456789"),
     rest=_json,
 )
 def test_secret_under_secret_key_never_survives(
-    redact_data: Any, key: str, secret: str, rest: Any
+    key: str, secret: str, rest: Any
 ) -> None:
     # The generated filler can coincidentally contain the same hex string, which would
     # fail the assertion without any secret having escaped its own key.
     assume(secret not in json.dumps(rest))
-    out = json.dumps(redact_data({key: secret, "other": rest}))
+    out = json.dumps(cli_redact({key: secret, "other": rest}))
     assert secret not in out
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
 @given(
     prefix=st.sampled_from(["KITKEY_", "Bearer "]),
     secret=st.text(min_size=8, max_size=20, alphabet="abcdef0123456789"),
 )
-def test_inline_marker_never_survives(
-    redact_data: Any, prefix: str, secret: str
-) -> None:
-    out = json.dumps(redact_data({"note": f"use {prefix}{secret} now"}))
+def test_inline_marker_never_survives(prefix: str, secret: str) -> None:
+    out = json.dumps(cli_redact({"note": f"use {prefix}{secret} now"}))
     assert secret not in out
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
-def test_camel_and_hyphen_secret_keys_are_masked(redact_data: Any) -> None:
-    out = redact_data({"apiKey": "0123456789", "x-api-key": "0123456789"})
+def test_camel_and_hyphen_secret_keys_are_masked() -> None:
+    out = cli_redact({"apiKey": "0123456789", "x-api-key": "0123456789"})
     assert out == {"apiKey": "***", "x-api-key": "***"}
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
-def test_distinct_keys_are_preserved(redact_data: Any) -> None:
-    assert len(redact_data({1: "a", "1": "b"})) == 2
+def test_distinct_keys_are_preserved() -> None:
+    assert len(cli_redact({1: "a", "1": "b"})) == 2
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
-def test_plural_secret_keys_are_masked(redact_data: Any) -> None:
-    out = redact_data({"secrets": {"a": "s5"}, "tokens": "s2"})
+def test_plural_secret_keys_are_masked() -> None:
+    out = cli_redact({"secrets": {"a": "s5"}, "tokens": "s2"})
     assert out["secrets"] == "***" and out["tokens"] == "***"
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
-def test_deep_nesting_does_not_recurse_out(redact_data: Any) -> None:
+def test_deep_nesting_does_not_recurse_out() -> None:
     value: dict[str, Any] = {}
     cursor = value
     for _ in range(3000):
         cursor["k"] = {}
         cursor = cursor["k"]
-    json.dumps(redact_data(value))
+    json.dumps(cli_redact(value))
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
 @given(
     value=st.dictionaries(
         st.text(max_size=12)
@@ -144,12 +133,10 @@ def test_deep_nesting_does_not_recurse_out(redact_data: Any) -> None:
         max_size=8,
     )
 )
-def test_mixed_keys_survive_json_and_repeated_redaction(
-    redact_data: Any, value: Any
-) -> None:
-    output = redact_data(value)
+def test_mixed_keys_survive_json_and_repeated_redaction(value: Any) -> None:
+    output = cli_redact(value)
     assert len(json.loads(json.dumps(output))) == len(value)
-    assert redact_data(output) == output
+    assert cli_redact(output) == output
 
 
 @given(value=_idempotent_roots)
@@ -168,15 +155,12 @@ def test_cli_and_mcp_export_the_shared_redactor() -> None:
     assert cli_redact is mcp_redact
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
 @pytest.mark.parametrize("key", [1, True, (1,)])
 @pytest.mark.parametrize("reverse", [False, True])
-def test_key_aliases_reserve_existing_strings(
-    redact_data: Any, key: Any, reverse: bool
-) -> None:
+def test_key_aliases_reserve_existing_strings(key: Any, reverse: bool) -> None:
     entries = [(key, "native"), (str(key), "string"), (f"{key} [2]", "reserved")]
     value = dict(reversed(entries) if reverse else entries)
-    output = json.loads(json.dumps(redact_data({"nested": [value]})))["nested"][0]
+    output = json.loads(json.dumps(cli_redact({"nested": [value]})))["nested"][0]
     assert len(output) == 3
     assert output[str(key)] == "string"
     assert output[f"{key} [2]"] == "reserved"
@@ -184,35 +168,32 @@ def test_key_aliases_reserve_existing_strings(
     assert list(value.items()) == list(reversed(entries) if reverse else entries)
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
-def test_cycles_are_bounded_but_shared_values_remain_visible(redact_data: Any) -> None:
+def test_cycles_are_bounded_but_shared_values_remain_visible() -> None:
     mapping: dict[str, Any] = {}
     sequence: list[Any] = [mapping]
     mapping["cycle"] = sequence
     shared = {"visible": 1, "password": "hidden"}
-    output = redact_data({"cycle": mapping, "first": shared, "second": shared})
+    output = cli_redact({"cycle": mapping, "first": shared, "second": shared})
     assert "hidden" not in json.dumps(output)
     assert output["first"] == output["second"] == {"visible": 1, "password": "***"}
     assert "cycle" in output["cycle"]
-    assert redact_data(output) == output
+    assert cli_redact(output) == output
     assert sequence[0] is mapping and mapping["cycle"] is sequence
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
 @pytest.mark.parametrize("depth", [63, 64, 65])
-def test_depth_boundary_is_bounded(redact_data: Any, depth: int) -> None:
+def test_depth_boundary_is_bounded(depth: int) -> None:
     value: Any = "visible"
     for _ in range(depth):
         value = [value]
-    output = redact_data(value)
+    output = cli_redact(value)
     serialized = json.dumps(output)
     assert ("visible" in serialized) == (depth < 64)
     assert len(serialized) < 200
-    assert redact_data(output) == output
+    assert cli_redact(output) == output
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
-def test_model_normalization_keeps_keys_and_supported_scalars(redact_data: Any) -> None:
+def test_model_normalization_keeps_keys_and_supported_scalars() -> None:
     class Values(BaseModel):
         values: dict[Any, Any]
 
@@ -233,7 +214,7 @@ def test_model_normalization_keeps_keys_and_supported_scalars(redact_data: Any) 
             "set": {3},
         }
     )
-    output = json.loads(json.dumps(redact_data(value)))["values"]
+    output = json.loads(json.dumps(cli_redact(value)))["values"]
     assert len(output) == len(value.values)
     assert output["1"] == "string"
     assert output["enum"] == "value"
@@ -245,7 +226,6 @@ def test_model_normalization_keeps_keys_and_supported_scalars(redact_data: Any) 
     assert output["tuple"] == [1, 2] and output["set"] == [3]
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
 @pytest.mark.parametrize(
     "usage",
     [
@@ -261,11 +241,10 @@ def test_model_normalization_keeps_keys_and_supported_scalars(redact_data: Any) 
         },
     ],
 )
-def test_numeric_token_usage_is_preserved(redact_data: Any, usage: Any) -> None:
-    assert redact_data({"tokens": usage}) == {"tokens": usage}
+def test_numeric_token_usage_is_preserved(usage: Any) -> None:
+    assert cli_redact({"tokens": usage}) == {"tokens": usage}
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
 @pytest.mark.parametrize(
     "secret",
     [
@@ -280,24 +259,20 @@ def test_numeric_token_usage_is_preserved(redact_data: Any, usage: Any) -> None:
         {"unknown": 1},
     ],
 )
-def test_secret_bearing_tokens_are_masked(redact_data: Any, secret: Any) -> None:
-    assert redact_data({"tokens": secret}) == {"tokens": "***"}
+def test_secret_bearing_tokens_are_masked(secret: Any) -> None:
+    assert cli_redact({"tokens": secret}) == {"tokens": "***"}
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
 @pytest.mark.parametrize(
     "key", ["input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens"]
 )
 @given(count=st.none() | st.integers())
-def test_numeric_usage_fields_are_preserved(
-    redact_data: Any, key: str, count: Any
-) -> None:
-    assert redact_data({key: count}) == {key: count}
-    assert redact_data({key: "credential-value"}) == {key: "***"}
-    assert redact_data({key: True}) == {key: "***"}
+def test_numeric_usage_fields_are_preserved(key: str, count: Any) -> None:
+    assert cli_redact({key: count}) == {key: count}
+    assert cli_redact({key: "credential-value"}) == {key: "***"}
+    assert cli_redact({key: True}) == {key: "***"}
 
 
-@pytest.mark.parametrize("redact_data", _REDACTORS)
-def test_credential_status_fields_are_preserved(redact_data: Any) -> None:
+def test_credential_status_fields_are_preserved() -> None:
     value = {"credential_stored": True, "credential_status": "configured"}
-    assert redact_data(value) == value
+    assert cli_redact(value) == value
