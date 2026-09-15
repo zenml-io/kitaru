@@ -111,18 +111,18 @@ def _get_context_data(prompt: str) -> dict[str, object]:
 
 
 def _node(
-    *, session_id: uuid.UUID, node_id: uuid.UUID, index: int
+    *, session_id: uuid.UUID, node_id: uuid.UUID, external_id: str
 ) -> SessionNodeResponse:
     return SessionNodeResponse(
         id=node_id,
         session_id=session_id,
-        index=index,
-        parent_index=None,
-        secondary_parent_indexes=[],
-        secondary_parent_ids=[],
+        external_id=external_id,
+        parent_external_id=None,
+        links=[],
         node_type=NodeType.TOOL_CALL,
         name="lookup_order",
         status=NodeStatus.COMPLETED,
+        started_at=NOW,
         inputs={},
         outputs={},
         tool_name="lookup_order",
@@ -143,7 +143,7 @@ def _distribution_sessions(
                 _node(
                     session_id=session.session.id,
                     node_id=uuid.UUID(int=number * 1000 + index),
-                    index=index,
+                    external_id=f"node-{index}",
                 ).model_copy(
                     update={
                         "node_type": (
@@ -969,17 +969,17 @@ async def test_rejects_sessions_concatenated_from_multiple_imports() -> None:
         await generate_insights([first, second], context=_context())
 
 
-@pytest.mark.parametrize("duplicate", ["session", "node_id", "node_index"])
+@pytest.mark.parametrize("duplicate", ["session", "node_id"])
 async def test_rejects_duplicate_normalized_identities(duplicate: str) -> None:
     first = _session(1, status=SessionStatus.FAILED)
     second = _session(2, status=SessionStatus.COMPLETED)
     node_id = uuid.uuid4()
     first.nodes = [
-        _node(session_id=first.session.id, node_id=node_id, index=0),
+        _node(session_id=first.session.id, node_id=node_id, external_id="node-0"),
         _node(
             session_id=first.session.id,
             node_id=node_id if duplicate == "node_id" else uuid.uuid4(),
-            index=0 if duplicate == "node_index" else 1,
+            external_id="node-1",
         ),
     ]
     sessions = [first, first] if duplicate == "session" else [first, second]
@@ -990,7 +990,9 @@ async def test_rejects_duplicate_normalized_identities(duplicate: str) -> None:
 
 async def test_rejects_node_from_another_session() -> None:
     session = _session(1, status=SessionStatus.FAILED)
-    session.nodes = [_node(session_id=uuid.uuid4(), node_id=uuid.uuid4(), index=0)]
+    session.nodes = [
+        _node(session_id=uuid.uuid4(), node_id=uuid.uuid4(), external_id="node-0")
+    ]
 
     with pytest.raises(ValueError, match="enclosing session"):
         await generate_insights([session], context=_context())
@@ -1125,7 +1127,7 @@ async def test_full_contribution_prompts_fit_the_length_bound() -> None:
                         _node(
                             session_id=session_id,
                             node_id=uuid.UUID(int=5000 + number * 100 + index),
-                            index=index,
+                            external_id=f"node-{index}",
                         )
                         for index in range(3 + number // 30)
                     ]
@@ -1133,7 +1135,7 @@ async def test_full_contribution_prompts_fit_the_length_bound() -> None:
                         _node(
                             session_id=session_id,
                             node_id=uuid.UUID(int=5000 + number * 100 + index),
-                            index=index,
+                            external_id=f"node-{index}",
                         ).model_copy(
                             update={
                                 "node_type": NodeType.LLM_CALL,

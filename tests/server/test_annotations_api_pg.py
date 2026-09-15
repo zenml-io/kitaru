@@ -58,7 +58,7 @@ async def _create_session_with_node(
             json={
                 "nodes": [
                     {
-                        "index": 0,
+                        "external_id": "n0",
                         "node_type": "llm_call",
                         "name": "call",
                         "status": "completed",

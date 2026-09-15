@@ -115,6 +115,10 @@ fuzz-mcp:
 fuzz-filters:
     HYPOTHESIS_PROFILE=nightly uv run --extra server pytest tests/server/test_fuzz_filters.py --hypothesis-show-statistics
 
+# Compare generated filter results with PostgreSQL in isolated databases
+fuzz-filters-pg MAX_EXAMPLES="25":
+    KITARU_FUZZ_POSTGRES=1 KITARU_TEST_REQUIRE_POSTGRES=1 KITARU_FUZZ_PG_MAX_EXAMPLES={{ MAX_EXAMPLES }} uv run --extra server pytest tests/server/test_fuzz_filters_pg.py --hypothesis-show-statistics
+
 # Heavy API fuzzing run against a live server (requires docker compose up -d db)
 fuzz-api:
     HYPOTHESIS_PROFILE=nightly KITARU_FUZZ=1 KITARU_FUZZ_RANDOM=1 KITARU_FUZZ_MAX_EXAMPLES=400 uv run --extra server --group fuzz pytest tests/server/test_fuzz_api.py -p no:randomly --hypothesis-show-statistics

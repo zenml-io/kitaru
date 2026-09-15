@@ -35,7 +35,7 @@ from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
 from kitaru.server.adapters.db.orm.replay import ReplayORM
 from kitaru.server.adapters.db.orm.replay_evaluation import ReplayEvaluationORM
 from kitaru.server.adapters.db.orm.session import SessionORM
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationIdentity,
@@ -229,7 +229,10 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, evaluation_filter, id_column=EvaluationORM.id
+            self._session,
+            statement,
+            evaluation_filter,
+            IdOrder(EvaluationORM.id, evaluation_filter.sort),
         )
         version_ids = {
             row.evaluator_version_id
