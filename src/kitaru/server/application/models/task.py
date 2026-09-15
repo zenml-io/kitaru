@@ -71,7 +71,6 @@ class TaskPolicy(FrozenModel):
     """Task execution policy."""
 
     heartbeat_timeout_seconds: int = 60
-    job_pending_timeout_seconds: int = 3600
     retry_limit: int = 3
     sweep_batch_limit: int = 100
     evaluator_timeout_seconds: int = 300

@@ -634,7 +634,6 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
     """
     return TaskPolicy(
         heartbeat_timeout_seconds=settings.TASK_HEARTBEAT_TIMEOUT_SECONDS,
-        job_pending_timeout_seconds=settings.JOB_PENDING_TIMEOUT_SECONDS,
         retry_limit=settings.TASK_RETRY_LIMIT,
         sweep_batch_limit=settings.TASK_SWEEP_BATCH_LIMIT,
         evaluator_timeout_seconds=settings.EVALUATOR_TASK_TIMEOUT_SECONDS,

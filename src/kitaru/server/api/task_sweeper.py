@@ -35,6 +35,7 @@ from kitaru.server.adapters.rest.dependencies import (
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.database.service import DatabaseService
+from kitaru.server.domain.job import pending_timeout_error
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,7 @@ async def _read_candidates(
     settings: APISettings,
     analytics: AnalyticsClient,
     now: datetime,
+    pending_cutoff: datetime,
 ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
     """Read the stale task ids, the canceling job ids, and the expired pending job ids.
 
@@ -150,6 +152,7 @@ async def _read_candidates(
         settings: API settings for this process.
         analytics: Analytics client for this process.
         now: Current time.
+        pending_cutoff: Bound a pending job's creation must be older than.
 
     Returns:
         Stale task ids, job ids owing a cancel propagation, and pending job
@@ -161,7 +164,9 @@ async def _read_candidates(
             service = get_task_service(session, database.engine, settings, tracker)
             task_ids = await service.list_stale_task_ids(now)
             job_ids = await service.list_unpropagated_cancel_job_ids()
-            expired_pending_job_ids = await service.list_expired_pending_job_ids(now)
+            expired_pending_job_ids = await service.list_expired_pending_job_ids(
+                pending_cutoff
+            )
             return task_ids, job_ids, expired_pending_job_ids
         finally:
             await session.rollback()
@@ -184,8 +189,10 @@ async def sweep_once(
         analytics: Analytics client for this process.
     """
     now = datetime.now(UTC)
+    pending_cutoff = now - timedelta(seconds=settings.JOB_PENDING_TIMEOUT_SECONDS)
+    pending_error = pending_timeout_error(settings.JOB_PENDING_TIMEOUT_SECONDS)
     task_ids, job_ids, expired_pending_job_ids = await _read_candidates(
-        database, settings, analytics, now
+        database, settings, analytics, now, pending_cutoff
     )
     # Propagate first. The rescue chooses between canceling and requeuing by
     # reading the task's own cancel_requested_at, so a stale task of a
@@ -205,7 +212,13 @@ async def sweep_once(
             database,
             settings,
             analytics,
-            partial(TaskService.expire_pending_job, job_id=job_id, now=now),
+            partial(
+                TaskService.expire_pending_job,
+                job_id=job_id,
+                cutoff=pending_cutoff,
+                error=pending_error,
+                now=now,
+            ),
             f"pending timeout for job {job_id}",
         )
     for task_id in task_ids:

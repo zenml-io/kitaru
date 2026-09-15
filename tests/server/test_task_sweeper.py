@@ -122,7 +122,11 @@ async def test_sweep_once_propagates_before_expiring_before_rescuing(
         calls.append("propagate")
 
     async def record_expire(
-        self: TaskService, job_id: uuid.UUID, now: datetime
+        self: TaskService,
+        job_id: uuid.UUID,
+        cutoff: datetime,
+        error: str,
+        now: datetime,
     ) -> None:
         calls.append("expire")
 
