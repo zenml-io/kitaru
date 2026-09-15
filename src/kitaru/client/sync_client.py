@@ -164,11 +164,11 @@ class KitaruSyncClient:
             version_idempotency_key: Idempotency key for version creation.
 
         Raises:
-            ValueError: A request field or idempotency key is invalid, or the
-                two idempotency keys are equal after normalization.
-            APIError: Agent creation failed.
+            ValueError: A request field is invalid or the two idempotency keys
+                are equal after normalization.
+            APIError: An idempotency key is invalid or agent creation failed.
             AgentRegistrationError: The agent was created but the initial
-                version request did not return successfully.
+                version request raised an ordinary exception.
 
         Returns:
             Created agent and initial version.
@@ -207,8 +207,9 @@ class KitaruSyncClient:
             idempotency_key: Idempotency key for version creation.
 
         Raises:
-            ValueError: A request field or idempotency key is invalid.
-            APIError: Agent lookup or version creation failed.
+            ValueError: A request field is invalid.
+            APIError: The idempotency key, agent lookup, or version creation
+                failed.
 
         Returns:
             Created agent version.

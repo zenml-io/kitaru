@@ -170,9 +170,11 @@ class KitaruClient:
 
         The operation sends separate agent and version requests. An
         ``AgentRegistrationError`` records the created agent, exact version
-        request, and version idempotency key when the second request does not
-        return successfully. It does not roll back the agent or start a fresh
-        version request with a different idempotency key.
+        request, and version idempotency key when the second request raises an
+        ordinary exception. Cancellation still propagates, with the agent id
+        and version idempotency key attached as an exception note. The method
+        does not roll back the agent or start a fresh version request with a
+        different idempotency key.
 
         Args:
             name: New agent name.
@@ -185,11 +187,11 @@ class KitaruClient:
             version_idempotency_key: Idempotency key for version creation.
 
         Raises:
-            ValueError: A request field or idempotency key is invalid, or the
-                two idempotency keys are equal after normalization.
-            APIError: Agent creation failed.
+            ValueError: A request field is invalid or the two idempotency keys
+                are equal after normalization.
+            APIError: An idempotency key is invalid or agent creation failed.
             AgentRegistrationError: The agent was created but the initial
-                version request did not return successfully.
+                version request raised an ordinary exception.
 
         Returns:
             Created agent and initial version.
@@ -201,6 +203,7 @@ class KitaruClient:
             run_spec=run_spec,
             capabilities=capabilities,
         )
+        # Both keys must be valid and distinct before either write is sent.
         agent_idempotency_key = validate_idempotency_key(
             agent_idempotency_key, "agent_idempotency_key"
         )
@@ -222,6 +225,13 @@ class KitaruClient:
                 version_request,
                 idempotency_key=version_idempotency_key,
             )
+        except asyncio.CancelledError as error:
+            error.add_note(
+                f"Agent {agent.id} was created before registration was canceled. "
+                f"The initial-version request used idempotency key "
+                f"{version_idempotency_key!r}."
+            )
+            raise
         except Exception as error:
             raise AgentRegistrationError(
                 agent=agent,
@@ -229,6 +239,7 @@ class KitaruClient:
                 version_idempotency_key=version_idempotency_key,
                 cause=error,
             ) from error
+        agent = agent.model_copy(update={"latest_version": version.version})
         return AgentRegistrationResult(agent=agent, version=version)
 
     async def register_agent_version(
@@ -252,8 +263,9 @@ class KitaruClient:
             idempotency_key: Idempotency key for version creation.
 
         Raises:
-            ValueError: A request field or idempotency key is invalid.
-            APIError: Agent lookup or version creation failed.
+            ValueError: A request field is invalid.
+            APIError: The idempotency key, agent lookup, or version creation
+                failed.
 
         Returns:
             Created agent version.
@@ -264,7 +276,6 @@ class KitaruClient:
             run_spec=run_spec,
             capabilities=capabilities,
         )
-        idempotency_key = validate_idempotency_key(idempotency_key, "idempotency_key")
         agent_id = (
             agent if isinstance(agent, uuid.UUID) else (await self.get_agent(agent)).id
         )

@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Round-trip tests for the async user-facing Kitaru client."""
 
+import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -64,6 +65,7 @@ from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.client import KitaruClient
 from kitaru.client.exceptions import (
     AgentRegistrationError,
+    APIError,
     KitaruClientError,
     NotFoundError,
 )
@@ -260,7 +262,7 @@ async def test_register_agent_creates_parent_and_initial_version() -> None:
     api_client, client = _mock_client()
     run_spec = RunSpec(command="python agent.py")
     capabilities = AgentCapabilities(tools=["search"], skills=["research"])
-    agent = _agent_response(name="assistant", description="Parent")
+    agent = _agent_response(name="assistant", description="Parent", latest_version=0)
     version = _agent_version_response(agent_id=agent.id)
     api_client.agents.create = AsyncMock(return_value=agent)
     api_client.agents.create_version = AsyncMock(return_value=version)
@@ -276,7 +278,7 @@ async def test_register_agent_creates_parent_and_initial_version() -> None:
         version_idempotency_key="version-key",
     )
 
-    assert result.agent == agent
+    assert result.agent == agent.model_copy(update={"latest_version": version.version})
     assert result.version == version
     api_client.agents.create.assert_awaited_once_with(
         AgentCreateRequest(name="assistant", description="Parent"),
@@ -366,6 +368,25 @@ async def test_register_agent_reports_partial_failure_without_retry() -> None:
     api_client.agents.delete.assert_not_awaited()
 
 
+async def test_register_agent_preserves_recovery_data_on_cancellation() -> None:
+    """Keep cancellation semantics and attach the partial registration details."""
+    api_client, client = _mock_client()
+    agent = _agent_response(latest_version=0)
+    api_client.agents.create = AsyncMock(return_value=agent)
+    api_client.agents.create_version = AsyncMock(side_effect=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await client.register_agent("assistant", RunSpec(command="python agent.py"))
+
+    version_call = api_client.agents.create_version.await_args
+    assert version_call is not None
+    version_key = version_call.kwargs["idempotency_key"]
+    assert any(
+        str(agent.id) in note and version_key in note
+        for note in exc_info.value.__notes__
+    )
+
+
 async def test_register_agent_validates_version_request_before_dispatch() -> None:
     """Reject invalid version fields before creating the parent agent."""
     api_client, client = _mock_client()
@@ -399,7 +420,7 @@ async def test_register_agent_validates_keys_before_dispatch(
     api_client.agents.create = AsyncMock()
     api_client.agents.create_version = AsyncMock()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(APIError):
         await client.register_agent(
             "assistant",
             RunSpec(command="python agent.py"),

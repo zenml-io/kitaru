@@ -22,6 +22,7 @@ import pytest
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import (
+    APIError,
     InvalidServerResponseError,
     NotFoundError,
     ServerError,
@@ -178,7 +179,7 @@ async def test_normalizes_explicit_idempotency_key() -> None:
     assert requests[0].headers[IDEMPOTENCY_KEY_HEADER] == "caller-key"
 
 
-@pytest.mark.parametrize("key", [" ", "line\nbreak", "a" * 256])
+@pytest.mark.parametrize("key", [" ", "line\nbreak", "clé", "a" * 256])
 async def test_rejects_invalid_explicit_idempotency_key(key: str) -> None:
     """Reject an invalid explicit idempotency key before sending a request."""
     requests: list[httpx.Request] = []
@@ -188,13 +189,14 @@ async def test_rejects_invalid_explicit_idempotency_key(key: str) -> None:
         return httpx.Response(200, json={})
 
     client = mock_api_client(handler)
-    with pytest.raises(ValueError, match="Invalid idempotency_key"):
+    with pytest.raises(APIError, match="Invalid idempotency_key") as exc_info:
         await client.request(
             "POST",
             "/api/v1/users",
             json={"name": "alice"},
             idempotency_key=key,
         )
+    assert exc_info.value.status_code == 400
     assert requests == []
 
 

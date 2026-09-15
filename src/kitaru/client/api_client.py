@@ -32,6 +32,7 @@ from kitaru.client.auth import (
 from kitaru.client.config import get_analytics_id, get_server_url
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import (
+    APIError,
     InvalidServerResponseError,
     raise_for_response,
 )
@@ -80,7 +81,7 @@ def validate_idempotency_key(key: str | None, parameter: str) -> str | None:
         parameter: Public parameter name used in validation errors.
 
     Raises:
-        ValueError: The key is empty, too long, or contains non-printable
+        APIError: The key is empty, non-ASCII, too long, or contains non-printable
             characters.
 
     Returns:
@@ -92,9 +93,10 @@ def validate_idempotency_key(key: str | None, parameter: str) -> str | None:
     if (
         not normalized
         or len(normalized) > _MAX_IDEMPOTENCY_KEY_LENGTH
+        or not normalized.isascii()
         or not normalized.isprintable()
     ):
-        raise ValueError(f"Invalid {parameter}.")
+        raise APIError(400, f"Invalid {parameter}.")
     return normalized
 
 
@@ -313,9 +315,9 @@ class KitaruAPIClient:
                 auth flow. The login endpoints send their own credential.
 
         Raises:
-            APIError: The response has an error status code.
+            APIError: The explicit idempotency key is invalid or the response
+                has an error status code.
             InvalidServerResponseError: The response is not an API response.
-            ValueError: The explicit idempotency key is invalid.
 
         Returns:
             HTTP response.
