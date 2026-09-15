@@ -21,13 +21,14 @@ An agent is the identity your sessions hang off. Register it once:
 kitaru agent register support-agent --command "python support.py"
 ```
 
-Registration creates the agent and its first version. A version pins the run specification Kitaru needs to execute your code later: the `--command`, `--working-dir`, `--env KEY=VALUE` pairs, `--secret-id` references, and `--timeout-seconds`. Register a new version whenever that specification changes:
+Registration creates the agent and its first version. A version pins the run specification Kitaru needs to execute your code later: the `--command`, `--working-dir`, `--env KEY=VALUE` pairs, `--secret-id` references to [secrets](../deploy/secrets.md) that hold the agent's credentials, and `--timeout-seconds`. Register a new version whenever that specification changes:
 
 ```bash
 kitaru agent version register support-agent \
   --command "python support.py" \
   --working-dir /srv/support \
-  --env KITARU_AGENT_ID="$KITARU_AGENT_ID"
+  --env KITARU_AGENT_ID="$KITARU_AGENT_ID" \
+  --secret-id <openai-secret-id>
 ```
 
 Recording itself only needs the agent ID. The run specification matters because a replay re-runs your real code, and the version is where Kitaru learns how.
