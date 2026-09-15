@@ -87,17 +87,18 @@ def test_secret_under_secret_key_never_survives(
     # The generated filler can coincidentally contain the same hex string, which would
     # fail the assertion without any secret having escaped its own key.
     assume(secret not in json.dumps(rest))
-    out = json.dumps(cli_redact({key: secret, "other": rest}))
-    assert secret not in out
+    output = cli_redact({key: secret, "other": rest})
+    assert output[key] == "***"
+    assert secret not in json.dumps(output)
 
 
 @given(
-    prefix=st.sampled_from(["KITKEY_", "Bearer "]),
+    prefix=st.sampled_from(["KITKEY_", "ZENPROKEY_", "Bearer "]),
     secret=st.text(min_size=8, max_size=20, alphabet="abcdef0123456789"),
 )
 def test_inline_marker_never_survives(prefix: str, secret: str) -> None:
-    out = json.dumps(cli_redact({"note": f"use {prefix}{secret} now"}))
-    assert secret not in out
+    output = cli_redact({"note": f"use {prefix}{secret} now"})
+    assert output == {"note": f"use {prefix}*** now"}
 
 
 def test_camel_and_hyphen_secret_keys_are_masked() -> None:

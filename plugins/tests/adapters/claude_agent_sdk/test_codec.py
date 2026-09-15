@@ -134,6 +134,35 @@ def test_tool_result_byte_limit_boundary() -> None:
     with pytest.raises(ToolPolicyError):
         decode_tool_result(envelope_above_limit)
 
+    text_byte_budget = MAX_TOOL_RESULT_BYTES - compact_json_overhead
+    multibyte_text_at_limit = "é" * (text_byte_budget // 2) + "x" * (
+        text_byte_budget % 2
+    )
+    multibyte_result_at_limit = {
+        "content": [{"type": "text", "text": multibyte_text_at_limit}]
+    }
+    multibyte_result_above_limit = {
+        "content": [{"type": "text", "text": f"{multibyte_text_at_limit}é"}]
+    }
+
+    assert (
+        _compact_utf8_size({**multibyte_result_at_limit, "is_error": False})
+        == MAX_TOOL_RESULT_BYTES
+    )
+    assert (
+        _compact_utf8_size({**multibyte_result_above_limit, "is_error": False})
+        == MAX_TOOL_RESULT_BYTES + 2
+    )
+    multibyte_envelope_at_limit = encode_tool_result(multibyte_result_at_limit)
+    multibyte_envelope_above_limit = encode_tool_result(multibyte_result_above_limit)
+    assert multibyte_envelope_at_limit["replayable"] is True
+    assert decode_tool_result(multibyte_envelope_at_limit) == {
+        **multibyte_result_at_limit,
+        "is_error": False,
+    }
+    assert multibyte_envelope_above_limit["replayable"] is False
+    assert multibyte_envelope_above_limit["payload"] is None
+
 
 @pytest.mark.parametrize("count", [MAX_TEXT_BLOCKS, MAX_TEXT_BLOCKS + 1])
 def test_text_block_count_boundary(count: int) -> None:

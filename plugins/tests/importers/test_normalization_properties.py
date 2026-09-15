@@ -304,9 +304,17 @@ def test_mastra_conserves_reordered_spans_and_collapses_identical_traces(
     for source in trace.nodes:
         node = actual[source.node_id]
         assert node.cost == (Decimal(source.cost) if source.cost is not None else None)
-        assert (node.tokens is None) == (
-            source.input_tokens is None and source.output_tokens is None
+        expected_tokens = (
+            None
+            if source.input_tokens is None and source.output_tokens is None
+            else (source.input_tokens, source.output_tokens)
         )
+        actual_tokens = (
+            None
+            if node.tokens is None
+            else (node.tokens.input_tokens, node.tokens.output_tokens)
+        )
+        assert actual_tokens == expected_tokens
 
 
 @given(data=st.data(), trace=generate_logical_trace(prefix="mastra-reversed"))

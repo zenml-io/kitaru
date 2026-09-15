@@ -105,6 +105,14 @@ _DECIMALS = st.decimals(
     allow_infinity=False,
 )
 _OPTIONAL_UUIDS = st.one_of(st.none(), st.uuids())
+_TOKEN_USAGE = st.fixed_dictionaries(
+    {
+        "input_tokens": st.one_of(st.none(), st.integers(0, 100000)),
+        "output_tokens": st.one_of(st.none(), st.integers(0, 100000)),
+        "cached_input_tokens": st.one_of(st.none(), st.integers(0, 100000)),
+        "reasoning_tokens": st.one_of(st.none(), st.integers(0, 100000)),
+    }
+)
 
 
 def _wire_value(value: Any) -> Any:
@@ -356,7 +364,7 @@ def _session_response_inputs(
         "framework": draw(st.one_of(st.none(), _SAFE_TEXT)),
         "adapter_version": draw(st.one_of(st.none(), _SAFE_TEXT)),
         "cost": draw(st.one_of(st.none(), _DECIMALS)),
-        "tokens": None,
+        "tokens": draw(st.one_of(st.none(), _TOKEN_USAGE)),
         "llm_call_count": draw(st.integers(0, 100000)),
         "tool_call_count": draw(st.integers(0, 100000)),
     }
@@ -390,6 +398,7 @@ def _node_create_inputs(
         "inputs": draw(JSON_VALUES),
         "outputs": draw(JSON_VALUES),
         "attributes": draw(JSON_VALUES),
+        "tokens": draw(st.one_of(st.none(), _TOKEN_USAGE)),
         "cost": draw(st.one_of(st.none(), _DECIMALS)),
         "model_params": draw(
             st.one_of(st.none(), st.dictionaries(_SAFE_TEXT, JSON_VALUES, max_size=3))
@@ -416,7 +425,6 @@ def _node_response_inputs(
         "requested_model": None,
         "model": None,
         "model_provider": None,
-        "tokens": None,
         "tool_name": None,
         "subagent_id": None,
         "cache_key": None,
