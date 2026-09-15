@@ -73,34 +73,41 @@ describe("normalized replay policy decisions", () => {
   it.each([
     ["recorded text", "tool raised an exception", "tool raised an exception"],
     ["no text", null, "Recorded tool call 'lookup' failed"],
-  ] as const)("throws a recorded failure with %s", async (_name, error, message) => {
-    const { client, run } = runState(
-      {
-        default: { on_miss: "passthrough", scope: "baseline", type: "history" },
-        tools: {},
-      },
-      () => ({ match: { error, result: null, status: "failed" } }),
-    );
+  ] as const)(
+    "throws a recorded failure with %s",
+    async (_name, error, message) => {
+      const { client, run } = runState(
+        {
+          default: {
+            on_miss: "passthrough",
+            scope: "baseline",
+            type: "history",
+          },
+          tools: {},
+        },
+        () => ({ match: { error, result: null, status: "failed" } }),
+      );
 
-    await expect(
-      decideToolCall(run, {
-        callId: "call-1",
-        inputs: { value: 1 },
-        toolName: "lookup",
-      }),
-    ).rejects.toEqual(
-      expect.objectContaining({ message, name: "ToolPolicyError" }),
-    );
-    expect(run.getToolCall("call-1")).toMatchObject({
-      mocked: true,
-      outcome: "failed",
-      policy: "history",
-    });
-    expect(client.lookups[0]?.occurrence).toBe(0);
-    expect(
-      run.getHistoryOccurrence(client.lookups[0]?.cache_key ?? "missing"),
-    ).toBe(1);
-  });
+      await expect(
+        decideToolCall(run, {
+          callId: "call-1",
+          inputs: { value: 1 },
+          toolName: "lookup",
+        }),
+      ).rejects.toEqual(
+        expect.objectContaining({ message, name: "ToolPolicyError" }),
+      );
+      expect(run.getToolCall("call-1")).toMatchObject({
+        mocked: true,
+        outcome: "failed",
+        policy: "history",
+      });
+      expect(client.lookups[0]?.occurrence).toBe(0);
+      expect(
+        run.getHistoryOccurrence(client.lookups[0]?.cache_key ?? "missing"),
+      ).toBe(1);
+    },
+  );
 
   it("fails closed for an unexpected recorded status", async () => {
     const run = state(
@@ -164,30 +171,29 @@ describe("normalized replay policy decisions", () => {
     expect(run.failure).toBeInstanceOf(ToolPolicyMissError);
   });
 
-  it.each([
-    "constructor",
-    "toString",
-    "__proto__",
-  ])("uses only own policy entries for %s", async (toolName) => {
-    type ToolPolicyConfig = NonNullable<Parameters<typeof replay>[0]>;
-    const tools = JSON.parse(
-      `{"${toolName}":{"type":"static","cases":[{"match":null,"match_mode":"exact","result":"own"}],"on_miss":"fail"}}`,
-    ) as NonNullable<ToolPolicyConfig["tools"]>;
-    const ownRun = state({ default: { type: "passthrough" }, tools });
-    const fallbackRun = state({
-      default: { type: "passthrough" },
-      tools: {},
-    });
-    const input = { callId: "call-1", inputs: {}, toolName };
+  it.each(["constructor", "toString", "__proto__"])(
+    "uses only own policy entries for %s",
+    async (toolName) => {
+      type ToolPolicyConfig = NonNullable<Parameters<typeof replay>[0]>;
+      const tools = JSON.parse(
+        `{"${toolName}":{"type":"static","cases":[{"match":null,"match_mode":"exact","result":"own"}],"on_miss":"fail"}}`,
+      ) as NonNullable<ToolPolicyConfig["tools"]>;
+      const ownRun = state({ default: { type: "passthrough" }, tools });
+      const fallbackRun = state({
+        default: { type: "passthrough" },
+        tools: {},
+      });
+      const input = { callId: "call-1", inputs: {}, toolName };
 
-    await expect(decideToolCall(ownRun, input)).resolves.toEqual({
-      output: "own",
-      type: "mocked_result",
-    });
-    await expect(decideToolCall(fallbackRun, input)).resolves.toEqual({
-      type: "execute",
-    });
-  });
+      await expect(decideToolCall(ownRun, input)).resolves.toEqual({
+        output: "own",
+        type: "mocked_result",
+      });
+      await expect(decideToolCall(fallbackRun, input)).resolves.toEqual({
+        type: "execute",
+      });
+    },
+  );
 
   it("rejects the llm policy before execution", async () => {
     const run = state({
@@ -238,22 +244,25 @@ describe("normalized replay policy decisions", () => {
         return output;
       },
     ],
-  ])("records a %s passthrough result without failing the run", (_name, build) => {
-    const run = state({ default: { type: "passthrough" }, tools: {} });
-    run.setToolCall({
-      callId: "call-1",
-      inputs: {},
-      mocked: false,
-      outcome: "pending",
-      toolName: "sendEmail",
-    });
+  ])(
+    "records a %s passthrough result without failing the run",
+    (_name, build) => {
+      const run = state({ default: { type: "passthrough" }, tools: {} });
+      run.setToolCall({
+        callId: "call-1",
+        inputs: {},
+        mocked: false,
+        outcome: "pending",
+        toolName: "sendEmail",
+      });
 
-    // The email has already been sent by the time its result is recorded,
-    // so a result too large or too circular to record must not throw.
-    expect(() => completeToolCall(run, "call-1", build())).not.toThrow();
-    expect(run.getToolCall("call-1")?.outcome).toBe("completed");
-    expect(run.failure).toBeUndefined();
-  });
+      // The email has already been sent by the time its result is recorded,
+      // so a result too large or too circular to record must not throw.
+      expect(() => completeToolCall(run, "call-1", build())).not.toThrow();
+      expect(run.getToolCall("call-1")?.outcome).toBe("completed");
+      expect(run.failure).toBeUndefined();
+    },
+  );
 
   const baselineHistory = (onMiss: "fail" | "passthrough") =>
     ({
@@ -332,30 +341,30 @@ describe("normalized replay policy decisions", () => {
     expect(client.lookups.map((lookup) => lookup.occurrence)).toEqual([0, 0]);
   });
 
-  it.each([
-    "agent",
-    "cohort_version",
-  ] as const)("sends no occurrence for the %s scope", async (scope) => {
-    const { client, run } = runState(
-      {
-        default: { on_miss: "fail", scope, type: "history" },
-        tools: {},
-      },
-      () => ({
-        match: {
-          error: null,
-          result: { value: "recorded" },
-          status: "completed",
+  it.each(["agent", "cohort_version"] as const)(
+    "sends no occurrence for the %s scope",
+    async (scope) => {
+      const { client, run } = runState(
+        {
+          default: { on_miss: "fail", scope, type: "history" },
+          tools: {},
         },
-      }),
-    );
-    await decideToolCall(run, { callId: "call-1", ...weatherDelft });
-    await decideToolCall(run, { callId: "call-2", ...weatherDelft });
-    expect(client.lookups).toHaveLength(2);
-    for (const lookup of client.lookups) {
-      expect(lookup).not.toHaveProperty("occurrence");
-    }
-  });
+        () => ({
+          match: {
+            error: null,
+            result: { value: "recorded" },
+            status: "completed",
+          },
+        }),
+      );
+      await decideToolCall(run, { callId: "call-1", ...weatherDelft });
+      await decideToolCall(run, { callId: "call-2", ...weatherDelft });
+      expect(client.lookups).toHaveLength(2);
+      for (const lookup of client.lookups) {
+        expect(lookup).not.toHaveProperty("occurrence");
+      }
+    },
+  );
 
   it("follows on_miss for a call past the last recorded occurrence", async () => {
     const { client, run } = runState(baselineHistory("fail"), (request) =>

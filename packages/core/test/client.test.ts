@@ -486,9 +486,12 @@ describe("KitaruClient", () => {
 
     expect(
       fetch.mock.calls.map(([url, init]) => ({
-        authorization: (init?.headers as Record<string, string>).Authorization,
+        authorization: (init?.headers as Record<string, string> | undefined)
+          ?.Authorization,
         body: init?.body,
-        contentType: (init?.headers as Record<string, string>)["Content-Type"],
+        contentType: (init?.headers as Record<string, string> | undefined)?.[
+          "Content-Type"
+        ],
         method: init?.method,
         url,
       })),

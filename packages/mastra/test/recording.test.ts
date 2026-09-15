@@ -190,7 +190,7 @@ describe("step recording", () => {
     const tool = nodes.find((node) => node.external_id === "call-1");
     expect(llm?.inputs).toBeNull();
     expect(JSON.stringify(llm?.outputs)).not.toContain("secret instructions");
-    expect((llm?.outputs as { text: string }).text).toBe(
+    expect((llm?.outputs as { text: string } | undefined)?.text).toBe(
       `${"x".repeat(4_096)}[truncated]`,
     );
     expect(tool?.inputs).toEqual({

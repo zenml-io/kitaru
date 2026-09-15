@@ -131,31 +131,34 @@ describe("replay safety with a real Mastra agent", () => {
   it.each([
     ["clientTools", { clientTools: { external: {} } }],
     ["toolsets", { toolsets: { remote: { external: {} } } }],
-  ])("checks non-interceptable tools supplied through %s", async (_name, runtimeOptions) => {
-    await expect(
-      assertReplayToolCoverage({
-        agent: {
-          getDefaultOptions: async () => ({}),
-          getToolsForExecution: async (options: Record<string, unknown>) =>
-            options.clientTools ??
-            Object.assign(
-              {},
-              ...Object.values(
-                (options.toolsets as
-                  | Record<string, Record<string, unknown>>
-                  | undefined) ?? {},
+  ])(
+    "checks non-interceptable tools supplied through %s",
+    async (_name, runtimeOptions) => {
+      await expect(
+        assertReplayToolCoverage({
+          agent: {
+            getDefaultOptions: async () => ({}),
+            getToolsForExecution: async (options: Record<string, unknown>) =>
+              options.clientTools ??
+              Object.assign(
+                {},
+                ...Object.values(
+                  (options.toolsets as
+                    | Record<string, Record<string, unknown>>
+                    | undefined) ?? {},
+                ),
               ),
-            ),
-          listConfiguredInputProcessors: async () => [],
-          listTools: async () => ({}),
-        },
-        runtimeOptions,
-        spec: failingStaticSpec() as never,
-      }),
-    ).rejects.toThrow(
-      "Replay requires a local execute function for tool 'external'",
-    );
-  });
+            listConfiguredInputProcessors: async () => [],
+            listTools: async () => ({}),
+          },
+          runtimeOptions,
+          spec: failingStaticSpec() as never,
+        }),
+      ).rejects.toThrow(
+        "Replay requires a local execute function for tool 'external'",
+      );
+    },
+  );
 
   it.each([
     ["prepareStep", { prepareStep: () => ({ tools: {} }) }],

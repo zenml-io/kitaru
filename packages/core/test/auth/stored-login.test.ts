@@ -51,34 +51,34 @@ afterEach(async () => {
 });
 
 describe("stored CLI login", () => {
-  it.each([
-    "https://EXAMPLE.com",
-    "https://example.com:443",
-  ])("reuses a CLI login whose URL canonicalizes from %s", async (serverUrl) => {
-    const root = await writeStore(serverUrl, {
-      api_key: "KITKEY_stored",
-      type: "server",
-    });
-    const fetch = vi.fn<typeof globalThis.fetch>(
-      async () =>
-        new Response(JSON.stringify({ detail: "missing" }), { status: 404 }),
-    );
+  it.each(["https://EXAMPLE.com", "https://example.com:443"])(
+    "reuses a CLI login whose URL canonicalizes from %s",
+    async (serverUrl) => {
+      const root = await writeStore(serverUrl, {
+        api_key: "KITKEY_stored",
+        type: "server",
+      });
+      const fetch = vi.fn<typeof globalThis.fetch>(
+        async () =>
+          new Response(JSON.stringify({ detail: "missing" }), { status: 404 }),
+      );
 
-    const client = await createKitaruClient({
-      environment: { KITARU_CONFIG_DIR: root },
-      fetch,
-    });
-    await expect(client.getReplay("missing")).rejects.toMatchObject({
-      status: 404,
-    });
+      const client = await createKitaruClient({
+        environment: { KITARU_CONFIG_DIR: root },
+        fetch,
+      });
+      await expect(client.getReplay("missing")).rejects.toMatchObject({
+        status: 404,
+      });
 
-    expect(fetch.mock.calls[0]?.[0]).toBe(
-      "https://example.com/api/v1/replays/missing",
-    );
-    expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
-      Authorization: "Bearer KITKEY_stored",
-    });
-  });
+      expect(fetch.mock.calls[0]?.[0]).toBe(
+        "https://example.com/api/v1/replays/missing",
+      );
+      expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
+        Authorization: "Bearer KITKEY_stored",
+      });
+    },
+  );
 
   it("uses a selected cached token without changing the store", async () => {
     const serverUrl = "https://api.example/base";
@@ -363,8 +363,9 @@ describe("stored CLI login", () => {
     let serverLogins = 0;
     const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
       const url = String(input);
-      const authorization = (init?.headers as Record<string, string>)
-        .Authorization;
+      const authorization = (
+        init?.headers as Record<string, string> | undefined
+      )?.Authorization;
       if (url === `${controlPlaneUrl}/auth/login`) {
         cpLogins += 1;
         expect(authorization).toBe("Bearer ZENPROKEY_durable");
