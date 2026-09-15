@@ -236,7 +236,7 @@ async def _build_typescript() -> None:
             ["pnpm", "--filter", "@zenml-io/kitaru-vercel-ai", "build"],
             REPOSITORY_ROOT,
         ),
-        (["pnpm", "--ignore-workspace", "build"], EXAMPLE_DIR),
+        (["pnpm", "build"], EXAMPLE_DIR),
     )
     for command, cwd in commands:
         await asyncio.to_thread(_run_checked, command, cwd=cwd)

@@ -1,6 +1,6 @@
 ---
 version: 2
-# Three lockfiles in this repository are deliberately NOT listed below. Read
+# Two lockfiles in this repository are deliberately NOT listed below. Read
 # this before adding one of them.
 #
 # examples/python/pydantic_ai_ticket_resolver/uv.lock is the public quickstart.
@@ -10,16 +10,6 @@ version: 2
 # the kitaru-release skill). CI's "Quickstart example end to end" job swaps in
 # wheels built from the PR branch before it tests, so a green Dependabot PR
 # would never have exercised the install the README tells users to run.
-#
-# examples/typescript/vercel_ai_ticket_resolver/pnpm-lock.yaml sits inside the
-# root pnpm workspace folder without being a member of it. CI installs it with
-# `pnpm --ignore-workspace`. Dependabot has no such switch. When a directory has
-# no pnpm-workspace.yaml of its own, Dependabot walks up and uses the root one
-# (`pnpm_workspace_yaml` in dependabot-core's npm_and_yarn file_fetcher.rb), so
-# its update job would not see the isolated install CI tests. docs/ avoids this
-# with its own `packages: []` workspace file; give the example one before
-# listing it here. Until then its pins mirror the root workspace and move by
-# hand in the same PR (see #913).
 #
 # plugins/tests/importers/fixtures/**/package-lock.json is test data that pins
 # one Mastra release on purpose.
@@ -388,7 +378,7 @@ updates:
       semver-patch-days: 3
     target-branch: develop
   # The root pnpm workspace: the TypeScript SDK and adapters published to npm
-  # (packages/*) plus the two workspace examples. From `/`, Dependabot reads
+  # (packages/*) plus the three workspace examples. From `/`, Dependabot reads
   # pnpm-workspace.yaml and updates every member's package.json together with
   # the single root pnpm-lock.yaml. The CI `typescript` job tests all of it.
   - package-ecosystem: npm
