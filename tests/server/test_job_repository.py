@@ -15,6 +15,7 @@
 
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -209,6 +210,26 @@ async def test_query_walks_pages(setup: Setup) -> None:
 
     assert collected == expected_order
     assert len({job.id for job in collected}) == 5
+
+
+async def test_list_expired_pending_ids(setup: Setup) -> None:
+    """Read the ids of pending jobs older than the cutoff, ascending, limited."""
+    repository, owner_id = setup
+    first = await repository.create(_job(owner_id))
+    second = await repository.create(_job(owner_id))
+    await repository.create(_job(owner_id, status=JobStatus.RUNNING))
+
+    assert await repository.list_expired_pending_ids(datetime.now(UTC), 10) == [
+        first.id,
+        second.id,
+    ]
+    assert await repository.list_expired_pending_ids(datetime.now(UTC), 1) == [first.id]
+    assert (
+        await repository.list_expired_pending_ids(
+            datetime.now(UTC) - timedelta(hours=2), 10
+        )
+        == []
+    )
 
 
 async def test_delete(setup: Setup) -> None:

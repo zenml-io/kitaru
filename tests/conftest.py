@@ -6260,6 +6260,27 @@ class FakeJobRepository:
         """
         return await self.get_many(job_ids)
 
+    async def list_expired_pending_ids(
+        self, cutoff: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of pending jobs older than the cutoff.
+
+        Args:
+            cutoff: Jobs created before this are read.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the pending jobs in ascending order.
+        """
+        expired: list[uuid.UUID] = []
+        for job_id in sorted(self._jobs):
+            job = self._jobs[job_id]
+            if job.status is not JobStatus.PENDING or job.created is None:
+                continue
+            if job.created < cutoff:
+                expired.append(job_id)
+        return expired[:limit]
+
     async def list_unpropagated_cancel_ids(self, limit: int) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.
 

@@ -74,6 +74,7 @@ from kitaru.server.domain.hook import (
     TeardownCommandHook,
 )
 from kitaru.server.domain.imports import Import
+from kitaru.server.domain.job import pending_timeout_error
 from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
@@ -460,6 +461,91 @@ async def test_abandoned_aborting_task_stamps_its_job(
 
     await services.task_service.propagate_job_cancel(job_id)
     assert (await services.tasks.get(sibling.id)).cancel_requested_at is not None
+
+
+async def test_list_expired_pending_job_ids(services: JobAndTaskServices) -> None:
+    """Read the ids of pending jobs the timeout has expired for."""
+    services = build_job_and_task_services(
+        policy=TaskPolicy(job_pending_timeout_seconds=1)
+    )
+    job_id = await _pending_job(services)
+
+    assert await services.task_service.list_expired_pending_job_ids(
+        datetime.now(UTC) + timedelta(seconds=2)
+    ) == [job_id]
+    assert (
+        await services.task_service.list_expired_pending_job_ids(datetime.now(UTC))
+        == []
+    )
+
+
+async def test_expire_pending_job_cancels_tasks_and_settles_canceled(
+    services: JobAndTaskServices,
+) -> None:
+    """An unclaimed job older than the timeout cancels its tasks and settles."""
+    services = build_job_and_task_services(
+        policy=TaskPolicy(job_pending_timeout_seconds=1)
+    )
+    job_id = await _pending_job(services)
+    task = await _claimable_agent_task(services, job_id)
+
+    await services.task_service.expire_pending_job(
+        job_id, datetime.now(UTC) + timedelta(seconds=2)
+    )
+
+    job = await services.jobs.get(job_id)
+    assert job.status is JobStatus.CANCELED
+    assert job.error == pending_timeout_error(1)
+    assert job.cancel_requested_at is not None
+    assert (await services.tasks.get(task.id)).status is TaskStatus.CANCELED
+
+
+async def test_expire_pending_job_settles_an_empty_job(
+    services: JobAndTaskServices,
+) -> None:
+    """A job with no tasks still settles canceled."""
+    services = build_job_and_task_services(
+        policy=TaskPolicy(job_pending_timeout_seconds=1)
+    )
+    job_id = await _pending_job(services)
+
+    await services.task_service.expire_pending_job(
+        job_id, datetime.now(UTC) + timedelta(seconds=2)
+    )
+
+    assert (await services.jobs.get(job_id)).status is JobStatus.CANCELED
+
+
+async def test_expire_pending_job_leaves_a_claimed_job_alone(
+    services: JobAndTaskServices,
+) -> None:
+    """A job a worker already claimed is left running."""
+    services = build_job_and_task_services(
+        policy=TaskPolicy(job_pending_timeout_seconds=1)
+    )
+    job_id = await _pending_job(services)
+    await _claimable_agent_task(services, job_id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+
+    await services.task_service.expire_pending_job(
+        job_id, datetime.now(UTC) + timedelta(seconds=2)
+    )
+
+    assert (await services.jobs.get(job_id)).status is JobStatus.RUNNING
+
+
+async def test_expire_pending_job_leaves_a_young_job_pending(
+    services: JobAndTaskServices,
+) -> None:
+    """A job created after the cutoff is left pending."""
+    job_id = await _pending_job(services)
+
+    await services.task_service.expire_pending_job(job_id, datetime.now(UTC))
+
+    assert (await services.jobs.get(job_id)).status is JobStatus.PENDING
 
 
 async def test_sweep_cancels_a_cancel_requested_stale_task(

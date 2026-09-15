@@ -44,6 +44,7 @@ from kitaru.server.application.services.resource_access import check_task_attemp
 from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.job import pending_timeout_error
 from kitaru.server.domain.task import (
     AgentTask,
     IllegalTaskStatusTransition,
@@ -356,6 +357,39 @@ class TaskService:
                 task,
                 partial(Task.abandon, error=stale_abandon_error(task.attempt), now=now),
             )
+
+    async def list_expired_pending_job_ids(self, now: datetime) -> list[uuid.UUID]:
+        """Read the ids of pending jobs no worker claimed within the timeout.
+
+        Takes no lock.
+
+        Args:
+            now: Current time.
+
+        Returns:
+            Ids of the expired pending jobs in ascending order.
+        """
+        cutoff = now - timedelta(seconds=self._policy.job_pending_timeout_seconds)
+        return await self._jobs.list_expired_pending_ids(
+            cutoff, self._policy.sweep_batch_limit
+        )
+
+    async def expire_pending_job(self, job_id: uuid.UUID, now: datetime) -> None:
+        """Cancel one pending job's tasks and settle it if still unclaimed.
+
+        Locks the job's live task rows, then its job row. A job a worker
+        claimed, or one created after the timeout, is left alone.
+
+        Args:
+            job_id: Id of the candidate job.
+            now: Current time.
+
+        Raises:
+            DBAPIError: Another transaction holds one of the task rows.
+        """
+        cutoff = now - timedelta(seconds=self._policy.job_pending_timeout_seconds)
+        error = pending_timeout_error(self._policy.job_pending_timeout_seconds)
+        await self._transitions.expire_pending_job(job_id, cutoff, error, now)
 
     async def list_unpropagated_cancel_job_ids(self) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.

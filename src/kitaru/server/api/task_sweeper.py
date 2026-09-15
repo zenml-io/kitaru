@@ -140,8 +140,10 @@ async def _read_candidates(
     settings: APISettings,
     analytics: AnalyticsClient,
     now: datetime,
-) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-    """Read the stale task ids and the canceling job ids without locking.
+) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
+    """Read the stale task ids, the canceling job ids, and the expired pending job ids.
+
+    Takes no lock.
 
     Args:
         database: Database service the read opens a session against.
@@ -150,7 +152,8 @@ async def _read_candidates(
         now: Current time.
 
     Returns:
-        Stale task ids and job ids owing a cancel propagation.
+        Stale task ids, job ids owing a cancel propagation, and pending job
+        ids the timeout has expired.
     """
     async for session in database.get_async_session():
         try:
@@ -158,10 +161,11 @@ async def _read_candidates(
             service = get_task_service(session, database.engine, settings, tracker)
             task_ids = await service.list_stale_task_ids(now)
             job_ids = await service.list_unpropagated_cancel_job_ids()
-            return task_ids, job_ids
+            expired_pending_job_ids = await service.list_expired_pending_job_ids(now)
+            return task_ids, job_ids, expired_pending_job_ids
         finally:
             await session.rollback()
-    return [], []
+    return [], [], []
 
 
 async def sweep_once(
@@ -169,7 +173,7 @@ async def sweep_once(
     settings: APISettings,
     analytics: AnalyticsClient,
 ) -> None:
-    """Propagate pending job cancels and rescue stale tasks, one item per transaction.
+    """Propagate cancels, expire unclaimed jobs, and rescue stale tasks per item.
 
     A candidate another replica already holds is skipped and picked up on a
     later tick. A failing item logs and leaves the remaining items to run.
@@ -180,7 +184,9 @@ async def sweep_once(
         analytics: Analytics client for this process.
     """
     now = datetime.now(UTC)
-    task_ids, job_ids = await _read_candidates(database, settings, analytics, now)
+    task_ids, job_ids, expired_pending_job_ids = await _read_candidates(
+        database, settings, analytics, now
+    )
     # Propagate first. The rescue chooses between canceling and requeuing by
     # reading the task's own cancel_requested_at, so a stale task of a
     # canceling job whose stamp has not landed yet is requeued instead of
@@ -193,6 +199,14 @@ async def sweep_once(
             analytics,
             partial(TaskService.propagate_job_cancel, job_id=job_id),
             f"cancel propagation for job {job_id}",
+        )
+    for job_id in expired_pending_job_ids:
+        await _run_unit(
+            database,
+            settings,
+            analytics,
+            partial(TaskService.expire_pending_job, job_id=job_id, now=now),
+            f"pending timeout for job {job_id}",
         )
     for task_id in task_ids:
         await _run_unit(

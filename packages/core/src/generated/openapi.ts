@@ -7435,7 +7435,7 @@ export interface components {
             ended_at?: string | null;
             /**
              * Error
-             * @description First counted task failure's error.
+             * @description Error the job settled with.
              */
             error?: string | null;
             /**
