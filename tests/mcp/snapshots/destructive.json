@@ -5902,7 +5902,7 @@
                 }
               ],
               "default": null,
-              "description": "First counted task failure's error.",
+              "description": "Error the job settled with.",
               "title": "Error"
             },
             "id": {
@@ -9656,7 +9656,7 @@
                 }
               ],
               "default": null,
-              "description": "First counted task failure's error.",
+              "description": "Error the job settled with.",
               "title": "Error"
             },
             "id": {
@@ -12357,7 +12357,7 @@
                 }
               ],
               "default": null,
-              "description": "First counted task failure's error.",
+              "description": "Error the job settled with.",
               "title": "Error"
             },
             "id": {
@@ -14688,7 +14688,7 @@
                 }
               ],
               "default": null,
-              "description": "First counted task failure's error.",
+              "description": "Error the job settled with.",
               "title": "Error"
             },
             "id": {
