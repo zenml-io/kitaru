@@ -170,11 +170,10 @@ def test_mastra_valid_records_reach_normalization(data: st.DataObject) -> None:
         source = {span["spanId"]: span for span in trace["spans"]}
         nodes = flatten_nodes(session.nodes)
         assert {node.external_id for node in nodes} == set(source)
-        by_index = {node.index: node.external_id for node in nodes}
         for node in nodes:
             raw = source[node.external_id]
             assert node.trace_id == trace["traceId"]
-            assert by_index.get(node.parent_index) == raw["parentSpanId"]
+            assert node.parent_external_id == raw["parentSpanId"]
             assert node.inputs == raw["input"]
             assert node.outputs == raw["output"]
             assert node.attributes == raw["attributes"]
