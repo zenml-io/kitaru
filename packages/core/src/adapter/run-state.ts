@@ -11,6 +11,11 @@ export type AdapterClient = Pick<
   | "upsertSessionNodes"
 >;
 
+// The recorder opens exactly one root span per session, so a fixed external
+// id needs no allocation and stays valid across the span's in_progress,
+// completed, and failed upserts.
+export const ROOT_NODE_EXTERNAL_ID = "run";
+
 interface ToolLedgerEntry {
   callId: string;
   error?: { message: string; name: string };
@@ -30,7 +35,6 @@ interface RunStateOptions {
   effectiveModelSettings?: Record<string, JsonValue>;
   replayId?: string;
   requestedModelId: string;
-  rootIndex?: number;
   sessionId: string;
   spec?: ReplaySpec;
 }
@@ -42,11 +46,9 @@ export interface AdapterRunState {
   readonly failure: unknown;
   readonly replayId?: string;
   readonly requestedModelId: string;
-  readonly rootIndex: number;
   readonly sessionId: string;
   readonly spec?: ReplaySpec;
   advanceHistoryOccurrence(cacheKey: string, usedOccurrence: number): void;
-  allocateNode(): { index: number };
   awaitSteps(): Promise<void>;
   clearLedger(callIds: readonly string[]): void;
   enqueueStep(operation: () => Promise<void>): Promise<void>;
@@ -64,7 +66,6 @@ export class RunState implements AdapterRunState {
   readonly effectiveModelSettings?: Record<string, JsonValue>;
   readonly replayId?: string;
   readonly requestedModelId: string;
-  readonly rootIndex: number;
   readonly sessionId: string;
   readonly spec?: ReplaySpec;
 
@@ -74,7 +75,6 @@ export class RunState implements AdapterRunState {
   // instead of replaying the newest match every time.
   #historyOccurrences = new Map<string, number>();
   #ledger = new Map<string, ToolLedgerEntry>();
-  #nextIndex: number;
   #stepBoundary: string = new Date().toISOString();
   #stepFailure: unknown;
   #stepTail: Promise<void> = Promise.resolve();
@@ -85,8 +85,6 @@ export class RunState implements AdapterRunState {
     this.effectiveModelSettings = options.effectiveModelSettings;
     this.replayId = options.replayId;
     this.requestedModelId = options.requestedModelId;
-    this.rootIndex = options.rootIndex ?? 0;
-    this.#nextIndex = this.rootIndex + 1;
     this.sessionId = options.sessionId;
     this.spec = options.spec;
   }
@@ -96,12 +94,6 @@ export class RunState implements AdapterRunState {
     // re-reading the counter, so overlapping identical calls that both read
     // the same occurrence cannot advance it twice.
     this.#historyOccurrences.set(cacheKey, usedOccurrence + 1);
-  }
-
-  allocateNode(): { index: number } {
-    const allocation = { index: this.#nextIndex };
-    this.#nextIndex += 1;
-    return allocation;
   }
 
   enqueueStep(operation: () => Promise<void>): Promise<void> {

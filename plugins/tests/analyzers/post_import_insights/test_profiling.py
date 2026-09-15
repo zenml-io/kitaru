@@ -326,21 +326,22 @@ def _node(
     started_offset: int | None = None,
     duration: int = 1,
 ) -> SessionNodeResponse:
-    started_at = (
-        NOW + timedelta(seconds=started_offset) if started_offset is not None else None
-    )
+    started_at = NOW + timedelta(seconds=started_offset or 0)
     return SessionNodeResponse(
         id=_id(10_000 + index + int(str(session_id)[-3:], 16)),
         session_id=session_id,
-        index=index,
-        parent_index=None,
-        secondary_parent_indexes=[],
-        secondary_parent_ids=[],
+        external_id=f"node-{index}",
+        parent_external_id=None,
+        links=[],
         node_type=node_type,
         name=tool_name or model or "node",
         status=status,
         started_at=started_at,
-        ended_at=started_at + timedelta(seconds=duration) if started_at else None,
+        ended_at=(
+            started_at + timedelta(seconds=duration)
+            if started_offset is not None
+            else None
+        ),
         inputs=inputs,
         outputs=outputs,
         requested_model=model,
@@ -996,7 +997,7 @@ def test_contributing_session_limit_matches_candidate_contract() -> None:
         ProfilingConfig(max_contributing_sessions=1_001)
 
 
-def test_ordering_is_stable_across_session_and_node_order() -> None:
+def test_ordering_is_stable_across_session_order() -> None:
     one = _calls(
         1,
         [
@@ -1007,7 +1008,6 @@ def test_ordering_is_stable_across_session_and_node_order() -> None:
     two = _calls(2, [("b", {"x": 2}, NodeStatus.FAILED, {})])
     expected = profile_sessions([one, two]).model_dump_json()
 
-    one.nodes.reverse()
     actual = profile_sessions([two, one]).model_dump_json()
 
     assert actual == expected

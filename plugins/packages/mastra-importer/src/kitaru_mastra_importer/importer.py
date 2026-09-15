@@ -98,12 +98,12 @@ def _get_system_selector(value: Any) -> str | None:
     return None
 
 
-def _get_reasoning(output: Any) -> str | None:
+def _get_reasoning_selectors(output: Any) -> list[str]:
     if not isinstance(output, dict):
-        return None
+        return []
     reasoning = output.get("reasoning")
     if isinstance(reasoning, str):
-        return reasoning
+        return ["/reasoning"]
     if (
         isinstance(reasoning, list)
         and reasoning
@@ -112,8 +112,8 @@ def _get_reasoning(output: Any) -> str | None:
             for part in reasoning
         )
     ):
-        return "\n".join(part["text"] for part in reasoning)
-    return None
+        return [f"/reasoning/{index}/text" for index in range(len(reasoning))]
+    return []
 
 
 def _get_cost(attributes: dict[str, Any]) -> Decimal | None:
@@ -231,7 +231,6 @@ def _normalize(
 ) -> ImportedSession:
     spans = _get_ordered_spans(trace)
     root = spans[0]
-    indexes = {span.spanId: index for index, span in enumerate(spans)}
     by_id = {span.spanId: span for span in spans}
     usage = {
         span.spanId: (
@@ -241,7 +240,7 @@ def _normalize(
         for span in spans
     }
     nodes = []
-    for index, span in enumerate(spans):
+    for span in spans:
         attributes = span.attributes or {}
         tokens, cost = _get_accounted_usage(span, by_id, usage)
         node_type = {
@@ -251,9 +250,10 @@ def _normalize(
         }.get(span.spanType, NodeType.SPAN)
         nodes.append(
             ImportedNode(
-                index=index,
-                parent_index=indexes.get(span.parentSpanId),
                 external_id=span.spanId,
+                parent_external_id=(
+                    span.parentSpanId if span.parentSpanId in by_id else None
+                ),
                 trace_id=span.traceId,
                 node_type=node_type,
                 name=span.name,
@@ -272,7 +272,7 @@ def _normalize(
                 input_text_selector=_get_text_selector(span.input),
                 output_text_selector=_get_text_selector(span.output),
                 system_prompt_selector=_get_system_selector(span.input),
-                reasoning=_get_reasoning(span.output),
+                reasoning_selectors=_get_reasoning_selectors(span.output),
                 requested_model=attributes.get("model"),
                 model=attributes.get("responseModel") or attributes.get("model"),
                 model_provider=attributes.get("provider"),
