@@ -16,7 +16,14 @@ import uuid
 from collections import Counter
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from decimal import MAX_EMAX, MIN_EMIN, Decimal, InvalidOperation, localcontext
+from decimal import (
+    MAX_EMAX,
+    MIN_EMIN,
+    ROUND_HALF_EVEN,
+    Decimal,
+    InvalidOperation,
+    localcontext,
+)
 from enum import Enum
 from itertools import pairwise
 from typing import Any
@@ -275,7 +282,9 @@ def sum_decimals(values: list[Decimal]) -> Decimal:
         context.prec = precision
         context.Emax = MAX_EMAX
         context.Emin = MIN_EMIN
-        return sum(values, start=Decimal(0))
+        context.rounding = ROUND_HALF_EVEN
+        total = sum(values, start=Decimal(0))
+        return total.copy_abs() if total.is_zero() else total
 
 
 def _resource_value(value: Decimal | int | None) -> str:

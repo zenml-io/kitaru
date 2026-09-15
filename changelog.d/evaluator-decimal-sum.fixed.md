@@ -1,1 +1,0 @@
-- Deterministic evaluators now sum finite decimal values exactly across wide exponent ranges.

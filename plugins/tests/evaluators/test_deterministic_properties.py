@@ -3,7 +3,18 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Property tests for deterministic evaluator pointer and decimal helpers."""
 
-from decimal import Decimal, localcontext
+from decimal import (
+    ROUND_05UP,
+    ROUND_CEILING,
+    ROUND_DOWN,
+    ROUND_FLOOR,
+    ROUND_HALF_DOWN,
+    ROUND_HALF_EVEN,
+    ROUND_HALF_UP,
+    ROUND_UP,
+    Decimal,
+    localcontext,
+)
 from fractions import Fraction
 from typing import Any
 
@@ -160,15 +171,30 @@ def test_decimal_sum_matches_exact_rational_reference(
     assert Fraction(reordered_sum) == expected
 
 
-def test_decimal_sum_empty_cancellation_and_signed_zero() -> None:
+@pytest.mark.parametrize(
+    "rounding",
+    [
+        ROUND_05UP,
+        ROUND_CEILING,
+        ROUND_DOWN,
+        ROUND_FLOOR,
+        ROUND_HALF_DOWN,
+        ROUND_HALF_EVEN,
+        ROUND_HALF_UP,
+        ROUND_UP,
+    ],
+)
+def test_decimal_sum_empty_cancellation_and_signed_zero(rounding: str) -> None:
     """Characterize empty input and the normalized representation of zero."""
-    assert evaluators.sum_decimals([]) == Decimal(0)
+    with localcontext() as context:
+        context.rounding = rounding
+        assert evaluators.sum_decimals([]) == Decimal(0)
 
-    cancelled = evaluators.sum_decimals([Decimal("10.00"), Decimal("-10")])
-    assert cancelled.as_tuple() == Decimal("0.00").as_tuple()
+        cancelled = evaluators.sum_decimals([Decimal("10.00"), Decimal("-10")])
+        assert cancelled.as_tuple() == Decimal("0.00").as_tuple()
 
-    signed_zero = evaluators.sum_decimals([Decimal("-0E-20")])
-    assert signed_zero.as_tuple() == Decimal("0E-20").as_tuple()
+        signed_zero = evaluators.sum_decimals([Decimal("-0E-20")])
+        assert signed_zero.as_tuple() == Decimal("0E-20").as_tuple()
 
 
 def test_decimal_sum_handles_wide_finite_exponent_spread() -> None:
