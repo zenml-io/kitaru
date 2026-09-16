@@ -17,13 +17,19 @@ import uuid
 
 import pytest
 
-from conftest import FakePluginRepository, create_plugin
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from conftest import (
+    FakeConnectionRepository,
+    FakePluginRepository,
+    create_connection,
+    create_plugin,
+)
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.services.evaluator_resolution import (
     resolve_evaluator_config,
     validate_evaluators,
 )
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.domain.connection import ConnectionNotFound
 from kitaru.server.domain.plugin import (
     PackagePluginSource,
     PluginKind,
@@ -42,7 +48,15 @@ def repository() -> FakePluginRepository:
     return FakePluginRepository()
 
 
-async def test_resolve_latest_version(repository: FakePluginRepository) -> None:
+@pytest.fixture
+def connections() -> FakeConnectionRepository:
+    """Provide a fake connection repository."""
+    return FakeConnectionRepository()
+
+
+async def test_resolve_latest_version(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
     """Resolve an omitted version to the evaluator's latest version."""
     plugin = await create_plugin(
         repository, OWNER_ID, kind=PluginKind.EVALUATOR, name="accuracy"
@@ -51,13 +65,17 @@ async def test_resolve_latest_version(repository: FakePluginRepository) -> None:
     second = await repository.create_version(plugin.id, SOURCE, display_version="v2")
 
     config = EvaluatorConfigInput(evaluator="accuracy")
-    resolved = await resolve_evaluator_config(config, repository, agent_id=None)
+    resolved = await resolve_evaluator_config(
+        config, repository, connections, agent_id=None
+    )
     assert resolved.evaluator == "accuracy"
     assert resolved.version == 2
     assert resolved.evaluator_version_id == second.id
 
 
-async def test_resolve_explicit_version(repository: FakePluginRepository) -> None:
+async def test_resolve_explicit_version(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
     """Resolve to the explicitly named version, not the latest."""
     plugin = await create_plugin(
         repository, OWNER_ID, kind=PluginKind.EVALUATOR, name="accuracy"
@@ -66,38 +84,66 @@ async def test_resolve_explicit_version(repository: FakePluginRepository) -> Non
     await repository.create_version(plugin.id, SOURCE, display_version="v2")
 
     config = EvaluatorConfigInput(evaluator="accuracy", version=1)
-    resolved = await resolve_evaluator_config(config, repository, agent_id=None)
+    resolved = await resolve_evaluator_config(
+        config, repository, connections, agent_id=None
+    )
     assert resolved.version == 1
     assert resolved.evaluator_version_id == first.id
 
 
-async def test_resolve_missing_evaluator(repository: FakePluginRepository) -> None:
+async def test_resolve_evaluator_config_carries_the_provider(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Resolve the evaluator plugin's provider onto the config."""
+    plugin = await create_plugin(
+        repository,
+        OWNER_ID,
+        kind=PluginKind.EVALUATOR,
+        name="accuracy",
+        provider="langfuse",
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version="v1")
+
+    config = EvaluatorConfigInput(evaluator="accuracy")
+    resolved = await resolve_evaluator_config(
+        config, repository, connections, agent_id=None
+    )
+    assert resolved.provider == "langfuse"
+
+
+async def test_resolve_missing_evaluator(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
     """Raise when no evaluator plugin has the config's name."""
     config = EvaluatorConfigInput(evaluator="missing")
     with pytest.raises(PluginNotFound, match="Plugin missing was not found"):
-        await resolve_evaluator_config(config, repository, agent_id=None)
+        await resolve_evaluator_config(config, repository, connections, agent_id=None)
 
 
-async def test_resolve_missing_version(repository: FakePluginRepository) -> None:
+async def test_resolve_missing_version(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
     """Raise when the explicit version has no matching plugin version."""
     await create_plugin(
         repository, OWNER_ID, kind=PluginKind.EVALUATOR, name="accuracy"
     )
     config = EvaluatorConfigInput(evaluator="accuracy", version=5)
     with pytest.raises(PluginVersionNotFound):
-        await resolve_evaluator_config(config, repository, agent_id=None)
+        await resolve_evaluator_config(config, repository, connections, agent_id=None)
 
 
-async def test_resolve_no_versions_yet(repository: FakePluginRepository) -> None:
+async def test_resolve_no_versions_yet(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
     """Raise when the evaluator plugin has no versions at all."""
     await create_plugin(repository, OWNER_ID, kind=PluginKind.EVALUATOR, name="fresh")
     config = EvaluatorConfigInput(evaluator="fresh")
     with pytest.raises(PluginVersionNotFound):
-        await resolve_evaluator_config(config, repository, agent_id=None)
+        await resolve_evaluator_config(config, repository, connections, agent_id=None)
 
 
 async def test_resolve_evaluator_config_scoped_matching_agent(
-    repository: FakePluginRepository,
+    repository: FakePluginRepository, connections: FakeConnectionRepository
 ) -> None:
     """Resolve a scoped evaluator when the agent context matches."""
     agent_id = uuid.uuid4()
@@ -111,12 +157,14 @@ async def test_resolve_evaluator_config_scoped_matching_agent(
     await repository.create_version(plugin.id, SOURCE, display_version="v1")
 
     config = EvaluatorConfigInput(evaluator="accuracy")
-    resolved = await resolve_evaluator_config(config, repository, agent_id=agent_id)
+    resolved = await resolve_evaluator_config(
+        config, repository, connections, agent_id=agent_id
+    )
     assert resolved.evaluator == "accuracy"
 
 
 async def test_resolve_evaluator_config_scoped_different_agent(
-    repository: FakePluginRepository,
+    repository: FakePluginRepository, connections: FakeConnectionRepository
 ) -> None:
     """Reject a scoped evaluator when the agent context is a different agent."""
     plugin = await create_plugin(
@@ -130,11 +178,13 @@ async def test_resolve_evaluator_config_scoped_different_agent(
 
     config = EvaluatorConfigInput(evaluator="accuracy")
     with pytest.raises(ValidationError, match="scoped to a different agent"):
-        await resolve_evaluator_config(config, repository, agent_id=uuid.uuid4())
+        await resolve_evaluator_config(
+            config, repository, connections, agent_id=uuid.uuid4()
+        )
 
 
 async def test_resolve_evaluator_config_scoped_none_context(
-    repository: FakePluginRepository,
+    repository: FakePluginRepository, connections: FakeConnectionRepository
 ) -> None:
     """Reject a scoped evaluator when the caller carries no agent context."""
     plugin = await create_plugin(
@@ -148,11 +198,11 @@ async def test_resolve_evaluator_config_scoped_none_context(
 
     config = EvaluatorConfigInput(evaluator="accuracy")
     with pytest.raises(ValidationError, match="scoped to a different agent"):
-        await resolve_evaluator_config(config, repository, agent_id=None)
+        await resolve_evaluator_config(config, repository, connections, agent_id=None)
 
 
 async def test_resolve_evaluator_config_unscoped_any_agent(
-    repository: FakePluginRepository,
+    repository: FakePluginRepository, connections: FakeConnectionRepository
 ) -> None:
     """Resolve a global evaluator regardless of the agent context."""
     plugin = await create_plugin(
@@ -161,12 +211,111 @@ async def test_resolve_evaluator_config_unscoped_any_agent(
     await repository.create_version(plugin.id, SOURCE, display_version="v1")
 
     config = EvaluatorConfigInput(evaluator="accuracy")
-    resolved = await resolve_evaluator_config(config, repository, agent_id=uuid.uuid4())
+    resolved = await resolve_evaluator_config(
+        config, repository, connections, agent_id=uuid.uuid4()
+    )
     assert resolved.evaluator == "accuracy"
 
 
+async def test_resolve_named_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Resolve the connection explicitly named by the evaluator config."""
+    plugin = await create_plugin(
+        repository,
+        OWNER_ID,
+        kind=PluginKind.EVALUATOR,
+        name="accuracy",
+        provider="langfuse",
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version="v1")
+    connection = await create_connection(
+        connections, OWNER_ID, uuid.uuid4(), name="named"
+    )
+
+    config = EvaluatorConfigInput(evaluator="accuracy", connection_id=connection.id)
+    resolved = await resolve_evaluator_config(
+        config, repository, connections, agent_id=None
+    )
+    assert resolved.connection_id == connection.id
+    assert resolved.provider == "langfuse"
+
+
+async def test_resolve_missing_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Raise when the evaluator config names an unknown connection."""
+    plugin = await create_plugin(
+        repository, OWNER_ID, kind=PluginKind.EVALUATOR, name="accuracy"
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version="v1")
+
+    config = EvaluatorConfigInput(evaluator="accuracy", connection_id=uuid.uuid4())
+    with pytest.raises(ConnectionNotFound):
+        await resolve_evaluator_config(config, repository, connections, agent_id=None)
+
+
+async def test_resolve_default_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Resolve the evaluator provider's default connection."""
+    plugin = await create_plugin(
+        repository,
+        OWNER_ID,
+        kind=PluginKind.EVALUATOR,
+        name="accuracy",
+        provider="langfuse",
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version="v1")
+    connection = await create_connection(
+        connections, OWNER_ID, uuid.uuid4(), default=True
+    )
+
+    config = EvaluatorConfigInput(evaluator="accuracy")
+    resolved = await resolve_evaluator_config(
+        config, repository, connections, agent_id=None
+    )
+    assert resolved.connection_id == connection.id
+
+
+async def test_resolve_evaluator_without_default_connection(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Record no connection when the provider has no default connection."""
+    plugin = await create_plugin(
+        repository,
+        OWNER_ID,
+        kind=PluginKind.EVALUATOR,
+        name="accuracy",
+        provider="langfuse",
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version="v1")
+
+    config = EvaluatorConfigInput(evaluator="accuracy")
+    resolved = await resolve_evaluator_config(
+        config, repository, connections, agent_id=None
+    )
+    assert resolved.connection_id is None
+
+
+async def test_resolve_evaluator_without_provider(
+    repository: FakePluginRepository, connections: FakeConnectionRepository
+) -> None:
+    """Record no connection when the evaluator has no provider."""
+    plugin = await create_plugin(
+        repository, OWNER_ID, kind=PluginKind.EVALUATOR, name="accuracy"
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version="v1")
+
+    config = EvaluatorConfigInput(evaluator="accuracy")
+    resolved = await resolve_evaluator_config(
+        config, repository, connections, agent_id=None
+    )
+    assert resolved.connection_id is None
+
+
 async def test_validate_evaluators_resolves_every_config(
-    repository: FakePluginRepository,
+    repository: FakePluginRepository, connections: FakeConnectionRepository
 ) -> None:
     """Resolve every config in the list."""
     accuracy = await create_plugin(
@@ -184,13 +333,14 @@ async def test_validate_evaluators_resolves_every_config(
             EvaluatorConfigInput(evaluator="relevance"),
         ],
         repository,
+        connections,
         agent_id=None,
     )
     assert {config.evaluator for config in resolved} == {"accuracy", "relevance"}
 
 
 async def test_validate_evaluators_rejects_duplicate_version(
-    repository: FakePluginRepository,
+    repository: FakePluginRepository, connections: FakeConnectionRepository
 ) -> None:
     """Reject two configs resolving to the same evaluator version."""
     plugin = await create_plugin(
@@ -205,6 +355,7 @@ async def test_validate_evaluators_rejects_duplicate_version(
                 EvaluatorConfigInput(evaluator="accuracy"),
             ],
             repository,
+            connections,
             agent_id=None,
         )
 
@@ -221,6 +372,7 @@ async def test_validate_evaluators_rejects_duplicate_version(
 )
 async def test_validate_evaluators_rejects_output_contract_without_rules(
     repository: FakePluginRepository,
+    connections: FakeConnectionRepository,
     params: dict[str, object],
 ) -> None:
     """Reject the built-in output contract without a non-empty rule."""
@@ -236,5 +388,6 @@ async def test_validate_evaluators_rejects_output_contract_without_rules(
         await validate_evaluators(
             [EvaluatorConfigInput(evaluator="kitaru/output-contract", params=params)],
             repository,
+            connections,
             agent_id=None,
         )

@@ -9,6 +9,8 @@ Replay tells you what a change _did_; evaluators tell you whether it _helped_. A
 
 Because evaluators run against recorded sessions, they evaluate baselines, replays, and imported traces identically. The same evaluator you run over today's production traffic runs over the fork you're thinking about shipping.
 
+An evaluator that calls a model or another external service can declare its provider and a connection schema, the environment variables its SDK reads, so a [connection](../guides/provider-connections.md) supplies the credentials at run time.
+
 ## The evaluator contract
 
 An evaluator is a callable (a single Python file or an installable package) that receives the full session and returns results:
@@ -99,7 +101,7 @@ Exactly one selection is required: explicit session IDs (arguments or `--session
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationBatchCreateRequest
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 
 job = await client.evaluations.create(
     EvaluationBatchCreateRequest(

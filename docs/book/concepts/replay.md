@@ -33,9 +33,9 @@ Creation returns immediately with the replay and its job. Use `kitaru job watch 
 ```python
 import asyncio
 from kitaru.client import KitaruAPIClient
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay import ReplayCreateRequest
 from kitaru.api_models.v1.replay_config import (
-    EvaluatorConfig,
     HistoryConfig,
     ToolPolicy,
 )

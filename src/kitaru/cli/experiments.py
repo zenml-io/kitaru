@@ -41,6 +41,7 @@ async def create_experiment(
     tool_policy: str | None,
     evaluators: Sequence[str],
     evaluator_params: Sequence[str] | None,
+    evaluator_connections: Sequence[str] | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an experiment with exact evaluator versions."""
@@ -53,7 +54,7 @@ async def create_experiment(
     if tool_policy is not None:
         fields["tool_policy"] = parse_tool_policy(tool_policy, option="--tool-policy")
     configs, _, _ = await resolve_evaluator_configs(
-        client, evaluators, evaluator_params or []
+        client, evaluators, evaluator_params or [], evaluator_connections or []
     )
     fields["evaluators"] = configs
 
@@ -96,6 +97,7 @@ async def update_experiment(
     tool_policy: str | None,
     evaluators: Sequence[str] | None,
     evaluator_params: Sequence[str] | None,
+    evaluator_connections: Sequence[str] | None = None,
 ) -> CommandResult:
     """Update only explicitly selected experiment fields."""
     if description is not None and clear_description:
@@ -113,6 +115,11 @@ async def update_experiment(
             "invalid_arguments",
             "--evaluator-params requires at least one --evaluator.",
         )
+    if evaluator_connections and evaluators is None:
+        raise CLIError(
+            "invalid_arguments",
+            "--evaluator-connection requires at least one --evaluator.",
+        )
 
     fields: dict[str, Any] = {}
     if name is not None:
@@ -129,7 +136,7 @@ async def update_experiment(
         fields["tool_policy"] = parse_tool_policy(tool_policy, option="--tool-policy")
     if evaluators is not None:
         configs, _, _ = await resolve_evaluator_configs(
-            client, evaluators, evaluator_params or []
+            client, evaluators, evaluator_params or [], evaluator_connections or []
         )
         fields["evaluators"] = configs
     if not fields:

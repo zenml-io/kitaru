@@ -215,24 +215,17 @@ async def test_create_session_duplicate_external_id(
 ) -> None:
     """Observe HTTP 409 for a duplicated imported_from and external id pair."""
     agent_id = str(uuid.uuid4())
-    await client.post(
-        "/api/v1/sessions",
-        json=_session_body(
-            agent_id=agent_id,
-            origin="imported",
-            imported_from="langsmith",
-            external_id="run-1",
-        ),
+    body = _session_body(
+        agent_id=agent_id,
+        origin="imported",
+        imported_from="langsmith",
+        external_id="run-1",
     )
-    response = await client.post(
-        "/api/v1/sessions",
-        json=_session_body(
-            agent_id=agent_id,
-            origin="imported",
-            imported_from="langsmith",
-            external_id="run-1",
-        ),
-    )
+    created = await client.post("/api/v1/sessions", json=body)
+    assert created.status_code == 201
+
+    response = await client.post("/api/v1/sessions", json=body)
+
     assert response.status_code == 409
 
 
@@ -448,7 +441,7 @@ async def test_list_sessions_filters_by_cost_bounds(
         json={
             "nodes": [
                 {
-                    "index": 0,
+                    "external_id": "n0",
                     "node_type": "llm_call",
                     "name": "call",
                     "status": "completed",
@@ -465,7 +458,7 @@ async def test_list_sessions_filters_by_cost_bounds(
         json={
             "nodes": [
                 {
-                    "index": 0,
+                    "external_id": "n0",
                     "node_type": "llm_call",
                     "name": "call",
                     "status": "completed",
@@ -854,7 +847,7 @@ async def test_list_sessions_filters_by_filter_query_param(
         json={
             "nodes": [
                 {
-                    "index": 0,
+                    "external_id": "n0",
                     "node_type": "llm_call",
                     "name": "call",
                     "status": "completed",
@@ -1248,7 +1241,7 @@ async def test_ingest_session_nodes_denies_a_task_token_for_another_tasks_sessio
             json={
                 "nodes": [
                     {
-                        "index": 0,
+                        "external_id": "n0",
                         "node_type": "llm_call",
                         "name": "call",
                         "status": "completed",

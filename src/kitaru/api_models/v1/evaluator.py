@@ -31,9 +31,16 @@ class EvaluatorCreateRequest(RequestModel):
 
     name: str = Field(description="Evaluator name.")
     description: str | None = Field(default=None, description="Evaluator description.")
+    provider: str | None = Field(
+        default=None, description="External service this evaluator calls."
+    )
     logo_url: str | None = Field(default=None, description="Evaluator logo URL.")
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict, description="Arbitrary metadata."
+    )
+    connection_schema: dict[str, JsonValue] | None = Field(
+        default=None,
+        description="JSON Schema of the connection values this evaluator reads.",
     )
     agent_id: uuid.UUID | None = Field(
         default=None,
@@ -53,6 +60,9 @@ class EvaluatorUpdateRequest(RequestModel):
     metadata: dict[str, JsonValue] | None = Field(
         default=None, description="New metadata."
     )
+    connection_schema: dict[str, JsonValue] | None = Field(
+        default=None, description="New connection schema."
+    )
 
 
 class EvaluatorListParams(FilterableListParams):
@@ -68,8 +78,12 @@ class EvaluatorResponse(TimestampedResponseModel):
     id: uuid.UUID = Field(description="Evaluator id.")
     name: str = Field(description="Evaluator name.")
     description: str | None = Field(description="Evaluator description.")
+    provider: str | None = Field(description="External service this evaluator calls.")
     logo_url: str | None = Field(description="Evaluator logo URL.")
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
+    connection_schema: dict[str, JsonValue] | None = Field(
+        description="JSON Schema of the connection values this evaluator reads."
+    )
     latest_version: int = Field(
         description="Highest version number created for this evaluator."
     )

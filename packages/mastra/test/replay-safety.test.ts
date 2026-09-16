@@ -131,31 +131,34 @@ describe("replay safety with a real Mastra agent", () => {
   it.each([
     ["clientTools", { clientTools: { external: {} } }],
     ["toolsets", { toolsets: { remote: { external: {} } } }],
-  ])("checks non-interceptable tools supplied through %s", async (_name, runtimeOptions) => {
-    await expect(
-      assertReplayToolCoverage({
-        agent: {
-          getDefaultOptions: async () => ({}),
-          getToolsForExecution: async (options: Record<string, unknown>) =>
-            options.clientTools ??
-            Object.assign(
-              {},
-              ...Object.values(
-                (options.toolsets as
-                  | Record<string, Record<string, unknown>>
-                  | undefined) ?? {},
+  ])(
+    "checks non-interceptable tools supplied through %s",
+    async (_name, runtimeOptions) => {
+      await expect(
+        assertReplayToolCoverage({
+          agent: {
+            getDefaultOptions: async () => ({}),
+            getToolsForExecution: async (options: Record<string, unknown>) =>
+              options.clientTools ??
+              Object.assign(
+                {},
+                ...Object.values(
+                  (options.toolsets as
+                    | Record<string, Record<string, unknown>>
+                    | undefined) ?? {},
+                ),
               ),
-            ),
-          listConfiguredInputProcessors: async () => [],
-          listTools: async () => ({}),
-        },
-        runtimeOptions,
-        spec: failingStaticSpec() as never,
-      }),
-    ).rejects.toThrow(
-      "Replay requires a local execute function for tool 'external'",
-    );
-  });
+            listConfiguredInputProcessors: async () => [],
+            listTools: async () => ({}),
+          },
+          runtimeOptions,
+          spec: failingStaticSpec() as never,
+        }),
+      ).rejects.toThrow(
+        "Replay requires a local execute function for tool 'external'",
+      );
+    },
+  );
 
   it.each([
     ["prepareStep", { prepareStep: () => ({ tools: {} }) }],
@@ -473,8 +476,20 @@ describe("replay safety with a real Mastra agent", () => {
     expect(api.sessionIds).toHaveLength(0);
   });
 
-  it("keeps a replay off live memory threads", async () => {
+  it("keeps a replay with recorded context off live memory threads", async () => {
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    vi.stubEnv(
+      "KITARU_TASK_INPUTS",
+      JSON.stringify({
+        mastra_conversation_context: {
+          version: 1,
+          source: "recalled",
+          complete: true,
+          messages: [{ role: "user", content: "run" }],
+        },
+        supplied_messages: "run",
+      }),
+    );
     installTestApi({
       replaySpec: {
         ...failingStaticSpec(),

@@ -7,10 +7,10 @@
     "node": ">=22.22.0 <23"
   },
   "dependencies": {
-    "@ai-sdk/openai": "4.0.20",
+    "@ai-sdk/openai": "4.0.66",
     "@zenml-io/kitaru": "workspace:*",
     "@zenml-io/kitaru-vercel-ai": "workspace:*",
-    "ai": "7.0.85"
+    "ai": "7.0.99"
   },
   "scripts": {
     "build": "node ../../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.json",

@@ -193,6 +193,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         elif isinstance(task, EvaluationTask):
             row.plugin_version_id = task.plugin_version_id
             row.input_session_id = task.input_session_id
+            row.connection_id = task.connection_id
             row.inputs = task.params
         elif isinstance(task, ImportTask):
             row.import_id = task.import_id
@@ -261,6 +262,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             return EvaluationTask(
                 plugin_version_id=self.plugin_version_id,
                 input_session_id=self.input_session_id,
+                connection_id=self.connection_id,
                 params=self.inputs if self.inputs is not None else {},
                 **shared,
             )

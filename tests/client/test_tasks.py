@@ -138,19 +138,15 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
         await api_client.tasks.get(uuid.uuid4())
 
 
-@pytest.mark.parametrize("skipped", [False, True])
 async def test_task_result_preserves_json(
     api_client: KitaruAPIClient,
     services: JobAndTaskServices,
     account: Account,
-    skipped: bool,
 ) -> None:
     """Task result dictionaries retain their original keys through the SDK."""
     job = await create_job(services.jobs, account.id)
     task = await create_agent_task(services.tasks, job.id)
-    result: dict[str, int | str] = {"eligible_sessions": 3, "min_sessions": 5}
-    if skipped:
-        result.update(status="skipped", reason="insufficient_sessions")
+    result: dict[str, int | str] = {"count": 3, "label": "trend"}
     task.result = result
     await services.tasks.update(task)
 

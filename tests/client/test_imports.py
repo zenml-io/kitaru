@@ -36,7 +36,7 @@ from kitaru.api_models.v1.imports import (
     ImportResponse,
 )
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
-from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import NotFoundError

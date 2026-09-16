@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Property tests for LangGraph value capture."""
 
+import copy
+import json
 from typing import Any
 
 from hypothesis import given
@@ -44,6 +46,40 @@ _values = st.recursive(
     max_leaves=10,
 )
 
+_json_text = st.text(alphabet=st.characters(blacklist_categories=("Cs",)), max_size=23)
+_json_strings = st.one_of(
+    _json_text,
+    st.tuples(
+        st.sampled_from(['"', "\\", "\b", "\f", "\n", "\r", "\t", "\x00", "é", "😀"]),
+        _json_text,
+    ).map(lambda parts: "".join(parts)),
+)
+_json_keys = _json_strings.map(lambda value: f"field:{value}")
+_json_values = st.recursive(
+    st.none()
+    | st.booleans()
+    | st.integers(min_value=-(10**30), max_value=10**30)
+    | st.floats(allow_nan=False, allow_infinity=False)
+    | _json_strings,
+    lambda children: (
+        st.lists(children, max_size=4)
+        | st.dictionaries(_json_keys, children, max_size=4)
+    ),
+    max_leaves=12,
+)
+
+
+def _get_json_size(value: Any) -> int:
+    """Return the independent compact JSON UTF-8 byte count."""
+    return len(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    )
+
 
 @given(value=st.dictionaries(st.text(max_size=8), _values, max_size=6))
 def test_string_keyed_mapping_is_captured_exactly_or_flagged(
@@ -65,3 +101,91 @@ def test_key_collapse_is_reported_as_lossy(value: dict[Any, Any]) -> None:
 def test_colliding_keys_example() -> None:
     result = capture_value({1: "a", "1": "b"}, CapturePolicy())
     assert len(result.value) == 2 or result.lossy
+
+
+@given(value=_json_values)
+def test_json_native_values_have_exact_byte_receipts(value: Any) -> None:
+    original = copy.deepcopy(value)
+
+    result = capture_value(value, CapturePolicy())
+
+    assert result.value == value
+    assert result.encoded_bytes == _get_json_size(value)
+    assert result.replayable
+    assert not result.lossy
+    assert not result.truncated
+    assert not result.reasons
+    assert value == original
+
+
+@given(value=_json_values)
+def test_field_byte_limit_is_inclusive(value: Any) -> None:
+    encoded_bytes = _get_json_size(value)
+
+    at = capture_value(value, CapturePolicy(max_field_bytes=encoded_bytes))
+    above = capture_value(value, CapturePolicy(max_field_bytes=encoded_bytes + 1))
+
+    if encoded_bytes > 1:
+        below = capture_value(value, CapturePolicy(max_field_bytes=encoded_bytes - 1))
+        assert below.value == {"__kitaru_capture__": "max_field_bytes"}
+        assert below.encoded_bytes == _get_json_size(below.value)
+        assert below.reasons == ("max_field_bytes",)
+        assert below.lossy and below.truncated and not below.replayable
+
+    for result in (at, above):
+        assert result.value == value
+        assert result.encoded_bytes == encoded_bytes
+        assert result.replayable
+        assert not result.reasons
+
+
+@given(max_field_bytes=st.integers(min_value=1, max_value=16))
+def test_tiny_budget_reports_final_marker_size(max_field_bytes: int) -> None:
+    result = capture_value(
+        "value-too-large-for-the-generated-budget",
+        CapturePolicy(max_field_bytes=max_field_bytes),
+    )
+
+    assert result.value == {"__kitaru_capture__": "max_field_bytes"}
+    assert result.encoded_bytes == _get_json_size(result.value)
+    assert result.encoded_bytes > max_field_bytes
+    assert result.reasons == ("max_field_bytes",)
+    assert result.lossy and result.truncated and not result.replayable
+
+
+@given(
+    prefix=_json_strings,
+    surrogate=st.integers(min_value=0xD800, max_value=0xDFFF).map(chr),
+    suffix=_json_strings,
+)
+def test_unencodable_strings_use_serialization_marker(
+    prefix: str, surrogate: str, suffix: str
+) -> None:
+    value = f"{prefix}{surrogate}{suffix}"
+
+    result = capture_value(value, CapturePolicy())
+
+    assert result.value == {
+        "__kitaru_capture__": "serialization_failed",
+        "type": "str",
+    }
+    assert result.encoded_bytes == _get_json_size(result.value)
+    assert result.reasons == ("serialization_failed",)
+    assert result.lossy and not result.truncated and not result.replayable
+
+
+@given(value=_json_values, max_field_bytes=st.integers(min_value=1, max_value=128))
+def test_loss_flags_and_receipts_remain_consistent(
+    value: Any, max_field_bytes: int
+) -> None:
+    original = copy.deepcopy(value)
+
+    result = capture_value(value, CapturePolicy(max_field_bytes=max_field_bytes))
+
+    assert result.encoded_bytes == _get_json_size(result.value)
+    assert result.lossy == bool(result.reasons)
+    assert result.replayable == (not result.lossy)
+    assert result.truncated == any(
+        reason.startswith("max_") for reason in result.reasons
+    )
+    assert value == original

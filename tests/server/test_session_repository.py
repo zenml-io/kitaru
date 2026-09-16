@@ -43,6 +43,7 @@ from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.orm.session import SessionORM
 from kitaru.server.adapters.db.pagination import (
     LIST_QUERY_TIMEOUT_INFO_KEY,
+    IdOrder,
     paginate,
 )
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -1721,7 +1722,13 @@ async def test_query_translates_statement_timeout() -> None:
         )
         statement = select(SessionORM).where(func.pg_sleep(1.5).is_(None))
         with pytest.raises(QueryTimeoutError):
-            await paginate(session, statement, SessionFilter(), id_column=SessionORM.id)
+            session_filter = SessionFilter()
+            await paginate(
+                session,
+                statement,
+                session_filter,
+                IdOrder(SessionORM.id, session_filter.sort),
+            )
 
 
 async def test_allocate_session_number_fake() -> None:

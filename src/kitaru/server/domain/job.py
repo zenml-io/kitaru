@@ -79,6 +79,18 @@ class JobNotSettled(ConflictError):
         super().__init__(f"Job {job_id} has not settled")
 
 
+def pending_timeout_error(timeout_seconds: int) -> str:
+    """Build the error a job carries when the sweep cancels it unclaimed.
+
+    Args:
+        timeout_seconds: Seconds the job waited unclaimed.
+
+    Returns:
+        Pending timeout error message.
+    """
+    return f"Job was not claimed within {timeout_seconds} seconds"
+
+
 class Job(DomainModel):
     """Job."""
 
@@ -121,7 +133,7 @@ class Job(DomainModel):
 
         Args:
             status: Terminal status to settle on.
-            error: Error of the first counted task failure.
+            error: Error the job settled with.
             now: Current time.
 
         Raises:

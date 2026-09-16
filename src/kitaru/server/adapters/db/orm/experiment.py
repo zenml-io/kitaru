@@ -32,8 +32,8 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 )
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.names import MAX_NAME_LENGTH
+from kitaru.server.domain.plugin import EvaluatorConfig
 from kitaru.server.domain.replay_config import (
-    EvaluatorConfig,
     ReplayConfig,
     ReplayOverride,
     ToolPolicy,

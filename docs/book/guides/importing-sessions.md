@@ -7,7 +7,7 @@ icon: file-import
 
 Kitaru importers convert exported trace data into session graphs. Provider importers decode source records, join related traces into sessions, order turns, reconstruct node relationships, and project common fields for the UI while preserving source inputs and outputs.
 
-Use a provider importer for Langfuse, LangSmith, Braintrust, Logfire, or Arize Phoenix data. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
+Use a provider importer for Langfuse, LangSmith, Braintrust, Logfire, or Arize Phoenix data. For Mastra full trace exports, follow the registration and import workflow in the [Mastra guide](../adapters/mastra.md); that importer is not a server default. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
 
 ## The portable session contract
 
@@ -31,9 +31,9 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 
 | Node field | Type | Meaning |
 |---|---|---|
-| `index` | integer | Stable position within the session import. Parents must have lower indexes. |
-| `parent_index` | integer or null | Primary parent. |
-| `secondary_parent_indexes` | integer array | Additional parents for graph joins. |
+| `index` | integer | Identity of the node within the session import, unique per session. |
+| `parent_index` | integer or null | Index of the parent node. |
+| `links` | link array | Links to other nodes of the session, each with the target's `external_id` and a `kind`. |
 | `external_id`, `trace_id` | string or null | Source node and trace identities. |
 | `node_type` | `llm_call`, `tool_call`, `subagent_call`, or `span` | Work represented by the node. |
 | `name` | string | Display name. |
@@ -43,7 +43,7 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 | `input_text_selector` | string or null | RFC 6901 JSON Pointer selecting the primary human-readable text inside `inputs`. |
 | `output_text_selector` | string or null | RFC 6901 JSON Pointer selecting the primary human-readable text inside `outputs`. |
 | `system_prompt_selector` | string or null | RFC 6901 JSON Pointer selecting the system prompt inside `inputs`. |
-| `reasoning` | string or null | Visible reasoning text when the source exports it. |
+| `reasoning_selectors` | string array | RFC 6901 JSON Pointers selecting visible reasoning strings inside `outputs`. |
 | `inputs`, `outputs` | any JSON value | Complete source payloads. Importers preserve message history, tool arguments, multimodal parts, and provider-specific content here. |
 | `requested_model`, `model`, `model_provider` | string or null | Requested model, served model, and model provider. |
 | `tokens` | object or null | Input, output, cached input, and reasoning token counts when reported. |
@@ -55,7 +55,7 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 
 Text selectors avoid copying potentially large values into separate columns. A selector is present only when the importer can identify one relevant string in the corresponding payload. A client resolves that [RFC 6901 JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901.html) when it loads the node payload and can show the complete `inputs` or `outputs` value for inspection. The selectors remain available in node list responses without loading the payload columns. `system_prompt_selector` resolves against `inputs`. A null selector means the importer could not choose one text value without guessing. The empty string is the JSON Pointer for the complete payload, which is useful when the payload itself is the selected string.
 
-`reasoning` contains visible text only. Redacted, encrypted, or unavailable reasoning remains null, while the provider payload stays in `inputs` or `outputs`. Token usage can also include `reasoning_tokens` when a provider reports the count.
+`reasoning_selectors` points at visible reasoning text only, wherever it lives inside `outputs`. A client resolves each pointer and joins the resulting strings with newlines, in order. Redacted, encrypted, or unavailable reasoning leaves the list empty, while the provider payload stays in `inputs` or `outputs`. Token usage can also include `reasoning_tokens` when a provider reports the count.
 
 ## Create Kitaru JSONL
 
@@ -78,7 +78,7 @@ The formatted object below represents one JSONL record. Serialize it onto one li
     {
       "index": 0,
       "parent_index": null,
-      "secondary_parent_indexes": [],
+      "links": [],
       "external_id": "model-call-42",
       "trace_id": "trace-42",
       "node_type": "llm_call",
@@ -89,9 +89,9 @@ The formatted object below represents one JSONL record. Serialize it onto one li
       "input_text_selector": "/1/content",
       "output_text_selector": "/0/content",
       "system_prompt_selector": "/0/content",
-      "reasoning": "The weather tool reports rain and a temperature of 18 C.",
+      "reasoning_selectors": ["/1/content"],
       "inputs": [{"role": "system", "content": "Answer in one sentence."}, {"role": "user", "content": "What is the weather in Delft?"}],
-      "outputs": [{"role": "assistant", "content": "Delft is rainy and 18 C."}],
+      "outputs": [{"role": "assistant", "content": "Delft is rainy and 18 C."}, {"role": "reasoning", "content": "The weather tool reports rain and a temperature of 18 C."}],
       "model": "claude-haiku-4-5-20251001",
       "model_provider": "anthropic",
       "tokens": {"input_tokens": 24, "output_tokens": 11, "cached_input_tokens": 0, "reasoning_tokens": 0},
@@ -102,7 +102,7 @@ The formatted object below represents one JSONL record. Serialize it onto one li
 }
 ```
 
-Node indexes do not need to be contiguous. Every `parent_index` and `secondary_parent_indexes` value must be lower than the child index. A node index must be unique within its session.
+Node indexes do not need to be contiguous, and a parent may carry a higher index than its child. A node without an `external_id` gets `node-<index>`, which is also how a link names it.
 
 ## Import a file
 
@@ -118,7 +118,7 @@ kitaru session import sessions.jsonl \
   --wait
 ```
 
-Use `--tag` with `--wait` to tag every created session. Use `--join-on` to group provider traces by a source value. Use `--params` for other provider-specific settings. Use `--max-sessions` to stop the import after it creates a set number of sessions. Use `--evaluator` to score every imported session once the import finishes, and `--evaluator-params` to pass parameters to a selected evaluator. Use `--analyzer` to run an [analyzer](../concepts/analyzers.md) over every imported session once the import finishes, `--analyzer-params` to pass parameters to a selected analyzer, and `--analyzer-connection` to select credentials for it:
+Use `--tag` with `--wait` to tag every created session. Use `--join-on` to group provider traces by a source value. Use `--params` for other provider-specific settings. Use `--max-sessions` to stop the import after it creates a set number of sessions. Use `--evaluator` to score every imported session once the import finishes, `--evaluator-params` to pass parameters to a selected evaluator, and `--evaluator-connection` to select credentials for it. Use `--analyzer` to run an [analyzer](../concepts/analyzers.md) over every imported session once the import finishes, `--analyzer-params` to pass parameters to a selected analyzer, and `--analyzer-connection` to select credentials for it:
 
 ```bash
 kitaru session import sessions.jsonl \
@@ -126,6 +126,7 @@ kitaru session import sessions.jsonl \
   --agent customer-service@latest \
   --evaluator accuracy@latest \
   --evaluator-params 'accuracy@latest={"threshold": 0.8}' \
+  --evaluator-connection accuracy@latest=model-provider-prod \
   --analyzer session-outcomes@latest \
   --analyzer-params 'session-outcomes@latest={"min_count": 5}' \
   --analyzer-connection session-outcomes@latest=model-provider-prod \
@@ -136,7 +137,7 @@ The command prints the created import id and the job running it. One evaluator t
 
 ## Join provider traces into sessions
 
-Providers often record one conversation turn as one trace. Importers group related traces into one Kitaru session, then order the traces by start time with a stable trace-ID tie-breaker.
+Providers often record one conversation turn as one trace. Importers that support conversation grouping combine related traces into one Kitaru session, then order the traces by start time with a stable trace-ID tie-breaker. The Mastra importer instead preserves each invocation as a separate session and does not accept `--join-on`.
 
 Default grouping uses the provider's native conversation or session identifier. When that identifier is absent, each trace becomes one session. Use `--join-on` when the export carries the shared session identity in another field.
 
@@ -166,11 +167,11 @@ The selected value must be a non-empty string, number, or boolean. A missing, co
 
 ### SDK and REST
 
-The CLI validates `--join-on` and adds it to the importer parameter object, resolves each `--evaluator` into an entry of the `evaluators` list, and resolves each `--analyzer` plus any matching `--analyzer-connection` into an entry of the `analyzers` list. SDK callers pass the same `join_on` parameter, evaluator configs, and analyzer configs directly:
+The CLI validates `--join-on` and adds it to the importer parameter object, resolves each `--evaluator` plus any matching `--evaluator-connection` into an entry of the `evaluators` list, and resolves each `--analyzer` plus any matching `--analyzer-connection` into an entry of the `analyzers` list. SDK callers pass the same `join_on` parameter, evaluator configs, and analyzer configs directly:
 
 ```python
 from kitaru.api_models.v1.imports import ImportCreateRequest
-from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 
 created_import = await client.imports.create(
     ImportCreateRequest(
@@ -180,7 +181,13 @@ created_import = await client.imports.create(
         agent_version_id=agent_version_id,
         payload_blob_id=blob_id,
         params={"join_on": "/metadata/customer/case_id"},
-        evaluators=[EvaluatorConfig(evaluator="accuracy", params={"threshold": 0.8})],
+        evaluators=[
+            EvaluatorConfig(
+                evaluator="accuracy",
+                params={"threshold": 0.8},
+                connection_id=evaluator_connection_id,
+            )
+        ],
         analyzers=[
             AnalyzerConfig(
                 analyzer="session-outcomes", connection_id=analyzer_connection_id
@@ -232,9 +239,10 @@ Provider importers apply the same output contract to different source formats:
 | Langfuse | Trace, observation, and ingestion-event JSON or JSONL | `sessionId`, then `traceId` |
 | LangSmith | Run-query and bulk-export JSON or JSONL | Known thread metadata paths, then `trace_id` |
 | Braintrust | Project-log and UI JSON exports | Known session or conversation fields, then trace ID |
+| Mastra | Full `getTrace` JSON response or an array of responses | No grouping; each trace is one invocation |
 | Kitaru | One portable Kitaru session per JSONL line | No grouping; each line is one session |
 
-Normalization includes source identity, parent-child graph reconstruction, deterministic ordering, status and error mapping, model fields, token counts, cost, tool arguments and results, text selectors, visible `reasoning`, and framework detection. Source payloads remain in `inputs` and `outputs`. Session metadata reports normalization warnings and source completeness.
+Normalization includes source identity, parent-child graph reconstruction, deterministic ordering, status and error mapping, model fields, token counts, cost, tool arguments and results, text selectors, reasoning selectors, and framework detection. Source payloads remain in `inputs` and `outputs`. Session metadata reports normalization warnings and source completeness.
 
 Framework detection only sets `framework` when trace metadata identifies one supported framework without conflict. Unknown or sparse traces keep the field null.
 

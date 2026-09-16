@@ -14,7 +14,6 @@
 """Session node DTO conversions."""
 
 import uuid
-from collections.abc import Sequence
 
 from kitaru.api_models.v1.session_node import (
     SessionNodeBatchRequest,
@@ -40,10 +39,9 @@ def session_node_create_to_upsert(body: SessionNodeCreateRequest) -> SessionNode
         Upsert command.
     """
     return SessionNodeUpsert(
-        index=body.index,
-        parent_index=body.parent_index,
-        secondary_parent_indexes=body.secondary_parent_indexes,
         external_id=body.external_id,
+        parent_external_id=body.parent_external_id,
+        links=body.links,
         trace_id=body.trace_id,
         node_type=body.node_type,
         name=body.name,
@@ -54,7 +52,7 @@ def session_node_create_to_upsert(body: SessionNodeCreateRequest) -> SessionNode
         input_text_selector=body.input_text_selector,
         output_text_selector=body.output_text_selector,
         system_prompt_selector=body.system_prompt_selector,
-        reasoning=body.reasoning,
+        reasoning_selectors=body.reasoning_selectors,
         inputs=body.inputs,
         outputs=body.outputs,
         requested_model=body.requested_model,
@@ -79,36 +77,18 @@ def session_node_batch_to_upserts(
         batch: Session node batch request.
 
     Returns:
-        Upsert commands, parent before child.
+        Upsert commands in batch order.
     """
     return [session_node_create_to_upsert(node) for node in batch.nodes]
 
 
-def referenced_parent_ids(nodes: Sequence[SessionNode]) -> set[uuid.UUID]:
-    """Collect the parent ids the given nodes point at.
-
-    Args:
-        nodes: Nodes about to be converted to responses.
-
-    Returns:
-        Ids of every primary and secondary parent the nodes name.
-    """
-    parent_ids: set[uuid.UUID] = set()
-    for node in nodes:
-        if node.parent_id is not None:
-            parent_ids.add(node.parent_id)
-        parent_ids.update(node.secondary_parent_ids)
-    return parent_ids
-
-
 def session_node_to_response(
-    node: SessionNode, index_by_id: dict[uuid.UUID, int], include_payloads: bool
+    node: SessionNode, include_payloads: bool
 ) -> SessionNodeResponse:
     """Convert a session node entity to its response DTO.
 
     Args:
         node: Stored session node.
-        index_by_id: Complete node-id-to-index lookup for the node's session.
         include_payloads: Whether to populate inputs, outputs, and
             attributes.
 
@@ -118,16 +98,9 @@ def session_node_to_response(
     return SessionNodeResponse(
         id=node.id,
         session_id=node.session_id,
-        index=node.index,
-        parent_index=(
-            index_by_id[node.parent_id] if node.parent_id is not None else None
-        ),
-        secondary_parent_indexes=[
-            index_by_id[parent_id] for parent_id in node.secondary_parent_ids
-        ],
-        parent_id=node.parent_id,
-        secondary_parent_ids=node.secondary_parent_ids,
         external_id=node.external_id,
+        parent_external_id=node.parent_external_id,
+        links=node.links,
         trace_id=node.trace_id,
         node_type=node.node_type,
         name=node.name,
@@ -138,11 +111,7 @@ def session_node_to_response(
         input_text_selector=node.input_text_selector,
         output_text_selector=node.output_text_selector,
         system_prompt_selector=node.system_prompt_selector,
-        reasoning=(
-            node.reasoning.value
-            if include_payloads and node.reasoning is not None
-            else None
-        ),
+        reasoning_selectors=node.reasoning_selectors,
         inputs=(
             node.inputs.value if include_payloads and node.inputs is not None else None
         ),

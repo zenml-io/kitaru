@@ -23,7 +23,7 @@ classifiers = [
 ]
 keywords = ["ai-agents", "insights", "kitaru", "llm", "analysis"]
 dependencies = [
-    "kitaru==0.25.0+dev",
+    "kitaru>=0.26.0",
 ]
 
 [project.optional-dependencies]

@@ -72,8 +72,8 @@ import os
 import uuid
 
 from kitaru.api_models.v1.experiment import ExperimentCreateRequest
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay_config import (
-    EvaluatorConfig,
     HistoryConfig,
     ReplayOverride,
     ToolPolicy,

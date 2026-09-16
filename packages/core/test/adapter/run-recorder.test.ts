@@ -46,7 +46,7 @@ describe("normalized run lifecycle", () => {
       started_at: "2026-01-01T00:00:00.500Z",
     });
     expect(client.nodes.at(-1)?.nodes[0]).toMatchObject({
-      index: 0,
+      external_id: "run",
       outputs: result,
       status: "completed",
     });
@@ -277,12 +277,12 @@ describe("normalized run lifecycle", () => {
         nodes: [
           {
             attributes: {},
-            index: 1,
+            external_id: "queued",
             inputs: null,
             name: "queued",
             node_type: "llm_call",
             outputs: null,
-            parent_index: 0,
+            parent_external_id: "run",
             status: "completed",
           },
         ],

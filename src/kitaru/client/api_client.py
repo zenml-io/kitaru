@@ -32,6 +32,7 @@ from kitaru.client.auth import (
 from kitaru.client.config import get_analytics_id, get_server_url
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import (
+    APIError,
     InvalidServerResponseError,
     raise_for_response,
 )
@@ -68,6 +69,35 @@ from kitaru.client.resources.users import UsersResource
 from kitaru.client.resources.workers import WorkersResource
 from kitaru.headers import CLIENT_HEADER, SKILL_HEADER, format_client_header
 from kitaru.transport import IDEMPOTENCY_KEY_HEADER, build_async_client
+
+_MAX_IDEMPOTENCY_KEY_LENGTH = 255
+
+
+def validate_idempotency_key(key: str | None, parameter: str) -> str | None:
+    """Validate and normalize an idempotency key.
+
+    Args:
+        key: Idempotency key, or None to use the default behavior.
+        parameter: Public parameter name used in validation errors.
+
+    Raises:
+        APIError: The key is empty, non-ASCII, too long, or contains non-printable
+            characters.
+
+    Returns:
+        Normalized key, or None when no key was supplied.
+    """
+    if key is None:
+        return None
+    normalized = key.strip()
+    if (
+        not normalized
+        or len(normalized) > _MAX_IDEMPOTENCY_KEY_LENGTH
+        or not normalized.isascii()
+        or not normalized.isprintable()
+    ):
+        raise APIError(400, f"Invalid {parameter}.")
+    return normalized
 
 
 class KitaruAPIClient:
@@ -285,7 +315,8 @@ class KitaruAPIClient:
                 auth flow. The login endpoints send their own credential.
 
         Raises:
-            APIError: The response has an error status code.
+            APIError: The explicit idempotency key is invalid or the response
+                has an error status code.
             InvalidServerResponseError: The response is not an API response.
 
         Returns:
@@ -295,8 +326,14 @@ class KitaruAPIClient:
             # httpx renders None query values as empty strings, which the
             # server rejects for typed filters.
             params = {key: value for key, value in params.items() if value is not None}
-        if idempotency_key is not None:
-            headers = {**(headers or {}), IDEMPOTENCY_KEY_HEADER: idempotency_key}
+        normalized_idempotency_key = validate_idempotency_key(
+            idempotency_key, "idempotency_key"
+        )
+        if normalized_idempotency_key is not None:
+            headers = {
+                **(headers or {}),
+                IDEMPOTENCY_KEY_HEADER: normalized_idempotency_key,
+            }
         if self._request_headers:
             headers = {**self._request_headers, **(headers or {})}
         response = await self._http.request(

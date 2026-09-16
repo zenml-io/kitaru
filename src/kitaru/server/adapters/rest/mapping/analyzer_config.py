@@ -13,9 +13,9 @@
 #  permissions and limitations under the License.
 """Analyzer config DTO conversions."""
 
-from kitaru.api_models.v1.replay_config import AnalyzerConfig as WireAnalyzerConfig
-from kitaru.server.application.models.replay_config import AnalyzerConfigInput
-from kitaru.server.domain.replay_config import AnalyzerConfig as DomainAnalyzerConfig
+from kitaru.api_models.v1.plugin import AnalyzerConfig as WireAnalyzerConfig
+from kitaru.server.application.models.plugin import AnalyzerConfigInput
+from kitaru.server.domain.plugin import AnalyzerConfig as DomainAnalyzerConfig
 
 
 def analyzer_config_to_wire(config: DomainAnalyzerConfig) -> WireAnalyzerConfig:

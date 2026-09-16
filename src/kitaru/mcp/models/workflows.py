@@ -10,8 +10,8 @@ from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.imports import ImportSource
+from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
-from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.mcp.models.common import IDEMPOTENCY_KEY_DESCRIPTION, DeleteKind, MCPModel
 from kitaru.mcp.models.management import EvaluatorSelection

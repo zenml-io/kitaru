@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-langsmith-importer"
-version = "0.2.0"
+version = "0.3.0"
 description = "LangSmith trace importer for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
@@ -23,11 +23,12 @@ classifiers = [
 ]
 keywords = ["ai-agents", "kitaru", "langsmith", "observability", "traces"]
 dependencies = [
-    "kitaru>=0.24.0",
+    "kitaru==0.26.0+dev",
 ]
 
 [project.optional-dependencies]
 api = [
+    "kitaru==0.26.0+dev",
     "langsmith>=0.3,<1",
 ]
 adapter = [

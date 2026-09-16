@@ -25,14 +25,13 @@ from kitaru.api_models.v1.evaluator import (
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.job import JobResponse, JobStatus
-from kitaru.api_models.v1.plugin import ScriptPluginSource
+from kitaru.api_models.v1.plugin import EvaluatorConfig, ScriptPluginSource
 from kitaru.api_models.v1.replay import (
     ReplayCreateRequest,
     ReplayResponse,
     ReplayStatus,
 )
 from kitaru.api_models.v1.replay_config import (
-    EvaluatorConfig,
     HistoryConfig,
     HistoryScope,
     PassthroughConfig,
@@ -121,7 +120,7 @@ def _assert_recorded_shape(nodes: list[SessionNodeResponse]) -> None:
     roots = [
         node
         for node in nodes
-        if node.node_type is NodeType.SPAN and node.parent_index is None
+        if node.node_type is NodeType.SPAN and node.parent_external_id is None
     ]
     llm_nodes = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
     tool_names = {

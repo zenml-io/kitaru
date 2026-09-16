@@ -17,7 +17,7 @@ from kitaru.api_models.v1.evaluation import (
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.job import JobStatus
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.session import SessionListParams, SessionStatus
 from kitaru.api_models.v1.session_run import SessionRunCreateRequest
 from kitaru.api_models.v1.task import TaskKind

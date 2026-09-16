@@ -38,13 +38,27 @@ independent and concurrent runs never share state. A session-scoped fixture
 reaps databases left behind by a killed run, age-gated on the timestamp in
 the database name so it never drops a concurrent run's live databases.
 
+Set `KITARU_TEST_REQUIRE_POSTGRES=1` to fail before collection if PostgreSQL is unavailable. CI enables this for both Python 3.14 base jobs; local runs and the other Python versions keep optional database skips.
+
+Repository sessions copy a session-scoped empty schema into each unique database instead of recreating every table for every test. The template has no open connections while it is copied and is dropped at session teardown. API lifespan and historical migration tests still initialize their own databases. CI stores the disposable PostgreSQL data directory in memory; it retains the normal PostgreSQL transaction and durability settings.
+
+## CI test distribution
+
+The Python 3.14 base suite runs on two independent runners, each with its own PostgreSQL service. Set both `KITARU_TEST_SHARD_INDEX` (zero-based) and `KITARU_TEST_SHARD_COUNT` to select a partition. Pytest assigns whole files using SHA-256 of their repository-relative POSIX paths modulo the count, preserving test order within each file and automatically including new files. With both variables unset or empty, pytest runs the full selection as usual. Invalid or incomplete settings fail instead of silently dropping tests.
+
+For local reproduction, prefix the normal base pytest command with `KITARU_TEST_SHARD_INDEX=0 KITARU_TEST_SHARD_COUNT=2`, then repeat with index `1`. Both partitions together must contain exactly the unpartitioned collection, with no overlap. Database-required behavior is independent of the partition settings.
+
 ## Property-based tests
 
-Hypothesis tests live next to the surface they cover: `plugins/tests/importers/test_fuzz_parse.py` (importer `parse()` contract), `tests/mcp/test_fuzz_tools.py` (MCP tool boundary, requests generated from each tool's JSON schema), `tests/cli/test_redaction_properties.py`, `tests/server/test_fuzz_filters.py` (recursive JSON list filters), and `plugins/tests/adapters/langgraph/test_capture_properties.py`.
+Hypothesis tests live next to the surface they cover: `plugins/tests/importers/test_fuzz_parse.py` and `test_normalization_properties.py` (importer parsing and normalization contracts), property modules under `plugins/tests/evaluators/`, `tests/api_models/test_wire_properties.py`, `tests/mcp/test_fuzz_tools.py` (MCP tool boundary, requests generated from each tool's JSON schema), `tests/cli/test_redaction_properties.py`, `tests/server/test_fuzz_filters.py` (recursive JSON list filters), `tests/server/test_fuzz_api_sequences.py` (isolated successful agent/version API sequences), and codec, capture, and record/replay property modules under `plugins/tests/adapters/`.
 
-Three profiles are registered in each root's `conftest.py` and selected with `HYPOTHESIS_PROFILE`: `dev` (100 examples, default locally), `ci` (50 examples, fixed seed; default when `CI` is set, so PR runs are deterministic), and `nightly` (2000 examples, random; used by `just fuzz` and the `fuzz-nightly` workflow — `fuzz-importers`, `fuzz-mcp`, and `fuzz-filters` cover their named property-test surfaces). `@given` tests are sync; call async code with `asyncio.run` inside the body.
+Three profiles are registered in each root's `conftest.py` and selected with `HYPOTHESIS_PROFILE`: `dev` (100 examples, default locally), `ci` (50 examples, fixed seed; default when `CI` is set, so PR runs are deterministic), and `nightly` (2000 examples, random; used by `just fuzz` and the `fuzz-nightly` workflow). The `just fuzz` aggregate runs `fuzz-importers`, `fuzz-evaluators`, `fuzz-api-models`, `fuzz-mcp`, `fuzz-adapters`, `fuzz-filters`, and `fuzz-api`. `@given` tests are sync; call async code with `asyncio.run` inside the body.
 
-Known bugs are pinned with `@pytest.mark.xfail(strict=True, reason="<issue>")` example tests, and the generators exclude the matching input class with a comment naming the same issue. Fixing the bug makes the xfail fail; remove the marker and the generator exclusion in the same PR. Failing examples are saved under `.hypothesis/examples` and replayed first on the next run.
+Known bugs are pinned with `@pytest.mark.xfail(strict=True, raises=..., reason="<issue>")` example tests, where `raises=` names the specific failure (a `pytest.RaisesExc` matcher when the exception type alone cannot tell it apart) so that a different failure still fails the run, and the generators exclude the matching input class with a comment naming the same issue. Fixing the bug makes the xfail fail; remove the marker and the generator exclusion in the same PR. Failing examples are saved under `.hypothesis/examples` and replayed first on the next run.
+
+Mark generated-input MCP tests with `mcp_fuzz`. PR CI runs those properties on Python 3.14 only; fixed MCP regression tests continue on every supported Python version. The nightly MCP fuzz job remains on Python 3.12.
+
+The CI profile omits Hypothesis's explanation phase only for the known-failing invalid-input MCP property. It still generates and shrinks examples; local and nightly profiles retain explanation.
 
 ## API fuzzing
 
@@ -57,3 +71,7 @@ The only assertion is that the server never answers 5xx. One database is shared 
 Known defects are listed in `KNOWN_FAILURES` keyed by method and path, with the issue number as the reason, and skip rather than mask everything behind them in the same operation. Delete an entry as part of closing its issue.
 
 `KITARU_FUZZ_MAX_EXAMPLES` sets depth (default 25) and `KITARU_FUZZ_RANDOM=1` turns off `derandomize` so a nightly explores fresh inputs; the default stays derandomized so a failure reproduces. `KITARU_FUZZ_CAPTURE` writes captured tracebacks to a JSONL file. Findings scale steeply with depth, so prefer nightly depth over a shallow gate.
+
+`tests/server/test_fuzz_api_sequences.py` gives each complete generated action list a fresh PostgreSQL database, application lifespan, and authenticated client. It records symbolic resource IDs and credential roles so a shrunk failure can be replayed without retaining database IDs or tokens. Schemathesis validates observed responses against the committed OpenAPI schema; ordinary Hypothesis action lists keep prerequisites valid and isolation explicit. Opt in with `just fuzz-api-sequences`, or pass smaller bounds such as `just fuzz-api-sequences 5 5` for a smoke run. The explicit suite fails rather than skips when PostgreSQL is unavailable.
+
+`tests/server/test_fuzz_task_lifecycle.py` generates authenticated task-attempt sequences in a fresh PostgreSQL database. It models legal transitions separately from deliberate stale-attempt and foreign-task credential checks, and drives recovery with the production task service at a synthetic future time. Opt in with `just fuzz-task-lifecycle`, or pass smaller bounds such as `just fuzz-task-lifecycle 5 5` for a smoke run. The explicit suite fails rather than skips when PostgreSQL is unavailable.

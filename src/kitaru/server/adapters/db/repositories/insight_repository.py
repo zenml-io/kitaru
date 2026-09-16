@@ -29,7 +29,7 @@ from kitaru.server.adapters.db.orm.insight import (
     INSIGHT_TASK_ID_FOREIGN_KEY,
     InsightORM,
 )
-from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.insight import InsightFilter
 from kitaru.server.domain.agent import AgentNotFound
@@ -146,7 +146,10 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
                 )
             )
         rows, next_cursor = await paginate(
-            self._session, statement, insight_filter, id_column=InsightORM.id
+            self._session,
+            statement,
+            insight_filter,
+            IdOrder(InsightORM.id, insight_filter.sort),
         )
         return [row.to_domain() for row in rows], next_cursor
 

@@ -20,6 +20,7 @@
 import json
 from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
+from contextlib import aclosing
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -742,8 +743,9 @@ class PhoenixTraceImporter:
         """Fetch parser payloads from the Phoenix API."""
         from .api import fetch
 
-        async for payload in fetch(query):
-            yield payload
+        async with aclosing(fetch(query)) as payloads:
+            async for payload in payloads:
+                yield payload
 
 
 importer = PhoenixTraceImporter()

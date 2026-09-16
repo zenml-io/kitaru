@@ -86,12 +86,12 @@ describe("KitaruAgent", () => {
     const rootBatches = api.nodeBatches();
     expect(rootBatches[0]?.[0]).toMatchObject({
       name: "run",
-      index: 0,
+      external_id: "run",
       outputs: null,
       status: "in_progress",
     });
     expect(rootBatches.at(-1)?.[0]).toMatchObject({
-      index: rootBatches[0]?.[0]?.index,
+      external_id: "run",
       outputs: { finish_reason: null, step_count: 0, text: null },
       status: "completed",
     });
@@ -137,11 +137,29 @@ describe("KitaruAgent", () => {
         structuredOutput: { model: "internal-model", schema: {} },
       } as never),
     ).rejects.toThrow(
-      "Kitaru cannot record Mastra structuredOutput.model because Mastra does not expose the internal model call to adapter instrumentation",
+      "Kitaru structuredOutput.model requires an agent with the public getModel() method",
     );
 
     expect(agent.calls).toHaveLength(0);
     expect(api.calls).toHaveLength(0);
+  });
+
+  it("records schema-only structured output supplied through agent defaults", async () => {
+    const api = installTestApi();
+    const expected = { object: { answer: "yes" }, steps: [] };
+    const agent = Object.assign(new FakeAgent(async () => expected), {
+      getDefaultOptions: () => ({ structuredOutput: { schema: {} } }),
+    });
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "requested-model",
+    });
+
+    expect(await recorded.generate("hello")).toBe(expected);
+    expect(api.nodeBatches().at(-1)?.[0]).toMatchObject({
+      outputs: { object: { answer: "yes" } },
+    });
   });
 
   it("composes caller tool hooks outside replay", async () => {

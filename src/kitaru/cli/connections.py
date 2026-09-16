@@ -37,6 +37,7 @@ async def create_connection(
     *,
     importer: str | None,
     analyzer: str | None = None,
+    evaluator: str | None = None,
     provider: str | None,
     values: list[str] | None,
     secret_values: list[str] | None,
@@ -47,21 +48,29 @@ async def create_connection(
     secret_prompt: Callable[[str], str] = getpass.getpass,
 ) -> CommandResult:
     """Create a connection from a schema prompt or from direct values."""
-    sources = [value for value in (importer, analyzer, provider) if value is not None]
+    sources = [
+        value
+        for value in (importer, analyzer, evaluator, provider)
+        if value is not None
+    ]
     if len(sources) != 1:
         raise CLIError(
             "invalid_arguments",
-            "Provide exactly one of --importer, --analyzer, or --provider.",
+            "Provide exactly one of --importer, --analyzer, --evaluator, or "
+            "--provider.",
         )
     env = parse_env(values or [])
     secrets = parse_env(secret_values or [])
-    if importer is None and analyzer is None:
+    if importer is None and analyzer is None and evaluator is None:
         assert provider is not None
         resolved_provider = provider
     else:
-        kind = "Importer" if importer is not None else "Analyzer"
-        resource = client.importers if importer is not None else client.analyzers
-        reference = importer if importer is not None else analyzer
+        if importer is not None:
+            kind, resource, reference = "Importer", client.importers, importer
+        elif analyzer is not None:
+            kind, resource, reference = "Analyzer", client.analyzers, analyzer
+        else:
+            kind, resource, reference = "Evaluator", client.evaluators, evaluator
         assert reference is not None
         parent = await resolve_asset(resource, reference, kind)
         if parent.provider is None:

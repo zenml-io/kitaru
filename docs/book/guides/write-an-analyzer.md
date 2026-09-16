@@ -79,7 +79,7 @@ The analyzer runs once the import finishes, as one task over every session the i
 
 ```python
 from kitaru.api_models.v1.imports import ImportCreateRequest
-from kitaru.api_models.v1.replay_config import AnalyzerConfig
+from kitaru.api_models.v1.plugin import AnalyzerConfig
 
 created_import = await client.imports.create(
     ImportCreateRequest(

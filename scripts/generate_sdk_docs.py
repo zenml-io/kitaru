@@ -68,6 +68,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "KitaruAPIClient",
                 "KitaruClient",
                 "KitaruSyncClient",
+                "AgentRegistrationResult",
                 "ClientConfig",
                 "load_config",
                 "save_config",
@@ -88,6 +89,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "device_login",
                 "DeviceLoginError",
                 "KitaruClientError",
+                "AgentRegistrationError",
                 "APIError",
                 "AuthenticationError",
                 "AuthorizationError",
@@ -125,6 +127,9 @@ PUBLIC_API: dict[str, ModuleSpec] = {
     "kitaru.task": ModuleSpec(
         symbols=frozenset({"get_task_id", "get_task_inputs"}),
     ),
+    "kitaru.json_pointer": ModuleSpec(
+        symbols=frozenset({"resolve_json_pointer"}),
+    ),
     # Container entries: kitaru.api_models and kitaru.api_models.v1 define no
     # developer-facing symbols themselves, but the attach step in
     # build_public_api requires every published module's parent to be
@@ -159,6 +164,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "SessionNodeListParams",
                 "SessionNodeResponse",
                 "SessionWithNodesResponse",
+                "NodeLink",
                 "NodeType",
                 "NodeStatus",
             }
@@ -194,8 +200,6 @@ PUBLIC_API: dict[str, ModuleSpec] = {
     "kitaru.api_models.v1.replay_config": ModuleSpec(
         symbols=frozenset(
             {
-                "EvaluatorConfig",
-                "AnalyzerConfig",
                 "HistoryConfig",
                 "PassthroughConfig",
                 "StaticConfig",
@@ -208,6 +212,9 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "StaticMatchMode",
             }
         ),
+    ),
+    "kitaru.api_models.v1.plugin": ModuleSpec(
+        symbols=frozenset({"EvaluatorConfig", "AnalyzerConfig"}),
     ),
     "kitaru.api_models.v1.job": ModuleSpec(
         symbols=frozenset(
@@ -421,6 +428,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "FetchingImporter",
                 "Importer",
                 "gather_bounded",
+                "stream_bounded",
                 "retry_rate_limited",
                 "call_parser",
                 "call_fetcher",

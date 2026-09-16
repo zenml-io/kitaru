@@ -171,11 +171,18 @@ class TaskSpecBuilder:
         """
         plugin_version = await self._plugins.get_version_by_id(task.plugin_version_id)
         plugin = await self._plugins.get(plugin_version.plugin_id)
+        try:
+            env, secret_env = await self._get_connection_env(
+                task.connection_id, task.env
+            )
+        except ConnectionNotFound:
+            env, secret_env = task.env, {}
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.EVALUATOR,
             timeout_seconds=self._policy.evaluator_timeout_seconds,
-            env=task.env,
+            env=env,
+            secret_env=secret_env,
             details=EvaluationTaskDetails(
                 evaluator_name=plugin.name,
                 params=task.params,

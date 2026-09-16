@@ -20,7 +20,7 @@ from typing import Any, ClassVar, NamedTuple
 from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayStatus
 from kitaru.api_models.v1.session_node import NodeStatus
 from kitaru.base import FrozenModel
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.base import ListFilter
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig, ReplayOverride, ToolPolicy

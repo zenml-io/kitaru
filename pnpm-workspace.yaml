@@ -4,3 +4,4 @@ packages:
   - examples/typescript/mastra_support_triage
   - examples/typescript/vercel_ai_support_triage
   - examples/typescript/mastra_adaptive_conversation
+  - examples/typescript/vercel_ai_ticket_resolver

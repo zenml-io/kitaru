@@ -35,6 +35,7 @@ EXPECTED_UNITS = {
     "langgraph": "kitaru-langgraph",
     "logfire-importer": "kitaru-logfire-importer",
     "langsmith-importer": "kitaru-langsmith-importer",
+    "mastra-importer": "kitaru-mastra-importer",
     "openai-agents": "kitaru-openai-agents",
     "phoenix-importer": "kitaru-phoenix-importer",
     "post-import-insights": "kitaru-post-import-insights",
@@ -140,13 +141,13 @@ def test_default_requirements_are_derived_from_release_units() -> None:
     inventory = load_inventory()
     assert set(default_requirements(inventory).values()) == {
         "kitaru-post-import-insights==0.1.0",
-        "kitaru-braintrust-importer==0.2.0",
+        "kitaru-braintrust-importer==0.3.0",
         "kitaru-evaluator==0.1.3",
-        "kitaru-jsonl-importer==0.1.1",
-        "kitaru-langfuse-importer==0.2.0",
-        "kitaru-langsmith-importer==0.2.0",
-        "kitaru-logfire-importer==0.2.0",
-        "kitaru-phoenix-importer==0.2.0",
+        "kitaru-jsonl-importer==0.1.2",
+        "kitaru-langfuse-importer==0.3.0",
+        "kitaru-langsmith-importer==0.3.0",
+        "kitaru-logfire-importer==0.3.0",
+        "kitaru-phoenix-importer==0.3.0",
     }
 
 
@@ -586,10 +587,10 @@ def test_inventory_rejects_an_adapter_in_the_default_catalog(
     ("old", "new"),
     [
         (
-            'requirement="kitaru-langfuse-importer==0.2.0"',
+            'requirement="kitaru-langfuse-importer==0.3.0"',
             'requirement="kitaru-langfuse-importer==0.1.1"',
         ),
-        ('display_version="0.2.0"', 'display_version="0.1.1"'),
+        ('display_version="0.3.0"', 'display_version="0.1.1"'),
     ],
 )
 def test_inventory_rejects_stale_server_default_versions(
@@ -600,7 +601,7 @@ def test_inventory_rejects_stale_server_default_versions(
 
     with pytest.raises(
         ReleaseInventoryError,
-        match=r"server default requirement and display version must match 0\.2\.0",
+        match=r"server default requirement and display version must match 0\.3\.0",
     ):
         load_inventory(release_repo)
 
@@ -623,7 +624,7 @@ def test_plugin_matrix_is_generated_from_the_plugin_units_in_three_shards() -> N
 
     shards = matrix["include"]
     assert [shard["shard"] for shard in shards] == ["1/3", "2/3", "3/3"]
-    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [4, 4, 4]
+    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [5, 4, 4]
     assert [
         package_path
         for shard in shards
@@ -868,7 +869,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 13 release units."),
+        (["validate"], "Validated 14 release units."),
         (
             [
                 "propose-core-version",

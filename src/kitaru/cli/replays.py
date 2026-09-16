@@ -27,6 +27,7 @@ async def create_replay(
     *,
     evaluators: Sequence[str],
     evaluator_params: Sequence[str] | None,
+    evaluator_connections: Sequence[str] | None = None,
     agent: str | None,
     override: str | None,
     tool_policy: str | None,
@@ -43,7 +44,7 @@ async def create_replay(
     if tool_policy is not None:
         fields["tool_policy"] = parse_tool_policy(tool_policy, option="--tool-policy")
     configs, _, _ = await resolve_evaluator_configs(
-        client, evaluators, evaluator_params or []
+        client, evaluators, evaluator_params or [], evaluator_connections or []
     )
     fields["evaluators"] = configs
     fields["baseline_evaluation_mode"] = baseline_evaluation_mode

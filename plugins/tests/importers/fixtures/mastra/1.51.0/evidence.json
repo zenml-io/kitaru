@@ -1,0 +1,131 @@
+{
+  "executed": [
+    {
+      "value": 3,
+      "label": "defaulted"
+    }
+  ],
+  "prompts": [
+    [
+      {
+        "role": "system",
+        "content": "Answer arithmetic questions using the double tool."
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Double 3.",
+            "providerOptions": {
+              "mastra": {
+                "createdAt": 1788976524028
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "role": "system",
+        "content": "Answer arithmetic questions using the double tool."
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Double 3.",
+            "providerOptions": {
+              "mastra": {
+                "createdAt": 1788976524028
+              }
+            }
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool-call",
+            "toolCallId": "call-double",
+            "toolName": "double",
+            "input": {
+              "value": "3"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": [
+          {
+            "type": "tool-result",
+            "toolCallId": "call-double",
+            "toolName": "double",
+            "output": {
+              "type": "json",
+              "value": {
+                "doubled": 6,
+                "label": "defaulted"
+              }
+            },
+            "input": {
+              "value": "3"
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "role": "system",
+        "content": "Answer arithmetic questions using the double tool."
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Double 3.",
+            "providerOptions": {
+              "mastra": {
+                "createdAt": 1788976524062
+              }
+            }
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "The result is 6.",
+            "providerOptions": {
+              "mastra": {
+                "createdAt": 1788976524062
+              }
+            }
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "What was the previous result?",
+            "providerOptions": {
+              "mastra": {
+                "createdAt": 1788976524062
+              }
+            }
+          }
+        ]
+      }
+    ]
+  ]
+}

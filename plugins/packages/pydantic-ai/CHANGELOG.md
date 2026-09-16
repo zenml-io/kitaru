@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Support PydanticAI 2.41 through 2.43 in addition to the existing 2.14 through 2.40 minor lines.
+- Emit `reasoning_selectors` pointing at every `ThinkingPart` in node outputs instead of extracted `reasoning` text.
+
+### Release context
+
+- Requires the unreleased session node `reasoning_selectors` field in core from [PR #1078](https://github.com/zenml-io/kitaru/pull/1078). Replace `kitaru==0.26.0+dev` with the selected compatible published core version before releasing.
+
+## 0.2.1 - 2026-09-10
+
 - Support PydanticAI 2.37 through 2.40 in addition to the existing 2.14 through 2.36 minor lines.
 
 ## 0.2.0

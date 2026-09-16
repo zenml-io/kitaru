@@ -44,8 +44,8 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.api.run_cancellation import get_run_canceler
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.experiment import ExperimentCreate
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.replay import ReplayStatusCounts
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )

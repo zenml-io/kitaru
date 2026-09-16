@@ -14,11 +14,15 @@
 """Job use cases and the job-and-task composition the command endpoints run."""
 
 import uuid
+from datetime import datetime
 
 from kitaru.api_models.v1.job import JobKind
 from kitaru.api_models.v1.task import TaskOnFailure
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
+)
+from kitaru.server.application.interfaces.connection_repository import (
+    ConnectionRepository,
 )
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
@@ -35,9 +39,7 @@ from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
-from kitaru.server.application.services.plugin_resolution import (
-    get_plugin_task_labels,
-)
+from kitaru.server.application.services.plugin_resolution import get_plugin_task_labels
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import Job, JobAlreadySettled, JobNotSettled
@@ -127,6 +129,7 @@ class JobService:
         session_repository: SessionRepository,
         agent_version_repository: AgentVersionRepository,
         plugin_repository: PluginRepository,
+        connection_repository: ConnectionRepository,
         transitions: TaskTransitions,
         policy: TaskPolicy,
     ) -> None:
@@ -138,6 +141,8 @@ class JobService:
             session_repository: Session repository.
             agent_version_repository: Agent version repository.
             plugin_repository: Plugin repository, for evaluator resolution.
+            connection_repository: Connection repository, for evaluator
+                resolution.
             transitions: Task transition dispatch.
             policy: Task execution policy.
         """
@@ -146,6 +151,7 @@ class JobService:
         self._sessions = session_repository
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
+        self._connections = connection_repository
         self._transitions = transitions
         self._policy = policy
 
@@ -224,6 +230,40 @@ class JobService:
         if job.settled:
             raise JobAlreadySettled(job_id)
         return await self._transitions.cancel_job(job_id)
+
+    async def list_expired_pending_job_ids(self, cutoff: datetime) -> list[uuid.UUID]:
+        """Read the ids of pending jobs created before a cutoff.
+
+        Takes no lock.
+
+        Args:
+            cutoff: Bound the job's creation must be older than.
+
+        Returns:
+            Ids of the expired pending jobs in ascending order.
+        """
+        return await self._repository.list_expired_pending_ids(
+            cutoff, self._policy.sweep_batch_limit
+        )
+
+    async def expire_pending_job(
+        self, job_id: uuid.UUID, cutoff: datetime, error: str, now: datetime
+    ) -> None:
+        """Cancel one pending job's tasks and settle it if still unclaimed.
+
+        Locks the job's live task rows, then its job row. A job a worker
+        claimed, or one created after the cutoff, is left alone.
+
+        Args:
+            job_id: Id of the candidate job.
+            cutoff: Bound the job's creation must be older than.
+            error: Error the job settles with.
+            now: Current time.
+
+        Raises:
+            DBAPIError: Another transaction holds one of the task rows.
+        """
+        await self._transitions.expire_pending_job(job_id, cutoff, error, now)
 
     async def delete_job(self, job_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a settled job, cascading its tasks.
@@ -342,7 +382,11 @@ class JobService:
         if len(agent_ids) > 1:
             raise ValidationError("Input sessions must belong to a single agent")
         evaluators = await validate_evaluators(
-            command.evaluators, self._plugins, next(iter(agent_ids)), actor
+            command.evaluators,
+            self._plugins,
+            self._connections,
+            next(iter(agent_ids)),
+            actor,
         )
         job = await self.create_job(JobKind.EVALUATION, actor)
         # The job was just created in this call and cannot have settled yet, so
@@ -354,7 +398,12 @@ class JobService:
                         job_id=job.id,
                         plugin_version_id=evaluator.evaluator_version_id,
                         input_session_id=session_id,
-                        labels=get_plugin_task_labels(evaluator.evaluator),
+                        connection_id=evaluator.connection_id,
+                        labels=get_plugin_task_labels(
+                            evaluator.evaluator,
+                            evaluator.provider,
+                            evaluator.requires_credentials,
+                        ),
                         params=evaluator.params,
                         on_failure=TaskOnFailure.CONTINUE,
                     )

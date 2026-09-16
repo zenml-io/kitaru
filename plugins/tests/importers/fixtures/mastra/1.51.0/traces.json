@@ -1,0 +1,1012 @@
+[
+  {
+    "traceId": "00000000000000000000000000000001",
+    "spans": [
+      {
+        "traceId": "00000000000000000000000000000001",
+        "spanId": "59f84016b9dee733",
+        "parentSpanId": null,
+        "name": "agent run: 'fixture-agent'",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "agent_run",
+        "attributes": {
+          "conversationId": "fixture-thread",
+          "instructions": "Answer arithmetic questions using the double tool.",
+          "availableTools": [
+            "double"
+          ]
+        },
+        "metadata": {
+          "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread"
+        },
+        "tags": null,
+        "links": null,
+        "input": [
+          {
+            "role": "user",
+            "content": "Double 3."
+          }
+        ],
+        "output": {
+          "text": "The result is 6.",
+          "files": []
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.024Z",
+        "endedAt": "2026-09-09T17:55:24.054Z",
+        "createdAt": "2026-09-09T17:55:24.060Z",
+        "updatedAt": "2026-09-09T17:55:24.061Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000001",
+        "spanId": "c7a4699a029d6331",
+        "parentSpanId": "59f84016b9dee733",
+        "name": "llm: 'fixture-model'",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_generation",
+        "attributes": {
+          "model": "fixture-model",
+          "provider": "fixture",
+          "streaming": true,
+          "parameters": {
+            "maxRetries": 0
+          },
+          "finishReason": "stop",
+          "responseModel": "",
+          "completionStartTime": "2026-09-09T17:55:24.042Z",
+          "usage": {
+            "inputTokens": 41,
+            "outputTokens": 11,
+            "inputDetails": {
+              "text": 41
+            },
+            "outputDetails": {
+              "text": 11
+            }
+          }
+        },
+        "metadata": {
+          "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread"
+        },
+        "tags": null,
+        "links": null,
+        "input": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Answer arithmetic questions using the double tool."
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Double 3.",
+                  "providerOptions": {
+                    "mastra": {
+                      "createdAt": 1788976524028
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "files": [],
+          "reasoning": [],
+          "sources": [],
+          "text": "The result is 6.",
+          "warnings": []
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.032Z",
+        "endedAt": "2026-09-09T17:55:24.053Z",
+        "createdAt": "2026-09-09T17:55:24.060Z",
+        "updatedAt": "2026-09-09T17:55:24.061Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000001",
+        "spanId": "7d7b77b3ba862df1",
+        "parentSpanId": "c7a4699a029d6331",
+        "name": "step: 0",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_step",
+        "attributes": {
+          "stepIndex": 0,
+          "messageId": "ee42aa46-d646-4c74-8a20-850cb1d57bb7",
+          "usage": {
+            "inputTokens": 20,
+            "outputTokens": 5,
+            "inputDetails": {
+              "text": 20
+            },
+            "outputDetails": {
+              "text": 5
+            }
+          },
+          "isContinued": true,
+          "finishReason": "tool-calls",
+          "warnings": []
+        },
+        "metadata": {
+          "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread",
+          "modelMetadata": {
+            "modelId": "fixture-model",
+            "modelVersion": "v2",
+            "modelProvider": "fixture"
+          }
+        },
+        "tags": null,
+        "links": null,
+        "input": [
+          {
+            "role": "system",
+            "content": "Answer arithmetic questions using the double tool."
+          },
+          {
+            "role": "user",
+            "content": "Double 3."
+          }
+        ],
+        "output": {
+          "text": "",
+          "toolCalls": [
+            {
+              "toolCallId": "call-double",
+              "toolName": "double",
+              "args": {
+                "value": "3"
+              }
+            }
+          ]
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.037Z",
+        "endedAt": "2026-09-09T17:55:24.049Z",
+        "createdAt": "2026-09-09T17:55:24.060Z",
+        "updatedAt": "2026-09-09T17:55:24.061Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000001",
+        "spanId": "fa4cda755674dbad",
+        "parentSpanId": "7d7b77b3ba862df1",
+        "name": "inference: 0",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_inference",
+        "attributes": {
+          "stepIndex": 0,
+          "model": "fixture-model",
+          "provider": "fixture",
+          "streaming": true,
+          "parameters": {
+            "maxRetries": 0
+          },
+          "availableTools": [
+            "double"
+          ],
+          "toolChoice": "auto",
+          "usage": {
+            "inputTokens": 20,
+            "outputTokens": 5,
+            "inputDetails": {
+              "text": 20
+            },
+            "outputDetails": {
+              "text": 5
+            }
+          },
+          "finishReason": "tool-calls",
+          "warnings": [],
+          "completionStartTime": "2026-09-09T17:55:24.042Z"
+        },
+        "metadata": {
+          "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread"
+        },
+        "tags": null,
+        "links": null,
+        "output": {
+          "text": "",
+          "toolCalls": [
+            {
+              "toolCallId": "call-double",
+              "toolName": "double",
+              "args": {
+                "value": "3"
+              }
+            }
+          ]
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.039Z",
+        "endedAt": "2026-09-09T17:55:24.049Z",
+        "createdAt": "2026-09-09T17:55:24.060Z",
+        "updatedAt": "2026-09-09T17:55:24.061Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000001",
+        "spanId": "96e2f53d10d958be",
+        "parentSpanId": "fa4cda755674dbad",
+        "name": "chunk: 'tool-call'",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_chunk",
+        "attributes": {
+          "chunkType": "tool-call",
+          "sequenceNumber": 0
+        },
+        "metadata": {
+          "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread"
+        },
+        "tags": null,
+        "links": null,
+        "output": {
+          "toolName": "double",
+          "toolCallId": "call-double",
+          "toolInput": {
+            "value": "3"
+          }
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.041Z",
+        "endedAt": "2026-09-09T17:55:24.042Z",
+        "createdAt": "2026-09-09T17:55:24.060Z",
+        "updatedAt": "2026-09-09T17:55:24.061Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000001",
+        "spanId": "a38d9aee5e95ce2c",
+        "parentSpanId": "7d7b77b3ba862df1",
+        "name": "tool: 'double'",
+        "entityType": "tool",
+        "entityId": "double",
+        "entityName": "double",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "tool_call",
+        "attributes": {
+          "toolDescription": "Double a number",
+          "toolType": "tool",
+          "success": true
+        },
+        "metadata": {
+          "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread"
+        },
+        "tags": null,
+        "links": null,
+        "input": {
+          "value": "3"
+        },
+        "output": {
+          "doubled": 6,
+          "label": "defaulted"
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.045Z",
+        "endedAt": "2026-09-09T17:55:24.046Z",
+        "createdAt": "2026-09-09T17:55:24.060Z",
+        "updatedAt": "2026-09-09T17:55:24.061Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000001",
+        "spanId": "3080f372d809b679",
+        "parentSpanId": "fa4cda755674dbad",
+        "name": "chunk: 'tool-result'",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_chunk",
+        "attributes": {
+          "chunkType": "tool-result",
+          "sequenceNumber": 1
+        },
+        "metadata": {
+          "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread",
+          "toolCallId": "call-double",
+          "toolName": "double"
+        },
+        "tags": null,
+        "links": null,
+        "input": null,
+        "output": null,
+        "error": null,
+        "isEvent": true,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.047Z",
+        "endedAt": null,
+        "createdAt": "2026-09-09T17:55:24.060Z",
+        "updatedAt": "2026-09-09T17:55:24.060Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000001",
+        "spanId": "7abe2a6e162936e6",
+        "parentSpanId": "c7a4699a029d6331",
+        "name": "step: 1",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_step",
+        "attributes": {
+          "stepIndex": 1,
+          "messageId": "ee42aa46-d646-4c74-8a20-850cb1d57bb7",
+          "usage": {
+            "inputTokens": 21,
+            "outputTokens": 6,
+            "inputDetails": {
+              "text": 21
+            },
+            "outputDetails": {
+              "text": 6
+            }
+          },
+          "isContinued": false,
+          "finishReason": "stop",
+          "warnings": []
+        },
+        "metadata": {
+          "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread",
+          "modelMetadata": {
+            "modelId": "fixture-model",
+            "modelVersion": "v2",
+            "modelProvider": "fixture"
+          }
+        },
+        "tags": null,
+        "links": null,
+        "input": [
+          {
+            "role": "system",
+            "content": "Answer arithmetic questions using the double tool."
+          },
+          {
+            "role": "user",
+            "content": "Double 3."
+          },
+          {
+            "role": "assistant",
+            "content": "[tool: double]"
+          },
+          {
+            "role": "tool",
+            "content": "[tool-result: double]"
+          }
+        ],
+        "output": {
+          "text": "The result is 6.",
+          "toolCalls": []
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.050Z",
+        "endedAt": "2026-09-09T17:55:24.053Z",
+        "createdAt": "2026-09-09T17:55:24.060Z",
+        "updatedAt": "2026-09-09T17:55:24.061Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000001",
+        "spanId": "7f8e75928cd5f7fb",
+        "parentSpanId": "7abe2a6e162936e6",
+        "name": "inference: 1",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_inference",
+        "attributes": {
+          "stepIndex": 1,
+          "model": "fixture-model",
+          "provider": "fixture",
+          "streaming": true,
+          "parameters": {
+            "maxRetries": 0
+          },
+          "availableTools": [
+            "double"
+          ],
+          "toolChoice": "auto",
+          "usage": {
+            "inputTokens": 21,
+            "outputTokens": 6,
+            "inputDetails": {
+              "text": 21
+            },
+            "outputDetails": {
+              "text": 6
+            }
+          },
+          "finishReason": "stop",
+          "warnings": [],
+          "completionStartTime": "2026-09-09T17:55:24.042Z"
+        },
+        "metadata": {
+          "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread"
+        },
+        "tags": null,
+        "links": null,
+        "output": {
+          "text": "The result is 6.",
+          "toolCalls": []
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.051Z",
+        "endedAt": "2026-09-09T17:55:24.053Z",
+        "createdAt": "2026-09-09T17:55:24.060Z",
+        "updatedAt": "2026-09-09T17:55:24.061Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000001",
+        "spanId": "b3c20c5e47411797",
+        "parentSpanId": "7f8e75928cd5f7fb",
+        "name": "chunk: 'text'",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_chunk",
+        "attributes": {
+          "chunkType": "text",
+          "sequenceNumber": 0
+        },
+        "metadata": {
+          "runId": "2577dbf0-ad98-41b8-b71c-992f1082712e",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread"
+        },
+        "tags": null,
+        "links": null,
+        "output": {
+          "text": "The result is 6."
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.051Z",
+        "endedAt": "2026-09-09T17:55:24.051Z",
+        "createdAt": "2026-09-09T17:55:24.060Z",
+        "updatedAt": "2026-09-09T17:55:24.061Z"
+      }
+    ]
+  },
+  {
+    "traceId": "00000000000000000000000000000002",
+    "spans": [
+      {
+        "traceId": "00000000000000000000000000000002",
+        "spanId": "69f90012dd2555d3",
+        "parentSpanId": null,
+        "name": "agent run: 'fixture-agent'",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "f8ecc6cb-858b-4f3c-8de2-d9955e8119ac",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "agent_run",
+        "attributes": {
+          "conversationId": "fixture-thread",
+          "instructions": "Answer arithmetic questions using the double tool.",
+          "availableTools": [
+            "double"
+          ]
+        },
+        "metadata": {
+          "runId": "f8ecc6cb-858b-4f3c-8de2-d9955e8119ac",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread"
+        },
+        "tags": null,
+        "links": null,
+        "input": [
+          {
+            "role": "user",
+            "content": "Double 3."
+          },
+          {
+            "role": "assistant",
+            "content": "The result is 6."
+          },
+          {
+            "role": "user",
+            "content": "What was the previous result?"
+          }
+        ],
+        "output": {
+          "text": "The previous result was 6.",
+          "files": []
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.061Z",
+        "endedAt": "2026-09-09T17:55:24.065Z",
+        "createdAt": "2026-09-09T17:55:24.065Z",
+        "updatedAt": "2026-09-09T17:55:24.065Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000002",
+        "spanId": "7c6134f6058d4860",
+        "parentSpanId": "69f90012dd2555d3",
+        "name": "llm: 'fixture-model'",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "f8ecc6cb-858b-4f3c-8de2-d9955e8119ac",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_generation",
+        "attributes": {
+          "model": "fixture-model",
+          "provider": "fixture",
+          "streaming": true,
+          "parameters": {
+            "maxRetries": 0
+          },
+          "finishReason": "stop",
+          "responseModel": "",
+          "completionStartTime": "2026-09-09T17:55:24.064Z",
+          "usage": {
+            "inputTokens": 22,
+            "outputTokens": 7,
+            "inputDetails": {
+              "text": 22
+            },
+            "outputDetails": {
+              "text": 7
+            }
+          }
+        },
+        "metadata": {
+          "runId": "f8ecc6cb-858b-4f3c-8de2-d9955e8119ac",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread"
+        },
+        "tags": null,
+        "links": null,
+        "input": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Answer arithmetic questions using the double tool."
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Double 3.",
+                  "providerOptions": {
+                    "mastra": {
+                      "createdAt": 1788976524062
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The result is 6.",
+                  "providerOptions": {
+                    "mastra": {
+                      "createdAt": 1788976524062
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "What was the previous result?",
+                  "providerOptions": {
+                    "mastra": {
+                      "createdAt": 1788976524062
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "files": [],
+          "reasoning": [],
+          "sources": [],
+          "text": "The previous result was 6.",
+          "warnings": []
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.062Z",
+        "endedAt": "2026-09-09T17:55:24.065Z",
+        "createdAt": "2026-09-09T17:55:24.065Z",
+        "updatedAt": "2026-09-09T17:55:24.065Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000002",
+        "spanId": "9de68c87f661643f",
+        "parentSpanId": "7c6134f6058d4860",
+        "name": "step: 0",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "f8ecc6cb-858b-4f3c-8de2-d9955e8119ac",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_step",
+        "attributes": {
+          "stepIndex": 0,
+          "messageId": "b39e9b21-06c2-43e1-afe1-f1cc31c7d56e",
+          "usage": {
+            "inputTokens": 22,
+            "outputTokens": 7,
+            "inputDetails": {
+              "text": 22
+            },
+            "outputDetails": {
+              "text": 7
+            }
+          },
+          "isContinued": false,
+          "finishReason": "stop",
+          "warnings": []
+        },
+        "metadata": {
+          "runId": "f8ecc6cb-858b-4f3c-8de2-d9955e8119ac",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread",
+          "modelMetadata": {
+            "modelId": "fixture-model",
+            "modelVersion": "v2",
+            "modelProvider": "fixture"
+          }
+        },
+        "tags": null,
+        "links": null,
+        "input": [
+          {
+            "role": "system",
+            "content": "Answer arithmetic questions using the double tool."
+          },
+          {
+            "role": "user",
+            "content": "Double 3."
+          },
+          {
+            "role": "assistant",
+            "content": "The result is 6."
+          },
+          {
+            "role": "user",
+            "content": "What was the previous result?"
+          }
+        ],
+        "output": {
+          "text": "The previous result was 6.",
+          "toolCalls": []
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.063Z",
+        "endedAt": "2026-09-09T17:55:24.064Z",
+        "createdAt": "2026-09-09T17:55:24.065Z",
+        "updatedAt": "2026-09-09T17:55:24.065Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000002",
+        "spanId": "14170be84e0431e7",
+        "parentSpanId": "9de68c87f661643f",
+        "name": "inference: 0",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "f8ecc6cb-858b-4f3c-8de2-d9955e8119ac",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_inference",
+        "attributes": {
+          "stepIndex": 0,
+          "model": "fixture-model",
+          "provider": "fixture",
+          "streaming": true,
+          "parameters": {
+            "maxRetries": 0
+          },
+          "availableTools": [
+            "double"
+          ],
+          "toolChoice": "auto",
+          "usage": {
+            "inputTokens": 22,
+            "outputTokens": 7,
+            "inputDetails": {
+              "text": 22
+            },
+            "outputDetails": {
+              "text": 7
+            }
+          },
+          "finishReason": "stop",
+          "warnings": [],
+          "completionStartTime": "2026-09-09T17:55:24.064Z"
+        },
+        "metadata": {
+          "runId": "f8ecc6cb-858b-4f3c-8de2-d9955e8119ac",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread"
+        },
+        "tags": null,
+        "links": null,
+        "output": {
+          "text": "The previous result was 6.",
+          "toolCalls": []
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.063Z",
+        "endedAt": "2026-09-09T17:55:24.064Z",
+        "createdAt": "2026-09-09T17:55:24.065Z",
+        "updatedAt": "2026-09-09T17:55:24.065Z"
+      },
+      {
+        "traceId": "00000000000000000000000000000002",
+        "spanId": "86f00832aceb161e",
+        "parentSpanId": "14170be84e0431e7",
+        "name": "chunk: 'text'",
+        "entityType": "agent",
+        "entityId": "fixture-agent",
+        "entityName": "Fixture agent",
+        "entityVersionId": null,
+        "userId": null,
+        "organizationId": null,
+        "resourceId": "fixture-user",
+        "runId": "f8ecc6cb-858b-4f3c-8de2-d9955e8119ac",
+        "sessionId": null,
+        "threadId": "fixture-thread",
+        "requestId": null,
+        "environment": null,
+        "source": null,
+        "serviceName": null,
+        "scope": null,
+        "experimentId": null,
+        "spanType": "model_chunk",
+        "attributes": {
+          "chunkType": "text",
+          "sequenceNumber": 0
+        },
+        "metadata": {
+          "runId": "f8ecc6cb-858b-4f3c-8de2-d9955e8119ac",
+          "resourceId": "fixture-user",
+          "threadId": "fixture-thread"
+        },
+        "tags": null,
+        "links": null,
+        "output": {
+          "text": "The previous result was 6."
+        },
+        "error": null,
+        "isEvent": false,
+        "requestContext": null,
+        "startedAt": "2026-09-09T17:55:24.064Z",
+        "endedAt": "2026-09-09T17:55:24.064Z",
+        "createdAt": "2026-09-09T17:55:24.065Z",
+        "updatedAt": "2026-09-09T17:55:24.065Z"
+      }
+    ]
+  }
+]

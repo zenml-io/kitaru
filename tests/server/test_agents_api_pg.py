@@ -248,7 +248,7 @@ async def _setup_agent_subtree(client: httpx.AsyncClient) -> dict[str, Any]:
         json={
             "nodes": [
                 {
-                    "index": 0,
+                    "external_id": "n0",
                     "node_type": "llm_call",
                     "name": "call",
                     "status": "completed",

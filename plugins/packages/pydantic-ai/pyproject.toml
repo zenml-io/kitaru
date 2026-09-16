@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-pydantic-ai"
-version = "0.2.0"
+version = "0.2.1"
 description = "PydanticAI recording and replay adapter for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
@@ -26,12 +26,12 @@ classifiers = [
 keywords = ["ai-agents", "kitaru", "pydantic-ai", "recording", "replay"]
 dependencies = [
     "genai-prices>=0.1.1,<0.2",
-    "kitaru>=0.23.0",
-    "pydantic-ai-slim>=2.14.1,<2.41",
+    "kitaru==0.26.0+dev",
+    "pydantic-ai-slim>=2.14.1,<2.44",
 ]
 
 [project.optional-dependencies]
-openai = ["pydantic-ai-slim[openai]>=2.14.1,<2.41"]
+openai = ["pydantic-ai-slim[openai]>=2.14.1,<2.44"]
 
 [project.urls]
 Homepage = "https://kitaru.ai"

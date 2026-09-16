@@ -26,7 +26,6 @@ from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
 from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
-from kitaru.server.adapters.db.repositories.import_repository import SQLImportRepository
 from kitaru.server.adapters.db.repositories.insight_repository import (
     SQLInsightRepository,
 )
@@ -39,7 +38,6 @@ from kitaru.server.database.migrations.alembic import Alembic
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
-from kitaru.server.domain.imports import Import
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import (
     PackagePluginSource,
@@ -86,8 +84,17 @@ async def test_upgrade_backfills_imports_and_downgrade_preserves_insights() -> N
                 ),
                 display_version=None,
             )
-            import_ = await SQLImportRepository(session).create(
-                Import(owner_id=owner.id, agent_id=agent.id, fetch_query={})
+            import_id = uuid.uuid4()
+            # Seed the historical schema without newer ORM columns such as
+            # max_sessions, which was added after this migration.
+            await session.execute(
+                text(
+                    "INSERT INTO import (id, owner_id, agent_id, fetch_query, "
+                    "params, evaluators, analyzers, created, updated) VALUES "
+                    "(:id, :owner_id, :agent_id, '{}'::jsonb, '{}'::jsonb, "
+                    "'[]'::jsonb, '[]'::jsonb, now(), now())"
+                ),
+                {"id": import_id, "owner_id": owner.id, "agent_id": agent.id},
             )
             job = await SQLJobRepository(session).create(
                 Job(owner_id=owner.id, kind=JobKind.IMPORT)
@@ -98,7 +105,7 @@ async def test_upgrade_backfills_imports_and_downgrade_preserves_insights() -> N
                     job_id=job.id,
                     agent_id=agent.id,
                     plugin_version_id=version.id,
-                    import_id=import_.id,
+                    import_id=import_id,
                 )
             )
             orphaned_task = await tasks.create(
@@ -137,7 +144,7 @@ async def test_upgrade_backfills_imports_and_downgrade_preserves_insights() -> N
         await alembic.upgrade(IMPORT_PROVENANCE_REVISION)
         async with factory() as session:
             insights = SQLInsightRepository(session)
-            assert (await insights.get(insight_ids[0])).import_id == import_.id
+            assert (await insights.get(insight_ids[0])).import_id == import_id
             assert (await insights.get(insight_ids[1])).import_id is None
             assert (await insights.get(insight_ids[2])).import_id is None
             plugins = SQLPluginRepository(session)

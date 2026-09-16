@@ -39,7 +39,7 @@ from kitaru.server.application.models.experiment import (
     ExperimentFilter,
     ExperimentUpdate,
 )
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
@@ -798,6 +798,7 @@ async def test_create_experiment_tracks_experiment_created(
     service = ExperimentService(
         repository=services.experiments,
         plugin_repository=services.plugins,
+        connection_repository=services.connections,
         experiment_run_repository=services.experiment_runs,
         agent_repository=services.agents,
         cohort_version_repository=services.cohort_versions,

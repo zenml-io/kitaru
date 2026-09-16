@@ -44,7 +44,7 @@ from kitaru.server.application.models.imports import (
     ImportCreate,
     ImportFilter,
 )
-from kitaru.server.application.models.replay_config import (
+from kitaru.server.application.models.plugin import (
     AnalyzerConfigInput,
     EvaluatorConfigInput,
 )
@@ -945,13 +945,8 @@ async def test_analyze_import_skips_without_eligible_sessions(
     assert job.status is JobStatus.COMPLETED
     assert (await services.jobs.get(job.id)).status is JobStatus.COMPLETED
     (task,) = await _analysis_tasks(services, job.id)
-    assert task.status is TaskStatus.COMPLETED
-    assert task.result == {
-        "status": "skipped",
-        "reason": "insufficient_sessions",
-        "eligible_sessions": 0,
-        "min_sessions": 1,
-    }
+    assert task.status is TaskStatus.SKIPPED
+    assert task.result is None
 
 
 async def test_analyze_import_mixes_skipped_and_runnable_analyzers(
@@ -973,7 +968,7 @@ async def test_analyze_import_mixes_skipped_and_runnable_analyzers(
     assert job.status is JobStatus.PENDING
     tasks = await _analysis_tasks(services, job.id)
     assert len(tasks) == 2
-    assert {task.status for task in tasks} == {TaskStatus.COMPLETED, TaskStatus.PENDING}
+    assert {task.status for task in tasks} == {TaskStatus.SKIPPED, TaskStatus.PENDING}
     runnable = next(task for task in tasks if task.plugin_version_id == trends.id)
     assert runnable.status is TaskStatus.PENDING
     assert runnable.result is None

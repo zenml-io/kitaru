@@ -1,0 +1,114 @@
+{
+  "output": "Your secret code is ORBIT-47, and double 3 is 6.",
+  "providerCalls": 2,
+  "toolExecutions": 0,
+  "lookupCalls": 1,
+  "generatedOptionsChecked": true,
+  "apiRequests": [
+    {
+      "path": "/api/v1/replays/01a08768-87a2-74f1-98c6-d644e0928520",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/sessions",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/sessions/01a08768-8a6e-7ff2-9f0b-1ebb3a9b7ac3/nodes",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/replays/01a08768-87a2-74f1-98c6-d644e0928520/tool-lookup",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/sessions/01a08768-8a6e-7ff2-9f0b-1ebb3a9b7ac3/nodes",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/sessions/01a08768-8a6e-7ff2-9f0b-1ebb3a9b7ac3/nodes",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/sessions/01a08768-8a6e-7ff2-9f0b-1ebb3a9b7ac3/nodes",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/sessions/01a08768-8a6e-7ff2-9f0b-1ebb3a9b7ac3",
+      "method": "PATCH"
+    }
+  ],
+  "providerRequests": [
+    {
+      "path": "/v1/responses",
+      "model": "gpt-4.1-mini",
+      "input": [
+        {
+          "role": "system",
+          "content": "Use the prior conversation to recall the secret code. Call the double tool exactly once for the requested number. After the tool result, answer in one short sentence containing both the secret code and computed result. Never call the tool twice."
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "My secret code is ORBIT-47. Remember it for my next question."
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "What is my secret code, and what is double 3? Use the tool."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/responses",
+      "model": "gpt-4.1-mini",
+      "input": [
+        {
+          "role": "system",
+          "content": "Use the prior conversation to recall the secret code. Call the double tool exactly once for the requested number. After the tool result, answer in one short sentence containing both the secret code and computed result. Never call the tool twice."
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "My secret code is ORBIT-47. Remember it for my next question."
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "What is my secret code, and what is double 3? Use the tool."
+            }
+          ]
+        },
+        {
+          "type": "function_call",
+          "call_id": "call_T7O1UjCteBYTeW66PYKtd50P",
+          "name": "double",
+          "arguments": "{\"value\":3}"
+        },
+        {
+          "type": "function_call_output",
+          "call_id": "call_T7O1UjCteBYTeW66PYKtd50P",
+          "output": "{\"doubled\":6}"
+        }
+      ]
+    }
+  ],
+  "replayId": "01a08768-87a2-74f1-98c6-d644e0928520",
+  "model": "openai/gpt-4.1-mini",
+  "adapter": "62c3 compiled #1050 context contract",
+  "command": "node replay.mjs persisted-session.json API_URL REPLAY_ID"
+}

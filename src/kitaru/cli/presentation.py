@@ -346,7 +346,17 @@ _VIEWS: dict[str, HumanView] = {
     "importer.version.register": _build_view(
         "Importer version", (), _REGISTRATION_SECTIONS
     ),
-    "evaluator.list": _build_view("Evaluators", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "evaluator.list": _build_view(
+        "Evaluators",
+        (
+            _NAME,
+            HumanField("provider", "Provider"),
+            HumanField("latest_version", "Latest"),
+            _ID,
+            _CREATED,
+        ),
+        _ASSET_SECTIONS,
+    ),
     "evaluator.get": _build_view("Evaluator", _ASSET_FIELDS, _ASSET_SECTIONS),
     "evaluator.register": _build_view("Evaluator", (), _REGISTRATION_SECTIONS),
     "evaluator.version.list": _build_view(

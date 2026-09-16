@@ -1,4 +1,6 @@
 import { createRequire } from "node:module";
+import type { Agent } from "@mastra/core/agent";
+import type { MastraModelConfig } from "@mastra/core/llm";
 import { KitaruClient } from "@zenml-io/kitaru";
 import {
   boundedRecorderJson,
@@ -10,10 +12,18 @@ import {
   stripSystemMessages,
 } from "@zenml-io/kitaru/adapter";
 import {
+  createContextInput,
+  createContextProcessor,
+  hasMemoryOptions,
+  restoreConversationContext,
+  unsupportedContext,
+} from "./conversation-context.js";
+import {
   assertReplayToolCoverage,
   stripLiveMemoryOptions,
 } from "./replay-guards.js";
 import { type RecordedStep, recordStep } from "./step-recorder.js";
+import { prepareStructuredOutputModel } from "./structured-output-model.js";
 import { createToolHooks } from "./tool-policies.js";
 import type {
   GenerateCapable,
@@ -103,9 +113,47 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
     callerMessages: unknown,
     callerOptions: RuntimeGenerateOptions = {},
   ): Promise<unknown> {
-    if (structuredOutputUsesModel(callerOptions)) {
+    const startedAt = new Date().toISOString();
+    const defaults =
+      "getDefaultOptions" in this.#agent &&
+      typeof this.#agent.getDefaultOptions === "function"
+        ? ((await this.#agent.getDefaultOptions({
+            requestContext: callerOptions.requestContext,
+          })) as RuntimeGenerateOptions)
+        : {};
+    if (structuredOutputUsesModel(defaults)) {
       throw new TypeError(
-        "Kitaru cannot record Mastra structuredOutput.model because Mastra does not expose the internal model call to adapter instrumentation",
+        "Kitaru cannot record agent-default structuredOutput.model. Move the secondary model configuration to the per-run generate options.",
+      );
+    }
+    const hasSecondaryModel = structuredOutputUsesModel(callerOptions);
+    if (
+      hasSecondaryModel &&
+      (!("getModel" in this.#agent) ||
+        typeof this.#agent.getModel !== "function")
+    ) {
+      throw new TypeError(
+        "Kitaru structuredOutput.model requires an agent with the public getModel() method",
+      );
+    }
+    const structuredOutput = {
+      ...(isRecord(defaults.structuredOutput) ? defaults.structuredOutput : {}),
+      ...(isRecord(callerOptions.structuredOutput)
+        ? Object.fromEntries(
+            Object.entries(callerOptions.structuredOutput).filter(
+              ([, value]) => value !== undefined,
+            ),
+          )
+        : {}),
+    };
+    if (
+      hasSecondaryModel &&
+      (structuredOutput.useAgent === true ||
+        (structuredOutput.errorStrategy !== undefined &&
+          structuredOutput.errorStrategy !== "strict"))
+    ) {
+      throw new TypeError(
+        "Kitaru secondary structured output requires useAgent: false and errorStrategy: strict. Conversation-aware structuring and suppressed validation failures are unsupported.",
       );
     }
     const requestedModelId =
@@ -116,8 +164,34 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       client: this.#client,
       requestedModelId,
     });
-    let effectiveMessages = replay.effectiveRuntimeInput;
+    const needsContext =
+      hasMemoryOptions(callerOptions) || hasMemoryOptions(defaults);
+    const contextMessages = restoreConversationContext(replay.effectiveInput);
+    if (contextMessages && !replay.spec) {
+      throw new Error(
+        "A recorded Mastra conversation context can only be restored through a Kitaru replay. Start a replay for this session to keep live memory isolated.",
+      );
+    }
+    if (replay.spec && needsContext && contextMessages === undefined) {
+      throw unsupportedContext();
+    }
+    if (
+      contextMessages &&
+      (replay.override?.prompt != null ||
+        replay.override?.system_prompt != null)
+    ) {
+      throw new Error(
+        "Unsupported Mastra replay: prompt and system_prompt overrides cannot replace a recorded conversation context. Record a new invocation with the desired messages.",
+      );
+    }
+    let effectiveMessages = contextMessages ?? replay.effectiveRuntimeInput;
     const effectiveOptions: RuntimeGenerateOptions = { ...callerOptions };
+    if (contextMessages) {
+      // The snapshot includes both instructions and memory-generated system messages.
+      effectiveOptions.instructions = [];
+      effectiveOptions.system = [];
+      effectiveOptions.context = [];
+    }
     let replayAbortController: AbortController | undefined;
 
     if (replay.replacementModelId !== undefined) {
@@ -175,24 +249,88 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       effectiveOptions.modelSettings,
     );
 
-    const recorder = await RunRecorder.create({
-      adapterVersion: ADAPTER_VERSION,
-      agentId: this.#options.agentId,
-      agentVersionId: this.#options.agentVersionId,
-      client: this.#client,
-      effectiveInput: replay.effectiveInput,
-      effectiveModelSettings,
-      framework: "mastra",
-      name: this.#sessionName,
-      replayId: replay.replayId,
-      requestedModelId,
-      sessionIdFile: process.env.KITARU_SESSION_ID_FILE,
-      spec: replay.spec,
-    });
-    const state = recorder.state;
+    let recorder: RunRecorder | undefined;
+    let recordedInput =
+      needsContext && !replay.spec
+        ? createContextInput(replay.effectiveInput)
+        : replay.effectiveInput;
+    let recorderPromise: Promise<RunRecorder> | undefined;
+    const initializeRecorder = (): Promise<RunRecorder> => {
+      recorderPromise ??= (async () => {
+        recorder = await RunRecorder.create({
+          startedAt,
+          adapterVersion: ADAPTER_VERSION,
+          agentId: this.#options.agentId,
+          agentVersionId: this.#options.agentVersionId,
+          client: this.#client,
+          effectiveInput: recordedInput,
+          effectiveModelSettings,
+          framework: "mastra",
+          name: this.#sessionName,
+          replayId: replay.replayId,
+          requestedModelId,
+          sessionIdFile: process.env.KITARU_SESSION_ID_FILE,
+          spec: replay.spec,
+        });
+        await recorder.initialize();
+        return recorder;
+      })();
+      return recorderPromise;
+    };
+    const captureContext = needsContext && !replay.spec;
+    let secondaryFailure: Error | undefined;
+    if (hasSecondaryModel) {
+      const getModel = (
+        this.#agent as unknown as Pick<Agent, "getModel">
+      ).getModel.bind(this.#agent);
+      effectiveOptions.structuredOutput = {
+        ...structuredOutput,
+        model: await prepareStructuredOutputModel({
+          modelConfig: structuredOutput.model as MastraModelConfig,
+          resolveModel: (modelConfig) =>
+            getModel({
+              modelConfig,
+              requestContext: callerOptions.requestContext,
+            }),
+          getState: async () => (await initializeRecorder()).state,
+          costCalculator: this.#options.costCalculator,
+          onAttemptFinish: (error) => {
+            secondaryFailure = error;
+          },
+        }),
+      };
+    }
+    if (captureContext) {
+      const configuredProcessors =
+        callerOptions.inputProcessors ??
+        defaults.inputProcessors ??
+        ("listConfiguredInputProcessors" in this.#agent &&
+        typeof this.#agent.listConfiguredInputProcessors === "function"
+          ? await this.#agent.listConfiguredInputProcessors(
+              callerOptions.requestContext,
+            )
+          : undefined);
+      if (Array.isArray(configuredProcessors)) {
+        effectiveOptions.inputProcessors = [
+          ...configuredProcessors,
+          createContextProcessor(async (messages) => {
+            recordedInput = createContextInput(
+              replay.effectiveInput,
+              configuredProcessors.length === 0 &&
+                callerOptions.prepareStep === undefined &&
+                defaults.prepareStep === undefined
+                ? messages
+                : undefined,
+              "This recording used memory behavior or input transformations outside history-only replay support. Disable working, semantic, and observational memory, input processors, and prepareStep before recording a new invocation.",
+            );
+            await initializeRecorder();
+          }),
+        ];
+      }
+    }
 
     try {
-      await recorder.initialize();
+      if (!captureContext) await initializeRecorder();
 
       let modelError: unknown;
       const callerOnError = effectiveOptions.onError;
@@ -206,6 +344,7 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
           step.finishReason === "error" && modelError !== undefined
             ? { ...step, error: modelError }
             : step;
+        const state = (await initializeRecorder()).state;
         await recordStep(
           state,
           recordedStep as RecordedStep,
@@ -222,13 +361,20 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
           throw state.failure;
         }
       };
-      effectiveOptions.hooks = createToolHooks({
-        abortReplay: (reason) => replayAbortController?.abort(reason),
-        callerHooks: callerOptions.hooks,
-        configuredAfterToolCall: this.#options.configuredAfterToolCall,
-        configuredBeforeToolCall: this.#options.configuredBeforeToolCall,
-        state,
-      });
+      const getToolHooks = async () =>
+        createToolHooks({
+          abortReplay: (reason) => replayAbortController?.abort(reason),
+          callerHooks: callerOptions.hooks,
+          configuredAfterToolCall: this.#options.configuredAfterToolCall,
+          configuredBeforeToolCall: this.#options.configuredBeforeToolCall,
+          state: (await initializeRecorder()).state,
+        });
+      effectiveOptions.hooks = {
+        beforeToolCall: async (event) =>
+          (await getToolHooks()).beforeToolCall?.(event),
+        afterToolCall: async (event) =>
+          (await getToolHooks()).afterToolCall?.(event),
+      };
 
       const generate = this.#agent.generate as unknown as RuntimeGenerate;
       const result = await generate.call(
@@ -236,19 +382,25 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
         effectiveMessages,
         effectiveOptions,
       );
-      if (state.failure !== undefined) {
-        throw state.failure;
+      const activeRecorder = await initializeRecorder();
+      if (activeRecorder.state.failure !== undefined) {
+        throw activeRecorder.state.failure;
       }
       const tripwire = tripwireReason(result);
       if (tripwire !== undefined) {
-        await recorder.fail(new Error(tripwire));
+        await activeRecorder.fail(new Error(tripwire));
         return result;
       }
-      await recorder.complete(
+      if (secondaryFailure !== undefined) {
+        await activeRecorder.fail(secondaryFailure);
+        return result;
+      }
+      await activeRecorder.complete(
         boundedRecorderJson(
           runResultSummary(result, {
             structuredOutputField:
-              effectiveOptions.structuredOutput === undefined
+              (effectiveOptions.structuredOutput ??
+                defaults.structuredOutput) === undefined
                 ? undefined
                 : "object",
           }),
@@ -257,8 +409,12 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       );
       return result;
     } catch (error) {
-      const primary = state.failure ?? error;
-      await recorder.fail(primary);
+      const primary = recorder?.state.failure ?? error;
+      try {
+        await (recorder ?? (await initializeRecorder())).fail(primary);
+      } catch {
+        // Recording cleanup must not replace the original runtime failure.
+      }
       throw primary;
     }
   }

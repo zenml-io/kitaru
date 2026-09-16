@@ -20,7 +20,7 @@ from pydantic import Field
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.base import FrozenModel
 from kitaru.server.application.models.agent import AgentCreate
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.session import SessionCreate
 from kitaru.server.application.models.session_node import SessionNodeUpsert
 from kitaru.server.domain.replay_config import ToolPolicy
@@ -37,7 +37,7 @@ class SampleSession(FrozenModel):
 class SampleHighlight(FrozenModel):
     """Sample highlight."""
 
-    node_index: int
+    node_external_id: str
     description: str
 
 
@@ -107,4 +107,4 @@ class SeededSession(FrozenModel):
     """Seeded session."""
 
     id: uuid.UUID
-    node_ids: dict[int, uuid.UUID]
+    node_ids: dict[str, uuid.UUID]

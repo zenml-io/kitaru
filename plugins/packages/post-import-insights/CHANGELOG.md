@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 - 2026-09-10
 
 - Describe insight actions with "Investigate [topic]" labels, such as "Investigate tool retries", and use "Investigate this finding" for unknown finding types.
 
@@ -24,4 +24,4 @@
 
 ### Release context
 
-- Requires the unreleased core analyzer task contract in [PR #988](https://github.com/zenml-io/kitaru/pull/988), which passes session UUIDs. Replace `kitaru==0.25.0+dev` with the selected compatible published core version before releasing `0.1.0`.
+- Requires Kitaru 0.26.0 or later for the analyzer task contract in [PR #988](https://github.com/zenml-io/kitaru/pull/988), which passes session UUIDs. Publish Kitaru 0.26.0 before this package.

@@ -101,13 +101,15 @@ describe("step recording", () => {
       .filter((batch) => batch[0]?.node_type === "llm_call");
     expect(stepBatches).toHaveLength(2);
     const [llm, firstTool, secondTool] = stepBatches[0] ?? [];
-    expect([llm?.index, firstTool?.index, secondTool?.index]).toEqual([
-      1, 2, 3,
-    ]);
+    expect([
+      llm?.external_id,
+      firstTool?.external_id,
+      secondTool?.external_id,
+    ]).toEqual(["response-tools", "call-1", "call-2"]);
     expect(firstTool).toMatchObject({
       external_id: "call-1",
       inputs: rawFirst,
-      parent_index: llm?.index,
+      parent_external_id: "response-tools",
       status: "completed",
     });
     const toolStartedAt = firstTool?.started_at;
@@ -119,7 +121,7 @@ describe("step recording", () => {
     expect(secondTool).toMatchObject({
       external_id: "call-2",
       inputs: rawSecond,
-      parent_index: llm?.index,
+      parent_external_id: "response-tools",
     });
     expect(llm).toMatchObject({
       attributes: { provider_metadata: { test: { suffix: "tools" } } },
@@ -141,7 +143,7 @@ describe("step recording", () => {
       ],
     });
     expect(typeof llm?.started_at).toBe("string");
-    expect(stepBatches[1]?.[0]?.index).toBe(4);
+    expect(stepBatches[1]?.[0]?.external_id).toBe("response-final");
   });
 
   it("bounds and redacts recorded step payloads", async () => {
@@ -188,7 +190,7 @@ describe("step recording", () => {
     const tool = nodes.find((node) => node.external_id === "call-1");
     expect(llm?.inputs).toBeNull();
     expect(JSON.stringify(llm?.outputs)).not.toContain("secret instructions");
-    expect((llm?.outputs as { text: string }).text).toBe(
+    expect((llm?.outputs as { text: string } | undefined)?.text).toBe(
       `${"x".repeat(4_096)}[truncated]`,
     );
     expect(tool?.inputs).toEqual({

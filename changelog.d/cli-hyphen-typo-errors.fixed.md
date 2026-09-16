@@ -1,0 +1,1 @@
+- Fixed CLI error messages for mistyped hyphen-leading arguments such as `kitaru agent get -xo`, which blamed the global `-o` flag instead of naming the unknown option. The `cli` extra now requires `cyclopts>=4.25.1`.

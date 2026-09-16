@@ -143,6 +143,28 @@ def test_root_help_validates_explicit_output(output, capsys) -> None:
     assert payload["error"]["kind"] == "invalid_arguments"
 
 
+@pytest.mark.parametrize(
+    ("argv", "culprit"),
+    [
+        (["schema", "-foo", "--output", "json"], "-foo"),
+        (["agent", "get", "-xo"], "-xo"),
+        (["session", "list", "--size", "-5o"], "--size"),
+    ],
+)
+def test_hyphen_leading_typo_is_not_blamed_on_output_flag(
+    argv, culprit, capsys
+) -> None:
+    """A mistyped hyphen-leading token is not blamed on the global `-o` flag."""
+    # The root parser accepts hyphen-leading tokens next to the global `-o`, and
+    # cyclopts before 4.25.1 split such a token into combined short flags.
+    assert app_module.main(argv) == 2
+
+    message = json.loads(capsys.readouterr().err)["error"]["message"]
+    assert culprit in message
+    assert "-o " not in message
+    assert "--output" not in message
+
+
 def test_bare_root_emits_structured_skill_onboarding_for_machines(
     monkeypatch, capsys
 ) -> None:
@@ -534,6 +556,15 @@ def test_http_413_maps_to_invalid_arguments_with_server_detail() -> None:
     assert error.kind == "invalid_arguments"
     assert error.message == "payload exceeds configured cap"
     assert error.details == {"status_code": 413}
+
+
+def test_http_404_without_detail_names_the_status_code() -> None:
+    """An empty error body still produces a readable message."""
+    error = app_module._convert_error(APIError(404, ""))
+
+    assert error.kind == "not_found"
+    assert error.message == "The server returned HTTP 404 with no detail."
+    assert error.details == {"status_code": 404}
 
 
 def test_html_response_maps_to_invalid_configuration() -> None:

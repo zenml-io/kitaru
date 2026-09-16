@@ -125,6 +125,62 @@ async def test_background_sweep_abandons_a_stale_task_and_settles_the_job(
     assert job_after["error"] is not None
 
 
+async def test_background_sweep_cancels_an_unclaimed_pending_job() -> None:
+    """A pending job no worker claims within the timeout is canceled by the sweep.
+
+    No claim request runs after the job is created, so the only thing that
+    can move it forward is the background sweeper started from the app
+    lifespan.
+    """
+    settings = db_settings(TASK_SWEEP_INTERVAL_SECONDS=1, JOB_PENDING_TIMEOUT_SECONDS=1)
+    async with lifespan_client(settings) as client:
+        agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+        version = (
+            await client.post(
+                f"/api/v1/agents/{agent['id']}/versions",
+                json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
+            )
+        ).json()
+        job = (
+            await client.post(
+                "/api/v1/session-runs",
+                json={"agent_version_id": version["id"], "inputs": {"q": "hi"}},
+            )
+        ).json()
+
+        job_after = await _wait_until(
+            client, f"/api/v1/jobs/{job['id']}", "status", "canceled"
+        )
+        assert job_after["error"] == "Job was not claimed within 1 seconds"
+
+        tasks_after = (await client.get(f"/api/v1/jobs/{job['id']}/tasks")).json()
+        assert all(task["status"] == "canceled" for task in tasks_after["items"])
+
+
+async def test_background_sweep_leaves_a_fresh_pending_job_untouched() -> None:
+    """A job created well within the timeout stays pending across a sweep tick."""
+    settings = db_settings(TASK_SWEEP_INTERVAL_SECONDS=1)
+    async with lifespan_client(settings) as client:
+        agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+        version = (
+            await client.post(
+                f"/api/v1/agents/{agent['id']}/versions",
+                json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
+            )
+        ).json()
+        job = (
+            await client.post(
+                "/api/v1/session-runs",
+                json={"agent_version_id": version["id"], "inputs": {"q": "hi"}},
+            )
+        ).json()
+
+        await asyncio.sleep(2)
+
+        job_after = (await client.get(f"/api/v1/jobs/{job['id']}")).json()
+        assert job_after["status"] == "pending"
+
+
 async def test_background_sweep_reaches_replay_settlement_subscribers(
     client: httpx.AsyncClient,
 ) -> None:

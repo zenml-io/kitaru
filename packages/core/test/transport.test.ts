@@ -173,9 +173,11 @@ describe("KitaruTransport", () => {
     });
 
     const headerOf = (index: number) =>
-      (fetch.mock.calls[index]?.[1]?.headers as Record<string, string>)[
-        "Idempotency-Key"
-      ];
+      (
+        fetch.mock.calls[index]?.[1]?.headers as
+          | Record<string, string>
+          | undefined
+      )?.["Idempotency-Key"];
     expect(headerOf(0)).toMatch(/^[0-9a-f-]{36}$/);
     expect(headerOf(1)).toBe(headerOf(0));
     expect(headerOf(2)).not.toBe(headerOf(0));
@@ -322,26 +324,26 @@ describe("KitaruTransport", () => {
     expect(JSON.stringify(error)).not.toContain(secret);
   });
 
-  it.each([
-    "https://api.example/v1/other",
-    "https://other.example/v1/private",
-  ])("rejects an authenticated redirect to %s without following it", async (target) => {
-    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
-      Response.redirect(target, 307),
-    );
-    const transport = new KitaruTransport({
-      apiUrl: "https://api.example",
-      credentialProvider: async () => "secret",
-      fetch,
-      timeoutMs: 1_000,
-    });
+  it.each(["https://api.example/v1/other", "https://other.example/v1/private"])(
+    "rejects an authenticated redirect to %s without following it",
+    async (target) => {
+      const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+        Response.redirect(target, 307),
+      );
+      const transport = new KitaruTransport({
+        apiUrl: "https://api.example",
+        credentialProvider: async () => "secret",
+        fetch,
+        timeoutMs: 1_000,
+      });
 
-    await expect(
-      transport.request({ method: "GET", path: "/v1/private" }),
-    ).rejects.toMatchObject({ kind: "redirect", status: 307 });
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(fetch.mock.calls[0]?.[1]?.redirect).toBe("manual");
-  });
+      await expect(
+        transport.request({ method: "GET", path: "/v1/private" }),
+      ).rejects.toMatchObject({ kind: "redirect", status: 307 });
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(fetch.mock.calls[0]?.[1]?.redirect).toBe("manual");
+    },
+  );
 
   it("rejects non-loopback HTTP before reading credentials", async () => {
     const credentialProvider = vi.fn(async () => "secret");

@@ -1,5 +1,18 @@
 ---
 version: 2
+# Two lockfiles in this repository are deliberately NOT listed below. Read
+# this before adding one of them.
+#
+# examples/python/pydantic_ai_ticket_resolver/uv.lock is the public quickstart.
+# Its README installs it with `uv sync --frozen`, so this lockfile is exactly
+# what a new user gets. The release process refreshes it to the newest
+# published Kitaru and then runs the frozen end-to-end check against PyPI (see
+# the kitaru-release skill). CI's "Quickstart example end to end" job swaps in
+# wheels built from the PR branch before it tests, so a green Dependabot PR
+# would never have exercised the install the README tells users to run.
+#
+# plugins/tests/importers/fixtures/**/package-lock.json is test data that pins
+# one Mastra release on purpose.
 updates:
   - package-ecosystem: github-actions
     directory: /
@@ -8,7 +21,6 @@ updates:
       day: tuesday
       time: "07:00"
       timezone: Europe/Amsterdam
-    reviewers: [strickvl]
     labels: [dependencies]
     groups:
       all-actions:
@@ -23,7 +35,6 @@ updates:
       day: tuesday
       time: "07:00"
       timezone: Europe/Amsterdam
-    reviewers: [strickvl]
     labels: [dependencies]
     groups:
       # Grouped by blast radius, not by semver magnitude. What decides how a
@@ -170,6 +181,152 @@ updates:
       semver-minor-days: 7
       semver-patch-days: 3
     target-branch: develop
+  # The plugins workspace (plugins/pyproject.toml, plugins/uv.lock) gets its own
+  # block instead of joining the root block as `directories: ["/", "/plugins"]`.
+  #
+  # Settings such as `versioning-strategy` apply to a whole block, and only this
+  # workspace needs `lockfile-only` (see below). A shared block would also let
+  # every group PR span both lockfiles. A one-line root `mcp` patch would then
+  # wait on the review of every plugin adapter SDK bump in the same PR.
+  #
+  # Nothing is lost by splitting the ruff and ty bumps. The root ruff config
+  # excludes `plugins`, and the plugin-tests CI job checks plugins with the
+  # plugins lockfile's own ruff and ty.
+  - package-ecosystem: uv
+    directory: /plugins
+    schedule:
+      interval: weekly
+      day: tuesday
+      time: "07:00"
+      timezone: Europe/Amsterdam
+    labels: [dependencies]
+    # Every package under plugins/packages/ is published to PyPI. The upper
+    # bound on each framework it wraps records the versions its adapter has
+    # been verified against, and extending one is a deliberate change with its
+    # own tests (#1091, #1092).
+    #
+    # Under the default strategy, Dependabot rewrites such a range itself as
+    # soon as a release lands outside it. It has already done this to the root
+    # pyproject.toml: #712 and #823 turned `>=2.14.1,<2.23` into
+    # `>=2.23.0,<2.24` and then `>=2.27.1,<2.28`, raising the floor as well as
+    # the ceiling. Merged into a plugin, that change makes the next
+    # release refuse to install next to any older framework version it used to
+    # support, and claim support for a version nobody tested.
+    #
+    # `lockfile-only` still moves plugins/uv.lock to the newest release inside
+    # each range, so plugin-tests exercises it. It never edits a pyproject.toml.
+    # The cost: a release outside a range produces no PR at all, so widening a
+    # range stays a job for a human watching upstream.
+    versioning-strategy: lockfile-only
+    groups:
+      # Same blast-radius grouping as the root `uv` block. Identifiers carry a
+      # `plugins-` prefix so a PR title names the workspace it touches, and so
+      # no branch name can collide with a root group of the same name.
+
+      # Failures surface in CI and nowhere else, so a green pipeline is the
+      # complete verification. Safe to merge on green.
+      plugins-dev-tooling:
+        patterns:
+          - ruff
+          - ty
+          - pytest*
+          - hypothesis
+        update-types:
+          - minor
+          - patch
+
+      # Mirrors the root `genai-prices` group: pricing data changes cost
+      # estimates, not adapter behavior.
+      plugins-genai-prices:
+        patterns:
+          - genai-prices
+        update-types:
+          - minor
+          - patch
+
+      # Mirrors the root `adapters-and-llm-sdks` group, plus `deepagents`, which
+      # the LangGraph adapter supports as an extra. These plugins wrap the
+      # frameworks, but CI runs them against fake models and has no provider
+      # credentials, so it cannot see a behavior change that only shows up
+      # against a real model. Needs live provider runs before merge.
+      plugins-adapters-and-llm-sdks:
+        patterns:
+          - openai
+          - openai-agents
+          - anthropic
+          - claude-agent-sdk
+          - google-genai
+          - google-adk
+          - mcp
+          - pydantic-ai*
+          - langchain*
+          - langgraph*
+          - deepagents
+        update-types:
+          - minor
+          - patch
+
+      # The trace importers call these SDKs to fetch traces from a provider
+      # account. Their tests run on fixtures and fakes with no credentials, so
+      # CI proves the parsing but not the provider contract. Needs a real import
+      # from each affected provider before merge.
+      plugins-importer-sdks:
+        patterns:
+          - arize-phoenix-client
+          - braintrust
+          - langfuse
+          - langsmith
+          - logfire
+        update-types:
+          - minor
+          - patch
+
+      # Everything else: httpx, opentelemetry-api, opentelemetry-sdk.
+      #
+      # `exclude-patterns` MUST mirror every pattern from the four groups above,
+      # for the reason documented at the top of the root block's `groups:`.
+      plugins-minor-and-patch:
+        exclude-patterns:
+          # mirrors plugins-dev-tooling
+          - ruff
+          - ty
+          - pytest*
+          - hypothesis
+          # mirrors plugins-genai-prices
+          - genai-prices
+          # mirrors plugins-adapters-and-llm-sdks
+          - openai
+          - openai-agents
+          - anthropic
+          - claude-agent-sdk
+          - google-genai
+          - google-adk
+          - mcp
+          - pydantic-ai*
+          - langchain*
+          - langgraph*
+          - deepagents
+          # mirrors plugins-importer-sdks
+          - arize-phoenix-client
+          - braintrust
+          - langfuse
+          - langsmith
+          - logfire
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Core Kitaru and every plugin resolve from this checkout through
+      # `[tool.uv.sources]` (core by path, plugins as workspace members), never
+      # from PyPI. Release preparation rewrites their pins by hand. `kitaru*`
+      # matches `kitaru[server]` and every `kitaru-*` plugin.
+      - dependency-name: "kitaru*"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    target-branch: develop
   - package-ecosystem: npm
     directory: /docs
     schedule:
@@ -177,7 +334,6 @@ updates:
       day: tuesday
       time: "07:00"
       timezone: Europe/Amsterdam
-    reviewers: [strickvl]
     labels: [dependencies]
     groups:
       # The fumadocs packages must move in lockstep (fumadocs-core, -mdx, -ui
@@ -214,6 +370,100 @@ updates:
       # styles (or until we replace fumadocs-ui's DefaultImage with a custom
       # template).
       - dependency-name: "@takumi-rs/image-response"
+        update-types: ["version-update:semver-major"]
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    target-branch: develop
+  # The root pnpm workspace: the TypeScript SDK and adapters published to npm
+  # (packages/*) plus the three workspace examples. From `/`, Dependabot reads
+  # pnpm-workspace.yaml and updates every member's package.json together with
+  # the single root pnpm-lock.yaml. The CI `typescript` job tests all of it.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: tuesday
+      time: "07:00"
+      timezone: Europe/Amsterdam
+    labels: [dependencies]
+    groups:
+      # Grouped by blast radius, like the root `uv` block. Identifiers carry a
+      # prefix or a framework name so no branch name can collide with the /docs
+      # groups.
+
+      # Failures surface in CI (`pnpm run lint`, `typecheck`, `test:built`,
+      # `generate:check`) and nowhere else. Safe to merge on green.
+      typescript-dev-tooling:
+        patterns:
+          - "@biomejs/biome"
+          - "@types/node"
+          - openapi-typescript
+          - typescript
+          - vitest
+        update-types:
+          - minor
+          - patch
+
+      # The two groups below each hold the framework behind one published
+      # adapter's `peerDependencies`. Dependabot never edits
+      # `peerDependencies` (the npm file parser reads only `dependencies`,
+      # `devDependencies` and `optionalDependencies`), so the published range
+      # stays put while the devDependency pin that CI tests moves.
+      #
+      # When a PR moves that pin past the peer ceiling, CI then tests a version
+      # users are told is unsupported. Treat that PR as the prompt for a
+      # deliberate range extension like #1092, not something to merge as is.
+      # Separate groups keep a Mastra range question from holding up an `ai`
+      # patch.
+      vercel-ai:
+        patterns:
+          - ai
+          - "@ai-sdk/*"
+        update-types:
+          - minor
+          - patch
+
+      # `zod` is declared only by the Mastra adapter and its example, where it
+      # defines the tool schemas Mastra validates.
+      mastra:
+        patterns:
+          - "@mastra/*"
+          - zod
+        update-types:
+          - minor
+          - patch
+
+      # Everything else. Empty today, so this group exists to stop the next
+      # new dependency arriving as a one-package PR.
+      #
+      # `exclude-patterns` MUST mirror every pattern from the three groups
+      # above, for the reason documented at the top of the root `uv` block's
+      # `groups:`.
+      typescript-minor-and-patch:
+        exclude-patterns:
+          # mirrors typescript-dev-tooling
+          - "@biomejs/biome"
+          - "@types/node"
+          - openapi-typescript
+          - typescript
+          - vitest
+          # mirrors vercel-ai
+          - ai
+          - "@ai-sdk/*"
+          # mirrors mastra
+          - "@mastra/*"
+          - zod
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Every package declares `engines.node` as `>=22.22.0 <23` and CI reads
+      # Node 22 from .node-version, so the Node type definitions must stay on
+      # 22.x. A newer major describes runtime APIs these packages cannot use.
+      - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 7

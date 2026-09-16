@@ -108,8 +108,8 @@ def test_run_imports_the_braintrust_trace_around_the_function(
     assert len(client.sessions.batches) == 1
     nodes = client.sessions.batches[0].nodes
     assert [node.name for node in nodes] == [root_span_id, "span-llm"]
-    assert nodes[0].parent_index is None
-    assert nodes[1].parent_index == 0
+    assert nodes[0].parent_external_id is None
+    assert nodes[1].parent_external_id == nodes[0].external_id
     assert nodes[1].node_type == NodeType.LLM_CALL
 
 

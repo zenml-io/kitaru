@@ -15,6 +15,7 @@
 
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
 
 from kitaru.server.application.models.job import JobFilter
@@ -85,6 +86,22 @@ class JobRepository(Protocol):
 
         Returns:
             Locked jobs keyed by id.
+        """
+        ...
+
+    async def list_expired_pending_ids(
+        self, cutoff: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of pending jobs older than the cutoff.
+
+        Rows are read without locking.
+
+        Args:
+            cutoff: Jobs created before this are read.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the pending jobs in ascending order.
         """
         ...
 

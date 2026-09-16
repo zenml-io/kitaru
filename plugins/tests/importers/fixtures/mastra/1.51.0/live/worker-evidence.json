@@ -1,0 +1,28 @@
+{
+  "imports": [
+    {
+      "created": 1,
+      "skipped": 0,
+      "failed": 0,
+      "failures": []
+    },
+    {
+      "created": 0,
+      "skipped": 1,
+      "failed": 0,
+      "failures": []
+    }
+  ],
+  "baseline_session_id": "01a08768-83b0-7cb1-b929-4c273e90cb1f",
+  "baseline_nodes": 14,
+  "replay_id": "01a08768-87a2-74f1-98c6-d644e0928520",
+  "replay_status": "completed",
+  "replay_result": {
+    "text": "Your secret code is ORBIT-47, and double 3 is 6.",
+    "step_count": 2,
+    "finish_reason": "stop"
+  },
+  "tool_history_verified": true,
+  "clean_wheel_worker": true,
+  "candidate_server": true
+}

@@ -18,6 +18,7 @@ Everything is deterministic. The same seed and flags produce the same sessions, 
 | `dbstats.py` | Postgres and query statistics, lock sampling |
 | `resilience.py` | Worker crash, zombie, fleet-death, abandonment scenarios |
 | `simulation.py` | Shared simulation core, do not invoke directly |
+| `publish.sh` | Build and push dev images and chart, create a ZenML Pro workspace |
 
 Requires `uv sync --extra server` and Docker for Postgres. Add `--extra cli` when you shell out to `kitaru`.
 

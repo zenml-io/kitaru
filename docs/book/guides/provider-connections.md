@@ -11,18 +11,19 @@ A **connection** is the alternative: a server-side resource that holds a provide
 
 ## Create one from a plugin schema
 
-Importers and analyzers can declare a `connection_schema`, the set of environment variables their provider SDK reads. Naming either plugin drives the create form:
+Importers, analyzers, and evaluators can declare a `connection_schema`, the set of environment variables their provider SDK reads. Naming any plugin drives the create form:
 
 ```bash
 kitaru connection create langfuse-prod --importer kitaru/langfuse
 ```
 
-Name the plugin, not a version. A connection holds credentials for the plugin's provider, and every version of that plugin uses the same connection, so `--importer` and `--analyzer` take a plugin name or UUID here rather than a `NAME@VERSION` reference.
+Name the plugin, not a version. A connection holds credentials for the plugin's provider, and every version of that plugin uses the same connection, so `--importer`, `--analyzer`, and `--evaluator` take a plugin name or UUID here rather than a `NAME@VERSION` reference.
 
-For an analyzer, use `--analyzer` instead:
+For an analyzer or evaluator, use `--analyzer` or `--evaluator` instead:
 
 ```bash
 kitaru connection create model-judge-prod --analyzer model-judge
+kitaru connection create tone-judge-prod --evaluator tone-judge
 ```
 
 This prompts for each property in the schema, in order, hiding input for anything the schema marks as secret (`LANGFUSE_SECRET_KEY`, in Langfuse's case). Skip the prompts with `--set KEY=VALUE` for a non-secret property or `--set-secret KEY=VALUE` for a secret one, repeated for as many keys as you already know:
@@ -86,6 +87,8 @@ kitaru session import sessions.jsonl \
 ```
 
 Repeat `--analyzer-connection ANALYZER@VERSION=CONNECTION` when different analyzers need different credentials. The analyzer token must exactly match one of the `--analyzer` values. On the REST API and the Python client, set `connection_id` on that analyzer's `AnalyzerConfig`.
+
+An evaluator named on an import, experiment, replay, or evaluation can name its own connection the same way, with `--evaluator-connection EVALUATOR@VERSION=CONNECTION`, or `connection_id` on its `EvaluatorConfig`.
 
 ## Resolution
 

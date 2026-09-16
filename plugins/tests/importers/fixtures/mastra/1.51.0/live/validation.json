@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-09",
+  "adapter_issue": 1050,
+  "adapter_context_sha256": "366794c9f965ef0bfdf27ab9e70c124950c2b17fa9aefa3e586257e55b3cc30f",
+  "core_version": "1.51.0",
+  "observability_version": "1.16.0",
+  "model": "gpt-4.1-mini-2025-04-14",
+  "provider_calls": {
+    "generation": 2,
+    "replay": 2
+  },
+  "server": "locally built candidate, auth disabled, isolated Docker PostgreSQL",
+  "worker": "fresh virtualenv installing candidate importer wheel",
+  "limitations": [
+    "Unreleased #1050 adapter implementation tested from a separate checkout; must integrate before this mode is released.",
+    "History-only native memory, no semantic/working/observational memory or custom processors.",
+    "Single bounded synthetic run; not a general replay fidelity claim."
+  ]
+}

@@ -211,6 +211,7 @@ async def test_create_parses_inline_config_and_pins_exact_evaluators() -> None:
                 "evaluator": "quality",
                 "version": 2,
                 "params": {"threshold": 0.8},
+                "connection_id": None,
             }
         ],
     }
@@ -237,7 +238,14 @@ async def test_create_omits_tool_policy_for_server_default() -> None:
     assert request.model_dump(mode="json", exclude_unset=True) == {
         "name": "default-policy",
         "agent_id": str(client.agent.id),
-        "evaluators": [{"evaluator": "quality", "version": 2, "params": {}}],
+        "evaluators": [
+            {
+                "evaluator": "quality",
+                "version": 2,
+                "params": {},
+                "connection_id": None,
+            }
+        ],
     }
     assert result.item["tool_policy"] == {
         "default": {"type": "passthrough"},
@@ -425,6 +433,7 @@ async def test_update_replaces_complete_config_atomically() -> None:
                 "evaluator": "quality",
                 "version": 2,
                 "params": {"strict": True},
+                "connection_id": None,
             }
         ],
     }

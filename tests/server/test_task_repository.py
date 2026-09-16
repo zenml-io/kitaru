@@ -267,6 +267,22 @@ async def test_evaluator_pair_uniqueness(setup: Setup) -> None:
         await setup.tasks.create(duplicate)
 
 
+async def test_evaluation_task_round_trips_its_connection_id(setup: Setup) -> None:
+    """An evaluation task round-trips its connection id."""
+    task = EvaluationTask(
+        job_id=setup.job_id,
+        plugin_version_id=setup.plugin_version_id,
+        input_session_id=setup.session_id,
+        connection_id=uuid.uuid4(),
+    )
+    created = await setup.tasks.create(task)
+    assert isinstance(created, EvaluationTask)
+    assert created.connection_id == task.connection_id
+
+    loaded = await setup.tasks.get(created.id)
+    assert loaded == created
+
+
 async def test_import_task_round_trips_its_fields(setup: Setup) -> None:
     """An importer task round-trips its import reference."""
     import_id = uuid.uuid4()

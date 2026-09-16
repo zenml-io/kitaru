@@ -14,6 +14,7 @@
 """Tests for job use cases."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -44,7 +45,7 @@ from kitaru.server.application.models.job import (
     JobFilter,
     SessionRunCreate,
 )
-from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy, TaskUpdate
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
@@ -52,7 +53,12 @@ from kitaru.server.domain.agent_version import (
     RunSpec,
 )
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.job import JobAlreadySettled, JobNotFound, JobNotSettled
+from kitaru.server.domain.job import (
+    JobAlreadySettled,
+    JobNotFound,
+    JobNotSettled,
+    pending_timeout_error,
+)
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.session import SessionNotEvaluatable
 from kitaru.server.domain.task import (
@@ -389,6 +395,99 @@ async def test_cancel_job_rejects_an_already_settled_job(
     job = await create_job(services.jobs, ACTOR.account.id, status=JobStatus.COMPLETED)
     with pytest.raises(JobAlreadySettled):
         await services.job_service.cancel_job(job.id, actor=ACTOR)
+
+
+async def test_list_expired_pending_job_ids(services: JobAndTaskServices) -> None:
+    """Read the ids of pending jobs created before the cutoff."""
+    job_id = (await create_job(services.jobs, ACTOR.account.id)).id
+
+    assert await services.job_service.list_expired_pending_job_ids(
+        datetime.now(UTC) + timedelta(seconds=1)
+    ) == [job_id]
+    assert (
+        await services.job_service.list_expired_pending_job_ids(
+            datetime.now(UTC) - timedelta(hours=1)
+        )
+        == []
+    )
+
+
+async def test_expire_pending_job_cancels_tasks_and_settles_canceled(
+    services: JobAndTaskServices,
+) -> None:
+    """An unclaimed job created before the cutoff cancels its tasks and settles."""
+    job_id = (await create_job(services.jobs, ACTOR.account.id)).id
+    task = await create_agent_task(
+        services.tasks, job_id, agent_version_id=await _runnable_agent_version(services)
+    )
+
+    await services.job_service.expire_pending_job(
+        job_id,
+        datetime.now(UTC) + timedelta(seconds=1),
+        pending_timeout_error(1),
+        datetime.now(UTC),
+    )
+
+    job = await services.jobs.get(job_id)
+    assert job.status is JobStatus.CANCELED
+    assert job.error == pending_timeout_error(1)
+    assert job.cancel_requested_at is not None
+    assert (await services.tasks.get(task.id)).status is TaskStatus.CANCELED
+
+
+async def test_expire_pending_job_settles_an_empty_job(
+    services: JobAndTaskServices,
+) -> None:
+    """A job with no tasks still settles canceled."""
+    job_id = (await create_job(services.jobs, ACTOR.account.id)).id
+
+    await services.job_service.expire_pending_job(
+        job_id,
+        datetime.now(UTC) + timedelta(seconds=1),
+        pending_timeout_error(1),
+        datetime.now(UTC),
+    )
+
+    assert (await services.jobs.get(job_id)).status is JobStatus.CANCELED
+
+
+async def test_expire_pending_job_leaves_a_claimed_job_alone(
+    services: JobAndTaskServices,
+) -> None:
+    """A job a worker already claimed is left running."""
+    job_id = (await create_job(services.jobs, ACTOR.account.id)).id
+    await create_agent_task(
+        services.tasks, job_id, agent_version_id=await _runnable_agent_version(services)
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+
+    await services.job_service.expire_pending_job(
+        job_id,
+        datetime.now(UTC) + timedelta(seconds=1),
+        pending_timeout_error(1),
+        datetime.now(UTC),
+    )
+
+    assert (await services.jobs.get(job_id)).status is JobStatus.RUNNING
+
+
+async def test_expire_pending_job_leaves_a_young_job_pending(
+    services: JobAndTaskServices,
+) -> None:
+    """A job created after the cutoff is left pending."""
+    job_id = (await create_job(services.jobs, ACTOR.account.id)).id
+
+    await services.job_service.expire_pending_job(
+        job_id,
+        datetime.now(UTC) - timedelta(hours=1),
+        pending_timeout_error(3600),
+        datetime.now(UTC),
+    )
+
+    assert (await services.jobs.get(job_id)).status is JobStatus.PENDING
 
 
 async def test_delete_job_cascades_its_tasks(services: JobAndTaskServices) -> None:

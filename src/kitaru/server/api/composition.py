@@ -33,9 +33,6 @@ from kitaru.server.adapters.db.repositories.insight_repository import (
     SQLInsightRepository,
 )
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
-from kitaru.server.adapters.db.repositories.plugin_repository import (
-    SQLPluginRepository,
-)
 from kitaru.server.adapters.db.repositories.replay_repository import (
     SQLReplayRepository,
 )
@@ -61,7 +58,6 @@ from kitaru.server.application.interfaces.experiment_run_repository import (
 from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.insight_repository import InsightRepository
 from kitaru.server.application.interfaces.job_repository import JobRepository
-from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
@@ -86,7 +82,6 @@ def register_subscribers(
     session_repository: SessionRepository,
     import_repository: ImportRepository,
     insight_repository: InsightRepository,
-    plugin_repository: PluginRepository,
     analytics: ServerAnalytics | None = None,
 ) -> None:
     """Register every task-transition subscriber on a dispatcher.
@@ -106,7 +101,6 @@ def register_subscribers(
         session_repository: Session repository.
         import_repository: Import repository.
         insight_repository: Insight repository.
-        plugin_repository: Plugin repository.
         analytics: Analytics tracker, None skips tracking.
     """
     dispatcher.register(
@@ -143,7 +137,6 @@ def register_subscribers(
             import_repository=import_repository,
             session_repository=session_repository,
             task_repository=task_repository,
-            plugin_repository=plugin_repository,
         ),
     )
     dispatcher.register(
@@ -196,7 +189,6 @@ def build_event_dispatcher(
         session_repository=SQLSessionRepository(session, engine),
         import_repository=SQLImportRepository(session),
         insight_repository=SQLInsightRepository(session),
-        plugin_repository=SQLPluginRepository(session),
         analytics=analytics,
     )
     return dispatcher

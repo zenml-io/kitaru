@@ -8,7 +8,7 @@ from typing import Any, cast
 import pytest
 
 from kitaru.api_models.v1.imports import ApiImportSource, BlobImportSource
-from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.management import EvaluatorSelection
@@ -238,8 +238,18 @@ async def test_evaluator_selections_use_name_version_dto_and_cache_parent() -> N
         ],
     )
     assert [config.model_dump(mode="json") for config in resolved.configs] == [
-        {"evaluator": "accuracy", "version": 2, "params": {"threshold": 0.8}},
-        {"evaluator": "accuracy", "version": 3, "params": {}},
+        {
+            "evaluator": "accuracy",
+            "version": 2,
+            "params": {"threshold": 0.8},
+            "connection_id": None,
+        },
+        {
+            "evaluator": "accuracy",
+            "version": 3,
+            "params": {},
+            "connection_id": None,
+        },
     ]
     assert client.parent_calls == 1
     assert client.version_calls == [2, 3]

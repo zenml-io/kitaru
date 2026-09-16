@@ -28,7 +28,7 @@ from kitaru.api_models.v1.base import (
     ResponseModel,
 )
 from kitaru.api_models.v1.filter import FilterableListParams
-from kitaru.api_models.v1.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 
 MAX_IMPORT_FAILURES = 20
 DEFAULT_FETCH_CONCURRENCY = 4

@@ -89,83 +89,85 @@ describe("Vercel returns resolver", () => {
     ).toBe(true);
   });
 
-  it.each(
-    ticketCases.map(({ ticket }) => ticket),
-  )("records the scripted baseline for $ticket_id", async (ticket) => {
-    const run = createTicketRun({
-      client: new SmokeClient(),
-      environment: { KITARU_AGENT_ID: AGENT_ID },
-      prompt: renderTicketPrompt(ticket),
-    });
-
-    const result = await run.generate();
-    const resolution = JSON.parse(result.text) as { action: string };
-    const accepted = run.store.actions.filter(({ accepted: ok }) => ok);
-
-    expect(accepted).toHaveLength(1);
-    expect(resolution.action).toBe(accepted[0]?.action);
-  });
-
-  it.each([
-    "ticket-004",
-    "ticket-007",
-  ])("changes scripted target %s to escalation in strict mode", async (ticketId) => {
-    const ticket = ticketCases.find(
-      ({ ticket: candidate }) => candidate.ticket_id === ticketId,
-    )?.ticket;
-    if (!ticket) {
-      throw new Error(`${ticketId} fixture is missing`);
-    }
-
-    const baseline = createTicketRun({
-      client: new SmokeClient(),
-      environment: { KITARU_AGENT_ID: AGENT_ID },
-      mode: "baseline",
-      prompt: renderTicketPrompt(ticket),
-    });
-    const strict = createTicketRun({
-      client: new SmokeClient(),
-      environment: { KITARU_AGENT_ID: AGENT_ID },
-      mode: "strict",
-      prompt: renderTicketPrompt(ticket),
-    });
-
-    expect(JSON.parse((await baseline.generate()).text).action).toBe("refund");
-    expect(JSON.parse((await strict.generate()).text)).toMatchObject({
-      action: "escalate",
-      amount: null,
-    });
-    expect(strict.store.actions.some(({ action }) => action === "refund")).toBe(
-      false,
-    );
-  });
-
-  it.each([
-    "ticket-001",
-    "ticket-009",
-    "ticket-010",
-  ])("keeps scripted control %s as a capped refund in both modes", async (ticketId) => {
-    const ticket = ticketCases.find(
-      ({ ticket: candidate }) => candidate.ticket_id === ticketId,
-    )?.ticket;
-    if (!ticket) {
-      throw new Error(`${ticketId} fixture is missing`);
-    }
-    for (const mode of ["baseline", "strict"] as const) {
+  it.each(ticketCases.map(({ ticket }) => ticket))(
+    "records the scripted baseline for $ticket_id",
+    async (ticket) => {
       const run = createTicketRun({
         client: new SmokeClient(),
         environment: { KITARU_AGENT_ID: AGENT_ID },
-        mode,
         prompt: renderTicketPrompt(ticket),
       });
 
-      expect(JSON.parse((await run.generate()).text).action).toBe("refund");
-      expect(run.store.actions.at(-1)).toMatchObject({
-        accepted: true,
-        action: "refund",
+      const result = await run.generate();
+      const resolution = JSON.parse(result.text) as { action: string };
+      const accepted = run.store.actions.filter(({ accepted: ok }) => ok);
+
+      expect(accepted).toHaveLength(1);
+      expect(resolution.action).toBe(accepted[0]?.action);
+    },
+  );
+
+  it.each(["ticket-004", "ticket-007"])(
+    "changes scripted target %s to escalation in strict mode",
+    async (ticketId) => {
+      const ticket = ticketCases.find(
+        ({ ticket: candidate }) => candidate.ticket_id === ticketId,
+      )?.ticket;
+      if (!ticket) {
+        throw new Error(`${ticketId} fixture is missing`);
+      }
+
+      const baseline = createTicketRun({
+        client: new SmokeClient(),
+        environment: { KITARU_AGENT_ID: AGENT_ID },
+        mode: "baseline",
+        prompt: renderTicketPrompt(ticket),
       });
-    }
-  });
+      const strict = createTicketRun({
+        client: new SmokeClient(),
+        environment: { KITARU_AGENT_ID: AGENT_ID },
+        mode: "strict",
+        prompt: renderTicketPrompt(ticket),
+      });
+
+      expect(JSON.parse((await baseline.generate()).text).action).toBe(
+        "refund",
+      );
+      expect(JSON.parse((await strict.generate()).text)).toMatchObject({
+        action: "escalate",
+        amount: null,
+      });
+      expect(
+        strict.store.actions.some(({ action }) => action === "refund"),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["ticket-001", "ticket-009", "ticket-010"])(
+    "keeps scripted control %s as a capped refund in both modes",
+    async (ticketId) => {
+      const ticket = ticketCases.find(
+        ({ ticket: candidate }) => candidate.ticket_id === ticketId,
+      )?.ticket;
+      if (!ticket) {
+        throw new Error(`${ticketId} fixture is missing`);
+      }
+      for (const mode of ["baseline", "strict"] as const) {
+        const run = createTicketRun({
+          client: new SmokeClient(),
+          environment: { KITARU_AGENT_ID: AGENT_ID },
+          mode,
+          prompt: renderTicketPrompt(ticket),
+        });
+
+        expect(JSON.parse((await run.generate()).text).action).toBe("refund");
+        expect(run.store.actions.at(-1)).toMatchObject({
+          accepted: true,
+          action: "refund",
+        });
+      }
+    },
+  );
 
   it("applies string worker task input in place of the default prompt", async () => {
     const ticket = ticketCases[9]?.ticket;

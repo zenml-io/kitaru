@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-09-10
+
+- Require Kitaru 0.26.0 or later for the `api` and `adapter` extras. File-only parsing retains support for Kitaru 0.24.0 or later.
 
 - Prefix session external IDs with a validated project namespace. Accept `source_instance` and `project` import parameters, require project identity for file exports, and retain the selected API or adapter project in serialized traces. Reimports of sessions created with earlier bare trace IDs can create a second session.
 

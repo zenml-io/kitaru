@@ -1,0 +1,1348 @@
+{
+  "traceId": "10540000000000000000000000000001",
+  "spans": [
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "691232b44b34e5f8",
+      "parentSpanId": null,
+      "name": "agent run: 'live-fixture-agent'",
+      "entityType": "agent",
+      "entityId": "live-fixture-agent",
+      "entityName": "Live fixture agent",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "agent_run",
+      "attributes": {
+        "conversationId": "live-history-fixture",
+        "instructions": "Use the prior conversation to recall the secret code. Call the double tool exactly once for the requested number. After the tool result, answer in one short sentence containing both the secret code and computed result. Never call the tool twice.",
+        "availableTools": [
+          "double"
+        ]
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture"
+      },
+      "tags": null,
+      "links": null,
+      "input": [
+        {
+          "role": "user",
+          "content": "What is my secret code, and what is double 3? Use the tool."
+        }
+      ],
+      "output": {
+        "text": "Your secret code is ORBIT-47, and double 3 is 6.",
+        "files": []
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:01.924Z",
+      "endedAt": "2026-09-09T18:18:13.130Z",
+      "createdAt": "2026-09-09T18:18:06.929Z",
+      "updatedAt": "2026-09-09T18:18:13.131Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "1e38cf1d78e27e2a",
+      "parentSpanId": "691232b44b34e5f8",
+      "name": "input processor: message-history",
+      "entityType": "input_processor",
+      "entityId": "message-history",
+      "entityName": "MessageHistory",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "processor_run",
+      "attributes": {
+        "processorExecutor": "workflow",
+        "processorIndex": 0
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture"
+      },
+      "tags": null,
+      "links": null,
+      "input": {
+        "messages": [
+          {
+            "id": "808f4ac0-cd38-4ef6-9763-d0d1e2fe01a0",
+            "role": "user",
+            "createdAt": "2026-09-09T18:18:01.928Z",
+            "content": {
+              "format": 2,
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "What is my secret code, and what is double 3? Use the tool.",
+                  "createdAt": 1788977881928
+                }
+              ],
+              "content": "What is my secret code, and what is double 3? Use the tool."
+            },
+            "threadId": "live-history-fixture",
+            "resourceId": "synthetic-user"
+          }
+        ],
+        "systemMessages": [
+          {
+            "role": "system",
+            "content": "Use the prior conversation to recall the secret code. Call the double tool exactly once for the requested number. After the tool result, answer in one short sentence containing both the secret code and computed result. Never call the tool twice."
+          }
+        ],
+        "retryCount": 0
+      },
+      "output": {
+        "messages": [
+          {
+            "id": "prior-message",
+            "type": "text",
+            "createdAt": "2026-09-09T10:00:00.000Z",
+            "threadId": "live-history-fixture",
+            "resourceId": "synthetic-user",
+            "content": {
+              "format": 2,
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "My secret code is ORBIT-47. Remember it for my next question."
+                }
+              ]
+            },
+            "role": "user"
+          },
+          {
+            "id": "808f4ac0-cd38-4ef6-9763-d0d1e2fe01a0",
+            "role": "user",
+            "createdAt": "2026-09-09T18:18:01.928Z",
+            "content": {
+              "format": 2,
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "What is my secret code, and what is double 3? Use the tool.",
+                  "createdAt": 1788977881928
+                }
+              ],
+              "content": "What is my secret code, and what is double 3? Use the tool."
+            },
+            "threadId": "live-history-fixture",
+            "resourceId": "synthetic-user"
+          }
+        ]
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:01.932Z",
+      "endedAt": "2026-09-09T18:18:01.933Z",
+      "createdAt": "2026-09-09T18:18:06.929Z",
+      "updatedAt": "2026-09-09T18:18:06.930Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "62b27b44606b35b7",
+      "parentSpanId": "1e38cf1d78e27e2a",
+      "name": "memory: recall",
+      "entityType": "memory",
+      "entityId": "message-history",
+      "entityName": "Memory",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "memory_operation",
+      "attributes": {
+        "operationType": "recall",
+        "lastMessages": 10,
+        "messageCount": 1
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture"
+      },
+      "tags": null,
+      "links": null,
+      "input": {
+        "threadId": "live-history-fixture",
+        "resourceId": "synthetic-user"
+      },
+      "output": {
+        "success": true
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:01.933Z",
+      "endedAt": "2026-09-09T18:18:01.933Z",
+      "createdAt": "2026-09-09T18:18:06.929Z",
+      "updatedAt": "2026-09-09T18:18:06.930Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "74687812655b6ede",
+      "parentSpanId": "691232b44b34e5f8",
+      "name": "llm: 'gpt-4.1-mini'",
+      "entityType": "agent",
+      "entityId": "live-fixture-agent",
+      "entityName": "Live fixture agent",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "model_generation",
+      "attributes": {
+        "model": "gpt-4.1-mini",
+        "provider": "openai",
+        "streaming": true,
+        "parameters": {
+          "maxRetries": 0,
+          "maxOutputTokens": 150,
+          "temperature": 0
+        },
+        "finishReason": "stop",
+        "responseId": "resp_008d47c270d6d0e3006aa1a2e28ddc87d29fb13118d034c0ad",
+        "responseModel": "gpt-4.1-mini-2025-04-14",
+        "completionStartTime": "2026-09-09T18:18:09.957Z",
+        "usage": {
+          "inputTokens": 289,
+          "outputTokens": 33,
+          "inputDetails": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "text": 289
+          },
+          "outputDetails": {
+            "reasoning": 0,
+            "text": 33
+          }
+        }
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture"
+      },
+      "tags": null,
+      "links": null,
+      "input": {
+        "messages": [
+          {
+            "role": "system",
+            "content": "Use the prior conversation to recall the secret code. Call the double tool exactly once for the requested number. After the tool result, answer in one short sentence containing both the secret code and computed result. Never call the tool twice."
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "My secret code is ORBIT-47. Remember it for my next question."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "What is my secret code, and what is double 3? Use the tool.",
+                "providerOptions": {
+                  "mastra": {
+                    "createdAt": 1788977881928
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "output": {
+        "files": [],
+        "reasoning": [],
+        "sources": [],
+        "text": "Your secret code is ORBIT-47, and double 3 is 6.",
+        "warnings": []
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": {
+        "MastraMemory": {
+          "thread": {
+            "id": "live-history-fixture",
+            "title": "",
+            "resourceId": "synthetic-user",
+            "createdAt": "2026-09-09T18:18:01.919Z",
+            "updatedAt": "2026-09-09T18:18:01.919Z"
+          },
+          "resourceId": "synthetic-user"
+        }
+      },
+      "startedAt": "2026-09-09T18:18:01.935Z",
+      "endedAt": "2026-09-09T18:18:13.116Z",
+      "createdAt": "2026-09-09T18:18:06.929Z",
+      "updatedAt": "2026-09-09T18:18:13.131Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "7bdbc84af937d609",
+      "parentSpanId": "74687812655b6ede",
+      "name": "step: 0",
+      "entityType": "agent",
+      "entityId": "live-fixture-agent",
+      "entityName": "Live fixture agent",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "model_step",
+      "attributes": {
+        "stepIndex": 0,
+        "messageId": "8241dcef-9f85-4e53-a2f0-d5c9b0be3a01",
+        "usage": {
+          "inputTokens": 132,
+          "outputTokens": 14,
+          "inputDetails": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "text": 132
+          },
+          "outputDetails": {
+            "reasoning": 0,
+            "text": 14
+          }
+        },
+        "isContinued": true,
+        "finishReason": "tool-calls",
+        "warnings": []
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture",
+        "headers": {
+          "access-control-expose-headers": "X-Request-ID, CF-Ray, CF-Ray",
+          "alt-svc": "h3=\":443\"; ma=86400",
+          "cf-cache-status": "DYNAMIC",
+          "cf-ray": "a38831731fd39fc4-AMS",
+          "connection": "keep-alive",
+          "content-encoding": "br",
+          "content-type": "application/json",
+          "date": "Wed, 09 Sep 2026 18:18:09 GMT",
+          "openai-organization": "zenml-1",
+          "openai-processing-ms": "6022",
+          "openai-project": "proj_HhYs2IpgmyH24j2Q3DESrdi0",
+          "openai-version": "2020-10-01",
+          "server": "cloudflare",
+          "set-cookie": "__cf_bm=nnWIf036AZFbhEVcQH6Sz7PJCGVgk6w3IW.yGt.1zxY-1788977882.092159-1.0.1.1-oN9sYl0rn1F_GnaIb4QhDKKkpt8GyL7iT3L8hTZdtVzORpN.c4W7V1.1STRhedOTjhn466nmd8CPq2kPK7o448lP3ivpHmp8PLewduzQSRfWvmW6WO_hiGMEueXPqFUW; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.openai.com; Expires=Wed, 09 Sep 2026 18:48:09 GMT",
+          "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+          "transfer-encoding": "chunked",
+          "x-content-type-options": "nosniff",
+          "x-ratelimit-limit-requests": "30000",
+          "x-ratelimit-limit-tokens": "150000000",
+          "x-ratelimit-remaining-requests": "29999",
+          "x-ratelimit-remaining-tokens": "149999650",
+          "x-ratelimit-reset-requests": "2ms",
+          "x-ratelimit-reset-tokens": "0s",
+          "x-request-id": "req_43d1e9a9a99447d0bd40e6923852c3a2"
+        },
+        "body": {
+          "id": "resp_0610db98a632881b006aa1a2db959c87d2b7d5f969fae2acf3",
+          "object": "response",
+          "created_at": 1788977883,
+          "status": "completed",
+          "background": false,
+          "billing": {
+            "payer": "developer"
+          },
+          "completed_at": 1788977889,
+          "error": null,
+          "frequency_penalty": 0,
+          "incomplete_details": null,
+          "instructions": null,
+          "max_output_tokens": 150,
+          "max_tool_calls": null,
+          "model": "gpt-4.1-mini-2025-04-14",
+          "moderation": null,
+          "output": [
+            {
+              "id": "fc_0610db98a632881b006aa1a2e1664c87d2a755de2e3267f741",
+              "type": "function_call",
+              "status": "completed",
+              "arguments": "{\"value\":3}",
+              "call_id": "call_VdiYXhnlCCImYGfY1XerKLLF",
+              "name": "double"
+            }
+          ],
+          "parallel_tool_calls": true,
+          "presence_penalty": 0,
+          "previous_response_id": null,
+          "prompt_cache_key": null,
+          "prompt_cache_retention": "in_memory",
+          "reasoning": {
+            "context": null,
+            "effort": null,
+            "summary": null
+          },
+          "safety_identifier": null,
+          "service_tier": "default",
+          "store": true,
+          "temperature": 0,
+          "text": {
+            "format": {
+              "type": "text"
+            },
+            "verbosity": "medium"
+          },
+          "tool_choice": "auto",
+          "tool_usage": {
+            "image_gen": {
+              "input_tokens": 0,
+              "input_tokens_details": {
+                "image_tokens": 0,
+                "text_tokens": 0
+              },
+              "output_tokens": 0,
+              "output_tokens_details": {
+                "image_tokens": 0,
+                "text_tokens": 0
+              },
+              "total_tokens": 0
+            },
+            "web_search": {
+              "num_requests": 0
+            }
+          },
+          "tools": [
+            {
+              "type": "function",
+              "description": "Double a supplied number. Call this exactly once to calculate the requested double.",
+              "name": "double",
+              "output_schema": null,
+              "parameters": {
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "strict": true
+            }
+          ],
+          "top_logprobs": 0,
+          "top_p": 1,
+          "truncation": "disabled",
+          "usage": {
+            "input_tokens": 132,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0
+            },
+            "output_tokens": 14,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 146
+          },
+          "user": null,
+          "metadata": {}
+        },
+        "modelMetadata": {
+          "modelId": "gpt-4.1-mini",
+          "modelVersion": "v2",
+          "modelProvider": "openai"
+        }
+      },
+      "tags": null,
+      "links": null,
+      "input": [
+        {
+          "role": "system",
+          "content": "Use the prior conversation to recall the secret code. Call the double tool exactly once for the requested number. After the tool result, answer in one short sentence containing both the secret code and computed result. Never call the tool twice."
+        },
+        {
+          "role": "user",
+          "content": "My secret code is ORBIT-47. Remember it for my next question."
+        },
+        {
+          "role": "user",
+          "content": "What is my secret code, and what is double 3? Use the tool."
+        }
+      ],
+      "output": {
+        "text": "",
+        "toolCalls": [
+          {
+            "toolCallId": "call_VdiYXhnlCCImYGfY1XerKLLF",
+            "toolName": "double",
+            "args": {
+              "value": 3
+            }
+          }
+        ]
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:01.940Z",
+      "endedAt": "2026-09-09T18:18:09.965Z",
+      "createdAt": "2026-09-09T18:18:06.929Z",
+      "updatedAt": "2026-09-09T18:18:13.131Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "92ffd5b33fb03fa5",
+      "parentSpanId": "7bdbc84af937d609",
+      "name": "inference: 0",
+      "entityType": "agent",
+      "entityId": "live-fixture-agent",
+      "entityName": "Live fixture agent",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "model_inference",
+      "attributes": {
+        "stepIndex": 0,
+        "model": "gpt-4.1-mini",
+        "provider": "openai",
+        "streaming": true,
+        "parameters": {
+          "maxRetries": 0,
+          "maxOutputTokens": 150,
+          "temperature": 0
+        },
+        "availableTools": [
+          "double"
+        ],
+        "toolChoice": "auto",
+        "usage": {
+          "inputTokens": 132,
+          "outputTokens": 14,
+          "inputDetails": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "text": 132
+          },
+          "outputDetails": {
+            "reasoning": 0,
+            "text": 14
+          }
+        },
+        "finishReason": "tool-calls",
+        "warnings": [],
+        "completionStartTime": "2026-09-09T18:18:09.957Z"
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture"
+      },
+      "tags": null,
+      "links": null,
+      "output": {
+        "text": "",
+        "toolCalls": [
+          {
+            "toolCallId": "call_VdiYXhnlCCImYGfY1XerKLLF",
+            "toolName": "double",
+            "args": {
+              "value": 3
+            }
+          }
+        ]
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:01.942Z",
+      "endedAt": "2026-09-09T18:18:09.965Z",
+      "createdAt": "2026-09-09T18:18:06.929Z",
+      "updatedAt": "2026-09-09T18:18:13.131Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "87d9322a407d36dd",
+      "parentSpanId": "92ffd5b33fb03fa5",
+      "name": "chunk: 'tool-call'",
+      "entityType": "agent",
+      "entityId": "live-fixture-agent",
+      "entityName": "Live fixture agent",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "model_chunk",
+      "attributes": {
+        "chunkType": "tool-call",
+        "sequenceNumber": 0
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture"
+      },
+      "tags": null,
+      "links": null,
+      "output": {
+        "toolName": "double",
+        "toolCallId": "call_VdiYXhnlCCImYGfY1XerKLLF",
+        "toolInput": {
+          "value": 3
+        }
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:09.957Z",
+      "endedAt": "2026-09-09T18:18:09.958Z",
+      "createdAt": "2026-09-09T18:18:13.130Z",
+      "updatedAt": "2026-09-09T18:18:13.131Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "0b98b36c5920cf27",
+      "parentSpanId": "7bdbc84af937d609",
+      "name": "tool: 'double'",
+      "entityType": "tool",
+      "entityId": "double",
+      "entityName": "double",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "tool_call",
+      "attributes": {
+        "toolDescription": "Double a supplied number. Call this exactly once to calculate the requested double.",
+        "toolType": "tool",
+        "success": true
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture"
+      },
+      "tags": null,
+      "links": null,
+      "input": {
+        "value": 3
+      },
+      "output": {
+        "doubled": 6
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": {
+        "MastraMemory": {
+          "thread": {
+            "id": "live-history-fixture",
+            "title": "",
+            "resourceId": "synthetic-user",
+            "createdAt": "2026-09-09T18:18:01.919Z",
+            "updatedAt": "2026-09-09T18:18:01.919Z"
+          },
+          "resourceId": "synthetic-user"
+        }
+      },
+      "startedAt": "2026-09-09T18:18:09.961Z",
+      "endedAt": "2026-09-09T18:18:09.962Z",
+      "createdAt": "2026-09-09T18:18:13.130Z",
+      "updatedAt": "2026-09-09T18:18:13.131Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "0652938eceb88183",
+      "parentSpanId": "92ffd5b33fb03fa5",
+      "name": "chunk: 'tool-result'",
+      "entityType": "agent",
+      "entityId": "live-fixture-agent",
+      "entityName": "Live fixture agent",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "model_chunk",
+      "attributes": {
+        "chunkType": "tool-result",
+        "sequenceNumber": 1
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture",
+        "toolCallId": "call_VdiYXhnlCCImYGfY1XerKLLF",
+        "toolName": "double"
+      },
+      "tags": null,
+      "links": null,
+      "input": null,
+      "output": null,
+      "error": null,
+      "isEvent": true,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:09.963Z",
+      "endedAt": null,
+      "createdAt": "2026-09-09T18:18:13.130Z",
+      "updatedAt": "2026-09-09T18:18:13.130Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "bb9b0e5950f6531d",
+      "parentSpanId": "74687812655b6ede",
+      "name": "step: 1",
+      "entityType": "agent",
+      "entityId": "live-fixture-agent",
+      "entityName": "Live fixture agent",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "model_step",
+      "attributes": {
+        "stepIndex": 1,
+        "messageId": "8241dcef-9f85-4e53-a2f0-d5c9b0be3a01",
+        "usage": {
+          "inputTokens": 157,
+          "outputTokens": 19,
+          "inputDetails": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "text": 157
+          },
+          "outputDetails": {
+            "reasoning": 0,
+            "text": 19
+          }
+        },
+        "isContinued": false,
+        "finishReason": "stop",
+        "warnings": []
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture",
+        "headers": {
+          "access-control-expose-headers": "X-Request-ID, CF-Ray, CF-Ray",
+          "alt-svc": "h3=\":443\"; ma=86400",
+          "cf-cache-status": "DYNAMIC",
+          "cf-ray": "a38831a478929fc4-AMS",
+          "connection": "keep-alive",
+          "content-encoding": "br",
+          "content-type": "application/json",
+          "date": "Wed, 09 Sep 2026 18:18:13 GMT",
+          "openai-organization": "zenml-1",
+          "openai-processing-ms": "2863",
+          "openai-project": "proj_HhYs2IpgmyH24j2Q3DESrdi0",
+          "openai-version": "2020-10-01",
+          "server": "cloudflare",
+          "set-cookie": "__cf_bm=cOnheunsWpymBQK.m3kO6F7cG3CZ_5iqj6fNuHAxx0Q-1788977889.9953146-1.0.1.1-7CclIbXyV8UTk.CCH8YlI2NpjUffLs8TvKUKHZQOuQNNeodQijg8AP_T.i3txydOu0N1iZ8CyKUELPQMtWTneuuP5ZcEY0t5EjD5ldMnLIuHrcSXN2Ajq6IJ_oZORJYu; HttpOnly; SameSite=None; Secure; Path=/; Domain=api.openai.com; Expires=Wed, 09 Sep 2026 18:48:13 GMT",
+          "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+          "transfer-encoding": "chunked",
+          "x-content-type-options": "nosniff",
+          "x-ratelimit-limit-requests": "30000",
+          "x-ratelimit-limit-tokens": "150000000",
+          "x-ratelimit-remaining-requests": "29999",
+          "x-ratelimit-remaining-tokens": "149999625",
+          "x-ratelimit-reset-requests": "2ms",
+          "x-ratelimit-reset-tokens": "0s",
+          "x-request-id": "req_6f56b8331bea4929ac4d29278ce36f62"
+        },
+        "body": {
+          "id": "resp_008d47c270d6d0e3006aa1a2e28ddc87d29fb13118d034c0ad",
+          "object": "response",
+          "created_at": 1788977890,
+          "status": "completed",
+          "background": false,
+          "billing": {
+            "payer": "developer"
+          },
+          "completed_at": 1788977892,
+          "error": null,
+          "frequency_penalty": 0,
+          "incomplete_details": null,
+          "instructions": null,
+          "max_output_tokens": 150,
+          "max_tool_calls": null,
+          "model": "gpt-4.1-mini-2025-04-14",
+          "moderation": null,
+          "output": [
+            {
+              "id": "msg_008d47c270d6d0e3006aa1a2e48c1c87d288e515f1e63278e9",
+              "type": "message",
+              "status": "completed",
+              "content": [
+                {
+                  "type": "output_text",
+                  "annotations": [],
+                  "logprobs": [],
+                  "text": "Your secret code is ORBIT-47, and double 3 is 6."
+                }
+              ],
+              "role": "assistant"
+            }
+          ],
+          "parallel_tool_calls": true,
+          "presence_penalty": 0,
+          "previous_response_id": null,
+          "prompt_cache_key": null,
+          "prompt_cache_retention": "in_memory",
+          "reasoning": {
+            "context": null,
+            "effort": null,
+            "summary": null
+          },
+          "safety_identifier": null,
+          "service_tier": "default",
+          "store": true,
+          "temperature": 0,
+          "text": {
+            "format": {
+              "type": "text"
+            },
+            "verbosity": "medium"
+          },
+          "tool_choice": "auto",
+          "tool_usage": {
+            "image_gen": {
+              "input_tokens": 0,
+              "input_tokens_details": {
+                "image_tokens": 0,
+                "text_tokens": 0
+              },
+              "output_tokens": 0,
+              "output_tokens_details": {
+                "image_tokens": 0,
+                "text_tokens": 0
+              },
+              "total_tokens": 0
+            },
+            "web_search": {
+              "num_requests": 0
+            }
+          },
+          "tools": [
+            {
+              "type": "function",
+              "description": "Double a supplied number. Call this exactly once to calculate the requested double.",
+              "name": "double",
+              "output_schema": null,
+              "parameters": {
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "strict": true
+            }
+          ],
+          "top_logprobs": 0,
+          "top_p": 1,
+          "truncation": "disabled",
+          "usage": {
+            "input_tokens": 157,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0
+            },
+            "output_tokens": 19,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 176
+          },
+          "user": null,
+          "metadata": {}
+        },
+        "modelMetadata": {
+          "modelId": "gpt-4.1-mini",
+          "modelVersion": "v2",
+          "modelProvider": "openai"
+        }
+      },
+      "tags": null,
+      "links": null,
+      "input": [
+        {
+          "role": "system",
+          "content": "Use the prior conversation to recall the secret code. Call the double tool exactly once for the requested number. After the tool result, answer in one short sentence containing both the secret code and computed result. Never call the tool twice."
+        },
+        {
+          "role": "user",
+          "content": "My secret code is ORBIT-47. Remember it for my next question."
+        },
+        {
+          "role": "user",
+          "content": "What is my secret code, and what is double 3? Use the tool."
+        },
+        {
+          "role": "assistant",
+          "content": "[tool: double]"
+        },
+        {
+          "role": "tool",
+          "content": "[tool-result: double]"
+        }
+      ],
+      "output": {
+        "text": "Your secret code is ORBIT-47, and double 3 is 6.",
+        "toolCalls": []
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:09.966Z",
+      "endedAt": "2026-09-09T18:18:13.101Z",
+      "createdAt": "2026-09-09T18:18:13.130Z",
+      "updatedAt": "2026-09-09T18:18:13.131Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "717afdcb98fb2240",
+      "parentSpanId": "bb9b0e5950f6531d",
+      "name": "inference: 1",
+      "entityType": "agent",
+      "entityId": "live-fixture-agent",
+      "entityName": "Live fixture agent",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "model_inference",
+      "attributes": {
+        "stepIndex": 1,
+        "model": "gpt-4.1-mini",
+        "provider": "openai",
+        "streaming": true,
+        "parameters": {
+          "maxRetries": 0,
+          "maxOutputTokens": 150,
+          "temperature": 0
+        },
+        "availableTools": [
+          "double"
+        ],
+        "toolChoice": "auto",
+        "usage": {
+          "inputTokens": 157,
+          "outputTokens": 19,
+          "inputDetails": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "text": 157
+          },
+          "outputDetails": {
+            "reasoning": 0,
+            "text": 19
+          }
+        },
+        "finishReason": "stop",
+        "warnings": [],
+        "completionStartTime": "2026-09-09T18:18:09.957Z"
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture"
+      },
+      "tags": null,
+      "links": null,
+      "output": {
+        "text": "Your secret code is ORBIT-47, and double 3 is 6.",
+        "toolCalls": []
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:09.966Z",
+      "endedAt": "2026-09-09T18:18:13.101Z",
+      "createdAt": "2026-09-09T18:18:13.130Z",
+      "updatedAt": "2026-09-09T18:18:13.131Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "711e61767e48eca4",
+      "parentSpanId": "717afdcb98fb2240",
+      "name": "chunk: 'text'",
+      "entityType": "agent",
+      "entityId": "live-fixture-agent",
+      "entityName": "Live fixture agent",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "model_chunk",
+      "attributes": {
+        "chunkType": "text",
+        "sequenceNumber": 0
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture"
+      },
+      "tags": null,
+      "links": null,
+      "output": {
+        "text": "Your secret code is ORBIT-47, and double 3 is 6."
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:13.098Z",
+      "endedAt": "2026-09-09T18:18:13.099Z",
+      "createdAt": "2026-09-09T18:18:13.130Z",
+      "updatedAt": "2026-09-09T18:18:13.131Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "d3b454ed6591d2df",
+      "parentSpanId": "691232b44b34e5f8",
+      "name": "output processor: message-history",
+      "entityType": "output_processor",
+      "entityId": "message-history",
+      "entityName": "MessageHistory",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "processor_run",
+      "attributes": {
+        "processorExecutor": "workflow",
+        "processorIndex": 0
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture"
+      },
+      "tags": null,
+      "links": null,
+      "input": {
+        "messages": [
+          {
+            "id": "8241dcef-9f85-4e53-a2f0-d5c9b0be3a01",
+            "role": "assistant",
+            "content": {
+              "format": 2,
+              "parts": [
+                {
+                  "type": "tool-invocation",
+                  "toolInvocation": {
+                    "state": "result",
+                    "toolCallId": "call_VdiYXhnlCCImYGfY1XerKLLF",
+                    "toolName": "double",
+                    "args": {
+                      "value": 3
+                    },
+                    "result": {
+                      "doubled": 6
+                    }
+                  }
+                },
+                {
+                  "type": "step-start",
+                  "createdAt": 1788977889966,
+                  "model": "openai/gpt-4.1-mini"
+                },
+                {
+                  "type": "text",
+                  "text": "Your secret code is ORBIT-47, and double 3 is 6.",
+                  "createdAt": 1788977893100
+                }
+              ],
+              "metadata": {
+                "modelId": "gpt-4.1-mini",
+                "provider": "openai"
+              },
+              "content": "Your secret code is ORBIT-47, and double 3 is 6."
+            },
+            "createdAt": "2026-09-09T18:18:09.959Z",
+            "threadId": "live-history-fixture",
+            "resourceId": "synthetic-user"
+          }
+        ],
+        "result": {
+          "text": "Your secret code is ORBIT-47, and double 3 is 6.",
+          "finishReason": "stop",
+          "stepCount": 2
+        },
+        "retryCount": 0
+      },
+      "output": {
+        "messages": [
+          {
+            "id": "prior-message",
+            "type": "text",
+            "createdAt": "2026-09-09T10:00:00.000Z",
+            "threadId": "live-history-fixture",
+            "resourceId": "synthetic-user",
+            "content": {
+              "format": 2,
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "My secret code is ORBIT-47. Remember it for my next question."
+                }
+              ]
+            },
+            "role": "user"
+          },
+          {
+            "id": "808f4ac0-cd38-4ef6-9763-d0d1e2fe01a0",
+            "role": "user",
+            "createdAt": "2026-09-09T18:18:01.928Z",
+            "content": {
+              "format": 2,
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "What is my secret code, and what is double 3? Use the tool.",
+                  "createdAt": 1788977881928
+                }
+              ],
+              "content": "What is my secret code, and what is double 3? Use the tool."
+            },
+            "threadId": "live-history-fixture",
+            "resourceId": "synthetic-user"
+          },
+          {
+            "id": "8241dcef-9f85-4e53-a2f0-d5c9b0be3a01",
+            "role": "assistant",
+            "content": {
+              "format": 2,
+              "parts": [
+                {
+                  "type": "tool-invocation",
+                  "toolInvocation": {
+                    "state": "result",
+                    "toolCallId": "call_VdiYXhnlCCImYGfY1XerKLLF",
+                    "toolName": "double",
+                    "args": {
+                      "value": 3
+                    },
+                    "result": {
+                      "doubled": 6
+                    }
+                  }
+                },
+                {
+                  "type": "step-start",
+                  "createdAt": 1788977889966,
+                  "model": "openai/gpt-4.1-mini"
+                },
+                {
+                  "type": "text",
+                  "text": "Your secret code is ORBIT-47, and double 3 is 6.",
+                  "createdAt": 1788977893100
+                }
+              ],
+              "metadata": {
+                "modelId": "gpt-4.1-mini",
+                "provider": "openai"
+              },
+              "content": "Your secret code is ORBIT-47, and double 3 is 6."
+            },
+            "createdAt": "2026-09-09T18:18:09.959Z",
+            "threadId": "live-history-fixture",
+            "resourceId": "synthetic-user"
+          }
+        ],
+        "systemMessages": [
+          {
+            "role": "system",
+            "content": "Use the prior conversation to recall the secret code. Call the double tool exactly once for the requested number. After the tool result, answer in one short sentence containing both the secret code and computed result. Never call the tool twice."
+          }
+        ]
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:13.102Z",
+      "endedAt": "2026-09-09T18:18:13.115Z",
+      "createdAt": "2026-09-09T18:18:13.130Z",
+      "updatedAt": "2026-09-09T18:18:13.131Z"
+    },
+    {
+      "traceId": "10540000000000000000000000000001",
+      "spanId": "78fa89568828d87c",
+      "parentSpanId": "d3b454ed6591d2df",
+      "name": "memory: save",
+      "entityType": "memory",
+      "entityId": "message-history",
+      "entityName": "Memory",
+      "entityVersionId": null,
+      "userId": null,
+      "organizationId": null,
+      "resourceId": "synthetic-user",
+      "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+      "sessionId": null,
+      "threadId": "live-history-fixture",
+      "requestId": null,
+      "environment": null,
+      "source": null,
+      "serviceName": null,
+      "scope": null,
+      "experimentId": null,
+      "spanType": "memory_operation",
+      "attributes": {
+        "operationType": "save",
+        "messageCount": 2
+      },
+      "metadata": {
+        "runId": "7e9f8c2b-0913-4fec-8f47-f291d04dd9fd",
+        "resourceId": "synthetic-user",
+        "threadId": "live-history-fixture"
+      },
+      "tags": null,
+      "links": null,
+      "output": {
+        "success": true
+      },
+      "error": null,
+      "isEvent": false,
+      "requestContext": null,
+      "startedAt": "2026-09-09T18:18:13.102Z",
+      "endedAt": "2026-09-09T18:18:13.115Z",
+      "createdAt": "2026-09-09T18:18:13.130Z",
+      "updatedAt": "2026-09-09T18:18:13.131Z"
+    }
+  ]
+}

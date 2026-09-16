@@ -26,7 +26,7 @@ from kitaru.server.domain.base import (
     ValidationError,
 )
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.replay_config import AnalyzerConfig, EvaluatorConfig
+from kitaru.server.domain.plugin import AnalyzerConfig, EvaluatorConfig
 
 
 class ImportNotFound(NotFoundError):

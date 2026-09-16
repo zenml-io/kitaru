@@ -75,6 +75,7 @@ export function stripLiveMemoryOptions(options: RuntimeGenerateOptions): void {
     delete options[name];
   }
   const requestContext = new RequestContext(options.requestContext?.entries());
+  requestContext.delete("MastraMemory");
   requestContext.delete(MASTRA_RESOURCE_ID_KEY);
   requestContext.delete(MASTRA_THREAD_ID_KEY);
   options.requestContext = requestContext;

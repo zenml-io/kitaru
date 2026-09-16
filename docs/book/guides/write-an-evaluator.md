@@ -7,6 +7,8 @@ icon: chart-line
 
 Your domain expert already knows what a good run looks like. An [evaluator](../concepts/evaluators.md) is that knowledge as code: a small Python callable that reads one recorded session and writes named, typed verdicts. This guide takes you from criteria to a registered, calibrated evaluator you can trust in a release gate.
 
+For existing TypeScript evaluation code or native Mastra scorers, use the [TypeScript and Mastra evaluator guide](typescript-evaluators.md) to register a Python wrapper around a pinned Node artifact.
+
 ## From criteria to code
 
 Start from what the expert says. "A good refund resolution issues exactly one refund, quotes the amount, and does not promise anything we do not do" is three checks:
@@ -82,6 +84,8 @@ kitaru evaluator register refund-quality \
   --script refund_quality_evaluator.py --entrypoint evaluate
 ```
 
+An evaluator that calls a provider, like the OpenAI judge above, can declare its provider and a [connection schema](provider-connections.md) on register with `--provider` and `--connection-schema`.
+
 Evaluators are versioned: re-registering with `kitaru evaluator version register refund-quality --script ...` creates version 2, and every evaluation row records exactly which version wrote it. Tightening a criterion never rewrites history: old rows keep their provenance, and you can evaluate any population again with the new version.
 
 ## Calibrate against human judgment
@@ -119,7 +123,7 @@ Or from the client, with explicit IDs:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationBatchCreateRequest
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 
 job = await client.evaluations.create(
     EvaluationBatchCreateRequest(

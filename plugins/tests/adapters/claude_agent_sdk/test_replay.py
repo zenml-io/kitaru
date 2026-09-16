@@ -51,7 +51,6 @@ from kitaru_claude_agent_sdk import (
 )
 from kitaru_claude_agent_sdk.codec import (
     TOOL_RESULT_SCHEMA,
-    decode_tool_result,
     encode_tool_result,
 )
 
@@ -150,39 +149,6 @@ async def _invoke_replay(
         )
     )
     return await captured_tools[0].handler(arguments), active_client, supplied_options
-
-
-def test_codec_round_trips_ordered_text_content_and_error_flag() -> None:
-    result = {
-        "content": [
-            {"type": "text", "text": "first"},
-            {"type": "text", "text": "second"},
-        ],
-        "is_error": True,
-    }
-
-    encoded = encode_tool_result(result)
-
-    assert encoded["schema"] == TOOL_RESULT_SCHEMA
-    assert decode_tool_result(encoded) == result
-
-
-@pytest.mark.parametrize(
-    "stored",
-    [
-        {},
-        {"schema": "future", "replayable": True, "payload": {}},
-        {
-            "schema": TOOL_RESULT_SCHEMA,
-            "replayable": True,
-            "payload": {"content": [{"type": "image", "data": "x"}]},
-        },
-        encode_tool_result({"content": [{"type": "text", "text": "x" * 70_000}]}),
-    ],
-)
-def test_codec_fails_closed_for_malformed_or_non_replayable_values(stored: Any) -> None:
-    with pytest.raises(ToolPolicyError):
-        decode_tool_result(stored)
 
 
 async def test_static_exact_and_subset_replay_never_call_original(

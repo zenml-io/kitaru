@@ -45,8 +45,8 @@ from kitaru.server.domain.experiment import (
     Experiment,
     ExperimentNotFound,
 )
+from kitaru.server.domain.plugin import EvaluatorConfig
 from kitaru.server.domain.replay_config import (
-    EvaluatorConfig,
     ReplayConfig,
     ReplayConfigNotFound,
     default_tool_policy,

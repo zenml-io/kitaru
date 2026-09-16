@@ -19,15 +19,9 @@
     "workflow": "node dist/workflow.js"
   },
   "dependencies": {
-    "@ai-sdk/openai": "4.0.20",
-    "@zenml-io/kitaru": "link:../../../packages/core",
-    "@zenml-io/kitaru-vercel-ai": "link:../../../packages/vercel-ai",
-    "ai": "7.0.85"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "2.3.11",
-    "@types/node": "22.20.1",
-    "typescript": "5.9.3",
-    "vitest": "4.1.10"
+    "@ai-sdk/openai": "4.0.66",
+    "@zenml-io/kitaru": "workspace:*",
+    "@zenml-io/kitaru-vercel-ai": "workspace:*",
+    "ai": "7.0.99"
   }
 }

@@ -75,7 +75,6 @@ class PluginService:
             DuplicatePluginName: The (kind, name) pair is already registered.
             InvalidPluginAgentScope: The kind is importer and agent_id is
                 set.
-            InvalidPluginProvider: The kind is evaluator and provider is set.
             ReservedPluginName: The name is under the reserved namespace.
 
         Returns:

@@ -97,23 +97,47 @@ test *ARGS:
     uv run pytest {{ ARGS }}
 
 # Run all property tests with the heavy nightly profile
-fuzz: fuzz-importers fuzz-mcp fuzz-filters fuzz-api
+fuzz: fuzz-importers fuzz-evaluators fuzz-api-models fuzz-mcp fuzz-adapters fuzz-filters fuzz-api
 
-# Heavy property-test run for the plugins tree (importer parse() contract, LangGraph capture)
+# Heavy property-test run for importer parse() and normalization contracts
 fuzz-importers:
-    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/importers/test_fuzz_parse.py plugins/tests/adapters/langgraph/test_capture_properties.py --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/importers/test_fuzz_parse.py plugins/tests/importers/test_normalization_properties.py --hypothesis-show-statistics
+
+# Heavy property-test run for deterministic evaluator pointer, arithmetic, and budget contracts
+fuzz-evaluators:
+    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/evaluators/test_deterministic_properties.py plugins/tests/evaluators/test_numeric_properties.py --hypothesis-show-statistics
+
+# Heavy property-test run for selected API model wire contracts
+fuzz-api-models:
+    HYPOTHESIS_PROFILE=nightly uv run --extra server pytest tests/api_models/test_wire_properties.py --hypothesis-show-statistics
 
 # Heavy property-test run for the core tree (MCP tool boundary, credential redaction)
 fuzz-mcp:
     HYPOTHESIS_PROFILE=nightly uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py tests/cli/test_redaction_properties.py --hypothesis-show-statistics
 
+# Heavy property-test run for adapter capture, codec, and record/replay contracts
+fuzz-adapters:
+    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/adapters/langgraph/test_capture_properties.py plugins/tests/adapters/langgraph/test_codec.py plugins/tests/adapters/claude_agent_sdk/test_codec.py plugins/tests/adapters/pydantic_ai/test_record_replay_properties.py plugins/tests/adapters/openai_agents/test_record_replay_properties.py --hypothesis-show-statistics
+
 # Heavy grammar-aware property tests for recursive JSON list filters
 fuzz-filters:
     HYPOTHESIS_PROFILE=nightly uv run --extra server pytest tests/server/test_fuzz_filters.py --hypothesis-show-statistics
 
+# Compare generated filter results with PostgreSQL in isolated databases
+fuzz-filters-pg MAX_EXAMPLES="25":
+    KITARU_FUZZ_POSTGRES=1 KITARU_TEST_REQUIRE_POSTGRES=1 KITARU_FUZZ_PG_MAX_EXAMPLES={{ MAX_EXAMPLES }} uv run --extra server pytest tests/server/test_fuzz_filters_pg.py --hypothesis-show-statistics
+
 # Heavy API fuzzing run against a live server (requires docker compose up -d db)
 fuzz-api:
     HYPOTHESIS_PROFILE=nightly KITARU_FUZZ=1 KITARU_FUZZ_RANDOM=1 KITARU_FUZZ_MAX_EXAMPLES=400 uv run --extra server --group fuzz pytest tests/server/test_fuzz_api.py -p no:randomly --hypothesis-show-statistics
+
+# Run isolated successful agent/version API sequences against PostgreSQL
+fuzz-api-sequences MAX_EXAMPLES="25" MAX_ACTIONS="15":
+    KITARU_FUZZ_API_SEQUENCES=1 KITARU_TEST_REQUIRE_POSTGRES=1 KITARU_FUZZ_API_SEQUENCE_MAX_EXAMPLES={{ MAX_EXAMPLES }} KITARU_FUZZ_API_SEQUENCE_MAX_ACTIONS={{ MAX_ACTIONS }} uv run --extra server --group fuzz pytest tests/server/test_fuzz_api_sequences.py -p no:randomly --hypothesis-show-statistics
+
+# Run authenticated task-attempt lifecycle sequences against PostgreSQL
+fuzz-task-lifecycle MAX_EXAMPLES="25" MAX_ACTIONS="10":
+    KITARU_FUZZ_TASK_LIFECYCLE=1 KITARU_TEST_REQUIRE_POSTGRES=1 KITARU_FUZZ_TASK_LIFECYCLE_MAX_EXAMPLES={{ MAX_EXAMPLES }} KITARU_FUZZ_TASK_LIFECYCLE_MAX_ACTIONS={{ MAX_ACTIONS }} uv run --extra server --group fuzz pytest tests/server/test_fuzz_task_lifecycle.py -p no:randomly --hypothesis-show-statistics
 
 # Check Alembic migrations against the ORM schema (requires docker compose up -d db)
 migration-check:

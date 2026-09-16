@@ -49,9 +49,9 @@ Every trustworthy comparison involves three sessions:
 ```python
 import asyncio
 from kitaru.client import KitaruAPIClient
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay import ReplayCreateRequest
 from kitaru.api_models.v1.replay_config import (
-    EvaluatorConfig,
     HistoryConfig,
     ReplayOverride,
     ToolPolicy,

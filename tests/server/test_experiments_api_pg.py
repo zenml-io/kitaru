@@ -176,7 +176,7 @@ async def test_update_new_evaluators_replaces_config_across_requests(
     assert response.status_code == 200
     body = response.json()
     assert body["evaluators"] == [
-        {"evaluator": "relevance", "version": 1, "params": {}}
+        {"evaluator": "relevance", "version": 1, "params": {}, "connection_id": None}
     ]
 
 

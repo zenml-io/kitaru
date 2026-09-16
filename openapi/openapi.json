@@ -3253,6 +3253,19 @@
         "additionalProperties": false,
         "description": "Evaluator config.",
         "properties": {
+          "connection_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Credential connection, an omitted value resolves to the provider's default.",
+            "title": "Connection Id"
+          },
           "evaluator": {
             "description": "Evaluator name.",
             "title": "Evaluator",
@@ -3300,6 +3313,19 @@
             "description": "Id of the agent this evaluator is scoped to, null for a global evaluator.",
             "title": "Agent Id"
           },
+          "connection_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "JSON Schema of the connection values this evaluator reads.",
+            "title": "Connection Schema"
+          },
           "description": {
             "anyOf": [
               {
@@ -3334,6 +3360,18 @@
             "description": "Evaluator name.",
             "title": "Name",
             "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External service this evaluator calls.",
+            "title": "Provider"
           }
         },
         "required": [
@@ -3357,6 +3395,19 @@
             ],
             "description": "Id of the agent this evaluator is scoped to, null for a global evaluator.",
             "title": "Agent Id"
+          },
+          "connection_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "JSON Schema of the connection values this evaluator reads.",
+            "title": "Connection Schema"
           },
           "created": {
             "description": "Creation time.",
@@ -3423,6 +3474,18 @@
             "description": "Id of the owning account, null for a default plugin.",
             "title": "Owner Id"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External service this evaluator calls.",
+            "title": "Provider"
+          },
           "updated": {
             "description": "Last modification time.",
             "format": "date-time",
@@ -3437,8 +3500,10 @@
           "id",
           "name",
           "description",
+          "provider",
           "logo_url",
           "metadata",
+          "connection_schema",
           "latest_version",
           "agent_id"
         ],
@@ -3449,6 +3514,19 @@
         "additionalProperties": false,
         "description": "Evaluator update request.",
         "properties": {
+          "connection_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New connection schema.",
+            "title": "Connection Schema"
+          },
           "description": {
             "anyOf": [
               {
@@ -5830,7 +5908,7 @@
                 "type": "null"
               }
             ],
-            "description": "First counted task failure's error.",
+            "description": "Error the job settled with.",
             "title": "Error"
           },
           "id": {
@@ -5991,6 +6069,31 @@
           "value"
         ],
         "title": "ManualAnnotationCreateRequest",
+        "type": "object"
+      },
+      "NodeLink": {
+        "additionalProperties": false,
+        "description": "Node link.",
+        "properties": {
+          "external_id": {
+            "description": "External id of the linked node.",
+            "minLength": 1,
+            "title": "External Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Relation the link states.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "external_id",
+          "kind"
+        ],
+        "title": "NodeLink",
         "type": "object"
       },
       "NodeStatus": {
@@ -7828,6 +7931,18 @@
       "ServerInfoResponse": {
         "description": "Server info response.",
         "properties": {
+          "analytics_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the server sends analytics events.",
+            "title": "Analytics Enabled"
+          },
           "auth_scheme": {
             "$ref": "#/components/schemas/AuthScheme",
             "description": "Scheme used to authenticate requests."
@@ -8478,7 +8593,7 @@
         "description": "Session node batch request.",
         "properties": {
           "nodes": {
-            "description": "Nodes to upsert, parent before child.",
+            "description": "Nodes to upsert, in any order.",
             "items": {
               "$ref": "#/components/schemas/SessionNodeCreateRequest"
             },
@@ -8543,22 +8658,10 @@
             "title": "Error"
           },
           "external_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Id from the source system.",
-            "title": "External Id"
-          },
-          "index": {
-            "description": "Position within the session, the wire identity.",
-            "minimum": 0.0,
-            "title": "Index",
-            "type": "integer"
+            "description": "Id from the source system, the wire identity.",
+            "minLength": 1,
+            "title": "External Id",
+            "type": "string"
           },
           "input_text_selector": {
             "anyOf": [
@@ -8575,6 +8678,14 @@
           "inputs": {
             "description": "Node inputs.",
             "title": "Inputs"
+          },
+          "links": {
+            "description": "Links to other nodes of the session.",
+            "items": {
+              "$ref": "#/components/schemas/NodeLink"
+            },
+            "title": "Links",
+            "type": "array"
           },
           "metadata": {
             "additionalProperties": true,
@@ -8644,20 +8755,7 @@
             "description": "Node outputs.",
             "title": "Outputs"
           },
-          "parent_index": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Index of the parent node.",
-            "title": "Parent Index"
-          },
-          "reasoning": {
+          "parent_external_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -8666,8 +8764,16 @@
                 "type": "null"
               }
             ],
-            "description": "Visible reasoning produced by the model call.",
-            "title": "Reasoning"
+            "description": "External id of the parent node.",
+            "title": "Parent External Id"
+          },
+          "reasoning_selectors": {
+            "description": "RFC 6901 JSON Pointers selecting visible reasoning from node outputs.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasoning Selectors",
+            "type": "array"
           },
           "requested_model": {
             "anyOf": [
@@ -8680,15 +8786,6 @@
             ],
             "description": "Model requested by the call.",
             "title": "Requested Model"
-          },
-          "secondary_parent_indexes": {
-            "description": "Indexes of additional parent nodes.",
-            "items": {
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "title": "Secondary Parent Indexes",
-            "type": "array"
           },
           "started_at": {
             "anyOf": [
@@ -8768,7 +8865,7 @@
           }
         },
         "required": [
-          "index",
+          "external_id",
           "node_type",
           "name",
           "status",
@@ -8837,27 +8934,15 @@
             "title": "Error"
           },
           "external_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Id from the source system.",
-            "title": "External Id"
+            "title": "External Id",
+            "type": "string"
           },
           "id": {
             "description": "Node id.",
             "format": "uuid",
             "title": "Id",
             "type": "string"
-          },
-          "index": {
-            "description": "Position within the session.",
-            "title": "Index",
-            "type": "integer"
           },
           "input_text_selector": {
             "anyOf": [
@@ -8874,6 +8959,14 @@
           "inputs": {
             "description": "Node inputs, null unless include_payloads.",
             "title": "Inputs"
+          },
+          "links": {
+            "description": "Links to other nodes of the session.",
+            "items": {
+              "$ref": "#/components/schemas/NodeLink"
+            },
+            "title": "Links",
+            "type": "array"
           },
           "metadata": {
             "additionalProperties": true,
@@ -8943,32 +9036,7 @@
             "description": "Node outputs, null unless include_payloads.",
             "title": "Outputs"
           },
-          "parent_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Parent node.",
-            "title": "Parent Id"
-          },
-          "parent_index": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Parent node index.",
-            "title": "Parent Index"
-          },
-          "reasoning": {
+          "parent_external_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -8977,8 +9045,16 @@
                 "type": "null"
               }
             ],
-            "description": "Visible reasoning, null unless payloads are included.",
-            "title": "Reasoning"
+            "description": "External id of the parent node.",
+            "title": "Parent External Id"
+          },
+          "reasoning_selectors": {
+            "description": "RFC 6901 JSON Pointers selecting visible reasoning from node outputs.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasoning Selectors",
+            "type": "array"
           },
           "requested_model": {
             "anyOf": [
@@ -8991,23 +9067,6 @@
             ],
             "description": "Model requested by the call.",
             "title": "Requested Model"
-          },
-          "secondary_parent_ids": {
-            "description": "Additional parent nodes.",
-            "items": {
-              "format": "uuid",
-              "type": "string"
-            },
-            "title": "Secondary Parent Ids",
-            "type": "array"
-          },
-          "secondary_parent_indexes": {
-            "description": "Secondary parent indexes.",
-            "items": {
-              "type": "integer"
-            },
-            "title": "Secondary Parent Indexes",
-            "type": "array"
           },
           "session_id": {
             "description": "Session this node belongs to.",
@@ -9095,10 +9154,8 @@
         "required": [
           "id",
           "session_id",
-          "index",
-          "parent_index",
-          "secondary_parent_indexes",
-          "secondary_parent_ids",
+          "external_id",
+          "links",
           "node_type",
           "name",
           "status",
@@ -9512,7 +9569,7 @@
         "description": "Session with nodes response.",
         "properties": {
           "nodes": {
-            "description": "Every node of the session, ordered by index ascending.",
+            "description": "Every node of the session, ordered by position ascending.",
             "items": {
               "$ref": "#/components/schemas/SessionNodeResponse"
             },
@@ -10217,6 +10274,7 @@
           "claimed",
           "running",
           "completed",
+          "skipped",
           "failed",
           "timed_out",
           "canceled",
@@ -11294,7 +11352,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.25.0+dev"
+    "version": "0.26.0+dev"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -24966,7 +25024,7 @@
     },
     "/api/v1/sessions/{session_id}/full": {
       "get": {
-        "description": "Get a session together with every one of its nodes.\n\nThe node list is not paginated, so one call carries a whole session.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 404 when no session has this id.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    node_service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Session with every node, ordered by index.",
+        "description": "Get a session together with every one of its nodes.\n\nThe node list is not paginated, so one call carries a whole session.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 404 when no session has this id.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    node_service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Session with every node, ordered by position.",
         "operationId": "get_session_with_nodes_api_v1_sessions__session_id__full_get",
         "parameters": [
           {
@@ -25050,7 +25108,7 @@
     },
     "/api/v1/sessions/{session_id}/nodes": {
       "get": {
-        "description": "List the nodes of a session, ordered by index ascending.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 422 on invalid filters or pagination parameters.\n\nArgs:\n    session_id: Id of the session.\n    service: Session node service.\n    actor: Caller context.\n    params: Session node list params.\n\nReturns:\n    Page of session nodes, ordered by index.",
+        "description": "List the nodes of a session, ordered by position ascending.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 422 on invalid filters or pagination parameters.\n\nArgs:\n    session_id: Id of the session.\n    service: Session node service.\n    actor: Caller context.\n    params: Session node list params.\n\nReturns:\n    Page of session nodes, ordered by position.",
         "operationId": "list_session_nodes_api_v1_sessions__session_id__nodes_get",
         "parameters": [
           {
@@ -25096,14 +25154,14 @@
             }
           },
           {
-            "description": "Nodes are ordered by ascending index.",
+            "description": "Nodes are ordered by start time, then insertion.",
             "in": "query",
             "name": "sort",
             "required": false,
             "schema": {
-              "const": "index:asc",
-              "default": "index:asc",
-              "description": "Nodes are ordered by ascending index.",
+              "const": "position:asc",
+              "default": "position:asc",
+              "description": "Nodes are ordered by start time, then insertion.",
               "title": "Sort",
               "type": "string"
             }
@@ -25136,13 +25194,13 @@
             }
           },
           {
-            "description": "Include reasoning, inputs, outputs, and attributes.",
+            "description": "Include inputs, outputs, and attributes.",
             "in": "query",
             "name": "include_payloads",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Include reasoning, inputs, outputs, and attributes.",
+              "description": "Include inputs, outputs, and attributes.",
               "title": "Include Payloads",
               "type": "boolean"
             }
@@ -25216,7 +25274,7 @@
         ]
       },
       "post": {
-        "description": "Ingest a batch of session nodes.\n\nAn index already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, 409 when the session does not\ncurrently accept node ingestion, and 422 when a parent_index does not\nresolve.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with reasoning, inputs, outputs, and\n    attributes null.",
+        "description": "Ingest a batch of session nodes.\n\nAn external id already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, and 409 when the session does not\ncurrently accept node ingestion.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with inputs, outputs, and attributes null.",
         "operationId": "ingest_session_nodes_api_v1_sessions__session_id__nodes_post",
         "parameters": [
           {

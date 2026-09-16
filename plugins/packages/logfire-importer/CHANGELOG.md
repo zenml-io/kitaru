@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-09-10
+
+- Require Kitaru 0.26.0 or later for the `api` and `adapter` extras. File-only parsing retains support for Kitaru 0.24.0 or later.
 
 - Require a stable project identity instead of falling back to `logfire`; normalize string identities and reject invalid identity types.
 

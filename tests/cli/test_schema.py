@@ -148,17 +148,24 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     }
     assert {"--provider", "--connection-schema"} <= analyzer_register_names
 
+    [evaluator_register] = describe_schema(("evaluator", "register"))
+    evaluator_register_names = {
+        parameter["name"] for parameter in evaluator_register["parameters"]
+    }
+    assert {"--provider", "--connection-schema"} <= evaluator_register_names
+
     [connection_create] = describe_schema(("connection", "create"))
     connection_create_names = {
         parameter["name"] for parameter in connection_create["parameters"]
     }
-    assert "--analyzer" in connection_create_names
+    assert {"--analyzer", "--evaluator"} <= connection_create_names
 
     [session_import] = describe_schema(("session", "import"))
     session_import_names = {
         parameter["name"] for parameter in session_import["parameters"]
     }
     assert "--analyzer-connection" in session_import_names
+    assert "--evaluator-connection" in session_import_names
 
     [version] = describe_schema(("version",))
     assert version["offline"] is True
@@ -174,6 +181,10 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert replay_create["read_only"] is False
     assert replay_create["side_effects"]["creates_remote_state"] is True
     assert replay_create["idempotency"] == "non_idempotent_replay_created_per_request"
+    replay_create_names = {
+        parameter["name"] for parameter in replay_create["parameters"]
+    }
+    assert "--evaluator-connection" in replay_create_names
     policy = next(
         parameter
         for parameter in replay_create["parameters"]
@@ -254,9 +265,13 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert evaluate_parameters["SESSION"]["required"] is False
     assert evaluate_parameters["--sessions-file"]["required"] is False
     assert evaluate_parameters["--evaluator"]["required"] is True
-    assert {"--evaluator-params", "--wait", "--interval", "--timeout"} <= set(
-        evaluate_parameters
-    )
+    assert {
+        "--evaluator-params",
+        "--evaluator-connection",
+        "--wait",
+        "--interval",
+        "--timeout",
+    } <= set(evaluate_parameters)
     evaluate_errors = {error["kind"] for error in session_evaluate["errors"]}
     assert {"timeout", "remote_failed", "remote_canceled"} <= evaluate_errors
 
@@ -381,6 +396,7 @@ def test_experiment_schema_describes_crud_and_run_lifecycle() -> None:
     assert create_parameters["--evaluator"]["required"] is True
     assert create_parameters["--evaluator"]["type"] == "reference[]"
     assert create_parameters["--evaluator-params"]["required"] is False
+    assert "--evaluator-connection" in create_parameters
     assert {"--override", "--tool-policy"} <= set(create_parameters)
 
     update = commands["experiment.update"]
@@ -395,6 +411,7 @@ def test_experiment_schema_describes_crud_and_run_lifecycle() -> None:
         "--clear-override",
         "--evaluator",
         "--evaluator-params",
+        "--evaluator-connection",
         "--tool-policy",
     } <= set(update_parameters)
     assert "--clear-tool-policy" not in update_parameters

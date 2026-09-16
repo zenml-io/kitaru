@@ -156,25 +156,28 @@ describe("replay tool policies", () => {
   it.each([
     ["provider", { type: "provider" }],
     ["dynamic", { type: "dynamic", execute: async () => "done" }],
-  ])("rejects a passthrough %s tool before model execution", async (_name, replayTool) => {
-    const client = new FakeClient({ replay: replaySpec() });
-    const model = modelForValue();
-    const generate = createKitaruGenerateText({
-      agentId: AGENT_ID,
-      client,
-      environment: replayEnvironment(),
-    });
+  ])(
+    "rejects a passthrough %s tool before model execution",
+    async (_name, replayTool) => {
+      const client = new FakeClient({ replay: replaySpec() });
+      const model = modelForValue();
+      const generate = createKitaruGenerateText({
+        agentId: AGENT_ID,
+        client,
+        environment: replayEnvironment(),
+      });
 
-    await expect(
-      generate({
-        model,
-        prompt: "go",
-        tools: { write: replayTool as never },
-      }),
-    ).rejects.toThrow(/provider|dynamic/);
-    expect(client.created).toHaveLength(0);
-    expect(model.doGenerateCalls).toHaveLength(0);
-  });
+      await expect(
+        generate({
+          model,
+          prompt: "go",
+          tools: { write: replayTool as never },
+        }),
+      ).rejects.toThrow(/provider|dynamic/);
+      expect(client.created).toHaveLength(0);
+      expect(model.doGenerateCalls).toHaveLength(0);
+    },
+  );
 
   it("runs passthrough once with unchanged execution options", async () => {
     const client = new FakeClient({ replay: replaySpec() });
@@ -517,46 +520,51 @@ describe("replay tool policies", () => {
   it.each([
     ["baseline", 0],
     ["agent", 1],
-  ] as const)("handles repeated %s history calls", async (scope, expectedWarnings) => {
-    const client = new FakeClient({
-      lookup: () => ({
-        match: { error: null, result: "recorded", status: "completed" },
-      }),
-      replay: replaySpec({ on_miss: "fail", scope, type: "history" }),
-    });
-    const model = new MockLanguageModelV4({
-      doGenerate: toolResponse([
-        { id: "call-1", input: '{"value":"a"}', name: "write" },
-        { id: "call-2", input: '{"value":"a"}', name: "write" },
-      ]),
-    });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const generate = createKitaruGenerateText({
-      agentId: AGENT_ID,
-      client,
-      environment: replayEnvironment(),
-    });
-
-    try {
-      await generate({
-        model,
-        prompt: "go",
-        tools: {
-          write: tool({
-            execute: async () => "live",
-            inputSchema: VALUE_INPUT,
-          }),
-        },
+  ] as const)(
+    "handles repeated %s history calls",
+    async (scope, expectedWarnings) => {
+      const client = new FakeClient({
+        lookup: () => ({
+          match: { error: null, result: "recorded", status: "completed" },
+        }),
+        replay: replaySpec({ on_miss: "fail", scope, type: "history" }),
+      });
+      const model = new MockLanguageModelV4({
+        doGenerate: toolResponse([
+          { id: "call-1", input: '{"value":"a"}', name: "write" },
+          { id: "call-2", input: '{"value":"a"}', name: "write" },
+        ]),
+      });
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
+      const generate = createKitaruGenerateText({
+        agentId: AGENT_ID,
+        client,
+        environment: replayEnvironment(),
       });
 
-      expect(warn).toHaveBeenCalledTimes(expectedWarnings);
-      if (expectedWarnings > 0) {
-        expect(warn.mock.calls[0]?.[0]).toContain("newest completed result");
+      try {
+        await generate({
+          model,
+          prompt: "go",
+          tools: {
+            write: tool({
+              execute: async () => "live",
+              inputSchema: VALUE_INPUT,
+            }),
+          },
+        });
+
+        expect(warn).toHaveBeenCalledTimes(expectedWarnings);
+        if (expectedWarnings > 0) {
+          expect(warn.mock.calls[0]?.[0]).toContain("newest completed result");
+        }
+      } finally {
+        warn.mockRestore();
       }
-    } finally {
-      warn.mockRestore();
-    }
-  });
+    },
+  );
 
   it("keeps an ordinary replay passthrough error native", async () => {
     const client = new FakeClient({ replay: replaySpec() });

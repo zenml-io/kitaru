@@ -690,6 +690,7 @@ def get_job_service(
         session_repository=SQLSessionRepository(session, engine),
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
+        connection_repository=SQLConnectionRepository(session),
         transitions=_build_task_transitions(session, engine, analytics),
         policy=get_task_policy(settings),
     )
@@ -810,6 +811,7 @@ def get_experiment_service(
     return ExperimentService(
         repository=SQLExperimentRepository(session),
         plugin_repository=SQLPluginRepository(session),
+        connection_repository=SQLConnectionRepository(session),
         experiment_run_repository=SQLExperimentRunRepository(session),
         agent_repository=SQLAgentRepository(session),
         cohort_version_repository=SQLCohortVersionRepository(session),
@@ -853,6 +855,7 @@ def get_replay_service(
         session_node_repository=SQLSessionNodeRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
+        connection_repository=SQLConnectionRepository(session),
         payload_store=payload_store,
         analytics=analytics,
     )

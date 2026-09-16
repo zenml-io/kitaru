@@ -29,13 +29,13 @@ from conftest import (
     create_session,
     override_idempotency,
 )
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay import (
     ReplayCreateRequest,
     ReplayListParams,
     ReplayResponse,
     ToolLookupRequest,
 )
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError

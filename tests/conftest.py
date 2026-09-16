@@ -22,6 +22,7 @@ from collections.abc import (
     AsyncGenerator,
     Callable,
     Collection,
+    Generator,
     Iterable,
     Mapping,
     Sequence,
@@ -216,8 +217,10 @@ from kitaru.server.domain.job import Job, JobNotFound
 from kitaru.server.domain.keys import generate_secret, hash_secret
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.plugin import (
+    AnalyzerConfig,
     DuplicatePluginName,
     DuplicatePluginVersion,
+    EvaluatorConfig,
     Plugin,
     PluginKind,
     PluginNotFound,
@@ -234,8 +237,6 @@ from kitaru.server.domain.replay import (
     ReplayNotFound,
 )
 from kitaru.server.domain.replay_config import (
-    AnalyzerConfig,
-    EvaluatorConfig,
     ReplayConfig,
     ReplayConfigInUse,
     ReplayConfigNotFound,
@@ -253,7 +254,9 @@ from kitaru.server.domain.session import (
     SessionNotFound,
     SessionRollups,
 )
-from kitaru.server.domain.session_node import SessionNode
+from kitaru.server.domain.session_node import (
+    SessionNode,
+)
 from kitaru.server.domain.tag import (
     DuplicateTagLink,
     DuplicateTagName,
@@ -333,6 +336,7 @@ def imported_node(
         Imported node.
     """
     return ImportedNode(
+        external_id=name,
         node_type=NodeType.LLM_CALL,
         name=name,
         status=NodeStatus.COMPLETED,
@@ -454,6 +458,48 @@ def control_plane_settings(use_db: bool = False, **overrides: Any) -> APISetting
 _postgres_available: bool | None = None
 
 
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Select a stable file-based CI shard when explicitly configured."""
+    index_value = os.environ.get("KITARU_TEST_SHARD_INDEX", "")
+    count_value = os.environ.get("KITARU_TEST_SHARD_COUNT", "")
+    if not index_value and not count_value:
+        return
+    try:
+        index = int(index_value)
+        count = int(count_value)
+    except ValueError as error:
+        raise pytest.UsageError(
+            "KITARU_TEST_SHARD_INDEX and KITARU_TEST_SHARD_COUNT must both be integers"
+        ) from error
+    if count < 1 or not 0 <= index < count:
+        raise pytest.UsageError(
+            "KITARU_TEST_SHARD_COUNT must be positive and "
+            "KITARU_TEST_SHARD_INDEX must be in [0, count)"
+        )
+
+    selected: list[pytest.Item] = []
+    deselected: list[pytest.Item] = []
+    for item in items:
+        path = item.path.relative_to(config.rootpath).as_posix()
+        shard = int(hashlib.sha256(path.encode()).hexdigest(), 16) % count
+        (selected if shard == index else deselected).append(item)
+    items[:] = selected
+    config.hook.pytest_deselected(items=deselected)
+
+
+def pytest_sessionstart() -> None:
+    """Require PostgreSQL before collection when explicitly enabled."""
+    if os.environ.get("KITARU_TEST_REQUIRE_POSTGRES") != "1":
+        return
+    if not asyncio.run(postgres_available()):
+        raise pytest.UsageError(
+            "KITARU_TEST_REQUIRE_POSTGRES=1 but PostgreSQL is not reachable. "
+            "Start PostgreSQL and check KITARU_TEST_DB_HOST and KITARU_TEST_DB_PORT."
+        )
+
+
 async def postgres_available() -> bool:
     """Report whether the local test database accepts connections.
 
@@ -536,6 +582,43 @@ def reap_stale_test_databases() -> None:
     asyncio.run(_drop_stale_test_databases())
 
 
+_repository_template_name: str | None = None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def repository_database_template(
+    reap_stale_test_databases: None,
+) -> Generator[None, None, None]:
+    """Create one empty repository schema to copy into isolated test databases."""
+    global _repository_template_name
+    if not asyncio.run(postgres_available()):
+        yield
+        return
+    template_settings = db_settings()
+
+    async def create_template() -> None:
+        await DatabaseService.create_db(template_settings)
+        engine = create_async_engine(
+            DatabaseService.generate_database_uri(template_settings)
+        )
+        try:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+        finally:
+            # PostgreSQL can only copy a template with no open connections.
+            await engine.dispose()
+
+    try:
+        asyncio.run(create_template())
+        _repository_template_name = DatabaseService.application_database_name(
+            template_settings
+        )
+        yield
+    finally:
+        _repository_template_name = None
+        asyncio.run(drop_test_database(template_settings))
+
+
 async def drop_test_database(settings: APISettings) -> None:
     """Drop the database a test created.
 
@@ -599,11 +682,30 @@ async def pg_session_with_engine() -> AsyncGenerator[
         Session bound to the test database engine, and the engine itself.
     """
     settings = db_settings()
-    await DatabaseService.create_db(settings)
+    if _repository_template_name is None:
+        await DatabaseService.create_db(settings)
+    else:
+        database_name = DatabaseService.application_database_name(settings)
+        admin_engine = create_async_engine(
+            DatabaseService.generate_database_uri(settings, use_default_db=True)
+        )
+        try:
+            async with admin_engine.execution_options(
+                isolation_level="AUTOCOMMIT"
+            ).begin() as connection:
+                await connection.execute(
+                    text(
+                        f'CREATE DATABASE "{database_name}" '
+                        f'TEMPLATE "{_repository_template_name}"'
+                    )
+                )
+        finally:
+            await admin_engine.dispose()
     engine = create_async_engine(DatabaseService.generate_database_uri(settings))
     try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
+        if _repository_template_name is None:
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
         session_factory = async_sessionmaker(
             bind=engine, class_=AsyncSession, expire_on_commit=False
         )
@@ -3136,6 +3238,98 @@ def _paginate_fake_by_index(
     return page, next_cursor
 
 
+def build_session_node(
+    session_id: uuid.UUID, external_id: str, **overrides: Any
+) -> SessionNode:
+    """Build a session node identified by its session and external id.
+
+    Args:
+        session_id: Id of the owning session.
+        external_id: Id from the source system.
+        **overrides: Additional node fields.
+
+    Returns:
+        Session node.
+    """
+    values: dict[str, Any] = {
+        "session_id": session_id,
+        "external_id": external_id,
+    }
+    values.update(overrides)
+    return SessionNode(**values)
+
+
+def _start_sort_key(
+    started_at: datetime | None, row_id: uuid.UUID
+) -> tuple[bool, datetime, uuid.UUID]:
+    """Build the sort key placing a node without a start time last.
+
+    Args:
+        started_at: Start time of the node, if any.
+        row_id: Id of the node.
+
+    Returns:
+        Untimed marker, start time, and id.
+    """
+    if started_at is None:
+        return True, datetime.min.replace(tzinfo=UTC), row_id
+    return False, started_at, row_id
+
+
+def _node_position_key(node: SessionNode) -> tuple[bool, datetime, uuid.UUID]:
+    """Build the sort key a session node is positioned by.
+
+    Args:
+        node: Session node to position.
+
+    Returns:
+        Untimed marker, start time, and id of the node.
+    """
+    return _start_sort_key(node.started_at, node.id)
+
+
+def _paginate_fake_by_start(
+    items: list[SessionNode], list_filter: ListFilter
+) -> tuple[list[SessionNode], str | None]:
+    """Apply start-ascending cursor pagination to an in-memory list of nodes.
+
+    Args:
+        items: Candidate nodes, already scoped by the caller.
+        list_filter: Filter carrying the cursor and size.
+
+    Returns:
+        Page of matching nodes and the next cursor.
+    """
+    filter_hash = list_filter.compute_filter_hash()
+    cursor = None
+    if list_filter.cursor is not None:
+        cursor = decode_cursor(list_filter.cursor, list_filter.sort, filter_hash)
+
+    ordered = sorted(items, key=_node_position_key)
+    if cursor is not None:
+        started_at, _, row_id = cursor.id.rpartition("|")
+        last = _start_sort_key(
+            datetime.fromisoformat(started_at) if started_at else None,
+            uuid.UUID(row_id),
+        )
+        ordered = [item for item in ordered if _node_position_key(item) > last]
+
+    page = ordered[: list_filter.size + 1]
+    next_cursor = None
+    if len(page) > list_filter.size:
+        page = page[: list_filter.size]
+        last_node = page[-1]
+        last_started_at = (
+            last_node.started_at.isoformat() if last_node.started_at is not None else ""
+        )
+        next_cursor = encode_cursor(
+            list_filter.sort,
+            f"{last_started_at}|{last_node.id}",
+            filter_hash,
+        )
+    return page, next_cursor
+
+
 class FakeSessionNodeRepository:
     """In-memory session node repository."""
 
@@ -3156,30 +3350,33 @@ class FakeSessionNodeRepository:
         self._sessions = sessions
         self._cohort_versions = cohort_versions
 
-    async def get_by_indexes(
-        self, session_id: uuid.UUID, indexes: Sequence[int], include_payloads: bool
-    ) -> dict[int, SessionNode]:
-        """Bulk-load the stored nodes of a session at the given indexes.
+    async def get_by_external_ids(
+        self,
+        session_id: uuid.UUID,
+        external_ids: Sequence[str],
+        include_payloads: bool,
+    ) -> dict[str, SessionNode]:
+        """Bulk-load the stored nodes of a session under the given external ids.
 
         Args:
             session_id: Id of the owning session.
-            indexes: Indexes to load.
+            external_ids: External ids to load.
             include_payloads: Whether to read the inputs, outputs, and
                 attributes.
 
         Returns:
-            Stored nodes keyed by index, missing indexes omitted.
+            Stored nodes keyed by external id, missing ids omitted.
         """
-        wanted = set(indexes)
+        wanted = set(external_ids)
         matches = [
             node
             for node in self._nodes.values()
-            if node.session_id == session_id and node.index in wanted
+            if node.session_id == session_id and node.external_id in wanted
         ]
         if include_payloads:
-            return {node.index: node.model_copy() for node in matches}
+            return {node.external_id: node.model_copy() for node in matches}
         return {
-            node.index: node.model_copy(
+            node.external_id: node.model_copy(
                 update={"inputs": None, "outputs": None, "attributes": None}
             )
             for node in matches
@@ -3188,7 +3385,7 @@ class FakeSessionNodeRepository:
     async def upsert_batch(
         self, session_id: uuid.UUID, nodes: list[SessionNode]
     ) -> list[SessionNode]:
-        """Insert or replace nodes upserted on (session, index).
+        """Insert or replace nodes upserted on (session, external id).
 
         Args:
             session_id: Id of the owning session.
@@ -3197,7 +3394,6 @@ class FakeSessionNodeRepository:
         Returns:
             Stored nodes in batch order, without payloads.
         """
-        _ = session_id
         stored: list[SessionNode] = []
         for node in nodes:
             existing = self._nodes.get(node.id)
@@ -3211,7 +3407,6 @@ class FakeSessionNodeRepository:
             stored.append(
                 row.model_copy(
                     update={
-                        "reasoning": None,
                         "inputs": None,
                         "outputs": None,
                         "attributes": None,
@@ -3223,7 +3418,7 @@ class FakeSessionNodeRepository:
     async def query(
         self, session_node_filter: SessionNodeFilter
     ) -> tuple[list[SessionNode], str | None]:
-        """Query the nodes of a session, ordered by index ascending.
+        """Query the nodes of a session, ordered by position ascending.
 
         Args:
             session_node_filter: Filter and pagination parameters.
@@ -3240,9 +3435,7 @@ class FakeSessionNodeRepository:
                 or _evaluate_filter_expression(node, session_node_filter.expression)
             )
         ]
-        page, next_cursor = _paginate_fake_by_index(
-            nodes, session_node_filter, lambda node: node.index
-        )
+        page, next_cursor = _paginate_fake_by_start(nodes, session_node_filter)
         result = []
         for node in page:
             if session_node_filter.include_payloads:
@@ -3258,7 +3451,7 @@ class FakeSessionNodeRepository:
     async def list_all(
         self, session_id: uuid.UUID, include_payloads: bool
     ) -> list[SessionNode]:
-        """Read every node of a session, ordered by index ascending.
+        """Read every node of a session, ordered by position ascending.
 
         Args:
             session_id: Id of the owning session.
@@ -3269,7 +3462,7 @@ class FakeSessionNodeRepository:
             Every node of the session.
         """
         nodes = [node for node in self._nodes.values() if node.session_id == session_id]
-        ordered = sorted(nodes, key=lambda node: node.index)
+        ordered = sorted(nodes, key=_node_position_key)
         if include_payloads:
             return [node.model_copy() for node in ordered]
         return [
@@ -3279,37 +3472,33 @@ class FakeSessionNodeRepository:
             for node in ordered
         ]
 
-    async def get_indexes_by_ids(
-        self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
-    ) -> dict[uuid.UUID, int]:
-        """Bulk-load the index of the named nodes of a session, keyed by node id.
+    async def exists_in_session(
+        self, session_id: uuid.UUID, node_id: uuid.UUID
+    ) -> bool:
+        """Report whether a node belongs to a session.
 
         Args:
             session_id: Id of the owning session.
-            node_ids: Ids to look up.
+            node_id: Id of the node.
 
         Returns:
-            Each requested node id mapped to its index, missing ids omitted.
+            Whether the node belongs to the session.
         """
-        requested = set(node_ids)
-        return {
-            node.id: node.index
-            for node in self._nodes.values()
-            if node.session_id == session_id and node.id in requested
-        }
+        node = self._nodes.get(node_id)
+        return node is not None and node.session_id == session_id
 
     def _newest_match(self, candidates: list[SessionNode]) -> SessionNode | None:
-        """Pick the highest-id node from a candidate list.
+        """Pick the last node in position order from a candidate list.
 
         Args:
             candidates: Matching nodes.
 
         Returns:
-            Highest-id node, or ``None`` when the list is empty.
+            Last node in position order, or ``None`` when the list is empty.
         """
         if not candidates:
             return None
-        return max(candidates, key=lambda node: node.id).model_copy()
+        return max(candidates, key=_node_position_key).model_copy()
 
     async def find_latest_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str
@@ -3321,7 +3510,7 @@ class FakeSessionNodeRepository:
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         return self._newest_match(
             [
@@ -3336,7 +3525,7 @@ class FakeSessionNodeRepository:
     async def find_nth_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str, occurrence: int
     ) -> SessionNode | None:
-        """Find the nth finished node with a cache key in one session, in index order.
+        """Find the nth finished node of a session with a cache key, in position order.
 
         Only completed and failed tool calls are candidates, so the
         occurrence offset counts finished calls only.
@@ -3344,7 +3533,7 @@ class FakeSessionNodeRepository:
         Args:
             session_id: Id of the session to search.
             cache_key: Tool call cache key to match.
-            occurrence: Zero-based match position in index order.
+            occurrence: Zero-based match position in position order.
 
         Returns:
             Matching node at the position, or ``None`` on a miss.
@@ -3357,7 +3546,7 @@ class FakeSessionNodeRepository:
                 and node.cache_key == cache_key
                 and node.status in (NodeStatus.COMPLETED, NodeStatus.FAILED)
             ),
-            key=lambda node: node.index,
+            key=_node_position_key,
         )
         if occurrence >= len(matches):
             return None
@@ -3376,7 +3565,7 @@ class FakeSessionNodeRepository:
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         assert self._sessions is not None
         session_ids = {
@@ -3405,7 +3594,7 @@ class FakeSessionNodeRepository:
             cache_key: Tool call cache key to match.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Last matching node in position order, or ``None`` on a miss.
         """
         assert self._cohort_versions is not None
         session_ids = set(self._cohort_versions._members.get(cohort_version_id, []))
@@ -4658,8 +4847,7 @@ async def create_plugin(
         kind: Plugin kind.
         name: Plugin name.
         description: Plugin description.
-        provider: Source system, evaluators and analyzers must leave this
-            unset.
+        provider: Source system.
         metadata: Arbitrary metadata.
         agent_id: Agent the plugin is scoped to, importers and analyzers
             must leave this unset.
@@ -6072,6 +6260,27 @@ class FakeJobRepository:
         """
         return await self.get_many(job_ids)
 
+    async def list_expired_pending_ids(
+        self, cutoff: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of pending jobs older than the cutoff.
+
+        Args:
+            cutoff: Jobs created before this are read.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the pending jobs in ascending order.
+        """
+        expired: list[uuid.UUID] = []
+        for job_id in sorted(self._jobs):
+            job = self._jobs[job_id]
+            if job.status is not JobStatus.PENDING or job.created is None:
+                continue
+            if job.created < cutoff:
+                expired.append(job_id)
+        return expired[:limit]
+
     async def list_unpropagated_cancel_ids(self, limit: int) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.
 
@@ -6693,6 +6902,7 @@ async def create_evaluation_task(
     job_id: uuid.UUID,
     plugin_version_id: uuid.UUID | None = None,
     input_session_id: uuid.UUID | None = None,
+    connection_id: uuid.UUID | None = None,
     params: dict[str, Any] | None = None,
     labels: dict[str, str] | None = None,
     on_failure: TaskOnFailure = TaskOnFailure.CONTINUE,
@@ -6704,6 +6914,7 @@ async def create_evaluation_task(
         job_id: Id of the owning job.
         plugin_version_id: Evaluator version the task runs.
         input_session_id: Session being scored.
+        connection_id: Connection injected into the task environment.
         params: Parameters passed to the evaluator.
         labels: Labels matched by worker scope selectors.
         on_failure: Effect of a hard failure on the job.
@@ -6719,6 +6930,7 @@ async def create_evaluation_task(
         input_session_id=(
             input_session_id if input_session_id is not None else uuid.uuid4()
         ),
+        connection_id=connection_id,
         params=params if params is not None else {},
         labels=labels if labels is not None else {},
         on_failure=on_failure,
@@ -7058,6 +7270,7 @@ def build_job_and_task_services(
         session_repository=substrate.sessions,
         agent_version_repository=substrate.agent_versions,
         plugin_repository=substrate.plugins,
+        connection_repository=substrate.connections,
         transitions=transitions,
         policy=task_policy,
     )
@@ -7118,6 +7331,7 @@ class ReplayServices(NamedTuple):
     tags: FakeTagRepository
     imports: FakeImportRepository
     insights: FakeInsightRepository
+    connections: FakeConnectionRepository
     transitions: TaskTransitions
     payload_store: PayloadStore
 
@@ -7180,7 +7394,6 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_repository=sessions,
         import_repository=imports,
         insight_repository=insights,
-        plugin_repository=plugins,
     )
     transitions = TaskTransitions(
         task_repository=tasks,
@@ -7215,6 +7428,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_repository=sessions,
         agent_version_repository=agent_versions,
         plugin_repository=plugins,
+        connection_repository=connections,
         transitions=transitions,
         policy=task_policy,
     )
@@ -7222,6 +7436,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     experiment_service = ExperimentService(
         repository=experiments,
         plugin_repository=plugins,
+        connection_repository=connections,
         experiment_run_repository=experiment_runs,
         agent_repository=agents,
         cohort_version_repository=cohort_versions,
@@ -7245,6 +7460,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_node_repository=session_nodes,
         agent_version_repository=agent_versions,
         plugin_repository=plugins,
+        connection_repository=connections,
         payload_store=payload_store,
     )
     experiment_run_service = ExperimentRunService(
@@ -7278,6 +7494,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         tags=tags,
         imports=imports,
         insights=insights,
+        connections=connections,
         transitions=transitions,
         payload_store=payload_store,
     )

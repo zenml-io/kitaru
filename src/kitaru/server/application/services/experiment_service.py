@@ -26,6 +26,9 @@ from kitaru.server.application.interfaces.agent_version_repository import (
 from kitaru.server.application.interfaces.cohort_version_repository import (
     CohortVersionRepository,
 )
+from kitaru.server.application.interfaces.connection_repository import (
+    ConnectionRepository,
+)
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationRepository,
 )
@@ -63,8 +66,8 @@ from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.plugin import EvaluatorConfig
 from kitaru.server.domain.replay_config import (
-    EvaluatorConfig,
     ReplayConfig,
     ReplayConfigInUse,
     ReplayOverride,
@@ -83,6 +86,7 @@ class ExperimentService:
         self,
         repository: ExperimentRepository,
         plugin_repository: PluginRepository,
+        connection_repository: ConnectionRepository,
         experiment_run_repository: ExperimentRunRepository,
         agent_repository: AgentRepository,
         cohort_version_repository: CohortVersionRepository,
@@ -101,6 +105,8 @@ class ExperimentService:
         Args:
             repository: Experiment and replay config repository.
             plugin_repository: Plugin repository, for evaluator resolution.
+            connection_repository: Connection repository, for evaluator
+                resolution.
             experiment_run_repository: Experiment run repository, for run
                 fan-out and delete cascade.
             agent_repository: Agent repository, to validate the owning
@@ -121,6 +127,7 @@ class ExperimentService:
         """
         self._repository = repository
         self._plugin_repository = plugin_repository
+        self._connection_repository = connection_repository
         self._experiment_runs = experiment_run_repository
         self._agents = agent_repository
         self._cohort_versions = cohort_version_repository
@@ -196,7 +203,11 @@ class ExperimentService:
         """
         await self._agents.get(command.agent_id)
         evaluators = await validate_evaluators(
-            command.evaluators, self._plugin_repository, command.agent_id, actor
+            command.evaluators,
+            self._plugin_repository,
+            self._connection_repository,
+            command.agent_id,
+            actor,
         )
         config = await self._create_replay_config(
             actor.account.id,
@@ -326,7 +337,11 @@ class ExperimentService:
             if not command.evaluators:
                 raise ValidationError("Experiment evaluators cannot be cleared")
             evaluators = await validate_evaluators(
-                command.evaluators, self._plugin_repository, experiment.agent_id, actor
+                command.evaluators,
+                self._plugin_repository,
+                self._connection_repository,
+                experiment.agent_id,
+                actor,
             )
         tool_policy = current_config.tool_policy
         if "tool_policy" in config_fields:

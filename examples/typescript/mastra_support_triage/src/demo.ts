@@ -182,7 +182,7 @@ function requireNonemptyText(outputs: unknown): string {
 
 function assertRecordedShape(nodes: readonly SessionNodeResponse[]): void {
   const roots = nodes.filter(
-    (node) => node.node_type === "span" && node.parent_index === null,
+    (node) => node.node_type === "span" && node.parent_external_id === null,
   );
   const llmNodes = nodes.filter((node) => node.node_type === "llm_call");
   const toolNames = new Set(
