@@ -1,6 +1,6 @@
 # Kitaru Helm Chart
 
-![Kitaru Logo](https://kitaru.ai/kitaru-logo.svg)
+![Kitaru icon](https://www.zenml.io/favicon.png)
 
 ## Overview
 

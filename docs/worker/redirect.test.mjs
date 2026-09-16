@@ -44,6 +44,16 @@ for (const [input, expected] of cases) {
 import worker from "./redirect.mjs";
 
 const marketingCases = [
+  [
+    "https://kitaru.ai/quickstart",
+    "https://docs.zenml.io/kitaru/getting-started/quickstart",
+  ],
+  [
+    "https://kitaru.ai/installation/",
+    "https://docs.zenml.io/kitaru/getting-started/installation",
+  ],
+  ["https://kitaru.ai/introduction", "https://docs.zenml.io/kitaru"],
+  ["https://kitaru.ai/api", "https://sdkdocs.kitaru.ai/"],
   ["https://kitaru.ai/help", "https://github.com/zenml-io/kitaru/issues"],
   ["https://kitaru.ai/slack", "https://www.zenml.io/slack"],
 ];
@@ -55,6 +65,17 @@ for (const [input, expected] of marketingCases) {
     assert.equal(response.headers.get("location"), expected);
   });
 }
+
+test("legacy documentation redirects preserve the query string", async () => {
+  const response = await worker.fetch(
+    new Request("https://kitaru.ai/quickstart?utm_source=legacy"),
+  );
+  assert.equal(response.status, 301);
+  assert.equal(
+    response.headers.get("location"),
+    "https://docs.zenml.io/kitaru/getting-started/quickstart?utm_source=legacy",
+  );
+});
 
 // kitaru.ai/install serves the installer script instead of redirecting.
 const installCases = [

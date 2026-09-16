@@ -11,7 +11,7 @@ From the repository root, use Node 22.22 or newer within Node 22, pnpm 10.33, uv
 ```bash
 uv sync --frozen --extra server --extra worker --extra cli
 pnpm install --frozen-lockfile
-pnpm --filter @zenml-io/kitaru build
+pnpm run build:packages
 pnpm --filter @zenml-io/kitaru-example-mastra-adaptive-conversation build
 ```
 
@@ -54,3 +54,22 @@ Here `prompt` is the target's instructions. The simulated user's opening message
 Replay `prompt` and `system_prompt` overrides change only target instructions; `system_prompt` takes precedence. Model overrides allow `openai/gpt-5-nano` and `openai/gpt-5-mini`; the demo uses nano. The only supported model parameter override is `maxOutputTokens`, from 1 to 2,000. Simulator behavior and evaluator parameters do not change with target variants. Replay tool policies other than the default passthrough policy are rejected because the example has no tools.
 
 `scenario_complete`, `turn_limit`, `usage_limit`, and overall `time_limit` are completed bounded stops. `call_timeout` and `runtime_failure` fail the session and executable, retaining the last recorded prefix. Usage on a failed or timed-out call may be unavailable. A hard process kill or recording-server failure can prevent the final checkpoint, so worker/task status remains authoritative for interrupted runs.
+
+## Evaluate the complete generated conversation
+
+The example also provides custom Mastra scorers through Kitaru's existing TypeScript evaluator bridge. After the build above, run:
+
+```bash
+uv run python examples/typescript/mastra_adaptive_conversation/check_scorers.py
+```
+
+This command generates a baseline conversation and an adaptive rerun with `openai/gpt-5-nano`, then evaluates both stored sessions. The rerun starts a fresh dialogue: the simulator reacts to its new answers rather than playing back the baseline history. It makes at most six target calls and two judge calls, with no provider retries. The command removes its temporary server, worker state, and database on exit.
+
+`src/scorers.ts` explicitly maps `session.outputs.messages` in recorded order. It does not use `session.inputs.prompt` as a user message, concatenate only the final exchange, or assume an ordinary Mastra agent judge reads every historical turn. Both custom Mastra scorers receive the same complete transcript:
+
+- `conversation_evidence` checks the fictional parcel request, lexical cues that the earlier assistant requested a reference, the later user's reference, and the final assistant's response. This scenario-specific keyword check can miss valid paraphrases; it is not a semantic judgment or a general measure of answer quality.
+- `conversation_judge` sends every user and assistant message to an independent judge with an explicit rubric. Its explanation is stored with its named result. The live judge uses `gpt-5-nano`, with a bounded request and no retries.
+
+Judge model and instructions come from evaluator job parameters. Target overrides, simulator configuration, and the transcript's original `judge` description do not configure this evaluator. Persisted evaluation rows identify the registered evaluator version and exact parameters. The registered Python wrapper checks compiled artifact digests; Node and imported packages still need the pinned workspace dependencies installed before workers run.
+
+The mapping accepts the version-1, tool-free parcel transcript with complete alternating user/assistant turns and a supported completed stop. Failed, unfinished, unsupported, or tool-bearing sessions fail evaluation. It creates no synthetic tool records. If either scorer fails, the bridge fails the evaluation task without storing a partial result batch.
