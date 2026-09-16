@@ -38,7 +38,7 @@ MODEL = "openai/gpt-5-nano"
 EVALUATOR = "kitaru/output-contract"
 
 
-async def _run_job(
+async def run_job(
     job_id: uuid.UUID, api_url: str, api_key: str, state_dir: Path
 ) -> None:
     """Run only this job's tasks, including evaluator subprocesses."""
@@ -115,7 +115,7 @@ async def run_demo(api_url: str, api_key: str, state_dir: Path) -> list[str]:
                     name=f"Synthetic adaptive conversation {repeat + 1}",
                 )
             )
-            await _run_job(job.id, api_url, api_key, state_dir)
+            await run_job(job.id, api_url, api_key, state_dir)
             tasks = await client.jobs.list_tasks(job.id)
             sessions = await client.sessions.list(
                 SessionListParams(
@@ -185,7 +185,7 @@ async def run_demo(api_url: str, api_key: str, state_dir: Path) -> list[str]:
                 ],
             )
         )
-        await _run_job(evaluation_job.id, api_url, api_key, state_dir)
+        await run_job(evaluation_job.id, api_url, api_key, state_dir)
         for session_id in session_ids:
             results = (
                 await client.evaluations.list(

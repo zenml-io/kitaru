@@ -54,7 +54,7 @@ examples:
   - id: mastra-adaptive-conversation
     path: examples/typescript/mastra_adaptive_conversation
     public_docs: [examples/README.md]
-    owner_area: Bounded adaptive transcript generation and Python contract evaluation
+    owner_area: Bounded adaptive transcripts and Python/TypeScript evaluation
     coverage:
       deterministic_pytest:
         status: not_applicable
@@ -64,7 +64,7 @@ examples:
         command: pnpm --filter @zenml-io/kitaru-example-mastra-adaptive-conversation test
         requires_server: false
         timeout_seconds: 60
-        notes: Covers branching, repeat isolation, overrides, input fallback, and bounded failures.
+        notes: Covers branching, repeat isolation, overrides, input fallback, bounded failures, and whole-transcript Mastra scoring.
       live_provider:
         status: manual_only
         provider: openai
@@ -74,7 +74,7 @@ examples:
         command: uv run python examples/typescript/mastra_adaptive_conversation/demo.py
         waiver:
           reason: Two bounded conversations call a paid OpenAI target through a temporary local server and worker.
-          reviewer_action: Run the documented demo and inspect both transcript and Python evaluator results.
+          reviewer_action: Run demo.py for Python contract results and check_scorers.py for generated baseline/rerun Mastra verdicts and provenance.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
