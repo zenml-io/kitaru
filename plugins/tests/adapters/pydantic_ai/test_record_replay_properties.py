@@ -215,7 +215,7 @@ def _get_recorded_tool_nodes(client: _FakeClient) -> list[SessionNodeCreateReque
         SessionNodeCreateRequest.model_validate_json(node.model_dump_json())
         for node in captured
     ]
-    return sorted(restored, key=lambda node: node.index)
+    return restored
 
 
 def _build_lookup_table(
@@ -336,6 +336,24 @@ async def _replay_program(
     assert result.output == "finished"
     assert client.closed
     return observed_results, replay_live_calls, client.replays.lookups
+
+
+async def _record_then_replay(
+    monkeypatch: pytest.MonkeyPatch,
+    recorded_program: list[_Call],
+    replay_program: list[_Call],
+) -> tuple[
+    list[_LiveCall],
+    tuple[list[JsonValue], list[_LiveCall], list[ToolLookupRequest]],
+]:
+    """Record and replay one generated program in a single event loop."""
+    nodes, recorded_live_calls = await _record_program(monkeypatch, recorded_program)
+    replay_result = await _replay_program(
+        monkeypatch,
+        replay_program,
+        _build_lookup_table(nodes),
+    )
+    return recorded_live_calls, replay_result
 
 
 def _get_logical_key(call: _Call) -> tuple[str, str]:
@@ -498,16 +516,38 @@ async def test_failed_recorded_match_refuses_live_execution(
     assert live_calls == []
 
 
-_argument_alphabet = st.sampled_from(
-    [
-        {"payload": None},
-        {"payload": "A"},
-        {"payload": "B"},
-        {"payload": [1, 2]},
-        {"payload": [2, 1]},
-        {"payload": {"a": 1, "b": 2}},
-    ]
+_JSON_TEXT = st.text(
+    alphabet=st.characters(exclude_categories=("Cs",)),
+    max_size=12,
 )
+_JSON_VALUES = st.recursive(
+    st.one_of(
+        st.none(),
+        st.booleans(),
+        st.integers(min_value=-100, max_value=100),
+        st.floats(
+            min_value=-100,
+            max_value=100,
+            allow_nan=False,
+            allow_infinity=False,
+            width=32,
+        ),
+        _JSON_TEXT,
+    ),
+    lambda children: st.one_of(
+        st.lists(children, max_size=4),
+        st.dictionaries(_JSON_TEXT, children, max_size=4),
+    ),
+    max_leaves=8,
+)
+
+
+def _make_arguments(payload: JsonValue) -> dict[str, JsonValue]:
+    """Wrap one generated JSON value as framework tool arguments."""
+    return {"payload": payload}
+
+
+_argument_alphabet = st.builds(_make_arguments, payload=_JSON_VALUES)
 _call_alphabet = st.builds(
     _Call,
     tool_name=st.sampled_from(["lookup", "inspect"]),
@@ -524,11 +564,10 @@ def test_generated_reordering_preserves_per_call_occurrences(
     order = data.draw(st.permutations(tuple(range(len(program)))))
     replayed = [program[index] for index in order]
     with pytest.MonkeyPatch.context() as monkeypatch:
-        nodes, recorded_live_calls = asyncio.run(_record_program(monkeypatch, program))
-        matches = _build_lookup_table(nodes)
-        results, live_calls, lookups = asyncio.run(
-            _replay_program(monkeypatch, replayed, matches)
+        recorded_live_calls, replay_result = asyncio.run(
+            _record_then_replay(monkeypatch, program, replayed)
         )
+    results, live_calls, lookups = replay_result
 
     assert results == _get_expected_results(recorded_live_calls, replayed)
     assert live_calls == []

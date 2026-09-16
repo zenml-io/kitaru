@@ -50,6 +50,7 @@ from openai.types.responses import (
 from openai.types.responses.response_prompt_param import ResponsePromptParam
 
 import kitaru_openai_agents.recording as recording_module
+from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.replay import (
     BaselineEvaluationMode,
     ReplayResponse,
@@ -187,7 +188,7 @@ class _RoundTripState:
         if self._baseline_nodes is None:
             self._baseline_nodes = tuple(self.nodes)
         matches: dict[tuple[str, str], list[ToolLookupMatch]] = defaultdict(list)
-        for node in sorted(self._baseline_nodes, key=lambda item: item.index):
+        for node in self._baseline_nodes:
             if node.node_type is not NodeType.TOOL_CALL or node.tool_name is None:
                 continue
             cache_key = compute_tool_cache_key(node.tool_name, node.inputs)
@@ -377,6 +378,10 @@ async def _record_then_replay(
         recorded_program, recorded_executions, _recorded_result
     )
     assert recorded_executions == list(recorded_program)
+    assert recorded_outputs == [
+        _recorded_result(invocation, index)
+        for index, invocation in enumerate(recorded_program)
+    ]
 
     replay = state.configure_replay(
         {invocation.tool_name for invocation in replay_program}
@@ -598,13 +603,47 @@ async def test_capture_loss_marker_fails_closed_without_live_execution(
     assert live_executions == []
 
 
-_GENERATED_INVOCATIONS = (
-    _Invocation("alpha", '{"value":0}'),
-    _Invocation("alpha", '{"value":1}'),
-    _Invocation("beta", '{"value":0}'),
-    _Invocation("beta", '{"value":1}'),
-    _Invocation("alpha", '{"items":[0,1]}'),
-    _Invocation("beta", '{"items":[1,0]}'),
+_JSON_TEXT = st.text(
+    alphabet=st.characters(exclude_categories=("Cs",)),
+    max_size=12,
+)
+_JSON_VALUES = st.recursive(
+    st.one_of(
+        st.none(),
+        st.booleans(),
+        st.integers(min_value=-100, max_value=100),
+        st.floats(
+            min_value=-100,
+            max_value=100,
+            allow_nan=False,
+            allow_infinity=False,
+            width=32,
+        ),
+        _JSON_TEXT,
+    ),
+    lambda children: st.one_of(
+        st.lists(children, max_size=4),
+        st.dictionaries(_JSON_TEXT, children, max_size=4),
+    ),
+    max_leaves=8,
+)
+
+
+def _make_generated_invocation(tool_name: str, payload: JsonValue) -> _Invocation:
+    """Build one framework invocation from bounded JSON-observable data."""
+    arguments_json = json.dumps(
+        {"payload": payload},
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return _Invocation(tool_name, arguments_json)
+
+
+_GENERATED_INVOCATIONS = st.builds(
+    _make_generated_invocation,
+    tool_name=st.sampled_from(["alpha", "beta"]),
+    payload=_JSON_VALUES,
 )
 
 
@@ -616,7 +655,7 @@ def _sequential_program_pairs(
     recorded = tuple(
         draw(
             st.lists(
-                st.sampled_from(_GENERATED_INVOCATIONS),
+                _GENERATED_INVOCATIONS,
                 min_size=1,
                 max_size=8,
             )
