@@ -115,9 +115,17 @@ jobs:
           SURFACE: ${{ matrix.name }}
         run: |-
           run_url="${REPO_URL}/actions/runs/${RUN_ID}"
-          existing=$(gh issue list --label fuzz-nightly --state open --search "in:title ${SURFACE}" --json number --jq 'length')
+          expected_title="Nightly fuzz run failed (${SURFACE})"
+          issue_titles=$(gh issue list --label fuzz-nightly --state open --search "in:title ${SURFACE}" --json title --jq '.[].title')
+          existing=0
+          while IFS= read -r issue_title; do
+            if [ "$issue_title" = "$expected_title" ]; then
+              existing=1
+              break
+            fi
+          done <<< "$issue_titles"
           if [ "$existing" = "0" ]; then
             gh issue create --label fuzz-nightly \
-              --title "Nightly fuzz run failed (${SURFACE})" \
+              --title "$expected_title" \
               --body "Run: ${run_url}. Download the hypothesis-examples-${SURFACE} artifact into .hypothesis/examples and rerun \`just fuzz-${SURFACE}\` to replay."
           fi
