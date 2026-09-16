@@ -9,8 +9,8 @@ permissions:
 jobs:
   fuzz:
     runs-on: ubuntu-latest
-    # The nightly profile draws 2000 examples per property across every MCP tool,
-    # so this job is expected to run long; the limit only catches a wedged run.
+    # Stateless properties use the 2000-example nightly profile. Database-backed
+    # state machines use bounded recipe defaults; the limit only catches a wedged run.
     timeout-minutes: 120
     permissions:
       contents: read
@@ -37,9 +37,21 @@ jobs:
           - name: filters
             sync-command: uv sync --frozen --extra server
             recipe: fuzz-filters
+          - name: filters-pg
+            sync-command: uv sync --frozen --extra server
+            recipe: fuzz-filters-pg
+            needs-db: true
           - name: api
             sync-command: uv sync --frozen --extra server --group fuzz
             recipe: fuzz-api
+            needs-db: true
+          - name: api-sequences
+            sync-command: uv sync --frozen --extra server --group fuzz
+            recipe: fuzz-api-sequences
+            needs-db: true
+          - name: task-lifecycle
+            sync-command: uv sync --frozen --extra server --group fuzz
+            recipe: fuzz-task-lifecycle
             needs-db: true
     name: fuzz (${{ matrix.name }})
     steps:
@@ -53,8 +65,8 @@ jobs:
         env:
           SYNC_COMMAND: ${{ matrix.sync-command }}
         run: $SYNC_COMMAND
-      # The API fuzz run drives the real app, so it needs the same PostgreSQL
-      # the pg tests expect on port 5433. Compose owns that port mapping.
+      # Database-backed fuzz runs use the PostgreSQL service expected on port
+      # 5433. Compose owns that port mapping.
       - name: Start PostgreSQL
         if: matrix.needs-db
         run: |-
@@ -75,6 +87,8 @@ jobs:
       - name: Run fuzz recipe
         id: fuzz
         env:
+          HYPOTHESIS_PROFILE: nightly
+          KITARU_FUZZ_RANDOM: '1'
           RECIPE: ${{ matrix.recipe }}
         run: uvx --from rust-just just "$RECIPE"
       - name: Save Hypothesis database
@@ -101,9 +115,17 @@ jobs:
           SURFACE: ${{ matrix.name }}
         run: |-
           run_url="${REPO_URL}/actions/runs/${RUN_ID}"
-          existing=$(gh issue list --label fuzz-nightly --state open --search "in:title ${SURFACE}" --json number --jq 'length')
+          expected_title="Nightly fuzz run failed (${SURFACE})"
+          issue_titles=$(gh issue list --label fuzz-nightly --state open --search "in:title ${SURFACE}" --json title --jq '.[].title')
+          existing=0
+          while IFS= read -r issue_title; do
+            if [ "$issue_title" = "$expected_title" ]; then
+              existing=1
+              break
+            fi
+          done <<< "$issue_titles"
           if [ "$existing" = "0" ]; then
             gh issue create --label fuzz-nightly \
-              --title "Nightly fuzz run failed (${SURFACE})" \
+              --title "$expected_title" \
               --body "Run: ${run_url}. Download the hypothesis-examples-${SURFACE} artifact into .hypothesis/examples and rerun \`just fuzz-${SURFACE}\` to replay."
           fi
