@@ -10,6 +10,7 @@ helm/Chart.lock
 /node_modules/
 /packages/*/node_modules/
 /examples/typescript/mastra_support_triage/node_modules/
+/examples/typescript/mastra_adaptive_conversation/node_modules/
 /examples/typescript/vercel_ai_support_triage/node_modules/
 /packages/*/dist/
 /typescript-dist/
