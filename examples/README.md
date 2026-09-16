@@ -21,6 +21,7 @@ uv sync --project plugins --frozen --all-packages
 
 The TypeScript examples use the `@zenml-io/kitaru` SDK and its framework adapters:
 
+- [`typescript/mastra_adaptive_conversation/`](typescript/mastra_adaptive_conversation/) generates a bounded response-dependent dialogue with raw Mastra calls, records one transcript session, and evaluates it with a Python evaluator.
 - [`typescript/mastra_support_triage/`](typescript/mastra_support_triage/) records and replays a Mastra support-triage agent, including tool-result reuse from history and Python evaluations.
 - [`typescript/vercel_ai_support_triage/`](typescript/vercel_ai_support_triage/) records a Vercel AI SDK agent and drives a job-scoped worker replay with overrides.
 - [`typescript/vercel_ai_ticket_resolver/`](typescript/vercel_ai_ticket_resolver/) is the full end-to-end returns walkthrough: baseline recording, evaluator, cohort, and replay comparison.
