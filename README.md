@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://kitaru.ai">
+  <a href="https://docs.zenml.io/kitaru">
     <img src="assets/kitaru_logo.png" alt="Kitaru" width="240">
   </a>
 </p>

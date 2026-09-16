@@ -59,6 +59,13 @@ export const ROOT_DOCS_ASSET_PATHS = [
 
 export const LEGACY_MARKETING_REDIRECTS = [
   ["/", `${ZENML_BASE_URL}/product/kitaru`],
+  ["/quickstart", "https://docs.zenml.io/kitaru/getting-started/quickstart"],
+  [
+    "/installation",
+    "https://docs.zenml.io/kitaru/getting-started/installation",
+  ],
+  ["/introduction", "https://docs.zenml.io/kitaru"],
+  ["/api", "https://sdkdocs.kitaru.ai"],
   ["/pricing", `${ZENML_BASE_URL}/pricing`],
   ["/book-a-demo", `${ZENML_BASE_URL}/book-your-demo`],
   ["/newsletter", `${ZENML_BASE_URL}/newsletter-signup`],
