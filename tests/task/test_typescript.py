@@ -69,10 +69,8 @@ def view() -> SessionView:
         SessionNodeResponse(
             id=uuid.uuid4(),
             session_id=session.id,
-            index=index,
-            parent_index=None,
-            secondary_parent_indexes=[],
-            secondary_parent_ids=[],
+            external_id=f"node-{index}",
+            links=[],
             node_type=kind,
             name=kind,
             status=NodeStatus.COMPLETED,

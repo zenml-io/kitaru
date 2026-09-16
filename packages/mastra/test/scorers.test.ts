@@ -183,21 +183,21 @@ describe("Mastra scorer evaluators", () => {
     await expect(evaluator(view, {})).rejects.toThrow();
   });
 
-  it.each([
-    NaN,
-    Infinity,
-  ])("rejects a nonfinite native score (%s)", async (score) => {
-    const evaluator = createMastraEvaluator({
-      scorers: () => ({
-        bad: createScorer({
-          id: "bad",
-          description: "Bad result",
-        }).generateScore(() => score),
-      }),
-      mapInput,
-    });
-    await expect(evaluator(view, {})).rejects.toThrow();
-  });
+  it.each([NaN, Infinity])(
+    "rejects a nonfinite native score (%s)",
+    async (score) => {
+      const evaluator = createMastraEvaluator({
+        scorers: () => ({
+          bad: createScorer({
+            id: "bad",
+            description: "Bad result",
+          }).generateScore(() => score),
+        }),
+        mapInput,
+      });
+      await expect(evaluator(view, {})).rejects.toThrow();
+    },
+  );
 
   it("rejects invalid names before calling a judge", async () => {
     const run = vi.fn(async () => ({ score: 1 }));
