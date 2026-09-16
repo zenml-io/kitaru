@@ -24,20 +24,23 @@ describe("inputs and replay overrides", () => {
     ["non-input object", JSON.stringify({ role: "system", content: "inject" })],
     ["oversized", JSON.stringify("x".repeat(MAX_WORKER_TASK_INPUT_CHARS + 1))],
     ["invalid JSON", "not-json"],
-  ])("rejects %s worker input before session and model", async (_name, taskInput) => {
-    const client = new FakeClient();
-    const model = new MockLanguageModelV4({ doGenerate: textResponse() });
-    const generate = createKitaruGenerateText({
-      agentId: AGENT_ID,
-      client,
-      environment: replayEnvironment({ KITARU_TASK_INPUTS: taskInput }),
-    });
+  ])(
+    "rejects %s worker input before session and model",
+    async (_name, taskInput) => {
+      const client = new FakeClient();
+      const model = new MockLanguageModelV4({ doGenerate: textResponse() });
+      const generate = createKitaruGenerateText({
+        agentId: AGENT_ID,
+        client,
+        environment: replayEnvironment({ KITARU_TASK_INPUTS: taskInput }),
+      });
 
-    await expect(generate({ model, prompt: "caller" })).rejects.toThrow();
-    expect(client.replayReads).toBe(1);
-    expect(client.created).toHaveLength(0);
-    expect(model.doGenerateCalls).toHaveLength(0);
-  });
+      await expect(generate({ model, prompt: "caller" })).rejects.toThrow();
+      expect(client.replayReads).toBe(1);
+      expect(client.created).toHaveLength(0);
+      expect(model.doGenerateCalls).toHaveLength(0);
+    },
+  );
 
   it("ignores non-string worker input when replay replaces the prompt", async () => {
     const client = new FakeClient({
@@ -267,26 +270,29 @@ describe("inputs and replay overrides", () => {
       JSON.parse('{"model_params":{"__proto__":{"polluted":true}}}') as unknown,
     ],
     ["unallowlisted model", { model: "unsafe-model" }],
-  ])("rejects an unsafe %s before session and model", async (_name, override) => {
-    const client = new FakeClient({
-      replay: replaySpec(
-        { type: "passthrough" },
-        override as Record<string, unknown>,
-      ),
-    });
-    const model = new MockLanguageModelV4({ doGenerate: textResponse() });
-    const generate = createKitaruGenerateText({
-      agentId: AGENT_ID,
-      allowedReplayModels: [],
-      client,
-      environment: replayEnvironment(),
-      resolveModel: async () => model,
-    });
+  ])(
+    "rejects an unsafe %s before session and model",
+    async (_name, override) => {
+      const client = new FakeClient({
+        replay: replaySpec(
+          { type: "passthrough" },
+          override as Record<string, unknown>,
+        ),
+      });
+      const model = new MockLanguageModelV4({ doGenerate: textResponse() });
+      const generate = createKitaruGenerateText({
+        agentId: AGENT_ID,
+        allowedReplayModels: [],
+        client,
+        environment: replayEnvironment(),
+        resolveModel: async () => model,
+      });
 
-    await expect(generate({ model, prompt: "caller" })).rejects.toThrow();
-    expect(client.created).toHaveLength(0);
-    expect(model.doGenerateCalls).toHaveLength(0);
-  });
+      await expect(generate({ model, prompt: "caller" })).rejects.toThrow();
+      expect(client.created).toHaveLength(0);
+      expect(model.doGenerateCalls).toHaveLength(0);
+    },
+  );
 
   it.each([
     [
@@ -308,26 +314,29 @@ describe("inputs and replay overrides", () => {
       {},
       tool({ inputSchema: EMPTY_INPUT, outputSchema: EMPTY_INPUT }),
     ],
-  ])("rejects unsupported replay shape: %s", async (_name, extra, replayTool) => {
-    const client = new FakeClient({
-      replay: replaySpec({ cases: [], on_miss: "fail", type: "static" }),
-    });
-    const model = new MockLanguageModelV4({ doGenerate: textResponse() });
-    const generate = createKitaruGenerateText({
-      agentId: AGENT_ID,
-      client,
-      environment: replayEnvironment(),
-    });
+  ])(
+    "rejects unsupported replay shape: %s",
+    async (_name, extra, replayTool) => {
+      const client = new FakeClient({
+        replay: replaySpec({ cases: [], on_miss: "fail", type: "static" }),
+      });
+      const model = new MockLanguageModelV4({ doGenerate: textResponse() });
+      const generate = createKitaruGenerateText({
+        agentId: AGENT_ID,
+        client,
+        environment: replayEnvironment(),
+      });
 
-    await expect(
-      generate({
-        ...extra,
-        model,
-        prompt: "caller",
-        tools: { write: replayTool },
-      }),
-    ).rejects.toThrow();
-    expect(client.created).toHaveLength(0);
-    expect(model.doGenerateCalls).toHaveLength(0);
-  });
+      await expect(
+        generate({
+          ...extra,
+          model,
+          prompt: "caller",
+          tools: { write: replayTool },
+        }),
+      ).rejects.toThrow();
+      expect(client.created).toHaveLength(0);
+      expect(model.doGenerateCalls).toHaveLength(0);
+    },
+  );
 });

@@ -23,6 +23,48 @@ async with KitaruAPIClient() as client:
 
 The client reaches everything, including single-session replay creation and blob upload, which the MCP server deliberately leaves out. The concept pages show it in context: [replay a session](../concepts/replay.md), [build a cohort](../concepts/cohorts.md), [start an experiment run](../concepts/experiments.md).
 
+### Register an agent from Python
+
+Use the higher-level `KitaruClient` when you want to create an agent and its initial version together:
+
+```python
+from kitaru.api_models.v1.agent_version import RunSpec, RuntimeCapabilities
+from kitaru.client import AgentRegistrationError, KitaruClient
+
+async with KitaruClient() as client:
+    try:
+        registration = await client.register_agent(
+            "support-agent",
+            RunSpec(
+                command="python -m support_agent.replay",
+                working_dir="/srv/support-agent",
+                runtime_capabilities=RuntimeCapabilities(
+                    overrides=False,
+                    tool_policies=False,
+                ),
+            ),
+        )
+    except AgentRegistrationError as error:
+        version = await client.api.agents.create_version(
+            error.agent.id,
+            error.version_request,
+            idempotency_key=error.version_idempotency_key,
+        )
+        print(error.agent.id)
+        print(version.id)
+    else:
+        print(registration.agent.id)
+        print(registration.version.id)
+```
+
+The two `false` flags are deliberate: a generic replay command should not claim that it can apply replay overrides or non-passthrough tool policies unless its runtime implements those contracts. Kitaru stores the execution specification, not your source code, dependencies, or environment, so `/srv/support-agent`, the project files, and its dependencies must exist on the worker that claims the task.
+
+Registration is not atomic. Kitaru creates the agent first and then sends the initial-version request; it does not roll back the agent or start a fresh version request with a different idempotency key. The transport may retry either POST with its existing key after a transient failure. If the second request raises an ordinary exception after those retries, the server may have committed the version. `AgentRegistrationError` therefore retains the created `agent`, the exact `version_request`, and the `version_idempotency_key`. Retry that identical request and key, as shown above, instead of creating a new request that could add another version.
+
+Task cancellation still propagates as `asyncio.CancelledError`. If cancellation arrives after the agent is created, the exception includes a note with the agent id and version idempotency key so you can reconcile the version request without losing cancellation semantics. A process exit cannot preserve that note, so durable callers should supply and persist both idempotency keys before calling `register_agent`.
+
+Idempotency keys are unique across an account, not scoped to one endpoint. If you supply both `agent_idempotency_key` and `version_idempotency_key`, they must be distinct. Stored idempotency responses expire after the server's configured retention period, which defaults to 15 minutes; a retry after expiry can create another version, so durable workflows should reconcile promptly and persist the returned resource IDs. See [Under the hood](../concepts/under-the-hood.md) for the full retry contract.
+
 ## The TypeScript SDK
 
 `@zenml-io/kitaru` creates and inspects Kitaru resources, records sessions, submits evaluations and experiments, and waits for exact jobs. The [Mastra](../adapters/mastra.md) and [Vercel AI SDK](../adapters/vercel-ai.md) adapters build on it.

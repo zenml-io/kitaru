@@ -132,68 +132,71 @@ describe("recorded conversation context", () => {
     expect(agent.calls).toHaveLength(0);
   });
 
-  it.each([
-    "prompt",
-    "system_prompt",
-  ])("rejects %s overrides rather than changing the saved context", async (field) => {
-    const api = installTestApi({
-      replaySpec: {
-        baseline_session_id: "018f0000-0000-7000-8000-000000000102",
-        id: REPLAY_ID,
-        override: { [field]: "replacement" },
-        status: "pending",
-        tool_policy: { default: { type: "passthrough" }, tools: {} },
-      },
-    });
-    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
-    vi.stubEnv(
-      "KITARU_TASK_INPUTS",
-      JSON.stringify(
-        createContextInput("input", [{ role: "user", content: "original" }]),
-      ),
-    );
-    const agent = new FakeAgent();
-    await expect(wrap(agent).generate("ignored")).rejects.toThrow(
-      "overrides cannot replace a recorded conversation context",
-    );
-    expect(agent.calls).toHaveLength(0);
-    expect(api.sessionIds).toHaveLength(0);
-  });
+  it.each(["prompt", "system_prompt"])(
+    "rejects %s overrides rather than changing the saved context",
+    async (field) => {
+      const api = installTestApi({
+        replaySpec: {
+          baseline_session_id: "018f0000-0000-7000-8000-000000000102",
+          id: REPLAY_ID,
+          override: { [field]: "replacement" },
+          status: "pending",
+          tool_policy: { default: { type: "passthrough" }, tools: {} },
+        },
+      });
+      vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+      vi.stubEnv(
+        "KITARU_TASK_INPUTS",
+        JSON.stringify(
+          createContextInput("input", [{ role: "user", content: "original" }]),
+        ),
+      );
+      const agent = new FakeAgent();
+      await expect(wrap(agent).generate("ignored")).rejects.toThrow(
+        "overrides cannot replace a recorded conversation context",
+      );
+      expect(agent.calls).toHaveLength(0);
+      expect(api.sessionIds).toHaveLength(0);
+    },
+  );
 
   it.each([
     { workingMemory: { enabled: true } },
     { semanticRecall: true },
     { observationalMemory: true },
-  ])("records advanced memory as unsupported without breaking the original invocation: %j", async (memoryConfig) => {
-    const api = installTestApi();
-    const requestContext = new RequestContext();
-    requestContext.set("MastraMemory", { memoryConfig });
-    const agent = new FakeAgent(async (_input, options) => {
-      const messageList = new MessageList();
-      messageList.add("hello", "input");
-      for (const processor of (options.inputProcessors ??
-        []) as InputProcessor[]) {
-        await processor.processInputStep?.({
-          messageList,
-          requestContext,
-        } as never);
-      }
-      return { text: "original answer" };
-    });
-    expect(await wrap(agent).generate("hello", { requestContext })).toEqual({
-      text: "original answer",
-    });
-    const input = api.calls[0]?.body?.inputs;
-    expect(input).toMatchObject({
-      mastra_conversation_context: { complete: false },
-    });
-    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
-    vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(input));
-    await expect(wrap(agent).generate("ignored")).rejects.toThrow(
-      "complete conversation context is unavailable",
-    );
-    expect(agent.calls).toHaveLength(1);
-  });
+  ])(
+    "records advanced memory as unsupported without breaking the original invocation: %j",
+    async (memoryConfig) => {
+      const api = installTestApi();
+      const requestContext = new RequestContext();
+      requestContext.set("MastraMemory", { memoryConfig });
+      const agent = new FakeAgent(async (_input, options) => {
+        const messageList = new MessageList();
+        messageList.add("hello", "input");
+        for (const processor of (options.inputProcessors ??
+          []) as InputProcessor[]) {
+          await processor.processInputStep?.({
+            messageList,
+            requestContext,
+          } as never);
+        }
+        return { text: "original answer" };
+      });
+      expect(await wrap(agent).generate("hello", { requestContext })).toEqual({
+        text: "original answer",
+      });
+      const input = api.calls[0]?.body?.inputs;
+      expect(input).toMatchObject({
+        mastra_conversation_context: { complete: false },
+      });
+      vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+      vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(input));
+      await expect(wrap(agent).generate("ignored")).rejects.toThrow(
+        "complete conversation context is unavailable",
+      );
+      expect(agent.calls).toHaveLength(1);
+    },
+  );
 
   it("refuses restoring a snapshot outside a replay before live history can run", async () => {
     const api = installTestApi();

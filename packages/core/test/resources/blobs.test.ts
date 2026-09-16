@@ -45,7 +45,7 @@ describe("blobs resource", () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockImplementationOnce(async (_url, init) => {
-        const file = (init?.body as FormData).get("file") as File;
+        const file = (init?.body as FormData | undefined)?.get("file") as File;
         expect(file.name).toBe("payload.bin");
         expect(file.type).toBe("application/custom");
         return jsonResponse(metadata, 201);

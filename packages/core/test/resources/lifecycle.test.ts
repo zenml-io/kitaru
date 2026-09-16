@@ -248,18 +248,21 @@ describe("execution lifecycle resources", () => {
     ["completed", "jobs"],
     ["failed", "jobs"],
     ["canceled", "jobs"],
-  ] as const)("returns terminal %s jobs without remapping", async (status, _resource) => {
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(jsonResponse({ ...job, status: "running" }))
-      .mockResolvedValueOnce(jsonResponse({ ...job, status }));
-    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
+  ] as const)(
+    "returns terminal %s jobs without remapping",
+    async (status, _resource) => {
+      const fetch = vi
+        .fn<typeof globalThis.fetch>()
+        .mockResolvedValueOnce(jsonResponse({ ...job, status: "running" }))
+        .mockResolvedValueOnce(jsonResponse({ ...job, status }));
+      const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
 
-    await expect(
-      client.jobs.wait(ID, { intervalMs: 1, timeoutMs: 100 }),
-    ).resolves.toMatchObject({ id: ID, status });
-    expect(fetch).toHaveBeenCalledTimes(2);
-  });
+      await expect(
+        client.jobs.wait(ID, { intervalMs: 1, timeoutMs: 100 }),
+      ).resolves.toMatchObject({ id: ID, status });
+      expect(fetch).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("treats run canceling and replay evaluating as nonterminal", async () => {
     const fetch = vi

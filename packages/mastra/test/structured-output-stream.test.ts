@@ -125,40 +125,40 @@ describe("structured output provider streams", () => {
     });
   });
 
-  it.each([
-    "v3",
-    "v4",
-  ] as const)("preserves %s chunks and records nested usage before EOF", async (version) => {
-    const chunks = [
-      { type: "response-metadata", id: "response", modelId: "served" },
-      { type: "text-delta", id: "text", delta: '{"ok":true}' },
-      {
-        type: "finish",
-        finishReason: { unified: "stop", raw: "end_turn" },
-        usage: {
-          inputTokens: { total: 11, noCache: 6, cacheRead: 5, cacheWrite: 0 },
-          outputTokens: { total: 8, text: 5, reasoning: 3 },
+  it.each(["v3", "v4"] as const)(
+    "preserves %s chunks and records nested usage before EOF",
+    async (version) => {
+      const chunks = [
+        { type: "response-metadata", id: "response", modelId: "served" },
+        { type: "text-delta", id: "text", delta: '{"ok":true}' },
+        {
+          type: "finish",
+          finishReason: { unified: "stop", raw: "end_turn" },
+          usage: {
+            inputTokens: { total: 11, noCache: 6, cacheRead: 5, cacheWrite: 0 },
+            outputTokens: { total: 8, text: 5, reasoning: 3 },
+          },
         },
-      },
-    ];
-    const test = await setup(() => streamOf(chunks), version);
-    expect(await collect((await test.open()).stream)).toEqual(chunks);
-    expect(test.nodes()).toHaveLength(1);
-    expect(test.nodes()[0]).toMatchObject({
-      requested_model: "secondary",
-      model: "served",
-      external_id: "response",
-      status: "completed",
-      model_params: { temperature: 0.2 },
-      tokens: {
-        input_tokens: 11,
-        output_tokens: 8,
-        cached_input_tokens: 5,
-        reasoning_tokens: 3,
-      },
-      outputs: { text: '{"ok":true}', finish_reason: "stop" },
-    });
-  });
+      ];
+      const test = await setup(() => streamOf(chunks), version);
+      expect(await collect((await test.open()).stream)).toEqual(chunks);
+      expect(test.nodes()).toHaveLength(1);
+      expect(test.nodes()[0]).toMatchObject({
+        requested_model: "secondary",
+        model: "served",
+        external_id: "response",
+        status: "completed",
+        model_params: { temperature: 0.2 },
+        tokens: {
+          input_tokens: 11,
+          output_tokens: 8,
+          cached_input_tokens: 5,
+          reasoning_tokens: 3,
+        },
+        outputs: { text: '{"ok":true}', finish_reason: "stop" },
+      });
+    },
+  );
 
   it("preserves non-enumerable symbols and getters on the stream result", async () => {
     const test = await setup(() => streamOf([finish]));
@@ -309,30 +309,30 @@ describe("structured output provider streams", () => {
     });
   });
 
-  it.each([
-    false,
-    true,
-  ])("stores recording failure while preserving native stream failure=%s", async (failProvider) => {
-    const providerError = new Error("Provider disconnected");
-    const recordingError = new Error("Recorder unavailable");
-    const test = await setup(() =>
-      failProvider
-        ? new ReadableStream({
-            start(controller) {
-              controller.error(providerError);
-            },
-          })
-        : streamOf([finish]),
-    );
-    vi.spyOn(test.client, "upsertSessionNodes").mockRejectedValue(
-      recordingError,
-    );
-    const result = collect((await test.open()).stream);
-    if (failProvider) await expect(result).rejects.toBe(providerError);
-    else expect(await result).toEqual([finish]);
-    expect(test.state.failure).toBe(recordingError);
-    await expect(test.state.awaitSteps()).rejects.toBe(recordingError);
-  });
+  it.each([false, true])(
+    "stores recording failure while preserving native stream failure=%s",
+    async (failProvider) => {
+      const providerError = new Error("Provider disconnected");
+      const recordingError = new Error("Recorder unavailable");
+      const test = await setup(() =>
+        failProvider
+          ? new ReadableStream({
+              start(controller) {
+                controller.error(providerError);
+              },
+            })
+          : streamOf([finish]),
+      );
+      vi.spyOn(test.client, "upsertSessionNodes").mockRejectedValue(
+        recordingError,
+      );
+      const result = collect((await test.open()).stream);
+      if (failProvider) await expect(result).rejects.toBe(providerError);
+      else expect(await result).toEqual([finish]);
+      expect(test.state.failure).toBe(recordingError);
+      await expect(test.state.awaitSteps()).rejects.toBe(recordingError);
+    },
+  );
 
   it("records each explicitly repeated doStream attempt once", async () => {
     const failure = new Error("Retryable provider error");

@@ -21,7 +21,7 @@ from kitaru.client.auth import (
     TokenAuth,
     TokenSource,
 )
-from kitaru.client.client import KitaruClient
+from kitaru.client.client import AgentRegistrationResult, KitaruClient
 from kitaru.client.config import (
     ClientConfig,
     get_server_url,
@@ -39,6 +39,7 @@ from kitaru.client.credentials import ApiToken, ApiType, ServerCredentials
 from kitaru.client.device_auth import device_login
 from kitaru.client.device_grant import DeviceLoginError
 from kitaru.client.exceptions import (
+    AgentRegistrationError,
     APIError,
     AuthenticationError,
     AuthorizationError,
@@ -52,6 +53,8 @@ from kitaru.client.sync_client import KitaruSyncClient
 
 __all__ = [
     "APIError",
+    "AgentRegistrationError",
+    "AgentRegistrationResult",
     "ApiToken",
     "ApiType",
     "AuthenticationError",
