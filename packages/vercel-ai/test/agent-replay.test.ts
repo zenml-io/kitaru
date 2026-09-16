@@ -75,35 +75,38 @@ describe("ToolLoopAgent replay safety", () => {
         ],
       },
     ],
-  ])("rejects %s before provider or tool side effects", async (_name, settings, call) => {
-    const client = new FakeClient({ replay: replaySpec() });
-    const model = new MockLanguageModelV4({
-      doGenerate: toolResponse([
-        { id: "call-1", input: '{"value":"a"}', name: "write" },
-      ]),
-    });
-    const execute = vi.fn(async () => "live");
-    const agent = createKitaruToolLoopAgent(
-      {
-        model,
-        tools: { write: tool({ execute, inputSchema: VALUE_INPUT }) },
-        ...settings,
-      } as never,
-      {
-        agentId: AGENT_ID,
-        client,
-        environment: replayEnvironment(),
-      },
-    );
+  ])(
+    "rejects %s before provider or tool side effects",
+    async (_name, settings, call) => {
+      const client = new FakeClient({ replay: replaySpec() });
+      const model = new MockLanguageModelV4({
+        doGenerate: toolResponse([
+          { id: "call-1", input: '{"value":"a"}', name: "write" },
+        ]),
+      });
+      const execute = vi.fn(async () => "live");
+      const agent = createKitaruToolLoopAgent(
+        {
+          model,
+          tools: { write: tool({ execute, inputSchema: VALUE_INPUT }) },
+          ...settings,
+        } as never,
+        {
+          agentId: AGENT_ID,
+          client,
+          environment: replayEnvironment(),
+        },
+      );
 
-    await expect(
-      agent.generate({ prompt: "go", ...call } as never),
-    ).rejects.toThrow(/approval|dynamic|prepareStep|provider|sandbox/i);
+      await expect(
+        agent.generate({ prompt: "go", ...call } as never),
+      ).rejects.toThrow(/approval|dynamic|prepareStep|provider|sandbox/i);
 
-    expect(client.created).toHaveLength(0);
-    expect(model.doGenerateCalls).toHaveLength(0);
-    expect(execute).not.toHaveBeenCalled();
-  });
+      expect(client.created).toHaveLength(0);
+      expect(model.doGenerateCalls).toHaveLength(0);
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
 
   it("applies replay overrides after prepareCall", async () => {
     const preparedModel = new MockLanguageModelV4({

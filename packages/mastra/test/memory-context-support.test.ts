@@ -17,11 +17,14 @@ describe("memory snapshot support", () => {
     { semanticRecall: { topK: 3, messageRange: 2 } },
     { observationalMemory: true },
     { observationalMemory: { scope: "thread" } },
-  ])("refuses memory behavior a fixed snapshot cannot replay: %j", (memoryConfig) => {
-    const context = new RequestContext();
-    context.set("MastraMemory", { memoryConfig });
-    expect(canCaptureMemoryContext(context)).toBe(false);
-  });
+  ])(
+    "refuses memory behavior a fixed snapshot cannot replay: %j",
+    (memoryConfig) => {
+      const context = new RequestContext();
+      context.set("MastraMemory", { memoryConfig });
+      expect(canCaptureMemoryContext(context)).toBe(false);
+    },
+  );
 
   it("does not treat disabled memory features as missing context", () => {
     const context = new RequestContext();
