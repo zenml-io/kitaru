@@ -135,6 +135,11 @@ async function assertSupportedOptions(
         `KitaruAgent.stream() does not support approval for tool '${name}'`,
       );
     }
+    if (isRecord(tool) && tool.hasSuspendSchema === true) {
+      throw new TypeError(
+        `KitaruAgent.stream() does not support suspension for tool '${name}'`,
+      );
+    }
   }
 }
 

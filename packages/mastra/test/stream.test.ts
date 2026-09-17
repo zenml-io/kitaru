@@ -507,6 +507,45 @@ describe("KitaruAgent.stream", () => {
     expect(api.sessionIds).toHaveLength(0);
   });
 
+  it("rejects suspend-capable tools before recording or execution", async () => {
+    const api = installTestApi();
+    const doStream = vi.fn(async () => ({
+      stream: streamChunks(["unexpected"]) as never,
+    }));
+    const execute = vi.fn(async () => ({ status: "unexpected" }));
+    const agent = new Agent({
+      id: "suspend-tool-stream",
+      instructions: "Use the suspendable tool.",
+      model: new MastraLanguageModelV2Mock({
+        doStream,
+        modelId: "suspend-tool-model",
+        provider: "test-provider",
+      }),
+      name: "Suspend tool stream",
+      tools: {
+        waitForInput: createTool({
+          description: "Wait for more input",
+          execute,
+          id: "waitForInput",
+          inputSchema: z.object({ prompt: z.string() }),
+          suspendSchema: z.object({ reason: z.string() }),
+        }),
+      },
+    });
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "suspend-tool-model",
+    });
+
+    await expect(recorded.stream("hello")).rejects.toThrow(
+      "suspension for tool 'waitForInput'",
+    );
+    expect(api.sessionIds).toHaveLength(0);
+    expect(doStream).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("rejects replay before defaults, tools, recording, or execution", async () => {
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
     const api = installTestApi();
