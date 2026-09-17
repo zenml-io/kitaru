@@ -34,14 +34,30 @@ export interface KitaruAgentOptions extends KitaruEnvironmentOptions {
   configuredOnStepFinish?: ConfiguredOnStepFinish;
   configuredBeforeToolCall?: ConfiguredBeforeToolCall;
   configuredAfterToolCall?: ConfiguredAfterToolCall;
+  onRecordingError?: (event: StreamRecordingErrorEvent) => Promise<void> | void;
 }
 
 export interface GenerateCapable {
   generate: (...args: never[]) => unknown;
 }
 
+export interface StreamCapable {
+  stream: (...args: never[]) => unknown;
+}
+
 export type MastraAgent = Agent;
 export type GenerateMethod<TAgent extends GenerateCapable> = TAgent["generate"];
+export type StreamMethod<TAgent> = TAgent extends StreamCapable
+  ? TAgent["stream"]
+  : never;
+
+export type StreamRecordingErrorStage = "step" | "complete";
+
+export interface StreamRecordingErrorEvent {
+  error: unknown;
+  sessionId?: string;
+  stage: StreamRecordingErrorStage;
+}
 
 export interface RuntimeGenerateOptions {
   abortSignal?: AbortSignal;
@@ -54,6 +70,11 @@ export interface RuntimeGenerateOptions {
   requestContext?: RequestContext;
   system?: unknown;
   [key: string]: unknown;
+}
+
+export interface RuntimeStreamOptions extends RuntimeGenerateOptions {
+  onAbort?: (event: Record<string, unknown>) => Promise<void> | void;
+  onFinish?: (event: Record<string, unknown>) => Promise<void> | void;
 }
 
 export interface PublicModelIdentity {

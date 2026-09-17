@@ -11,4 +11,6 @@ export type {
   KitaruAgentOptions,
   KitaruCostCalculator,
   KitaruCostInput,
+  StreamRecordingErrorEvent,
+  StreamRecordingErrorStage,
 } from "./types.js";

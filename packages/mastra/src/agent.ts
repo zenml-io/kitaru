@@ -23,6 +23,7 @@ import {
   stripLiveMemoryOptions,
 } from "./replay-guards.js";
 import { type RecordedStep, recordStep } from "./step-recorder.js";
+import { streamWithRecording } from "./stream-recording.js";
 import { prepareStructuredOutputModel } from "./structured-output-model.js";
 import { createToolHooks } from "./tool-policies.js";
 import type {
@@ -30,6 +31,8 @@ import type {
   GenerateMethod,
   KitaruAgentOptions,
   RuntimeGenerateOptions,
+  RuntimeStreamOptions,
+  StreamMethod,
 } from "./types.js";
 
 const packageMetadata: unknown = createRequire(import.meta.url)(
@@ -91,6 +94,7 @@ function tripwireReason(value: unknown): string | undefined {
 
 export class KitaruAgent<TAgent extends GenerateCapable> {
   readonly generate: GenerateMethod<TAgent>;
+  readonly stream: StreamMethod<TAgent>;
 
   readonly #agent: TAgent;
   readonly #client: KitaruClient;
@@ -107,6 +111,44 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       timeoutMs: options.timeoutMs,
     });
     this.generate = this.#generate.bind(this) as GenerateMethod<TAgent>;
+    this.stream = this.#stream.bind(this) as StreamMethod<TAgent>;
+  }
+
+  async #stream(
+    callerMessages: unknown,
+    callerOptions: RuntimeStreamOptions = {},
+  ): Promise<unknown> {
+    if (process.env.KITARU_REPLAY_ID !== undefined) {
+      throw new Error("KitaruAgent.stream() does not support replay");
+    }
+    const requestedModelId =
+      readableModelId(callerOptions.model) ?? this.#options.requestedModelId;
+    const replay = await resolveReplayContext({
+      allowedReplayModels: this.#options.allowedReplayModels,
+      callerInput: callerMessages,
+      client: this.#client,
+      requestedModelId,
+    });
+    if (
+      replay.spec ||
+      replay.replayId ||
+      replay.override ||
+      replay.replacementModelId
+    ) {
+      throw new Error("KitaruAgent.stream() does not support replay");
+    }
+    return streamWithRecording({
+      adapterVersion: ADAPTER_VERSION,
+      agent: this.#agent,
+      callerMessages: replay.effectiveRuntimeInput,
+      callerOptions,
+      client: this.#client,
+      options: this.#options,
+      replayInput: replay.effectiveInput,
+      requestedModelId,
+      sessionName: this.#sessionName,
+      startedAt: new Date().toISOString(),
+    });
   }
 
   async #generate(
