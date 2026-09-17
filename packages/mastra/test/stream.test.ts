@@ -1,4 +1,5 @@
 import { Agent } from "@mastra/core/agent";
+import type { ProcessInputArgs } from "@mastra/core/processors";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -355,11 +356,12 @@ describe("KitaruAgent.stream", () => {
       answer: "雪",
       api_key: "secret-value",
     });
+    await expect(output.text).resolves.toBe(answer);
     await output.getFullOutput();
     expect(api.calls.at(-1)?.body).toMatchObject({
       outputs: {
         object: { answer: "雪", api_key: "[redacted]" },
-        text: answer,
+        text: JSON.stringify({ answer: "雪", api_key: "[redacted]" }),
       },
       status: "completed",
     });
@@ -487,6 +489,116 @@ describe("KitaruAgent.stream", () => {
 
       expect(agent.streamCalls).toHaveLength(0);
       expect(api.sessionIds).toHaveLength(0);
+    },
+  );
+
+  it.each(["per-run", "default"] as const)(
+    "rejects %s prepareStep before it can replace the model",
+    async (source) => {
+      const api = installTestApi();
+      const doStream = vi.fn(async () => ({
+        stream: streamChunks(["unexpected"]) as never,
+      }));
+      const replacementDoStream = vi.fn(async () => ({
+        stream: streamChunks(["replacement"]) as never,
+      }));
+      const execute = vi.fn(async () => ({ changed: true }));
+      const replacementModel = new MastraLanguageModelV2Mock({
+        doStream: replacementDoStream,
+        modelId: "replacement-model",
+        provider: "test-provider",
+      });
+      const prepareStep = vi.fn(() => ({ model: replacementModel }));
+      const agent = new Agent({
+        defaultOptions: source === "default" ? { prepareStep } : undefined,
+        id: `prepare-step-${source}`,
+        instructions: "Use the side-effecting tool.",
+        model: new MastraLanguageModelV2Mock({
+          doStream,
+          modelId: "prepare-step-model",
+          provider: "test-provider",
+        }),
+        name: `Prepare step ${source}`,
+        tools: {
+          sideEffect: createTool({
+            description: "Make an observable change",
+            execute,
+            id: "sideEffect",
+            inputSchema: z.object({ value: z.string() }),
+          }),
+        },
+      });
+      const recorded = new KitaruAgent(agent, {
+        agentId: AGENT_ID,
+        apiUrl: "https://api.example",
+        requestedModelId: "prepare-step-model",
+      });
+
+      await expect(
+        recorded.stream("hello", source === "per-run" ? { prepareStep } : {}),
+      ).rejects.toThrow("does not support prepareStep");
+      expect(prepareStep).not.toHaveBeenCalled();
+      expect(doStream).not.toHaveBeenCalled();
+      expect(replacementDoStream).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+      expect(api.calls).toHaveLength(0);
+    },
+  );
+
+  it.each(["per-run", "default", "configured"] as const)(
+    "rejects %s input processors before recording or execution",
+    async (source) => {
+      const api = installTestApi();
+      const doStream = vi.fn(async () => ({
+        stream: streamChunks(["unexpected"]) as never,
+      }));
+      const execute = vi.fn(async () => ({ changed: true }));
+      const processInput = vi.fn((args: ProcessInputArgs) => args.messageList);
+      const processor = { id: "replace-input", processInput };
+      const agent = new Agent({
+        defaultOptions:
+          source === "default" ? { inputProcessors: [processor] } : undefined,
+        id: `input-processor-${source}`,
+        inputProcessors: source === "configured" ? [processor] : undefined,
+        instructions: "Use the side-effecting tool.",
+        model: new MastraLanguageModelV2Mock({
+          doStream,
+          modelId: "input-processor-model",
+          provider: "test-provider",
+        }),
+        name: `Input processor ${source}`,
+        tools: {
+          sideEffect: createTool({
+            description: "Make an observable change",
+            execute,
+            id: "sideEffect",
+            inputSchema: z.object({ value: z.string() }),
+          }),
+        },
+      });
+      const configuredProcessors = vi.spyOn(
+        agent,
+        "listConfiguredInputProcessors",
+      );
+      const recorded = new KitaruAgent(agent, {
+        agentId: AGENT_ID,
+        apiUrl: "https://api.example",
+        requestedModelId: "input-processor-model",
+      });
+
+      await expect(
+        recorded.stream(
+          "hello",
+          source === "per-run" ? { inputProcessors: [processor] } : {},
+        ),
+      ).rejects.toThrow("does not support user inputProcessors");
+      expect(processInput).not.toHaveBeenCalled();
+      expect(doStream).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+      expect(configuredProcessors).toHaveBeenCalledTimes(
+        source === "configured" ? 1 : 0,
+      );
+      expect(api.calls).toHaveLength(0);
     },
   );
 

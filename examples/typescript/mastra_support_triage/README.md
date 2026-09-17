@@ -41,7 +41,7 @@ pnpm --filter @zenml-io/kitaru-example-mastra-support-triage stream
 
 The example's `onRecordingError` callback prints only the failed recording stage and optional session ID. It does not print the error body, prompt, tool payload, output, or credentials. A setup error for this ordinary non-memory stream rejects the initial `stream()` call. For memory-backed agents, Mastra can return the stream before Kitaru's post-recall input processor initializes recording; callers should also observe native aggregate failures such as `getFullOutput()` during consumption.
 
-An unconsumed or canceled reader is not reported as a completed Kitaru session. An observable Mastra abort is recorded as failed. Streaming replay, approval and resume modes, background execution, `untilIdle`, and secondary structured-output models are outside this entry point; schema-only structured output remains supported. Default-option and tool resolvers must be deterministic and side-effect-free because Mastra and Kitaru may call them more than once, with no exact invocation-count guarantee.
+An unconsumed or canceled reader is not reported as a completed Kitaru session. An observable Mastra abort is recorded as failed. User `prepareStep` and input processors, streaming replay, approval and resume modes, background execution, `untilIdle`, and secondary structured-output models are outside this entry point; schema-only structured output remains supported. Default-option and tool resolvers must be deterministic and side-effect-free because Mastra and Kitaru may call them more than once, with no exact invocation-count guarantee.
 
 ## Isolation and recovery
 

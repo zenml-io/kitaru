@@ -99,6 +99,7 @@ async function assertSupportedOptions(
   agent: StreamAgent,
   options: RuntimeStreamOptions,
 ): Promise<void> {
+  assertDisabled("prepareStep", options.prepareStep);
   assertDisabled("requireToolApproval", options.requireToolApproval);
   assertDisabled("autoResumeSuspendedTools", options.autoResumeSuspendedTools);
   assertDisabled("untilIdle", options.untilIdle);
@@ -286,6 +287,19 @@ export async function streamWithRecording({
     : {};
   const { deepMerge } = await import("@mastra/core/utils");
   const effective = deepMerge(defaults, callerOptions) as RuntimeStreamOptions;
+  const processors =
+    effective.inputProcessors ??
+    (typeof agent.listConfiguredInputProcessors === "function"
+      ? await agent.listConfiguredInputProcessors(effective.requestContext)
+      : undefined);
+  if (
+    processors != null &&
+    (!Array.isArray(processors) || processors.length > 0)
+  ) {
+    throw new TypeError(
+      "KitaruAgent.stream() does not support user inputProcessors",
+    );
+  }
   await assertSupportedOptions(agent, effective);
 
   let recordedInput = replayInput;
@@ -321,20 +335,13 @@ export async function streamWithRecording({
 
   const needsContext = hasMemoryOptions(effective);
   if (needsContext) {
-    const processors =
-      effective.inputProcessors ??
-      (typeof agent.listConfiguredInputProcessors === "function"
-        ? await agent.listConfiguredInputProcessors(effective.requestContext)
-        : undefined);
     if (Array.isArray(processors)) {
       effective.inputProcessors = [
         ...processors,
         createContextProcessor(async (messages) => {
           recordedInput = createContextInput(
             replayInput,
-            processors.length === 0 && effective.prepareStep === undefined
-              ? messages
-              : undefined,
+            messages,
             "This recording used memory behavior or input transformations outside history-only replay support.",
           );
           await initialize();
@@ -381,15 +388,25 @@ export async function streamWithRecording({
       await active.fail(new Error(tripwire));
       return;
     }
-    await active.complete(
-      recordedToolPayloadJson(
-        runResultSummary(event, {
-          structuredOutputField:
-            effective.structuredOutput === undefined ? undefined : "object",
-        }),
-        "run output",
-      ),
-    );
+    const summary = runResultSummary(event, {
+      structuredOutputField:
+        effective.structuredOutput === undefined ? undefined : "object",
+    });
+    if (
+      effective.structuredOutput !== undefined &&
+      isRecord(summary) &&
+      typeof summary.text === "string"
+    ) {
+      try {
+        // Structured output can repeat the same credentials in its JSON text.
+        summary.text = JSON.stringify(
+          recordedToolPayloadJson(JSON.parse(summary.text), "run output text"),
+        );
+      } catch {
+        // Non-JSON explanatory text retains the ordinary text recording contract.
+      }
+    }
+    await active.complete(recordedToolPayloadJson(summary, "run output"));
   };
   effective.onError = async (event) => {
     modelError = event.error;
