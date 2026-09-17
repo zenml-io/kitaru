@@ -47,7 +47,7 @@ export interface StreamCapable {
 
 export type MastraAgent = Agent;
 export type GenerateMethod<TAgent extends GenerateCapable> = TAgent["generate"];
-export type StreamMethod<TAgent> = TAgent extends StreamCapable
+export type StreamMethod<TAgent> = [TAgent] extends [StreamCapable]
   ? TAgent["stream"]
   : never;
 

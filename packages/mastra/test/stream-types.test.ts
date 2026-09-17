@@ -4,6 +4,7 @@ import { expectTypeOf, it } from "vitest";
 import { z } from "zod";
 
 import { KitaruAgent } from "../src/index.js";
+import type { StreamMethod } from "../src/types.js";
 import { AGENT_ID, FakeAgent } from "./helpers.js";
 
 it("preserves native stream overloads and schema inference", async () => {
@@ -38,4 +39,5 @@ it("preserves native stream overloads and schema inference", async () => {
     requestedModelId: "generate-model",
   });
   expectTypeOf(generateOnly.stream).toEqualTypeOf<never>();
+  expectTypeOf<StreamMethod<typeof agent | FakeAgent>>().toEqualTypeOf<never>();
 });
