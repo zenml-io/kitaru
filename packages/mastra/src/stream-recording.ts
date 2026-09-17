@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import type { KitaruClient } from "@zenml-io/kitaru";
+import type { JsonValue, KitaruClient } from "@zenml-io/kitaru";
 import {
   type RunRecorder,
   runResultSummary,
@@ -34,7 +34,7 @@ interface StreamRecordingOptions {
   callerOptions: RuntimeStreamOptions;
   client: KitaruClient;
   options: KitaruAgentOptions;
-  replayInput: unknown;
+  replayInput: JsonValue;
   requestedModelId: string;
   sessionName?: string;
   startedAt: string;
@@ -278,18 +278,17 @@ export async function streamWithRecording({
   await assertSupportedOptions(agent, effective);
 
   let recordedInput = replayInput;
-  let recorder: RunRecorder | undefined;
   let lifecycle: StreamLifecycle | undefined;
   let initializePromise: Promise<StreamLifecycle> | undefined;
   const initialize = (): Promise<StreamLifecycle> => {
     initializePromise ??= (async () => {
       const { RunRecorder } = await import("@zenml-io/kitaru/adapter");
-      recorder = await RunRecorder.create({
+      const recorder = await RunRecorder.create({
         adapterVersion,
         agentId: options.agentId,
         agentVersionId: options.agentVersionId,
         client,
-        effectiveInput: recordedInput as never,
+        effectiveInput: recordedInput,
         effectiveModelSettings: serializedSettings(effective.modelSettings),
         framework: "mastra",
         name: sessionName,
@@ -321,7 +320,7 @@ export async function streamWithRecording({
         ...processors,
         createContextProcessor(async (messages) => {
           recordedInput = createContextInput(
-            replayInput as never,
+            replayInput,
             processors.length === 0 && effective.prepareStep === undefined
               ? messages
               : undefined,
