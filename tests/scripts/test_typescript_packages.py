@@ -230,6 +230,7 @@ def test_typescript_ci_owns_cross_language_tests() -> None:
     assert base_commands
     assert all("--ignore=tests/typescript" in command for command in base_commands)
     assert "run: uv run pytest -q tests/typescript" in typescript_job
+    assert "run: pnpm run pack:check:built" in typescript_job
     assert (
         "uv sync --frozen --extra server --extra cli --extra worker" in typescript_job
     )

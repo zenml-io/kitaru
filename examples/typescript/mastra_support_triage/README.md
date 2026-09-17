@@ -13,7 +13,7 @@ Every LLM node records `openai/gpt-5-nano` as the requested model and the model 
 
 ## Run
 
-Use Node 22 and a Kitaru server backed by PostgreSQL. Log in once with the Python CLI, then install, build, and run the TypeScript driver:
+Use Node 22 or Node 26 and a Kitaru server backed by PostgreSQL. Log in once with the Python CLI, then install, build, and run the TypeScript driver:
 
 ```bash
 kitaru login https://your-kitaru-server.example.com
@@ -25,6 +25,23 @@ OPENAI_API_KEY='your-openai-key' pnpm --filter @zenml-io/kitaru-example-mastra-s
 The driver reads the selected server and credential without printing or copying the credential. Before creating remote resources, it verifies that the dedicated worker command is installed and can make an authenticated, read-only request to the selected server. The worker can use the same stored login, or an explicit `KITARU_API_KEY` or `KITARU_API_TOKEN` supplied to the driver.
 
 The command prints the run state directory, session and replay IDs, both outbox counts, the mocked history action, and evaluation scores.
+
+## Provider-free streaming
+
+The separate `stream` entry point demonstrates recorded Mastra 1.67.x streaming without replacing the worker-backed generate and replay flow above. It uses a deterministic local model, calls the side-effect-free `lookupOrder` fixture tool, and prints two text chunks through ordinary `for await` consumption. Kitaru records the two model steps, tool result, usage, and final text only after the native stream reaches its finish callback.
+
+Point it at a running server and an existing agent. It makes no provider request:
+
+```bash
+KITARU_API_URL='https://your-kitaru-server.example.com' \
+KITARU_API_KEY='your-kitaru-key' \
+KITARU_AGENT_ID='your-agent-id' \
+pnpm --filter @zenml-io/kitaru-example-mastra-support-triage stream
+```
+
+The example's `onRecordingError` callback prints only the failed recording stage and optional session ID. It does not print the error body, prompt, tool payload, output, or credentials. A setup error for this ordinary non-memory stream rejects the initial `stream()` call. For memory-backed agents, Mastra can return the stream before Kitaru's post-recall input processor initializes recording; callers should also observe native aggregate failures such as `getFullOutput()` during consumption.
+
+An unconsumed or canceled reader is not reported as a completed Kitaru session. An observable Mastra abort is recorded as failed. Streaming replay, approval and resume modes, background execution, `untilIdle`, and secondary structured-output models are outside this entry point; schema-only structured output remains supported. Default-option and tool resolvers must be deterministic and side-effect-free because Mastra and Kitaru may call them more than once, with no exact invocation-count guarantee.
 
 ## Isolation and recovery
 

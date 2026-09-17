@@ -2,7 +2,7 @@ import { Agent } from "@mastra/core/agent";
 import type { LLMStepResult } from "@mastra/core/stream";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod/v4";
 
 type CompatibilityStep = LLMStepResult<unknown> & {
@@ -95,6 +95,15 @@ function makeModel(
   return { calls, model };
 }
 
+function streamChunks(chunks: unknown[]): ReadableStream<unknown> {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+}
+
 function normalizeTool(execute: (input: typeof EXECUTION_INPUT) => unknown) {
   return createTool({
     id: "normalize",
@@ -128,6 +137,114 @@ afterEach(() => {
 });
 
 describe("Mastra 1.67.0 compatibility", () => {
+  it("streams typed schema output and complete tool-step data", async () => {
+    let modelCall = 0;
+    let executedInput: unknown;
+    const steps: CompatibilityStep[] = [];
+    const model = new MastraLanguageModelV2Mock({
+      doStream: async () => {
+        modelCall += 1;
+        return {
+          stream: streamChunks(
+            modelCall === 1
+              ? [
+                  { type: "stream-start", warnings: [] },
+                  {
+                    id: "compatibility-tool-response",
+                    modelId: "compatibility-stream-model",
+                    type: "response-metadata",
+                  },
+                  {
+                    input: JSON.stringify(RAW_INPUT),
+                    toolCallId: "compatibility-tool-call",
+                    toolName: "normalize",
+                    type: "tool-call",
+                  },
+                  {
+                    finishReason: "tool-calls",
+                    type: "finish",
+                    usage: {
+                      inputTokens: 4,
+                      outputTokens: 2,
+                      totalTokens: 6,
+                    },
+                  },
+                ]
+              : [
+                  { type: "stream-start", warnings: [] },
+                  {
+                    id: "compatibility-text-response",
+                    modelId: "compatibility-stream-model",
+                    type: "response-metadata",
+                  },
+                  { id: "compatibility-text", type: "text-start" },
+                  {
+                    delta: "normalized",
+                    id: "compatibility-text",
+                    type: "text-delta",
+                  },
+                  { id: "compatibility-text", type: "text-end" },
+                  {
+                    finishReason: "stop",
+                    type: "finish",
+                    usage: {
+                      inputTokens: 3,
+                      outputTokens: 1,
+                      totalTokens: 4,
+                    },
+                  },
+                ],
+          ) as never,
+        };
+      },
+      modelId: "compatibility-stream-model",
+      provider: "compatibility-stream-provider",
+    });
+    const agent = new Agent({
+      id: "compatibility-stream-agent",
+      instructions: "Normalize input.",
+      model,
+      name: "Compatibility stream agent",
+      tools: {
+        normalize: normalizeTool((input) => {
+          executedInput = input;
+          return { normalized: input };
+        }),
+      },
+    });
+    const schema = z.object({ answer: z.string() });
+    const assertSchemaInference = async () => {
+      const result = await agent.stream("schema", {
+        structuredOutput: { schema },
+      });
+      expectTypeOf(await result.object).toEqualTypeOf<{ answer: string }>();
+    };
+    expectTypeOf(assertSchemaInference).toBeFunction();
+
+    const output = await agent.stream("normalize", {
+      onStepFinish: (step) => {
+        steps.push(step);
+      },
+    });
+    const chunks: string[] = [];
+    for await (const chunk of output.textStream) chunks.push(chunk);
+
+    expect(chunks).toEqual(["normalized"]);
+    expect(executedInput).toEqual(EXECUTION_INPUT);
+    expect(steps).toHaveLength(2);
+    expect(steps[0]?.toolCalls[0]?.payload).toMatchObject({
+      args: RAW_INPUT,
+      toolCallId: "compatibility-tool-call",
+      toolName: "normalize",
+    });
+    expect(steps[0]?.toolResults[0]?.payload).toMatchObject({
+      args: RAW_INPUT,
+      toolCallId: "compatibility-tool-call",
+      toolName: "normalize",
+    });
+    expect(steps.map((step) => step.usage.totalTokens)).toEqual([6, 4]);
+  });
+
   it("keeps raw registry keys in listTools and formats execution keys", async () => {
     const { model } = makeModel([textResult("unused")]);
     const agent = new Agent({

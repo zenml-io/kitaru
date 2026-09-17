@@ -1,6 +1,6 @@
 # `@zenml-io/kitaru-mastra`
 
-Experimental non-streaming recording and replay support for Mastra `>=1.51.0 <1.68.0`.
+Experimental recording and replay support for Mastra. `generate()` supports `@mastra/core >=1.51.0 <1.68.0`; recorded `stream()` calls require a stable `@mastra/core 1.67.x` release.
 
 This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose repository directory is `packages/core/`. The packages are versioned and released together.
 
@@ -29,7 +29,41 @@ const recorded = new KitaruAgent(existingAgent, {
 const result = await recorded.generate(messages, options);
 ```
 
-The wrapper calls the existing agent's public `generate()` method. It does not recreate tools, inspect private agent fields, or change the returned Mastra result. For a per-run `structuredOutput.model`, it resolves the secondary model through public `getModel()` and wraps that model's `doStream()` for this invocation without mutating the original model.
+The wrapper calls the existing agent's public method. It does not recreate tools, inspect private agent fields, or change the returned Mastra result. For a per-run `generate()` with `structuredOutput.model`, it resolves the secondary model through public `getModel()` and wraps that model's `doStream()` for this invocation without mutating the original model.
+
+## Streaming
+
+On Mastra 1.67.x, `KitaruAgent.stream()` returns the native Mastra result and records completed model and local-tool steps as the application consumes it:
+
+```ts
+const output = await recorded.stream(messages, {
+  structuredOutput: { schema: supportDecisionSchema },
+});
+
+for await (const chunk of output.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+Kitaru does not store token-by-token events. Mastra's final callbacks supply the completed steps and resolved output that Kitaru records. Schema-only structured output is supported and stays available on `output.object`; a secondary `structuredOutput.model` is not supported for streaming.
+
+Ordinary setup failures, before native `stream()` starts, reject the initial call. Memory-backed streams initialize from a public Mastra input processor after recall so Kitaru can record the effective context. Mastra may return the native stream before that processor runs. In that case, initialization failure rejects the native aggregate such as `getFullOutput()` during consumption and prevents model and tool execution; it need not reject the initial `stream()` promise.
+
+Recording failures after native execution starts stay separate from the application stream. Supply `onRecordingError` to observe one bounded report without exposing the raw payload:
+
+```ts
+const recorded = new KitaruAgent(agent, {
+  agentId,
+  requestedModelId,
+  onRecordingError: ({ stage, sessionId }) => {
+    console.error(`Kitaru recording failed at ${stage}`, { sessionId });
+  },
+});
+```
+
+`stage` is `"step"` or `"complete"`, and `sessionId` is optional. The callback runs once and its return value is not awaited, so it cannot delay native completion. A thrown, rejected, or never-settling reporter does not change the Mastra result.
+
+Consume the stream to completion when you want a completed Kitaru session. An unconsumed stream or reader cancellation remains in progress unless Mastra emits an observable error or abort. Kitaru does not drain an abandoned stream or fabricate a final snapshot.
 
 ## Recording
 
@@ -46,7 +80,7 @@ Recording uses the public response model, provider, usage, finish information, a
 
 Each LLM node records `requested_model` (the Kitaru model id the run asked for, before any replay override), `model` (the model id the provider says it served), and `model_provider` (the bare provider family, such as `openai`). Mastra reports transport-qualified provider strings such as `openai.responses`; the adapter keeps that original string as the `provider_id` attribute so evaluator model policies can match one exact provider family.
 
-Recording is bounded on purpose. Parent step nodes record no model inputs, because the provider request body repeats the whole system prompt and message history on every step. Step outputs keep the finish reason, text, tool calls, tool results, tripwire details, and warnings; the session output keeps the finish reason, step count, and final text. Tool strings longer than 4096 characters, arrays longer than 100 items, objects with more than 100 keys, and nesting deeper than 8 levels are truncated, and values under the credential keys `authorization`, `token`, `secret`, `password`, `api_key`, `apikey`, and `cookie` are replaced with `[redacted]`. Provider metadata is not part of the replay contract, so it also hides values under keys that carry blobs or transport envelopes, such as `data`, `file`, `request`, and `url`.
+Recording is bounded on purpose. Parent step nodes record no model inputs, because the provider request body repeats the whole system prompt and message history on every step. Step outputs keep the finish reason, text, tool calls, tool results, tripwire details, and warnings; the session output keeps the finish reason, step count, and final text. Tool strings longer than 4096 characters, arrays longer than 100 items, objects with more than 100 keys, and nesting deeper than 8 levels are truncated, and values under the credential keys `authorization`, `token`, `secret`, `password`, `api_key`, `apikey`, and `cookie` are replaced with `[redacted]`. Final stream text is not subject to the 4096-character tool-value limit. The existing recorder can preserve it until the whole serialized payload exceeds 1,048,576 characters, when it stores a degraded bounded marker instead of an unlimited transcript. Provider metadata is not part of the replay contract, so it also hides values under keys that carry blobs or transport envelopes, such as `data`, `file`, `request`, and `url`.
 
 Model nodes follow completed `onStepFinish` callbacks, and each model node is written before its local tool children. This is adapter callback order, not proof of provider-side start order or wall-clock ordering among concurrent operations.
 
@@ -67,7 +101,7 @@ Each LLM node carries a `cost` attribute recording where the number came from: `
 
 ## Replay
 
-When `KITARU_REPLAY_ID` is set, the wrapper fetches the replay and applies its model, system-instruction, model-parameter, and tool-policy overrides through public per-run `generate()` options and tool hooks.
+When `KITARU_REPLAY_ID` is set, `generate()` fetches the replay and applies its model, system-instruction, model-parameter, and tool-policy overrides through public per-run options and tool hooks. `stream()` rejects replay before creating a session or invoking Mastra.
 
 Input precedence is `KITARU_TASK_INPUTS`, then caller messages. The Kitaru worker puts the effective baseline or replay input in `KITARU_TASK_INPUTS`, so the wrapper does not need to reconstruct it from the replay resource. Replay overrides take precedence over the legacy `KITARU_OVERRIDE` fallback; they are never merged.
 
@@ -103,7 +137,7 @@ Per-run Mastra hooks replace configured hooks. During replay, Kitaru evaluates i
 
 Pass configured callbacks explicitly with `configuredOnStepFinish`, `configuredBeforeToolCall`, and `configuredAfterToolCall`. The wrapper never uses `getConfiguredToolHooks()`. Callbacks that are configured on the agent but not supplied to the wrapper cannot be preserved when replay must replace the same per-run hook.
 
-Mastra merges per-run model settings with configured defaults. Kitaru can replace supplied keys but cannot remove configured keys it cannot inspect.
+Mastra merges per-run model settings with configured defaults. Kitaru can replace supplied keys but cannot remove configured keys it cannot inspect. Streaming preflight also resolves public default and tool functions. Those resolvers must be deterministic and side-effect-free for the request context: Kitaru and Mastra may invoke them more than once, with no exact invocation-count guarantee. Kitaru cannot detect every changing resolver through the public API.
 
 ## JSON boundary
 
@@ -111,6 +145,6 @@ Recorded payloads preserve JSON values, convert dates to ISO strings, bigints to
 
 ## Current scope
 
-This experimental release supports non-streaming `Agent.generate()` with local function tools, including function-valued tools resolved from the run's `requestContext`. Replay rejects `prepareStep` and input processors because they can replace the model, prompt, or tools after preflight. Streaming, workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, and LLM tool policy are intentionally not implemented.
+This experimental release supports `Agent.generate()` from Mastra 1.51 onward and ordinary consumed `Agent.stream()` calls on stable Mastra 1.67.x. Streaming supports local function tools and schema-only structured output. It rejects replay, approval and resume modes, background or `untilIdle` execution, and secondary structured-output models before native execution. Replay remains a `generate()` capability and rejects `prepareStep` and input processors because they can replace the model, prompt, or tools after preflight. Workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, and LLM tool policy are intentionally not implemented.
 
 Replay is execution, not a transaction. A passthrough tool can complete an external side effect before a later model or recording failure, and Kitaru cannot roll it back. Use application-level idempotency keys for side-effecting tools, or prefer static/history replay when execution must be suppressed.

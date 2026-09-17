@@ -1,0 +1,1 @@
+- Added native-typed Mastra 1.67.x `Agent.stream()` recording with completed model and local-tool steps, final output persistence, bounded recording-error reporting, and fail-closed replay and unsupported-mode preflight.

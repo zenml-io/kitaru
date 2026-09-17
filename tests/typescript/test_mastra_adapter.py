@@ -3,9 +3,11 @@
 import asyncio
 import importlib
 import json
+import os
 import socket
 import subprocess
 import sys
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,8 +16,11 @@ import pytest
 import uvicorn
 
 from conftest import db_settings, drop_test_database, postgres_available
+from kitaru.api_models.v1.agent import AgentCreateRequest
 from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeType
+from kitaru.client.api_client import KitaruAPIClient
 from kitaru.server.api.app import create_app
 from kitaru.server.database.service import DatabaseService
 
@@ -70,10 +75,9 @@ async def _network_server() -> AsyncIterator[str]:
         await drop_test_database(settings)
 
 
-async def test_worker_records_and_history_replays_compiled_mastra(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Prove worker, Node/Mastra, history replay, overrides, and scoring."""
+@pytest.fixture(scope="module")
+def built_mastra_example() -> Path:
+    """Build the compiled package and example once for both integration paths."""
     repo_root = Path(__file__).resolve().parents[2]
     for package in (
         "@zenml-io/kitaru",
@@ -85,6 +89,154 @@ async def test_worker_records_and_history_replays_compiled_mastra(
             cwd=repo_root,
             check=True,
         )
+    return repo_root
+
+
+async def _run_stream_example(
+    *,
+    abort: bool,
+    agent_id: uuid.UUID,
+    api_url: str,
+    repo_root: Path,
+    session_id_file: Path,
+) -> dict[str, object]:
+    """Run the compiled streaming example without blocking the server loop."""
+    command = [
+        "node",
+        str(
+            repo_root
+            / "examples"
+            / "typescript"
+            / "mastra_support_triage"
+            / "dist"
+            / "stream.js"
+        ),
+        "--api-url",
+        api_url,
+        "--agent-id",
+        str(agent_id),
+    ]
+    if abort:
+        command.append("--abort")
+    environment = os.environ.copy()
+    environment["KITARU_SESSION_ID_FILE"] = str(session_id_file)
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=repo_root,
+        env=environment,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        async with asyncio.timeout(30):
+            stdout_bytes, stderr_bytes = await process.communicate()
+    except TimeoutError as exc:
+        if process.returncode is None:
+            process.kill()
+        await process.wait()
+        raise RuntimeError("Timed out running the TypeScript stream example") from exc
+    stdout = stdout_bytes.decode()
+    if process.returncode != 0:
+        detail = stderr_bytes.decode().strip() or stdout.strip()
+        raise RuntimeError(
+            f"The TypeScript stream example exited with {process.returncode}: {detail}"
+        )
+    results = [
+        line.removeprefix("KITARU_STREAM_RESULT ")
+        for line in stdout.splitlines()
+        if line.startswith("KITARU_STREAM_RESULT ")
+    ]
+    if len(results) != 1:
+        raise RuntimeError("The TypeScript stream example omitted its result record")
+    return json.loads(results[0])
+
+
+async def test_stream_persists_completed_tools_and_observable_abort(
+    built_mastra_example: Path, tmp_path: Path
+) -> None:
+    """Prove a real server persists completed and observably aborted streams."""
+    async with (
+        _network_server() as api_url,
+        KitaruAPIClient(base_url=api_url) as client,
+    ):
+        agent = await client.agents.create(
+            AgentCreateRequest(name=f"mastra-stream-{uuid.uuid4().hex[:12]}")
+        )
+        completed_id_file = tmp_path / "completed-session-id"
+        completed_result = await _run_stream_example(
+            abort=False,
+            agent_id=agent.id,
+            api_url=api_url,
+            repo_root=built_mastra_example,
+            session_id_file=completed_id_file,
+        )
+        completed = await client.sessions.get_with_nodes(
+            uuid.UUID(completed_id_file.read_text(encoding="utf-8"))
+        )
+
+        aborted_id_file = tmp_path / "aborted-session-id"
+        aborted_result = await _run_stream_example(
+            abort=True,
+            agent_id=agent.id,
+            api_url=api_url,
+            repo_root=built_mastra_example,
+            session_id_file=aborted_id_file,
+        )
+        aborted = await client.sessions.get_with_nodes(
+            uuid.UUID(aborted_id_file.read_text(encoding="utf-8"))
+        )
+
+    assert completed_result == {
+        "aborted": False,
+        "chunks": 2,
+        "text": "Order ord-1001 is delayed.",
+    }
+    assert completed.session.status is SessionStatus.COMPLETED
+    assert completed.session.outputs == {
+        "finish_reason": "stop",
+        "step_count": 2,
+        "text": "Order ord-1001 is delayed.",
+    }
+    llm_nodes = [
+        node for node in completed.nodes if node.node_type is NodeType.LLM_CALL
+    ]
+    assert len(llm_nodes) == 2
+    assert all(node.tokens is not None for node in llm_nodes)
+    assert [
+        (node.tokens.input_tokens, node.tokens.output_tokens)
+        for node in llm_nodes
+        if node.tokens is not None
+    ] == [
+        (5, 2),
+        (6, 4),
+    ]
+    tool_nodes = [
+        node for node in completed.nodes if node.node_type is NodeType.TOOL_CALL
+    ]
+    assert len(tool_nodes) == 1
+    assert tool_nodes[0].tool_name == "lookupOrder"
+    assert tool_nodes[0].inputs == {"orderId": "ord-1001"}
+    assert tool_nodes[0].outputs == {
+        "accountId": "acct-1001",
+        "amountUsd": 89.5,
+        "chargeCount": 2,
+        "expectedDelivery": "2026-07-20",
+        "orderId": "ord-1001",
+        "status": "delayed",
+    }
+
+    assert aborted_result == {"aborted": True, "chunks": 1, "text": "partial"}
+    assert aborted.session.status is SessionStatus.FAILED
+    assert aborted.session.error == "Mastra stream aborted"
+    assert all(node.status.value != "completed" for node in aborted.nodes)
+
+
+async def test_worker_records_and_history_replays_compiled_mastra(
+    built_mastra_example: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Prove worker, Node/Mastra, history replay, overrides, and scoring."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     demo = importlib.import_module("examples.typescript.mastra_support_triage.demo")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

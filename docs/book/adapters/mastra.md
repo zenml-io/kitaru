@@ -5,10 +5,10 @@ icon: robot
 
 # Mastra
 
-The Kitaru Mastra adapter wraps an existing Mastra `Agent` and records each non-streaming `generate()` call as a Kitaru [session](../concepts/agents-and-sessions.md). Mastra still runs the agent and Kitaru returns the native Mastra result unchanged.
+The Kitaru Mastra adapter wraps an existing Mastra `Agent` and records `generate()` calls and supported streams as Kitaru [sessions](../concepts/agents-and-sessions.md). Mastra still runs the agent and Kitaru returns the native Mastra result unchanged.
 
 {% hint style="warning" %}
-`@zenml-io/kitaru-mastra` supports Node `>=22.22.0 <23 || >=26 <27` and `@mastra/core >=1.51.0 <1.68.0`. It supports non-streaming `Agent.generate()` only.
+`@zenml-io/kitaru-mastra` supports Node `>=22.22.0 <23 || >=26 <27`. `Agent.generate()` supports `@mastra/core >=1.51.0 <1.68.0`; recorded `Agent.stream()` calls require a stable Mastra 1.67.x release.
 {% endhint %}
 
 To bring in runs already recorded by Mastra, use [Import existing Mastra traces](#import-existing-mastra-traces). Importing an export does not require the original run to have used `KitaruAgent`.
@@ -59,9 +59,45 @@ const result = await recordedAgent.generate(messages, options);
 console.log(result.text);
 ```
 
-Configure the adapter subprocess with `KITARU_API_URL` and either the worker-provided `KITARU_API_TOKEN` or `KITARU_API_KEY`. A separate Node management driver can use [`createKitaruClient()`](../deploy/sdks.md) to reuse `kitaru login` without exporting a token. The wrapper calls the existing agent's public `generate()` method. It does not recreate tools, inspect private agent fields, install model middleware, or replace the returned result.
+Configure the adapter subprocess with `KITARU_API_URL` and either the worker-provided `KITARU_API_TOKEN` or `KITARU_API_KEY`. A separate Node management driver can use [`createKitaruClient()`](../deploy/sdks.md) to reuse `kitaru login` without exporting a token. The wrapper calls the existing agent's public method. It does not recreate tools, inspect private agent fields, install model middleware, or replace the returned result.
 
 `requestedModelId` is the Kitaru model identifier for the normal run. `allowedReplayModels` limits which replay model overrides the process will accept. When a replay selects another allowed model, `resolveModel` turns its Kitaru identifier into a Mastra model configuration. If no replay can change the model, `resolveModel` can be omitted.
+
+## Stream an agent
+
+On Mastra 1.67.x, call the public wrapper and consume its native text stream in the ordinary way:
+
+```ts
+const output = await recordedAgent.stream(messages, {
+  structuredOutput: { schema: supportDecisionSchema },
+});
+
+for await (const chunk of output.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+Kitaru records completed model and local-tool steps plus the final resolved output. It does not store token-by-token events or introduce a Kitaru streaming protocol. Schema-only structured output is supported and stays available on `output.object`. A separate `structuredOutput.model` is not supported for streaming.
+
+For ordinary streams, setup happens before Mastra starts and a setup failure rejects the initial `stream()` call. Memory-backed streams are different: Kitaru initializes from a public Mastra input processor after native recall so it can record the effective context. Mastra may return the stream object before that processor runs. A setup failure then rejects native aggregate consumption such as `getFullOutput()` and prevents model or tool execution; it does not necessarily reject the initial `stream()` promise.
+
+Once native execution starts, a Kitaru step or completion write failure does not replace Mastra's chunks or aggregate result. Observe it separately with the typed callback:
+
+```ts
+const recordedAgent = new KitaruAgent(agent, {
+  agentId,
+  requestedModelId,
+  onRecordingError: ({ stage, sessionId }) => {
+    console.error(`Kitaru recording failed at ${stage}`, { sessionId });
+  },
+});
+```
+
+The callback runs once. `stage` is `"step"` or `"complete"`, and `sessionId` is optional. Kitaru does not include prompts, outputs, credentials, or raw HTTP bodies in its default diagnostic. It does not await the callback's result, so a reporter that throws, rejects, or never settles cannot hold the application stream open.
+
+Consume the stream to completion when you need a completed session. An unconsumed stream, an early loop exit, or reader cancellation can leave the session in progress. Kitaru marks it failed only when Mastra exposes an error or abort; it does not drain abandoned streams or invent a final output.
+
+Mastra default-option and tool resolvers must return the same value for the same request context and must have no side effects. Streaming preflight, tool inventory, and native execution can invoke them more than once. No exact invocation count is guaranteed, and Kitaru cannot detect every changing resolver through Mastra's public API.
 
 ## What Kitaru records
 
@@ -76,7 +112,7 @@ Each LLM node records the requested Kitaru model, the model and provider reporte
 
 Step nodes do not record model inputs because Mastra repeats the full prompt and message history in each provider request. Step outputs include the finish reason, text, tool calls, tool results, tripwire details, and warnings. Tool inputs are the arguments requested by the model, before a tool schema applies defaults or coercion.
 
-Recording uses bounded JSON conversion. Credential-shaped keys such as `authorization`, `token`, `secret`, `password`, `api_key`, `apikey`, and `cookie` are replaced with `[redacted]`, and oversized or unsupported values are truncated or marked. This is a safety net, not a sensitive-data classifier. Do not put secrets or unnecessary personal data in prompts, tool inputs, tool outputs, or provider metadata.
+Recording uses bounded JSON conversion. Credential-shaped keys such as `authorization`, `token`, `secret`, `password`, `api_key`, `apikey`, and `cookie` are replaced with `[redacted]`, and oversized or unsupported values are truncated or marked. Tool strings have a 4096-character limit, while final stream text does not. The recorder preserves final text until the whole serialized payload exceeds 1,048,576 characters, when it stores a degraded bounded marker rather than an unlimited transcript. This is a safety net, not a sensitive-data classifier. Do not put secrets or unnecessary personal data in prompts, tool inputs, tool outputs, or provider metadata.
 
 The recorded node order reflects completed Mastra callbacks. It does not prove provider-side start order or wall-clock order among concurrent operations.
 
@@ -88,7 +124,7 @@ The wrapper does not inspect `getConfiguredToolHooks()`. Configured callbacks th
 
 ## Replay behavior
 
-A [replay](../concepts/replay.md) runs the same compiled command again. When the Kitaru worker sets `KITARU_REPLAY_ID`, the wrapper fetches the replay configuration and applies supported overrides through public per-run Mastra options and tool hooks. Application code does not need a separate replay branch.
+A [replay](../concepts/replay.md) runs the same compiled command again. When the Kitaru worker sets `KITARU_REPLAY_ID`, `generate()` fetches the replay configuration and applies supported overrides through public per-run Mastra options and tool hooks. Application code does not need a separate replay branch. `stream()` rejects replay before it creates a session or invokes Mastra.
 
 The adapter can override:
 
@@ -135,7 +171,7 @@ A missing, incomplete, or lossy snapshot produces an actionable unsupported-repl
 
 ## Structured output
 
-Schema-only structured output is supported and remains available on the returned Mastra result:
+Schema-only structured output is supported by both `generate()` and `stream()` and remains available on the returned Mastra result:
 
 ```ts
 const result = await recordedAgent.generate(messages, {
@@ -145,7 +181,7 @@ const result = await recordedAgent.generate(messages, {
 console.log(result.object);
 ```
 
-A separate structuring model can be supplied in the per-run options:
+A separate structuring model can be supplied only to `generate()` in the per-run options:
 
 ```ts
 const result = await recordedAgent.generate(messages, {
@@ -174,13 +210,14 @@ Run native Mastra scorers against stored and replayed sessions with the [TypeScr
 
 The adapter supports:
 
-- Non-streaming `Agent.generate()` calls.
+- `Agent.generate()` calls on Mastra 1.51 through 1.67.
+- Ordinary consumed `Agent.stream()` calls on stable Mastra 1.67.x, with schema-only structured output.
 - Local function tools, including function-valued tools resolved from the run's `requestContext`.
 - Per-run model, system-instruction, model-setting, and input overrides.
 - Passthrough, static, and same-adapter history tool policies.
-- Schema-only structured output and per-run secondary structuring models with strict validation.
+- Schema-only structured output, plus per-run secondary structuring models with strict validation for `generate()`.
 
-It does not support streaming, workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, `prepareStep`, input processors, or LLM tool policy. `prepareStep` and input processors are rejected during replay because they can replace the model, prompt, or tools after policy preflight.
+Streaming does not support replay, approval or resume modes, background or `untilIdle` execution, or secondary structured-output models. The adapter does not support workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, or LLM tool policy. `prepareStep` and input processors are rejected during replay because they can replace the model, prompt, or tools after policy preflight.
 
 ## Import existing Mastra traces
 
@@ -256,9 +293,20 @@ The importer accepts selected files only; it does not fetch traces or live memor
 
 ## Runnable example
 
-The [Mastra support-triage example](https://github.com/zenml-io/kitaru/tree/main/examples/typescript/mastra_support_triage) records a real Mastra agent, runs the compiled Node command through a job-scoped Kitaru worker, then replays it with prompt, instruction, model-setting, and history-policy overrides. Its side-effecting `queueRefundReview` tool is answered from history during replay, so the example's append-only outbox remains unchanged.
+The [Mastra support-triage example](https://github.com/zenml-io/kitaru/tree/main/examples/typescript/mastra_support_triage) includes two entry points. Its existing worker command records a real `generate()` call and replays it with prompt, instruction, model-setting, and history-policy overrides. Its `stream` command uses a provider-free deterministic Mastra model and local order lookup to print two native text chunks while Kitaru records the final run.
 
-Use Node 22 and a running Kitaru API backed by PostgreSQL:
+Use Node 22 or Node 26 and a running Kitaru API backed by PostgreSQL. The deterministic stream needs an existing agent ID and no provider credential:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+KITARU_API_URL='https://your-kitaru-server.example.com' \
+KITARU_API_KEY='your-kitaru-key' \
+KITARU_AGENT_ID='your-agent-id' \
+pnpm --filter @zenml-io/kitaru-example-mastra-support-triage stream
+```
+
+The generate-and-replay workflow calls OpenAI:
 
 ```bash
 pnpm install --frozen-lockfile

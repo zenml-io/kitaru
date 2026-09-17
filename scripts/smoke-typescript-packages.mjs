@@ -164,6 +164,216 @@ if (
 `,
   );
   writeFileSync(
+    join(consumerRoot, "stream.mjs"),
+    `import { Agent } from "@mastra/core/agent";
+import { createTool } from "@mastra/core/tools";
+import { KitaruAgent } from "@zenml-io/kitaru-mastra";
+import { z } from "zod";
+
+const mastraVersion = process.argv[2];
+const sessionId = "018f0000-0000-7000-8000-000000000101";
+const replayId = "018f0000-0000-7000-8000-000000000102";
+const calls = [];
+globalThis.fetch = async (input, init = {}) => {
+  const url = new URL(String(input));
+  const method = init.method ?? "GET";
+  const body = init.body ? JSON.parse(String(init.body)) : undefined;
+  calls.push({ body, method, path: url.pathname });
+  if (method === "POST" && url.pathname === "/api/v1/sessions") {
+    return Response.json(
+      { id: sessionId, origin: "recorded", status: "in_progress" },
+      { status: 201 },
+    );
+  }
+  if (method === "POST" && url.pathname.endsWith("/nodes")) {
+    return Response.json([], { status: 200 });
+  }
+  if (method === "PATCH" && url.pathname === "/api/v1/sessions/" + sessionId) {
+    return Response.json({
+      id: sessionId,
+      origin: "recorded",
+      status: body.status,
+    });
+  }
+  throw new Error("Unexpected stream smoke request: " + method + " " + url.pathname);
+};
+
+let modelCalls = 0;
+let toolCalls = 0;
+const model = {
+  doGenerate: async () => {
+    throw new Error("Stream smoke must not generate");
+  },
+  doStream: async () => {
+    modelCalls += 1;
+    const chunks = modelCalls === 1
+      ? [
+          { type: "stream-start", warnings: [] },
+          { id: "tool-response", modelId: "served-stream-model", type: "response-metadata" },
+          {
+            input: '{"city":"Amsterdam"}',
+            toolCallId: "call-weather",
+            toolName: "weather",
+            type: "tool-call",
+          },
+          {
+            finishReason: "tool-calls",
+            type: "finish",
+            usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 },
+          },
+        ]
+      : [
+          { type: "stream-start", warnings: [] },
+          { id: "text-response", modelId: "served-stream-model", type: "response-metadata" },
+          { id: "answer", type: "text-start" },
+          { delta: "sunny ", id: "answer", type: "text-delta" },
+          { delta: "today", id: "answer", type: "text-delta" },
+          { id: "answer", type: "text-end" },
+          {
+            finishReason: "stop",
+            type: "finish",
+            usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+          },
+        ];
+    return {
+      stream: new ReadableStream({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          controller.close();
+        },
+      }),
+    };
+  },
+  modelId: "stream-smoke-model",
+  provider: "stream-smoke",
+  specificationVersion: "v2",
+  supportedUrls: {},
+};
+const weather = createTool({
+  id: "weather",
+  description: "Return deterministic weather",
+  inputSchema: z.object({ city: z.string() }),
+  execute: async ({ city }) => {
+    toolCalls += 1;
+    return { forecast: "sunny", city };
+  },
+});
+const agent = new Agent({
+  id: "stream-smoke-agent",
+  instructions: "Use weather.",
+  model,
+  name: "Stream smoke agent",
+  tools: { weather },
+});
+const recorded = new KitaruAgent(agent, {
+  agentId: sessionId,
+  apiUrl: "https://api.example",
+  requestedModelId: "stream-smoke-model",
+});
+
+if (mastraVersion === "1.51.0") {
+  await recorded.stream("weather").then(
+    () => {
+      throw new Error("Mastra 1.51 stream unexpectedly started");
+    },
+    (error) => {
+      if (!String(error).includes("requires a stable @mastra/core 1.67.x")) {
+        throw error;
+      }
+    },
+  );
+  if (calls.length !== 0 || modelCalls !== 0 || toolCalls !== 0) {
+    throw new Error("Mastra 1.51 stream rejection caused side effects");
+  }
+} else {
+  const output = await recorded.stream("weather");
+  const chunks = [];
+  for await (const chunk of output.textStream) chunks.push(chunk);
+  if (chunks.join("") !== "sunny today" || chunks.length !== 2) {
+    throw new Error("Unexpected native stream chunks: " + JSON.stringify(chunks));
+  }
+  if (modelCalls !== 2 || toolCalls !== 1) {
+    throw new Error("Deterministic stream did not execute two model steps and one tool");
+  }
+  const nodes = calls
+    .filter((call) => call.method === "POST" && call.path.endsWith("/nodes"))
+    .flatMap((call) => call.body.nodes);
+  if (nodes.filter((node) => node.node_type === "llm_call").length !== 2) {
+    throw new Error("Packaged stream omitted its two LLM nodes");
+  }
+  const tool = nodes.find((node) => node.node_type === "tool_call");
+  if (tool?.outputs?.forecast !== "sunny" || tool?.status !== "completed") {
+    throw new Error("Packaged stream omitted its completed tool result");
+  }
+  const completion = calls.find(
+    (call) => call.method === "PATCH" && call.path.endsWith(sessionId),
+  );
+  if (
+    completion?.body.status !== "completed" ||
+    completion.body.outputs?.text !== "sunny today" ||
+    completion.body.outputs?.step_count !== 2
+  ) {
+    throw new Error("Packaged stream did not record its final output");
+  }
+
+  const sideEffects = { calls: calls.length, modelCalls, toolCalls };
+  process.env.KITARU_REPLAY_ID = replayId;
+  await recorded.stream("replay").then(
+    () => {
+      throw new Error("Streaming replay unexpectedly started");
+    },
+    (error) => {
+      if (!String(error).includes("does not support replay")) throw error;
+    },
+  );
+  delete process.env.KITARU_REPLAY_ID;
+  if (
+    calls.length !== sideEffects.calls ||
+    modelCalls !== sideEffects.modelCalls ||
+    toolCalls !== sideEffects.toolCalls
+  ) {
+    throw new Error("Streaming replay rejection caused side effects");
+  }
+}
+`,
+  );
+  writeFileSync(
+    join(consumerRoot, "stream.ts"),
+    `import { Agent } from "@mastra/core/agent";
+import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
+import { KitaruAgent } from "@zenml-io/kitaru-mastra";
+import { z } from "zod";
+
+const agent = new Agent({
+  id: "typed-stream",
+  instructions: "Respond.",
+  model: new MastraLanguageModelV2Mock({
+    modelId: "typed-model",
+    provider: "package-smoke",
+  }),
+  name: "Typed stream",
+});
+const recorded = new KitaruAgent(agent, {
+  agentId: "018f0000-0000-7000-8000-000000000103",
+  apiUrl: "https://api.example",
+  requestedModelId: "typed-model",
+});
+const wrapperAsNative: typeof agent.stream = recorded.stream;
+const nativeAsWrapper: typeof recorded.stream = agent.stream;
+void wrapperAsNative;
+void nativeAsWrapper;
+
+async function assertSchemaInference(): Promise<void> {
+  const output = await recorded.stream("hello", {
+    structuredOutput: { schema: z.object({ answer: z.string() }) },
+  });
+  const value: { answer: string } = await output.object;
+  void value;
+}
+void assertSchemaInference;
+`,
+  );
+  writeFileSync(
     join(consumerRoot, "tsconfig.json"),
     JSON.stringify({
       compilerOptions: {
@@ -176,6 +386,21 @@ if (
         types: [],
       },
       include: ["packages.ts"],
+    }),
+  );
+  writeFileSync(
+    join(consumerRoot, "tsconfig.stream.json"),
+    JSON.stringify({
+      compilerOptions: {
+        lib: ["ES2022", "DOM"],
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        noEmit: true,
+        skipLibCheck: true,
+        strict: true,
+        types: [],
+      },
+      include: ["stream.ts"],
     }),
   );
 }
@@ -200,6 +425,7 @@ function smokeConsumer({ artifactRoot, mastraVersion, npmCache }) {
       ...tarballs,
       `@mastra/core@${mastraVersion}`,
       "ai@7.0.65",
+      "zod@3.25.76",
     ],
     consumerRoot,
   );
@@ -210,6 +436,14 @@ function smokeConsumer({ artifactRoot, mastraVersion, npmCache }) {
     consumerRoot,
   );
   run(process.execPath, ["generate.mjs"], consumerRoot);
+  if (mastraVersion === upperMastraVersion) {
+    run(
+      join(repositoryRoot, "node_modules", ".bin", "tsc"),
+      ["-p", "tsconfig.stream.json"],
+      consumerRoot,
+    );
+  }
+  run(process.execPath, ["stream.mjs", mastraVersion], consumerRoot);
 }
 
 const outputDirectory = parseOutputDirectory(process.argv.slice(2));
