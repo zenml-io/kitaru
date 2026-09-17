@@ -358,7 +358,7 @@ describe("KitaruAgent.stream", () => {
     await output.getFullOutput();
     expect(api.calls.at(-1)?.body).toMatchObject({
       outputs: {
-        object: { answer: "雪", api_key: "secret-value" },
+        object: { answer: "雪", api_key: "[redacted]" },
         text: answer,
       },
       status: "completed",

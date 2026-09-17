@@ -92,7 +92,9 @@ function agentFor(text = "done"): Agent {
   });
 }
 
-function failingAgent(): Agent {
+function failingAgent(
+  failure = new Error("native model stream failed"),
+): Agent {
   return new Agent({
     id: "failing-stream",
     instructions: "Respond.",
@@ -112,7 +114,7 @@ function failingAgent(): Agent {
                 });
                 return;
               }
-              controller.error(new Error("native model stream failed"));
+              controller.error(failure);
             },
           }) as never,
         };
@@ -223,6 +225,31 @@ async function text(output: {
   }
 }
 
+async function errorChannels(
+  output: Parameters<typeof text>[0] & {
+    getFullOutput(): Promise<unknown>;
+  },
+  first: "aggregate" | "text",
+): Promise<{ aggregate: unknown; text: "rejected" | "resolved" | "timeout" }> {
+  const readAggregate = () => output.getFullOutput().catch((error) => error);
+  const readText = () =>
+    Promise.race([
+      text(output).then(
+        () => "resolved" as const,
+        () => "rejected" as const,
+      ),
+      new Promise<"timeout">((resolve) =>
+        setTimeout(() => resolve("timeout"), 50),
+      ),
+    ]);
+  if (first === "aggregate") {
+    const aggregate = await readAggregate();
+    return { aggregate, text: await readText() };
+  }
+  const textResult = await readText();
+  return { aggregate: await readAggregate(), text: textResult };
+}
+
 function wrapFetch(
   reject: (call: {
     body?: Record<string, unknown>;
@@ -250,6 +277,70 @@ function wrapFetch(
 }
 
 describe("stream recording lifecycle", () => {
+  it.each([
+    {
+      expectedModelError: "blocked by policy",
+      expectedRunError: "blocked by policy",
+      reason: "blocked by policy",
+    },
+    {
+      expectedModelError: "Model step failed",
+      expectedRunError: "Mastra processor tripwire triggered",
+      reason: "",
+    },
+  ])(
+    "records a tripwire with reason '$reason' as failed without changing the native result",
+    async ({ expectedModelError, expectedRunError, reason }) => {
+      const api = installTestApi();
+      const tripwire = {
+        metadata: { category: "policy" },
+        processorId: "guard",
+        reason,
+      };
+      const step = {
+        ...textStep(`tripwire-${reason.length}`),
+        finishReason: "tripwire",
+        tripwire,
+      };
+      const nativeResult = { text: "", tripwire };
+      const agent = Object.assign(new FakeAgent(), {
+        async stream(_messages: unknown, options: RuntimeStreamOptions = {}) {
+          await options.onStepFinish?.(step as never);
+          await options.onFinish?.({
+            ...step,
+            steps: [step],
+            text: "",
+            totalUsage: step.usage,
+          } as never);
+          return nativeResult;
+        },
+      });
+      const recorded = new KitaruAgent(agent, {
+        agentId: AGENT_ID,
+        apiUrl: "https://api.example",
+        requestedModelId: "tripwire-model",
+      });
+
+      await expect(recorded.stream("hello")).resolves.toBe(nativeResult);
+
+      const nodes = api.nodeBatches().flat();
+      expect(nodes.find((node) => node.node_type === "llm_call")).toMatchObject(
+        {
+          error: expectedModelError,
+          outputs: { tripwire },
+          status: "failed",
+        },
+      );
+      expect(
+        nodes.find((node) => node.name === "run" && node.status === "failed"),
+      ).toMatchObject({ error: expectedRunError, status: "failed" });
+      expect(api.calls.at(-1)?.body).toMatchObject({
+        error: expectedRunError,
+        status: "failed",
+      });
+    },
+  );
+
   it("keeps abort as the final state when it arrives during a successful terminal write", async () => {
     const api = installTestApi();
     const original = globalThis.fetch;
@@ -642,15 +733,71 @@ describe("stream recording lifecycle", () => {
     });
   });
 
+  it("redacts credential-shaped keys in structured completion output", async () => {
+    const api = installTestApi();
+    const nativeObject = {
+      account: {
+        api_key: "api-secret",
+        profile: { password: "password-secret", visible: "kept" },
+      },
+      token: "token-secret",
+    };
+    const nativeResult = { object: nativeObject };
+    const agent = Object.assign(new FakeAgent(), {
+      async stream(_messages: unknown, options: RuntimeStreamOptions = {}) {
+        const step = textStep("structured-secret");
+        await options.onFinish?.({
+          ...step,
+          object: nativeObject,
+          steps: [step],
+          text: "",
+          totalUsage: step.usage,
+        } as never);
+        return nativeResult;
+      },
+    });
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "structured-secret-model",
+    });
+
+    const returned = await recorded.stream("hello", {
+      structuredOutput: { schema: {} },
+    } as never);
+
+    expect(returned).toBe(nativeResult);
+    expect(returned.object).toBe(nativeObject);
+    const expected = {
+      account: {
+        api_key: "[redacted]",
+        profile: { password: "[redacted]", visible: "kept" },
+      },
+      token: "[redacted]",
+    };
+    expect(
+      api
+        .nodeBatches()
+        .flat()
+        .find((node) => node.name === "run" && node.status === "completed"),
+    ).toMatchObject({ outputs: { object: expected } });
+    expect(api.calls.at(-1)?.body).toMatchObject({
+      outputs: { object: expected },
+      status: "completed",
+    });
+  });
+
   it("preserves a native model failure and marks the recording failed", async () => {
     const api = installTestApi();
-    const recorded = new KitaruAgent(failingAgent(), {
+    const modelError = new Error("native model stream failed");
+    const callerError = vi.fn();
+    const recorded = new KitaruAgent(failingAgent(modelError), {
       agentId: AGENT_ID,
       apiUrl: "https://api.example",
       requestedModelId: "failing-model",
     });
 
-    const output = await recorded.stream("hello");
+    const output = await recorded.stream("hello", { onError: callerError });
     await expect(text(output)).resolves.toBe("partial");
     await expect(output.getFullOutput()).rejects.toThrow(
       "native model stream failed",
@@ -664,12 +811,80 @@ describe("stream recording lifecycle", () => {
         ).toBe(true),
       { timeout: 3_000 },
     );
+    expect(callerError).toHaveBeenCalledTimes(1);
+    expect(callerError.mock.calls[0]?.[0].error).toBe(modelError);
     expect(
       api.calls.some(
         (call) => call.method === "PATCH" && call.body?.status === "completed",
       ),
     ).toBe(false);
   });
+
+  it.each([
+    ["throws", "aggregate"],
+    ["throws", "text"],
+    ["rejects", "aggregate"],
+    ["rejects", "text"],
+  ] as const)(
+    "matches native %s onError channels when %s is consumed first",
+    async (behavior, first) => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const nativeModelError = new Error("native onError model failure");
+      const nativeHookError = new Error("native onError hook failure");
+      const nativeOnError = vi.fn((_event: { error: unknown }) => {
+        if (behavior === "rejects") return Promise.reject(nativeHookError);
+        throw nativeHookError;
+      });
+      const native = await failingAgent(nativeModelError).stream("hello", {
+        onError: nativeOnError,
+      });
+      const nativeChannels = await errorChannels(native, first);
+
+      const api = installTestApi();
+      const wrappedModelError = new Error("wrapped onError model failure");
+      const wrappedHookError = new Error("wrapped onError hook failure");
+      const wrappedOnError = vi.fn((_event: { error: unknown }) => {
+        if (behavior === "rejects") return Promise.reject(wrappedHookError);
+        throw wrappedHookError;
+      });
+      const recorded = new KitaruAgent(failingAgent(wrappedModelError), {
+        agentId: AGENT_ID,
+        apiUrl: "https://api.example",
+        requestedModelId: "failing-model",
+      });
+      const wrapped = await recorded.stream("hello", {
+        onError: wrappedOnError,
+      });
+      const wrappedChannels = await errorChannels(wrapped, first);
+
+      expect(nativeChannels.aggregate).toBe(nativeHookError);
+      expect(wrappedChannels.aggregate).toBe(wrappedHookError);
+      expect(wrappedChannels.text).toBe(nativeChannels.text);
+      expect(nativeOnError).toHaveBeenCalledTimes(2);
+      expect(nativeOnError.mock.calls[0]?.[0].error).toBe(nativeModelError);
+      expect(nativeOnError.mock.calls[1]?.[0].error).toMatchObject({
+        message: nativeHookError.message,
+        name: nativeHookError.name,
+      });
+      expect(wrappedOnError).toHaveBeenCalledTimes(2);
+      expect(wrappedOnError.mock.calls[0]?.[0].error).toBe(wrappedModelError);
+      expect(wrappedOnError.mock.calls[1]?.[0].error).toMatchObject({
+        message: wrappedHookError.message,
+        name: wrappedHookError.name,
+      });
+      await vi.waitFor(() =>
+        expect(
+          api.calls.filter(
+            (call) => call.method === "PATCH" && call.body?.status === "failed",
+          ),
+        ).toHaveLength(1),
+      );
+      expect(api.calls.at(-1)?.body).toMatchObject({
+        error: "wrapped onError model failure",
+        status: "failed",
+      });
+    },
+  );
 
   it("preserves native abort behavior and never overwrites failure with success", async () => {
     const api = installTestApi();

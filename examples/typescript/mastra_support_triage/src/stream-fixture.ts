@@ -15,7 +15,7 @@ function chunkStream(chunks: unknown[]): ReadableStream<unknown> {
   });
 }
 
-function successfulModel(): MastraLanguageModelV2Mock {
+function createSuccessfulModel(): MastraLanguageModelV2Mock {
   let call = 0;
   return new MastraLanguageModelV2Mock({
     doStream: async () => {
@@ -75,7 +75,7 @@ function successfulModel(): MastraLanguageModelV2Mock {
   });
 }
 
-function abortableModel(): MastraLanguageModelV2Mock {
+function createAbortableModel(): MastraLanguageModelV2Mock {
   return new MastraLanguageModelV2Mock({
     doStream: async (options) => {
       let emitted = false;
@@ -119,7 +119,7 @@ export function createStreamingSupportAgent(abort = false): Agent {
   return new Agent({
     id: "kitaru-mastra-streaming-support-triage",
     instructions: "Look up the order, then summarize its delivery status.",
-    model: abort ? abortableModel() : successfulModel(),
+    model: abort ? createAbortableModel() : createSuccessfulModel(),
     name: "Kitaru Mastra streaming support triage",
     tools: { lookupOrder },
   });

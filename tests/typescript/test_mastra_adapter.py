@@ -77,7 +77,7 @@ async def _network_server() -> AsyncIterator[str]:
 
 @pytest.fixture(scope="module")
 def built_mastra_example() -> Path:
-    """Build the compiled package and example once for both integration paths."""
+    """Build the Mastra packages and return the repository root."""
     repo_root = Path(__file__).resolve().parents[2]
     for package in (
         "@zenml-io/kitaru",

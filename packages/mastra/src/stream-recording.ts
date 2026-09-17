@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import type { JsonValue, KitaruClient } from "@zenml-io/kitaru";
 import {
   type RunRecorder,
+  recordedToolPayloadJson,
   runResultSummary,
   serializedSettings,
 } from "@zenml-io/kitaru/adapter";
@@ -44,7 +45,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function mastraVersion(): string {
+function getMastraVersion(): string {
   let metadata: unknown;
   try {
     metadata = createRequire(import.meta.url)("@mastra/core/package.json");
@@ -69,7 +70,7 @@ export function assertStreamSupported(
 ): asserts agent is StreamAgent & {
   stream: NonNullable<StreamAgent["stream"]>;
 } {
-  const version = mastraVersion();
+  const version = getMastraVersion();
   if (!isSupportedMastraStreamVersion(version)) {
     throw new Error(
       `KitaruAgent.stream() requires a stable @mastra/core 1.67.x installation; found '${version}'`,
@@ -143,7 +144,7 @@ async function assertSupportedOptions(
   }
 }
 
-function tripwireReason(value: unknown): string | undefined {
+function getTripwireReason(value: unknown): string | undefined {
   if (!isRecord(value) || !isRecord(value.tripwire)) return undefined;
   return typeof value.tripwire.reason === "string" && value.tripwire.reason
     ? value.tripwire.reason
@@ -370,16 +371,19 @@ export async function streamWithRecording({
       await active.fail(error);
       throw error;
     }
-    const tripwire = tripwireReason(event);
+    const tripwire = getTripwireReason(event);
     if (tripwire) {
       await active.fail(new Error(tripwire));
       return;
     }
     await active.complete(
-      runResultSummary(event, {
-        structuredOutputField:
-          effective.structuredOutput === undefined ? undefined : "object",
-      }),
+      recordedToolPayloadJson(
+        runResultSummary(event, {
+          structuredOutputField:
+            effective.structuredOutput === undefined ? undefined : "object",
+        }),
+        "run output",
+      ),
     );
   };
   effective.onError = async (event) => {

@@ -88,12 +88,12 @@ export async function runStreamingSupport({
   };
 }
 
-function requiredOption(name: string, value: string | undefined): string {
+function getRequiredOption(name: string, value: string | undefined): string {
   if (!value) throw new Error(`${name} is required`);
   return value;
 }
 
-function argument(name: string): string | undefined {
+function getArgument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
   return index === -1 ? undefined : process.argv[index + 1];
 }
@@ -101,11 +101,11 @@ function argument(name: string): string | undefined {
 async function main(): Promise<void> {
   const result = await runStreamingSupport({
     abort: process.argv.includes("--abort"),
-    agentId: requiredOption(
+    agentId: getRequiredOption(
       "--agent-id or KITARU_AGENT_ID",
-      argument("--agent-id") ?? process.env.KITARU_AGENT_ID,
+      getArgument("--agent-id") ?? process.env.KITARU_AGENT_ID,
     ),
-    apiUrl: argument("--api-url") ?? process.env.KITARU_API_URL,
+    apiUrl: getArgument("--api-url") ?? process.env.KITARU_API_URL,
     onChunk: (chunk) => process.stdout.write(chunk),
   });
   process.stdout.write(`\n${RESULT_PREFIX}${JSON.stringify(result)}\n`);
