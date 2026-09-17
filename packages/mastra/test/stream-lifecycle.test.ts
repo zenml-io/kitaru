@@ -276,6 +276,44 @@ function wrapFetch(
   );
 }
 
+function enforceTerminalSessionTransitions(): { attempts: string[] } {
+  const original = globalThis.fetch;
+  const attempts: string[] = [];
+  const terminalSessions = new Set<string>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined;
+      const status = body?.status;
+      if (
+        init?.method === "PATCH" &&
+        url.pathname.startsWith("/api/v1/sessions/") &&
+        (status === "completed" || status === "failed")
+      ) {
+        attempts.push(status);
+        const sessionId = url.pathname.split("/").at(-1);
+        if (sessionId && terminalSessions.has(sessionId)) {
+          return new Response(
+            JSON.stringify({ detail: "session is already terminal" }),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 409,
+            },
+          );
+        }
+        const response = await original(input, init);
+        if (response.ok && sessionId) terminalSessions.add(sessionId);
+        return response;
+      }
+      return original(input, init);
+    }),
+  );
+  return { attempts };
+}
+
 describe("stream recording lifecycle", () => {
   it.each([
     {
@@ -341,8 +379,9 @@ describe("stream recording lifecycle", () => {
     },
   );
 
-  it("keeps abort as the final state when it arrives during a successful terminal write", async () => {
+  it("does not rewrite completion when abort arrives after the terminal decision", async () => {
     const api = installTestApi();
+    const terminal = enforceTerminalSessionTransitions();
     const original = globalThis.fetch;
     let releasePatch: (() => void) | undefined;
     let patchStarted: (() => void) | undefined;
@@ -393,8 +432,9 @@ describe("stream recording lifecycle", () => {
     const statuses = api.calls
       .filter((call) => call.method === "PATCH")
       .map((call) => call.body?.status);
-    expect(statuses).toEqual(["completed", "failed"]);
-    expect(api.calls.at(-1)?.body).toMatchObject({ status: "failed" });
+    expect(terminal.attempts).toEqual(["completed"]);
+    expect(statuses).toEqual(["completed"]);
+    expect(api.calls.at(-1)?.body).toMatchObject({ status: "completed" });
   });
 
   it("waits for a whole pending step write before publishing completion", async () => {
@@ -518,8 +558,9 @@ describe("stream recording lifecycle", () => {
     expect(terminalStatuses).toEqual(["failed"]);
   });
 
-  it("retains completed steps already queued when an abort arrives", async () => {
+  it("lets abort win before the terminal decision and retains queued steps", async () => {
     const api = installTestApi();
+    const terminal = enforceTerminalSessionTransitions();
     const original = globalThis.fetch;
     let releaseFirst: (() => void) | undefined;
     let firstStarted: (() => void) | undefined;
@@ -561,9 +602,16 @@ describe("stream recording lifecycle", () => {
     const first = runtimeOptions?.onStepFinish?.(textStep("queued-one"));
     await started;
     const second = runtimeOptions?.onStepFinish?.(textStep("queued-two"));
+    await Promise.resolve();
+    const finish = runtimeOptions?.onFinish?.({
+      ...textStep("queued-two"),
+      steps: [textStep("queued-one"), textStep("queued-two")],
+      text: "done",
+      totalUsage: textStep("queued-two").usage,
+    });
     const abort = runtimeOptions?.onAbort?.({ steps: [], text: "partial" });
     releaseFirst?.();
-    await Promise.all([first, second, abort]);
+    await Promise.all([first, second, finish, abort]);
 
     const llmNodes = api
       .nodeBatches()
@@ -573,6 +621,7 @@ describe("stream recording lifecycle", () => {
       "response-queued-one",
       "response-queued-two",
     ]);
+    expect(terminal.attempts).toEqual(["failed"]);
     expect(api.calls.at(-1)?.body).toMatchObject({ status: "failed" });
   });
 

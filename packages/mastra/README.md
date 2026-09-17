@@ -63,7 +63,7 @@ const recorded = new KitaruAgent(agent, {
 
 `stage` is `"step"` or `"complete"`, and `sessionId` is optional. The callback runs once and its return value is not awaited, so it cannot delay native completion. A thrown, rejected, or never-settling reporter does not change the Mastra result.
 
-Consume the stream to completion when you want a completed Kitaru session. An unconsumed stream or reader cancellation remains in progress unless Mastra emits an observable error or abort. Kitaru does not drain an abandoned stream or fabricate a final snapshot.
+Consume the stream to completion when you want a completed Kitaru session. An unconsumed stream or reader cancellation remains in progress unless Mastra emits an observable error or abort. Kitaru does not drain an abandoned stream or fabricate a final snapshot. After queued steps settle, the finish callback chooses the terminal status once. An error or abort observed before that decision records failure; a later abort cannot reverse completion because the API does not reopen terminal sessions.
 
 ## Recording
 

@@ -153,6 +153,7 @@ function getTripwireReason(value: unknown): string | undefined {
 
 class StreamLifecycle {
   #cleanupPromise?: Promise<void>;
+  #completionStarted = false;
   #failureReason: unknown;
   #failureRequested = false;
   #finalizerPromise?: Promise<void>;
@@ -190,6 +191,10 @@ class StreamLifecycle {
   }
 
   async fail(error: unknown): Promise<void> {
+    if (this.#completionStarted) {
+      await this.#finalizerPromise;
+      return;
+    }
     this.requestFailure(error);
     await this.finalize(false);
   }
@@ -213,15 +218,15 @@ class StreamLifecycle {
     this.#finalizerPromise ??= (async () => {
       await this.#stepTail;
       if (!this.#failureRequested && complete) {
+        // The API cannot reopen a terminal session. Choose completion once all
+        // queued steps settle; later aborts cannot reverse this terminal write.
+        this.#completionStarted = true;
         try {
           await this.recorder.complete(result);
         } catch (error) {
           this.requestRecordingFailure("complete", error);
         }
       }
-      // An abort or error can arrive while the successful terminal writes are
-      // in flight. Closing as failed afterwards keeps failure as the final
-      // observable state and prevents a later success callback from winning.
       if (this.#failureRequested) {
         await this.cleanup(this.#failureReason);
       }
