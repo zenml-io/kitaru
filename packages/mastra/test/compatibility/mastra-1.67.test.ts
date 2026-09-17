@@ -127,7 +127,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Mastra 1.66.0 compatibility", () => {
+describe("Mastra 1.67.0 compatibility", () => {
   it("keeps raw registry keys in listTools and formats execution keys", async () => {
     const { model } = makeModel([textResult("unused")]);
     const agent = new Agent({

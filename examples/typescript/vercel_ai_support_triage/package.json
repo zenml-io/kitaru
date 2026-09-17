@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.22.0 <23"
+    "node": ">=22.22.0 <23 || >=26 <27"
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.66",
