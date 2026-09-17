@@ -8,7 +8,7 @@ icon: robot
 The Kitaru Mastra adapter wraps an existing Mastra `Agent` and records each non-streaming `generate()` call as a Kitaru [session](../concepts/agents-and-sessions.md). Mastra still runs the agent and Kitaru returns the native Mastra result unchanged.
 
 {% hint style="warning" %}
-`@zenml-io/kitaru-mastra` supports Node `>=22.22.0 <23` and `@mastra/core >=1.51.0 <1.67.0`. It supports non-streaming `Agent.generate()` only.
+`@zenml-io/kitaru-mastra` supports Node `>=22.22.0 <23 || >=26 <27` and `@mastra/core >=1.51.0 <1.68.0`. It supports non-streaming `Agent.generate()` only.
 {% endhint %}
 
 To bring in runs already recorded by Mastra, use [Import existing Mastra traces](#import-existing-mastra-traces). Importing an export does not require the original run to have used `KitaruAgent`.
@@ -18,13 +18,13 @@ To bring in runs already recorded by Mastra, use [Import existing Mastra traces]
 {% tabs %}
 {% tab title="pnpm" %}
 ```bash
-pnpm add @zenml-io/kitaru-mastra @mastra/core@1.66.0
+pnpm add @zenml-io/kitaru-mastra @mastra/core@1.67.0
 ```
 {% endtab %}
 
 {% tab title="npm" %}
 ```bash
-npm install @zenml-io/kitaru-mastra @mastra/core@1.66.0
+npm install @zenml-io/kitaru-mastra @mastra/core@1.67.0
 ```
 {% endtab %}
 {% endtabs %}

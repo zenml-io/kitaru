@@ -13,7 +13,7 @@ Version `0.1.0` is the initial stable package release. Kitaru records non-stream
 
 ## Install
 
-Use Node 22.22 or later in the Node 22 release line. Install the adapter with AI SDK 7 and the provider package used by your agent. This OpenAI example uses the versions verified in the repository:
+Use Node `>=22.22.0 <23 || >=26 <27`. Install the adapter with AI SDK 7 and the provider package used by your agent. This OpenAI example uses the versions verified in the repository:
 
 ```bash
 pnpm add @zenml-io/kitaru-vercel-ai@0.1.0 ai@7.0.65 @ai-sdk/openai@4.0.20 zod@4.4.3

@@ -70,7 +70,7 @@ Idempotency keys are unique across an account, not scoped to one endpoint. If yo
 `@zenml-io/kitaru` creates and inspects Kitaru resources, records sessions, submits evaluations and experiments, and waits for exact jobs. The [Mastra](../adapters/mastra.md) and [Vercel AI SDK](../adapters/vercel-ai.md) adapters build on it.
 
 {% hint style="info" %}
-The TypeScript packages require Node `>=22.22.0 <23` and are versioned and released together. Install with `pnpm add @zenml-io/kitaru`; see [Installation](../getting-started/installation.md).
+The TypeScript packages require Node `>=22.22.0 <23 || >=26 <27` and are versioned and released together. Install with `pnpm add @zenml-io/kitaru`; see [Installation](../getting-started/installation.md).
 {% endhint %}
 
 ### Reuse a developer login

@@ -109,7 +109,7 @@ Node applications can also reuse a developer's selected CLI login without export
 
 The installer run inside your agent's repository already installs into that project. The paths below are for adding the SDK by hand, Node projects, CI, or a machine where you only want the skills.
 
-Kitaru is three pieces: the **SDK + CLI**, a **server** your team shares (self-hosted, one per team), and **workers** that execute replays and evaluations in your environment. The CLI, server, and workers require **Python 3.11 or newer**; TypeScript agents use Node **22.22 or newer in the Node 22 release line** and connect to the same server. The server stores everything in **PostgreSQL**, provisioned for you locally by `kitaru login --local`; a [self-hosted deployment](../deploy/README.md) brings its own. Workers are plain processes (`kitaru worker start`) that run wherever your agent's environment lives; for containerized fleets, the published `zenmldocker/kitaru-worker` image works out of the box (see [Workers in production](../deploy/workers.md)).
+Kitaru is three pieces: the **SDK + CLI**, a **server** your team shares (self-hosted, one per team), and **workers** that execute replays and evaluations in your environment. The CLI, server, and workers require **Python 3.11 or newer**; TypeScript agents use Node `>=22.22.0 <23 || >=26 <27` and connect to the same server. The server stores everything in **PostgreSQL**, provisioned for you locally by `kitaru login --local`; a [self-hosted deployment](../deploy/README.md) brings its own. Workers are plain processes (`kitaru worker start`) that run wherever your agent's environment lives; for containerized fleets, the published `zenmldocker/kitaru-worker` image works out of the box (see [Workers in production](../deploy/workers.md)).
 
 ### Add the Python SDK to a project
 
@@ -153,7 +153,7 @@ Adapters are **not** extras. Each ships as its own distribution, so you install 
 `@zenml-io/kitaru` is the framework-neutral TypeScript SDK: it creates and inspects Kitaru resources, records sessions, submits evaluations and experiments, and waits for exact jobs. The Python `kitaru` command remains the CLI for login and worker operations; there is no separate TypeScript CLI.
 
 {% hint style="info" %}
-The TypeScript packages require Node `>=22.22.0 <23` and are versioned and released together.
+The TypeScript packages require Node `>=22.22.0 <23 || >=26 <27` and are versioned and released together.
 {% endhint %}
 
 Install the adapter in the Node project that runs your agent:
@@ -161,7 +161,7 @@ Install the adapter in the Node project that runs your agent:
 {% tabs %}
 {% tab title="Mastra" %}
 ```bash
-pnpm add @zenml-io/kitaru-mastra @mastra/core@1.51.0
+pnpm add @zenml-io/kitaru-mastra @mastra/core@1.67.0
 ```
 
 See the [Mastra adapter](../adapters/mastra.md) for the wrapper, replay behavior, and supported boundary.

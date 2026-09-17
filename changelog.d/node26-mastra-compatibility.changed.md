@@ -1,0 +1,1 @@
+- The TypeScript packages now support Node `>=22.22.0 <23 || >=26 <27`; the Mastra adapter is now developed and tested against `@mastra/core` 1.67.0, with its peer range widened from `>=1.51.0 <1.65.0` to `>=1.51.0 <1.68.0`.

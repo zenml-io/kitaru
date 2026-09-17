@@ -69,18 +69,25 @@ function manifest(): WorkflowManifest {
 }
 
 describe("canonical workflow preflight", () => {
-  it.each(["21.99.0", "22.21.9", "23.0.0", "not-a-version"])(
-    "rejects unsupported Node %s",
+  it.each([
+    "21.99.0",
+    "22.21.9",
+    "23.0.0",
+    "25.99.0",
+    "27.0.0",
+    "not-a-version",
+  ])("rejects unsupported Node %s", (version) => {
+    expect(() => assertSupportedNodeVersion(version)).toThrow(
+      "Node >=22.22.0 <23 or >=26.0.0 <27",
+    );
+  });
+
+  it.each(["22.22.0", "22.22.3", "26.0.0", "26.8.1"])(
+    "accepts supported Node %s",
     (version) => {
-      expect(() => assertSupportedNodeVersion(version)).toThrow(
-        "Node >=22.22.0 <23",
-      );
+      expect(() => assertSupportedNodeVersion(version)).not.toThrow();
     },
   );
-
-  it("accepts the pinned Node runtime", () => {
-    expect(() => assertSupportedNodeVersion("22.22.3")).not.toThrow();
-  });
 
   it("keeps the deterministic path provider-free", () => {
     expect(() =>

@@ -22,6 +22,29 @@ const packageDefinitions = [
     path: "packages/vercel-ai",
   },
 ];
+const engineManifestDefinitions = [
+  { label: "root package", path: "package.json" },
+  ...packageDefinitions.map(({ path }) => ({
+    label: path,
+    path: `${path}/package.json`,
+  })),
+  {
+    label: "examples/typescript/mastra_adaptive_conversation",
+    path: "examples/typescript/mastra_adaptive_conversation/package.json",
+  },
+  {
+    label: "examples/typescript/mastra_support_triage",
+    path: "examples/typescript/mastra_support_triage/package.json",
+  },
+  {
+    label: "examples/typescript/vercel_ai_support_triage",
+    path: "examples/typescript/vercel_ai_support_triage/package.json",
+  },
+  {
+    label: "examples/typescript/vercel_ai_ticket_resolver",
+    path: "examples/typescript/vercel_ai_ticket_resolver/package.json",
+  },
+];
 
 function assertEqual(actual, expected, message) {
   if (actual !== expected) {
@@ -44,6 +67,29 @@ export async function loadTypescriptPackageMetadata({
       return { ...definition, manifest };
     }),
   );
+  const publishedManifests = new Map(
+    packages.map(({ path, manifest }) => [`${path}/package.json`, manifest]),
+  );
+  const engineManifests = await Promise.all(
+    engineManifestDefinitions.map(async (definition) => {
+      const manifestPath = resolve(repositoryRoot, definition.path);
+      const manifest = publishedManifests.get(definition.path) ??
+        JSON.parse(await readFile(manifestPath, "utf8"));
+      return { ...definition, manifest };
+    }),
+  );
+
+  const expectedNodeEngine = engineManifests[0].manifest.engines?.node;
+  if (typeof expectedNodeEngine !== "string") {
+    throw new Error("root package engines.node must be a string");
+  }
+  for (const { label, manifest } of engineManifests.slice(1)) {
+    assertEqual(
+      manifest.engines?.node,
+      expectedNodeEngine,
+      `${label} engines.node must match the root package`,
+    );
+  }
 
   const version = packages[0].manifest.version;
   if (typeof version !== "string" || !versionPattern.test(version)) {

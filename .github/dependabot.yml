@@ -460,9 +460,9 @@ updates:
           - minor
           - patch
     ignore:
-      # Every package declares `engines.node` as `>=22.22.0 <23` and CI reads
-      # Node 22 from .node-version, so the Node type definitions must stay on
-      # 22.x. A newer major describes runtime APIs these packages cannot use.
+      # Every package supports Node 22 and 26, but the release/build gate reads
+      # Node 22 from .node-version. Keep the Node type definitions on 22.x so
+      # package builds do not accidentally depend on APIs absent from Node 22.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
     cooldown:

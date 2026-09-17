@@ -1,1 +1,0 @@
-- The Mastra adapter is now developed and tested against `@mastra/core` 1.66.0, and its peer range widened from `>=1.51.0 <1.65.0` to `>=1.51.0 <1.67.0`.

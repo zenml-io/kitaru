@@ -4,7 +4,7 @@ Experimental framework-neutral TypeScript SDK and adapter foundation for Kitaru.
 
 The public package name is `@zenml-io/kitaru`; `packages/core/` is only its repository directory. Framework integrations depend on this package rather than maintaining separate Kitaru clients, replay-policy engines, and recording lifecycles:
 
-- `@zenml-io/kitaru-mastra` adapts Mastra 1.51.x.
+- `@zenml-io/kitaru-mastra` adapts Mastra `>=1.51.0 <1.68.0`.
 - `@zenml-io/kitaru-vercel-ai` adapts AI SDK 7.
 
 The TypeScript packages are versioned and released together.
