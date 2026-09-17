@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://docs.zenml.io/kitaru">
-    <img src="assets/kitaru_logo.png" alt="Kitaru" width="240">
+    <img src="assets/kitaru_header.png" alt="Kitaru — Traces you can run, not just read." width="900">
   </a>
 </p>
 
