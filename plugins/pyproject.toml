@@ -6,6 +6,7 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 kitaru = { path = "..", editable = true }
+kitaru-atif-importer = { workspace = true }
 kitaru-claude-agent-sdk = { workspace = true }
 kitaru-braintrust-importer = { workspace = true }
 kitaru-langfuse-importer = { workspace = true }
@@ -21,6 +22,7 @@ kitaru-pydantic-ai = { workspace = true }
 [dependency-groups]
 dev = [
     "kitaru[server]",
+    "kitaru-atif-importer",
     "kitaru-claude-agent-sdk",
     "kitaru-braintrust-importer[adapter]",
     "kitaru-langfuse-importer[adapter]",
@@ -53,6 +55,7 @@ convention = "google"
 [tool.ruff.lint.isort]
 known-first-party = [
     "kitaru",
+    "kitaru_atif_importer",
     "kitaru_claude_agent_sdk",
     "kitaru_evaluator",
     "kitaru_braintrust_importer",
