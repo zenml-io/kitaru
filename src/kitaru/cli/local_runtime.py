@@ -217,11 +217,15 @@ async def start_local_runtime(
     with _operation_lock(paths):
         state = _read_state(paths.state)
         if runner is None:
-            runner = await _get_container_runner(
-                state.runtime if state is not None else None
-            )
+            if state is None:
+                available_runners = await _get_available_container_runners()
+                runner = available_runners[0]
+            else:
+                runner = await _get_container_runner(state.runtime)
+                available_runners = [runner]
         else:
             await _validate_container_runtime(runner)
+            available_runners = [runner]
         resolved_port = _resolve_local_port(port, state)
         server_url = _get_local_server_url(resolved_port)
         port_changed = state is not None and state.port != resolved_port
@@ -232,7 +236,8 @@ async def start_local_runtime(
                 hint="Run `kitaru login --local` first.",
             )
         if state is None:
-            await _reject_unowned_resources(runner)
+            for available_runner in available_runners:
+                await _reject_unowned_resources(available_runner)
         elif state.server_image != image and not upgrade:
             raise CLIError(
                 "conflict",

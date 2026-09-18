@@ -908,6 +908,39 @@ async def test_orphaned_resources_name_themselves_and_point_at_the_cleanup(
     assert raised.value.details == {"volumes": ["kitaru-local_postgres_data"]}
 
 
+async def test_first_start_checks_every_healthy_runtime(
+    runtime_paths, monkeypatch
+) -> None:
+    """A first start finds Podman resources when Docker is also healthy."""
+    docker = FakeDockerRunner()
+    podman = _orphan_volume_runner()
+    podman.runtime = "podman"
+    runners = {"docker": docker, "podman": podman}
+    monkeypatch.setattr(
+        local_runtime.shutil,
+        "which",
+        {"docker": "/usr/bin/docker", "podman": "/usr/bin/podman"}.get,
+    )
+    monkeypatch.setattr(
+        local_runtime,
+        "ContainerRunner",
+        lambda _executable, runtime: runners[runtime],
+    )
+
+    with pytest.raises(CLIError, match="without CLI ownership state") as raised:
+        await local_runtime.start_local_runtime(
+            package_version="0.21.0",
+            upgrade=False,
+            timeout=30,
+            paths=runtime_paths,
+        )
+
+    assert raised.value.details == {"volumes": ["kitaru-local_postgres_data"]}
+    label = f"label=com.docker.compose.project={local_runtime.LOCAL_PROJECT_NAME}"
+    assert ("volume", "ls", "--quiet", "--filter", label) in docker.calls
+    assert not runtime_paths.state.exists()
+
+
 async def test_deleting_volumes_removes_orphaned_resources(runtime_paths) -> None:
     """A stop with data deletion clears resources the state no longer tracks."""
     runner = _orphan_volume_runner()
