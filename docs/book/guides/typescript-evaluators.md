@@ -92,7 +92,7 @@ For TypeScript code that does not use Mastra, pass your own callback directly to
 
 ## Build and pin the worker artifact
 
-Use Node 22 and install dependencies during your worker image build. Include `@zenml-io/kitaru`, `@zenml-io/kitaru-mastra`, `@mastra/core`, and your chosen compiler or bundler in a package manifest, pin their versions, and commit the package-manager lockfile. Build the TypeScript entrypoint as a Node-compatible ES module and deploy it at a stable absolute path, for example `/opt/evaluators/conversation/evaluator.mjs`.
+Use Node 22 or Node 26 and install dependencies during your worker image build. Include `@zenml-io/kitaru`, `@zenml-io/kitaru-mastra`, `@mastra/core`, and your chosen compiler or bundler in a package manifest, pin their versions, and commit the package-manager lockfile. Build the TypeScript entrypoint as a Node-compatible ES module and deploy it at a stable absolute path, for example `/opt/evaluators/conversation/evaluator.mjs`.
 
 For example, with `esbuild` pinned as a development dependency, build your entrypoint and local scorer modules together:
 

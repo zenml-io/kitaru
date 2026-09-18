@@ -6,7 +6,7 @@ The scenario uses only fictional parcel information. The target has no tools or 
 
 ## Run the example
 
-From the repository root, use Node 22.22 or newer within Node 22, pnpm 10.33, uv, and local PostgreSQL reachable by the repository's [devtools harness](../../../devtools/AGENTS.md). Docker can provide PostgreSQL when it is not already running.
+From the repository root, use Node 22.22 or newer within Node 22, or Node 26, plus pnpm 10.33, uv, and local PostgreSQL reachable by the repository's [devtools harness](../../../devtools/AGENTS.md). Docker can provide PostgreSQL when it is not already running.
 
 ```bash
 uv sync --frozen --extra server --extra worker --extra cli

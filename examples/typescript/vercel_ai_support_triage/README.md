@@ -13,7 +13,7 @@ The baseline allows 2,000 output tokens and the replay raises that limit to 3,00
 
 ## Run
 
-Use Node 22 and a running Kitaru API backed by PostgreSQL. Export `KITARU_API_URL` and, when the server requires it, `KITARU_API_KEY`. Then install, build, and run:
+Use Node 22 or Node 26 and a running Kitaru API backed by PostgreSQL. Export `KITARU_API_URL` and, when the server requires it, `KITARU_API_KEY`. Then install, build, and run:
 
 ```bash
 pnpm install --frozen-lockfile
