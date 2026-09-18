@@ -16,6 +16,8 @@
 import asyncio
 import contextlib
 import importlib.resources
+import ipaddress
+import json
 import os
 import re
 import secrets
@@ -379,11 +381,16 @@ async def stop_local_runtime(
         )
     if state is None:
         if runner is None:
-            runner = await _get_container_runner()
+            runners = await _get_available_container_runners()
         else:
             await _validate_container_runtime(runner)
+            runners = [runner]
         with _operation_lock(paths):
-            removed = await _remove_labeled_resources(runner)
+            removed = False
+            for available_runner in runners:
+                removed = (
+                    bool(await _remove_labeled_resources(available_runner)) or removed
+                )
             if not removed:
                 raise CLIError(
                     "invalid_configuration",
@@ -470,7 +477,9 @@ async def get_local_logs(
     if service:
         arguments.append(service)
     if follow:
-        return runner.stream(*arguments, failure_message="Compose logs failed.")
+        return _strip_ansi_stream(
+            runner.stream(*arguments, failure_message="Compose logs failed.")
+        )
     result = await runner.run(*arguments, timeout=60)
     _raise_for_runtime(result, "Compose logs failed.")
     return _strip_ansi(result.stdout).splitlines()
@@ -510,6 +519,31 @@ async def _get_container_runner(
     )
 
 
+async def _get_available_container_runners() -> list[ContainerRunner]:
+    """Return every installed and healthy local container runtime."""
+    runners: list[ContainerRunner] = []
+    validation_error: CLIError | None = None
+    runtimes: tuple[ContainerRuntime, ...] = ("docker", "podman")
+    for runtime in runtimes:
+        if executable := shutil.which(runtime):
+            runner = ContainerRunner(executable, runtime)
+            try:
+                await _validate_container_runtime(runner)
+            except CLIError as error:
+                validation_error = error
+                continue
+            runners.append(runner)
+    if runners:
+        return runners
+    if validation_error is not None:
+        raise validation_error
+    raise CLIError(
+        "invalid_configuration",
+        "Docker or Podman with Compose support is required to run Kitaru locally.",
+        hint=_INSTALL_HINT,
+    )
+
+
 async def _validate_container_runtime(runner: ContainerCommandRunner) -> None:
     compose = await runner.run("compose", "version", timeout=15)
     if compose.returncode:
@@ -537,6 +571,41 @@ async def _validate_container_runtime(runner: ContainerCommandRunner) -> None:
             details=_runtime_details(info),
         )
     if runner.runtime == "podman":
+        connection_uri = os.environ.get("CONTAINER_HOST")
+        if connection_uri is None:
+            connections = await runner.run(
+                "system", "connection", "list", "--format", "json", timeout=15
+            )
+            if connections.returncode:
+                raise CLIError(
+                    "invalid_configuration",
+                    "The active Podman connection could not be inspected.",
+                    details=_runtime_details(connections),
+                )
+            try:
+                configured_connections = json.loads(connections.stdout or "[]")
+                connection_name = os.environ.get("CONTAINER_CONNECTION")
+                connection_uri = next(
+                    (
+                        connection["URI"]
+                        for connection in configured_connections
+                        if connection.get("Name") == connection_name
+                        or (connection_name is None and connection.get("Default"))
+                    ),
+                    None,
+                )
+            except (AttributeError, KeyError, TypeError, json.JSONDecodeError) as error:
+                raise CLIError(
+                    "invalid_configuration",
+                    "The active Podman connection could not be inspected.",
+                    details=_runtime_details(connections),
+                ) from error
+        if connection_uri is not None and not _is_local_container_host(connection_uri):
+            raise CLIError(
+                "invalid_configuration",
+                "The active Podman connection points to a remote daemon.",
+                hint="Select a local Podman connection, then retry the command.",
+            )
         return
     context = await runner.run(
         "context", "inspect", "--format", "{{json .Endpoints.docker.Host}}", timeout=15
@@ -554,6 +623,19 @@ async def _validate_container_runtime(runner: ContainerCommandRunner) -> None:
             "The active Docker context points to a remote daemon.",
             hint="Select a local Docker context, then retry the command.",
         )
+
+
+def _is_local_container_host(host: str) -> bool:
+    """Check whether a container service URI is reachable on this host."""
+    parsed = urlsplit(host)
+    if parsed.scheme == "unix":
+        return True
+    if parsed.hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(parsed.hostname or "").is_loopback
+    except ValueError:
+        return False
 
 
 def _get_local_server_url(port: int) -> str:
@@ -947,6 +1029,12 @@ def _decode_output(value: bytes) -> str:
 def _strip_ansi(value: str) -> str:
     """Remove terminal escape sequences from captured output."""
     return _ANSI_ESCAPE_PATTERN.sub("", value)
+
+
+async def _strip_ansi_stream(lines: AsyncIterator[str]) -> AsyncIterator[str]:
+    """Remove terminal escape sequences from streamed output."""
+    async for line in lines:
+        yield _strip_ansi(line)
 
 
 async def _terminate_process(process: asyncio.subprocess.Process) -> None:

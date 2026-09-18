@@ -35,6 +35,7 @@ class FakeDockerRunner:
         self.runtime = runtime
         self.calls: list[tuple[str, ...]] = []
         self.stream_calls: list[tuple[str, ...]] = []
+        self.stream_lines = ("server ready", "db ready")
         self.results: dict[tuple[str, ...], ProcessResult] = {}
 
     async def run(self, *arguments: str, timeout: float = 120) -> ProcessResult:
@@ -57,7 +58,7 @@ class FakeDockerRunner:
         del failure_message
         self.calls.append(arguments)
         self.stream_calls.append(arguments)
-        for line in ("server ready", "db ready"):
+        for line in self.stream_lines:
             yield line
 
 
@@ -76,8 +77,10 @@ def runtime_paths(tmp_path: Path) -> LocalRuntimePaths:
 
 @pytest.fixture(autouse=True)
 def clear_local_port_environment(monkeypatch) -> None:
-    """Keep local-port tests independent of the developer environment."""
+    """Keep local-runtime tests independent of the developer environment."""
     monkeypatch.delenv(local_runtime.LOCAL_PORT_ENV, raising=False)
+    monkeypatch.delenv("CONTAINER_CONNECTION", raising=False)
+    monkeypatch.delenv("CONTAINER_HOST", raising=False)
 
 
 async def test_first_start_writes_private_state_and_starts_compose(
@@ -575,12 +578,53 @@ async def test_remote_docker_context_is_rejected() -> None:
 
 
 async def test_podman_validation_skips_docker_context_inspection() -> None:
-    """Podman machines are valid even though they are remote Linux VMs."""
+    """A Podman machine's loopback SSH connection remains valid."""
     runner = FakeDockerRunner(runtime="podman")
+    runner.results[("system", "connection", "list", "--format", "json")] = (
+        ProcessResult(
+            0,
+            json.dumps(
+                [
+                    {
+                        "Name": "podman-machine-default",
+                        "URI": "ssh://core@127.0.0.1:53298/run/user/501/podman.sock",
+                        "Default": True,
+                    }
+                ]
+            ),
+            "",
+        )
+    )
 
     await local_runtime._validate_container_runtime(runner)
 
-    assert runner.calls == [("compose", "version"), ("info",)]
+    assert runner.calls == [
+        ("compose", "version"),
+        ("info",),
+        ("system", "connection", "list", "--format", "json"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "ssh://root@podman.example.com/run/podman/podman.sock",
+        "tcp://192.0.2.10:1234",
+    ],
+)
+async def test_remote_podman_connection_is_rejected(uri: str) -> None:
+    """A remote Podman service cannot expose ports on the local host."""
+    runner = FakeDockerRunner(runtime="podman")
+    runner.results[("system", "connection", "list", "--format", "json")] = (
+        ProcessResult(
+            0,
+            json.dumps([{"Name": "remote", "URI": uri, "Default": True}]),
+            "",
+        )
+    )
+
+    with pytest.raises(CLIError, match="remote daemon"):
+        await local_runtime._validate_container_runtime(runner)
 
 
 async def test_developer_override_must_exist_locally(
@@ -729,6 +773,38 @@ async def test_logs_use_bounded_tail_and_service(runtime_paths) -> None:
     assert result == ["ready", "serving"]
 
 
+async def test_followed_logs_strip_ansi_sequences(runtime_paths) -> None:
+    """Followed logs remove terminal formatting from every streamed line."""
+    local_runtime._write_runtime_files(
+        runtime_paths,
+        image="zenmldocker/kitaru-server:0.21.0",
+        port=8000,
+    )
+    runner = FakeDockerRunner(runtime="podman")
+    runner.stream_lines = ("\x1b[32mready\x1b[0m", "\x1b[1mserving\x1b[0m")
+
+    result = await local_runtime.get_local_logs(
+        service="server",
+        tail=25,
+        follow=True,
+        runner=runner,
+        paths=runtime_paths,
+    )
+
+    assert not isinstance(result, list)
+    assert [line async for line in result] == ["ready", "serving"]
+    assert runner.stream_calls == [
+        (
+            *local_runtime._compose_arguments(runtime_paths),
+            "logs",
+            "--tail",
+            "25",
+            "--follow",
+            "server",
+        )
+    ]
+
+
 async def test_running_state_uses_engine_filters() -> None:
     """Running-state checks do not depend on a Compose provider's ps flags."""
     runner = FakeDockerRunner(runtime="podman")
@@ -843,6 +919,35 @@ async def test_deleting_volumes_removes_orphaned_resources(runtime_paths) -> Non
     assert item["deployment"] == "deleted"
     assert item["data_deleted"] is True
     assert ("volume", "rm", "kitaru-local_postgres_data") in runner.calls
+
+
+async def test_deleting_volumes_checks_every_healthy_runtime(
+    runtime_paths, monkeypatch
+) -> None:
+    """State-less cleanup finds Podman resources when Docker is also healthy."""
+    docker = FakeDockerRunner()
+    podman = _orphan_volume_runner()
+    podman.runtime = "podman"
+    runners = {"docker": docker, "podman": podman}
+    monkeypatch.setattr(
+        local_runtime.shutil,
+        "which",
+        {"docker": "/usr/bin/docker", "podman": "/usr/bin/podman"}.get,
+    )
+    monkeypatch.setattr(
+        local_runtime,
+        "ContainerRunner",
+        lambda _executable, runtime: runners[runtime],
+    )
+
+    item = await local_runtime.stop_local_runtime(
+        delete_volumes=True, paths=runtime_paths
+    )
+
+    assert item["deployment"] == "deleted"
+    assert ("volume", "rm", "kitaru-local_postgres_data") in podman.calls
+    label = f"label=com.docker.compose.project={local_runtime.LOCAL_PROJECT_NAME}"
+    assert ("volume", "ls", "--quiet", "--filter", label) in docker.calls
 
 
 async def test_stop_without_resources_reports_no_deployment(runtime_paths) -> None:
