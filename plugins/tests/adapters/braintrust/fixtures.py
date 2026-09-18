@@ -309,14 +309,11 @@ def _fast_polling(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def fake_braintrust(monkeypatch: pytest.MonkeyPatch) -> FakeBraintrust:
-    """Create a fake Braintrust SDK and route the adapter to it."""
+def fake_braintrust_api(monkeypatch: pytest.MonkeyPatch) -> FakeBraintrust:
+    """Create a fake Braintrust backend and route BTQL queries to it."""
     fake = FakeBraintrust()
     monkeypatch.setenv("BRAINTRUST_API_KEY", "test-key")
     monkeypatch.delenv("BRAINTRUST_API_URL", raising=False)
-    monkeypatch.setattr(adapter_module, "start_span", fake.start_span)
-    monkeypatch.setattr(adapter_module, "flush", fake.flush)
-    monkeypatch.setattr(adapter_module, "current_logger", fake.current_logger)
     monkeypatch.setattr(
         api_module,
         "httpx",
@@ -326,4 +323,16 @@ def fake_braintrust(monkeypatch: pytest.MonkeyPatch) -> FakeBraintrust:
             Response=httpx.Response,
         ),
     )
+    return fake
+
+
+@pytest.fixture
+def fake_braintrust(
+    fake_braintrust_api: FakeBraintrust, monkeypatch: pytest.MonkeyPatch
+) -> FakeBraintrust:
+    """Route the adapter's Braintrust SDK calls to the fake backend as well."""
+    fake = fake_braintrust_api
+    monkeypatch.setattr(adapter_module, "start_span", fake.start_span)
+    monkeypatch.setattr(adapter_module, "flush", fake.flush)
+    monkeypatch.setattr(adapter_module, "current_logger", fake.current_logger)
     return fake

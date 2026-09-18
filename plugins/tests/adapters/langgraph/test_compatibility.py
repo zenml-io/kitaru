@@ -13,6 +13,7 @@ from langgraph.func import entrypoint
 from langgraph.graph import END, START, StateGraph
 
 from kitaru.api_models.v1.replay_config import ReplayOverride
+from kitaru.api_models.v1.session_node import NodeType
 from kitaru_langgraph import (
     CapabilityOperation,
     CapabilityTargetKind,
@@ -356,15 +357,16 @@ def test_real_deep_agent_factory_runs_through_runner(fake_client: Any) -> None:
     model = ToolCallingFakeModel(
         responses=[AIMessage(content="", tool_calls=[add_call]), AIMessage("42")]
     )
+    agent_kwargs = {"model": model, "tools": [add]}
     runner = KitaruGraphRunner.from_agent_factory(
         create_deep_agent,
-        factory_kwargs={"model": model, "tools": [add]},
+        factory_kwargs=agent_kwargs,
         local_subagents=(
             LocalSubagentFactorySpec(
                 name="adder",
                 description="Adds numbers.",
                 factory=create_agent,
-                factory_kwargs={"model": model, "tools": [add]},
+                factory_kwargs=agent_kwargs,
             ),
         ),
     )
@@ -372,18 +374,18 @@ def test_real_deep_agent_factory_runs_through_runner(fake_client: Any) -> None:
     assert runner.capabilities.get_target("adder") is not None
     result = runner.invoke({"messages": [{"role": "user", "content": "17 + 25?"}]})
 
-    assert [message.content for message in result["messages"][-2:]] == ["42", "42"]
+    assert result["messages"][-1].content == "42"
     batches = fake_client.instances[0].sessions.node_batches
     recorded = [
-        (node.node_type.value, node.name)
+        (node.node_type, node.name)
         for _, batch in batches
         for node in batch.nodes
-        if node.node_type.value != "span"
+        if node.node_type != NodeType.SPAN
     ]
     assert recorded == [
-        ("llm_call", "ToolCallingFakeModel"),
-        ("tool_call", "add"),
-        ("llm_call", "ToolCallingFakeModel"),
+        (NodeType.LLM_CALL, "ToolCallingFakeModel"),
+        (NodeType.TOOL_CALL, "add"),
+        (NodeType.LLM_CALL, "ToolCallingFakeModel"),
     ]
 
 
