@@ -17,8 +17,11 @@ import uuid
 from types import SimpleNamespace
 from typing import Any
 
+import braintrust
 import pytest
+from braintrust.test_helpers import init_test_logger
 
+import kitaru_braintrust_importer.adapter as adapter_module
 from kitaru import importer_adapter
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
@@ -125,6 +128,52 @@ def test_trace_requires_an_active_braintrust_logger(
 
     assert "func" not in fake_braintrust.events
     assert client.sessions.created == []
+
+
+@pytest.fixture
+def real_braintrust_sdk(
+    fake_braintrust: FakeBraintrust,
+    with_memory_logger: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Any:
+    """Route the adapter back to the real SDK, logging to memory offline."""
+    monkeypatch.setattr(adapter_module, "start_span", braintrust.start_span)
+    monkeypatch.setattr(adapter_module, "flush", braintrust.flush)
+    monkeypatch.setattr(adapter_module, "current_logger", braintrust.current_logger)
+    # init_test_logger overwrites this module global without restoring it.
+    monkeypatch.setattr(
+        braintrust.logger,
+        "_compute_logger_metadata",
+        braintrust.logger._compute_logger_metadata,
+    )
+    return with_memory_logger
+
+
+def test_real_sdk_reports_no_active_logger(real_braintrust_sdk: Any) -> None:
+    """Reject a trace when the real SDK returns its no-op span."""
+    with (
+        pytest.raises(RuntimeError, match="No active Braintrust logger"),
+        BraintrustAdapter().open_trace(),
+    ):
+        pass
+
+
+async def test_real_sdk_span_is_traced_flushed_and_polled(
+    real_braintrust_sdk: Any, fake_braintrust: FakeBraintrust
+) -> None:
+    """Open, flush, and resolve the project through the real SDK."""
+    init_test_logger(fake_braintrust.project_id)
+    adapter = BraintrustAdapter()
+    fake_braintrust.rows_builders = [build_complete_rows, build_complete_rows]
+
+    with adapter.open_trace() as root_span_id:
+        pass
+    await adapter.wait_until_complete(root_span_id)
+
+    logged = real_braintrust_sdk.pop()
+    assert [row["root_span_id"] for row in logged] == [root_span_id]
+    assert logged[0]["span_attributes"]["name"] == "kitaru-run"
+    assert fake_braintrust.requested == [root_span_id, root_span_id]
 
 
 async def test_wait_polls_until_the_root_span_has_ended(
