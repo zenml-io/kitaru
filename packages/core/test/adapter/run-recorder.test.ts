@@ -299,6 +299,25 @@ describe("normalized run lifecycle", () => {
     expect(client.nodes.at(-1)?.nodes[0]).toMatchObject({ status: "failed" });
   });
 
+  it("closes a failed recording without marking the application run failed", async () => {
+    const client = fakeClient();
+    const run = await recorder(client);
+    await run.initialize();
+    const recordingError = new Error("node write failed");
+
+    await run.failRecording(recordingError);
+
+    expect(run.state.failure).toBeUndefined();
+    expect(client.nodes.at(-1)?.nodes[0]).toMatchObject({
+      error: "node write failed",
+      status: "failed",
+    });
+    expect(client.updates.at(-1)).toMatchObject({
+      error: "node write failed",
+      status: "failed",
+    });
+  });
+
   it("creates no nodes when session creation fails", async () => {
     const client = fakeClient();
     client.createSession = async () => {

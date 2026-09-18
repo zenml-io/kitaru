@@ -163,8 +163,19 @@ export class RunRecorder {
     // Let queued step writes land before the failed ledger and the closing
     // node, so a late step cannot arrive after the session is marked failed.
     await bestEffort(() => this.state.awaitSteps());
-    const endedAt = new Date().toISOString();
     await bestEffort(() => flushFailedPolicyOutcomes(this.state));
+    await this.#closeFailed(error);
+  }
+
+  async failRecording(error: unknown): Promise<void> {
+    // A telemetry failure must not enter application state. Tool hooks use
+    // state.failure to stop execution after policy or runtime failures.
+    await bestEffort(() => this.state.awaitSteps());
+    await this.#closeFailed(error);
+  }
+
+  async #closeFailed(error: unknown): Promise<void> {
+    const endedAt = new Date().toISOString();
     await bestEffort(() =>
       this.#client.upsertSessionNodes(this.state.sessionId, {
         nodes: [

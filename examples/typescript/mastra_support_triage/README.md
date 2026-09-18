@@ -28,7 +28,7 @@ The command prints the run state directory, session and replay IDs, both outbox 
 
 ## Provider-free streaming
 
-The separate `stream` entry point demonstrates recorded Mastra 1.67.x streaming without replacing the worker-backed generate and replay flow above. It uses a deterministic local model, calls the side-effect-free `lookupOrder` fixture tool, and prints two text chunks through ordinary `for await` consumption. Kitaru records the two model steps, tool result, usage, and final text only after the native stream reaches its finish callback.
+The separate `stream` entry point demonstrates recorded Mastra 1.67.x streaming without replacing the worker-backed generate and replay flow above. It uses a deterministic local model, calls the side-effect-free `lookupOrder` fixture tool, and prints two text chunks through ordinary `for await` consumption. Kitaru records each model step and tool result as Mastra completes the step, then records the final text and terminal session state from the finish callback.
 
 Point it at a running server and an existing agent. It makes no provider request:
 
@@ -41,7 +41,7 @@ pnpm --filter @zenml-io/kitaru-example-mastra-support-triage stream
 
 The example's `onRecordingError` callback prints only the failed recording stage and optional session ID. It does not print the error body, prompt, tool payload, output, or credentials. A setup error for this ordinary non-memory stream rejects the initial `stream()` call. For memory-backed agents, Mastra can return the stream before Kitaru's post-recall input processor initializes recording; callers should also observe native aggregate failures such as `getFullOutput()` during consumption.
 
-An unconsumed or canceled reader is not reported as a completed Kitaru session. An observable Mastra abort is recorded as failed. User `prepareStep` and input processors, streaming replay, approval and resume modes, background execution, `untilIdle`, and secondary structured-output models are outside this entry point; schema-only structured output remains supported. Default-option and tool resolvers must be deterministic and side-effect-free because Mastra and Kitaru may call them more than once, with no exact invocation-count guarantee.
+Mastra 1.67 continues the model call in the background when this reader is left unconsumed or canceled, so Kitaru records the eventual completion. An observable Mastra abort is recorded as failed. User `prepareStep` and input processors, streaming replay, approval and resume modes, background execution, `untilIdle`, and secondary structured-output models are outside this entry point; schema-only structured output remains supported. Default-option and tool resolvers must be deterministic and side-effect-free because Mastra and Kitaru may call them more than once, with no exact invocation-count guarantee.
 
 ## Isolation and recovery
 

@@ -41,6 +41,8 @@ interface StreamRecordingOptions {
   startedAt: string;
 }
 
+const ERROR_STEP_GRACE_MS = 250;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -152,9 +154,22 @@ function getTripwireReason(value: unknown): string | undefined {
     : "Mastra processor tripwire triggered";
 }
 
+function getSafeStreamError(error: unknown): Error {
+  const name =
+    error instanceof Error && /^[A-Za-z][A-Za-z0-9]*Error$/.test(error.name)
+      ? error.name
+      : undefined;
+  return new Error(
+    name && name !== "Error"
+      ? `Mastra stream failed (${name})`
+      : "Mastra stream failed",
+  );
+}
+
 class StreamLifecycle {
   #cleanupPromise?: Promise<void>;
   #completionStarted = false;
+  #deferredFailure?: ReturnType<typeof setTimeout>;
   #failureReason: unknown;
   #failureRequested = false;
   #finalizerPromise?: Promise<void>;
@@ -172,19 +187,22 @@ class StreamLifecycle {
 
   async record(step: RecordedStep): Promise<void> {
     if (this.#recordingError !== undefined) return;
+    let writeFailure: { error: unknown } | undefined;
     const write = this.#stepTail.then(() =>
       recordStep(this.recorder.state, step, this.options.costCalculator),
     );
     this.#stepTail = write.catch((error: unknown) => {
+      writeFailure = { error };
       this.requestRecordingFailure("step", error);
     });
     await this.#stepTail;
-    if (this.#recordingError !== undefined) {
-      await this.finalize(false);
+    if (writeFailure !== undefined) {
+      await this.cleanup(writeFailure.error, "recording");
     }
   }
 
   async complete(result: unknown): Promise<void> {
+    this.cancelDeferredFailure();
     if (this.recorder.state.failure !== undefined) {
       this.requestFailure(this.recorder.state.failure);
     }
@@ -192,6 +210,7 @@ class StreamLifecycle {
   }
 
   async fail(error: unknown): Promise<void> {
+    this.cancelDeferredFailure();
     if (this.#completionStarted) {
       await this.#finalizerPromise;
       return;
@@ -200,12 +219,30 @@ class StreamLifecycle {
     await this.finalize(false);
   }
 
+  deferFailure(error: unknown): void {
+    if (this.#completionStarted || this.#deferredFailure !== undefined) return;
+    // Mastra normally follows onError with a failed step. Error-only paths,
+    // including total timeouts, close without that callback. Give the failed
+    // step a bounded chance to arrive before closing the session without it.
+    this.#deferredFailure = setTimeout(() => {
+      this.#deferredFailure = undefined;
+      void this.fail(error).catch(() => undefined);
+    }, ERROR_STEP_GRACE_MS);
+  }
+
+  cancelDeferredFailure(): void {
+    if (this.#deferredFailure === undefined) return;
+    clearTimeout(this.#deferredFailure);
+    this.#deferredFailure = undefined;
+  }
+
   private requestRecordingFailure(
     stage: StreamRecordingErrorStage,
     error: unknown,
   ): void {
-    this.#recordingError ??= { error, stage };
-    this.requestFailure(error);
+    if (this.#recordingError !== undefined) return;
+    this.#recordingError = { error, stage };
+    this.notify(stage, error);
   }
 
   private requestFailure(error: unknown): void {
@@ -218,28 +255,40 @@ class StreamLifecycle {
   private async finalize(complete: boolean, result?: unknown): Promise<void> {
     this.#finalizerPromise ??= (async () => {
       await this.#stepTail;
+      if (this.#recordingError !== undefined) {
+        await this.cleanup(this.#recordingError.error, "recording");
+        return;
+      }
       if (!this.#failureRequested && complete) {
         // The API cannot reopen a terminal session. Choose completion once all
         // queued steps settle; later aborts cannot reverse this terminal write.
         this.#completionStarted = true;
+        let completionFailure: { error: unknown } | undefined;
         try {
           await this.recorder.complete(result);
         } catch (error) {
+          completionFailure = { error };
           this.requestRecordingFailure("complete", error);
+        }
+        if (completionFailure !== undefined) {
+          await this.cleanup(completionFailure.error, "recording");
         }
       }
       if (this.#failureRequested) {
-        await this.cleanup(this.#failureReason);
-      }
-      if (this.#recordingError) {
-        this.notify(this.#recordingError.stage, this.#recordingError.error);
+        await this.cleanup(this.#failureReason, "run");
       }
     })();
     await this.#finalizerPromise;
   }
 
-  private cleanup(error: unknown): Promise<void> {
-    this.#cleanupPromise ??= this.recorder.fail(error).catch(() => undefined);
+  private cleanup(error: unknown, kind: "recording" | "run"): Promise<void> {
+    this.#cleanupPromise ??= (
+      kind === "recording"
+        ? this.recorder.failRecording(
+            new Error("Kitaru stream recording failed"),
+          )
+        : this.recorder.fail(error)
+    ).catch(() => undefined);
     return this.#cleanupPromise;
   }
 
@@ -361,9 +410,12 @@ export async function streamWithRecording({
   let modelError: unknown;
   effective.onStepFinish = async (step) => {
     const active = await initialize();
+    if (step.finishReason === "error") active.cancelDeferredFailure();
+    const pendingModelError =
+      step.finishReason === "error" ? modelError : undefined;
     const recordedStep =
-      step.finishReason === "error" && modelError !== undefined
-        ? { ...step, error: modelError }
+      pendingModelError !== undefined
+        ? { ...step, error: getSafeStreamError(pendingModelError) }
         : step;
     await active.record(recordedStep as RecordedStep);
     if (step.finishReason === "error") modelError = undefined;
@@ -371,8 +423,11 @@ export async function streamWithRecording({
       await options.configuredOnStepFinish?.(step);
       await callerStep?.(step);
     } catch (error) {
-      await active.fail(error);
+      await active.fail(getSafeStreamError(error));
       throw error;
+    }
+    if (pendingModelError !== undefined) {
+      await active.fail(getSafeStreamError(pendingModelError));
     }
   };
   effective.onFinish = async (event) => {
@@ -380,7 +435,7 @@ export async function streamWithRecording({
     try {
       await callerFinish?.(event);
     } catch (error) {
-      await active.fail(error);
+      await active.fail(getSafeStreamError(error));
       throw error;
     }
     const tripwire = getTripwireReason(event);
@@ -409,9 +464,10 @@ export async function streamWithRecording({
     await active.complete(recordedToolPayloadJson(summary, "run output"));
   };
   effective.onError = async (event) => {
-    modelError = event.error;
-    const active = await initialize();
-    await active.fail(event.error);
+    modelError ??= event.error;
+    const active =
+      lifecycle ?? (await initializePromise?.catch(() => undefined));
+    active?.deferFailure(getSafeStreamError(modelError));
     await callerError?.(event);
   };
   effective.onAbort = async (event) => {
@@ -438,7 +494,7 @@ export async function streamWithRecording({
   } catch (error) {
     const active =
       lifecycle ?? (await initializePromise?.catch(() => undefined));
-    await active?.fail(error);
+    await active?.fail(getSafeStreamError(error));
     throw error;
   }
 }

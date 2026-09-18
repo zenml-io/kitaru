@@ -81,7 +81,7 @@ Kitaru records completed model and local-tool steps plus the final resolved outp
 
 For ordinary streams, setup happens before Mastra starts and a setup failure rejects the initial `stream()` call. Memory-backed streams are different: Kitaru initializes from a public Mastra input processor after native recall so it can record the effective context. Mastra may return the stream object before that processor runs. A setup failure then rejects native aggregate consumption such as `getFullOutput()` and prevents model or tool execution; it does not necessarily reject the initial `stream()` promise.
 
-Once native execution starts, a Kitaru step or completion write failure does not replace Mastra's chunks or aggregate result. Observe it separately with the typed callback:
+Once native execution starts, a Kitaru step or completion write failure does not replace Mastra's chunks or aggregate result, and it does not disable later application tools. Observe it separately with the typed callback:
 
 ```ts
 const recordedAgent = new KitaruAgent(agent, {
@@ -95,7 +95,9 @@ const recordedAgent = new KitaruAgent(agent, {
 
 The callback runs once. `stage` is `"step"` or `"complete"`, and `sessionId` is optional. Kitaru does not include prompts, outputs, credentials, or raw HTTP bodies in its default diagnostic. It does not await the callback's result, so a reporter that throws, rejects, or never settles cannot hold the application stream open.
 
-Consume the stream to completion when you need a completed session. An unconsumed stream, an early loop exit, or reader cancellation can leave the session in progress. Kitaru marks it failed only when Mastra exposes an error or abort; it does not drain abandoned streams or invent a final output. User `prepareStep` and input processors are rejected before recording because they can replace tools or structured-output models after preflight. The adapter-owned memory-capture processor remains supported. After queued steps settle, the finish callback chooses the terminal status once. An error or abort observed before that decision records failure; a later abort cannot reverse completion because the API does not reopen terminal sessions.
+Failed sessions store a bounded failure category rather than the raw provider or callback message, which can contain request bodies or credentials. The native Mastra error and caller callbacks remain unchanged.
+
+Mastra 1.67 continues model execution in the background when the application leaves the stream unconsumed, exits a loop early, or cancels its reader. Kitaru records the eventual finish callback and completed result. It does not drain the returned reader itself or invent a final output. Kitaru marks the session failed when Mastra exposes an error or abort. User `prepareStep` and input processors are rejected before recording because they can replace tools or structured-output models after preflight. The adapter-owned memory-capture processor remains supported. After queued steps settle, the finish callback chooses the terminal status once. An error or abort observed before that decision records failure; a later abort cannot reverse completion because the API does not reopen terminal sessions.
 
 Mastra default-option and tool resolvers must return the same value for the same request context and must have no side effects. Streaming preflight, tool inventory, and native execution can invoke them more than once. No exact invocation count is guaranteed, and Kitaru cannot detect every changing resolver through Mastra's public API.
 

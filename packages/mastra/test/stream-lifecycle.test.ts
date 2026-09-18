@@ -6,7 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { KitaruAgent } from "../src/index.js";
 import type { RuntimeStreamOptions } from "../src/types.js";
-import { AGENT_ID, FakeAgent, installTestApi, textStep } from "./helpers.js";
+import {
+  AGENT_ID,
+  FakeAgent,
+  installTestApi,
+  invokeTool,
+  textStep,
+} from "./helpers.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -287,6 +293,23 @@ function enforceTerminalSessionTransitions(): { attempts: string[] } {
       const body = init?.body
         ? (JSON.parse(String(init.body)) as Record<string, unknown>)
         : undefined;
+      const sessionId = url.pathname.match(
+        /^\/api\/v1\/sessions\/([^/]+)/,
+      )?.[1];
+      if (
+        init?.method === "POST" &&
+        url.pathname.endsWith("/nodes") &&
+        sessionId &&
+        terminalSessions.has(sessionId)
+      ) {
+        return new Response(
+          JSON.stringify({ detail: "session is already terminal" }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
       const status = body?.status;
       if (
         init?.method === "PATCH" &&
@@ -294,7 +317,6 @@ function enforceTerminalSessionTransitions(): { attempts: string[] } {
         (status === "completed" || status === "failed")
       ) {
         attempts.push(status);
-        const sessionId = url.pathname.split("/").at(-1);
         if (sessionId && terminalSessions.has(sessionId)) {
           return new Response(
             JSON.stringify({ detail: "session is already terminal" }),
@@ -688,6 +710,76 @@ describe("stream recording lifecycle", () => {
     },
   );
 
+  it("does not let a step recording failure disable later application tools", async () => {
+    installTestApi();
+    let nodeWrites = 0;
+    wrapFetch(({ method, path }) => {
+      if (method === "POST" && path.endsWith("/nodes")) {
+        nodeWrites += 1;
+        return nodeWrites === 2;
+      }
+      return false;
+    });
+    const execute = vi.fn(() => ({ queued: true }));
+    const reported = vi.fn();
+    const nativeResult = { text: "refund queued" };
+    const agent = Object.assign(new FakeAgent(), {
+      async stream(_messages: unknown, options: RuntimeStreamOptions = {}) {
+        await options.onStepFinish?.(textStep("before-tool"));
+        const output = await invokeTool(options.hooks ?? {}, {
+          args: { orderId: "order-1" },
+          callId: "refund-1",
+          execute,
+          output: undefined,
+          toolName: "queueRefundReview",
+        });
+        expect(output).toEqual({ queued: true });
+        return nativeResult;
+      },
+    });
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      onRecordingError: reported,
+      requestedModelId: "lifecycle-model",
+    });
+
+    await expect(recorded.stream("hello")).resolves.toBe(nativeResult);
+    expect(execute).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(reported).toHaveBeenCalledTimes(1));
+  });
+
+  it("reports a step write rejected after terminal completion", async () => {
+    installTestApi();
+    enforceTerminalSessionTransitions();
+    let runtimeOptions: RuntimeStreamOptions | undefined;
+    const agent = Object.assign(new FakeAgent(), {
+      async stream(_messages: unknown, options: RuntimeStreamOptions = {}) {
+        runtimeOptions = options;
+        return { native: true };
+      },
+    });
+    const reported = vi.fn();
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      onRecordingError: reported,
+      requestedModelId: "lifecycle-model",
+    });
+    await recorded.stream("hello");
+    await runtimeOptions?.onFinish?.({
+      ...textStep("complete-first"),
+      steps: [],
+      text: "done",
+      totalUsage: textStep("complete-first").usage,
+    });
+
+    await runtimeOptions?.onStepFinish?.(textStep("too-late"));
+
+    await vi.waitFor(() => expect(reported).toHaveBeenCalledTimes(1));
+    expect(reported.mock.calls[0]?.[0]).toMatchObject({ stage: "step" });
+  });
+
   it.each(["throws", "rejects", "pending"])(
     "does not wait for a reporter that %s",
     async (behavior) => {
@@ -838,6 +930,7 @@ describe("stream recording lifecycle", () => {
 
   it("preserves a native model failure and marks the recording failed", async () => {
     const api = installTestApi();
+    enforceTerminalSessionTransitions();
     const modelError = new Error("native model stream failed");
     const callerError = vi.fn();
     const recorded = new KitaruAgent(failingAgent(modelError), {
@@ -862,6 +955,41 @@ describe("stream recording lifecycle", () => {
     );
     expect(callerError).toHaveBeenCalledTimes(1);
     expect(callerError.mock.calls[0]?.[0].error).toBe(modelError);
+    const calls = api.calls;
+    const failedModelIndex = calls.findIndex(
+      (call) =>
+        call.method === "POST" &&
+        Array.isArray(call.body?.nodes) &&
+        call.body.nodes.some(
+          (node) =>
+            typeof node === "object" &&
+            node !== null &&
+            (node as Record<string, unknown>).node_type === "llm_call" &&
+            (node as Record<string, unknown>).status === "failed",
+        ),
+    );
+    const failedSessionIndex = calls.findIndex(
+      (call) => call.method === "PATCH" && call.body?.status === "failed",
+    );
+    expect(failedModelIndex).toBeGreaterThan(-1);
+    expect(failedSessionIndex).toBeGreaterThan(failedModelIndex);
+    const failedModelNodes = calls[failedModelIndex]?.body?.nodes;
+    const failedModel = (
+      Array.isArray(failedModelNodes) ? failedModelNodes : []
+    ).find(
+      (node) =>
+        typeof node === "object" &&
+        node !== null &&
+        (node as Record<string, unknown>).node_type === "llm_call",
+    );
+    expect(failedModel).toMatchObject({
+      error: "Mastra stream failed",
+      status: "failed",
+    });
+    expect(api.calls[failedSessionIndex]?.body).toMatchObject({
+      error: "Mastra stream failed",
+      status: "failed",
+    });
     expect(
       api.calls.some(
         (call) => call.method === "PATCH" && call.body?.status === "completed",
@@ -929,11 +1057,51 @@ describe("stream recording lifecycle", () => {
         ).toHaveLength(1),
       );
       expect(api.calls.at(-1)?.body).toMatchObject({
-        error: "wrapped onError model failure",
+        error: "Mastra stream failed",
         status: "failed",
       });
     },
   );
+
+  it("closes an error-only stream without waiting for a failed step", async () => {
+    const api = installTestApi();
+    const modelError = Object.assign(new Error("Bearer private-token"), {
+      name: "MastraTimeoutError",
+    });
+    const nativeResult = { native: true };
+    const agent = Object.assign(new FakeAgent(), {
+      async stream(_messages: unknown, options: RuntimeStreamOptions = {}) {
+        await options.onError?.({ error: modelError });
+        return nativeResult;
+      },
+    });
+    const callerError = vi.fn();
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "timeout-model",
+    });
+
+    await expect(
+      recorded.stream("private prompt", { onError: callerError }),
+    ).resolves.toBe(nativeResult);
+    await vi.waitFor(
+      () =>
+        expect(
+          api.calls.filter(
+            (call) => call.method === "PATCH" && call.body?.status === "failed",
+          ),
+        ).toHaveLength(1),
+      { timeout: 2_000 },
+    );
+
+    expect(callerError).toHaveBeenCalledWith({ error: modelError });
+    expect(api.calls.at(-1)?.body).toMatchObject({
+      error: "Mastra stream failed (MastraTimeoutError)",
+      status: "failed",
+    });
+    expect(JSON.stringify(api.calls)).not.toContain("private-token");
+  });
 
   it("preserves native abort behavior and never overwrites failure with success", async () => {
     const api = installTestApi();
@@ -963,7 +1131,7 @@ describe("stream recording lifecycle", () => {
     ).toBe(false);
   });
 
-  it("does not fabricate completion when the caller cancels early", async () => {
+  it("records Mastra's background completion after the caller cancels early", async () => {
     const api = installTestApi();
     const recorded = new KitaruAgent(cancellableAgent(), {
       agentId: AGENT_ID,
@@ -973,14 +1141,15 @@ describe("stream recording lifecycle", () => {
     const output = await recorded.stream("hello");
     const reader = output.textStream.getReader();
     const cancellation = reader.cancel("stop reading");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
-    expect(
-      api.calls.some(
-        (call) => call.method === "PATCH" && call.body?.status === "completed",
-      ),
-    ).toBe(false);
     await cancellation;
+    await vi.waitFor(() =>
+      expect(
+        api.calls.some(
+          (call) =>
+            call.method === "PATCH" && call.body?.status === "completed",
+        ),
+      ).toBe(true),
+    );
   });
 
   it("rejects root initialization before model execution and preserves the setup error", async () => {
@@ -1015,6 +1184,7 @@ describe("stream recording lifecycle", () => {
   });
 
   it("captures real recalled context before initialization failure prevents model execution", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const memory = new StreamHistoryMemory();
     const threadId = "stream-context";
     const resourceId = "resource";
@@ -1034,7 +1204,7 @@ describe("stream recording lifecycle", () => {
         },
       ],
     });
-    installTestApi();
+    const api = installTestApi();
     wrapFetch(
       ({ method, path }) => method === "POST" && path.endsWith("/nodes"),
     );
@@ -1060,12 +1230,28 @@ describe("stream recording lifecycle", () => {
       requestedModelId: "memory-model",
     });
 
+    const callerError = vi.fn();
+
     const output = await recorded.stream("which color?", {
       memory: { resource: resourceId, thread: threadId },
+      onError: callerError,
     });
-    await expect(output.getFullOutput()).rejects.toThrow("capture failed");
+    const channels = await errorChannels(output, "aggregate");
+    expect(channels.aggregate).toMatchObject({
+      message: expect.stringContaining("capture failed"),
+    });
+    expect(channels.text).not.toBe("timeout");
+    expect(callerError).toHaveBeenCalled();
     expect(recall).toHaveBeenCalled();
     expect(modelCalls).toBe(0);
+    const recordedInput = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    )?.body?.inputs;
+    expect(recordedInput).toMatchObject({
+      mastra_conversation_context: { complete: true, source: "recalled" },
+      supplied_messages: "which color?",
+    });
+    expect(JSON.stringify(recordedInput)).toContain("remember blue");
   });
 
   it("rejects session creation before model execution", async () => {
@@ -1141,7 +1327,7 @@ describe("stream recording lifecycle", () => {
     expect(aggregate).toMatchObject({ cause: hookError });
     expect(onRecordingError).not.toHaveBeenCalled();
     expect(api.calls.at(-1)?.body).toMatchObject({
-      error: "caller finish failed",
+      error: "Mastra stream failed",
       status: "failed",
     });
   });
@@ -1218,7 +1404,7 @@ describe("stream recording lifecycle", () => {
     expect(aggregate).toMatchObject({ cause: hookError });
     expect(onRecordingError).not.toHaveBeenCalled();
     expect(api.calls.at(-1)?.body).toMatchObject({
-      error: "caller step failed",
+      error: "Mastra stream failed",
       status: "failed",
     });
   });
