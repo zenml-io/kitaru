@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { ImageResponse } from "@takumi-rs/image-response";
 import { notFound } from "next/navigation";
 import { getPageImage, source } from "@/lib/source";
@@ -92,7 +94,7 @@ function KitaruOgImage({
             borderRadius: "100px",
             backgroundColor: "rgba(251, 232, 218, 0.2)",
             color: orange50,
-            fontFamily: "Geist Mono",
+            fontFamily: "JetBrains Mono",
             fontSize: "18px",
             fontWeight: 500,
             letterSpacing: "0.08em",
@@ -115,6 +117,7 @@ function KitaruOgImage({
           <p
             style={{
               margin: 0,
+              fontFamily: "Rethink Sans",
               fontSize: "68px",
               fontWeight: 600,
               lineHeight: 1.1,
@@ -129,6 +132,7 @@ function KitaruOgImage({
             style={{
               margin: 0,
               marginTop: "18px",
+              fontFamily: "Rethink Sans",
               fontSize: "30px",
               lineHeight: 1.35,
               color: sand100,
@@ -153,7 +157,7 @@ function KitaruOgImage({
           <p
             style={{
               margin: 0,
-              fontFamily: "Geist Mono",
+              fontFamily: "JetBrains Mono",
               fontSize: "18px",
               fontWeight: 500,
               letterSpacing: "0.08em",
@@ -169,6 +173,25 @@ function KitaruOgImage({
 }
 
 export const revalidate = false;
+
+// The same Google Fonts the site itself loads via next/font, as static TTFs so
+// the image renderer can embed them at build time.
+const fontsDir = join(process.cwd(), "app/og/fonts");
+
+async function loadFonts() {
+  const files = [
+    { name: "Rethink Sans", file: "RethinkSans-Regular.ttf", weight: 400 },
+    { name: "Rethink Sans", file: "RethinkSans-SemiBold.ttf", weight: 600 },
+    { name: "JetBrains Mono", file: "JetBrainsMono-Medium.ttf", weight: 500 },
+  ];
+  return Promise.all(
+    files.map(async ({ name, file, weight }) => ({
+      name,
+      weight,
+      data: await readFile(join(fontsDir, file)),
+    })),
+  );
+}
 
 export async function GET(
   _req: Request,
@@ -187,6 +210,7 @@ export async function GET(
       width: 1200,
       height: 630,
       format: "webp",
+      fonts: await loadFonts(),
     },
   );
 }

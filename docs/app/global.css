@@ -65,7 +65,8 @@ html {
 }
 
 body {
-  font-family: var(--font-dm-sans), "DM Sans", -apple-system, sans-serif;
+  font-family:
+    var(--font-rethink-sans), "Rethink Sans", -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -99,8 +100,8 @@ kbd,
 pre,
 .font-mono {
   font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+    var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, SFMono-Regular,
+    Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 /* ═══════════════════════════════════════════════════

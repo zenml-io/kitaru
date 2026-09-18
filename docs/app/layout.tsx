@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
-import { DM_Sans } from "next/font/google";
+import { JetBrains_Mono, Rethink_Sans } from "next/font/google";
 import { Provider } from "@/components/provider";
 import "./global.css";
 
-const dmSans = DM_Sans({
+const rethinkSans = Rethink_Sans({
   subsets: ["latin"],
-  variable: "--font-dm-sans",
+  variable: "--font-rethink-sans",
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
   display: "swap",
 });
 
@@ -31,7 +37,11 @@ export const metadata: Metadata = {
 
 export default function Layout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={dmSans.variable} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${rethinkSans.variable} ${jetbrainsMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script
           async
