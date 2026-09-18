@@ -42,6 +42,7 @@ interface StreamRecordingOptions {
 }
 
 const ERROR_STEP_GRACE_MS = 250;
+const MAX_STREAM_ERROR_NAME_LENGTH = 80;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -156,7 +157,9 @@ function getTripwireReason(value: unknown): string | undefined {
 
 function getSafeStreamError(error: unknown): Error {
   const name =
-    error instanceof Error && /^[A-Za-z][A-Za-z0-9]*Error$/.test(error.name)
+    error instanceof Error &&
+    error.name.length <= MAX_STREAM_ERROR_NAME_LENGTH &&
+    /^[A-Za-z][A-Za-z0-9_]*Error$/.test(error.name)
       ? error.name
       : undefined;
   return new Error(

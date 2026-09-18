@@ -1063,45 +1063,60 @@ describe("stream recording lifecycle", () => {
     },
   );
 
-  it("closes an error-only stream without waiting for a failed step", async () => {
-    const api = installTestApi();
-    const modelError = Object.assign(new Error("Bearer private-token"), {
-      name: "MastraTimeoutError",
-    });
-    const nativeResult = { native: true };
-    const agent = Object.assign(new FakeAgent(), {
-      async stream(_messages: unknown, options: RuntimeStreamOptions = {}) {
-        await options.onError?.({ error: modelError });
-        return nativeResult;
-      },
-    });
-    const callerError = vi.fn();
-    const recorded = new KitaruAgent(agent, {
-      agentId: AGENT_ID,
-      apiUrl: "https://api.example",
-      requestedModelId: "timeout-model",
-    });
+  it.each([
+    {
+      errorName: "AI_APICallError",
+      expectedError: "Mastra stream failed (AI_APICallError)",
+      scenario: "AI SDK",
+    },
+    {
+      errorName: `A${"x".repeat(80)}Error`,
+      expectedError: "Mastra stream failed",
+      scenario: "oversized",
+    },
+  ])(
+    "records a bounded category for $scenario error-only streams",
+    async ({ errorName, expectedError }) => {
+      const api = installTestApi();
+      const modelError = Object.assign(new Error("Bearer private-token"), {
+        name: errorName,
+      });
+      const nativeResult = { native: true };
+      const agent = Object.assign(new FakeAgent(), {
+        async stream(_messages: unknown, options: RuntimeStreamOptions = {}) {
+          await options.onError?.({ error: modelError });
+          return nativeResult;
+        },
+      });
+      const callerError = vi.fn();
+      const recorded = new KitaruAgent(agent, {
+        agentId: AGENT_ID,
+        apiUrl: "https://api.example",
+        requestedModelId: "timeout-model",
+      });
 
-    await expect(
-      recorded.stream("private prompt", { onError: callerError }),
-    ).resolves.toBe(nativeResult);
-    await vi.waitFor(
-      () =>
-        expect(
-          api.calls.filter(
-            (call) => call.method === "PATCH" && call.body?.status === "failed",
-          ),
-        ).toHaveLength(1),
-      { timeout: 2_000 },
-    );
+      await expect(
+        recorded.stream("private prompt", { onError: callerError }),
+      ).resolves.toBe(nativeResult);
+      await vi.waitFor(
+        () =>
+          expect(
+            api.calls.filter(
+              (call) =>
+                call.method === "PATCH" && call.body?.status === "failed",
+            ),
+          ).toHaveLength(1),
+        { timeout: 2_000 },
+      );
 
-    expect(callerError).toHaveBeenCalledWith({ error: modelError });
-    expect(api.calls.at(-1)?.body).toMatchObject({
-      error: "Mastra stream failed (MastraTimeoutError)",
-      status: "failed",
-    });
-    expect(JSON.stringify(api.calls)).not.toContain("private-token");
-  });
+      expect(callerError).toHaveBeenCalledWith({ error: modelError });
+      expect(api.calls.at(-1)?.body).toMatchObject({
+        error: expectedError,
+        status: "failed",
+      });
+      expect(JSON.stringify(api.calls)).not.toContain("private-token");
+    },
+  );
 
   it("preserves native abort behavior and never overwrites failure with success", async () => {
     const api = installTestApi();
