@@ -4,7 +4,7 @@ import { ImageResponse } from "@takumi-rs/image-response";
 import { notFound } from "next/navigation";
 import { getPageImage, source } from "@/lib/source";
 
-// Colours follow the brand Figma "Template - Release / Kitaru" social card.
+// Colors follow the brand Figma "Template - Release / Kitaru" social card.
 const orange600 = "#b65915";
 const orange50 = "#fcf7f3";
 const cream = "#f6f9f1";
