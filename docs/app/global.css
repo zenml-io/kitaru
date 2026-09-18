@@ -172,28 +172,6 @@ figure:has(> pre) code span {
 }
 
 /* ═══════════════════════════════════════════════════
-   Logo Ring Animation
-   ═══════════════════════════════════════════════════ */
-
-@keyframes ring-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.logo-ring {
-  transform-origin: 85px 85px;
-  animation: ring-spin 12s linear infinite;
-}
-
-.nav-title:hover .logo-ring {
-  animation-duration: 3s;
-}
-
-/* ═══════════════════════════════════════════════════
    Nav Glass Enhancement
    FumaDocs mobile header already has backdrop-blur-sm;
    strengthen it to match landing page feel
