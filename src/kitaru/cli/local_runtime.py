@@ -576,8 +576,11 @@ async def _validate_container_runtime(runner: ContainerCommandRunner) -> None:
             details=_runtime_details(info),
         )
     if runner.runtime == "podman":
-        connection_uri = os.environ.get("CONTAINER_HOST")
-        if connection_uri is None:
+        connection_name = os.environ.get("CONTAINER_CONNECTION")
+        connection_uri = (
+            None if connection_name is not None else os.environ.get("CONTAINER_HOST")
+        )
+        if connection_name is not None or connection_uri is None:
             connections = await runner.run(
                 "system", "connection", "list", "--format", "json", timeout=15
             )
@@ -589,7 +592,6 @@ async def _validate_container_runtime(runner: ContainerCommandRunner) -> None:
                 )
             try:
                 configured_connections = json.loads(connections.stdout or "[]")
-                connection_name = os.environ.get("CONTAINER_CONNECTION")
                 connection_uri = next(
                     (
                         connection["URI"]

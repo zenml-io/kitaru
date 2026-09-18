@@ -627,6 +627,35 @@ async def test_remote_podman_connection_is_rejected(uri: str) -> None:
         await local_runtime._validate_container_runtime(runner)
 
 
+async def test_podman_named_connection_takes_precedence_over_host(
+    monkeypatch,
+) -> None:
+    """A named Podman connection overrides the configured container host."""
+    runner = FakeDockerRunner(runtime="podman")
+    runner.results[("system", "connection", "list", "--format", "json")] = (
+        ProcessResult(
+            0,
+            json.dumps(
+                [
+                    {
+                        "Name": "remote",
+                        "URI": "ssh://root@podman.example.com/run/podman/podman.sock",
+                        "Default": False,
+                    }
+                ]
+            ),
+            "",
+        )
+    )
+    monkeypatch.setenv("CONTAINER_CONNECTION", "remote")
+    monkeypatch.setenv("CONTAINER_HOST", "unix:///run/user/501/podman.sock")
+
+    with pytest.raises(CLIError, match="remote daemon"):
+        await local_runtime._validate_container_runtime(runner)
+
+    assert ("system", "connection", "list", "--format", "json") in runner.calls
+
+
 async def test_developer_override_must_exist_locally(
     runtime_paths, monkeypatch
 ) -> None:
