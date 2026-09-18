@@ -11,7 +11,7 @@ The independently versioned `kitaru-post-import-insights` package supplies two a
 
 ## Set up a worker and import
 
-Start with a connected Kitaru installation and a registered agent. See [Installation](../getting-started/installation.md) for a local Docker server or an existing team server, and [Importing sessions](importing-sessions.md) for the trace format and agent setup. Keep the server and worker on the same Kitaru version.
+Start with a connected Kitaru installation and a registered agent. See [Installation](../getting-started/installation.md) for a local server or an existing team server, and [Importing sessions](importing-sessions.md) for the trace format and agent setup. Keep the server and worker on the same Kitaru version.
 
 In a project environment, install the CLI and worker and connect locally:
 

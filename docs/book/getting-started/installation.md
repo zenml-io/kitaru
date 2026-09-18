@@ -19,7 +19,7 @@ That one command:
 4. Prints the two ways to get a server, and stops:
 
 ```
-uv run kitaru login --local    local, in Docker. Free, open source.
+uv run kitaru login --local    local, with Docker or Podman. Free, open source.
 uv run kitaru login            managed cloud. 14-day trial, no credit card required.
 ```
 
@@ -48,7 +48,7 @@ Works on macOS, Linux, WSL, and Git Bash on Windows. Running it again upgrades. 
 uv add "kitaru[cli,mcp,worker]" kitaru-pydantic-ai    # into this project; pick your adapter
 uv run kitaru setup                                   # skills + MCP server for every coding agent found
 uv run kitaru login                                   # managed cloud; 14-day trial, no credit card required
-uv run kitaru login --local                           # local server in Docker
+uv run kitaru login --local                           # local server in Docker or Podman
 # or: uv run kitaru login <team-url>                  # an existing managed or self-hosted workspace
 ```
 
@@ -66,13 +66,13 @@ Set up Kitaru in this repository by following https://kitaru.ai/install.md. Use 
 kitaru doctor        # or: uvx kitaru doctor, before you open a new terminal
 ```
 
-It checks the CLI, the server connection, authentication, and whether the skills are installed (`kitaru setup` installs them if not). Server connection and authentication fail until you have run `kitaru login --local` (needs [Docker](https://docs.docker.com/get-started/get-docker/)) or `kitaru login` for the managed cloud; the sections below cover both.
+It checks the CLI, the server connection, authentication, and whether the skills are installed (`kitaru setup` installs them if not). Server connection and authentication fail until you have run `kitaru login --local` (see [The local server](#the-local-server)) or `kitaru login` for the managed cloud; the sections below cover both.
 
 Then read the [Quickstart](quickstart.md). It is written as prompts for your coding agent, and everything it needs is now in place.
 
 ## The local server
 
-The server is FastAPI + Postgres, and the CLI can run both for you. All it needs is [Docker](https://docs.docker.com/get-started/get-docker/) with the [Compose v2 plugin](https://docs.docker.com/compose/install/):
+The server is FastAPI + Postgres, and the CLI can run both for you. Install [Docker](https://docs.docker.com/get-started/get-docker/) with the [Compose v2 plugin](https://docs.docker.com/compose/install/), or [Podman](https://podman.io/docs/installation) with Compose support:
 
 ```bash
 kitaru login --local
@@ -86,7 +86,7 @@ kitaru logout                # stop the containers; the database persists
 kitaru logout --volumes      # stop and delete the database (a clean reset)
 ```
 
-After upgrading the `kitaru` package, upgrade the local server to match with `kitaru login --local --upgrade`; a plain login deliberately never replaces the server image. Prefer to manage Docker yourself, or need a shared deployment with your own Postgres, real auth, and TLS? See [Docker](../deploy/docker.md) and [Deploy Kitaru](../deploy/README.md).
+After upgrading the `kitaru` package, upgrade the local server to match with `kitaru login --local --upgrade`; a plain login deliberately never replaces the server image. Prefer to manage the containers yourself, or need a shared deployment with your own Postgres, real auth, and TLS? See [Docker](../deploy/docker.md) and [Deploy Kitaru](../deploy/README.md).
 
 ## Connect to managed cloud or a team server
 

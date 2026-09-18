@@ -1,0 +1,1 @@
+- Added Podman support for CLI-managed local deployments created with `kitaru login --local`.

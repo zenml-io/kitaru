@@ -16,7 +16,7 @@ Want to see the complete Kitaru loop without setting anything up first? [Watch t
 
 - [Git](https://git-scm.com/)
 - [uv](https://docs.astral.sh/uv/)
-- Docker, only if you use the optional local Kitaru server
+- Docker or Podman, only if you use the optional local Kitaru server
 - Node.js and `npx`, for installing the optional coding-agent skills
 
 No model-provider or Langfuse credentials are needed for the checked-in import.
@@ -50,7 +50,7 @@ uv run kitaru session list \
 
 If the agent and its ten imported sessions already exist, skip to [Continue with a coding agent](#continue-with-a-coding-agent). The guided tour will inspect and resume that state before it creates anything. If neither exists, continue with the registration below. If only part of the setup exists, or `returns-resolver` belongs to another project, select a different server so the fixed example names do not collide.
 
-If no usable server is selected and you want an isolated local server for the example, start and select one with Docker:
+If no usable server is selected and you want an isolated local server for the example, start and select one with Docker or Podman:
 
 ```bash
 uv run kitaru login --local

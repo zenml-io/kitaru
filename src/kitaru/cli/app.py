@@ -667,7 +667,7 @@ def _add_parameter_help(function: F, spec: CommandSpec) -> None:
                 "boolean",
                 "option",
                 False,
-                "Provision and use a local Docker deployment.",
+                "Provision and use a local container deployment.",
             ),
             ParameterSpec(
                 "--port",
@@ -856,7 +856,7 @@ async def local_logs(
     tail: int = 100,
     follow: bool = False,
 ) -> CommandResult:
-    """Read or follow logs from the local Docker Compose deployment."""
+    """Read or follow logs from the local container deployment."""
     if follow and get_output_context().mode == "json":
         raise CLIError(
             "invalid_arguments",

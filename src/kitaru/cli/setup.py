@@ -98,7 +98,7 @@ async def setup(
         server: Server URL the MCP server should target. Defaults to the
             same resolution every other command uses (``KITARU_API_URL``,
             then the stored server), then ``KITARU_LOCAL_URL``, then the
-            local Docker server.
+            local container server.
         mode: MCP capability mode.
         install_skills: Whether to install the agent skills.
         register_mcp: Whether to register the MCP server.
@@ -296,7 +296,7 @@ def _resolve_server_url(explicit: str | None) -> str:
 
     Uses the same resolution as every other command (explicit option,
     ``KITARU_API_URL``, stored server), then ``KITARU_LOCAL_URL`` as the
-    installer always has, then the default local Docker server.
+    installer always has, then the default local container server.
     """
     try:
         return resolve_target(explicit_server=explicit).server_url

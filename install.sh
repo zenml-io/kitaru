@@ -21,7 +21,7 @@
 #      found (printing the JSON for everything else). Re-run `kitaru setup`
 #      after installing a new coding agent. Kitaru releases before `setup`
 #      existed get the same steps done by this script instead.
-#   4. Stops there and prints the two ways to get a server: local in Docker
+#   4. Stops there and prints the two ways to get a server: local in Docker or Podman
 #      (`kitaru login --local`) or the managed cloud (`kitaru login`). Login
 #      is a decision, so the script does not make it for you.
 #
@@ -479,7 +479,7 @@ if [ -n "$KITARU_SERVER" ]; then
 else
   say "  Next, pick where your Kitaru server lives:"
   say ""
-  say "    ${C_BOLD}$K login --local${C_RESET}    local, in Docker. Free, open source."
+  say "    ${C_BOLD}$K login --local${C_RESET}    local, with Docker or Podman. Free, open source."
   say "    ${C_BOLD}$K login${C_RESET}            managed cloud. 14-day trial, no credit card required."
 fi
 say ""

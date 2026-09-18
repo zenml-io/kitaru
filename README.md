@@ -44,7 +44,7 @@ Kitaru turns that history into something you can test:
 
 ## ⚡ Get started
 
-**1. Install.** Open a terminal in your agent's repository and run one line. It adds Kitaru to that project's environment with `uv` (the worker that replays your agent has to live next to its dependencies), installs the coding-agent skills, and registers the MCP server with Claude Code, Codex, Cursor, and Windsurf (that part is `kitaru setup`, re-run it after installing a new editor). It ends by printing the two ways to get a server: `kitaru login --local` (Docker, free) or `kitaru login` for the managed cloud (14-day trial, no credit card required).
+**1. Install.** Open a terminal in your agent's repository and run one line. It adds Kitaru to that project's environment with `uv` (the worker that replays your agent has to live next to its dependencies), installs the coding-agent skills, and registers the MCP server with Claude Code, Codex, Cursor, and Windsurf (that part is `kitaru setup`, re-run it after installing a new editor). It ends by printing the two ways to get a server: `kitaru login --local` (Docker or Podman, free) or `kitaru login` for the managed cloud (14-day trial, no credit card required).
 
 ```bash
 curl -fsSL https://kitaru.ai/install | bash
@@ -56,12 +56,12 @@ Already in Claude Code, Codex, or Cursor? Open the repository there and paste th
 Set up Kitaru in this repository by following https://kitaru.ai/install.md. Use the one-line installer and tell me what it did.
 ```
 
-Prefer to do it by hand? Add Kitaru to your project's environment, then choose managed cloud with `uv run kitaru login`, or provision the local FastAPI + Postgres server with Docker:
+Prefer to do it by hand? Add Kitaru to your project's environment, then choose managed cloud with `uv run kitaru login`, or provision the local FastAPI + Postgres server with Docker or Podman:
 
 ```bash
 uv add "kitaru[cli,worker,mcp]" kitaru-pydantic-ai    # or: pip install
 uv run kitaru login                                   # managed cloud; 14-day trial, no credit card required
-uv run kitaru login --local                           # local server in Docker
+uv run kitaru login --local                           # local server in Docker or Podman
 # or: uv run kitaru login <your-team-url>
 ```
 
