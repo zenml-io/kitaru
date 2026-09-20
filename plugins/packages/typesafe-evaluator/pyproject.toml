@@ -37,3 +37,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kitaru_typesafe_evaluator"]
+
+[tool.kitaru.artifact]
+import-module = "kitaru_typesafe_evaluator"
