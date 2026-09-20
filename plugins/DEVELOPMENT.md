@@ -282,6 +282,7 @@ Use the package directory and distribution name from this table:
 | `mastra-importer` | `kitaru-mastra-importer` | `python/kitaru-mastra-importer/vX.Y.Z` |
 | `openai-agents` | `kitaru-openai-agents` | `python/kitaru-openai-agents/vX.Y.Z` |
 | `pydantic-ai` | `kitaru-pydantic-ai` | `python/kitaru-pydantic-ai/vX.Y.Z` |
+| `typesafe-evaluator` | `kitaru-typesafe-evaluator` | `python/kitaru-typesafe-evaluator/vX.Y.Z` |
 
 Release only the distribution that contains the change. A change to any built-in evaluator releases the shared `kitaru-evaluator` distribution.
 

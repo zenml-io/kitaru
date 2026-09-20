@@ -22,16 +22,28 @@ from typing import Any
 
 import httpx2
 import pytest
+from typesafe_helpers import build_view_from_imported
 from typesafe_sdk import RetryPolicy, TypeSafeClient
 
 from kitaru.api_models.v1.session import SessionDetailResponse
-from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.task.evaluator import SessionView, call_evaluator
 from kitaru.task.importer import ImportedSession
 from kitaru_langfuse_importer.importer import parse
 from kitaru_typesafe_evaluator import judge as judge_module
 from kitaru_typesafe_evaluator.connection import TypeSafeConnection
 from kitaru_typesafe_evaluator.judge import judge
+
+_LIVE_TEST_ENV = "KITARU_TYPESAFE_LIVE_TEST"
+
+
+def _live_test_skip_reason() -> str | None:
+    """State what to set to run the live TypeSafe test, or None to run it."""
+    if os.environ.get(_LIVE_TEST_ENV) != "1":
+        return f"set {_LIVE_TEST_ENV}=1 to run the live TypeSafe test"
+    if not os.environ.get("TYPESAFE_API_KEY"):
+        return f"{_LIVE_TEST_ENV}=1 is set; also set TYPESAFE_API_KEY to run it"
+    return None
+
 
 PARAMS: dict[str, Any] = {
     "questions": {
@@ -150,7 +162,23 @@ def test_too_large_state_writes_unavailable_rows(
     ]
     explanation = results[0].explanation
     assert explanation is not None
-    assert "outcome" in explanation and "include" in explanation
+    assert explanation == (
+        "The 'outcome' state of this session is over jev's input limit. "
+        "Narrow it with include."
+    )
+
+
+def test_too_large_full_state_still_suggests_the_outcome_view(
+    fake_api: Callable[..., list[dict[str, Any]]],
+) -> None:
+    fake_api(400, {"detail": {"error_type": "max_tokens_exceeded"}})
+    results = judge(_view(), **(PARAMS | {"state": "full"}))
+    explanation = results[0].explanation
+    assert explanation is not None
+    assert explanation == (
+        "The 'full' state of this session is over jev's input limit. "
+        "Use the 'outcome' view or narrow it with include."
+    )
 
 
 def test_other_bad_request_fails_the_task(
@@ -213,7 +241,7 @@ TRACES = (
 
 
 @pytest.mark.skipif(
-    not os.environ.get("TYPESAFE_API_KEY"), reason="needs a live TypeSafe key"
+    _live_test_skip_reason() is not None, reason=_live_test_skip_reason() or ""
 )
 def test_live_flags_the_invented_refund_timelines() -> None:
     """jev finds the five quickstart replies that promise days no tool returned."""
@@ -229,21 +257,8 @@ def test_live_flags_the_invented_refund_timelines() -> None:
     flagged: list[str] = []
     for imported in parse(TRACES.read_bytes(), {"source_instance": "live-test"}):
         assert isinstance(imported, ImportedSession), imported
-        flat: list[Any] = []
-        stack = list(reversed(imported.nodes))
-        while stack:
-            node = stack.pop()
-            flat.append(node)
-            stack.extend(reversed(node.children))
-        nodes = [
-            SessionNodeResponse.model_construct(**n.model_dump(exclude={"children"}))
-            for n in flat
-        ]
-        session = SessionDetailResponse.model_construct(
-            inputs=imported.inputs, outputs=imported.outputs, input_text_selector=None
-        )
         result = judge(
-            SessionView(session=session, nodes=nodes),
+            build_view_from_imported(imported),
             questions={"invented_timeline": question},
         )[0]
         if result.passed is not True:

@@ -15,7 +15,7 @@
 
 import json
 import re
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeResponse
@@ -47,16 +47,22 @@ def _resolve_text(document: Any, pointer: str | None) -> Any:
     return value if found else None
 
 
-def _started_at(node: SessionNodeResponse) -> datetime:
-    """Return a node's start time, for use as a sort key on already-filtered nodes."""
-    assert node.started_at is not None
-    return node.started_at
-
-
 def _sort_nodes(nodes: list[SessionNodeResponse]) -> list[SessionNodeResponse]:
     """Order nodes by start time, nodes without one kept last in recorded order."""
-    timed = sorted((n for n in nodes if n.started_at is not None), key=_started_at)
-    return [*timed, *(n for n in nodes if n.started_at is None)]
+    # Pair each timed node with its original index so the sort key never needs
+    # to narrow `started_at` back from `datetime | None`, and ties break by
+    # recorded order instead of relying on Python's stable-sort side effect.
+    timed = sorted(
+        (
+            (node.started_at, index, node)
+            for index, node in enumerate(nodes)
+            if node.started_at is not None
+        ),
+        key=lambda item: item[:2],
+    )
+    return [node for _, _, node in timed] + [
+        node for node in nodes if node.started_at is None
+    ]
 
 
 def _find_request(session: SessionView, nodes: list[SessionNodeResponse]) -> Any:

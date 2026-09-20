@@ -14,13 +14,17 @@
 """Tests for the state jev receives."""
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
+from typesafe_helpers import build_view_from_imported
 
 from kitaru.api_models.v1.session import SessionDetailResponse
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeResponse
 from kitaru.task.evaluator import SessionView
+from kitaru.task.importer import ImportedSession
+from kitaru_langfuse_importer.importer import parse
 from kitaru_typesafe_evaluator.params import JudgeParams
 from kitaru_typesafe_evaluator.state import build_state, check_params_against_view
 
@@ -213,6 +217,35 @@ def test_question_must_not_reference_a_field_outside_the_view() -> None:
     )
     with pytest.raises(ValueError, match=r"obeys.*system_prompt.*full"):
         check_params_against_view(params)
+
+
+TRACES = (
+    Path(__file__).parents[3]
+    / "examples/python/pydantic_ai_ticket_resolver/traces/langfuse-traces.jsonl"
+)
+
+
+def test_outcome_view_of_a_real_imported_session_reaches_the_refund() -> None:
+    """`build_state` must work on a session shaped by a real importer, not a fixture."""
+    imported = next(
+        session
+        for session in parse(TRACES.read_bytes(), {"source_instance": "state-test"})
+        if isinstance(session, ImportedSession)
+    )
+    state = build_state(build_view_from_imported(imported), _params())
+
+    assert isinstance(state["request"], str) and state["request"]
+    assert "Merino Runners" in state["request"]
+    assert "turns" not in state["request"]
+
+    assert [call["tool"] for call in state["tool_calls"]] == [
+        "lookup_order",
+        "get_return_policy",
+        "issue_refund",
+    ]
+    assert all(call["result"] is not None for call in state["tool_calls"])
+
+    assert state["final_answer"]["action"] == "refund"
 
 
 def test_backticked_text_that_is_not_a_field_is_ignored() -> None:

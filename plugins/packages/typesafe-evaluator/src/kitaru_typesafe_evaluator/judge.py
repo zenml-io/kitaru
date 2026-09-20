@@ -72,10 +72,17 @@ def judge(session: SessionView, **params: Any) -> list[EvaluationResult]:
         # bug in the params or the request and would repeat on every session.
         if not _is_too_large(error):
             raise
+        # A run already on the 'outcome' view has no smaller built-in view left
+        # to fall back to, so only suggest narrowing it further with include.
+        hint = (
+            "Use the 'outcome' view or narrow it with include."
+            if config.state == "full"
+            else "Narrow it with include."
+        )
         return build_unavailable_results(
             config.questions,
-            f"The '{config.state}' state of this session is over jev's input limit. "
-            "Use the 'outcome' view or narrow it with include.",
+            f"The '{config.state}' state of this session is over jev's input "
+            f"limit. {hint}",
         )
     except (TypeSafeAuthenticationError, TypeSafePermissionDeniedError) as error:
         raise RuntimeError(f"TypeSafe rejected {API_KEY_ENV}. {_KEY_HELP}") from error
