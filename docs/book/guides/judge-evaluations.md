@@ -19,7 +19,7 @@ The model is jev, from TypeSafe. It takes a piece of JSON state and a set of typ
 
 Measured on ten sessions from the quickstart returns agent: about 270 ms per call, and 357 ms for a state of 17,931 tokens. Thirty-two calls used 59,738 input tokens, about $0.0025 at TypeSafe's list price of $0.042 per million input tokens. That is cheap enough to run on every session rather than on a sample.
 
-Cheap and steady matters most for [replay](replay-and-overrides.md). When you replay 50 sessions against a cheaper model and the pass rate moves from 82% to 78%, you need to be sure the judge did not cause those four points. A judge whose repeat answers move by 0.02 lets you attribute the change to the model swap. A judge that moves by 0.15 does not.
+Cheap and steady matters most for [replay](replay-and-overrides.md). Say you replay 50 sessions against a cheaper model and the pass rate moves from 82% to 78%. You need to be sure the judge did not cause those four points. A judge whose repeat answers move by 0.02 lets you attribute the change to the model swap. A judge that moves by 0.15 does not.
 
 TypeSafe announced jev and its other System One models on [their blog](https://typesafe.ai/blog/introducing-system-one-models-and-jev). [LangChain](https://www.langchain.com/blog/jev-agent-evals-langsmith) and [Braintrust](https://www.braintrust.dev/blog/evaluate-agent-responses-with-jev) have both published their own measurements of jev as a judge. Those are each vendor's numbers on each vendor's data, not ours.
 
@@ -55,6 +55,10 @@ kitaru evaluator register typesafe-judge \
   --provider typesafe \
   --connection-schema connection-schema.json
 ```
+
+This file holds no secret. It declares a shape, and the shape is "this plugin needs one secret string called `TYPESAFE_API_KEY`". Registering the evaluator with it tells Kitaru what to ask you for later, nothing more. Never put your key in this file.
+
+You type the key itself at a hidden prompt when you run `kitaru connection create`, and the server keeps it as an encrypted secret, the same way Kitaru's importers and analyzers hold their provider credentials.
 
 Registering creates version 1 of `typesafe-judge`. The worker installs the package itself the first time it claims one of these tasks.
 
@@ -102,6 +106,8 @@ Write your questions to a file. Keep that file in version control next to the co
 }
 ```
 
+`noul` is jev's name for a yes/no question. jev answers one with the probability that the answer is yes, not with the word "yes" or the word "no".
+
 ```bash
 kitaru session evaluate "$SESSION_ID" \
   --evaluator typesafe-judge@latest \
@@ -129,7 +135,7 @@ The evaluator builds one JSON document from the session and sends it as the stat
 | Field | What it holds |
 |---|---|
 | `request` | What the user asked for. |
-| `tool_calls` | Every tool call in recorded order, each with `tool`, `arguments`, `result`, and `error`. |
+| `tool_calls` | Every tool call in start-time order, with any call that recorded no start time last, each with `tool`, `arguments`, `result`, and `error`. |
 | `final_answer` | What the agent returned. A failed session with no answer sends `null` here. |
 
 `full` has those three plus two more:
@@ -141,7 +147,9 @@ The evaluator builds one JSON document from the session and sends it as the stat
 
 Those five names are the contract. Your questions refer to state fields by putting the name in backticks, as `` `final_answer` `` and `` `tool_calls` `` do in the example above, and Kitaru will not rename them, because a rename would leave every question you have written still running and quietly answering about something else.
 
-Both views are built only from fields that every adapter and importer already fills in, so a question written against a Pydantic AI recording works unchanged on a Langfuse import. A question written for `outcome` also works unchanged on `full`. Every question in one run shares one view, because one run is one call to jev.
+A question written for `outcome` works unchanged on `full`, because `full` only adds fields. Every question in one run shares one view, because one run is one call to jev.
+
+Both views are built from the generic session fields: node type, tool name, inputs, outputs, error, and the text selectors. How completely those are filled depends on the adapter or importer that recorded the session, so read one session's state from a new source before you trust a question against the rest of them.
 
 ### Narrowing a view with `include`
 
@@ -189,8 +197,8 @@ Each question takes:
 |---|---|---|
 | `type` | `noul` (yes/no), `choice` (one label from a set), or `score` (a position on ordered levels). | Required. |
 | `instructions` | The question text, passed to jev as written. | Required. |
-| `criteria` | For `choice`, a map of label to description, 2 to 255 labels. For `score`, an ordered list of 2 to 10 level descriptions. Not accepted on `noul`. | Required for `choice` and `score`. |
-| `pass_when` | For `noul`, `"yes"` or `"no"`. For `choice`, the list of labels that count as passing. Not allowed on `score`. | Unset, so the result is descriptive and `passed` stays unset. |
+| `criteria` | For `choice`, a map of label to description, 2 to 255 labels; a label's description may be `null` when the label speaks for itself. For `score`, an ordered list of 2 to 10 level descriptions. Not accepted on `noul`. | Required for `choice` and `score`. |
+| `pass_when` | For `noul`, `"yes"` or `"no"`. For `choice`, the list of labels that count as passing, and every label you list must also appear in `criteria`. Not allowed on `score`. | Unset, so the result is descriptive and `passed` stays unset. |
 | `decisive_at` | `noul` only. How sure jev must be before the result is a verdict. Above 0.5 and at most 1. Exactly 0.5 is rejected, because pass and fail would overlap. | `0.8` |
 
 Pydantic models check all of this before anything is sent. A bad params block fails the task with the validation message and costs nothing.
@@ -228,6 +236,8 @@ That is not jev being unreliable. It is the question being three questions at on
 | Does `final_answer` promise a number of days that no `tool_calls` result contains? | 0.94 |
 
 Repeats of those moved by at most 0.02. Each one asks jev to look for one thing and say whether it is there.
+
+Trading one wide question for several narrow yes/no checks is the advice in [Hamel Husain's post on binary pass/fail evals](https://hamel.dev/blog/posts/evals-faq/why-do-you-recommend-binary-passfail-evaluations-instead-of-1-5-ratings-likert-scales.html). His argument is that a binary label forces you to decide what you actually mean, and that nuance belongs in more sub-checks rather than in a wider scale. The numbers above are what that looks like on our own sessions.
 
 The third question then earned its keep. Checked against a plain text search of the ten replies, jev agreed on all ten sessions. Tickets 001, 003, 004, 007 and 009 promise the customer "3-5", "5-7" or "3-7" business days that no tool ever returned; jev scored those 0.94, 0.71, 0.88, 0.92 and 0.93. Ticket 010 says "within 30 days", which really is in the policy tool's result, and scored 0.05. The remaining four scored 0.02 to 0.04.
 

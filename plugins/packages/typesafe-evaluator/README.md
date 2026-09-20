@@ -29,6 +29,10 @@ Save the connection schema that ships in the wheel at `kitaru_typesafe_evaluator
 }
 ```
 
+This file holds no secret. It declares a shape, and the shape is "this plugin needs one secret string called `TYPESAFE_API_KEY`". Registering the evaluator with it tells Kitaru what to ask you for later, nothing more. Never put your key in this file.
+
+You type the key itself at a hidden prompt when you run `kitaru connection create`, and the server keeps it as an encrypted secret, the same way Kitaru's importers and analyzers hold their provider credentials.
+
 Then register the evaluator under a name you choose:
 
 ```bash
