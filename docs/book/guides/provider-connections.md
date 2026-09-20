@@ -1,5 +1,5 @@
 ---
-description: Store provider credentials once on the server and let importer and analyzer tasks pick them up automatically, instead of setting them in every worker's environment.
+description: Store provider credentials once on the server and let importer, analyzer, and evaluator tasks pick them up automatically, instead of setting them in every worker's environment.
 icon: plug
 ---
 
@@ -7,7 +7,7 @@ icon: plug
 
 Every import guide so far sets provider credentials in the worker's environment: `LANGFUSE_SECRET_KEY`, `LANGSMITH_API_KEY`, and so on. That works, but it ties every credential to one worker's process, and rotating a key means touching every worker that might claim an import task.
 
-A **connection** is the alternative: a server-side resource that holds a provider's credentials and non-secret values, so an importer or analyzer task carries them to whichever worker claims it. Like a [secret](../deploy/secrets.md), the sensitive values are encrypted at rest. Unlike a secret, a connection is scoped to one `provider` and can be marked the provider's default, so most imports and analyzers don't need to name one at all.
+A **connection** is the alternative: a server-side resource that holds a provider's credentials and non-secret values, so an importer, analyzer, or evaluator task carries them to whichever worker claims it. Like a [secret](../deploy/secrets.md), the sensitive values are encrypted at rest. Unlike a secret, a connection is scoped to one `provider` and can be marked the provider's default, so most imports, analyzers, and evaluators don't need to name one at all.
 
 ## Create one from a plugin schema
 
@@ -61,7 +61,7 @@ A provider has at most one default connection. Setting a new one clears the prev
 
 `kitaru connection list`, `get CONNECTION`, and `update CONNECTION [--set ...] [--set-secret ...]` round out management. An update replaces the whole `env` and secret maps, so `--set` sends the stored `env` with the keys you name applied on top and keeps the other values, while `--set-secret` sends exactly the secret values you name and replaces every stored one. Responses never carry secret values, only a `secret_keys` list naming which keys are set. Deleting a connection also deletes the secret holding its values, so `delete CONNECTION` requires `--force`.
 
-## Use one on an import or analyzer
+## Use one on an import, analyzer, or evaluator
 
 An import that fetches from a provider's API can name a connection explicitly:
 
@@ -92,15 +92,15 @@ An evaluator named on an import, experiment, replay, or evaluation can name its 
 
 ## Resolution
 
-Each importer and analyzer connection resolves when the import is created, in this order:
+A plugin connection resolves when its job is created, including evaluator jobs, in this order:
 
-1. The connection the importer or analyzer named.
+1. The connection explicitly named for that importer, analyzer, or evaluator.
 2. Otherwise, the default connection for that plugin's `provider`.
 3. Otherwise, nothing is injected, and the package reads the worker's own environment, exactly as it did before connections existed. Only a worker that declares the provider claims such a task, see [Worker credentials](#worker-credentials).
 
-Self-hosted, single-tenant deployments can keep doing that. A connection overrides the worker's environment, it is never required. A file import resolves no connection at all, since only an API import talks to the provider.
+Self-hosted, single-tenant deployments can keep doing that. A connection overrides the worker's environment, it is never required. The importer for a file upload resolves no connection, since it does not call a provider API. An analyzer or evaluator attached to that import can still need its own connection.
 
-The resolved importer connection is recorded on the import as `connection_id`. Each resolved analyzer connection is recorded in its analyzer config and copied to the analysis task. A default connection created after the import only applies to later imports. If a resolved connection is deleted before a worker claims the task, that task runs with nothing injected.
+The resolved importer connection is recorded on the import as `connection_id`. Each resolved analyzer connection is recorded in its analyzer config and copied to the analysis task. An evaluator connection is likewise recorded on its task at job creation. A default connection created afterward only applies to new jobs; it does not change the credentials label or connection of a pending task. To recover such a task, use a worker with the required credentials and selector, or submit a new job after creating the default connection. If a resolved connection is deleted before a worker claims the task, that task runs with nothing injected.
 
 ## Merge order
 
@@ -116,15 +116,24 @@ Only step 2 is new. Creating or updating a connection rejects a `KITARU_*` key o
 
 ## Worker credentials
 
-Some customers won't hand a Kitaru server their provider credentials at all, and a connection doesn't change that: it still means putting a secret on the server. For that case, the credentials stay in the worker's environment. An API import or analysis task whose plugin declares a `connection_schema` but resolved no connection carries the label `kitaru/requires-credentials=<provider>` alongside its usual [task labels](../deploy/workers.md), and a worker selects the providers it holds credentials for:
+Some customers won't hand a Kitaru server their provider credentials at all, and a connection doesn't change that: it still means putting a secret on the server. For that case, the credentials stay in the worker's environment. An API import, analysis, or evaluation task whose plugin declares a `connection_schema` but resolved no connection carries the label `kitaru/requires-credentials=<provider>` alongside its usual [task labels](../deploy/workers.md), and a worker selects the providers it holds credentials for:
 
 ```bash
 kitaru worker start --claim importer --selector kitaru/requires-credentials=langfuse
 ```
 
-That worker claims Langfuse API imports and reads `LANGFUSE_SECRET_KEY` and friends from its own environment, and it skips API imports and analyzers that need any other provider's credentials. List several providers as `kitaru/requires-credentials=langfuse,openai`. No connection is created, and none is needed.
+That worker claims Langfuse API imports and reads `LANGFUSE_SECRET_KEY` and friends from its own environment, and it skips tasks that need any other provider's credentials, as well as task kinds it does not claim. List several providers as `kitaru/requires-credentials=langfuse,openai`. No connection is created, and none is needed.
 
-A worker that sets no such selector is read as if it had set an empty one, `kitaru/requires-credentials=`, so it skips every task that needs provider credentials it would have to bring itself. Tasks whose credentials arrive through a connection, and tasks that need none, such as file imports and evaluations, carry no label and are claimed by any worker as before. A plugin that declares no schema stamps no label either. Every importer and analyzer task also carries `kitaru/provider=<provider>` whether or not a connection resolved, so `--selector kitaru/provider=langfuse` still pins a worker to one provider's tasks.
+A worker that sets no such selector is read as if it had set an empty one, `kitaru/requires-credentials=`, so it skips every task that needs provider credentials it would have to bring itself. Tasks whose credentials arrive through a connection, and tasks that need none, such as file imports and offline evaluations, carry no label and are claimed by any worker as before. A plugin that declares no schema stamps no label either. Tasks for importers, analyzers, and evaluators that declare a provider also carry `kitaru/provider=<provider>` whether or not a connection resolved, so `--selector kitaru/provider=langfuse` still pins a worker to one provider's tasks.
+
+For a judge evaluator whose key stays on the worker, use the evaluator task kind and its provider:
+
+```bash
+export TYPESAFE_API_KEY=...
+kitaru worker start --claim evaluator --selector kitaru/requires-credentials=typesafe
+```
+
+If the evaluator instead uses a server connection, ensure a worker is running with `--claim evaluator`; it does not need the credential selector. See [Judge evaluations](judge-evaluations.md).
 
 Ephemeral workers register under the same rule. Set `KITARU_SERVER_EPHEMERAL_WORKER__SELECTORS`, or `server.ephemeralWorker.selectors` in the Helm chart, to a list of selectors, such as a `kitaru/requires-credentials` selector naming the providers whose credentials `KITARU_SERVER_EPHEMERAL_WORKER__ENV` carries.
 

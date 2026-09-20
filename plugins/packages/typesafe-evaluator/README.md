@@ -6,11 +6,13 @@ Judge recorded and imported Kitaru sessions with jev, TypeSafe's hosted model th
 
 Every run of this evaluator sends part of a recorded session to TypeSafe's hosted API: what the user asked, the tool calls with their arguments and results, the final answer, and, on the `full` view, the system prompt and the model messages. Nothing is redacted for you.
 
-That is why this is a separate package. Kitaru does not install it with the server, the server does not register it at startup, and no Kitaru deployment starts talking to TypeSafe until you run the two commands below. The built-in `kitaru-evaluator` package stays offline and free; this one does not.
+That is why this is a separate package. Kitaru does not install it with the server, the server does not register it at startup, and no Kitaru deployment starts talking to TypeSafe until you submit an evaluation task and a worker executes it. The built-in `kitaru-evaluator` package stays offline and free; this one does not.
 
 ## Register the evaluator
 
-Save the connection schema that ships in the wheel at `kitaru_typesafe_evaluator/connection-schema.json` to a local file:
+You need a configured Kitaru CLI connected to your workspace, a TypeSafe API key, and a completed recorded or imported session. The [quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) provides returns-agent sessions matching the example below. Choose a session with `kitaru session list` and set `SESSION_ID` to its ID. Adapt the questions when evaluating another agent.
+
+Save the connection schema that ships in the wheel at `kitaru_typesafe_evaluator/connection-schema.json` as `connection-schema.json` in your working directory:
 
 ```json
 {
@@ -49,11 +51,13 @@ The worker installs the package itself when it claims the first evaluation task.
 
 The evaluator creates a TypeSafe client, which reads `TYPESAFE_API_KEY` from the task's environment. Because you registered the evaluator with a provider and a connection schema, the key has to arrive one of two ways. If you set up neither, the evaluation job stays `pending` and no worker ever claims it.
 
-Store the key on the server, and any worker can run the task:
+Store the key on the server, and an evaluator worker can run the task:
 
 ```bash
 kitaru connection create typesafe-prod --evaluator typesafe-judge --default
 ```
+
+Ensure an evaluator worker is running. If needed, run `kitaru worker start --claim evaluator` in another terminal.
 
 Or keep the key on one worker, and tell that worker to claim tasks that need it:
 
@@ -62,9 +66,11 @@ export TYPESAFE_API_KEY=...
 kitaru worker start --claim evaluator --selector kitaru/requires-credentials=typesafe
 ```
 
+Connections are resolved when a job is created. To recover an existing job pending for lack of credentials, start a worker with the key and selector above. Creating a default connection afterward only helps new jobs; submit a new evaluation after creating it.
+
 ## Ask a question
 
-Write your questions to a file and keep that file in version control. The question text is the logic:
+Save the following as `questions.json` in your working directory and keep that file in version control. The question text is the logic:
 
 ```json
 {
@@ -90,12 +96,16 @@ kitaru session evaluate "$SESSION_ID" \
   --wait
 ```
 
-Each question becomes its own evaluation result, named after its key, carrying jev's probability as the score and the full params that produced it:
+Each question becomes its own evaluation result, named after its key, carrying the probability of yes as the score and the full params that produced it. This is an illustrative summary, not literal CLI output:
 
 ```text
 invented_timeline  passed=False  score=0.94  jev-1.13.0 · p(yes)=0.94 · fail: p(no)=0.06 is at or below 0.20
 action_executed    passed=True   score=0.99  jev-1.13.0 · p(yes)=0.99 · pass: p(yes)=0.99 is at or above 0.80
 ```
+
+Read stored results with `kitaru evaluation list` and `kitaru evaluation get EVALUATION_ID`. The explanations above are generated threshold calculations, not model reasoning. Task completion does not mean every question passed. Missing session evidence does not automatically produce a held result, and model probabilities are not measured accuracy.
+
+Use these questions for exploration first. Before using them as a gate, validate each failure check against human labels on sessions kept separate from question development, and report incorrect verdicts, held results, operational failures, and coverage.
 
 See the [judge evaluations guide](https://docs.zenml.io/kitaru/guides/judge-evaluations) for the full params reference, the two state views, how to write questions jev answers steadily, what not to ask it, and how to calibrate it against human verdicts.
 
