@@ -12,3 +12,7 @@
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
 """Judge evaluator for Kitaru backed by TypeSafe's jev model."""
+
+from kitaru_typesafe_evaluator.params import JudgeParams
+
+__all__ = ["JudgeParams"]
