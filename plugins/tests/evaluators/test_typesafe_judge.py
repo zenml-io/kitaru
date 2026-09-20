@@ -16,6 +16,7 @@
 import json
 import os
 from collections.abc import Callable
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from kitaru.task.evaluator import SessionView, call_evaluator
 from kitaru.task.importer import ImportedSession
 from kitaru_langfuse_importer.importer import parse
 from kitaru_typesafe_evaluator import judge as judge_module
+from kitaru_typesafe_evaluator.connection import TypeSafeConnection
 from kitaru_typesafe_evaluator.judge import judge
 
 PARAMS: dict[str, Any] = {
@@ -247,3 +249,13 @@ def test_live_flags_the_invented_refund_timelines() -> None:
         if result.passed is not True:
             flagged.append(imported.external_id[-3:])
     assert flagged == ["001", "003", "004", "007", "009"]
+
+
+def test_shipped_connection_schema_matches_the_model() -> None:
+    """The JSON file users pass to --connection-schema cannot drift from the model."""
+    shipped = json.loads(
+        files("kitaru_typesafe_evaluator")
+        .joinpath("connection-schema.json")
+        .read_text()
+    )
+    assert shipped == TypeSafeConnection.model_json_schema()

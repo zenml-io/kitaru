@@ -11,9 +11,12 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Judge evaluator for Kitaru backed by TypeSafe's jev model."""
+"""Connection values the judge evaluator reads."""
 
-from kitaru_typesafe_evaluator.connection import TypeSafeConnection
-from kitaru_typesafe_evaluator.params import JudgeParams
+from pydantic import BaseModel, SecretStr
 
-__all__ = ["JudgeParams", "TypeSafeConnection"]
+
+class TypeSafeConnection(BaseModel):
+    """TypeSafe connection."""
+
+    TYPESAFE_API_KEY: SecretStr

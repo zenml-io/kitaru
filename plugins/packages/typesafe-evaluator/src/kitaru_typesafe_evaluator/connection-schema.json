@@ -1,0 +1,16 @@
+{
+  "description": "TypeSafe connection.",
+  "properties": {
+    "TYPESAFE_API_KEY": {
+      "format": "password",
+      "title": "Typesafe Api Key",
+      "type": "string",
+      "writeOnly": true
+    }
+  },
+  "required": [
+    "TYPESAFE_API_KEY"
+  ],
+  "title": "TypeSafeConnection",
+  "type": "object"
+}
