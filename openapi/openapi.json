@@ -11352,7 +11352,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.27.0"
+    "version": "0.27.0+dev"
   },
   "openapi": "3.1.0",
   "paths": {
