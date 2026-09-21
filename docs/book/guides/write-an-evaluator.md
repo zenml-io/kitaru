@@ -9,6 +9,8 @@ Your domain expert already knows what a good run looks like. An [evaluator](../c
 
 For existing TypeScript evaluation code or native Mastra scorers, use the [TypeScript and Mastra evaluator guide](typescript-evaluators.md) to register a Python wrapper around a pinned Node artifact.
 
+For typed questions about session content using TypeSafe's jev model, use [Judge evaluations](judge-evaluations.md). That guide covers credentials, question design, and validation against human labels without writing a custom evaluator.
+
 ## From criteria to code
 
 Start from what the expert says. "A good refund resolution issues exactly one refund, quotes the amount, and does not promise anything we do not do" is three checks:

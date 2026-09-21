@@ -37,6 +37,7 @@
 - [TypeScript and Mastra evaluators](guides/typescript-evaluators.md)
 - [Write an analyzer](guides/write-an-analyzer.md)
 - [Deterministic evaluations](guides/deterministic-evaluations.md)
+- [Judge evaluations](guides/judge-evaluations.md)
 - [Tool policies](guides/tool-policies.md)
 - [Track cost and model usage](guides/llm-calls.md)
 

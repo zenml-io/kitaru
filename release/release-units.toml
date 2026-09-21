@@ -246,3 +246,18 @@ impact-paths = ["plugins/packages/pydantic-ai/**"]
 tag-prefix = "python/kitaru-pydantic-ai/v"
 maintenance-branch-prefix = "release/pydantic-ai/"
 checks = []
+
+[[units]]
+slug = "typesafe-evaluator"
+path = "plugins/packages/typesafe-evaluator"
+distribution = "kitaru-typesafe-evaluator"
+registry = "pypi"
+version-source = "plugins/packages/typesafe-evaluator/pyproject.toml"
+changelog = "plugins/packages/typesafe-evaluator/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = false
+release-label = "requires:plugin:typesafe-evaluator"
+impact-paths = ["plugins/packages/typesafe-evaluator/**"]
+tag-prefix = "python/kitaru-typesafe-evaluator/v"
+maintenance-branch-prefix = "release/typesafe-evaluator/"
+checks = []

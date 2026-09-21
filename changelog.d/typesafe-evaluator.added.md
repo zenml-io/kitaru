@@ -1,0 +1,1 @@
+- Added the `kitaru-typesafe-evaluator` package: judge recorded sessions with TypeSafe's jev model using your own yes/no, choice, and score questions, stored as one evaluation result per question.
