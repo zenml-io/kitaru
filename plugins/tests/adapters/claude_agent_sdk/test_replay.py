@@ -4,6 +4,7 @@
 """Provider-free replay tests for wrapped Claude SDK MCP tools."""
 
 import asyncio
+import importlib.metadata
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -56,6 +57,8 @@ from kitaru_claude_agent_sdk.codec import (
 
 from .conftest import FakeClient, nodes
 
+_MCP_MAJOR = int(importlib.metadata.version("mcp").split(".", 1)[0])
+
 
 def _terminal() -> ResultMessage:
     return ResultMessage(
@@ -97,6 +100,28 @@ def _policy(tool: str, config: Any) -> ToolPolicy:
         default=StaticConfig(cases=[], on_miss=ToolPolicyOnMiss.FAIL),
         tools={tool: config},
     )
+
+
+async def _call_lookup_tool(instance: Any, arguments: dict[str, Any]) -> bool:
+    """Invoke the `lookup` tool on a public SDK MCP server and return its error flag.
+
+    Drives the server exactly as the Claude runtime would, through the request
+    handler the SDK registered on the underlying `mcp.server.Server`. The
+    lowlevel handler API differs between mcp 1.x (a `request_handlers` mapping
+    keyed by request type, handlers take the request and return a
+    `ServerResult` with camelCase fields) and mcp 2.x (`get_request_handler`
+    entries whose handlers take a context and the params and return a
+    snake_case `CallToolResult` directly).
+    """
+    params = mcp_types.CallToolRequestParams(name="lookup", arguments=arguments)
+    if _MCP_MAJOR >= 2:
+        entry = instance.get_request_handler("tools/call")
+        assert entry is not None
+        result = await entry.handler(None, params)
+        return result.is_error
+    request = mcp_types.CallToolRequest(params=params)
+    result = await instance.request_handlers[mcp_types.CallToolRequest](request)
+    return result.root.isError
 
 
 def _server(name: str, handler: Any) -> Any:
@@ -891,13 +916,7 @@ async def test_real_sdk_server_propagates_swallowed_policy_failure(
 
     async def query(**kwargs: Any) -> AsyncIterator[ResultMessage]:
         instance = kwargs["options"].mcp_servers["support"]["instance"]
-        request = mcp_types.CallToolRequest(
-            params=mcp_types.CallToolRequestParams(
-                name="lookup", arguments={"query": "missing"}
-            )
-        )
-        result = await instance.request_handlers[mcp_types.CallToolRequest](request)
-        assert result.root.isError is True
+        assert await _call_lookup_tool(instance, {"query": "missing"}) is True
         yield _terminal()
 
     monkeypatch.setattr(runner_module, "sdk_query", query)
@@ -945,13 +964,7 @@ async def test_real_sdk_server_propagates_swallowed_kitaru_failure(
 
     async def query(**kwargs: Any) -> AsyncIterator[ResultMessage]:
         instance = kwargs["options"].mcp_servers["support"]["instance"]
-        request = mcp_types.CallToolRequest(
-            params=mcp_types.CallToolRequestParams(
-                name="lookup", arguments={"query": "refund"}
-            )
-        )
-        result = await instance.request_handlers[mcp_types.CallToolRequest](request)
-        assert result.root.isError is True
+        assert await _call_lookup_tool(instance, {"query": "refund"}) is True
         yield _terminal()
 
     monkeypatch.setattr(runner_module, "sdk_query", query)
@@ -1000,13 +1013,7 @@ async def test_real_sdk_server_propagates_swallowed_history_decode_failure(
 
     async def query(**kwargs: Any) -> AsyncIterator[ResultMessage]:
         instance = kwargs["options"].mcp_servers["support"]["instance"]
-        request = mcp_types.CallToolRequest(
-            params=mcp_types.CallToolRequestParams(
-                name="lookup", arguments={"query": "refund"}
-            )
-        )
-        result = await instance.request_handlers[mcp_types.CallToolRequest](request)
-        assert result.root.isError is True
+        assert await _call_lookup_tool(instance, {"query": "refund"}) is True
         yield _terminal()
 
     monkeypatch.setattr(runner_module, "sdk_query", query)
@@ -1039,11 +1046,7 @@ async def test_real_sdk_server_leaves_passthrough_handler_failure_with_claude(
 
     async def query(**kwargs: Any) -> AsyncIterator[ResultMessage]:
         instance = kwargs["options"].mcp_servers["support"]["instance"]
-        request = mcp_types.CallToolRequest(
-            params=mcp_types.CallToolRequestParams(name="lookup", arguments={})
-        )
-        result = await instance.request_handlers[mcp_types.CallToolRequest](request)
-        assert result.root.isError is True
+        assert await _call_lookup_tool(instance, {}) is True
         yield _terminal()
 
     monkeypatch.setattr(runner_module, "sdk_query", query)
