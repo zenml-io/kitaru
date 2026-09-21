@@ -1,0 +1,1 @@
+- `kitaru-pydantic-ai` now supports the PydanticAI 2.44 through 2.46 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.44.0.
