@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-claude-agent-sdk"
-version = "0.1.0rc0"
+version = "0.1.0"
 description = "Claude Agent SDK recording and replay adapter for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
@@ -24,7 +24,7 @@ classifiers = [
 keywords = ["ai-agents", "anthropic", "claude-agent-sdk", "kitaru", "recording", "replay"]
 dependencies = [
     "claude-agent-sdk>=0.2.149,<0.3",
-    "kitaru==0.26.0+dev",
+    "kitaru>=0.27.0",
 ]
 
 [project.urls]

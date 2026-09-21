@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-jsonl-importer"
-version = "0.1.2"
+version = "0.2.0"
 description = "Canonical JSONL session importer for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 keywords = ["ai-agents", "jsonl", "kitaru", "observability", "traces"]
-dependencies = ["kitaru>=0.22.0"]
+dependencies = ["kitaru>=0.27.0"]
 
 [project.urls]
 Homepage = "https://kitaru.ai"

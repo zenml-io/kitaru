@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0 - 2026-09-21
+
+- Stream API imports in complete session batches, batch trace IDs into records queries, and stop fetching when `max_sessions` is reached.
+- Identify imported nodes and their parents by external ID. Require Kitaru 0.27.0 or later for the new node contract and bounded streaming helper.
+
 ## 0.3.0 - 2026-09-10
 
 - Require Kitaru 0.26.0 or later for the `api` and `adapter` extras. File-only parsing retains support for Kitaru 0.24.0 or later.

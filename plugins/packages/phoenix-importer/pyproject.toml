@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-phoenix-importer"
-version = "0.3.0"
+version = "0.4.0"
 description = "Arize Phoenix trace importer for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
@@ -23,12 +23,12 @@ classifiers = [
 ]
 keywords = ["ai-agents", "arize-phoenix", "kitaru", "observability", "traces"]
 dependencies = [
-    "kitaru>=0.24.0",
+    "kitaru>=0.27.0",
 ]
 
 [project.optional-dependencies]
 api = [
-    "kitaru>=0.26.0",
+    "kitaru>=0.27.0",
     "arize-phoenix-client>=2.0,<4",
     "httpx>=0.27,<1",
 ]

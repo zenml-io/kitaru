@@ -830,15 +830,15 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.25.0"
+version = "0.26.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9f/e6/b353b3cc754ddc4a2a616b3c94735b9ff68c7d05a98e784aad951fc3b32e/kitaru-0.25.0.tar.gz", hash = "sha256:d3079d45a9e8d3bfa807c4746eb28fe03af1470e4ea046d2bda7ce4a66725f52", size = 5080368, upload-time = "2026-09-03T17:15:44.965Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/32/a9/9401f99b09dd547b4e49da73a9878f9352eeb69189156fc60ee89aaafdee/kitaru-0.26.0.tar.gz", hash = "sha256:c318eecbdbcedcba4de74ea7af3fadd02d3249cde1e67c4cd8d0b60ebf23ba4b", size = 5808300, upload-time = "2026-09-10T15:21:51.432Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/de/5e/d989e7b4b0fe193f179f6942b1014a4f5d9a6f446ffff28fca9ad08df0c3/kitaru-0.25.0-py3-none-any.whl", hash = "sha256:5fc3d393434d23ff4b659edc5fc688ba241e8416e103873b60a2fe46bc4e531d", size = 2887766, upload-time = "2026-09-03T17:15:42.881Z" },
+    { url = "https://files.pythonhosted.org/packages/18/88/cad473451da98dcc2e345d6aebe5fa2aa284e1e298551b2b485ec0c43a6a/kitaru-0.26.0-py3-none-any.whl", hash = "sha256:f2ec03e5bca7a31ccd28f992be31219d162cd8c5dd9da8a2cde2f97c2c5138ce", size = 3183089, upload-time = "2026-09-10T15:21:49.466Z" },
 ]
 
 [package.optional-dependencies]
@@ -867,6 +867,7 @@ server = [
     { name = "uvicorn" },
 ]
 worker = [
+    { name = "packaging" },
     { name = "pydantic-settings" },
 ]
 
@@ -920,7 +921,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "kitaru", extras = ["cli", "mcp", "server", "worker"], specifier = ">=0.25.0" },
+    { name = "kitaru", extras = ["cli", "mcp", "server", "worker"], specifier = ">=0.26.0" },
     { name = "kitaru-langfuse-importer", specifier = ">=0.1.1" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], specifier = ">=0.1.0" },
     { name = "langfuse", specifier = ">=4.14,<5" },

@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-09-21
 
 - Fixed capture byte-budget accounting for enum values while retaining bounded unwrapping.
+- Record nodes and parent relationships with external IDs instead of positional indexes. Require Kitaru 0.27.0 or later for the new node contract.
 
 ## 0.1.2
 

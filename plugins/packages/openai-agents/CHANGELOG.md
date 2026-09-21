@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 - 2026-09-21
+
+- Record nodes and parent relationships with provider or synthetic external IDs, and retain concrete start times for materialized model, tool, and handoff nodes. Require Kitaru 0.27.0 or later for the new node contract.
+
 ## 0.2.0
 
 - Add named history tool policies for replaying recorded direct function-tool results.

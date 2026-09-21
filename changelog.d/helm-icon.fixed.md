@@ -1,1 +1,0 @@
-- Fixed the Helm chart icon and README image to use the live shared ZenML and Kitaru mark.

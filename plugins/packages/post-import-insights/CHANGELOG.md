@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 - 2026-09-21
+
+- Consume nodes in the server's materialized order and remove assumptions about positional node indexes, retaining compatibility with Kitaru 0.26.0 and later.
+
 ## 0.1.0 - 2026-09-10
 
 - Describe insight actions with "Investigate [topic]" labels, such as "Investigate tool retries", and use "Investigate this finding" for unknown finding types.

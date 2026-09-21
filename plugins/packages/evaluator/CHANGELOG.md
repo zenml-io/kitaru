@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-09-21
 
 - Deterministic evaluators now sum finite decimal values exactly across wide exponent ranges.
+- Analyze nodes in materialized session order and report missing or nonpreceding external-ID relationships. Require Kitaru 0.27.0 or later for the new node contract.
 
 ## 0.1.3
 

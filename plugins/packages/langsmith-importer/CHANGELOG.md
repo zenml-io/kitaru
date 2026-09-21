@@ -1,12 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-09-21
 
 - Emit `reasoning_selectors` pointing at visible reasoning in node outputs instead of extracted `reasoning` text.
-
-### Release context
-
-- Requires the unreleased session node `reasoning_selectors` field in core from [PR #1078](https://github.com/zenml-io/kitaru/pull/1078). Replace `kitaru==0.26.0+dev` with the selected compatible published core version before releasing.
+- Stream API imports as complete session batches, stop fetching when `max_sessions` is reached, and fetch trace batches instead of issuing one request per trace.
+- Identify imported nodes and their parents by external ID. Require Kitaru 0.27.0 or later for the new node contract and bounded streaming helper.
 
 ## 0.3.0 - 2026-09-10
 

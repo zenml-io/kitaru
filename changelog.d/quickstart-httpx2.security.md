@@ -1,1 +1,0 @@
-- The quickstart example's frozen lockfile now installs `httpx2` 2.12.0 and `httpcore2` 2.12.0, which fix unbounded memory use when decompressing streamed HTTP responses ([GHSA-8xx6-hgc6-gc2m](https://github.com/advisories/GHSA-8xx6-hgc6-gc2m)) and two moderate `httpx2` advisories.

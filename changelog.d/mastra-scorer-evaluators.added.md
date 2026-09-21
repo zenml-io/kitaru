@@ -1,1 +1,0 @@
-- Run TypeScript evaluation code and native Mastra scorers as versioned Kitaru evaluators through a Python wrapper and a SHA-256-pinned Node artifact, with explicit recorded-input mapping and validated evaluation results.

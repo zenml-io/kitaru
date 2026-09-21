@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.27.0] - 2026-09-21
+
+### Added
+
+- Evaluators accept an optional `provider` and `connection_schema`. Evaluation tasks receive the env and secret values of the provider's default connection when one exists.
+- Add explicit whole-transcript Mastra evaluation to the adaptive conversation example, with independent judge settings and a generated baseline/rerun validation command.
+- Jobs that no worker claims within `KITARU_SERVER_JOB_PENDING_TIMEOUT_SECONDS` (default 3600) are canceled by the background sweep with the error "Job was not claimed within N seconds".
+- Added a bounded adaptive Mastra conversation example with one transcript session per worker run, isolated conversation history, and Python evaluation.
+- Run TypeScript evaluation code and native Mastra scorers as versioned Kitaru evaluators through a Python wrapper and a SHA-256-pinned Node artifact, with explicit recorded-input mapping and validated evaluation results.
+- Added native-typed Mastra 1.67.x `Agent.stream()` recording with completed model and local-tool steps, final output persistence, bounded recording-error reporting, and fail-closed replay and unsupported-mode preflight.
+- Added Podman support for CLI-managed local deployments created with `kitaru login --local`.
+- Added typed Python SDK helpers for registering agents and agent versions.
+- Added the `kitaru-typesafe-evaluator` package: judge recorded sessions with TypeSafe's jev model using your own yes/no, choice, and score questions, stored as one evaluation result per question.
+
+### Changed
+
+- Changed API imports to create sessions while traces are still being fetched. Each session is ingested as soon as its traces arrive, and `--max-sessions` stops fetching instead of only stopping ingestion.
+- Session nodes are identified by `external_id` instead of a numeric position. Parents are referenced by `parent_external_id`, and any other relation by `links`, each naming a target `external_id` and a `kind`. `index`, `parent_index`, `secondary_parent_indexes`, `parent_id`, and `secondary_parent_ids` are gone from requests and responses. Build the node tree from `external_id` and `parent_external_id`. A custom importer sets `external_id` on every `ImportedNode` and names its parent by `parent_external_id`. The `index` fields remain only in the Kitaru JSONL file format. Nodes are listed by start time, then insertion, and a parent may arrive after its children.
+- An import whose source yields one session twice now adds the second batch of nodes to the session it created for the first, reported as `skipped`. A node is replaced when its external id already exists and added when it doesn't.
+- Analysis tasks that do not run because an import has fewer eligible sessions than the analyzer minimum now report the `skipped` task status instead of `completed`.
+- The TypeScript packages now support Node `>=22.22.0 <23 || >=26 <27`; the Mastra adapter is now developed and tested against `@mastra/core` 1.67.0, with its peer range widened from `>=1.51.0 <1.65.0` to `>=1.51.0 <1.68.0`.
+- `kitaru-pydantic-ai` now supports the PydanticAI 2.41 through 2.43 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.42.0.
+- `kitaru-pydantic-ai` now supports the PydanticAI 2.44 through 2.46 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.44.0.
+- Session nodes now carry `reasoning_selectors`, a list of RFC 6901 JSON Pointers into the node outputs, instead of the `reasoning` text field. Upgrading permanently deletes all previously recorded reasoning text: the database migration drops the `reasoning` column and its offloaded blobs without migrating the text into node outputs, and the downgrade path restores the column empty. Back up the database before upgrading if you need that text. Reasoning recorded or imported after the upgrade lives in node outputs and is addressed by the selectors.
+
+### Fixed
+
+- Fixed CLI error messages for mistyped hyphen-leading arguments such as `kitaru agent get -xo`, which blamed the global `-o` flag instead of naming the unknown option. The `cli` extra now requires `cyclopts>=4.25.1`.
+- Fixed the Helm chart icon and README image to use the live shared ZenML and Kitaru mark.
+- Fixed LangGraph capture so enum values consume their field byte budget once.
+
+### Security
+
+- The quickstart example's frozen lockfile now installs `httpx2` 2.12.0 and `httpcore2` 2.12.0, which fix unbounded memory use when decompressing streamed HTTP responses ([GHSA-8xx6-hgc6-gc2m](https://github.com/advisories/GHSA-8xx6-hgc6-gc2m)) and two moderate `httpx2` advisories.
+
 ## [0.26.0] - 2026-09-10
 
 ### Added

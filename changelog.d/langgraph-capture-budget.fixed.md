@@ -1,1 +1,0 @@
-- Fixed LangGraph capture so enum values consume their field byte budget once.
