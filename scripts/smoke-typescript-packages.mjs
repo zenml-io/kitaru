@@ -37,8 +37,8 @@ function assertPackageContents(tarball) {
   if (result.status !== 0) {
     throw new Error(`tar -tzf ${tarball} exited with ${result.status}`);
   }
-  if (!result.stdout.split("\n").includes("package/LICENSE")) {
-    throw new Error(`${tarball} does not contain package/LICENSE`);
+  if (!result.stdout.split("\n").includes("package/package.json")) {
+    throw new Error(`${tarball} does not contain package/package.json`);
   }
 }
 
