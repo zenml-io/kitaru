@@ -13,7 +13,6 @@
 <p align="center">
   <a href="https://pypi.org/project/kitaru/"><img alt="PyPI" src="https://img.shields.io/pypi/v/kitaru?color=blue"></a>
   <a href="https://pypi.org/project/kitaru/"><img alt="Python" src="https://img.shields.io/pypi/pyversions/kitaru"></a>
-  <a href="https://github.com/zenml-io/kitaru/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/zenml-io/kitaru"></a>
 </p>
 
 <p align="center">
@@ -149,7 +148,3 @@ We're happy to take contributions from outside the core team. Comment on an exis
 - [support@kitaru.ai](mailto:support@kitaru.ai): when email is easier
 
 Hit something broken? Any of the three reaches a human. An issue with a session ID attached gets fixed fastest.
-
-## 📄 License
-
-[Apache 2.0](LICENSE)
