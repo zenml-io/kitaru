@@ -19,9 +19,9 @@
     "workflow": "node dist/workflow.js"
   },
   "dependencies": {
-    "@ai-sdk/openai": "4.0.66",
+    "@ai-sdk/openai": "4.0.71",
     "@zenml-io/kitaru": "workspace:*",
     "@zenml-io/kitaru-vercel-ai": "workspace:*",
-    "ai": "7.0.99"
+    "ai": "7.0.107"
   }
 }
