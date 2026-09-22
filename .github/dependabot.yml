@@ -371,6 +371,14 @@ updates:
       # template).
       - dependency-name: "@takumi-rs/image-response"
         update-types: ["version-update:semver-major"]
+      # fumadocs-python 1.x rewrote the convert()/write() API that
+      # docs/scripts/convert-sdk-docs.mjs and scripts/generate_sdk_docs.py are
+      # built on (write() takes a string outDir, convert() returns
+      # {path,title,content}, root-prefix stripping is gone). Taking the major
+      # breaks the "Convert SDK reference to MDX" step of docs.yml. Hold it
+      # until the generator is migrated; see #1161 and remove this entry then.
+      - dependency-name: fumadocs-python
+        update-types: ["version-update:semver-major"]
     cooldown:
       default-days: 7
       semver-major-days: 14
