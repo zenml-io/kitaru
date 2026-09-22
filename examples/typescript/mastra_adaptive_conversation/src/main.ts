@@ -127,7 +127,9 @@ async function main(): Promise<void> {
           id: "adaptive-parcel-fixture",
           name: "Adaptive parcel fixture",
           instructions: config.system,
-          model: openai(config.model.slice("openai/".length)),
+          // Cast because @ai-sdk/provider >=4.0.16 and @mastra/core disagree on the
+          // LanguageModelV4 result types; the runtime contract is unchanged.
+          model: openai(config.model.slice("openai/".length)) as never,
           tools: {},
         });
         return async (history, signal) => {
