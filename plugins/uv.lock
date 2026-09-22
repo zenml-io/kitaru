@@ -284,7 +284,7 @@ wheels = [
 
 [[package]]
 name = "braintrust"
-version = "0.39.0"
+version = "0.40.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chevron" },
@@ -298,9 +298,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2c/d0/edc11aaca7b7fccf76495afac212af1f8f5c7264a25b25d134ccb3a8921c/braintrust-0.39.0.tar.gz", hash = "sha256:5093e4fae247821036ef8cc1101999cc7e5f820fb744cebeb733721fb07397b0", size = 889870, upload-time = "2026-09-10T15:58:01.777Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/82/a126cff7619b69ff7cfd050f8f36e129e89567aa758b3e3a992169be5426/braintrust-0.40.0.tar.gz", hash = "sha256:04713c481edb8e6f40034e3578973b9255c9cb080aa195d55fccb5c3ecb741be", size = 898632, upload-time = "2026-09-14T19:33:45.149Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6d/4c/cff6dbcc83fa814c874b1f6a73f88170872991c8725c98014816d7c5b4b2/braintrust-0.39.0-py3-none-any.whl", hash = "sha256:373ec66280c77895754a97fdbc6b2e54fc4158e14cdf9a7cf1d4c3f1f0c286f0", size = 1042072, upload-time = "2026-09-10T15:57:59.603Z" },
+    { url = "https://files.pythonhosted.org/packages/79/68/809c489e72a44064f3089c991e614fed4f68645841369b6c068e1477961a/braintrust-0.40.0-py3-none-any.whl", hash = "sha256:d6f8d95de628c4ae20e44175ec0ca89578779f810f76a0aada94f4cdf924bd40", size = 1054005, upload-time = "2026-09-14T19:33:43.311Z" },
 ]
 
 [[package]]
@@ -1634,7 +1634,7 @@ wheels = [
 
 [[package]]
 name = "langfuse"
-version = "4.15.2"
+version = "4.15.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backoff" },
@@ -1647,9 +1647,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/97/30/6a64dcf84de2f2eb4d03adbfd22cc7bdc95ce67e3e56cd6288405087fb8a/langfuse-4.15.2.tar.gz", hash = "sha256:7f818f38cc22daba88fdcec62d2addcee4e18d1af4529978b6d07501e86b6946", size = 391727, upload-time = "2026-09-09T16:01:25.73Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b3/0c/ccb04968d47896e9eb7421b6e2e6e8cd510d8fa3e79337092dc734f25543/langfuse-4.15.4.tar.gz", hash = "sha256:b9a36194f4e968206d919313c24ea71c6ea68e21286370b01de752d20b26e7a3", size = 392296, upload-time = "2026-09-16T16:13:05.967Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/de/e59da18cb5ca9cb8515a254199bd96ace8cf918788d13ded66aa2693e007/langfuse-4.15.2-py3-none-any.whl", hash = "sha256:98c27a3c06e18c4497045f2d4decce2c716ef11cb215cf5b27bbea6ee0877115", size = 705824, upload-time = "2026-09-09T16:01:23.696Z" },
+    { url = "https://files.pythonhosted.org/packages/97/bd/8e0cadd69d0855646eda8d584ef4f38ca46cf271553af8ba7f93ae607626/langfuse-4.15.4-py3-none-any.whl", hash = "sha256:8e75c70b1522a722a11ab6c7d88e27534a5d0c3844a1a464ac5eb548b014e9c3", size = 706367, upload-time = "2026-09-16T16:13:07.294Z" },
 ]
 
 [[package]]
