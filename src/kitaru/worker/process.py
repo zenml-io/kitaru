@@ -68,18 +68,24 @@ _PEP723_BLOCK_REGEX = (
 # Extra an importer package declares for its API import dependencies.
 API_EXTRA = "api"
 
-# Published first-party packages used by the server's default plugin catalog.
-# Keep this list in sync with DEFAULT_PLUGIN_DEFINITIONS in server/api/bootstrap.py.
-_DEFAULT_KITARU_PLUGIN_PACKAGES = frozenset(
+# Published first-party distributions. Keep this list in sync with the PyPI
+# units in release/release-units.toml; the worker cannot read that source file.
+_FIRST_PARTY_KITARU_PACKAGES = frozenset(
     {
         "kitaru-braintrust-importer",
+        "kitaru-claude-agent-sdk",
         "kitaru-evaluator",
         "kitaru-jsonl-importer",
         "kitaru-langfuse-importer",
+        "kitaru-langgraph",
         "kitaru-langsmith-importer",
         "kitaru-logfire-importer",
+        "kitaru-mastra-importer",
+        "kitaru-openai-agents",
         "kitaru-phoenix-importer",
         "kitaru-post-import-insights",
+        "kitaru-pydantic-ai",
+        "kitaru-typesafe-evaluator",
     }
 )
 
@@ -397,7 +403,7 @@ def get_python_run_argv(
         package = canonicalize_name(requirement.name)
         specifiers = list(requirement.specifier)
         if (
-            (package == "kitaru" or package in _DEFAULT_KITARU_PLUGIN_PACKAGES)
+            (package == "kitaru" or package in _FIRST_PARTY_KITARU_PACKAGES)
             and len(specifiers) == 1
             and specifiers[0].operator == "=="
             and "*" not in specifiers[0].version

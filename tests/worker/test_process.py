@@ -16,6 +16,7 @@
 import asyncio
 import sys
 import time
+import tomllib
 import uuid
 from pathlib import Path
 
@@ -360,6 +361,18 @@ def test_get_python_run_argv_allows_fresh_pinned_kitaru_plugins() -> None:
         "kitaru.task",
         "import",
     ]
+
+
+def test_get_python_run_argv_allows_all_released_kitaru_packages() -> None:
+    """Every published first-party plugin can bypass a stale project cutoff."""
+    inventory = Path(__file__).resolve().parents[2] / "release/release-units.toml"
+    units = tomllib.loads(inventory.read_text())["units"]
+    for unit in units:
+        package = unit["distribution"]
+        if unit["registry"] != "pypi" or not package.startswith("kitaru-"):
+            continue
+        argv = get_python_run_argv("kitaru.task", ["evaluate"], [f"{package}==1.0.0"])
+        assert f"{package}=0 days" in argv, package
 
 
 @pytest.mark.parametrize("dependency", ["kitaru-custom==1.0.0", "kitaru-custom>=1"])
