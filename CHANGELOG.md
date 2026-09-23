@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.27.1] - 2026-09-23
+
+### Added
+
+- Added native Mastra stream replay with model and tool-policy overrides, plus configurable bounded tool recording for history replay.
+
+### Fixed
+
+- Reject explicitly incomplete recorded tool arguments and results during history replay instead of returning truncated data.
+- Fixed worker tasks failing to install newly released, version-pinned Kitaru plugins when the worker runs from a project with an `exclude-newer` cutoff.
+
 ## [0.27.0] - 2026-09-21
 
 ### Added

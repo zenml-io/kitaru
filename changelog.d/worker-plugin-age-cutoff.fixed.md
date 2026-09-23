@@ -1,1 +1,0 @@
-- Fixed worker tasks failing to install newly released, version-pinned Kitaru plugins when the worker runs from a project with an `exclude-newer` cutoff.

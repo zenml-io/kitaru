@@ -1,1 +1,0 @@
-- Reject explicitly incomplete recorded tool arguments and results during history replay instead of returning truncated data.
