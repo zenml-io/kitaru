@@ -44,6 +44,7 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.replay_config import (
     PassthroughConfig,
@@ -466,7 +467,8 @@ async def test_tool_lookup_completed_null_is_a_match(
 
     assert response.status_code == 200
     assert response.json() == {
-        "match": {"error": None, "result": None, "status": "completed"}
+        "match": {"error": None, "result": None, "status": "completed"},
+        "rejected_candidate": False,
     }
 
 
@@ -482,4 +484,38 @@ async def test_tool_lookup_miss_returns_a_null_match(
     )
 
     assert response.status_code == 200
-    assert response.json() == {"match": None}
+    assert response.json() == {"match": None, "rejected_candidate": False}
+
+
+async def test_tool_lookup_reports_rejected_candidate(
+    client: httpx.AsyncClient,
+    services: ReplayServices,
+    baseline_session_id: uuid.UUID,
+) -> None:
+    """A lossy stored result is a miss that consumes a baseline occurrence."""
+    created = await _replay_with_history_tool(client, baseline_session_id)
+    cache_key = "c" * 64
+    await services.session_nodes.upsert_batch(
+        baseline_session_id,
+        [
+            build_session_node(
+                baseline_session_id,
+                "call-0",
+                node_type=NodeType.TOOL_CALL,
+                name="search",
+                status=NodeStatus.COMPLETED,
+                outputs=Payload.from_json({"result": "[truncated]"}),
+                attributes=Payload.from_json({"outputs_bounded": True}),
+                tool_name="search",
+                cache_key=cache_key,
+            )
+        ],
+    )
+
+    response = await client.post(
+        f"/api/v1/replays/{created['id']}/tool-lookup",
+        json={"tool_name": "search", "cache_key": cache_key, "occurrence": 0},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"match": None, "rejected_candidate": True}

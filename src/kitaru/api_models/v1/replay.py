@@ -170,3 +170,6 @@ class ToolLookupResponse(ResponseModel):
     match: ToolLookupMatch | None = Field(
         default=None, description="Matching recorded tool call."
     )
+    rejected_candidate: bool = Field(
+        default=False, description="Selected history candidate has incomplete payload."
+    )

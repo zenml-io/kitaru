@@ -291,6 +291,33 @@ describe("normalized replay policy decisions", () => {
     ]);
   });
 
+  it("consumes a rejected baseline candidate before the next identical call", async () => {
+    const { client, run } = runState(
+      baselineHistory("passthrough"),
+      (request) =>
+        request.occurrence === 0
+          ? { match: null, rejected_candidate: true }
+          : {
+              match: {
+                error: null,
+                result: { value: "complete" },
+                status: "completed",
+              },
+            },
+    );
+
+    await expect(
+      decideToolCall(run, { callId: "call-0", ...weatherDelft }),
+    ).resolves.toEqual({ type: "execute" });
+    await expect(
+      decideToolCall(run, { callId: "call-1", ...weatherDelft }),
+    ).resolves.toEqual({
+      output: { value: "complete" },
+      type: "mocked_result",
+    });
+    expect(client.lookups.map((lookup) => lookup.occurrence)).toEqual([0, 1]);
+  });
+
   it("counts baseline occurrences per cache key, not per run", async () => {
     const { client, run } = runState(baselineHistory("fail"), (request) => ({
       match: {

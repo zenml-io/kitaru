@@ -65,6 +65,7 @@ class ToolLookupResult(NamedTuple):
     result: Any
     status: NodeStatus
     error: str | None
+    rejected_candidate: bool = False
 
 
 class ReplayWithDetails(NamedTuple):

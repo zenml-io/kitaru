@@ -3,7 +3,10 @@ import { ToolPolicyError, ToolPolicyMissError } from "../errors.js";
 import { recorderError, toRecorderJson } from "../json.js";
 import type { JsonValue, ToolLookupRequest, ToolPolicy } from "../types.js";
 import { isRecord } from "../validation.js";
-import { recordedToolPayloadJson } from "./recorded-json.js";
+import {
+  boundedRecorderConversion,
+  type RecordingLimits,
+} from "./recorded-json.js";
 import type { AdapterRunState } from "./run-state.js";
 
 type ToolLedgerEntry = NonNullable<ReturnType<AdapterRunState["getToolCall"]>>;
@@ -250,6 +253,9 @@ export async function decideToolCall(
     }
     const lookup = await state.client.lookupToolResult(state.replayId, request);
     if (lookup.match == null) {
+      if (occurrence !== undefined && lookup.rejected_candidate === true) {
+        state.advanceHistoryOccurrence(cacheKey, occurrence);
+      }
       return policyMiss(entry, "history", policy.on_miss);
     }
     // Any recorded match consumes its occurrence before its outcome is
@@ -297,6 +303,7 @@ export function completeToolCall(
   state: AdapterRunState,
   callId: string,
   output: unknown,
+  limits?: RecordingLimits,
 ): void {
   const entry = requiredEntry(state, callId);
   if (entry.mocked) {
@@ -305,10 +312,13 @@ export function completeToolCall(
   // A passthrough tool during a replay has already fired its side effect by
   // the time its result is recorded, so an oversized or circular result is
   // bounded rather than thrown: crashing here would strand a sent email.
-  entry.output = recordedToolPayloadJson(
+  const conversion = boundedRecorderConversion(
     output,
     `tool '${entry.toolName}' output`,
+    limits,
   );
+  entry.output = conversion.value;
+  entry.outputLossy = conversion.lossy;
   entry.outcome = "completed";
 }
 

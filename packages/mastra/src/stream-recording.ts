@@ -1,17 +1,26 @@
 import { createRequire } from "node:module";
 import type { JsonValue, KitaruClient } from "@zenml-io/kitaru";
 import {
+  parseModelSettings,
+  type ReplayContext,
   type RunRecorder,
   recordedToolPayloadJson,
   runResultSummary,
   serializedSettings,
+  stripSystemMessages,
 } from "@zenml-io/kitaru/adapter";
 
 import {
   createContextInput,
   createContextProcessor,
   hasMemoryOptions,
+  restoreConversationContext,
+  unsupportedContext,
 } from "./conversation-context.js";
+import {
+  assertReplayToolCoverage,
+  stripLiveMemoryOptions,
+} from "./replay-guards.js";
 import { type RecordedStep, recordStep } from "./step-recorder.js";
 import { createToolHooks } from "./tool-policies.js";
 import type {
@@ -39,6 +48,7 @@ interface StreamRecordingOptions {
   requestedModelId: string;
   sessionName?: string;
   startedAt: string;
+  replay: ReplayContext;
 }
 
 const ERROR_STEP_GRACE_MS = 250;
@@ -192,7 +202,12 @@ class StreamLifecycle {
     if (this.#recordingError !== undefined) return;
     let writeFailure: { error: unknown } | undefined;
     const write = this.#stepTail.then(() =>
-      recordStep(this.recorder.state, step, this.options.costCalculator),
+      recordStep(
+        this.recorder.state,
+        step,
+        this.options.costCalculator,
+        this.options.recordingLimits,
+      ),
     );
     this.#stepTail = write.catch((error: unknown) => {
       writeFailure = { error };
@@ -326,6 +341,7 @@ export async function streamWithRecording({
   requestedModelId,
   sessionName,
   startedAt,
+  replay,
 }: StreamRecordingOptions): Promise<unknown> {
   assertStreamSupported(agent);
   const resolvedDefaults =
@@ -339,6 +355,79 @@ export async function streamWithRecording({
     : {};
   const { deepMerge } = await import("@mastra/core/utils");
   const effective = deepMerge(defaults, callerOptions) as RuntimeStreamOptions;
+  const needsContext = hasMemoryOptions(effective);
+  const contextMessages = restoreConversationContext(replayInput);
+  if (contextMessages && !replay.spec) {
+    throw new Error(
+      "A recorded Mastra conversation context can only be restored through a Kitaru replay. Start a replay for this session to keep live memory isolated.",
+    );
+  }
+  if (replay.spec && needsContext && contextMessages === undefined) {
+    throw unsupportedContext();
+  }
+  if (
+    contextMessages &&
+    (replay.override?.prompt != null || replay.override?.system_prompt != null)
+  ) {
+    throw new Error(
+      "Unsupported Mastra replay: prompt and system_prompt overrides cannot replace a recorded conversation context. Record a new invocation with the desired messages.",
+    );
+  }
+  let effectiveMessages = contextMessages ?? callerMessages;
+  if (contextMessages) {
+    effective.instructions = [];
+    effective.system = [];
+    effective.context = [];
+  }
+  let replayAbortController: AbortController | undefined;
+  if (replay.replacementModelId !== undefined) {
+    if (!options.resolveModel) {
+      throw new Error(
+        `Cannot resolve replacement model '${replay.replacementModelId}' without resolveModel`,
+      );
+    }
+    const resolved = await options.resolveModel(replay.replacementModelId);
+    if (resolved === undefined || resolved === null) {
+      throw new Error(
+        `Replacement model '${replay.replacementModelId}' did not resolve`,
+      );
+    }
+    effective.model = resolved;
+  }
+  if (
+    replay.override?.system_prompt !== undefined &&
+    replay.override.system_prompt !== null
+  ) {
+    delete effective.system;
+    effective.instructions = replay.override.system_prompt;
+    effectiveMessages = stripSystemMessages(effectiveMessages);
+  }
+  const overrideModelSettings = parseModelSettings(
+    replay.override?.model_params,
+  );
+  if (overrideModelSettings) {
+    effective.modelSettings = {
+      ...effective.modelSettings,
+      ...overrideModelSettings,
+    };
+  }
+  if (replay.spec) {
+    replayAbortController = new AbortController();
+    effective.abortSignal = callerOptions.abortSignal
+      ? AbortSignal.any([
+          callerOptions.abortSignal,
+          replayAbortController.signal,
+        ])
+      : replayAbortController.signal;
+    stripLiveMemoryOptions(effective);
+    await assertReplayToolCoverage({
+      agent,
+      methodType: "stream",
+      runtimeOptions: effective,
+      spec: replay.spec,
+    });
+    effective.toolCallConcurrency = 1;
+  }
   const processors =
     effective.inputProcessors ??
     (typeof agent.listConfiguredInputProcessors === "function"
@@ -354,7 +443,10 @@ export async function streamWithRecording({
   }
   await assertSupportedOptions(agent, effective);
 
-  let recordedInput = replayInput;
+  let recordedInput =
+    needsContext && !replay.spec
+      ? createContextInput(replayInput)
+      : replayInput;
   let lifecycle: StreamLifecycle | undefined;
   let initializePromise: Promise<StreamLifecycle> | undefined;
   const initialize = (): Promise<StreamLifecycle> => {
@@ -369,9 +461,11 @@ export async function streamWithRecording({
         effectiveModelSettings: serializedSettings(effective.modelSettings),
         framework: "mastra",
         name: sessionName,
+        replayId: replay.replayId,
         requestedModelId,
         sessionIdFile: process.env.KITARU_SESSION_ID_FILE,
         startedAt,
+        spec: replay.spec,
       });
       try {
         await recorder.initialize();
@@ -385,8 +479,7 @@ export async function streamWithRecording({
     return initializePromise;
   };
 
-  const needsContext = hasMemoryOptions(effective);
-  if (needsContext) {
+  if (needsContext && !replay.spec) {
     if (Array.isArray(processors)) {
       effective.inputProcessors = [
         ...processors,
@@ -422,6 +515,10 @@ export async function streamWithRecording({
         : step;
     await active.record(recordedStep as RecordedStep);
     if (step.finishReason === "error") modelError = undefined;
+    if (replay.spec && active.recorder.state.failure !== undefined) {
+      await active.fail(active.recorder.state.failure);
+      return;
+    }
     try {
       await options.configuredOnStepFinish?.(step);
       await callerStep?.(step);
@@ -435,6 +532,10 @@ export async function streamWithRecording({
   };
   effective.onFinish = async (event) => {
     const active = await initialize();
+    if (replay.spec && active.recorder.state.failure !== undefined) {
+      await active.fail(active.recorder.state.failure);
+      return;
+    }
     try {
       await callerFinish?.(event);
     } catch (error) {
@@ -470,19 +571,25 @@ export async function streamWithRecording({
     modelError ??= event.error;
     const active =
       lifecycle ?? (await initializePromise?.catch(() => undefined));
-    active?.deferFailure(getSafeStreamError(modelError));
+    active?.deferFailure(
+      active.recorder.state.failure ?? getSafeStreamError(modelError),
+    );
     await callerError?.(event);
   };
   effective.onAbort = async (event) => {
     const active = await initialize();
-    await active.fail(new Error("Mastra stream aborted"));
+    await active.fail(
+      active.recorder.state.failure ?? new Error("Mastra stream aborted"),
+    );
     await callerAbort?.(event);
   };
   const getToolHooks = async () =>
     createToolHooks({
+      abortReplay: (reason) => replayAbortController?.abort(reason),
       callerHooks,
       configuredAfterToolCall: options.configuredAfterToolCall,
       configuredBeforeToolCall: options.configuredBeforeToolCall,
+      limits: options.recordingLimits,
       state: (await initialize()).recorder.state,
     });
   effective.hooks = {
@@ -493,11 +600,14 @@ export async function streamWithRecording({
   };
 
   try {
-    return await agent.stream(callerMessages, effective);
+    return await agent.stream(effectiveMessages, effective);
   } catch (error) {
     const active =
       lifecycle ?? (await initializePromise?.catch(() => undefined));
-    await active?.fail(getSafeStreamError(error));
-    throw error;
+    const replayFailure = replay.spec
+      ? active?.recorder.state.failure
+      : undefined;
+    await active?.fail(replayFailure ?? getSafeStreamError(error));
+    throw replayFailure ?? error;
   }
 }

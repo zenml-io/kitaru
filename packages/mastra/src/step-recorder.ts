@@ -6,6 +6,7 @@ import {
   boundedRecorderJson,
   type NormalizedToolCall,
   projectRecordedMetadata,
+  type RecordingLimits,
   recordNormalizedStep,
   resolveCost,
 } from "@zenml-io/kitaru/adapter";
@@ -172,6 +173,7 @@ export async function recordStep(
   state: AdapterRunState,
   step: RecordedStep,
   costCalculator?: KitaruCostCalculator,
+  limits?: RecordingLimits,
 ): Promise<void> {
   const calls = step.toolCalls.flatMap((item) => {
     const call = toolCallPayload(item);
@@ -188,7 +190,15 @@ export async function recordStep(
     const inputs = boundedRecorderConversion(
       call.args,
       `tool '${call.toolName}' input`,
+      limits,
     );
+    const recordedResult = result
+      ? boundedRecorderConversion(
+          result.result,
+          `tool '${call.toolName}' output`,
+          limits,
+        )
+      : undefined;
     return {
       callId: call.toolCallId,
       inputs: inputs.value,
@@ -206,10 +216,8 @@ export async function recordStep(
               ? errorMessage(result.result, "Tool failed")
               : undefined,
             failed: result.isError,
-            output: boundedRecorderJson(
-              result.result,
-              `tool '${call.toolName}' output`,
-            ),
+            output: recordedResult?.value ?? null,
+            outputLossy: recordedResult?.lossy,
           }
         : undefined,
       toolName: call.toolName,

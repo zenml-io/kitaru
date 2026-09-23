@@ -391,6 +391,7 @@ def _cache_node(
     outputs: object,
     status: NodeStatus = NodeStatus.COMPLETED,
     error: str | None = None,
+    attributes: dict[str, object] | None = None,
 ) -> SessionNode:
     return build_session_node(
         session_id,
@@ -402,6 +403,7 @@ def _cache_node(
         tool_name="search",
         cache_key=cache_key,
         outputs=Payload.from_json(outputs) if outputs is not None else None,
+        attributes=Payload.from_json(attributes) if attributes is not None else None,
     )
 
 
@@ -626,6 +628,44 @@ async def test_tool_lookup_occurrence_replays_baseline_order(
         replay_id, "search", cache_key, 3, actor=ACTOR
     )
     assert exhausted is None
+
+
+@pytest.mark.parametrize("bounded_key", ["inputs_bounded", "outputs_bounded"])
+async def test_tool_lookup_rejects_selected_lossy_node(
+    services: ReplayServices, bounded_key: str
+) -> None:
+    """A selected lossy node is a miss without shifting later occurrences."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    cache_key = "z" * 64
+    await services.session_nodes.upsert_batch(
+        baseline.id,
+        [
+            _cache_node(
+                baseline.id,
+                0,
+                cache_key,
+                {"result": "shortened"},
+                attributes={bounded_key: True},
+            ),
+            _cache_node(baseline.id, 1, cache_key, {"result": "complete"}),
+        ],
+    )
+    replay_id = await _replay_with_history_scope(
+        services, HistoryScope.BASELINE, baseline
+    )
+
+    rejected = await services.replay_service.tool_lookup(
+        replay_id, "search", cache_key, 0, actor=ACTOR
+    )
+    complete = await services.replay_service.tool_lookup(
+        replay_id, "search", cache_key, 1, actor=ACTOR
+    )
+
+    assert rejected is not None
+    assert rejected.rejected_candidate is True
+    assert complete is not None
+    assert complete.result == {"result": "complete"}
 
 
 async def test_tool_lookup_occurrence_interleaves_cache_keys(

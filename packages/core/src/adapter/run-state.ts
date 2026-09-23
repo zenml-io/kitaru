@@ -24,6 +24,7 @@ interface ToolLedgerEntry {
   mocked: boolean;
   outcome: "completed" | "failed" | "pending";
   output?: JsonValue;
+  outputLossy?: boolean;
   policy?: "history" | "static";
   startedAt?: string;
   toolName: string;

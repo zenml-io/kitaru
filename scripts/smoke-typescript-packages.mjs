@@ -195,6 +195,25 @@ globalThis.fetch = async (input, init = {}) => {
       status: body.status,
     });
   }
+  if (method === "GET" && url.pathname === "/api/v1/replays/" + replayId) {
+    return Response.json({
+      baseline_session_id: sessionId,
+      id: replayId,
+      job_id: "018f0000-0000-7000-8000-000000000104",
+      override: null,
+      status: "pending",
+      tool_policy: {
+        default: { on_miss: "fail", scope: "baseline", type: "history" },
+        tools: {},
+      },
+    });
+  }
+  if (method === "POST" && url.pathname.endsWith("/tool-lookup")) {
+    return Response.json({
+      match: { error: null, result: { forecast: "sunny", city: "Amsterdam" }, status: "completed" },
+      rejected_candidate: false,
+    });
+  }
   throw new Error("Unexpected stream smoke request: " + method + " " + url.pathname);
 };
 
@@ -206,7 +225,7 @@ const model = {
   },
   doStream: async () => {
     modelCalls += 1;
-    const chunks = modelCalls === 1
+    const chunks = modelCalls % 2 === 1
       ? [
           { type: "stream-start", warnings: [] },
           { id: "tool-response", modelId: "served-stream-model", type: "response-metadata" },
@@ -316,23 +335,21 @@ if (mastraVersion === "1.51.0") {
     throw new Error("Packaged stream did not record its final output");
   }
 
-  const sideEffects = { calls: calls.length, modelCalls, toolCalls };
   process.env.KITARU_REPLAY_ID = replayId;
-  await recorded.stream("replay").then(
-    () => {
-      throw new Error("Streaming replay unexpectedly started");
-    },
-    (error) => {
-      if (!String(error).includes("does not support replay")) throw error;
-    },
-  );
+  process.env.KITARU_TASK_INPUTS = JSON.stringify("recorded weather");
+  const replay = await recorded.stream("caller weather");
+  const replayChunks = [];
+  for await (const chunk of replay.textStream) replayChunks.push(chunk);
   delete process.env.KITARU_REPLAY_ID;
-  if (
-    calls.length !== sideEffects.calls ||
-    modelCalls !== sideEffects.modelCalls ||
-    toolCalls !== sideEffects.toolCalls
-  ) {
-    throw new Error("Streaming replay rejection caused side effects");
+  delete process.env.KITARU_TASK_INPUTS;
+  if (replayChunks.join("") !== "sunny today" || modelCalls !== 4 || toolCalls !== 1) {
+    throw new Error("Packaged stream replay did not mock the history tool");
+  }
+  const replaySession = calls.find(
+    (call) => call.method === "POST" && call.path === "/api/v1/sessions" && call.body.origin === "replay",
+  );
+  if (replaySession?.body.inputs !== "recorded weather") {
+    throw new Error("Packaged stream replay did not use the recorded input");
   }
 }
 `,

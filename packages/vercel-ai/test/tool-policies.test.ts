@@ -223,6 +223,7 @@ describe("replay tool policies", () => {
       client: () =>
         new FakeClient({
           lookup: () => ({
+            rejected_candidate: false,
             match: {
               error: null,
               result: { source: "history" },
@@ -302,6 +303,7 @@ describe("replay tool policies", () => {
   it("returns and records a completed null history result", async () => {
     const client = new FakeClient({
       lookup: () => ({
+        rejected_candidate: false,
         match: { error: null, result: null, status: "completed" },
       }),
       replay: replaySpec({ on_miss: "fail", type: "history" }),
@@ -335,6 +337,7 @@ describe("replay tool policies", () => {
   it("throws and records a failed history result", async () => {
     const client = new FakeClient({
       lookup: () => ({
+        rejected_candidate: false,
         match: {
           error: "recorded tool failure",
           result: null,
@@ -525,6 +528,7 @@ describe("replay tool policies", () => {
     async (scope, expectedWarnings) => {
       const client = new FakeClient({
         lookup: () => ({
+          rejected_candidate: false,
           match: { error: null, result: "recorded", status: "completed" },
         }),
         replay: replaySpec({ on_miss: "fail", scope, type: "history" }),

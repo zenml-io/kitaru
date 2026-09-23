@@ -110,7 +110,7 @@ class SessionNodeRepository(Protocol):
     ) -> SessionNode | None:
         """Find the newest completed node with a cache key within one session.
 
-        Only the outputs payload of the match is read.
+        Only the outputs and attributes payloads of the match are read.
 
         Args:
             session_id: Id of the session to search.
@@ -128,7 +128,7 @@ class SessionNodeRepository(Protocol):
 
         Only completed and failed tool calls are candidates, so the
         occurrence offset counts finished calls only. Only the outputs
-        payload of the match is read.
+        and attributes payloads of the match are read.
 
         Args:
             session_id: Id of the session to search.
@@ -147,7 +147,7 @@ class SessionNodeRepository(Protocol):
 
         Only sessions with a recorded or imported origin are searched, so a
         replay's own result session is never a match. Only the outputs
-        payload of the match is read.
+        and attributes payloads of the match are read.
 
         Args:
             agent_id: Id of the agent to search.
@@ -163,7 +163,7 @@ class SessionNodeRepository(Protocol):
     ) -> SessionNode | None:
         """Find the newest completed node with a cache key in a cohort version.
 
-        Only the outputs payload of the match is read.
+        Only the outputs and attributes payloads of the match are read.
 
         Args:
             cohort_version_id: Id of the cohort version to search.

@@ -4,6 +4,7 @@ import type { MastraModelConfig } from "@mastra/core/llm";
 import { KitaruClient } from "@zenml-io/kitaru";
 import {
   boundedRecorderJson,
+  normalizeRecordingLimits,
   parseModelSettings,
   RunRecorder,
   resolveReplayContext,
@@ -103,7 +104,10 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
 
   constructor(agent: TAgent, options: KitaruAgentOptions) {
     this.#agent = agent;
-    this.#options = options;
+    this.#options = {
+      ...options,
+      recordingLimits: normalizeRecordingLimits(options.recordingLimits),
+    };
     this.#sessionName = options.sessionName ?? process.env.KITARU_SESSION_NAME;
     this.#client = new KitaruClient({
       apiKey: options.apiKey,
@@ -118,9 +122,6 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
     callerMessages: unknown,
     callerOptions: RuntimeStreamOptions = {},
   ): Promise<unknown> {
-    if (process.env.KITARU_REPLAY_ID !== undefined) {
-      throw new Error("KitaruAgent.stream() does not support replay");
-    }
     const requestedModelId =
       readableModelId(callerOptions.model) ?? this.#options.requestedModelId;
     const replay = await resolveReplayContext({
@@ -129,14 +130,6 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       client: this.#client,
       requestedModelId,
     });
-    if (
-      replay.spec ||
-      replay.replayId ||
-      replay.override ||
-      replay.replacementModelId
-    ) {
-      throw new Error("KitaruAgent.stream() does not support replay");
-    }
     return streamWithRecording({
       adapterVersion: ADAPTER_VERSION,
       agent: this.#agent,
@@ -145,6 +138,7 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       client: this.#client,
       options: this.#options,
       replayInput: replay.effectiveInput,
+      replay,
       requestedModelId,
       sessionName: this.#sessionName,
       startedAt: new Date().toISOString(),
@@ -391,6 +385,7 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
           state,
           recordedStep as RecordedStep,
           this.#options.costCalculator,
+          this.#options.recordingLimits,
         );
         if (step.finishReason === "error") {
           modelError = undefined;
@@ -409,6 +404,7 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
           callerHooks: callerOptions.hooks,
           configuredAfterToolCall: this.#options.configuredAfterToolCall,
           configuredBeforeToolCall: this.#options.configuredBeforeToolCall,
+          limits: this.#options.recordingLimits,
           state: (await initializeRecorder()).state,
         });
       effectiveOptions.hooks = {

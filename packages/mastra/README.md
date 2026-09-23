@@ -1,6 +1,6 @@
 # `@zenml-io/kitaru-mastra`
 
-Experimental recording and replay support for Mastra. `generate()` supports `@mastra/core >=1.51.0 <1.68.0`; recorded `stream()` calls require a stable `@mastra/core 1.67.x` release.
+Experimental recording and replay support for Mastra. `generate()` supports `@mastra/core >=1.51.0 <1.68.0`; recorded and replayed `stream()` calls require a stable `@mastra/core 1.67.x` release.
 
 This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose repository directory is `packages/core/`. The packages are versioned and released together.
 
@@ -33,7 +33,7 @@ The wrapper calls the existing agent's public method. It does not recreate tools
 
 ## Streaming
 
-On Mastra 1.67.x, `KitaruAgent.stream()` returns the native Mastra result and records model and local-tool steps as Mastra completes them:
+On Mastra 1.67.x, `KitaruAgent.stream()` returns the native Mastra result and records model and local-tool steps as Mastra completes them, including during replay:
 
 ```ts
 const output = await recorded.stream(messages, {
@@ -82,7 +82,17 @@ Recording uses the public response model, provider, usage, finish information, a
 
 Each LLM node records `requested_model` (the Kitaru model id the run asked for, before any replay override), `model` (the model id the provider says it served), and `model_provider` (the bare provider family, such as `openai`). Mastra reports transport-qualified provider strings such as `openai.responses`; the adapter keeps that original string as the `provider_id` attribute so evaluator model policies can match one exact provider family.
 
-Recording is bounded on purpose. Parent step nodes record no model inputs, because the provider request body repeats the whole system prompt and message history on every step. Step outputs keep the finish reason, text, tool calls, tool results, tripwire details, and warnings; the session output keeps the finish reason, step count, and final text. Tool strings longer than 4096 characters, arrays longer than 100 items, objects with more than 100 keys, and nesting deeper than 8 levels are truncated, and values under the credential keys `authorization`, `token`, `secret`, `password`, `api_key`, `apikey`, and `cookie` are replaced with `[redacted]`. Final stream text is not subject to the 4096-character tool-value limit. The existing recorder can preserve it until the whole serialized payload exceeds 1,048,576 characters, when it stores a degraded bounded marker instead of an unlimited transcript. Provider metadata is not part of the replay contract, so it also hides values under keys that carry blobs or transport envelopes, such as `data`, `file`, `request`, and `url`.
+Recording is bounded on purpose. Parent step nodes record no model inputs, because the provider request body repeats the whole system prompt and message history on every step. Step outputs keep the finish reason, text, tool calls, tool results, tripwire details, and warnings; the session output keeps the finish reason, step count, and final text. Tool strings longer than 4096 characters, arrays longer than 100 items, objects with more than 100 keys, and nesting deeper than 8 levels are truncated by default. Set `recordingLimits` when your tools return larger values:
+
+```ts
+const recorded = new KitaruAgent(agent, {
+  agentId,
+  requestedModelId,
+  recordingLimits: { maxStringChars: 6_000, maxItems: 120, maxDepth: 10 },
+});
+```
+
+Each limit is a positive integer, at most 1,048,565 characters, 9,000 items per array or object, or 64 levels of nesting, respectively. The whole recorded value must also fit within 1 MiB and 9,000 items; an over-budget value becomes a bounded degraded marker. These limits apply to dedicated tool-call nodes; duplicate tool details in model-step summaries keep the default bounds. They do not change final stream text, model output, or provider metadata. Credential keys `authorization`, `token`, `secret`, `password`, `api_key`, `apikey`, and `cookie` remain redacted at every setting. The recorder marks truncated, degraded, or redacted tool values as incomplete. Provider metadata is not part of the replay contract, so it also hides values under keys that carry blobs or transport envelopes, such as `data`, `file`, `request`, and `url`.
 
 Model nodes follow completed `onStepFinish` callbacks, and each model node is written before its local tool children. This is adapter callback order, not proof of provider-side start order or wall-clock ordering among concurrent operations.
 
@@ -103,7 +113,7 @@ Each LLM node carries a `cost` attribute recording where the number came from: `
 
 ## Replay
 
-When `KITARU_REPLAY_ID` is set, `generate()` fetches the replay and applies its model, system-instruction, model-parameter, and tool-policy overrides through public per-run options and tool hooks. `stream()` rejects replay before creating a session or invoking Mastra.
+When `KITARU_REPLAY_ID` is set, `generate()` or `stream()` fetches the replay and applies its model, system-instruction, model-parameter, and tool-policy overrides through public per-run options and tool hooks. The stream entrypoint still returns Mastra's native result; callers must consume it through completion so Kitaru can finalize the replay session.
 
 Input precedence is `KITARU_TASK_INPUTS`, then caller messages. The Kitaru worker puts the effective baseline or replay input in `KITARU_TASK_INPUTS`, so the wrapper does not need to reconstruct it from the replay resource. Replay overrides take precedence over the legacy `KITARU_OVERRIDE` fallback; they are never merged.
 
@@ -127,9 +137,9 @@ The adapter drops per-run `memory`, `threadId`, `resourceId`, and `savePerStep`,
 
 Missing, incomplete, or lossy snapshots fail replay before model execution with instructions to record the invocation again or supply its complete recorded messages without live memory selectors. Existing recordings cannot recover history that was never recorded. Legacy raw inputs carry no memory provenance, so removing memory selectors from an entrypoint cannot prove that a legacy recording contains the full conversation. Record legacy memory-dependent invocations again before replaying them. Prompt and system-instruction overrides on conversation snapshots are rejected because replacing them can discard part of the recorded context.
 
-A tool-policy failure aborts the replay. Mastra turns a rejected tool hook into a tool-error result and keeps the agent loop running, so the adapter stops the run itself: later tools refuse to execute, the run rejects with the original policy error, and the session is recorded as failed rather than completed. Replay also runs tool calls one at a time (`toolCallConcurrency: 1`) so that a policy failure stops the step before a sibling tool fires its side effect.
+A tool-policy failure stops later live tools and model steps, and Kitaru records a failed replay session. Mastra turns a rejected tool hook into a tool-error result, so the adapter aborts the run and executes replay tool calls one at a time (`toolCallConcurrency: 1`). On `generate()`, the call rejects with the policy error. On `stream()`, Mastra may settle its native text or aggregate result without rejecting; inspect the Kitaru replay session for the final failure status. Throwing again from `onStepFinish` can leave Mastra's native stream unresolved, so Kitaru preserves its completion behavior.
 
-Supported tool policies are passthrough, static, and history, including `fail`, `passthrough`, and `error_result` miss behavior. History lookup computes the same SHA-256 cache key as the Python server from the tool name and JSON inputs. A completed match replays its result, including `null`, without executing the live tool. A failed match throws its stored error and does not execute the live tool. Only a genuine miss follows `on_miss`. The `llm` policy fails before tool execution because it is not supported in this release.
+Supported tool policies are passthrough, static, and history, including `fail`, `passthrough`, and `error_result` miss behavior. History lookup computes the same SHA-256 cache key as the Python server from the tool name and JSON inputs. A completed match replays its result, including `null`, without executing the live tool. A failed match throws its stored error and does not execute the live tool. A recorded tool call marked with incomplete arguments or results is a history miss and follows `on_miss`; `passthrough` therefore executes the live tool and may cause a side effect. Use `on_miss: "fail"` when that must not happen. Older recordings without a result-fidelity flag remain readable, but Kitaru cannot determine whether their results were truncated; record them again for trustworthy history replay. Imports retain their source payloads and do not use `recordingLimits`, although the executing adapter needs limits high enough to match imported tool arguments. The `llm` policy fails before tool execution because it is not supported in this release.
 
 History matching is guaranteed only for traces recorded and replayed through this Mastra adapter. Another framework may validate, default, or serialize the same logical tool input differently, so cross-framework history replay is not a compatibility promise.
 
@@ -147,6 +157,6 @@ Recorded payloads preserve JSON values, convert dates to ISO strings, bigints to
 
 ## Current scope
 
-This experimental release supports `Agent.generate()` with Mastra `>=1.51.0 <1.68.0` and ordinary consumed `Agent.stream()` calls on stable Mastra 1.67.x. Streaming supports local function tools and schema-only structured output. It rejects user `prepareStep` and input processors, replay, approval and resume modes, background or `untilIdle` execution, and secondary structured-output models before native execution. Replay remains a `generate()` capability and rejects `prepareStep` and input processors because they can replace the model, prompt, or tools after preflight. Workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, and LLM tool policy are intentionally not implemented.
+This experimental release supports `Agent.generate()` with Mastra `>=1.51.0 <1.68.0` and consumed `Agent.stream()` calls, including replay, on stable Mastra 1.67.x. Streaming supports local function tools and schema-only structured output. It rejects user `prepareStep` and input processors, approval and resume modes, background or `untilIdle` execution, and secondary structured-output models before native execution. Both replay entrypoints reject `prepareStep` and input processors because they can replace the model, prompt, or tools after preflight. Workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, and LLM tool policy are intentionally not implemented.
 
 Replay is execution, not a transaction. A passthrough tool can complete an external side effect before a later model or recording failure, and Kitaru cannot roll it back. Use application-level idempotency keys for side-effecting tools, or prefer static/history replay when execution must be suppressed.

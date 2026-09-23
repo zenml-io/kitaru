@@ -10,6 +10,7 @@ export interface NormalizedToolResult {
   error?: string;
   failed: boolean;
   output: JsonValue;
+  outputLossy?: boolean;
 }
 
 export interface NormalizedToolCall {
@@ -53,10 +54,13 @@ export interface NormalizedModelStep {
 function toolCallAttributes(
   policyAttributes: Record<string, JsonValue>,
   inputsBounded: boolean,
+  outputsBounded: boolean,
 ): Record<string, JsonValue> {
-  return inputsBounded
-    ? { ...policyAttributes, inputs_bounded: true }
-    : policyAttributes;
+  return {
+    ...policyAttributes,
+    ...(inputsBounded ? { inputs_bounded: true } : {}),
+    ...(outputsBounded ? { outputs_bounded: true } : {}),
+  };
 }
 
 function policyAttributesFromLedger(
@@ -86,6 +90,9 @@ function toolNode(
     attributes: toolCallAttributes(
       policyAttributesFromLedger(ledgerEntry),
       call.inputsLossy === true || ledgerEntry?.inputsLossy === true,
+      call.result === undefined
+        ? ledgerEntry?.outputLossy === true
+        : call.result.outputLossy === true,
     ),
     ended_at: endedAt,
     error: failed
@@ -98,7 +105,10 @@ function toolNode(
     inputs: call.inputs,
     name: call.toolName,
     node_type: "tool_call",
-    outputs: call.result?.output ?? ledgerEntry?.output ?? null,
+    outputs:
+      call.result === undefined
+        ? (ledgerEntry?.output ?? null)
+        : call.result.output,
     parent_external_id: parentExternalId,
     started_at: call.startedAt ?? ledgerEntry?.startedAt,
     status: failed ? "failed" : "completed",
@@ -168,6 +178,7 @@ export async function flushFailedPolicyOutcomes(
         ? {}
         : { mocked: entry.mocked, policy: entry.policy },
       entry.inputsLossy === true,
+      entry.outputLossy === true,
     ),
     ended_at: endedAt,
     error: entry.error?.message ?? "Tool policy failed",

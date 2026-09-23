@@ -369,6 +369,7 @@ describe("KitaruClient", () => {
 
   it.each([
     ["a non-object match", { match: "completed" }],
+    ["a malformed rejection flag", { match: null, rejected_candidate: "yes" }],
     ["a missing result", { match: { status: "completed" } }],
     ["an unknown status", { match: { result: null, status: "unknown" } }],
     [
@@ -389,6 +390,20 @@ describe("KitaruClient", () => {
         tool_name: "normalize",
       }),
     ).rejects.toThrow("Invalid response");
+  });
+
+  it("defaults the rejection flag from an older server response", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      jsonResponse({ match: null }),
+    );
+    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
+
+    await expect(
+      client.lookupToolResult(REPLAY_ID, {
+        cache_key: "a".repeat(64),
+        tool_name: "normalize",
+      }),
+    ).resolves.toEqual({ match: null, rejected_candidate: false });
   });
 
   it.each([

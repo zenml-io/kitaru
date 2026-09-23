@@ -10614,6 +10614,12 @@
               }
             ],
             "description": "Matching recorded tool call."
+          },
+          "rejected_candidate": {
+            "default": false,
+            "description": "Selected history candidate has incomplete payload.",
+            "title": "Rejected Candidate",
+            "type": "boolean"
           }
         },
         "title": "ToolLookupResponse",

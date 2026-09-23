@@ -8,6 +8,9 @@ const MAX_RECORDED_JSON_CHARS = 65_536;
 export const MAX_RECORDED_PAYLOAD_CHARS = 1_048_576;
 const MAX_RECORDED_PAYLOAD_ITEMS = 10_000;
 const MAX_RECORDED_PAYLOAD_DEPTH = 64;
+// Leave room for the session node and step envelope in toRecorderJson's
+// 10,000-item ceiling after the tool value is embedded in it.
+const MAX_BOUNDED_TOOL_ITEMS = 9_000;
 
 const CIRCULAR_MARKER = "[circular]";
 const REDACTED_MARKER = "[redacted]";
@@ -50,6 +53,39 @@ type SensitiveKeyMode = "allow" | "redact" | "reject";
 
 interface CloneBudget {
   chars: number;
+  items?: number;
+}
+
+/** Per-value bounds for recorded tool arguments and results. */
+export interface RecordingLimits {
+  maxDepth?: number;
+  maxItems?: number;
+  maxStringChars?: number;
+}
+
+/** Validate once at adapter construction; retain a separate policy per agent. */
+export function normalizeRecordingLimits(
+  limits: RecordingLimits = {},
+): Required<RecordingLimits> {
+  const normalized = {
+    maxDepth: limits.maxDepth ?? MAX_RECORDED_DEPTH,
+    maxItems: limits.maxItems ?? MAX_RECORDED_ITEMS,
+    maxStringChars: limits.maxStringChars ?? MAX_RECORDED_STRING_CHARS,
+  };
+  const ceilings = {
+    maxDepth: MAX_RECORDED_PAYLOAD_DEPTH,
+    maxItems: MAX_BOUNDED_TOOL_ITEMS,
+    maxStringChars: MAX_RECORDED_PAYLOAD_CHARS - TRUNCATED_MARKER.length,
+  };
+  for (const key of Object.keys(normalized) as (keyof RecordingLimits)[]) {
+    const value = normalized[key];
+    if (!Number.isSafeInteger(value) || value < 1 || value > ceilings[key]) {
+      throw new TypeError(
+        `recordingLimits.${key} must be an integer from 1 to ${ceilings[key]}`,
+      );
+    }
+  }
+  return Object.freeze(normalized);
 }
 
 /** A converted payload together with whether converting it lost information. */
@@ -120,6 +156,12 @@ function cloneJson(
   depth: number,
   seen: Set<object>,
 ): JsonValue {
+  if (options.budget.items !== undefined) {
+    options.budget.items -= 1;
+    if (options.budget.items < 0) {
+      throw new TypeError(`${options.path} exceeds its recorded item count`);
+    }
+  }
   spendBudget(options, 1);
   if (value === null || typeof value === "boolean") {
     return value;
@@ -373,29 +415,41 @@ export function recordedToolPayloadJson(
 export function boundedRecorderConversion(
   value: unknown,
   path: string,
+  limits?: RecordingLimits,
 ): RecordedConversion {
+  const resolved = normalizeRecordingLimits(limits);
   const options: CloneOptions = {
-    // The per-string, per-item, and depth bounds already cap this payload, and
-    // a whole-payload degraded marker is lossy, so budgeting the total size
-    // here would take every merely large tool input out of recorded history.
-    budget: { chars: Number.POSITIVE_INFINITY },
+    // The downstream recorder accepts at most 10,000 values and a 1 MiB
+    // string. Degrade larger values here so they cannot fail the run later.
+    budget: {
+      chars: MAX_RECORDED_PAYLOAD_CHARS * 2,
+      items: MAX_BOUNDED_TOOL_ITEMS,
+    },
     lossy: false,
-    maxDepth: MAX_RECORDED_DEPTH,
-    maxItems: MAX_RECORDED_ITEMS,
-    maxStringChars: MAX_RECORDED_STRING_CHARS,
+    maxDepth: resolved.maxDepth,
+    maxItems: resolved.maxItems,
+    maxStringChars: resolved.maxStringChars,
     path,
     rejectLongStrings: false,
     sensitiveKeyMode: "redact",
     sensitiveKeys: SECRET_KEYS,
   };
-  return withoutFailing(options, () => convert(value, options));
+  return withoutFailing(options, () => {
+    const converted = convert(value, options);
+    assertJsonSize(converted, path, MAX_RECORDED_PAYLOAD_CHARS);
+    return converted;
+  });
 }
 
 /**
  * Convert a payload for recording with narrow bounds and credentials hidden.
  */
-export function boundedRecorderJson(value: unknown, path: string): JsonValue {
-  return boundedRecorderConversion(value, path).value;
+export function boundedRecorderJson(
+  value: unknown,
+  path: string,
+  limits?: RecordingLimits,
+): JsonValue {
+  return boundedRecorderConversion(value, path, limits).value;
 }
 
 /**

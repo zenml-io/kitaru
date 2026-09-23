@@ -45,12 +45,8 @@ PAYLOAD_COLUMNS = (
     SessionNodeORM.attributes,
 )
 
-# Tool lookups replay only the stored result, so every payload column
-# except outputs stays unread.
-TOOL_LOOKUP_DEFERRED_COLUMNS = (
-    SessionNodeORM.inputs,
-    SessionNodeORM.attributes,
-)
+# Tool lookups read result and fidelity attributes, but never arguments.
+TOOL_LOOKUP_DEFERRED_COLUMNS = (SessionNodeORM.inputs,)
 
 
 class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):

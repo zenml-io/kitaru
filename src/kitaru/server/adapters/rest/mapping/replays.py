@@ -174,6 +174,8 @@ def tool_lookup_result_to_response(
     """
     if result is None:
         return ToolLookupResponse()
+    if result.rejected_candidate:
+        return ToolLookupResponse(rejected_candidate=True)
     return ToolLookupResponse(
         match=ToolLookupMatch(
             result=result.result, status=result.status, error=result.error

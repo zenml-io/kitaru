@@ -18,6 +18,27 @@ afterEach(() => {
 });
 
 describe("step recording", () => {
+  it.each([
+    { maxStringChars: 0 },
+    { maxItems: 10_000 },
+    { maxDepth: 65 },
+    { maxDepth: 1.5 },
+  ])(
+    "rejects invalid recording limits before execution: %j",
+    (recordingLimits) => {
+      const agent = new FakeAgent();
+      expect(
+        () =>
+          new KitaruAgent(agent, {
+            agentId: AGENT_ID,
+            apiUrl: "https://api.example",
+            recordingLimits,
+            requestedModelId: "requested-model",
+          }),
+      ).toThrow(/recordingLimits/);
+    },
+  );
+
   it("batches an LLM parent and ordered tool children with raw model arguments", async () => {
     const api = installTestApi();
     const rawFirst = { count: "2" };
@@ -198,6 +219,120 @@ describe("step recording", () => {
       query: `${"x".repeat(4_096)}[truncated]`,
     });
     expect(tool?.outputs).toEqual({ api_key: "[redacted]", hits: 2 });
+    expect(tool?.attributes).toMatchObject({
+      inputs_bounded: true,
+      outputs_bounded: true,
+    });
+  });
+
+  it("uses per-agent tool limits without changing the native result", async () => {
+    const api = installTestApi();
+    const narrative = "n".repeat(5_000);
+    const hotels = Array.from({ length: 105 }, (_, index) => index);
+    const input = { hotels, narrative };
+    const output = { hotels, narrative, token: "SECRET_SENTINEL" };
+    const createAgent = (callId: string) =>
+      new FakeAgent(async (_messages, options) => {
+        await options.onStepFinish?.({
+          ...textStep(callId),
+          toolCalls: [
+            {
+              payload: { args: input, toolCallId: callId, toolName: "search" },
+            },
+          ],
+          toolResults: [
+            {
+              payload: {
+                args: input,
+                result: output,
+                toolCallId: callId,
+                toolName: "search",
+              },
+            },
+          ],
+        } as unknown as RecordedStep);
+        return { text: narrative };
+      });
+    const defaultAgent = new KitaruAgent(createAgent("default-call"), {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "requested-model",
+    });
+    const expandedAgent = new KitaruAgent(createAgent("expanded-call"), {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      recordingLimits: { maxDepth: 8, maxItems: 105, maxStringChars: 5_000 },
+      requestedModelId: "requested-model",
+    });
+
+    expect(await defaultAgent.generate("run")).toEqual({ text: narrative });
+    expect(await expandedAgent.generate("run")).toEqual({ text: narrative });
+
+    const nodes = api.nodeBatches().flat();
+    const defaultNode = nodes.find(
+      (node) => node.external_id === "default-call",
+    );
+    const expandedNode = nodes.find(
+      (node) => node.external_id === "expanded-call",
+    );
+    expect(defaultNode?.attributes).toMatchObject({
+      inputs_bounded: true,
+      outputs_bounded: true,
+    });
+    expect(defaultNode?.inputs).toMatchObject({
+      hotels: hotels.slice(0, 100),
+    });
+    expect(expandedNode?.inputs).toEqual(input);
+    expect(expandedNode?.outputs).toEqual({
+      hotels,
+      narrative,
+      token: "[redacted]",
+    });
+    expect(expandedNode?.attributes).toMatchObject({ outputs_bounded: true });
+    expect(expandedNode?.attributes).not.toHaveProperty("inputs_bounded");
+  });
+
+  it("marks a bounded result captured only by the tool hook", async () => {
+    const api = installTestApi();
+    const result = { narrative: "n".repeat(5_000) };
+    const agent = new FakeAgent(async (_messages, options) => {
+      await invokeTool(options.hooks ?? {}, {
+        args: { query: "hotels" },
+        callId: "hook-only",
+        output: result,
+        toolName: "search",
+      });
+      await options.onStepFinish?.({
+        ...textStep("hook-only"),
+        toolCalls: [
+          {
+            payload: {
+              args: { query: "hotels" },
+              toolCallId: "hook-only",
+              toolName: "search",
+            },
+          },
+        ],
+        toolResults: [],
+      } as unknown as RecordedStep);
+      return { text: "done" };
+    });
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "requested-model",
+    });
+
+    await recorded.generate("run");
+
+    const node = api
+      .nodeBatches()
+      .flat()
+      .find((candidate) => candidate.external_id === "hook-only");
+    expect(node?.outputs).toEqual({
+      narrative: `${"n".repeat(4_096)}[truncated]`,
+    });
+    expect(node?.attributes).toMatchObject({ outputs_bounded: true });
   });
 
   it("records public tool failure text when Mastra omits toolResults", async () => {

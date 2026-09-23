@@ -329,6 +329,38 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
     ).json()
     assert miss["match"] is None
 
+    lossy_inputs = {"query": "long"}
+    stored = await client.post(
+        f"/api/v1/sessions/{baseline_id}/nodes",
+        json={
+            "nodes": [
+                {
+                    "external_id": "n1",
+                    "node_type": "tool_call",
+                    "name": "search",
+                    "status": "completed",
+                    "tool_name": "search",
+                    "inputs": lossy_inputs,
+                    "outputs": {"result": "[truncated]"},
+                    "attributes": {"outputs_bounded": True},
+                    "metadata": {},
+                }
+            ]
+        },
+    )
+    assert stored.status_code == 200
+
+    rejected = await client.post(
+        f"/api/v1/replays/{replay['id']}/tool-lookup",
+        json={
+            "tool_name": "search",
+            "cache_key": compute_tool_cache_key("search", lossy_inputs),
+            "occurrence": 0,
+        },
+    )
+    assert rejected.status_code == 200
+    assert rejected.json() == {"match": None, "rejected_candidate": True}
+
 
 async def test_delete_replay_removes_the_replay(client: httpx.AsyncClient) -> None:
     """Deleting a standalone replay removes it, no longer reachable by id."""

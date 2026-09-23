@@ -12,6 +12,7 @@ import {
   decideToolCall,
   failToolCall,
   isMockedToolCall,
+  type RecordingLimits,
 } from "@zenml-io/kitaru/adapter";
 
 import type {
@@ -24,6 +25,7 @@ interface ToolHookOptions {
   callerHooks?: ToolHooks;
   configuredAfterToolCall?: ConfiguredAfterToolCall;
   configuredBeforeToolCall?: ConfiguredBeforeToolCall;
+  limits?: RecordingLimits;
   state: AdapterRunState;
 }
 
@@ -61,16 +63,17 @@ async function invokePassthroughBeforeHooks(
   hookContext: ToolHookContext,
   configuredHook?: ConfiguredBeforeToolCall,
   callerHook?: ToolHooks["beforeToolCall"],
+  limits?: RecordingLimits,
 ): Promise<undefined | ToolBeforeHookResult<unknown>> {
   try {
     const configuredResult = await configuredHook?.(hookContext);
     if (isSkippedResult(configuredResult)) {
-      completeToolCall(state, callId, configuredResult.output);
+      completeToolCall(state, callId, configuredResult.output, limits);
       return configuredResult;
     }
     const callerResult = await callerHook?.(hookContext);
     if (isSkippedResult(callerResult)) {
-      completeToolCall(state, callId, callerResult.output);
+      completeToolCall(state, callId, callerResult.output, limits);
       return callerResult;
     }
     return undefined;
@@ -86,6 +89,7 @@ export function createToolHooks(options: ToolHookOptions): ToolHooks {
     callerHooks,
     configuredAfterToolCall,
     configuredBeforeToolCall,
+    limits,
     state,
   } = options;
 
@@ -101,6 +105,7 @@ export function createToolHooks(options: ToolHookOptions): ToolHooks {
         const converted = boundedRecorderConversion(
           hookContext.input,
           `tool '${hookContext.toolName}' input`,
+          limits,
         );
         if (state.spec) {
           const decision = await decideToolCall(state, {
@@ -130,6 +135,7 @@ export function createToolHooks(options: ToolHookOptions): ToolHooks {
           hookContext,
           configuredBeforeToolCall,
           callerHooks?.beforeToolCall,
+          limits,
         );
       } catch (error) {
         abortReplay?.(error);
@@ -145,7 +151,7 @@ export function createToolHooks(options: ToolHookOptions): ToolHooks {
       if (hookContext.error !== undefined) {
         failToolCall(state, callId, hookContext.error);
       } else {
-        completeToolCall(state, callId, hookContext.output);
+        completeToolCall(state, callId, hookContext.output, limits);
       }
 
       try {

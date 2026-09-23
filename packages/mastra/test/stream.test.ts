@@ -658,7 +658,7 @@ describe("KitaruAgent.stream", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("rejects replay before defaults, tools, recording, or execution", async () => {
+  it("passes a replay through the native stream call", async () => {
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
     const api = installTestApi();
     const agent = new FakeStreamAgent();
@@ -670,13 +670,114 @@ describe("KitaruAgent.stream", () => {
       requestedModelId: "stream-model",
     });
 
-    await expect(recorded.stream("hello")).rejects.toThrow(
-      "does not support replay",
+    await recorded.stream("hello");
+    expect(defaults).toHaveBeenCalled();
+    expect(tools).toHaveBeenCalled();
+    expect(agent.streamCalls).toHaveLength(1);
+    expect(api.sessionIds).toHaveLength(1);
+  });
+
+  it("applies replay inputs and options before the native stream call", async () => {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    vi.stubEnv(
+      "KITARU_TASK_INPUTS",
+      JSON.stringify([
+        { content: "Old system", role: "system" },
+        { content: "recorded prompt", role: "user" },
+      ]),
     );
-    expect(defaults).not.toHaveBeenCalled();
-    expect(tools).not.toHaveBeenCalled();
+    const api = installTestApi({
+      replaySpec: {
+        baseline_session_id: "018f0000-0000-7000-8000-000000000102",
+        id: REPLAY_ID,
+        override: {
+          model: { "stream-model": "replacement-model" },
+          model_params: { temperature: 0.8 },
+          system_prompt: "New system",
+        },
+        status: "pending",
+        tool_policy: { default: { type: "passthrough" }, tools: {} },
+      },
+    });
+    const agent = new FakeStreamAgent();
+    const wrapped = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      allowedReplayModels: ["replacement-model"],
+      apiUrl: "https://api.example",
+      requestedModelId: "stream-model",
+      resolveModel: async () => "replacement-model",
+    });
+
+    await wrapped.stream("ignored", {
+      modelSettings: { temperature: 0.1, topP: 0.2 },
+    });
+
+    expect(agent.streamCalls[0]?.messages).toEqual([
+      { content: "recorded prompt", role: "user" },
+    ]);
+    expect(agent.streamCalls[0]?.options).toMatchObject({
+      instructions: "New system",
+      model: "replacement-model",
+      modelSettings: { temperature: 0.8, topP: 0.2 },
+      toolCallConcurrency: 1,
+    });
+    expect(
+      api.calls.find((call) => call.path === "/api/v1/sessions")?.body,
+    ).toMatchObject({
+      origin: "replay",
+    });
+  });
+
+  it("rejects unsupported replay options before recording or streaming", async () => {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    const api = installTestApi();
+    const agent = new FakeStreamAgent();
+    const wrapped = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "stream-model",
+    });
+
+    await expect(
+      wrapped.stream("hello", { prepareStep: () => ({}) }),
+    ).rejects.toThrow("Replay does not support prepareStep");
     expect(agent.streamCalls).toHaveLength(0);
     expect(api.sessionIds).toHaveLength(0);
+  });
+
+  it("replays a captured conversation without live memory selectors", async () => {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    const captured = {
+      mastra_conversation_context: {
+        complete: true,
+        messages: [
+          { content: "Remembered context", role: "user" },
+          { content: "Current request", role: "user" },
+        ],
+        source: "recalled",
+        version: 1,
+      },
+      supplied_messages: "Current request",
+    };
+    vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(captured));
+    installTestApi();
+    const agent = new FakeStreamAgent();
+    const wrapped = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "stream-model",
+    });
+
+    await wrapped.stream("ignored", {
+      memory: { thread: "live-thread", resource: "live-resource" },
+      threadId: "live-thread",
+    });
+
+    expect(agent.streamCalls[0]?.messages).toEqual(
+      captured.mastra_conversation_context.messages,
+    );
+    expect(agent.streamCalls[0]?.options.memory).toBeUndefined();
+    expect(agent.streamCalls[0]?.options.threadId).toBeUndefined();
   });
 
   it("keeps generate-only wrappers constructible", () => {

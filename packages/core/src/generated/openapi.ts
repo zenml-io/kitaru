@@ -9891,6 +9891,12 @@ export interface components {
         ToolLookupResponse: {
             /** @description Matching recorded tool call. */
             match?: components["schemas"]["ToolLookupMatch"] | null;
+            /**
+             * Rejected Candidate
+             * @description Selected history candidate has incomplete payload.
+             * @default false
+             */
+            rejected_candidate: boolean;
         };
         /**
          * ToolPolicy

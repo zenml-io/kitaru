@@ -75,13 +75,17 @@ export class ReplaysResource {
     request: ToolLookupRequest,
     options: ResourceRequestOptions = {},
   ): Promise<ToolLookupResponse> {
-    return this.#transport.request({
+    const response = await this.#transport.request({
       method: "POST",
       path: `/api/v1/replays/${encodeURIComponent(replayId)}/tool-lookup`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateToolLookup,
     });
+    return {
+      ...response,
+      rejected_candidate: response.rejected_candidate ?? false,
+    };
   }
 
   wait(replayId: string, options: WaitOptions = {}): Promise<ReplayResponse> {

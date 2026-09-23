@@ -247,6 +247,12 @@ export function validateToolLookup(
   if (!isRecord(value) || !Object.hasOwn(value, "match")) {
     invalidResponse(method, path, status, "missing match");
   }
+  if (
+    value.rejected_candidate !== undefined &&
+    typeof value.rejected_candidate !== "boolean"
+  ) {
+    invalidResponse(method, path, status, "invalid rejected_candidate");
+  }
   if (value.match === null) {
     return;
   }

@@ -90,6 +90,22 @@ const COLLIDING_PAIRS: readonly [string, unknown, unknown][] = [
 ];
 
 describe("history lookup of lossily converted tool arguments", () => {
+  it("accepts larger bounded tool values without losing the existing defaults", () => {
+    const value = {
+      narrative: "n".repeat(5_000),
+      hotels: Array.from({ length: 105 }, (_, index) => index),
+    };
+    const defaults = boundedRecorderConversion(value, "input");
+    const expanded = boundedRecorderConversion(value, "input", {
+      maxStringChars: 5_000,
+      maxItems: 105,
+      maxDepth: 8,
+    });
+
+    expect(defaults.lossy).toBe(true);
+    expect(expanded).toEqual({ lossy: false, value });
+  });
+
   it("redacts credentials without truncating ordinary replay-sized payloads", () => {
     const secret = recordedToolPayloadConversion(
       { api_key: "SECRET_SENTINEL", query: "weather" },

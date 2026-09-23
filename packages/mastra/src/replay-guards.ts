@@ -86,6 +86,7 @@ export function stripLiveMemoryOptions(options: RuntimeGenerateOptions): void {
  */
 export async function assertReplayToolCoverage(options: {
   agent: unknown;
+  methodType?: "generate" | "stream";
   runtimeOptions: RuntimeGenerateOptions;
   spec: ReplaySpec;
 }): Promise<void> {
@@ -160,7 +161,7 @@ export async function assertReplayToolCoverage(options: {
     clientTools: runtimeOptions.clientTools,
     delegation: runtimeOptions.delegation,
     memoryConfig: runtimeOptions.memory,
-    methodType: "generate",
+    methodType: options.methodType ?? "generate",
     outputWriter: runtimeOptions.outputWriter,
     requestContext: runtimeOptions.requestContext,
     resourceId: runtimeOptions.resourceId,

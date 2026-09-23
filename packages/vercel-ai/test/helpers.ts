@@ -114,7 +114,12 @@ export class FakeClient implements AdapterClient {
     request: ToolLookupRequest,
   ): Promise<ToolLookupResponse> {
     this.lookups.push(request);
-    return this.#options.lookup?.(request) ?? { match: null };
+    return (
+      this.#options.lookup?.(request) ?? {
+        match: null,
+        rejected_candidate: false,
+      }
+    );
   }
 
   async updateSession(

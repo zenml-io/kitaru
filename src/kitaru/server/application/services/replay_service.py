@@ -317,7 +317,7 @@ class ReplayService:
                 an occurrence was given for a non-baseline history scope.
 
         Returns:
-            Matching tool call result, or ``None`` on a miss.
+            Matching result (possibly rejected), or ``None`` on an absent match.
         """
         replay = await self._repository.get(replay_id)
         await self._check_task_access(replay, actor)
@@ -337,6 +337,19 @@ class ReplayService:
         )
         if node is None:
             return None
+        if node.attributes is not None:
+            await self._payload_store.resolve([node.attributes])
+            attributes = node.attributes.value
+            if isinstance(attributes, dict) and (
+                attributes.get("inputs_bounded") is True
+                or attributes.get("outputs_bounded") is True
+            ):
+                return ToolLookupResult(
+                    result=None,
+                    status=node.status,
+                    error=None,
+                    rejected_candidate=True,
+                )
         if node.outputs is not None:
             await self._payload_store.resolve([node.outputs])
         return ToolLookupResult(

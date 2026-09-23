@@ -4,7 +4,11 @@ import type { RequestContext } from "@mastra/core/request-context";
 import type { LLMStepResult } from "@mastra/core/stream";
 import type { ToolHooks } from "@mastra/core/tools";
 import type { KitaruEnvironmentOptions } from "@zenml-io/kitaru";
-import type { CostCalculator, CostInput } from "@zenml-io/kitaru/adapter";
+import type {
+  CostCalculator,
+  CostInput,
+  RecordingLimits,
+} from "@zenml-io/kitaru/adapter";
 
 export type KitaruCostInput = CostInput;
 export type KitaruCostCalculator = CostCalculator;
@@ -27,6 +31,7 @@ export interface KitaruAgentOptions extends KitaruEnvironmentOptions {
   allowedReplayModels?: readonly string[];
   costCalculator?: KitaruCostCalculator;
   requestedModelId: string;
+  recordingLimits?: RecordingLimits;
   resolveModel?: (
     replacementModelId: string,
   ) => MastraModelConfig | Promise<MastraModelConfig>;
