@@ -18,9 +18,11 @@ import contextlib
 import logging
 import os
 import re
+import subprocess
 import sys
 import tomllib
 import uuid
+from functools import cache
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -88,6 +90,31 @@ _FIRST_PARTY_KITARU_PACKAGES = frozenset(
         "kitaru-typesafe-evaluator",
     }
 )
+
+
+@cache
+def _uv_supports_package_age_exceptions() -> bool:
+    """Check whether uv accepts package-specific exclude-newer overrides."""
+    try:
+        result = subprocess.run(
+            ["uv", "run", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        supported = (
+            result.returncode == 0 and "--exclude-newer-package" in result.stdout
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        supported = False
+    if not supported:
+        logger.warning(
+            "Installed uv does not support --exclude-newer-package; upgrade uv "
+            "to 0.8.4 or newer to resolve newly published Kitaru packages "
+            "under an exclude-newer cutoff"
+        )
+    return supported
 
 
 class TaskProcess(NamedTuple):
@@ -398,6 +425,7 @@ def get_python_run_argv(
     # The worker may run inside a checkout whose exclude-newer cutoff predates
     # a pinned Kitaru plugin and the core release required by that plugin.
     allows_fresh_kitaru = False
+    supports_package_age_exceptions: bool | None = None
     for dependency in dependencies:
         requirement = Requirement(dependency)
         package = canonicalize_name(requirement.name)
@@ -408,11 +436,14 @@ def get_python_run_argv(
             and specifiers[0].operator == "=="
             and "*" not in specifiers[0].version
         ):
-            if not allows_fresh_kitaru:
-                parts.extend(["--exclude-newer-package", "kitaru=0 days"])
-                allows_fresh_kitaru = True
-            if package != "kitaru":
-                parts.extend(["--exclude-newer-package", f"{package}=0 days"])
+            if supports_package_age_exceptions is None:
+                supports_package_age_exceptions = _uv_supports_package_age_exceptions()
+            if supports_package_age_exceptions:
+                if not allows_fresh_kitaru:
+                    parts.extend(["--exclude-newer-package", "kitaru=0 days"])
+                    allows_fresh_kitaru = True
+                if package != "kitaru":
+                    parts.extend(["--exclude-newer-package", f"{package}=0 days"])
         parts.extend(["--with", dependency])
     parts.extend(["python", "-m", module, *args])
     return parts
