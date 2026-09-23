@@ -15,11 +15,13 @@
 
 import json
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any
 
 import httpx
 import pytest
 from httpx import AsyncClient
+from logfire.query_client import AsyncLogfireQueryClient
 
 import kitaru_logfire_importer.api as api_module
 from kitaru.task import importer as importer_module
@@ -700,3 +702,30 @@ async def test_api_and_file_imports_share_project_identity(
     expected_project = params.get("source_instance", "project-1").strip()
     assert api_session.external_id.startswith(f"{expected_project}:")
     assert api_session.metadata["logfire.project_id"] == "project-1"
+
+
+async def test_fetch_trace_queries_the_token_region_with_the_logfire_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Query the read token's region with the Logfire SDK query timeout."""
+    requests: list[httpx.Request] = []
+
+    def _respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=ndjson(build_complete_rows(TRACE_ID_1)))
+
+    monkeypatch.setenv("LOGFIRE_READ_TOKEN", "pylf_v1_eu_test")
+    monkeypatch.setattr(
+        api_module,
+        "AsyncLogfireQueryClient",
+        partial(AsyncLogfireQueryClient, transport=httpx.MockTransport(_respond)),
+    )
+
+    await api_module.fetch_trace(TRACE_ID_1, datetime(2026, 7, 24, tzinfo=UTC))
+
+    [request] = requests
+    assert request.url == "https://logfire-eu.pydantic.dev/v2/query"
+    assert request.headers["authorization"] == "Bearer pylf_v1_eu_test"
+    # A bare httpx client times out after 5 seconds, which large records
+    # queries can exceed.
+    assert request.extensions["timeout"]["read"] >= 30.0

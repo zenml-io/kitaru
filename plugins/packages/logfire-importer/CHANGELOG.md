@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Send API import queries through the Logfire SDK query client, which gives them the SDK's 30 second query timeout instead of the 5 second HTTP default, and stop importing the private `logfire._internal` region helper.
+
 ## 0.4.0 - 2026-09-21
 
 - Stream API imports in complete session batches, batch trace IDs into records queries, and stop fetching when `max_sessions` is reached.
