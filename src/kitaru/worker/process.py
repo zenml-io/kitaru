@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from kitaru.worker.platforms import WorkerPlatform, current_platform
 
@@ -66,6 +67,21 @@ _PEP723_BLOCK_REGEX = (
 
 # Extra an importer package declares for its API import dependencies.
 API_EXTRA = "api"
+
+# Published first-party packages used by the server's default plugin catalog.
+# Keep this list in sync with DEFAULT_PLUGIN_DEFINITIONS in server/api/bootstrap.py.
+_DEFAULT_KITARU_PLUGIN_PACKAGES = frozenset(
+    {
+        "kitaru-braintrust-importer",
+        "kitaru-evaluator",
+        "kitaru-jsonl-importer",
+        "kitaru-langfuse-importer",
+        "kitaru-langsmith-importer",
+        "kitaru-logfire-importer",
+        "kitaru-phoenix-importer",
+        "kitaru-post-import-insights",
+    }
+)
 
 
 class TaskProcess(NamedTuple):
@@ -373,7 +389,24 @@ def get_python_run_argv(
         sys.executable,
         "--prerelease=allow",
     ]
+    # The worker may run inside a checkout whose exclude-newer cutoff predates
+    # a pinned Kitaru plugin and the core release required by that plugin.
+    allows_fresh_kitaru = False
     for dependency in dependencies:
+        requirement = Requirement(dependency)
+        package = canonicalize_name(requirement.name)
+        specifiers = list(requirement.specifier)
+        if (
+            (package == "kitaru" or package in _DEFAULT_KITARU_PLUGIN_PACKAGES)
+            and len(specifiers) == 1
+            and specifiers[0].operator == "=="
+            and "*" not in specifiers[0].version
+        ):
+            if not allows_fresh_kitaru:
+                parts.extend(["--exclude-newer-package", "kitaru=0 days"])
+                allows_fresh_kitaru = True
+            if package != "kitaru":
+                parts.extend(["--exclude-newer-package", f"{package}=0 days"])
         parts.extend(["--with", dependency])
     parts.extend(["python", "-m", module, *args])
     return parts

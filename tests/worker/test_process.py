@@ -331,3 +331,42 @@ def test_get_python_run_argv_with_dependencies() -> None:
         "kitaru.task",
         "import",
     ]
+
+
+def test_get_python_run_argv_allows_fresh_pinned_kitaru_plugins() -> None:
+    """New Kitaru releases can resolve under the worker's project cutoff."""
+    argv = get_python_run_argv(
+        "kitaru.task",
+        ["import"],
+        ["kitaru-langfuse-importer[api]==0.4.0", "requests==2.32.5"],
+    )
+    assert argv == [
+        "uv",
+        "run",
+        "--no-project",
+        "--python",
+        sys.executable,
+        "--prerelease=allow",
+        "--exclude-newer-package",
+        "kitaru=0 days",
+        "--exclude-newer-package",
+        "kitaru-langfuse-importer=0 days",
+        "--with",
+        "kitaru-langfuse-importer[api]==0.4.0",
+        "--with",
+        "requests==2.32.5",
+        "python",
+        "-m",
+        "kitaru.task",
+        "import",
+    ]
+
+
+@pytest.mark.parametrize("dependency", ["kitaru-custom==1.0.0", "kitaru-custom>=1"])
+def test_get_python_run_argv_keeps_custom_plugins_under_cutoff(
+    dependency: str,
+) -> None:
+    """A custom plugin cannot bypass the worker's package-age cutoff."""
+    argv = get_python_run_argv("kitaru.task", ["import"], [dependency])
+    assert "kitaru-custom=0 days" not in argv
+    assert "--exclude-newer-package" not in argv
