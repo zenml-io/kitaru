@@ -41,6 +41,7 @@ Use the PostgreSQL-backed tests for transaction, locking, migration, or cross-re
 - Worker lifecycle and handler contracts live under `tests/worker/`.
 - Keep subprocess tests bounded and assert structured receipts, exit behavior, and redaction.
 - Use the existing worker fakes rather than starting unrelated services.
+- When changing dynamic task dependencies or adding a first-party Python distribution, compare the worker's package-age allowlist with every PyPI unit in `release/release-units.toml`, including non-default packages. Exercise an exact pin under an older `exclude-newer` cutoff with a candidate or published wheel, and cover the fallback when the installed `uv` lacks `--exclude-newer-package`.
 
 ## Default Plugin Packages
 

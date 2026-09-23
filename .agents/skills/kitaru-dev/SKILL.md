@@ -43,6 +43,19 @@ There is no v2 `kitaru init` command or `local` extra. Do not carry the v1 `.kit
 
 When resolving `pyproject.toml` or `uv.lock` conflicts, do not regenerate the whole lockfile: that silently reverts intentional dependency-security bumps. Upgrade only the packages involved and run `just audit` before pushing.
 
+## New Distribution Integration Review
+
+Before opening a PR that creates an independently published package, trace how it will be built, installed, discovered, and released. This applies to a new adapter, importer, evaluator, or other Python distribution; adding an evaluator inside the existing `kitaru-evaluator` wheel does not create a new distribution. For substantial packages, ask a bounded independent subagent to review the integration points and omissions, then verify its findings against the code. Record the applicable paths and any deliberate exclusions in `Reviewer Notes` or `Release context` so a reviewer can check the complete package path.
+
+- Add the package manifest, source, tests, README, changelog, plugin workspace lock entry, and a row in `plugins/README.md`. Add artifact import metadata for a non-default package, and check whether `plugins/pyproject.toml` needs an update.
+- Add every new Python distribution to `release/release-units.toml` and the expected inventory in `tests/scripts/test_release_units.py`. Check that the release workflow and CI matrix discover it; edit fixed selections only when they actually exclude the new package.
+- Add every new PyPI `kitaru-*` distribution to `src/kitaru/worker/process.py::_FIRST_PARTY_KITARU_PACKAGES`, including packages outside the default server catalog. Run the inventory-based test in `tests/worker/test_process.py`; the server catalog is not the worker's package list.
+- Decide separately whether the server should offer the package by default. Set `default-catalog` in the release inventory accordingly, and change `DEFAULT_PLUGIN_DEFINITIONS` and its tests only for an approved default. Do not add adapters to the server catalog.
+- Inspect package-specific selections and exclusions, including candidate-wheel builds, example dependencies, and the quickstart's `--no-install-package` list in `.github/workflows/ci.yml`. There is no global plugin ignore list; those exclusions apply to their particular example or build. Update them only when the new package enters that path.
+- Check the required core version, release order, documentation, and runnable examples. For worker-installed exact pins, test candidate-wheel resolution with a cutoff predating the package, verify that supported `uv` accepts the package exception, and verify that older `uv` retains the prior command and warns. Only a postpublication registry install proves the published wheel resolves under that cutoff. Run the focused package tests, release-inventory test, and `just plugin-artifact-smoke` before handoff.
+
+Use `plugins/DEVELOPMENT.md` for package and candidate-server commands, and the `kitaru-release` skill for version selection and publication. Do not treat registration metadata or a local wheel as proof that the published package can be installed by a worker.
+
 ## Docs Workflows
 
 These require Node 22+ and pnpm.

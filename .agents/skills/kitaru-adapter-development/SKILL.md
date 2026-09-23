@@ -27,7 +27,7 @@ Preserve the framework's ordinary behavior, configured hooks and state, public e
 
 Python feature PRs follow the version and dependency ownership rules in `plugins/AGENTS.md`. Leave existing package versions unchanged. Use the exact development dependency from `plugins/DEVELOPMENT.md` only when the adapter needs unreleased core; release prep selects the published compatibility floor.
 
-For a new Python adapter, inspect the current package inventory and update only the required integration points:
+For a new Python adapter, complete the new-distribution integration review in the `kitaru-dev` skill before the PR; it covers worker installation and release wiring beyond the adapter package itself. Inspect the current package inventory and update only the required integration points:
 
 - `plugins/packages/<slug>/pyproject.toml`, README, changelog, source package, public exports, and focused tests
 - `tool.kitaru.artifact.import-module` for standalone artifact-smoke coverage
