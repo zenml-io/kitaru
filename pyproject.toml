@@ -133,6 +133,7 @@ dev = [
     "hypothesis>=6.165",
     "hypothesis-jsonschema>=0.23",
     "pyyaml>=6.0",
+    "coverage>=7.10",
 ]
 fuzz = [
     "schemathesis>=4.25,<5",
@@ -209,6 +210,17 @@ pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = ["mcp_fuzz: generated-input MCP property tests"]
+
+[tool.coverage.run]
+source = ["src/kitaru"]
+branch = true
+relative_files = true
+# Measure Python child processes too; modules such as
+# kitaru.cli.plugin_test_runner only ever run in a subprocess.
+patch = ["subprocess"]
+
+[tool.coverage.report]
+precision = 1
 
 [tool.importlinter]
 root_packages = ["kitaru"]

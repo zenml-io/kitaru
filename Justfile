@@ -96,6 +96,13 @@ fix:
 test *ARGS:
     uv run pytest {{ ARGS }}
 
+# Run tests with coverage and print the least-covered files (e.g., `just coverage tests/cli`)
+coverage *ARGS:
+    uv run coverage erase
+    uv run coverage run -m pytest {{ ARGS }}
+    uv run coverage combine -q
+    uv run coverage report --skip-covered --sort=cover
+
 # Run all property tests with the heavy nightly profile
 fuzz: fuzz-importers fuzz-evaluators fuzz-api-models fuzz-mcp fuzz-adapters fuzz-filters fuzz-api
 
