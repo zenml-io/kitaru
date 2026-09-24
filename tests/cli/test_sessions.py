@@ -729,6 +729,12 @@ async def test_session_import_old_server_without_upload_cap_still_works(
             "split the payload",
         ),
         (
+            httpx.WriteError("connection closed during upload"),
+            "network_error",
+            "may have been rejected for size",
+            "split the payload",
+        ),
+        (
             httpx.RemoteProtocolError("connection dropped"),
             "network_error",
             "may have been rejected for size",
@@ -766,7 +772,7 @@ async def test_session_import_maps_blob_upload_size_failures(
     assert message_fragment in caught.value.message
     assert caught.value.hint is not None
     assert hint_fragment in caught.value.hint.lower()
-    assert caught.value.retryable is False
+    assert caught.value.retryable is (kind == "network_error")
 
 
 async def test_session_import_forwards_evaluators(tmp_path: Path) -> None:

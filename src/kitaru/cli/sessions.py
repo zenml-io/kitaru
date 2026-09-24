@@ -531,11 +531,12 @@ async def import_sessions(
                     "smaller files."
                 ),
             ) from error
-        except (httpx.ReadError, httpx.RemoteProtocolError) as error:
+        except (httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError) as error:
             raise CLIError(
                 "network_error",
                 "The upload connection closed unexpectedly; the payload may have "
                 "been rejected for size.",
+                retryable=True,
                 details={"error_type": type(error).__name__},
                 hint="Check the upload limit and split the payload into smaller files.",
             ) from error
