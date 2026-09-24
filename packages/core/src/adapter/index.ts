@@ -69,3 +69,7 @@ export {
   isMockedToolCall,
   selectToolPolicy,
 } from "./tool-policy.js";
+export {
+  containsUrlCredentials,
+  redactUrlCredentials,
+} from "./url-credentials.js";

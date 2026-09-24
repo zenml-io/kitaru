@@ -28,9 +28,11 @@ export {
   validateMemorySnapshot,
 } from "./memory-snapshot.js";
 export type {
+  DeclareMemoryReplayFiles,
   MemoryReplayAgentBindings,
   MemoryReplayAgentFactory,
   MemoryReplayAgentOptions,
+  MemoryReplayFileCall,
 } from "./stateful-agent.js";
 
 export { createMemoryReplayAgent } from "./stateful-agent.js";

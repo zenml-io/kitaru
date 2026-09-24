@@ -63,7 +63,6 @@ import {
   createCapturedFiles,
   createRecordedEvidenceSanitizer,
   restoreCapturedFiles,
-  type UnsafeEvidenceReason,
 } from "./stateful-files.js";
 import {
   bindMemoryToolIdentity,
@@ -124,7 +123,12 @@ export interface MemoryReplayAgentOptions extends KitaruAgentOptions {
   sourceMemory(): MastraMemorySource | Promise<MastraMemorySource>;
   /** Return only approved replay-relevant JSON context. Credentials are forbidden. */
   captureRequestContext?(context: RequestContext): Record<string, unknown>;
-  files?: readonly string[];
+  /**
+   * File URLs the factory's `resolveFile` may fetch during a recorded turn,
+   * either fixed for the wrapper or computed for each call. Each is fetched
+   * once per turn and replay serves the captured bytes.
+   */
+  files?: readonly string[] | DeclareMemoryReplayFiles;
   resolveFile?: (
     url: string,
   ) => Promise<{ bytes: Uint8Array; mediaType: string }>;
@@ -138,6 +142,16 @@ export interface MemoryReplayAgentOptions extends KitaruAgentOptions {
    */
   finalizationWaitMs?: number;
 }
+
+/** The call a per-call `files` function declares file URLs for. */
+export interface MemoryReplayFileCall {
+  input: unknown;
+  options: RuntimeStreamOptions;
+}
+
+export type DeclareMemoryReplayFiles = (
+  call: MemoryReplayFileCall,
+) => readonly string[] | Promise<readonly string[]>;
 
 export interface MemoryReplayAgentBindings {
   memory: Memory;
@@ -431,7 +445,9 @@ export function createMemoryReplayAgent(
       client,
       recordedInputProjector: async (input) => {
         baselineFiles = await createCapturedFiles(
-          options.files ?? [],
+          typeof options.files === "function"
+            ? await options.files({ input: rawInput, options: callerOptions })
+            : (options.files ?? []),
           options.resolveFile ??
             (async () => {
               throw new Error("Missing controlled file resolver.");
@@ -542,16 +558,15 @@ export function createMemoryReplayAgent(
       finish(): Promise<boolean>;
       release(): Promise<void>;
     };
-    let unsafeEvidenceReason: UnsafeEvidenceReason | undefined;
-    let markUnknownOnBinding: (() => void) | undefined;
-    const markUnknownCredentialUrl = (reason: UnsafeEvidenceReason) => {
-      if (!unsafeEvidenceReason || reason === "credential_url")
-        unsafeEvidenceReason = reason;
-      markUnknownOnBinding?.();
+    let unsupportedEvidence = false;
+    let markUnsupportedOnBinding: (() => void) | undefined;
+    const markUnsupportedEvidence = () => {
+      unsupportedEvidence = true;
+      markUnsupportedOnBinding?.();
     };
     const sanitizer = historical
-      ? createRecordedEvidenceSanitizer(new Map(), markUnknownCredentialUrl)
-      : baselineFiles?.evidenceSanitizer(markUnknownCredentialUrl);
+      ? createRecordedEvidenceSanitizer(new Map(), markUnsupportedEvidence)
+      : baselineFiles?.evidenceSanitizer(markUnsupportedEvidence);
     if (!sanitizer)
       throw new Error("Controlled evidence sanitizer was not initialized.");
     let memoryStore: MastraMemoryStoreSemantics;
@@ -647,11 +662,11 @@ export function createMemoryReplayAgent(
         release: () => binding.release(),
       };
     }
-    markUnknownOnBinding = () =>
+    markUnsupportedOnBinding = () =>
       runtime.binding.markIncomplete(
-        "Recorded evidence contains an uncaptured credential URL or unsupported value.",
+        "Recorded evidence contains an unsupported value.",
       );
-    if (unsafeEvidenceReason) markUnknownOnBinding();
+    if (unsupportedEvidence) markUnsupportedOnBinding();
     try {
       const files = historical
         ? restoreCapturedFiles(historical.files)
@@ -659,11 +674,7 @@ export function createMemoryReplayAgent(
       if (!files)
         throw new Error("Controlled file capture was not initialized.");
       const evidenceClient = recordingClient(client, sanitizer.replace, () =>
-        unsafeEvidenceReason === "credential_url"
-          ? "credential_url_uncaptured"
-          : unsafeEvidenceReason === "unsupported_value"
-            ? "recorded_evidence_unsupported"
-            : undefined,
+        unsupportedEvidence ? "recorded_evidence_unsupported" : undefined,
       );
       const workspace = options.skillsDirectory
         ? await loadSkillsWorkspace(

@@ -12,12 +12,14 @@ import type {
 import type { JsonValue } from "@zenml-io/kitaru";
 import {
   boundMastraReplayEvidence,
+  containsUrlCredentials,
   degradedMastraReplayEvidence,
   MAX_MASTRA_REPLAY_ITEMS,
   MAX_MASTRA_REPLAY_JSON_BYTES,
   MastraReplayBudgetError,
   type MastraReplayEvidence,
   type RecordingLimits,
+  redactUrlCredentials,
   strictMastraReplayValue,
 } from "@zenml-io/kitaru/adapter";
 import { fileReference } from "./stateful-files.js";
@@ -151,18 +153,12 @@ function validateUrl(value: string): URL {
     return url;
   }
   requireValue(
-    (url.protocol === "https:" || url.protocol === "http:") &&
-      !url.username &&
-      !url.password,
-    "URL credentials are not replayable.",
+    url.protocol === "https:" || url.protocol === "http:",
+    "Only captured file references and web URLs are replayable.",
   );
   requireValue(
-    ![...url.searchParams.keys()].some((key) =>
-      /(?:^|[-_])(?:api[-_]?key|authorization|cookie|password|secret|token|signature|credential|sig)$/i.test(
-        key,
-      ),
-    ),
-    "URL query credentials are not replayable.",
+    !containsUrlCredentials(url.href),
+    "URL credentials are not replayable.",
   );
   return url;
 }
@@ -170,8 +166,10 @@ function validateUrl(value: string): URL {
 /**
  * Encode the few non-JSON values in native memory without losing their types.
  *
- * `path` names the value in a budget error; other failures keep the replay
- * codec's own reasons.
+ * URL credentials in strings and URL values are redacted, so a signed link in
+ * thread history or model output never reaches recorded JSON. `path` names
+ * the value in a budget error; other failures keep the replay codec's own
+ * reasons.
  */
 export function encodeMemoryValue(value: unknown, path?: string): JsonValue {
   let items = 0;
@@ -191,7 +189,7 @@ export function encodeMemoryValue(value: unknown, path?: string): JsonValue {
         path,
         `exceeds maximum JSON bytes ${MAX_MASTRA_REPLAY_JSON_BYTES}`,
       );
-      return current;
+      return redactUrlCredentials(current);
     }
     if (typeof current === "number") {
       requireValue(Number.isFinite(current), "Non-finite memory number.");
@@ -206,8 +204,9 @@ export function encodeMemoryValue(value: unknown, path?: string): JsonValue {
       return { [CODEC_KEY]: "date", value: current.toISOString() };
     }
     if (current instanceof URL) {
-      validateUrl(current.href);
-      return { [CODEC_KEY]: "url", value: current.href };
+      const href = redactUrlCredentials(current.href);
+      validateUrl(href);
+      return { [CODEC_KEY]: "url", value: href };
     }
     if (current instanceof Uint8Array)
       return { [CODEC_KEY]: "bytes", ...binary(current) };
@@ -250,7 +249,8 @@ export function encodeMemoryValue(value: unknown, path?: string): JsonValue {
  *
  * A value over the replay budget becomes a degraded marker that names the
  * exceeded bound, and optional per-value `limits` truncate the encoded value.
- * Values the codec cannot represent, or that carry credentials, still throw.
+ * Values the codec cannot represent, or that sit under credential keys, still
+ * throw.
  */
 export function encodeMemoryEvidence(
   value: unknown,

@@ -240,7 +240,10 @@ export interface MastraMemoryCaptureOptions extends MastraMemorySelector {
   recordMutation: (event: MastraMemoryMutation) => Promise<void>;
   getRequestId?: () => string | undefined;
   onIncomplete?: (reason: string) => void;
-  /** Replace captured file URLs in evidence without changing native writes. */
+  /**
+   * Replace captured file URLs and redact URL credentials in evidence and in
+   * the initial snapshot, without changing native reads or writes.
+   */
   sanitizeEvidence?: <T>(value: T) => T;
   leaseWaitMs?: number;
   leaseSignal?: AbortSignal;
@@ -965,8 +968,14 @@ export function createMemoryCaptureBinding(
               records: projectOMRecords(records),
             };
             // No storage-owned objects or Dates escape the explicit codec.
+            // Declared file URLs in history become captured references here,
+            // so a replayed processor resolves recorded bytes without a token.
             const copy = normalizeStoredMemoryDates(
-              decodeMemoryValue(encodeMemoryValue(snapshot)),
+              decodeMemoryValue(
+                encodeMemoryValue(
+                  options.sanitizeEvidence?.(snapshot) ?? snapshot,
+                ),
+              ),
             );
             validateMemorySnapshot(copy);
             return copy;

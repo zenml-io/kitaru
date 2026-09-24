@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { redactUrlCredentials } from "@zenml-io/kitaru/adapter";
 import type { MastraRecordedFile } from "./memory-snapshot.js";
 
 export interface ResolvedMemoryFile {
@@ -12,28 +13,30 @@ export interface RecordedEvidenceSanitizer {
   replace<T>(value: T): T;
 }
 
-export type UnsafeEvidenceReason = "credential_url" | "unsupported_value";
-
 const FILE_REFERENCE = /^kitaru-file:\/\/sha256\/[a-f0-9]{64}$/;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_RECORDED_FILES = 64;
-const URL_IN_TEXT = /https?:\/\/[^\s"'<>]+/gi;
-const CREDENTIAL_QUERY_KEY =
-  /^(?:token|access[_-]?token|id[_-]?token|refresh[_-]?token|api[_-]?key|signature|sig|secret|auth|authorization|credential|x-amz-[\w-]+|x-goog-[\w-]+)$/i;
+const ABSOLUTE_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
 
-function hasUrlCredential(url: string): boolean {
+/** Return the WHATWG form of an absolute URL, or `value` when it is not one. */
+function normalizeFileUrl(value: string): string {
+  if (!ABSOLUTE_URL.test(value)) return value;
   try {
-    const parsed = new URL(url);
-    return (
-      Boolean(parsed.username || parsed.password) ||
-      [...parsed.searchParams.keys()].some((key) =>
-        CREDENTIAL_QUERY_KEY.test(key),
-      )
-    );
+    return new URL(value).href;
   } catch {
-    return /[?&](?:token|signature|sig|secret|auth|credential)=/i.test(url);
+    return value;
   }
+}
+
+/** Look a string up among declared file URLs, in the form the app wrote or its WHATWG form. */
+function createFileUrlLookup(
+  references: ReadonlyMap<string, string>,
+): (value: string) => string | undefined {
+  return (value) =>
+    references.size === 0
+      ? undefined
+      : (references.get(value) ?? references.get(normalizeFileUrl(value)));
 }
 
 export function fileReference(file: ResolvedMemoryFile): string {
@@ -90,24 +93,19 @@ export function restoreCapturedFiles(recorded: readonly MastraRecordedFile[]) {
   };
 }
 
-/** Sanitize every persisted evidence field, including URLs inside prompt text. */
+/**
+ * Sanitize every persisted evidence field, including URLs inside prompt text.
+ *
+ * A string that is a declared file URL becomes its captured reference; every
+ * other URL keeps its text with its credentials redacted.
+ */
 export function createRecordedEvidenceSanitizer(
   references: ReadonlyMap<string, string>,
-  onUnsafeEvidence: (reason: UnsafeEvidenceReason) => void,
+  onUnsupportedEvidence: () => void,
 ): RecordedEvidenceSanitizer {
-  const declared = [...references].sort(
-    (left, right) => right[0].length - left[0].length,
-  );
+  const lookup = createFileUrlLookup(references);
   function replaceString(value: string): string {
-    let replaced = value;
-    for (const [url, reference] of declared) {
-      replaced = replaced.split(url).join(reference);
-    }
-    return replaced.replace(URL_IN_TEXT, (url) => {
-      if (!hasUrlCredential(url)) return url;
-      onUnsafeEvidence("credential_url");
-      return "[redacted credential URL]";
-    });
+    return lookup(value) ?? redactUrlCredentials(value);
   }
   function replace<T>(value: T): T {
     const active = new Set<object>();
@@ -121,12 +119,12 @@ export function createRecordedEvidenceSanitizer(
         typeof current === "function" ||
         typeof current === "symbol"
       ) {
-        onUnsafeEvidence("unsupported_value");
+        onUnsupportedEvidence();
         return "[unrecordable evidence value]";
       }
       if (current === null || typeof current !== "object") return current;
       if (active.has(current)) {
-        onUnsafeEvidence("unsupported_value");
+        onUnsupportedEvidence();
         return "[unrecordable circular evidence]";
       }
       active.add(current);
@@ -137,7 +135,7 @@ export function createRecordedEvidenceSanitizer(
               (descriptor) => descriptor.enumerable && !("value" in descriptor),
             )
           ) {
-            onUnsafeEvidence("unsupported_value");
+            onUnsupportedEvidence();
             return "[unrecordable accessor evidence]";
           }
           return current.map(visit);
@@ -147,7 +145,7 @@ export function createRecordedEvidenceSanitizer(
             Object.getPrototypeOf(current) !== null) ||
           Reflect.ownKeys(current).some((key) => typeof key !== "string")
         ) {
-          onUnsafeEvidence("unsupported_value");
+          onUnsupportedEvidence();
           return "[unrecordable evidence value]";
         }
         const descriptors = Object.getOwnPropertyDescriptors(current);
@@ -156,7 +154,7 @@ export function createRecordedEvidenceSanitizer(
             (descriptor) => descriptor.enumerable && !("value" in descriptor),
           )
         ) {
-          onUnsafeEvidence("unsupported_value");
+          onUnsupportedEvidence();
           return "[unrecordable accessor evidence]";
         }
         return Object.fromEntries(
@@ -179,15 +177,20 @@ export async function createCapturedFiles(
   urls: readonly string[],
   resolveFile: MemoryFileResolver,
 ) {
-  const originalToReference = new Map<string, string>();
+  // Keyed by WHATWG form so a file part holding `new URL(declared)` matches.
+  const declaredToReference = new Map<string, string>();
   const filesByReference = new Map<string, MastraRecordedFile>();
-  const uniqueUrls = new Set(urls);
+  const uniqueUrls = new Map<string, string>();
+  for (const url of urls) {
+    const normalized = normalizeFileUrl(url);
+    if (!uniqueUrls.has(normalized)) uniqueUrls.set(normalized, url);
+  }
   if (uniqueUrls.size > MAX_RECORDED_FILES)
     throw new Error(
       "Unsupported Mastra memory replay: file count limit exceeded.",
     );
   let totalBytes = 0;
-  for (const url of uniqueUrls) {
+  for (const [normalized, url] of uniqueUrls) {
     let resolved: ResolvedMemoryFile;
     try {
       resolved = await resolveFile(url);
@@ -211,42 +214,46 @@ export async function createCapturedFiles(
       bytes: new Uint8Array(resolved.bytes),
       mediaType: resolved.mediaType,
     };
-    originalToReference.set(url, file.url);
+    declaredToReference.set(normalized, file.url);
     filesByReference.set(file.url, file);
   }
   const captured = restoreCapturedFiles([...filesByReference.values()]);
-  const declared = [...originalToReference].sort(
-    (left, right) => right[0].length - left[0].length,
-  );
+  const lookup = createFileUrlLookup(declaredToReference);
   function referenceFor(url: string): string {
-    const reference = originalToReference.get(url);
+    const reference = lookup(url);
     if (!reference)
       throw new Error("Unsupported Mastra memory replay: undeclared file URL.");
     return reference;
   }
+  /**
+   * Copy replay input with declared file URLs swapped for their references.
+   *
+   * Only a whole value that is a declared URL is swapped, so prompt text,
+   * working memory and neighboring URLs keep what the model saw; their URL
+   * credentials are redacted instead. An undeclared network URL inside a
+   * file or image part throws, because replay would have to fetch it.
+   */
   function replaceDeclaredFileUrls<T>(value: T): T {
     const active = new Set<object>();
     function visit(current: unknown, filePart: boolean): unknown {
       if (typeof current === "string") {
-        const reference = originalToReference.get(current);
+        const reference = lookup(current);
         if (reference) return reference;
         if (filePart && /^https?:\/\//i.test(current))
           throw new Error(
             "Unsupported Mastra memory replay: undeclared file URL.",
           );
-        let replaced = current;
-        for (const [url, fileReference] of declared)
-          replaced = replaced.split(url).join(fileReference);
-        return replaced;
+        return redactUrlCredentials(current);
       }
       if (current instanceof URL) {
-        const reference = originalToReference.get(current.href);
+        const reference = lookup(current.href);
         if (reference) return new URL(reference);
         if (filePart && /^https?:$/i.test(current.protocol))
           throw new Error(
             "Unsupported Mastra memory replay: undeclared file URL.",
           );
-        return current;
+        const redacted = redactUrlCredentials(current.href);
+        return redacted === current.href ? current : new URL(redacted);
       }
       if (
         current === null ||
@@ -303,9 +310,11 @@ export async function createCapturedFiles(
   return {
     files: captured.files,
     referenceFor,
-    evidenceSanitizer: (
-      onUnsafeEvidence: (reason: UnsafeEvidenceReason) => void,
-    ) => createRecordedEvidenceSanitizer(originalToReference, onUnsafeEvidence),
+    evidenceSanitizer: (onUnsupportedEvidence: () => void) =>
+      createRecordedEvidenceSanitizer(
+        declaredToReference,
+        onUnsupportedEvidence,
+      ),
     replaceDeclaredFileUrls,
     resolveFile: async (url: string): Promise<ResolvedMemoryFile> =>
       captured.resolveFile(referenceFor(url)),

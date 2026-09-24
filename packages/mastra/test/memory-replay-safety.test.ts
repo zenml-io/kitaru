@@ -51,7 +51,7 @@ function input(): MastraMemoryReplayInput {
   };
 }
 
-it("stores captured file references and refuses signed source URLs", () => {
+it("stores captured file references and redacts signed source URLs", () => {
   const bytes = new Uint8Array([1, 2, 3]);
   const digest = createHash("sha256")
     .update("image/png")
@@ -80,8 +80,11 @@ it("stores captured file references and refuses signed source URLs", () => {
       file: "https://files.invalid/image.png?X-Amz-Signature=SECRET",
     },
   });
-  expect(signed.complete).toBe(false);
+  expect(signed.complete).toBe(true);
   expect(JSON.stringify(signed)).not.toContain("SECRET");
+  expect(decodeMemoryReplayEnvelope(signed).rawInput).toEqual({
+    file: "https://files.invalid/image.png?X-Amz-Signature=REDACTED",
+  });
 
   const captured = envelope.files[0];
   if (!captured) throw new Error("Missing captured file");

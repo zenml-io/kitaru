@@ -212,7 +212,7 @@ it("runs the native file processor with historical bytes, skills and complete la
   }
 });
 
-it("keeps signed URLs native while every recorded node and output uses file references", async () => {
+it("keeps signed URLs native while recorded nodes use file references or redacted URLs", async () => {
   const signed = "https://files.invalid/report.pdf?token=NATIVE_SECRET";
   const runtime = createMemoryRuntime({ messageTokens: 100000 });
   await seedMemory(runtime);
@@ -313,22 +313,31 @@ it("keeps signed URLs native while every recorded node and output uses file refe
           ?.mastra_replay_state === "eligible",
     );
     expect(JSON.stringify(completion?.body?.outputs)).toContain(
-      "kitaru-file://sha256/",
+      "Opened https://files.invalid/report.pdf?token=REDACTED",
     );
   } finally {
     await runtime.store.close();
   }
 });
 
-it("marks a recording ineligible when model output contains an uncaptured signed URL", async () => {
+it("keeps baseline and replay outputs when only the model output holds a credential URL", async () => {
   const runtime = createMemoryRuntime({ messageTokens: 100000 });
   await seedMemory(runtime);
-  const api = installTestApi();
+  const api = installTestApi({
+    replaySpec: {
+      id: REPLAY_ID,
+      baseline_session_id: ORIGINAL_SESSION_ID,
+      status: "pending",
+      override: { system_prompt: "Answer with the example" },
+      tool_policy: { default: { type: "passthrough" }, tools: {} },
+    },
+  });
+  const answer =
+    "Call it like: curl 'https://api.example.com/v1/data?api_key=UNDECLARED_SECRET'";
   const model = new MastraLanguageModelV2Mock({
     modelId: "actor",
     provider: "fixture",
-    doStream: async () =>
-      textStream("https://unknown.invalid/a?token=UNDECLARED_SECRET"),
+    doStream: async () => textStream(answer),
   });
   const adapter = createMemoryReplayAgent(
     ({ memory }) => ({
@@ -348,9 +357,23 @@ it("marks a recording ineligible when model output contains an uncaptured signed
         configuration: runtime.memory.getMergedThreadConfig(),
         exclusiveAccess: createProcessLocalMemoryAccess(),
       }),
-      resolveModel: () => model,
+      resolveModel: async (id) =>
+        id.includes("observer")
+          ? runtime.observer.model
+          : id.includes("reflector")
+            ? runtime.reflector.model
+            : model,
     },
   );
+  const final = (sessionId: string | undefined) =>
+    api.calls
+      .filter(
+        (call) =>
+          call.method === "PATCH" &&
+          call.path.endsWith(`/${sessionId}`) &&
+          call.body?.status !== "in_progress",
+      )
+      .at(-1)?.body;
   try {
     const output = await adapter.stream("Hello", {
       memory: { thread: THREAD, resource: RESOURCE },
@@ -358,14 +381,24 @@ it("marks a recording ineligible when model output contains an uncaptured signed
     await output.consumeStream();
     expect(await output.text).toContain("UNDECLARED_SECRET");
     await vi.waitFor(() =>
-      expect(
-        api.calls.some(
-          (call) =>
-            call.method === "PATCH" &&
-            (call.body?.metadata as Record<string, unknown> | undefined)
-              ?.mastra_replay_state === "ineligible",
-        ),
-      ).toBe(true),
+      expect(final(api.sessionIds[0])?.status).toBe("completed"),
+    );
+    const baseline = final(api.sessionIds[0]);
+    expect(baseline?.metadata).toMatchObject({
+      mastra_replay_state: "eligible",
+    });
+    expect(JSON.stringify(baseline?.outputs)).toContain("api_key=REDACTED");
+    const input = baseline?.inputs;
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(input));
+    const replay = await adapter.stream("ignored");
+    await replay.consumeStream();
+    expect(await replay.text).toContain("UNDECLARED_SECRET");
+    await vi.waitFor(() =>
+      expect(final(api.sessionIds[1])?.status).toBe("completed"),
+    );
+    expect(JSON.stringify(final(api.sessionIds[1])?.outputs)).toContain(
+      "api_key=REDACTED",
     );
     expect(JSON.stringify(api.calls)).not.toContain("UNDECLARED_SECRET");
   } finally {

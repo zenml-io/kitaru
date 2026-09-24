@@ -299,13 +299,40 @@ it.each(["resourceScope", "semanticRecall", "buffer", "ids", "date", "url"])(
       );
     if (kind === "url")
       required(required(input.rawInput[0]).content[0]).data = new URL(
-        "https://files.invalid/file?apiKey=private-value",
+        "ftp://private-value@files.invalid/file",
       );
     const envelope = createMemoryReplayEnvelope(input);
     expect(envelope.complete).toBe(false);
     expect(JSON.stringify(envelope)).not.toContain("private-value");
   },
 );
+
+it("redacts URL credentials in replay input and history instead of refusing them", async () => {
+  const input = await fixture();
+  required(required(input.rawInput[0]).content[0]).data = new URL(
+    "https://files.invalid/file?apiKey=private-value",
+  );
+  const message = required(input.initialSnapshot.messages[0]);
+  message.content.parts = [
+    {
+      type: "text",
+      text: "Saved https://firebasestorage.googleapis.com/v0/b/b/o/a.pdf?alt=media&token=private-token",
+    },
+  ];
+  const envelope = createMemoryReplayEnvelope(input);
+  expect(envelope.complete, envelope.reasons.join("; ")).toBe(true);
+  expect(JSON.stringify(envelope)).not.toMatch(/private-value|private-token/);
+  const decoded = decodeMemoryReplayEnvelope(envelope);
+  expect(
+    String(
+      required(required(decoded.rawInput as typeof input.rawInput)[0])
+        .content[0]?.data,
+    ),
+  ).toBe("https://files.invalid/file?apiKey=REDACTED");
+  expect(JSON.stringify(decoded.initialSnapshot.messages[0])).toContain(
+    "alt=media&token=REDACTED",
+  );
+});
 
 it("rejects changed file lengths, noncanonical base64, and malformed date tags", async () => {
   const input = await fixture();

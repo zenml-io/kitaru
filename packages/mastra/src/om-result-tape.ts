@@ -3,6 +3,7 @@ import type { JsonValue } from "@zenml-io/kitaru";
 import {
   MAX_MASTRA_REPLAY_ITEMS,
   MAX_MASTRA_REPLAY_JSON_BYTES,
+  redactUrlCredentials,
 } from "@zenml-io/kitaru/adapter";
 import { decodeMemoryValue, encodeMemoryValue } from "./memory-snapshot.js";
 
@@ -73,9 +74,10 @@ const VOLATILE_TEXT: ReadonlyArray<readonly [RegExp, string]> = [
 ];
 
 function normalizeText(text: string): string {
+  // Replay history holds redacted URLs, so the baseline hashes them redacted too.
   return VOLATILE_TEXT.reduce(
     (current, [pattern, replacement]) => current.replace(pattern, replacement),
-    text,
+    redactUrlCredentials(text),
   );
 }
 

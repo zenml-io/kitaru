@@ -58,24 +58,91 @@ it("rewrites declared file and image URLs without changing baseline input", asyn
   ).rejects.toThrow(/undeclared file URL/);
 });
 
-it("scrubs declared URLs embedded in evidence text and flags unknown signed URLs", async () => {
+it("maps whole declared values to references and redacts other evidence URLs without flagging", async () => {
   const signed = "https://files.invalid/a?token=KNOWN_SECRET";
   const captured = await createCapturedFiles([signed], async () => ({
     bytes: new Uint8Array([1]),
     mediaType: "image/png",
   }));
-  const unknown = vi.fn();
-  const sanitizer = captured.evidenceSanitizer(unknown);
+  const unsupported = vi.fn();
+  const sanitizer = captured.evidenceSanitizer(unsupported);
   const native = {
     prompt: `Open ${signed} then https://other.invalid/b?token=UNKNOWN_SECRET`,
     tool: { result: signed },
   };
   const persisted = sanitizer.replace(native);
   expect(native.prompt).toContain("KNOWN_SECRET");
-  expect(persisted.prompt).toContain(captured.referenceFor(signed));
+  expect(persisted.prompt).toBe(
+    "Open https://files.invalid/a?token=REDACTED then https://other.invalid/b?token=REDACTED",
+  );
   expect(persisted.tool.result).toBe(captured.referenceFor(signed));
   expect(JSON.stringify(persisted)).not.toMatch(/KNOWN_SECRET|UNKNOWN_SECRET/);
-  expect(unknown).toHaveBeenCalledTimes(1);
+  expect(unsupported).not.toHaveBeenCalled();
+});
+
+it("leaves prompt text, working memory and neighboring URLs as the model saw them", async () => {
+  const declared = "https://cdn.example.com/q3";
+  const captured = await createCapturedFiles([declared], async () => ({
+    bytes: new Uint8Array([1]),
+    mediaType: "application/pdf",
+  }));
+  const text = `Summarize ${declared} please; draft at ${declared}-draft.pdf and ${declared}?X-Amz-Signature=PREFIX_SECRET`;
+  const input = {
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text },
+          { type: "file", data: declared, mimeType: "application/pdf" },
+        ],
+      },
+    ],
+    workingMemory: `Q3 report lives at ${declared}`,
+  };
+  const replayed = captured.replaceDeclaredFileUrls(input);
+  const reference = captured.referenceFor(declared);
+  expect(replayed.messages[0]?.content[0]).toEqual({
+    type: "text",
+    text: `Summarize ${declared} please; draft at ${declared}-draft.pdf and ${declared}?X-Amz-Signature=REDACTED`,
+  });
+  expect(replayed.messages[0]?.content[1]).toMatchObject({ data: reference });
+  expect(replayed.workingMemory).toBe(input.workingMemory);
+  const evidence = captured.evidenceSanitizer(vi.fn()).replace(input);
+  expect(evidence.messages[0]?.content[0]).toEqual(
+    replayed.messages[0]?.content[0],
+  );
+  expect(evidence.workingMemory).toBe(input.workingMemory);
+  expect(JSON.stringify([replayed, evidence])).not.toContain("PREFIX_SECRET");
+});
+
+it.each([
+  "https://files.example.com/Q3 Report.pdf",
+  "https://Files.Example.com/a.pdf",
+  "https://files.example.com/résumé.pdf?token=NORMALIZED_SECRET",
+])("matches a declared URL in its WHATWG form: %s", async (declared) => {
+  const resolveFile = vi.fn(async () => ({
+    bytes: new Uint8Array([7]),
+    mediaType: "application/pdf",
+  }));
+  const captured = await createCapturedFiles(
+    [declared, new URL(declared).href],
+    resolveFile,
+  );
+  expect(resolveFile).toHaveBeenCalledOnce();
+  expect(resolveFile).toHaveBeenCalledWith(declared);
+  const reference = captured.referenceFor(declared);
+  const replayed = captured.replaceDeclaredFileUrls({
+    type: "file",
+    data: new URL(declared),
+  });
+  expect(replayed.data.href).toBe(reference);
+  expect(captured.referenceFor(new URL(declared).href)).toBe(reference);
+  expect((await captured.resolveFile(new URL(declared).href)).bytes).toEqual(
+    new Uint8Array([7]),
+  );
+  expect(
+    captured.evidenceSanitizer(vi.fn()).replace({ url: new URL(declared) }),
+  ).toEqual({ url: reference });
 });
 
 it("preserves Date and bytes through signed URL evidence projection", async () => {

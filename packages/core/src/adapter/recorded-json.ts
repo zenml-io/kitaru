@@ -1,5 +1,6 @@
 import { isPlainObject } from "../json.js";
 import type { JsonValue } from "../types.js";
+import { containsUrlCredentials } from "./url-credentials.js";
 
 export const MAX_RECORDED_STRING_CHARS = 4_096;
 const MAX_RECORDED_ITEMS = 100;
@@ -37,12 +38,6 @@ const MASTRA_REPLAY_SENSITIVE_KEYS: ReadonlySet<string> = new Set([
   "headers",
   "abortsignal",
 ]);
-
-function isSecretUrlQueryKey(key: string): boolean {
-  return /(?:^|[-_])(?:api[-_]?key|authorization|cookie|password|secret|token|signature|credential|sig)$/i.test(
-    key,
-  );
-}
 
 /**
  * Keys whose value is a blob, a transport envelope, or a framework context
@@ -143,22 +138,8 @@ function spendBudget(options: CloneOptions, characters: number): void {
 }
 
 function boundedString(value: string, options: CloneOptions): JsonValue {
-  if (options.rejectUrlCredentials) {
-    for (const match of value.matchAll(/https?:\/\/[^\s"'<>]+/gi)) {
-      let url: URL;
-      try {
-        url = new URL(match[0]);
-      } catch {
-        continue;
-      }
-      if (
-        url.username ||
-        url.password ||
-        [...url.searchParams.keys()].some(isSecretUrlQueryKey)
-      ) {
-        throw new TypeError(`${options.path} contains URL credentials`);
-      }
-    }
+  if (options.rejectUrlCredentials && containsUrlCredentials(value)) {
+    throw new TypeError(`${options.path} contains URL credentials`);
   }
   if (value.length <= options.maxStringChars) {
     spendBudget(options, value.length);
