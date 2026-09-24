@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import type { MastraModelConfig } from "@mastra/core/llm";
 import type { MemoryConfigInternal } from "@mastra/core/memory";
+import type { MemoryStorage } from "@mastra/core/storage";
 import {
   createMemoryCaptureBinding,
   createProcessLocalMemoryAccess,
@@ -174,9 +175,103 @@ export async function bindOMResultModels(
   return { ...config, observationalMemory: bound } as MemoryConfigInternal;
 }
 
+/**
+ * How a source memory store hands out observational-memory records.
+ *
+ * `in-memory` is Mastra's InMemoryStore, which returns its stored objects.
+ * `persistent` covers database stores such as PostgreSQL and LibSQL, which
+ * return a fresh copy on every read.
+ */
+export type MastraMemoryStoreSemantics = "in-memory" | "persistent";
+
+/** Classify a source memory domain by the record semantics it implements. */
+export async function getMemoryStoreSemantics(
+  domain: MemoryStorage,
+): Promise<MastraMemoryStoreSemantics> {
+  const { InMemoryMemory } = await import("@mastra/core/storage");
+  return domain instanceof InMemoryMemory ? "in-memory" : "persistent";
+}
+
+/** Copy plain objects and arrays; Dates and class instances stay shared. */
+function copyStoredValue<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(copyStoredValue) as T;
+  if (
+    !record(value) ||
+    ![Object.prototype, null].includes(Object.getPrototypeOf(value))
+  )
+    return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, copyStoredValue(item)]),
+  ) as T;
+}
+
+/**
+ * Give an InMemoryStore memory domain the record semantics of a database store.
+ *
+ * Observational memory decides what to observe from the record it read at the
+ * start of a step. InMemoryStore returns live objects, so later writes change
+ * that record under Mastra; a database returns a copy that stays stale. Its
+ * `createReflectionGeneration` also substitutes the current time for a missing
+ * `lastObservedAt`, which makes Mastra treat unobserved messages as observed.
+ */
+function applyPersistentStoreSemantics(
+  domain: MemoryStorage,
+  selector: Pick<MastraMemorySnapshot, "threadId" | "resourceId">,
+): void {
+  const read = domain.getObservationalMemory.bind(domain);
+  const history = domain.getObservationalMemoryHistory.bind(domain);
+  const initialize = domain.initializeObservationalMemory.bind(domain);
+  const insert = domain.insertObservationalMemoryRecord.bind(domain);
+  const observe = domain.updateActiveObservations.bind(domain);
+  const activate = domain.swapBufferedToActive.bind(domain);
+  const reflect = domain.createReflectionGeneration.bind(domain);
+  // The isolated store holds one thread, and InMemoryStore's history returns
+  // the stored objects themselves, so assignments below change the store.
+  const getStoredRecord = async (id: string) =>
+    (await history(selector.threadId, selector.resourceId)).find(
+      (value) => value.id === id,
+    );
+  // Instance properties shadow the prototype, so InMemoryStore's own internal
+  // calls, such as swapBufferedReflectionToActive, also use these versions.
+  domain.getObservationalMemory = async (...args) =>
+    copyStoredValue(await read(...args));
+  domain.getObservationalMemoryHistory = async (...args) =>
+    copyStoredValue(await history(...args));
+  domain.initializeObservationalMemory = async (input) => {
+    const created = await initialize(input);
+    const stored = await getStoredRecord(created.id);
+    if (stored) stored.metadata = undefined;
+    return copyStoredValue({ ...created, metadata: undefined });
+  };
+  domain.insertObservationalMemoryRecord = (value) =>
+    insert(copyStoredValue(value));
+  domain.updateActiveObservations = async (input) => {
+    await observe(input);
+    // A database overwrites the column, so omitted identities become unset.
+    if (input.observedMessageIds) return;
+    const stored = await getStoredRecord(input.id);
+    if (stored) stored.observedMessageIds = undefined;
+  };
+  domain.swapBufferedToActive = (input) =>
+    // A database activates its persisted chunks, never the caller's copy.
+    activate({ ...input, bufferedChunks: undefined });
+  domain.createReflectionGeneration = async (input) => {
+    const created = await reflect(input);
+    const stored = await getStoredRecord(created.id);
+    const copied = {
+      lastObservedAt: input.currentRecord.lastObservedAt,
+      metadata: input.currentRecord.metadata,
+    };
+    if (stored) Object.assign(stored, copied);
+    return copyStoredValue({ ...created, ...copied });
+  };
+}
+
 export interface IsolatedMemoryReplayOptions {
   invocationId: string;
   initialSnapshot: MastraMemorySnapshot;
+  /** Defaults to `persistent`, the semantics of database-backed stores. */
+  storeSemantics?: MastraMemoryStoreSemantics;
   configuration: Record<string, unknown>;
   resolveModel: (id: string) => Promise<MastraModelConfig> | MastraModelConfig;
   recordMutation: MastraMemoryCaptureOptions["recordMutation"];
@@ -211,6 +306,8 @@ export async function createIsolatedMemoryReplay(
   const store = new InMemoryStore();
   const domain = store.stores.memory;
   if (!domain) return unsupported("Native in-memory storage is unavailable.");
+  if (options.storeSemantics !== "in-memory")
+    applyPersistentStoreSemantics(domain, snapshot);
   try {
     if (snapshot.thread)
       await domain.saveThread({ thread: structuredClone(snapshot.thread) });

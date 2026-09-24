@@ -259,3 +259,99 @@ it("waits for native background observation and evidence before releasing replay
     await runtime.finish();
   }
 }, 20000);
+
+it("replays on the record semantics of a database store unless the source was in memory", async () => {
+  const { source, initialSnapshot, configuration } = await baseline();
+  const historical = initialSnapshot.records[0];
+  if (!historical) throw new Error("Missing native memory fixture");
+  // A database copies an unobserved generation's cursor into its reflection.
+  historical.lastObservedAt = undefined;
+  historical.metadata = { origin: "database" };
+  const options = {
+    initialSnapshot,
+    configuration,
+    resolveModel: async (id: string) =>
+      id.endsWith("observer") ? source.observer.model : source.reflector.model,
+    recordMutation: async () => {},
+  };
+  const persistent = await createIsolatedMemoryReplay({
+    ...options,
+    invocationId: "persistent",
+  });
+  const domain = persistent.binding.domain;
+  const current = await domain.getObservationalMemory(THREAD, RESOURCE);
+  if (!current) throw new Error("Missing restored observational memory");
+  current.activeObservations = "CHANGED BY THE CALLER";
+  expect(
+    (await domain.getObservationalMemory(THREAD, RESOURCE))?.activeObservations,
+  ).toBe(historical.activeObservations);
+  expect(
+    await domain.swapBufferedToActive({
+      id: current.id,
+      activationRatio: 1,
+      messageTokensThreshold: 100,
+      currentPendingTokens: 50,
+      bufferedChunks: [
+        {
+          id: "caller-chunk",
+          cycleId: "caller-cycle",
+          observations: "NOT PERSISTED",
+          tokenCount: 3,
+          messageIds: ["historical-message"],
+          messageTokens: 50,
+          lastObservedAt: new Date(),
+          createdAt: new Date(),
+        },
+      ],
+    }),
+  ).toMatchObject({ chunksActivated: 0 });
+  await domain.createReflectionGeneration({
+    currentRecord: current,
+    reflection: "REFLECTED",
+    tokenCount: 3,
+  });
+  const reflected = await domain.getObservationalMemory(THREAD, RESOURCE);
+  if (!reflected) throw new Error("Missing reflection generation");
+  expect(reflected).toMatchObject({
+    originType: "reflection",
+    metadata: { origin: "database" },
+  });
+  expect(reflected.lastObservedAt).toBeUndefined();
+  const observation = {
+    id: reflected.id,
+    observations: "OBSERVED",
+    tokenCount: 3,
+    lastObservedAt: new Date("2026-01-02T00:00:00Z"),
+  };
+  await domain.updateActiveObservations({
+    ...observation,
+    observedMessageIds: ["historical-message"],
+  });
+  await domain.updateActiveObservations(observation);
+  expect(
+    (await domain.getObservationalMemory(THREAD, RESOURCE))?.observedMessageIds,
+  ).toBeUndefined();
+  await persistent.finish();
+
+  const inMemory = await createIsolatedMemoryReplay({
+    ...options,
+    invocationId: "in-memory",
+    storeSemantics: "in-memory",
+  });
+  const nativeDomain = inMemory.binding.domain;
+  const nativeCurrent = await nativeDomain.getObservationalMemory(
+    THREAD,
+    RESOURCE,
+  );
+  if (!nativeCurrent) throw new Error("Missing restored observational memory");
+  await nativeDomain.createReflectionGeneration({
+    currentRecord: nativeCurrent,
+    reflection: "REFLECTED",
+    tokenCount: 3,
+  });
+  expect(
+    (await nativeDomain.getObservationalMemory(THREAD, RESOURCE))
+      ?.lastObservedAt,
+  ).toBeInstanceOf(Date);
+  await inMemory.finish();
+});

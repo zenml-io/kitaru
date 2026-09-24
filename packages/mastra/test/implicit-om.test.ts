@@ -105,6 +105,9 @@ it("records a first turn with implicit thread-scoped OM and string models", asyn
     )?.body?.inputs as Record<string, { version: number; omTape: unknown[] }>;
     expect(input.mastra_memory_replay?.version).toBe(3);
     expect(input.mastra_memory_replay?.omTape.length).toBeGreaterThan(0);
+    expect(JSON.stringify(input.mastra_memory_replay)).toContain(
+      '"memoryStore":"in-memory"',
+    );
     const observerCalls = observe.mock.calls.length;
     const reflectorCalls = reflect.mock.calls.length;
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);

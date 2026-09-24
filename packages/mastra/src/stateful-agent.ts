@@ -27,6 +27,8 @@ import {
   bindOMResultModels,
   createIsolatedMemoryReplay,
   getMemoryModelId,
+  getMemoryStoreSemantics,
+  type MastraMemoryStoreSemantics,
   serializeMemoryConfiguration,
 } from "./memory-replay.js";
 import {
@@ -492,10 +494,16 @@ export function createMemoryReplayAgent(
       : baselineFiles?.evidenceSanitizer(markUnknownCredentialUrl);
     if (!sanitizer)
       throw new Error("Controlled evidence sanitizer was not initialized.");
+    let memoryStore: MastraMemoryStoreSemantics;
     if (historical) {
+      memoryStore =
+        historical.configuration.memoryStore === "in-memory"
+          ? "in-memory"
+          : "persistent";
       runtime = await createIsolatedMemoryReplay({
         invocationId,
         initialSnapshot: historical.initialSnapshot,
+        storeSemantics: memoryStore,
         configuration: requireRecord(
           historical.configuration.memoryConfig,
           "memory configuration",
@@ -508,6 +516,7 @@ export function createMemoryReplayAgent(
       });
     } else {
       const source = await options.sourceMemory();
+      memoryStore = await getMemoryStoreSemantics(source.domain);
       const binding = createMemoryCaptureBinding({
         invocationId,
         ...selector,
@@ -693,6 +702,7 @@ export function createMemoryReplayAgent(
         memoryConfig:
           historical?.configuration.memoryConfig ??
           serializeMemoryConfiguration(runtime.memory.getMergedThreadConfig()),
+        memoryStore,
         ...(workspace ? { workspaceManifest: workspace.manifest } : {}),
       };
       let recordedRawInput = invocationInput;
