@@ -18,9 +18,11 @@ import {
 } from "@zenml-io/kitaru/adapter";
 import {
   createMemoryCaptureBinding,
+  createRegisteredWriteDomain,
   type MastraExclusiveMemoryAccess,
   type MastraMemoryCaptureBinding,
   type MastraMemoryMutation,
+  type MastraMemorySelector,
 } from "./memory-binding.js";
 import {
   assertMemoryReplayVersions,
@@ -68,6 +70,12 @@ import type { KitaruAgentOptions, RuntimeStreamOptions } from "./types.js";
 
 interface MastraMemorySource {
   settled(): Promise<void>;
+  /**
+   * The source Memory instance. When supplied, its `settled()` also joins the
+   * memory work each recorded turn runs on its own Memory instance, and Kitaru
+   * joins only the recorded thread's buffered work before capturing a turn.
+   */
+  memory?: Memory;
   domain: MemoryStorage;
   configuration: MemoryConfigInternal;
   exclusiveAccess: MastraExclusiveMemoryAccess;
@@ -113,6 +121,12 @@ export interface MemoryReplayAgentOptions extends KitaruAgentOptions {
   ) => Promise<{ bytes: Uint8Array; mediaType: string }>;
   skillsDirectory?: string;
   resolveModel: (id: string) => MastraModelConfig | Promise<MastraModelConfig>;
+  /**
+   * How long a baseline waits after its stream closes for observational-memory
+   * work before it releases the source lease. A turn whose work does not settle
+   * in time is recorded as ineligible. Defaults to 60 seconds.
+   */
+  finalizationWaitMs?: number;
 }
 
 export interface MemoryReplayAgentBindings {
@@ -124,6 +138,9 @@ export interface MemoryReplayAgentBindings {
 export type MemoryReplayAgentFactory = (
   bindings: MemoryReplayAgentBindings,
 ) => AgentConfig | Promise<AgentConfig>;
+
+const DEFAULT_FINALIZATION_WAIT_MS = 60_000;
+const CAPTURE_BUFFERING_WAIT_MS = 5_000;
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -259,34 +276,19 @@ export function createMemoryReplayAgent(
     const { MastraCompositeStore } = await import("@mastra/core/storage");
     const { Memory } = await import("@mastra/memory");
     const source = await options.sourceMemory();
-    let unsafeSelector: { threadId: string; resourceId: string } | undefined;
-    try {
-      unsafeSelector = getSelector(callerOptions);
-    } catch {
-      // An implicit native selector can come from factory defaults.
-    }
-    try {
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([
-          source.exclusiveAccess.markUnsafeWrite(unsafeSelector),
-          new Promise<never>((_resolve, reject) => {
-            timeout = setTimeout(
-              () => reject(new Error("Source-thread unsafe marker timed out.")),
-              100,
-            );
-          }),
-        ]);
-      } finally {
-        if (timeout) clearTimeout(timeout);
-      }
-    } catch (error) {
-      reportLocalRecordingError(error);
-    }
+    // Mastra writes only once the stream runs, after the factory has resolved
+    // the default memory selectors below.
+    let selector: MastraMemorySelector | undefined;
+    const domain = createRegisteredWriteDomain(
+      source.domain,
+      source.exclusiveAccess,
+      () => selector,
+      (reason) => reportLocalRecordingError(new Error(reason)),
+    );
     const memory = new Memory({
       storage: new MastraCompositeStore({
         id: `kitaru-native-${globalThis.crypto.randomUUID()}`,
-        domains: { memory: source.domain },
+        domains: { memory: domain },
       }),
       options: source.configuration,
     });
@@ -302,10 +304,39 @@ export function createMemoryReplayAgent(
         }),
       workspace: workspace?.workspace,
     });
+    selector = await getNativeSelector(config, callerOptions);
     const native = new Agent({ ...config, memory }) as unknown as {
       stream(input: unknown, options: RuntimeStreamOptions): Promise<unknown>;
     };
     return native.stream(rawInput, callerOptions);
+  }
+
+  /** Resolve the selectors a native call writes, or undefined when unknown. */
+  async function getNativeSelector(
+    config: AgentConfig,
+    callerOptions: RuntimeStreamOptions,
+  ): Promise<MastraMemorySelector | undefined> {
+    try {
+      const defaults = requireRecord(
+        typeof config.defaultOptions === "function"
+          ? await config.defaultOptions({
+              requestContext:
+                callerOptions.requestContext ?? new RequestContext(),
+              mastra: options.mastra,
+            })
+          : (config.defaultOptions ?? {}),
+        "default options",
+      );
+      const { deepMerge } = await import("@mastra/core/utils");
+      return getSelector(
+        deepMerge(
+          record(defaults.memory) ? { memory: defaults.memory } : {},
+          record(callerOptions.memory) ? { memory: callerOptions.memory } : {},
+        ),
+      );
+    } catch {
+      return undefined;
+    }
   }
 
   function reportLocalRecordingError(error: unknown): void {
@@ -479,7 +510,9 @@ export function createMemoryReplayAgent(
       memory: Memory;
       binding: MastraMemoryCaptureBinding;
       initialSnapshot: MastraMemorySnapshot | undefined;
-      finish(): Promise<void>;
+      beginFinalization?(): void;
+      /** Resolve false when memory work missed the finalization deadline. */
+      finish(): Promise<boolean>;
       release(): Promise<void>;
     };
     let unsafeEvidenceReason: UnsafeEvidenceReason | undefined;
@@ -539,16 +572,50 @@ export function createMemoryReplayAgent(
           omTape,
         ),
       });
-      const initialSnapshot = await binding.captureInitial(source);
-      let finished: Promise<void> | undefined;
+      const sourceEngine = source.memory
+        ? await source.memory.omEngine.catch(() => null)
+        : null;
+      // Once the source Memory joins every turn's work, its settled() also
+      // waits for turns on other threads. Join only this thread's buffering.
+      const initialSnapshot = await binding.captureInitial(
+        source.memory
+          ? {
+              settled: async () => {
+                await (await memory.omEngine)?.waitForBuffering(
+                  selector.threadId,
+                  selector.resourceId,
+                  CAPTURE_BUFFERING_WAIT_MS,
+                );
+              },
+            }
+          : source,
+      );
+      let tracked = false;
+      const trackSourceWork = () => {
+        if (tracked || !sourceEngine) return;
+        tracked = true;
+        void sourceEngine
+          .trackBackgroundWork(binding.settle(memory))
+          .catch(() => undefined);
+      };
+      let finished: Promise<boolean> | undefined;
       runtime = {
         memory,
         binding,
         initialSnapshot,
+        beginFinalization: trackSourceWork,
         finish() {
           finished ??= (async () => {
-            await memory.settled();
-            await binding.drain();
+            trackSourceWork();
+            const settled = await binding.settle(
+              memory,
+              options.finalizationWaitMs ?? DEFAULT_FINALIZATION_WAIT_MS,
+            );
+            if (!settled)
+              binding.markIncomplete(
+                "Observational-memory work did not settle before the finalization deadline.",
+              );
+            return settled;
           })();
           return finished;
         },
@@ -874,11 +941,19 @@ export function createMemoryReplayAgent(
               );
             return evidence;
           },
+          beginFinalization() {
+            runtime.beginFinalization?.();
+          },
           async finish() {
-            await runtime.finish();
+            const settled = await runtime.finish();
             await capture.drain();
             if (!historical) await runtime.binding.verifyEligibility();
-            const omResults = await omTape.finish();
+            // The turn's writes are settled and checked, so the next turn on
+            // this thread can acquire while the session update is sent.
+            await runtime.release();
+            // An OM call past the deadline may never return; the turn is
+            // already ineligible, so do not wait for its tape entry.
+            const omResults = settled ? await omTape.finish() : [];
             for (const reason of omCaptureErrors)
               runtime.binding.markIncomplete(reason);
             if (omMismatches.length)

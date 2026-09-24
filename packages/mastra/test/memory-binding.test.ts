@@ -212,7 +212,7 @@ it("invalidates the first recording when a conflicting invocation cannot get its
   await next.binding.release();
 });
 
-it("preserves a native write after lost ownership and blocks eligibility until quiescence reset", async () => {
+it("keeps a native write after lost ownership and recovers once overlapping turns release", async () => {
   const access = createProcessLocalMemoryAccess();
   const first = await fixture("first", access);
   const second = await fixture("second", access);
@@ -230,6 +230,46 @@ it("preserves a native write after lost ownership and blocks eligibility until q
   await first.binding.release();
   await second.binding.release();
   const next = await fixture("after", access);
+  expect(await next.binding.captureInitial(next.runtime.memory)).toBeDefined();
+  await next.binding.release();
+});
+
+it("registers a late write for its duration instead of poisoning later turns", async () => {
+  const access = createProcessLocalMemoryAccess();
+  const unsafeWrite = vi.spyOn(access, "markUnsafeWrite");
+  const first = await fixture("first", access);
+  await first.binding.captureInitial(first.runtime.memory);
+  await first.binding.release();
+  const holder = await fixture("holder", access);
+  expect(
+    await holder.binding.captureInitial(holder.runtime.memory),
+  ).toBeDefined();
+  const native = await first.binding.domain.updateThread({
+    id: THREAD,
+    title: "late native write",
+  });
+  expect(native.title).toBe("late native write");
+  // The late write overlapped the holder, so only the holder's turn is lost.
+  await holder.binding.verifyEligibility();
+  expect(holder.binding.incompleteReasons.join()).toMatch(/overlapping/);
+  await holder.binding.release();
+  expect(unsafeWrite).not.toHaveBeenCalled();
+  const next = await fixture("next", access);
+  expect(await next.binding.captureInitial(next.runtime.memory)).toBeDefined();
+  await next.binding.release();
+});
+
+it("keeps a thread unsafe when a late write cannot register", async () => {
+  const access = createProcessLocalMemoryAccess();
+  const first = await fixture("first", access);
+  await first.binding.captureInitial(first.runtime.memory);
+  await first.binding.release();
+  const acquire = vi
+    .spyOn(access, "acquire")
+    .mockRejectedValueOnce(new Error("coordination unavailable"));
+  await first.binding.domain.updateThread({ id: THREAD, title: "late" });
+  acquire.mockRestore();
+  const next = await fixture("next", access);
   expect(
     await next.binding.captureInitial(next.runtime.memory),
   ).toBeUndefined();
@@ -242,27 +282,14 @@ it("preserves a native write after lost ownership and blocks eligibility until q
   await recovered.binding.release();
 });
 
-it("keeps an untracked late write unsafe until an explicit quiescence reset", async () => {
+it("waits within waitMs for a releasing holder instead of invalidating it", async () => {
   const access = createProcessLocalMemoryAccess();
-  const first = await fixture("first", access);
-  await first.binding.captureInitial(first.runtime.memory);
-  await first.binding.release();
-  const native = await first.binding.domain.updateThread({
-    id: THREAD,
-    title: "late native write",
-  });
-  expect(native.title).toBe("late native write");
-  const next = await fixture("next", access);
-  expect(
-    await next.binding.captureInitial(next.runtime.memory),
-  ).toBeUndefined();
-  await next.binding.release();
-  await access.resetAfterQuiescence({ threadId: THREAD, resourceId: RESOURCE });
-  const recovered = await fixture("recovered", access);
-  expect(
-    await recovered.binding.captureInitial(recovered.runtime.memory),
-  ).toBeDefined();
-  await recovered.binding.release();
+  const selector = { threadId: THREAD, resourceId: RESOURCE };
+  const first = await access.acquire(selector);
+  setTimeout(() => void first(), 20);
+  const second = await access.acquire(selector, { waitMs: 200 });
+  expect(await second.verifyEligibility()).toBe(true);
+  await second();
 });
 
 it("bounds a hung acquisition and releases a lease returned after cancellation", async () => {

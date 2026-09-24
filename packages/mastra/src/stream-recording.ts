@@ -55,6 +55,8 @@ export interface StatefulStreamRecording {
   sanitizeEvidence?: <T>(value: T) => T;
   initialize(state: AdapterRunState): void;
   takeRequest(): RequestEvidence | undefined;
+  /** Start joining the invocation's background memory work without waiting. */
+  beginFinalization?(): void;
   finish(): Promise<JsonValue>;
   release(): Promise<void>;
 }
@@ -328,6 +330,9 @@ class StreamLifecycle {
   private async finalize(complete: boolean, result?: unknown): Promise<void> {
     this.#finalizerPromise ??= (async () => {
       try {
+        // Start before the first await so a caller that joins background work
+        // right after the stream closes already sees this invocation's work.
+        this.stateful?.beginFinalization?.();
         await this.#stepTail;
         let finalInput: JsonValue | undefined;
         try {

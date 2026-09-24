@@ -16,7 +16,10 @@ export interface MastraMemorySelector {
 }
 
 export interface MastraMemoryLeaseOptions {
-  /** Bound acquisition so a live answer does not wait for a delayed reflection. */
+  /**
+   * Bound acquisition so a live answer does not wait for a delayed reflection.
+   * Zero means do not wait: invalidate any current holder at once.
+   */
   waitMs?: number;
   /** Cancel a waiting acquisition without releasing another writer's lease. */
   signal?: AbortSignal;
@@ -34,13 +37,23 @@ export interface MastraMemoryLease {
 /**
  * Coordinate every writer of a source thread or resource across all processes.
  *
- * The implementation must atomically poison eligibility for both selectors when
- * a competing native turn proceeds without ownership or an owner loses its lease.
- * Poison must survive process loss and prevent a later acquisition from becoming
- * eligible until all possible stale writers have quiesced. A timeout or failed
- * coordination call must fail closed for replay eligibility, while native Mastra
- * storage writes still run. Keep ownership through the final eligible-session
- * update, then release only after no delayed source write remains possible.
+ * `acquire` atomically reserves both selectors. When either selector is still
+ * held after `waitMs`, the implementation invalidates every current holder and
+ * returns a lease that is not eligible but still occupies both selectors until
+ * it is released. That invalidation ends once every overlapping lease has been
+ * released. Kitaru holds a turn's lease until the turn's memory writes,
+ * including delayed observational-memory work, have settled or reached their
+ * finalization deadline, and until the final eligibility check has passed.
+ * A write Kitaru makes outside that lease registers through
+ * `acquire(selector, { waitMs: 0 })` and releases immediately afterwards.
+ *
+ * `markUnsafeWrite` is only for a write that could not register: its selector
+ * is unknown or coordination failed. That marker must survive process loss and
+ * keep both selectors ineligible until `resetAfterQuiescence`. Kitaru never
+ * calls `resetAfterQuiescence`; the application calls it after every process
+ * that could have written without registering has stopped or restarted. A
+ * timeout or failed coordination call must fail closed for replay eligibility,
+ * while native Mastra storage writes still run.
  *
  * The process-local helper below is valid only when every writer shares one
  * instance in one process. A production multi-server application must provide
@@ -51,7 +64,7 @@ export interface MastraExclusiveMemoryAccess {
     selector: MastraMemorySelector,
     options?: MastraMemoryLeaseOptions,
   ): Promise<MastraMemoryLease>;
-  /** Persist an unsafe-write marker before an unowned native write proceeds.
+  /** Persist an unsafe-write marker before an unregistered native write proceeds.
    * An unknown selector poisons every thread until global quiescence is proven.
    */
   markUnsafeWrite(selector?: MastraMemorySelector): Promise<void>;
@@ -71,6 +84,7 @@ export function createProcessLocalMemoryAccess(): MastraExclusiveMemoryAccess {
     persistentLoss: boolean;
   };
   const scopes = new Map<string, ScopeState>();
+  const releaseWaiters = new Set<() => void>();
   let unknownWriterPoisoned = false;
 
   function keys({ threadId, resourceId }: MastraMemorySelector): string[] {
@@ -103,11 +117,39 @@ export function createProcessLocalMemoryAccess(): MastraExclusiveMemoryAccess {
     }
   }
 
+  function isOccupied(scopeKeys: readonly string[]): boolean {
+    return scopeKeys.some((key) => (scopes.get(key)?.turns.size ?? 0) > 0);
+  }
+
+  async function waitForRelease(
+    scopeKeys: readonly string[],
+    waitMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    const deadline = Date.now() + waitMs;
+    while (isOccupied(scopeKeys) && !signal?.aborted) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return;
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(timer);
+          releaseWaiters.delete(done);
+          signal?.removeEventListener("abort", done);
+          resolve();
+        };
+        const timer = setTimeout(done, remaining);
+        releaseWaiters.add(done);
+        signal?.addEventListener("abort", done, { once: true });
+      });
+    }
+  }
+
   return {
     async acquire(selector, options = {}) {
+      const scopeKeys = keys(selector);
+      await waitForRelease(scopeKeys, options.waitMs ?? 0, options.signal);
       if (options.signal?.aborted)
         throw new Error("Exclusive source-thread ownership was cancelled.");
-      const scopeKeys = keys(selector);
       const states = scopeKeys.map(getState);
       const occupied = states.filter((state) => state.turns.size > 0);
       if (occupied.length > 0) poison(occupied, false);
@@ -127,6 +169,7 @@ export function createProcessLocalMemoryAccess(): MastraExclusiveMemoryAccess {
           if (state && state.turns.size === 0 && !state.persistentLoss)
             scopes.delete(key);
         }
+        for (const notify of [...releaseWaiters]) notify();
       };
       return Object.assign(release, {
         async verifyEligibility() {
@@ -201,10 +244,32 @@ export interface MastraMemoryCaptureBinding {
   }): Promise<MastraMemorySnapshot | undefined>;
   markIncomplete(reason: string): void;
   drain(): Promise<void>;
+  /**
+   * Join the invocation's memory work, including buffered observation and
+   * reflection, and record its evidence. Without `waitMs` this waits until the
+   * work settles; with it, resolve false once `waitMs` passes first. A failed
+   * join rejects either way.
+   */
+  settle(memory: MastraSettlingMemory, waitMs?: number): Promise<boolean>;
   /** Check shared ownership immediately before persisting eligible inputs. */
   verifyEligibility(): Promise<void>;
   release(): Promise<void>;
 }
+
+/** A Memory whose background observational-memory work can be joined. */
+export interface MastraSettlingMemory {
+  settled(): Promise<void>;
+  readonly omEngine: Promise<{
+    waitForBuffering(
+      threadId: string,
+      resourceId: string,
+      timeoutMs?: number,
+    ): Promise<void>;
+  } | null>;
+}
+
+const BUFFERING_WAIT_MS = 30_000;
+const ACQUIRE_RESPONSE_MARGIN_MS = 25;
 
 async function boundedCoordination<T>(
   operation: Promise<T>,
@@ -222,6 +287,147 @@ async function boundedCoordination<T>(
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/**
+ * Acquire within `boundWaitMs`, even from a backend that ignores cancellation.
+ *
+ * A lease that arrives after the caller has given up is released at once so it
+ * cannot keep the selectors occupied.
+ */
+async function acquireWithin(
+  access: MastraExclusiveMemoryAccess,
+  selector: MastraMemorySelector,
+  options: MastraMemoryLeaseOptions,
+  boundWaitMs: number,
+  onLateReleaseFailure: () => void,
+): Promise<MastraMemoryLease> {
+  const timeout = AbortSignal.timeout(boundWaitMs);
+  const signal = options.signal
+    ? AbortSignal.any([timeout, options.signal])
+    : timeout;
+  const attempted = access.acquire(selector, { ...options, signal });
+  let accepted = false;
+  void attempted.then(
+    async (lateLease) => {
+      if (accepted || !signal.aborted) return;
+      try {
+        await lateLease();
+      } catch {
+        onLateReleaseFailure();
+      }
+    },
+    () => undefined,
+  );
+  const lease = await Promise.race([
+    attempted,
+    new Promise<never>((_resolve, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      else
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+    }),
+  ]);
+  accepted = true;
+  return lease;
+}
+
+/**
+ * Register storage writes that have no eligible lease behind them.
+ *
+ * Each registration overlaps any current holder, so that turn becomes
+ * ineligible, and it ends with its write. Only a write that cannot register
+ * leaves a persistent marker; an unknown selector cannot register at all. That
+ * marker already covers every later write, so later writes skip coordination
+ * instead of delaying the native call again.
+ */
+function createWriteRegistrar(
+  access: MastraExclusiveMemoryAccess,
+  getSelector: () => MastraMemorySelector | undefined,
+  waitMs: number,
+  onFailure: (reason: string) => void,
+): () => Promise<MastraMemoryLease | undefined> {
+  let markedUnsafe = false;
+  return async () => {
+    if (markedUnsafe) return undefined;
+    const selector = getSelector();
+    if (selector) {
+      try {
+        return await acquireWithin(
+          access,
+          selector,
+          { waitMs: 0 },
+          waitMs,
+          () => onFailure("Late source-thread lease release failed."),
+        );
+      } catch {
+        // Fall through to the persistent marker below.
+      }
+    }
+    markedUnsafe = true;
+    try {
+      await boundedCoordination(access.markUnsafeWrite(selector), waitMs);
+    } catch {
+      onFailure("Unsafe memory write could not be fenced.");
+    }
+    return undefined;
+  };
+}
+
+async function releaseRegistration(
+  registration: MastraMemoryLease | undefined,
+  waitMs: number,
+  onFailure: (reason: string) => void,
+): Promise<void> {
+  if (!registration) return;
+  try {
+    await boundedCoordination(registration(), waitMs);
+  } catch {
+    onFailure("Source-thread write registration release failed.");
+  }
+}
+
+/**
+ * Register each native write to a source domain for the duration of the write.
+ *
+ * `getSelector` is read at write time, so a caller can resolve its selector
+ * after constructing the Memory that owns this domain. Coordination failures
+ * are reported and never fail the native write.
+ */
+export function createRegisteredWriteDomain(
+  domain: MemoryStorage,
+  access: MastraExclusiveMemoryAccess,
+  getSelector: () => MastraMemorySelector | undefined,
+  onFailure: (reason: string) => void,
+  waitMs = 100,
+): MemoryStorage {
+  const methods = new Map<PropertyKey, unknown>();
+  const registerWrite = createWriteRegistrar(
+    access,
+    getSelector,
+    waitMs,
+    onFailure,
+  );
+  return new Proxy(domain, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") return value;
+      if (methods.has(property)) return methods.get(property);
+      const bound = MUTATIONS.has(property as keyof MemoryStorage)
+        ? async (...args: unknown[]): Promise<unknown> => {
+            const registration = await registerWrite();
+            try {
+              return await Reflect.apply(value, target, args);
+            } finally {
+              await releaseRegistration(registration, waitMs, onFailure);
+            }
+          }
+        : value.bind(target);
+      methods.set(property, bound);
+      return bound;
+    },
+  });
 }
 
 // The pinned public MemoryStorage mutation inventory. Delegation binds `this` to
@@ -390,6 +596,17 @@ export function createMemoryCaptureBinding(
   const reasons: string[] = [];
   const methods = new Map<PropertyKey, unknown>();
   const waitMs = options.leaseWaitMs ?? 100;
+  const selector = {
+    threadId: options.threadId,
+    resourceId: options.resourceId,
+  };
+  let settling: Promise<void> | undefined;
+  const registerWrite = createWriteRegistrar(
+    options.exclusiveAccess,
+    () => selector,
+    waitMs,
+    markIncomplete,
+  );
 
   function markIncomplete(reason: string): void {
     if (reasons.includes(reason)) return;
@@ -399,6 +616,25 @@ export function createMemoryCaptureBinding(
     } catch {
       /* Diagnostics must not affect native calls. */
     }
+  }
+
+  async function holdsEligibleLease(): Promise<boolean> {
+    if (released || !lease) {
+      markIncomplete(
+        "Memory mutation occurred without source-thread ownership.",
+      );
+      return false;
+    }
+    try {
+      if (await boundedCoordination(lease.verifyEligibility(), waitMs))
+        return true;
+      markIncomplete("Exclusive source-thread ownership was lost.");
+    } catch {
+      markIncomplete(
+        "Exclusive source-thread ownership could not be verified.",
+      );
+    }
+    return false;
   }
 
   const domain = new Proxy(options.domain, {
@@ -441,51 +677,16 @@ export function createMemoryCaptureBinding(
         const duringCapture = capturing;
         const result = mutations.then(async () => {
           let output: unknown;
+          let registration: MastraMemoryLease | undefined;
           try {
-            if (released || !lease) {
-              markIncomplete(
-                "Memory mutation occurred without source-thread ownership.",
-              );
-              try {
-                await boundedCoordination(
-                  options.exclusiveAccess.markUnsafeWrite(options),
-                  waitMs,
-                );
-              } catch {
-                markIncomplete("Unsafe memory write could not be fenced.");
-              }
-            } else {
-              try {
-                if (
-                  !(await boundedCoordination(
-                    lease.verifyEligibility(),
-                    waitMs,
-                  ))
-                ) {
-                  markIncomplete("Exclusive source-thread ownership was lost.");
-                  await boundedCoordination(
-                    options.exclusiveAccess.markUnsafeWrite(options),
-                    waitMs,
-                  );
-                }
-              } catch {
-                markIncomplete(
-                  "Exclusive source-thread ownership could not be verified.",
-                );
-                try {
-                  await boundedCoordination(
-                    options.exclusiveAccess.markUnsafeWrite(options),
-                    waitMs,
-                  );
-                } catch {
-                  markIncomplete("Unsafe memory write could not be fenced.");
-                }
-              }
-            }
+            if (!(await holdsEligibleLease()))
+              registration = await registerWrite();
             output = await Reflect.apply(value, target, args);
           } catch (error) {
             markIncomplete("Native memory storage mutation failed.");
             throw error;
+          } finally {
+            await releaseRegistration(registration, waitMs, markIncomplete);
           }
           // Joined work from a previous turn belongs to the initial snapshot.
           if (duringCapture) return output;
@@ -562,6 +763,26 @@ export function createMemoryCaptureBinding(
     }
   }
 
+  async function joinMemoryWork(memory: MastraSettlingMemory): Promise<void> {
+    const engine = await memory.omEngine;
+    // Mastra's settled() does not join a buffered reflection, and settled
+    // work can start more buffering. Repeat until a round records no write.
+    while (true) {
+      const before = revision;
+      await memory.settled();
+      const waitStarted = Date.now();
+      await engine?.waitForBuffering(
+        options.threadId,
+        options.resourceId,
+        BUFFERING_WAIT_MS,
+      );
+      await drain();
+      // waitForBuffering resolves, rather than rejects, when it times out.
+      if (Date.now() - waitStarted >= BUFFERING_WAIT_MS) continue;
+      if (revision === before) return;
+    }
+  }
+
   async function verifyEligibility(): Promise<void> {
     if (released || !lease) {
       markIncomplete("Exclusive source-thread ownership is unavailable.");
@@ -597,44 +818,22 @@ export function createMemoryCaptureBinding(
       capturing = true;
       try {
         try {
-          const timeout = AbortSignal.timeout(waitMs);
-          const signal = options.leaseSignal
-            ? AbortSignal.any([timeout, options.leaseSignal])
-            : timeout;
-          const attempted = options.exclusiveAccess.acquire(options, {
-            waitMs,
-            signal,
-            onConflict: () =>
-              markIncomplete(
-                "Exclusive source-thread ownership was invalidated by an overlapping invocation.",
-              ),
-          });
-          let accepted = false;
-          // A backend that ignores cancellation must not retain ownership if
-          // its acquire resolves after the caller has resumed natively.
-          void attempted.then(
-            async (lateLease) => {
-              if (!accepted && signal.aborted) {
-                try {
-                  await lateLease();
-                } catch {
-                  markIncomplete("Late source-thread lease release failed.");
-                }
-              }
+          lease = await acquireWithin(
+            options.exclusiveAccess,
+            selector,
+            {
+              // Leave the backend time to answer with a lease that registers
+              // the overlap before this invocation stops waiting for it.
+              waitMs: Math.max(0, waitMs - ACQUIRE_RESPONSE_MARGIN_MS),
+              signal: options.leaseSignal,
+              onConflict: () =>
+                markIncomplete(
+                  "Exclusive source-thread ownership was invalidated by an overlapping invocation.",
+                ),
             },
-            () => undefined,
+            waitMs,
+            () => markIncomplete("Late source-thread lease release failed."),
           );
-          lease = await Promise.race([
-            attempted,
-            new Promise<never>((_resolve, reject) => {
-              if (signal.aborted) reject(signal.reason);
-              else
-                signal.addEventListener("abort", () => reject(signal.reason), {
-                  once: true,
-                });
-            }),
-          ]);
-          accepted = true;
           await verifyEligibility();
           if (reasons.length) return undefined;
         } catch {
@@ -698,6 +897,24 @@ export function createMemoryCaptureBinding(
       }
     },
     drain,
+    async settle(memory, settleWaitMs) {
+      settling ??= joinMemoryWork(memory);
+      if (settleWaitMs === undefined) {
+        await settling;
+        return true;
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          settling.then(() => true),
+          new Promise<boolean>((resolve) => {
+            timer = setTimeout(() => resolve(false), settleWaitMs);
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    },
     verifyEligibility,
     async release() {
       if (released) return;

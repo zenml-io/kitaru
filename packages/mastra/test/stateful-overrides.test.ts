@@ -228,6 +228,7 @@ it("executes a second-step memory tool during replay", async () => {
 import {
   createMemoryReplayAgent,
   createProcessLocalMemoryAccess,
+  type MastraMemoryLease,
   MEMORY_REPLAY_KEY,
 } from "../src/memory.js";
 import {
@@ -654,23 +655,22 @@ it("runs natively when request context cannot be captured safely", async () => {
     }),
   );
   expect(JSON.stringify(api.calls)).not.toContain("secret");
-  expect(unsafeWrite).toHaveBeenCalledWith({
-    threadId: THREAD,
-    resourceId: RESOURCE,
-  });
+  // The fallback registered each write, so nothing outlives its native turn.
+  expect(unsafeWrite).not.toHaveBeenCalled();
   const next = await access.acquire({ threadId: THREAD, resourceId: RESOURCE });
-  expect(await next.verifyEligibility()).toBe(false);
+  expect(await next.verifyEligibility()).toBe(true);
   await next();
   await runtime.memory.settled();
   await runtime.store.close();
 });
 
-it("poisons all source threads when a native fallback has only an implicit selector", async () => {
+it("registers native fallback writes under an implicit default selector", async () => {
   const runtime = createMemoryRuntime({ messageTokens: 10000 });
   await seedMemory(runtime);
   installTestApi();
   const access = createProcessLocalMemoryAccess();
   const unsafeWrite = vi.spyOn(access, "markUnsafeWrite");
+  const acquire = vi.spyOn(access, "acquire");
   const model = new MastraLanguageModelV2Mock({
     modelId: "actor",
     provider: "fixture",
@@ -704,12 +704,16 @@ it("poisons all source threads when a native fallback has only an implicit selec
     const output = await adapter.stream("Hello");
     await output.consumeStream();
     expect(await output.text).toBe("native answer");
-    expect(unsafeWrite).toHaveBeenCalledWith(undefined);
+    expect(unsafeWrite).not.toHaveBeenCalled();
+    expect(acquire).toHaveBeenCalledWith(
+      { threadId: THREAD, resourceId: RESOURCE },
+      expect.objectContaining({ waitMs: 0 }),
+    );
     const next = await access.acquire({
       threadId: THREAD,
       resourceId: RESOURCE,
     });
-    expect(await next.verifyEligibility()).toBe(false);
+    expect(await next.verifyEligibility()).toBe(true);
     await next();
   } finally {
     await runtime.store.close();
@@ -723,6 +727,7 @@ it("keeps the native answer moving when unsafe-write coordination hangs", async 
   const reported = vi.fn();
   const access = {
     ...createProcessLocalMemoryAccess(),
+    acquire: vi.fn(() => new Promise<MastraMemoryLease>(() => undefined)),
     markUnsafeWrite: vi.fn(() => new Promise<void>(() => undefined)),
   };
   const model = new MastraLanguageModelV2Mock({
@@ -759,13 +764,16 @@ it("keeps the native answer moving when unsafe-write coordination hangs", async 
     });
     await output.consumeStream();
     expect(await output.text).toBe("native answer");
+    // One persistent marker covers the fallback, so later writes skip waiting.
     expect(access.markUnsafeWrite).toHaveBeenCalledOnce();
-    expect(reported).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: expect.objectContaining({
-          message: "Source-thread unsafe marker timed out.",
+    await vi.waitFor(() =>
+      expect(reported).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.objectContaining({
+            message: "Unsafe memory write could not be fenced.",
+          }),
         }),
-      }),
+      ),
     );
   } finally {
     await runtime.store.close();

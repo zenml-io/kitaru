@@ -342,16 +342,15 @@ export async function createIsolatedMemoryReplay(
         "Restored memory did not produce a coherent initial snapshot.",
       );
     }
-    let finished: Promise<void> | undefined;
+    let finished: Promise<boolean> | undefined;
     return {
       memory,
       binding,
       initialSnapshot,
-      finish(): Promise<void> {
+      finish(): Promise<boolean> {
         finished ??= (async () => {
           try {
-            await memory.settled();
-            await binding.drain();
+            return await binding.settle(memory);
           } finally {
             await binding.release();
             await store.close();
@@ -359,8 +358,8 @@ export async function createIsolatedMemoryReplay(
         })();
         return finished;
       },
-      release(): Promise<void> {
-        return finished ?? Promise.resolve();
+      async release(): Promise<void> {
+        await finished;
       },
     };
   } catch (error) {

@@ -147,11 +147,25 @@ export function createOMResultTape(
         return async (input: unknown) => {
           const ordinal = next++;
           const inputFingerprint = fingerprint(input);
-          const result = await Reflect.apply(
-            value as (input: unknown) => Promise<unknown>,
-            target,
-            [input],
-          );
+          // Track the call from its start: finish() must wait for a call that
+          // is still waiting on the provider, not report its slot as missing.
+          let settleCall!: () => void;
+          const call = new Promise<void>((resolve) => {
+            settleCall = resolve;
+          });
+          pending.add(call);
+          void call.finally(() => pending.delete(call));
+          let result: unknown;
+          try {
+            result = await Reflect.apply(
+              value as (input: unknown) => Promise<unknown>,
+              target,
+              [input],
+            );
+          } catch (error) {
+            settleCall();
+            throw error;
+          }
           if (method === "doGenerate") {
             try {
               entries[ordinal] = {
@@ -164,12 +178,14 @@ export function createOMResultTape(
             } catch {
               failCapture();
             }
+            settleCall();
             return result;
           }
           const stream = (result as { stream?: ReadableStream<unknown> })
             ?.stream;
           if (!(stream instanceof ReadableStream)) {
             failCapture();
+            settleCall();
             return result;
           }
           const [native, capture] = stream.tee();
@@ -209,8 +225,7 @@ export function createOMResultTape(
               reader.releaseLock();
             }
           })();
-          pending.add(work);
-          void work.finally(() => pending.delete(work));
+          void work.finally(settleCall);
           return { ...(result as object), stream: native };
         };
       },

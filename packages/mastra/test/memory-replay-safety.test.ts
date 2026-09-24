@@ -94,6 +94,15 @@ it("stores captured file references and refuses signed source URLs", () => {
   );
 });
 
+/** The native fallback registers each write; no recording leased the thread. */
+function expectOnlyWriteRegistrations(acquire: {
+  mock: { calls: unknown[][] };
+}): void {
+  expect(acquire.mock.calls.length).toBeGreaterThan(0);
+  for (const [, options] of acquire.mock.calls)
+    expect(options).toMatchObject({ waitMs: 0 });
+}
+
 function fixture(
   factory?: MemoryReplayAgentFactory,
   overrides: Partial<MemoryReplayAgentOptions> = {},
@@ -209,7 +218,7 @@ it.each([MASTRA_THREAD_ID_KEY, MASTRA_RESOURCE_ID_KEY])(
     });
     await result.consumeStream();
     expect(await result.text).toBe("done");
-    expect(acquire).not.toHaveBeenCalled();
+    expectOnlyWriteRegistrations(acquire);
     expect(modelCall).toHaveBeenCalledTimes(1);
     await vi.waitFor(() =>
       expect(
@@ -237,7 +246,7 @@ it("does not make mismatched middleware selectors replayable through selective c
   });
   await result.consumeStream();
   expect(await result.text).toBe("done");
-  expect(acquire).not.toHaveBeenCalled();
+  expectOnlyWriteRegistrations(acquire);
   await vi.waitFor(() =>
     expect(
       api.calls.find(

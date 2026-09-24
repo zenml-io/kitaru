@@ -472,11 +472,13 @@ it.each(["late", "memory-name-spoof", "copied-memory-id"])(
     replaying = true;
     const result = await adapter.stream("ignored");
     await result.consumeStream();
+    // The baseline finalizes in the background, so its update can land last.
     await vi.waitFor(() =>
       expect(
-        api.calls.filter((call) => call.method === "PATCH").at(-1)?.body
-          ?.status,
-      ).toBe("failed"),
+        api.calls
+          .filter((call) => call.method === "PATCH")
+          .map((call) => call.body?.status),
+      ).toContain("failed"),
     );
     expect(execute).not.toHaveBeenCalled();
     expect(
