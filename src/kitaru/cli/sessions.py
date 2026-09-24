@@ -74,34 +74,30 @@ _MIB_BYTES = 1024 * 1024
 
 def _read_payload(path: Path, *, max_size_bytes: int | None = None) -> bytes:
     """Read one regular local file without exposing its path in failures."""
-    _check_payload_size(path, max_size_bytes)
+    size = _check_payload_size(path, max_size_bytes)
     try:
         if max_size_bytes is None:
             return path.read_bytes()
-        content = bytearray()
         with path.open("rb") as payload_file:
-            while chunk := payload_file.read(_MIB_BYTES):
-                if len(content) + len(chunk) > max_size_bytes:
-                    raise CLIError(
-                        "invalid_arguments",
-                        f"FILE exceeds the upload limit of {max_size_bytes} bytes. "
-                        "Split the payload into smaller files and import each slice.",
-                    )
-                content.extend(chunk)
+            content = payload_file.read(size + 1)
     except OSError as error:
         reason = error.strerror or type(error).__name__
         raise CLIError(
             "invalid_arguments", f"FILE could not be read: {reason}."
         ) from None
-    return bytes(content)
+    if len(content) != size:
+        raise CLIError(
+            "invalid_arguments",
+            "FILE changed while being read. Retry with a stable file or split "
+            "the payload.",
+        )
+    return content
 
 
-def _check_payload_size(path: Path, max_size_bytes: int | None) -> None:
+def _check_payload_size(path: Path, max_size_bytes: int | None) -> int:
     """Reject a local payload whose metadata exceeds an upload limit."""
     if not path.is_file():
         raise CLIError("invalid_arguments", "FILE must be an existing regular file.")
-    if max_size_bytes is None:
-        return
     try:
         size = path.stat().st_size
     except OSError as error:
@@ -109,12 +105,13 @@ def _check_payload_size(path: Path, max_size_bytes: int | None) -> None:
         raise CLIError(
             "invalid_arguments", f"FILE could not be read: {reason}."
         ) from None
-    if size > max_size_bytes:
+    if max_size_bytes is not None and size > max_size_bytes:
         raise CLIError(
             "invalid_arguments",
             f"FILE exceeds the upload limit of {max_size_bytes} bytes. "
             "Split the payload into smaller files and import each slice.",
         )
+    return size
 
 
 _RELATIVE_DURATION = re.compile(r"(?P<amount>\d+)(?P<unit>[dhm])")

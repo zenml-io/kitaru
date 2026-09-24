@@ -676,7 +676,7 @@ def test_read_payload_rejects_growth_after_size_check(
         return original_open(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", grow_before_open)
-    with pytest.raises(CLIError, match="Split the payload"):
+    with pytest.raises(CLIError, match="changed while being read"):
         sessions._read_payload(payload, max_size_bytes=2)
 
 
