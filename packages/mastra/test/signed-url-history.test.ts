@@ -58,22 +58,11 @@ function createAttachmentProcessor(
   };
 }
 
-it("keeps a thread with a signed attachment URL in history replayable on every turn", async () => {
-  const nativeFetch = globalThis.fetch;
-  const api = installTestApi();
-  const apiFetch = globalThis.fetch;
-  // Mastra hands base64 file parts to the model as data: URLs it reads back.
-  vi.stubGlobal("fetch", ((
-    input: Parameters<typeof fetch>[0],
-    init: Parameters<typeof fetch>[1],
-  ) =>
-    String(input).startsWith("data:")
-      ? nativeFetch(input, init)
-      : apiFetch(input, init)) as typeof fetch);
+/** A thread whose history holds the attachment's signed URL, not its bytes. */
+async function seedAttachmentHistory() {
   const store = new InMemoryStore();
   const domain = store.stores.memory;
   if (!domain) throw new Error("Missing native memory domain");
-  // History as an earlier turn left it: the attachment's signed URL, not bytes.
   await domain.saveThread({
     thread: {
       id: THREAD,
@@ -102,6 +91,22 @@ it("keeps a thread with a signed attachment URL in history replayable on every t
       },
     ],
   });
+  return { store, domain };
+}
+
+it("keeps a thread with a signed attachment URL in history replayable on every turn", async () => {
+  const nativeFetch = globalThis.fetch;
+  const api = installTestApi();
+  const apiFetch = globalThis.fetch;
+  // Mastra hands base64 file parts to the model as data: URLs it reads back.
+  vi.stubGlobal("fetch", ((
+    input: Parameters<typeof fetch>[0],
+    init: Parameters<typeof fetch>[1],
+  ) =>
+    String(input).startsWith("data:")
+      ? nativeFetch(input, init)
+      : apiFetch(input, init)) as typeof fetch);
+  const { store, domain } = await seedAttachmentHistory();
   const prompts: string[] = [];
   const model = new MastraLanguageModelV2Mock({
     provider: "fixture",
@@ -192,6 +197,64 @@ it("keeps a thread with a signed attachment URL in history replayable on every t
     expect(declareFiles).toHaveBeenCalledTimes(3);
     expect(prompts.at(-1)).toContain(encodedBytes);
     expect(prompts.at(-1)).toContain("alt=media&token=REDACTED");
+    expect(JSON.stringify(api.calls)).not.toContain(DOWNLOAD_TOKEN);
+  } finally {
+    await store.close();
+  }
+});
+
+it("records a turn as ineligible when history holds an undeclared attachment URL", async () => {
+  const api = installTestApi();
+  const { store, domain } = await seedAttachmentHistory();
+  const model = new MastraLanguageModelV2Mock({
+    provider: "fixture",
+    modelId: "actor",
+    doStream: async () => textStream("The quote covers two nights."),
+  });
+  // The provider reads the URL itself, so the native turn never downloads it.
+  Object.assign(model, { supportedUrls: { "*/*": [/^https:\/\//] } });
+  const adapter = createMemoryReplayAgent(
+    ({ memory }) => ({
+      id: "undeclared-history",
+      name: "Undeclared history",
+      instructions: "Answer about the attachment.",
+      memory,
+      model,
+    }),
+    {
+      agentId: AGENT_ID,
+      apiUrl: "https://kitaru.invalid",
+      apiKey: "fixture",
+      requestedModelId: "fixture/actor",
+      onRecordingError: () => undefined,
+      sourceMemory: () => ({
+        settled: async () => {},
+        domain,
+        configuration: { lastMessages: 20, semanticRecall: false },
+        exclusiveAccess: createProcessLocalMemoryAccess(),
+      }),
+      resolveModel: () => model,
+      files: [],
+    },
+  );
+  try {
+    const output = await adapter.stream("What does it cost?", {
+      memory: { thread: THREAD, resource: RESOURCE },
+    });
+    expect(await output.text).toBe("The quote covers two nights.");
+    // Replay would send the redacted URL to the provider, so the turn is
+    // refused up front instead of failing every replay.
+    await vi.waitFor(() =>
+      expect(
+        api.calls.find(
+          (call) =>
+            call.method === "PATCH" && call.body?.status === "completed",
+        )?.body?.metadata,
+      ).toMatchObject({
+        mastra_replay_state: "ineligible",
+        mastra_replay_reason: "file_url_undeclared",
+      }),
+    );
     expect(JSON.stringify(api.calls)).not.toContain(DOWNLOAD_TOKEN);
   } finally {
     await store.close();

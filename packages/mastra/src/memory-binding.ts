@@ -20,6 +20,7 @@ import {
   type MastraReplayReason,
   MastraReplayReasonError,
 } from "./replay-reasons.js";
+import { containsFileNetworkUrl } from "./stateful-files.js";
 
 export interface MastraMemorySelector {
   threadId: string;
@@ -1042,15 +1043,18 @@ export function createMemoryCaptureBinding(
               messages,
               records: projectOMRecords(records),
             };
-            // No storage-owned objects or Dates escape the explicit codec.
             // Declared file URLs in history become captured references here,
             // so a replayed processor resolves recorded bytes without a token.
+            const sanitized = options.sanitizeEvidence?.(snapshot) ?? snapshot;
+            if (containsFileNetworkUrl(sanitized.messages))
+              throw new MastraReplayReasonError(
+                "Thread history holds a file URL that was not declared in files.",
+                "file_url_undeclared",
+              );
+            // No storage-owned objects or Dates escape the explicit codec.
             const copy = normalizeStoredMemoryDates(
               decodeMemoryValue(
-                encodeMemoryValue(
-                  options.sanitizeEvidence?.(snapshot) ?? snapshot,
-                  "Initial memory snapshot",
-                ),
+                encodeMemoryValue(sanitized, "Initial memory snapshot"),
               ),
             );
             validateMemorySnapshot(copy);

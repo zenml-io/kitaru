@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { redactUrlCredentials } from "@zenml-io/kitaru/adapter";
 import type { MastraRecordedFile } from "./memory-snapshot.js";
+import { MastraReplayReasonError } from "./replay-reasons.js";
 
 export interface ResolvedMemoryFile {
   bytes: Uint8Array;
@@ -172,6 +173,48 @@ export function createRecordedEvidenceSanitizer(
   return { replace };
 }
 
+const NETWORK_URL = /^https?:\/\//i;
+
+function isFilePart(value: Record<string, unknown>): boolean {
+  return value.type === "file" || value.type === "image";
+}
+
+/**
+ * Whether a file or image part in `value`, or a message attachment, holds a
+ * network URL. Only declared files become recorded references, so replay
+ * would have to fetch such a URL.
+ */
+export function containsFileNetworkUrl(value: unknown): boolean {
+  const active = new Set<object>();
+  function visit(current: unknown, filePart: boolean): boolean {
+    if (typeof current === "string")
+      return filePart && NETWORK_URL.test(current);
+    if (current instanceof URL)
+      return filePart && /^https?:$/i.test(current.protocol);
+    if (
+      current === null ||
+      typeof current !== "object" ||
+      current instanceof Date ||
+      current instanceof Uint8Array ||
+      active.has(current)
+    )
+      return false;
+    active.add(current);
+    try {
+      if (Array.isArray(current))
+        return current.some((item) => visit(item, filePart));
+      const entries = Object.entries(current as Record<string, unknown>);
+      const part = filePart || isFilePart(current as Record<string, unknown>);
+      return entries.some(([key, item]) =>
+        visit(item, part || key === "experimental_attachments"),
+      );
+    } finally {
+      active.delete(current);
+    }
+  }
+  return visit(value, false);
+}
+
 /** Declared files did not finish downloading within the capture wait. */
 export class FileCaptureTimeoutError extends Error {
   constructor() {
@@ -314,9 +357,10 @@ export async function createCapturedFiles(
       if (typeof current === "string") {
         const reference = lookup(current);
         if (reference) return reference;
-        if (filePart && /^https?:\/\//i.test(current))
-          throw new Error(
+        if (filePart && NETWORK_URL.test(current))
+          throw new MastraReplayReasonError(
             "Unsupported Mastra memory replay: undeclared file URL.",
+            "file_url_undeclared",
           );
         return redactUrlCredentials(current);
       }
@@ -324,8 +368,9 @@ export async function createCapturedFiles(
         const reference = lookup(current.href);
         if (reference) return new URL(reference);
         if (filePart && /^https?:$/i.test(current.protocol))
-          throw new Error(
+          throw new MastraReplayReasonError(
             "Unsupported Mastra memory replay: undeclared file URL.",
+            "file_url_undeclared",
           );
         const redacted = redactUrlCredentials(current.href);
         return redacted === current.href ? current : new URL(redacted);
