@@ -24,6 +24,7 @@ export {
   projectMastraReplayInput,
   projectRecordedInput,
   projectRecordedMetadata,
+  RecordedSensitiveKeyError,
   recordedPayloadConversion,
   recordedPayloadJson,
   recordedToolPayloadConversion,
@@ -41,7 +42,7 @@ export {
   resolveReplayContext,
   stripSystemMessages,
 } from "./replay.js";
-export type { RunRecorderOptions } from "./run-recorder.js";
+export type { RunCompletion, RunRecorderOptions } from "./run-recorder.js";
 export { RunRecorder } from "./run-recorder.js";
 export type { AdapterClient, AdapterRunState } from "./run-state.js";
 export { ROOT_NODE_EXTERNAL_ID } from "./run-state.js";

@@ -108,6 +108,68 @@ describe("normalized run lifecycle", () => {
     });
   });
 
+  it("stores the rejected-finalization metadata when the server refuses replay inputs", async () => {
+    const client = rejectingFinalization(
+      new KitaruApiError(
+        "PATCH",
+        `/api/v1/sessions/${SESSION_ID}`,
+        422,
+        "Extra inputs are not permitted",
+      ),
+    );
+    const run = await recorder(client);
+    await run.initialize();
+    const rejectedMetadata = {
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "server_rejected_finalization",
+    };
+
+    const completion = await run.complete(
+      { text: "done" },
+      { ...FINALIZATION, rejectedMetadata },
+    );
+
+    expect(completion).toEqual({ finalizationAccepted: false });
+    expect(client.updates[1]).toEqual({
+      ended_at: expect.any(String),
+      metadata: rejectedMetadata,
+      outputs: { text: "done" },
+      status: "completed",
+    });
+  });
+
+  it("completes a finished run whose step uploads failed", async () => {
+    const client = fakeClient();
+    const run = await recorder(client);
+    await run.initialize();
+    await run.state
+      .enqueueStep(async () => {
+        throw new Error("step upload failed");
+      })
+      .catch(() => undefined);
+    const metadata = {
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "recording_step_failed",
+    };
+
+    await expect(run.complete({ text: "done" })).rejects.toThrow(
+      "step upload failed",
+    );
+    await run.completeIncompleteRecording({ text: "done" }, metadata);
+
+    expect(run.state.failure).toBeUndefined();
+    expect(client.nodes.at(-1)?.nodes[0]).toMatchObject({
+      outputs: { text: "done" },
+      status: "completed",
+    });
+    expect(client.updates.at(-1)).toEqual({
+      ended_at: expect.any(String),
+      metadata,
+      outputs: { text: "done" },
+      status: "completed",
+    });
+  });
+
   it("does not retry a completion rejected for another reason", async () => {
     const conflict = new KitaruApiError(
       "PATCH",

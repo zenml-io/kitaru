@@ -163,6 +163,9 @@ function unconvertible(options: CloneOptions, reason: string): JsonValue {
   return null;
 }
 
+/** A value holds a credential-named key that its strict conversion refuses. */
+export class RecordedSensitiveKeyError extends TypeError {}
+
 function cloneJson(
   value: unknown,
   options: CloneOptions,
@@ -302,7 +305,7 @@ function cloneRecord(
       options.sensitiveKeys.has(key.toLowerCase())
     ) {
       if (options.sensitiveKeyMode === "reject") {
-        throw new TypeError(
+        throw new RecordedSensitiveKeyError(
           `${options.path} contains unsupported sensitive key '${key}'`,
         );
       }

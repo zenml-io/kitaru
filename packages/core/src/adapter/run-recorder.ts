@@ -73,6 +73,16 @@ export interface RunRecorderOptions {
   startedAt?: string;
 }
 
+interface CompletionOptions {
+  inputs?: JsonValue;
+  metadata?: Record<string, JsonValue>;
+  /**
+   * Metadata to store instead when the server refuses `inputs` or
+   * `metadata`, so the completed session can say why it lacks them.
+   */
+  rejectedMetadata?: Record<string, JsonValue>;
+}
+
 export interface RunCompletion {
   /** Whether the server stored the inputs and metadata passed to `complete`. */
   finalizationAccepted: boolean;
@@ -145,12 +155,30 @@ export class RunRecorder {
 
   async complete(
     result: unknown,
-    options: {
-      inputs?: JsonValue;
-      metadata?: Record<string, JsonValue>;
-    } = {},
+    options: CompletionOptions = {},
   ): Promise<RunCompletion> {
     await this.state.awaitSteps();
+    return this.#closeCompleted(result, options);
+  }
+
+  /**
+   * Record a run that finished but whose recording is incomplete.
+   *
+   * The session is completed with the run's result even when step uploads
+   * failed, and `metadata` states why the recording is incomplete.
+   */
+  async completeIncompleteRecording(
+    result: unknown,
+    metadata: Record<string, JsonValue>,
+  ): Promise<RunCompletion> {
+    await bestEffort(() => this.state.awaitSteps());
+    return this.#closeCompleted(result, { metadata });
+  }
+
+  async #closeCompleted(
+    result: unknown,
+    options: CompletionOptions,
+  ): Promise<RunCompletion> {
     // The run has finished by the time its result is recorded, so a result too
     // large or too circular to record is bounded instead of turning a
     // successful generation into a failed one.
@@ -194,7 +222,12 @@ export class RunRecorder {
       )
         throw error;
     }
-    await this.#client.updateSession(this.state.sessionId, completion);
+    await this.#client.updateSession(this.state.sessionId, {
+      ...completion,
+      ...(options.rejectedMetadata
+        ? { metadata: options.rejectedMetadata }
+        : {}),
+    });
     return { finalizationAccepted: false };
   }
 
