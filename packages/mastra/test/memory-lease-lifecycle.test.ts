@@ -251,7 +251,11 @@ function outcomes(api: TestApi): string[] {
     const metadata = update.body?.metadata as
       | Record<string, unknown>
       | undefined;
-    return `${String(update.body?.status)}/${String(metadata?.mastra_replay_state)}`;
+    const reason =
+      metadata?.mastra_replay_state === "ineligible"
+        ? `/${String(metadata.mastra_replay_reason)}`
+        : "";
+    return `${String(update.body?.status)}/${String(metadata?.mastra_replay_state)}${reason}`;
   });
 }
 
@@ -461,8 +465,8 @@ it.each(LEASES)(
     await vi.waitFor(
       () =>
         expect(outcomes(api)).toEqual([
-          "failed/ineligible",
-          "failed/ineligible",
+          "completed/ineligible/memory_lease_conflict",
+          "completed/ineligible/memory_lease_conflict",
         ]),
       { timeout: 3000 },
     );
@@ -489,7 +493,10 @@ it("releases the lease and closes the session when OM work misses the finalizati
   try {
     await turn(LONG_MESSAGE);
     await vi.waitFor(
-      () => expect(outcomes(api)).toEqual(["failed/ineligible"]),
+      () =>
+        expect(outcomes(api)).toEqual([
+          "completed/ineligible/om_settle_timeout",
+        ]),
       { timeout: 3000 },
     );
     const probe = await access.acquire({

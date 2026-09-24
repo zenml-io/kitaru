@@ -27,6 +27,7 @@ export {
   restoreMemoryReplayEnvelope,
   validateMemorySnapshot,
 } from "./memory-snapshot.js";
+export type { MastraReplayReason } from "./replay-reasons.js";
 export type {
   DeclareMemoryReplayFiles,
   MemoryReplayAgentBindings,

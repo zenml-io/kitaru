@@ -195,6 +195,7 @@ it("marks failed capture or unjoined work incomplete without throwing", async ()
   await runtime.domain.setObservingFlag(required(record).id, true);
   expect(await binding.captureInitial(runtime.memory)).toBeUndefined();
   expect(binding.incompleteReasons.join()).toMatch(/Unjoined/);
+  expect(binding.incompleteReason).toBe("om_work_unjoined");
   await binding.release();
 });
 
@@ -205,11 +206,22 @@ it("invalidates the first recording when a conflicting invocation cannot get its
   await one.binding.captureInitial(one.runtime.memory);
   await two.binding.captureInitial(two.runtime.memory);
   expect(one.binding.incompleteReasons.join()).toMatch(/overlapping/);
+  expect(one.binding.incompleteReason).toBe("memory_lease_conflict");
+  expect(two.binding.incompleteReason).toBe("memory_lease_conflict");
   await one.binding.release();
   await two.binding.release();
   const next = await fixture("next", access);
   expect(await next.binding.captureInitial(next.runtime.memory)).toBeDefined();
   await next.binding.release();
+});
+
+it("names an unavailable lease backend separately from a conflicting writer", async () => {
+  const access = createProcessLocalMemoryAccess();
+  vi.spyOn(access, "acquire").mockRejectedValue(new Error("backend down"));
+  const { runtime, binding } = await fixture("unavailable", access);
+  expect(await binding.captureInitial(runtime.memory)).toBeUndefined();
+  expect(binding.incompleteReason).toBe("memory_lease_unavailable");
+  await binding.release();
 });
 
 it("keeps a native write after lost ownership and recovers once overlapping turns release", async () => {
@@ -352,6 +364,7 @@ it("bounds a stalled pre-turn source read without changing native storage", asyn
   expect(await binding.captureInitial(runtime.memory)).toBeUndefined();
   expect(Date.now() - start).toBeLessThan(200);
   expect(binding.incompleteReasons.join()).toMatch(/capture timed out/i);
+  expect(binding.incompleteReason).toBe("memory_capture_timeout");
   await binding.release();
   read.mockRestore();
   const updated = await native({ id: THREAD, title: "native still works" });
@@ -459,7 +472,10 @@ it("still refuses buffered chunk dates that are not ISO timestamps", async () =>
   const { runtime, binding } = await fixture();
   await readChunksLikeDatabase(runtime, "Sun Feb 01 2026");
   expect(await binding.captureInitial(runtime.memory)).toBeUndefined();
-  expect(binding.incompleteReasons.join()).toMatch(/Initial memory capture/);
+  expect(binding.incompleteReasons.join()).toMatch(
+    /Initial memory capture failed: .*Malformed observation buffer chunk/,
+  );
+  expect(binding.incompleteReason).toBe("memory_store_shape_unsupported");
   await binding.release();
 });
 
@@ -576,7 +592,10 @@ it("keeps custom OM extractor execution native while refusing incomplete replay 
     },
   });
   expect(native.threadId).toBe("custom-extractor-thread");
-  expect(binding.incompleteReasons.join()).toMatch(/arguments|result/);
+  expect(binding.incompleteReasons.join()).toMatch(
+    /Unsupported observational-memory extractor/,
+  );
+  expect(binding.incompleteReason).toBe("om_config_unsupported");
   await binding.release();
 });
 

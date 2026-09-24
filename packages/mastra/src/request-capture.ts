@@ -91,6 +91,9 @@ export function createRequestCapture(options: RequestCaptureOptions) {
     string,
     { evidence: RequestEvidence; returned: boolean }
   >();
+  // Attempts whose provider call threw, already written as failed nodes. A
+  // step that fails because of the last one reuses its node.
+  const failed: RequestEvidence[] = [];
   const proxies = new WeakMap<object, object>();
   const writes = new Set<Promise<void>>();
 
@@ -289,6 +292,7 @@ export function createRequestCapture(options: RequestCaptureOptions) {
               return result;
             } catch (error) {
               unfinished.delete(evidence.externalId);
+              failed.push(evidence);
               // Queue the sink separately: retries and provider failures retain native behavior.
               const write = Promise.resolve()
                 .then(() => options.onFailedAttempt?.(evidence, error))
@@ -314,10 +318,23 @@ export function createRequestCapture(options: RequestCaptureOptions) {
         (stepNumber === undefined || attempt.evidence.stepNumber === stepNumber)
       ) {
         unfinished.delete(id);
+        failed.length = 0;
         return attempt.evidence;
       }
     }
     return undefined;
+  }
+
+  /**
+   * Take the latest attempt whose provider call threw, for the step it failed.
+   *
+   * Earlier failed attempts stay separate nodes: each was a real provider call
+   * that Mastra retried.
+   */
+  function takeFailed(): RequestEvidence | undefined {
+    const evidence = failed.at(-1);
+    failed.length = 0;
+    return evidence;
   }
 
   /** Retain requests whose step never completed, including aborts and abandoned output streams. */
@@ -337,6 +354,7 @@ export function createRequestCapture(options: RequestCaptureOptions) {
     beginStep,
     instrumentModel,
     takeSuccessful,
+    takeFailed,
     flushUnfinished,
     drain,
     get currentRequestId() {

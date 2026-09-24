@@ -22,6 +22,12 @@ import {
   redactUrlCredentials,
   strictMastraReplayValue,
 } from "@zenml-io/kitaru/adapter";
+import {
+  describeReplayFailure,
+  getReplayReason,
+  type MastraReplayReason,
+  unsupportedMemoryReplay,
+} from "./replay-reasons.js";
 import { fileReference } from "./stateful-files.js";
 
 export const MEMORY_REPLAY_KEY = "mastra_memory_replay";
@@ -93,18 +99,23 @@ export interface MastraMemoryReplayEnvelope {
   keyOrder: MastraKeyOrder;
 }
 
-class MemoryReplayError extends Error {}
-
-function unsupported(reason: string): Error {
-  return new MemoryReplayError(`Unsupported Mastra memory replay: ${reason}`);
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function requireValue(condition: unknown, reason: string): asserts condition {
-  if (!condition) throw unsupported(reason);
+function requireValue(
+  condition: unknown,
+  message: string,
+  reason?: MastraReplayReason,
+): asserts condition {
+  if (!condition) throw unsupportedMemoryReplay(message, reason);
+}
+
+function requireStoredShape(
+  condition: unknown,
+  message: string,
+): asserts condition {
+  requireValue(condition, message, "memory_store_shape_unsupported");
 }
 
 function requireWithinBudget(
@@ -132,6 +143,7 @@ function binary(bytes: Uint8Array): {
   requireValue(
     bytes.byteLength <= 8 * 1_048_576,
     "Binary content exceeds maximum file bytes 8388608.",
+    "replay_input_too_large",
   );
   return {
     base64: Buffer.from(bytes).toString("base64"),
@@ -313,7 +325,7 @@ export function decodeMemoryValue(value: JsonValue): unknown {
       }
       if (kind === "bytes" && Object.keys(current).length === 4)
         return readBinary(current);
-      throw unsupported("Malformed memory codec tag.");
+      throw unsupportedMemoryReplay("Malformed memory codec tag.");
     }
     return Object.fromEntries(
       Object.entries(current).map(([key, item]) => [
@@ -530,7 +542,7 @@ export function normalizeStoredMemoryDates(snapshot: unknown): unknown {
 export function validateMemorySnapshot(
   value: unknown,
 ): asserts value is MastraMemorySnapshot {
-  requireValue(
+  requireStoredShape(
     isRecord(value) &&
       typeof value.threadId === "string" &&
       value.threadId.length > 0 &&
@@ -542,7 +554,7 @@ export function validateMemorySnapshot(
   );
   const dates = (record: Record<string, unknown>) =>
     record.createdAt instanceof Date && record.updatedAt instanceof Date;
-  requireValue(
+  requireStoredShape(
     value.thread === null ||
       (isRecord(value.thread) &&
         value.thread.id === value.threadId &&
@@ -550,21 +562,21 @@ export function validateMemorySnapshot(
         dates(value.thread)),
     "Malformed or mismatched thread record.",
   );
-  requireValue(
+  requireStoredShape(
     value.resource === null ||
       (isRecord(value.resource) &&
         value.resource.id === value.resourceId &&
         dates(value.resource)),
     "Malformed or mismatched resource record.",
   );
-  requireValue(
+  requireStoredShape(
     value.thread !== null ||
       (value.messages.length === 0 && value.records.length === 0),
     "Orphaned memory state.",
   );
   const messageIds = new Set<string>();
   for (const message of value.messages) {
-    requireValue(
+    requireStoredShape(
       isRecord(message) &&
         typeof message.id === "string" &&
         !messageIds.has(message.id) &&
@@ -584,7 +596,7 @@ export function validateMemorySnapshot(
   }
   const recordIds = new Set<string>();
   for (const record of value.records) {
-    requireValue(
+    requireStoredShape(
       isRecord(record) &&
         typeof record.id === "string" &&
         !recordIds.has(record.id) &&
@@ -604,7 +616,7 @@ export function validateMemorySnapshot(
       "pendingMessageTokens",
       "lastBufferedAtTokens",
     ])
-      requireValue(
+      requireStoredShape(
         typeof record[key] === "number" &&
           Number.isFinite(record[key]) &&
           record[key] >= 0,
@@ -619,18 +631,19 @@ export function validateMemorySnapshot(
       requireValue(
         record[key] === false,
         "Unjoined observational-memory work or missing work flag.",
+        "om_work_unjoined",
       );
-    requireValue(
+    requireStoredShape(
       record.lastBufferedAtTime === null ||
         record.lastBufferedAtTime instanceof Date,
       "Malformed observational-memory buffer cursor.",
     );
-    requireValue(
+    requireStoredShape(
       record.lastObservedAt === undefined ||
         record.lastObservedAt instanceof Date,
       "Malformed observational-memory observation cursor.",
     );
-    requireValue(
+    requireStoredShape(
       record.originType === "initial" || record.originType === "reflection",
       "Malformed observational-memory generation origin.",
     );
@@ -639,7 +652,7 @@ export function validateMemorySnapshot(
       "bufferedReflection",
       "observedTimezone",
     ])
-      requireValue(
+      requireStoredShape(
         record[key] === undefined || typeof record[key] === "string",
         "Malformed observational-memory text.",
       );
@@ -649,7 +662,7 @@ export function validateMemorySnapshot(
       "bufferedReflectionInputTokens",
       "reflectedObservationLineCount",
     ])
-      requireValue(
+      requireStoredShape(
         record[key] === undefined ||
           (typeof record[key] === "number" &&
             Number.isFinite(record[key]) &&
@@ -657,20 +670,20 @@ export function validateMemorySnapshot(
         "Malformed observational-memory buffer counter.",
       );
     for (const key of ["observedMessageIds", "bufferedMessageIds"])
-      requireValue(
+      requireStoredShape(
         record[key] === undefined ||
           (Array.isArray(record[key]) &&
             record[key].every((id) => typeof id === "string")),
         "Malformed observational-memory message identities.",
       );
     const chunks = record.bufferedObservationChunks;
-    requireValue(
+    requireStoredShape(
       chunks === undefined || Array.isArray(chunks),
       "Malformed observation buffer.",
     );
     if (Array.isArray(chunks))
       for (const chunk of chunks) {
-        requireValue(
+        requireStoredShape(
           isRecord(chunk) &&
             typeof chunk.id === "string" &&
             typeof chunk.cycleId === "string" &&
@@ -694,7 +707,11 @@ export function validateMemorySnapshot(
 function validateConfiguration(
   configuration: unknown,
 ): asserts configuration is Record<string, unknown> {
-  requireValue(isRecord(configuration), "Malformed resolved configuration.");
+  requireValue(
+    isRecord(configuration),
+    "Malformed resolved configuration.",
+    "memory_config_unsupported",
+  );
   function containsTransport(value: unknown): boolean {
     if (Array.isArray(value)) return value.some(containsTransport);
     if (!isRecord(value)) return false;
@@ -706,12 +723,14 @@ function validateConfiguration(
   requireValue(
     !containsTransport(configuration),
     "Replay configuration contains transport metadata.",
+    "credential_key_unsupported",
   );
   for (const memory of [configuration.memoryConfig, configuration.memory]) {
     if (!isRecord(memory)) continue;
     requireValue(
       memory.semanticRecall === undefined || memory.semanticRecall === false,
       "Semantic recall is outside isolated memory replay scope.",
+      "memory_config_unsupported",
     );
     for (const key of ["workingMemory", "observationalMemory"]) {
       const feature = memory[key];
@@ -720,6 +739,7 @@ function validateConfiguration(
           feature.scope === "thread" ||
             (key === "observationalMemory" && feature.scope === undefined),
           "Only thread-scoped memory is replayable.",
+          "memory_config_unsupported",
         );
     }
   }
@@ -768,6 +788,7 @@ export function validateMemoryReplayContext(
   requireValue(
     !Object.hasOwn(requestContext, MASTRA_AUTH_TOKEN_KEY),
     "Native authentication tokens are not replayable request context.",
+    "credential_key_unsupported",
   );
   validateMemoryReplaySelectors(selector, requestContext);
 }
@@ -788,6 +809,7 @@ export function validateMemoryReplaySelectors(
         value === "" ||
         value === expected,
       "Request-context memory selectors differ from the captured selectors.",
+      "context_unsupported",
     );
   }
 }
@@ -800,19 +822,24 @@ export function validateMemoryReplaySelectors(
  */
 export type MemoryReplayEnvelopeSanitizer = (value: JsonValue) => JsonValue;
 
+/** A replay envelope and, when it is incomplete, why. */
+export interface MemoryReplayEnvelopeCapture {
+  envelope: MastraMemoryReplayEnvelope;
+  reason?: MastraReplayReason;
+}
+
 /**
- * Build safe diagnostic evidence even when complete replay prerequisites are unavailable.
+ * Record why replay prerequisites are unavailable, without any of them.
  *
- * `sanitize` receives the encoded envelope before its key order is recorded.
+ * `message` is stored on the server and must not contain recorded data.
  */
-export function createMemoryReplayEnvelope(
-  input: MastraMemoryReplayInput,
-  sanitize: MemoryReplayEnvelopeSanitizer = (value) => value,
+export function createIncompleteMemoryReplayEnvelope(
+  message: string,
 ): MastraMemoryReplayEnvelope {
-  const incomplete = (reason: string): MastraMemoryReplayEnvelope => ({
+  return {
     version: 3,
     complete: false,
-    reasons: [reason],
+    reasons: [message],
     invocationId: "",
     rawInput: null,
     initialSnapshot: null,
@@ -822,7 +849,30 @@ export function createMemoryReplayEnvelope(
     omTape: [],
     turnStartedAt: "",
     keyOrder: { permutations: "", sha256: "" },
-  });
+  };
+}
+
+/**
+ * Build safe diagnostic evidence even when complete replay prerequisites are unavailable.
+ *
+ * `sanitize` receives the encoded envelope before its key order is recorded.
+ */
+export function createMemoryReplayEnvelope(
+  input: MastraMemoryReplayInput,
+  sanitize: MemoryReplayEnvelopeSanitizer = (value) => value,
+): MastraMemoryReplayEnvelope {
+  return captureMemoryReplayEnvelope(input, sanitize).envelope;
+}
+
+/**
+ * Build a replay envelope and name the reason code when it is incomplete.
+ *
+ * `sanitize` receives the encoded envelope before its key order is recorded.
+ */
+export function captureMemoryReplayEnvelope(
+  input: MastraMemoryReplayInput,
+  sanitize: MemoryReplayEnvelopeSanitizer = (value) => value,
+): MemoryReplayEnvelopeCapture {
   try {
     validateMemorySnapshot(input.initialSnapshot);
     const turnStartedAt = input.turnStartedAt ?? new Date();
@@ -835,12 +885,19 @@ export function createMemoryReplayEnvelope(
       complete: true,
       reasons: [],
       invocationId: input.invocationId,
-      rawInput: encodeMemoryValue(input.rawInput),
-      initialSnapshot: encodeMemoryValue(input.initialSnapshot),
+      rawInput: encodeMemoryValue(input.rawInput, "Invocation input"),
+      initialSnapshot: encodeMemoryValue(
+        input.initialSnapshot,
+        "Initial memory snapshot",
+      ),
       configuration: encodeMemoryValue(
         normalizeReplayConfiguration(input.configuration),
+        "Replay configuration",
       ),
-      requestContext: encodeMemoryValue(input.requestContext),
+      requestContext: encodeMemoryValue(
+        input.requestContext,
+        "Request context",
+      ),
       files: input.files.map((file) => ({
         url: file.url,
         mediaType: file.mediaType,
@@ -856,15 +913,17 @@ export function createMemoryReplayEnvelope(
       ),
     );
     decodeConvertedMemoryReplayEnvelope(converted);
-    return converted;
+    return { envelope: converted };
   } catch (error) {
-    return incomplete(
-      error instanceof MemoryReplayError
-        ? error.message
-        : error instanceof Error && /exceeds maximum/.test(error.message)
-          ? error.message
-          : "Memory replay prerequisites could not be captured safely.",
-    );
+    return {
+      envelope: createIncompleteMemoryReplayEnvelope(
+        describeReplayFailure(
+          error,
+          "Memory replay prerequisites could not be captured safely.",
+        ),
+      ),
+      reason: getReplayReason(error, "capture_prerequisite_failed"),
+    };
   }
 }
 

@@ -411,6 +411,56 @@ async def test_abandoned_mastra_baseline_is_refused_with_its_reason(
         )
 
 
+async def test_completed_ineligible_mastra_baseline_keeps_outputs_and_reason(
+    services: ReplayServices,
+) -> None:
+    """A native answer that succeeded without a usable recording stays completed."""
+    version = await _agent_version_with_run_spec(services)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        framework="mastra",
+        inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+        metadata={"mastra_replay_state": "pending"},
+    )
+    closed = await SessionService(
+        repository=services.sessions,
+        task_repository=services.tasks,
+        agent_version_repository=services.agent_versions,
+        replay_repository=services.replays,
+        import_repository=services.imports,
+        payload_store=services.payload_store,
+    ).update_session(
+        baseline.id,
+        SessionUpdate(
+            status=SessionStatus.COMPLETED,
+            outputs={"text": "native answer"},
+            metadata={
+                "mastra_replay_state": "ineligible",
+                "mastra_replay_reason": "replay_input_too_large",
+                "mastra_native_state": "completed",
+            },
+        ),
+        actor=ACTOR,
+    )
+    assert closed.status == SessionStatus.COMPLETED
+    assert closed.error is None
+    with pytest.raises(
+        SessionReplayNotReady, match="mastra_replay_replay_input_too_large"
+    ):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[],
+                baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+            ),
+            actor=ACTOR,
+        )
+
+
 async def _cohort_version(
     services: ReplayServices,
     agent_id: uuid.UUID,

@@ -16,13 +16,17 @@ import {
 } from "./memory-snapshot.js";
 import type { createOMResultTape } from "./om-result-tape.js";
 import type { RecordedClock } from "./replay-clock.js";
+import {
+  type MastraReplayReason,
+  unsupportedMemoryReplay,
+} from "./replay-reasons.js";
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function unsupported(message: string): never {
-  throw new Error(`Unsupported Mastra memory replay: ${message}`);
+function unsupported(message: string, reason?: MastraReplayReason): never {
+  throw unsupportedMemoryReplay(message, reason);
 }
 
 /** Require the dependency pair exercised by the native memory proof. */
@@ -34,12 +38,15 @@ export function assertMemoryReplayVersions(): void {
   ]) {
     const metadata: unknown = require(`${name}/package.json`);
     if (!record(metadata) || metadata.version !== version)
-      unsupported(`requires ${name}@${version}.`);
+      unsupported(`requires ${name}@${version}.`, "version_mismatch");
   }
 }
 
 /** Save a model identity, never the provider client or its credentials. */
-export function getMemoryModelId(model: unknown): string {
+export function getMemoryModelId(
+  model: unknown,
+  reason: MastraReplayReason = "model_identity_unsupported",
+): string {
   if (typeof model === "string" && model.length > 0) return model;
   if (
     record(model) &&
@@ -48,7 +55,7 @@ export function getMemoryModelId(model: unknown): string {
   )
     return `${model.provider}/${model.modelId}`;
   if (record(model) && typeof model.id === "string") return model.id;
-  return unsupported("Memory models require a static model identity.");
+  return unsupported("Memory models require a static model identity.", reason);
 }
 
 function checkConfiguration(config: Record<string, unknown>): void {
@@ -63,22 +70,34 @@ function checkConfiguration(config: Record<string, unknown>): void {
   ]);
   for (const key of Object.keys(config))
     if (!allowed.has(key))
-      unsupported(`Memory option '${key}' is not supported.`);
+      unsupported(
+        `Memory option '${key}' is not supported.`,
+        "memory_config_unsupported",
+      );
   if (config.semanticRecall !== undefined && config.semanticRecall !== false)
-    unsupported("Semantic recall requires external state.");
+    unsupported(
+      "Semantic recall requires external state.",
+      "memory_config_unsupported",
+    );
   if (config.generateTitle !== undefined && config.generateTitle !== false)
-    unsupported("Automatic title generation is not supported.");
+    unsupported(
+      "Automatic title generation is not supported.",
+      "memory_config_unsupported",
+    );
   for (const key of ["workingMemory", "observationalMemory"]) {
     const feature = config[key];
     if (feature === undefined || feature === false) continue;
     if (!record(feature))
-      unsupported(`${key} requires thread-scoped configuration.`);
+      unsupported(
+        `${key} requires thread-scoped configuration.`,
+        "memory_config_unsupported",
+      );
     if (
       feature.enabled !== false &&
       feature.scope !== undefined &&
       feature.scope !== "thread"
     )
-      unsupported(`${key} must use thread scope.`);
+      unsupported(`${key} must use thread scope.`, "memory_config_unsupported");
   }
 }
 
@@ -101,12 +120,27 @@ export function serializeMemoryConfiguration(
   }
   if (record(config.observationalMemory)) {
     const om = { ...config.observationalMemory };
-    if (om.model !== undefined) om.model = getMemoryModelId(om.model);
+    if (om.model !== undefined)
+      om.model = getMemoryModelId(om.model, "om_config_unsupported");
     for (const name of ["observation", "reflection"]) {
       if (record(om[name])) {
         const phase = { ...om[name] };
         if (phase.model !== undefined)
-          phase.model = getMemoryModelId(phase.model);
+          phase.model = getMemoryModelId(phase.model, "om_config_unsupported");
+        // Extractor instances run application code that a JSON
+        // configuration cannot carry into a replay.
+        if (
+          Array.isArray(phase.extract) &&
+          phase.extract.some(
+            (extractor) =>
+              !record(extractor) ||
+              Object.getPrototypeOf(extractor) !== Object.prototype,
+          )
+        )
+          unsupported(
+            "Observational-memory extractors are outside memory replay support.",
+            "om_config_unsupported",
+          );
         om[name] = phase;
       }
     }
@@ -164,13 +198,17 @@ export async function bindOMResultModels(
     if (modelIdentity === undefined)
       unsupported(
         "OM requires an explicit observer and reflector model identity.",
+        "om_config_unsupported",
       );
     const model =
       typeof modelIdentity === "string"
         ? await resolveModel(modelIdentity)
         : modelIdentity;
     if (!record(model) || typeof model.doStream !== "function")
-      unsupported("OM model resolution did not return a stream-capable model.");
+      unsupported(
+        "OM model resolution did not return a stream-capable model.",
+        "om_config_unsupported",
+      );
     settings.model = tape.instrument(model, phase, modelIdentity);
     bound[name] = settings;
   }

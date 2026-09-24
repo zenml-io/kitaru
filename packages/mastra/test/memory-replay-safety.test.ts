@@ -201,9 +201,13 @@ it("keeps native auth context while marking uncaptured context ineligible", asyn
   await vi.waitFor(() =>
     expect(
       api.calls.find(
-        (call) => call.method === "PATCH" && call.body?.status === "failed",
+        (call) => call.method === "PATCH" && call.body?.status === "completed",
       )?.body?.metadata,
-    ).toMatchObject({ mastra_replay_state: "ineligible" }),
+    ).toMatchObject({
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "context_unsupported",
+      mastra_native_state: "completed",
+    }),
   );
   expect(JSON.stringify(api.calls)).not.toContain("CREDENTIAL");
 });
@@ -344,9 +348,14 @@ it.each([MASTRA_THREAD_ID_KEY, MASTRA_RESOURCE_ID_KEY, MASTRA_AUTH_TOKEN_KEY])(
     await vi.waitFor(() =>
       expect(
         api.calls.find(
-          (call) => call.method === "PATCH" && call.body?.status === "failed",
+          (call) =>
+            call.method === "PATCH" && call.body?.status === "completed",
         )?.body?.metadata,
-      ).toMatchObject({ mastra_replay_state: "ineligible" }),
+      ).toMatchObject({
+        mastra_replay_state: "ineligible",
+        mastra_replay_reason: "context_unsupported",
+        mastra_native_state: "completed",
+      }),
     );
   },
 );
@@ -392,9 +401,12 @@ it("preserves native default-option auth tokens while marking recording ineligib
   await vi.waitFor(() =>
     expect(
       api.calls.find(
-        (call) => call.method === "PATCH" && call.body?.status === "failed",
+        (call) => call.method === "PATCH" && call.body?.status === "completed",
       )?.body?.metadata,
-    ).toMatchObject({ mastra_replay_state: "ineligible" }),
+    ).toMatchObject({
+      mastra_replay_state: "ineligible",
+      mastra_native_state: "completed",
+    }),
   );
   expect(JSON.stringify(api.calls)).not.toContain("CREDENTIAL");
 });
@@ -525,7 +537,8 @@ it.each([MASTRA_THREAD_ID_KEY, MASTRA_RESOURCE_ID_KEY, MASTRA_AUTH_TOKEN_KEY])(
       await vi.waitFor(() =>
         expect(
           api.calls.filter(
-            (call) => call.method === "PATCH" && call.body?.status === "failed",
+            (call) =>
+              call.method === "PATCH" && call.body?.status === "completed",
           ),
         ).toHaveLength(index),
       );
@@ -535,7 +548,8 @@ it.each([MASTRA_THREAD_ID_KEY, MASTRA_RESOURCE_ID_KEY, MASTRA_AUTH_TOKEN_KEY])(
     expect(
       api.calls
         .filter(
-          (call) => call.method === "PATCH" && call.body?.status === "failed",
+          (call) =>
+            call.method === "PATCH" && call.body?.status === "completed",
         )
         .every(
           (call) =>

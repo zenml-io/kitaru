@@ -43,7 +43,8 @@ import {
   serializeMemoryConfiguration,
 } from "./memory-replay.js";
 import {
-  createMemoryReplayEnvelope,
+  captureMemoryReplayEnvelope,
+  createIncompleteMemoryReplayEnvelope,
   decodeMemoryValue,
   encodeMemoryValue,
   finalizeMemoryReplayEnvelope,
@@ -54,8 +55,14 @@ import {
   validateMemoryReplaySelectors,
 } from "./memory-snapshot.js";
 import { createOMResultTape, type OMResultEntry } from "./om-result-tape.js";
+import { describeProviderError } from "./provider-errors.js";
 import { createRecordedClock } from "./replay-clock.js";
 import { assertStableToolName } from "./replay-guards.js";
+import {
+  getReplayReason,
+  type MastraReplayReason,
+  MastraReplayReasonError,
+} from "./replay-reasons.js";
 import {
   createRequestCapture,
   type RequestEvidence,
@@ -75,10 +82,15 @@ import {
 } from "./stateful-tools.js";
 import { loadSkillsWorkspace } from "./stateful-workspace.js";
 import {
-  StatefulRecordingError,
+  type NativeFallbackRun,
+  type NativeOutcome,
   streamWithRecording,
 } from "./stream-recording.js";
-import type { KitaruAgentOptions, RuntimeStreamOptions } from "./types.js";
+import type {
+  KitaruAgentOptions,
+  RuntimeStreamOptions,
+  StreamRecordingErrorStage,
+} from "./types.js";
 
 interface MastraMemorySource {
   settled(): Promise<void>;
@@ -195,10 +207,65 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!record(value))
-    throw new Error(`Unsupported Mastra memory replay: missing ${label}.`);
+    throw new MastraReplayReasonError(
+      `Unsupported Mastra memory replay: missing ${label}.`,
+      "agent_config_unsupported",
+    );
   return value;
 }
-class MemoryReplayContextError extends Error {}
+class MemoryReplayContextError extends MastraReplayReasonError {
+  constructor(
+    message: string,
+    reason: MastraReplayReason = "context_unsupported",
+  ) {
+    super(message, reason);
+  }
+}
+
+/** Reject an agent or run configuration outside isolated replay support. */
+function unsupportedAgentConfiguration(message: string): never {
+  throw new MastraReplayReasonError(message, "agent_config_unsupported");
+}
+
+/**
+ * Pass a native turn's callbacks through and report how the turn ended.
+ *
+ * The caller's callbacks run first, so a callback that throws marks the turn
+ * failed as it does for a recorded turn.
+ */
+function observeNativeOutcome(callerOptions: RuntimeStreamOptions): {
+  options: RuntimeStreamOptions;
+  outcome: Promise<NativeOutcome>;
+} {
+  let settle: (outcome: NativeOutcome) => void = () => {};
+  const outcome = new Promise<NativeOutcome>((resolve) => {
+    settle = resolve;
+  });
+  const failed = async <T>(
+    callback: ((event: T) => Promise<void> | void) | undefined,
+    event: T,
+  ) => {
+    settle("failed");
+    await callback?.(event);
+  };
+  return {
+    outcome,
+    options: {
+      ...callerOptions,
+      onFinish: async (event) => {
+        try {
+          await callerOptions.onFinish?.(event);
+        } catch (error) {
+          settle("failed");
+          throw error;
+        }
+        settle(record(event.tripwire) ? "failed" : "completed");
+      },
+      onError: (event) => failed(callerOptions.onError, event),
+      onAbort: (event) => failed(callerOptions.onAbort, event),
+    },
+  };
+}
 
 function getSelector(options: RuntimeStreamOptions) {
   const memory = record(options.memory) ? options.memory : undefined;
@@ -236,7 +303,9 @@ function assertSupportedConfiguration(
     "hooks",
   ]) {
     if ((config as unknown as Record<string, unknown>)[name] !== undefined)
-      throw new Error(`Unsupported memory replay configuration '${name}'.`);
+      unsupportedAgentConfiguration(
+        `Unsupported memory replay configuration '${name}'.`,
+      );
   }
   for (const name of [
     "inputProcessors",
@@ -255,19 +324,23 @@ function assertSupportedConfiguration(
     "onStepFinish",
   ]) {
     if (options[name] !== undefined)
-      throw new Error(`Unsupported serialized memory replay option '${name}'.`);
+      unsupportedAgentConfiguration(
+        `Unsupported serialized memory replay option '${name}'.`,
+      );
   }
   for (const name of Object.keys(config.tools ?? {}))
     assertStableToolName(name);
   for (const name of ["experimental_sandbox", "delegation", "backgroundTasks"])
     if (options[name] !== undefined)
-      throw new Error(`Unsupported memory replay option ${name}.`);
+      unsupportedAgentConfiguration(
+        `Unsupported memory replay option ${name}.`,
+      );
   if (
     typeof config.tools === "function" ||
     typeof config.inputProcessors === "function" ||
     typeof config.workspace === "function"
   )
-    throw new Error(
+    unsupportedAgentConfiguration(
       "Memory replay requires static tools, processors and supplied workspace bindings.",
     );
   if (
@@ -278,7 +351,7 @@ function assertSupportedConfiguration(
         "createRun" in processor,
     )
   )
-    throw new Error(
+    unsupportedAgentConfiguration(
       "Memory replay processors must use the supplied dependencies and ordinary processor methods.",
     );
 }
@@ -323,7 +396,7 @@ export function createMemoryReplayAgent(
     rawInput: unknown,
     callerOptions: RuntimeStreamOptions,
     downloads: FileDownloads,
-  ): Promise<unknown> {
+  ): Promise<NativeFallbackRun> {
     const { MastraCompositeStore } = await import("@mastra/core/storage");
     const { Memory } = await import("@mastra/memory");
     const source = await options.sourceMemory();
@@ -334,7 +407,12 @@ export function createMemoryReplayAgent(
       source.domain,
       source.exclusiveAccess,
       () => selector,
-      (reason) => reportLocalRecordingError(new Error(reason)),
+      (reason) =>
+        reportLocalRecordingError(
+          new Error(reason),
+          "memory_lease_unavailable",
+          "complete",
+        ),
     );
     const memory = new Memory({
       storage: new MastraCompositeStore({
@@ -355,7 +433,11 @@ export function createMemoryReplayAgent(
     const native = new Agent({ ...config, memory }) as unknown as {
       stream(input: unknown, options: RuntimeStreamOptions): Promise<unknown>;
     };
-    return native.stream(rawInput, callerOptions);
+    const observed = observeNativeOutcome(callerOptions);
+    return {
+      result: await native.stream(rawInput, observed.options),
+      outcome: observed.outcome,
+    };
   }
 
   /**
@@ -399,20 +481,40 @@ export function createMemoryReplayAgent(
     }
   }
 
-  function reportLocalRecordingError(error: unknown): void {
+  function reportLocalRecordingError(
+    error: unknown,
+    reason: MastraReplayReason,
+    stage: StreamRecordingErrorStage,
+    sessionId?: string,
+  ): void {
     if (options.onRecordingError) {
       void Promise.resolve()
-        .then(() => options.onRecordingError?.({ error, stage: "complete" }))
+        .then(() =>
+          options.onRecordingError?.({
+            error,
+            reason,
+            stage,
+            ...(sessionId === undefined ? {} : { sessionId }),
+          }),
+        )
         .catch(() => undefined);
     } else {
-      console.warn("Kitaru memory recording is unavailable for this turn");
+      console.warn(
+        `Kitaru memory recording is unavailable for this turn (${reason})`,
+      );
     }
   }
 
+  /**
+   * Store an ineligible session for a turn that ran natively because its
+   * recording could not be set up, and close it once the native turn ends.
+   */
   async function reportSetupFailure(
     error: unknown,
-    reasonCode: string,
+    reasonCode: MastraReplayReason,
+    outcome: Promise<NativeOutcome>,
   ): Promise<void> {
+    let sessionId: string | undefined;
     try {
       const session = await client.createSession({
         agent_id: options.agentId,
@@ -437,14 +539,35 @@ export function createMemoryReplayAgent(
         started_at: new Date().toISOString(),
         status: "in_progress",
       });
-      await client.updateSession(session.id, {
-        error: `KITARU_RECORDING_INCOMPLETE:${reasonCode}`,
-        ended_at: new Date().toISOString(),
-        status: "failed",
-      });
+      sessionId = session.id;
     } catch {
-      reportLocalRecordingError(error);
+      // The report below still reaches the application without a session.
     }
+    reportLocalRecordingError(error, reasonCode, "setup", sessionId);
+    if (sessionId === undefined) return;
+    const native = await outcome;
+    const metadata = {
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: reasonCode,
+      mastra_native_state: native,
+    };
+    await client
+      .updateSession(
+        sessionId,
+        native === "completed"
+          ? {
+              ended_at: new Date().toISOString(),
+              metadata,
+              status: "completed",
+            }
+          : {
+              error: `KITARU_RECORDING_INCOMPLETE:${reasonCode}`,
+              ended_at: new Date().toISOString(),
+              metadata,
+              status: "failed",
+            },
+      )
+      .catch(() => undefined);
   }
 
   async function recordedStream(
@@ -671,6 +794,7 @@ export function createMemoryReplayAgent(
             if (!settled)
               binding.markIncomplete(
                 "Observational-memory work did not settle before the finalization deadline.",
+                "om_settle_timeout",
               );
             return settled;
           })();
@@ -682,6 +806,7 @@ export function createMemoryReplayAgent(
     markUnsupportedOnBinding = () =>
       runtime.binding.markIncomplete(
         "Recorded evidence contains an unsupported value.",
+        "recorded_evidence_unsupported",
       );
     if (unsupportedEvidence) markUnsupportedOnBinding();
     try {
@@ -714,12 +839,14 @@ export function createMemoryReplayAgent(
         workspace: workspace?.workspace,
       });
       if (config.memory !== undefined && config.memory !== owned.memory)
-        throw new Error("Agent factory must use its supplied Memory instance.");
+        unsupportedAgentConfiguration(
+          "Agent factory must use its supplied Memory instance.",
+        );
       if (
         config.workspace !== undefined &&
         config.workspace !== workspace?.workspace
       )
-        throw new Error(
+        unsupportedAgentConfiguration(
           "Agent factory must use its supplied pinned workspace.",
         );
       const dynamic = { requestContext, mastra: options.mastra };
@@ -737,8 +864,9 @@ export function createMemoryReplayAgent(
           ? await config.model(dynamic)
           : config.model;
       if (Array.isArray(modelConfiguration))
-        throw new Error(
+        throw new MastraReplayReasonError(
           "Model fallback arrays are outside memory replay support.",
+          "model_identity_unsupported",
         );
       const nativeModel = await resolveModelConfig(
         modelConfiguration,
@@ -774,6 +902,7 @@ export function createMemoryReplayAgent(
       )
         throw new MemoryReplayContextError(
           "Unsupported replay request context credential key.",
+          "credential_key_unsupported",
         );
       if (
         !historical &&
@@ -782,6 +911,7 @@ export function createMemoryReplayAgent(
       )
         runtime.binding.markIncomplete(
           "Request context was not captured safely.",
+          "context_unsupported",
         );
       const { deepMerge } = await import("@mastra/core/utils");
       const callerData = { ...callerOptions };
@@ -805,8 +935,9 @@ export function createMemoryReplayAgent(
           "Invocation memory selectors differ from the captured selectors.",
         );
       if (record(effective.memory) && effective.memory.options !== undefined)
-        throw new Error(
+        throw new MastraReplayReasonError(
           "Per-call memory.options are unsupported. Set the complete memory configuration in sourceMemory instead.",
+          "memory_config_unsupported",
         );
       const overrideSettings = parseModelSettings(
         replay.override?.model_params,
@@ -844,20 +975,31 @@ export function createMemoryReplayAgent(
           runtime.memory,
           createRecordedClock(historical.turnStartedAt),
         );
-      const envelope = createMemoryReplayEnvelope(
-        {
-          invocationId,
-          rawInput: recordedRawInput,
-          initialSnapshot: runtime.initialSnapshot as MastraMemorySnapshot,
-          configuration,
-          requestContext: effectiveContext,
-          files: files.files,
-          turnStartedAt,
-        },
-        // Uploads pass through this sanitizer too; applying it first keeps
-        // the recorded hash valid for the stored envelope.
-        sanitizer.replace,
-      );
+      // A failed capture already recorded why; the envelope repeats it
+      // instead of reporting a missing snapshot.
+      const captured = runtime.initialSnapshot
+        ? captureMemoryReplayEnvelope(
+            {
+              invocationId,
+              rawInput: recordedRawInput,
+              initialSnapshot: runtime.initialSnapshot,
+              configuration,
+              requestContext: effectiveContext,
+              files: files.files,
+              turnStartedAt,
+            },
+            // Uploads pass through this sanitizer too; applying it first
+            // keeps the recorded hash valid for the stored envelope.
+            sanitizer.replace,
+          )
+        : {
+            envelope: createIncompleteMemoryReplayEnvelope(
+              runtime.binding.incompleteReasons.join(" ") ||
+                "Initial memory was not captured.",
+            ),
+            reason: runtime.binding.incompleteReason,
+          };
+      const envelope = captured.envelope;
       if (!envelope.complete && historical)
         throw new Error(envelope.reasons.join(" "));
       const writeAttempt = (evidence: RequestEvidence, error: unknown) =>
@@ -867,7 +1009,7 @@ export function createMemoryReplayAgent(
           node_type: "llm_call",
           name: "model_request",
           status: "failed",
-          error: error instanceof Error ? error.name : "Model request failed",
+          error: describeProviderError(error) ?? "Model request failed",
           inputs: evidence.inputs,
           outputs: null,
           model: evidence.modelId,
@@ -890,6 +1032,7 @@ export function createMemoryReplayAgent(
         onCaptureError: () =>
           runtime.binding.markIncomplete(
             "Actor request evidence was incomplete.",
+            "request_evidence_incomplete",
           ),
       });
       requestCapture = capture;
@@ -924,6 +1067,7 @@ export function createMemoryReplayAgent(
           ) {
             runtime.binding.markIncomplete(
               "Request context changed after replay capture.",
+              "context_mutated_after_capture",
             );
             if (historical)
               throw new Error(
@@ -990,14 +1134,18 @@ export function createMemoryReplayAgent(
         options,
         replayInput: replay.effectiveInput,
         replay,
-        nativeFallback: async (error) => {
+        nativeFallback: async (error, reason) => {
           try {
             await runtime.finish();
             await runtime.release();
           } catch (cleanupError) {
-            reportLocalRecordingError(cleanupError);
+            reportLocalRecordingError(
+              cleanupError,
+              getReplayReason(cleanupError, "memory_lease_unavailable"),
+              "setup",
+            );
           }
-          reportLocalRecordingError(error);
+          reportLocalRecordingError(error, reason, "setup");
           return runNativeBaseline(rawInput, callerOptions, downloads);
         },
         setupWaitMs: historical
@@ -1014,15 +1162,20 @@ export function createMemoryReplayAgent(
           initialize(value) {
             state = value;
           },
-          takeRequest() {
-            const evidence = capture.takeSuccessful();
+          takeRequest(failedStep) {
+            const successful = capture.takeSuccessful();
             // Truncation to size bounds loses diagnostic detail only; replay
             // input comes from the envelope, not from request evidence.
-            if (evidence?.reasons.length)
+            if (successful?.reasons.length)
               runtime.binding.markIncomplete(
                 "Actor request evidence was incomplete.",
+                "request_evidence_incomplete",
               );
-            return evidence;
+            // A step that failed because its provider call threw reuses that
+            // attempt's node, which already holds the request evidence.
+            return (
+              successful ?? (failedStep ? capture.takeFailed() : undefined)
+            );
           },
           beginFinalization() {
             runtime.beginFinalization?.();
@@ -1045,7 +1198,7 @@ export function createMemoryReplayAgent(
             const tape = settled ? await omTape.finish() : undefined;
             const omResults = tape?.entries ?? [];
             for (const reason of omCaptureErrors)
-              runtime.binding.markIncomplete(reason);
+              runtime.binding.markIncomplete(reason, "om_tape_incomplete");
             const divergence = historical ? tape?.divergence : undefined;
             if (divergence?.inputMismatches)
               await writeNode({
@@ -1085,23 +1238,15 @@ export function createMemoryReplayAgent(
                 pending,
                 new Error("Unfinished model attempt"),
               );
-            if (runtime.binding.incompleteReasons.length) {
-              const message = runtime.binding.incompleteReasons.join(" ");
-              const reasonCode = runtime.binding.incompleteReasons.includes(
-                "Native memory storage mutation failed.",
-              )
-                ? "memory_mutation_failed"
-                : runtime.binding.incompleteReasons.includes(
-                      "Request context changed after replay capture.",
-                    )
-                  ? "context_mutated_after_capture"
-                  : "memory_evidence_incomplete";
-              throw new StatefulRecordingError(message, reasonCode);
-            }
+            if (runtime.binding.incompleteReasons.length)
+              throw new MastraReplayReasonError(
+                runtime.binding.incompleteReasons.join(" "),
+                runtime.binding.incompleteReason,
+              );
             if (!envelope.complete)
-              throw new StatefulRecordingError(
+              throw new MastraReplayReasonError(
                 envelope.reasons.join(" "),
-                "capture_prerequisite_failed",
+                captured.reason ?? "capture_prerequisite_failed",
               );
             return {
               [MEMORY_REPLAY_KEY]: finalizeMemoryReplayEnvelope(
@@ -1169,21 +1314,16 @@ export function createMemoryReplayAgent(
       )
         throw error;
       const reasonCode =
-        error instanceof Error &&
-        /requires @mastra\/(?:core|memory)@/.test(error.message)
-          ? "version_mismatch"
-          : error instanceof MemoryReplayContextError
-            ? "context_unsupported"
-            : error instanceof FileCaptureTimeoutError
-              ? "file_capture_timeout"
-              : "capture_setup_failed";
-      const nativeResult = await runNativeBaseline(
+        error instanceof FileCaptureTimeoutError
+          ? "file_capture_timeout"
+          : getReplayReason(error, "capture_setup_failed");
+      const native = await runNativeBaseline(
         rawInput,
         callerOptions,
         downloads,
       );
-      void reportSetupFailure(error, reasonCode);
-      return nativeResult;
+      void reportSetupFailure(error, reasonCode, native.outcome);
+      return native.result;
     }
   }
   return { stream: stream as Agent["stream"] };

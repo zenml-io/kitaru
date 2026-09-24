@@ -63,9 +63,9 @@ const recorded = new KitaruAgent(agent, {
 });
 ```
 
-`stage` is `"step"` or `"complete"`, and `sessionId` is optional. The callback runs once and its return value is not awaited, so it cannot delay native completion. A thrown, rejected, or never-settling reporter does not change the Mastra result.
+`stage` is `"setup"`, `"step"`, or `"complete"`, and `sessionId` is optional. `reason`, when present, is a short code for the failure; for a memory replay turn it is the session's `mastra_replay_reason`. The callback runs once and its return value is not awaited, so it cannot delay native completion. A thrown, rejected, or never-settling reporter does not change the Mastra result.
 
-Failed sessions store a bounded failure category rather than the raw provider or callback message, which can contain request bodies or credentials. The native Mastra error and caller callbacks remain unchanged.
+Failed sessions store a bounded failure category rather than the raw callback message, which can contain request bodies or credentials. Provider errors from the AI SDK, and errors that carry an HTTP status, also keep the status and up to 500 characters of the provider's message, with URL credentials, `Bearer` and `Basic` values, and `sk-`-style keys replaced by `REDACTED`, so a rate limit, an outage, and a bad key read differently. The native Mastra error and caller callbacks remain unchanged.
 
 Mastra 1.67 continues model execution in the background when the application stops reading or cancels its reader. Kitaru records the eventual finish callback and completed result in that case. Kitaru does not drain the returned reader itself. After queued steps settle, the finish callback chooses the terminal status once. An error or abort observed before that decision records failure; a later abort cannot reverse completion because the API does not reopen terminal sessions.
 
@@ -243,7 +243,36 @@ Inspect the baseline session's metadata and status:
 - `mastra_replay_state: "eligible"`: the complete version-3 input and evidence were persisted for replay.
 - `mastra_replay_state: "ineligible"`: recording could not establish a complete, isolated baseline. Inspect `mastra_replay_reason` and `mastra_native_state` to distinguish recording failure from native execution failure, then record a new baseline after resolving the cause.
 
-Recording-only problems do not replace the baseline's native answer. Diagnostics use `KITARU_RECORDING_INCOMPLETE:<reason>`, such as `memory_mutation_failed`, `context_mutated_after_capture`, or `memory_evidence_incomplete`. A Kitaru outage can prevent even these diagnostics from being persisted; missing status updates are not evidence of successful recording. A pending baseline older than 30 minutes is reported as `mastra_replay_abandoned` when replay is requested; this does not cancel a native turn or release a source lease.
+Recording-only problems do not replace the baseline's native answer. When the native answer succeeded but its recording cannot be used, the session is `completed` with the answer as its output and is marked `ineligible`; only a failed native turn produces a `failed` session, whose error is `KITARU_RECORDING_INCOMPLETE:<reason>`. A turn that ran natively because its recording could not be set up gets a session without steps, closed the same way once the native turn ends. `onRecordingError` receives the same code as `reason`, and `stage` is `"setup"` for these turns. `mastra_replay_reason` names the cause:
+
+| Reason | What happened |
+|---|---|
+| `replay_input_too_large` | The thread's memory, or another part of the replay input, is over the replay size budget (16 MiB, 200,000 JSON values, or depth 64). |
+| `credential_key_unsupported` | Memory, request context, or evidence has a credential-named key such as `token`, `password`, or `headers`. |
+| `om_config_unsupported` | Observational memory uses `extract` extractors or a model without a static identity, such as a function. |
+| `memory_config_unsupported` | The memory configuration uses options outside isolated replay, such as semantic recall or resource scope. |
+| `agent_config_unsupported` | The agent or its run options use features outside isolated replay. |
+| `model_identity_unsupported` | The actor model has no static identity, for example a fallback array. |
+| `memory_store_shape_unsupported` | The memory store returned records Kitaru cannot represent or validate. |
+| `om_work_unjoined` | Stored OM records show observation or reflection that was still running, or a flag that was never cleared. |
+| `memory_read_failed` | Reading the thread's memory from storage failed. |
+| `memory_capture_timeout` | Reading the thread's memory did not finish in time. |
+| `memory_lease_conflict` | Another writer overlapped the turn, or a write happened without the lease. |
+| `memory_lease_unavailable` | The lease backend failed or did not answer in time. |
+| `memory_mutation_failed` | A native memory write failed. |
+| `om_tape_incomplete` | An observer or reflector result could not be recorded. |
+| `om_settle_timeout` | Observational-memory work did not finish within `finalizationWaitMs`. |
+| `request_evidence_incomplete` | The model request could not be recorded faithfully. |
+| `recorded_evidence_unsupported` | Evidence contains a value the replay codec cannot represent, such as a function. |
+| `context_unsupported`, `context_mutated_after_capture` | Request context could not be captured, or changed after capture. |
+| `version_mismatch` | The installed Mastra packages are not the supported versions. |
+| `file_capture_timeout` | Declared files did not download within `fileCaptureWaitMs`. |
+| `recording_setup_timeout`, `recording_setup_failed` | Kitaru did not open the session in time, or could not open it. |
+| `recording_step_failed`, `recording_evidence_failed`, `recording_flush_timeout` | Kitaru did not accept some evidence, or not in time. |
+| `server_rejected_finalization` | The server refused the replay inputs, usually because it predates memory replay. |
+| `native_run_failed` | The native turn itself failed. |
+
+The remaining codes, such as `memory_evidence_incomplete`, `capture_setup_failed`, and `recording_finalization_failed`, cover causes the codes above do not name. A Kitaru outage can prevent even these diagnostics from being persisted; missing status updates are not evidence of successful recording. A pending baseline older than 30 minutes is reported as `mastra_replay_abandoned` when replay is requested; this does not cancel a native turn or release a source lease.
 
 A slow or unresponsive Kitaru server does not hold up the native answer. Before the model starts, a baseline turn waits up to `sessionSetupWaitMs` (2 seconds by default) for Kitaru to open its session. If Kitaru has not answered by then, the turn runs natively and is not recorded; a session that opens later is closed as ineligible with `recording_setup_timeout`. Model steps, memory changes, and other evidence upload in the background, in order, without delaying the stream. They must finish within twice `finalizationWaitMs` of the stream closing; otherwise Kitaru cancels the remaining uploads and closes the session as ineligible with `recording_flush_timeout`. The client `timeoutMs` bounds each background request to Kitaru, including the final session update.
 

@@ -578,22 +578,30 @@ it("keeps baseline output when initial snapshot evidence fails and rejects its i
   expect(await output.text).toBe("native output");
   const input = api.calls.find(
     (call) => call.method === "POST" && call.path === "/api/v1/sessions",
-  )?.body?.inputs as Record<string, { complete: boolean }>;
+  )?.body?.inputs as Record<string, { complete: boolean; reasons: string[] }>;
   expect(input[MEMORY_REPLAY_KEY]?.complete).toBe(false);
+  // The envelope names the failed read without copying the storage error.
+  expect(input[MEMORY_REPLAY_KEY]?.reasons.join(" ")).toMatch(
+    /could not be read from storage/,
+  );
+  expect(JSON.stringify(api.calls)).not.toContain("Snapshot read failed");
   await vi.waitFor(() =>
     expect(
       api.calls.find(
         (call) =>
           call.method === "PATCH" &&
-          call.body?.status === "failed" &&
+          call.body?.status === "completed" &&
           call.body?.metadata &&
           (call.body.metadata as Record<string, unknown>)
             .mastra_replay_state === "ineligible",
-      )?.body?.metadata,
+      )?.body,
     ).toMatchObject({
-      mastra_replay_state: "ineligible",
-      mastra_replay_reason: "memory_evidence_incomplete",
-      mastra_native_state: "completed",
+      metadata: {
+        mastra_replay_state: "ineligible",
+        mastra_replay_reason: "memory_read_failed",
+        mastra_native_state: "completed",
+      },
+      outputs: { text: "native output" },
     }),
   );
   vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
@@ -939,7 +947,10 @@ it("runs natively and reports locally when Kitaru session creation fails", async
   await output.consumeStream();
   expect(await output.text).toBe("native answer");
   await vi.waitFor(() => expect(reported).toHaveBeenCalledTimes(1));
-  expect(reported.mock.calls[0]?.[0]).toMatchObject({ stage: "complete" });
+  expect(reported.mock.calls[0]?.[0]).toMatchObject({
+    reason: "recording_setup_failed",
+    stage: "setup",
+  });
   await runtime.memory.settled();
   await runtime.store.close();
 });
@@ -1253,7 +1264,7 @@ it("preserves native continuation after a memory storage write fails", async () 
       expect(
         api.calls.filter((call) => call.method === "PATCH").at(-1)?.body
           ?.status,
-      ).toBe("failed"),
+      ).toBe("completed"),
     );
     expect(actorCalls).toBe(2);
     expect(external).toHaveBeenCalledTimes(1);
@@ -1261,7 +1272,7 @@ it("preserves native continuation after a memory storage write fails", async () 
       api.calls.find(
         (call) =>
           call.method === "PATCH" &&
-          call.body?.status === "failed" &&
+          call.body?.status === "completed" &&
           (call.body?.metadata as Record<string, unknown> | undefined)
             ?.mastra_replay_state === "ineligible",
       )?.body?.metadata,

@@ -14,6 +14,12 @@ import {
   validateMemorySnapshot,
 } from "./memory-snapshot.js";
 import { getNativeOMModel } from "./om-result-tape.js";
+import {
+  describeReplayFailure,
+  getReplayReason,
+  type MastraReplayReason,
+  MastraReplayReasonError,
+} from "./replay-reasons.js";
 
 export interface MastraMemorySelector {
   threadId: string;
@@ -256,10 +262,13 @@ export interface MastraMemoryCaptureBinding {
   domain: MemoryStorage;
   readonly revision: number;
   readonly incompleteReasons: readonly string[];
+  /** The reason code of the first problem that made the recording incomplete. */
+  readonly incompleteReason: MastraReplayReason | undefined;
   captureInitial(memory: {
     settled(): Promise<void>;
   }): Promise<MastraMemorySnapshot | undefined>;
-  markIncomplete(reason: string): void;
+  /** Record why the invocation's evidence is incomplete; the first reason code wins. */
+  markIncomplete(message: string, reason?: MastraReplayReason): void;
   /** Wait for every storage write and its evidence upload to finish. */
   drain(): Promise<void>;
   /**
@@ -297,13 +306,18 @@ async function boundedCoordination<T>(
   operation: Promise<T>,
   waitMs: number,
   timeoutMessage = "Source-thread coordination timed out.",
+  timeoutReason: MastraReplayReason = "memory_lease_unavailable",
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       operation,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(timeoutMessage)), waitMs);
+        timer = setTimeout(
+          () =>
+            reject(new MastraReplayReasonError(timeoutMessage, timeoutReason)),
+          waitMs,
+        );
       }),
     ]);
   } finally {
@@ -499,7 +513,10 @@ function modelIdentity(model: unknown): string {
   )
     return `${model.provider}/${model.modelId}`;
   if (record(model) && typeof model.id === "string") return model.id;
-  throw new Error("Observational-memory model has no stable identity.");
+  throw new MastraReplayReasonError(
+    "Observational-memory model has no stable identity.",
+    "om_config_unsupported",
+  );
 }
 
 const BUILTIN_EXTRACTORS = new Set([
@@ -524,7 +541,10 @@ function extractorIdentity(extractor: unknown): {
     BUILTIN_EXTRACTORS.has(extractor.slug)
   )
     return { mastraBuiltinExtractor: extractor.slug };
-  throw new Error("Unsupported observational-memory extractor.");
+  throw new MastraReplayReasonError(
+    "Unsupported observational-memory extractor.",
+    "om_config_unsupported",
+  );
 }
 
 /** Replace OM models with identities and built-in extractors with their slugs. */
@@ -664,6 +684,7 @@ export function createMemoryCaptureBinding(
   let mutations = Promise.resolve();
   let evidence = Promise.resolve();
   const reasons: string[] = [];
+  let firstReason: MastraReplayReason | undefined;
   const methods = new Map<PropertyKey, unknown>();
   const waitMs = options.leaseWaitMs ?? 100;
   const selector = {
@@ -674,18 +695,24 @@ export function createMemoryCaptureBinding(
   // A hung buffering operation stays in Mastra's process-wide map; stop
   // polling it once a bounded caller has given up on this invocation.
   let joinAbandoned = false;
+  const markLeaseUnavailable = (message: string) =>
+    markIncomplete(message, "memory_lease_unavailable");
   const registerWrite = createWriteRegistrar(
     options.exclusiveAccess,
     () => selector,
     waitMs,
-    markIncomplete,
+    markLeaseUnavailable,
   );
 
-  function markIncomplete(reason: string): void {
-    if (reasons.includes(reason)) return;
-    reasons.push(reason);
+  function markIncomplete(
+    message: string,
+    reason: MastraReplayReason = "memory_evidence_incomplete",
+  ): void {
+    if (reasons.includes(message)) return;
+    reasons.push(message);
+    firstReason ??= reason;
     try {
-      options.onIncomplete?.(reason);
+      options.onIncomplete?.(message);
     } catch {
       /* Diagnostics must not affect native calls. */
     }
@@ -695,15 +722,19 @@ export function createMemoryCaptureBinding(
     if (released || !lease) {
       markIncomplete(
         "Memory mutation occurred without source-thread ownership.",
+        "memory_lease_conflict",
       );
       return false;
     }
     try {
       if (await boundedCoordination(lease.verifyEligibility(), waitMs))
         return true;
-      markIncomplete("Exclusive source-thread ownership was lost.");
-    } catch {
       markIncomplete(
+        "Exclusive source-thread ownership was lost.",
+        "memory_lease_conflict",
+      );
+    } catch {
+      markLeaseUnavailable(
         "Exclusive source-thread ownership could not be verified.",
       );
     }
@@ -739,18 +770,26 @@ export function createMemoryCaptureBinding(
             ),
           );
           requestId = options.getRequestId?.();
-        } catch {
+        } catch (error) {
           complete = false;
           markIncomplete(
-            "Memory mutation arguments or request attribution could not be recorded safely.",
+            describeReplayFailure(
+              error,
+              "Memory mutation arguments or request attribution could not be recorded safely.",
+            ),
+            getReplayReason(error, "recorded_evidence_unsupported"),
           );
         }
         if (!started || released)
           markIncomplete(
             "Memory mutation occurred outside the owned invocation lifecycle.",
+            "memory_lease_conflict",
           );
         if (readingSnapshot)
-          markIncomplete("Memory mutation overlapped initial snapshot reads.");
+          markIncomplete(
+            "Memory mutation overlapped initial snapshot reads.",
+            "memory_lease_conflict",
+          );
         if (property === "dangerouslyClearAll" || property === "prune")
           markIncomplete(
             "Storage-wide mutation is outside the captured thread scope.",
@@ -764,10 +803,17 @@ export function createMemoryCaptureBinding(
               registration = await registerWrite();
             output = await Reflect.apply(value, target, args);
           } catch (error) {
-            markIncomplete("Native memory storage mutation failed.");
+            markIncomplete(
+              "Native memory storage mutation failed.",
+              "memory_mutation_failed",
+            );
             throw error;
           } finally {
-            await releaseRegistration(registration, waitMs, markIncomplete);
+            await releaseRegistration(
+              registration,
+              waitMs,
+              markLeaseUnavailable,
+            );
           }
           // Joined work from a previous turn belongs to the initial snapshot.
           if (duringCapture) return output;
@@ -786,10 +832,14 @@ export function createMemoryCaptureBinding(
                 encodedArguments,
                 encodedResult,
               );
-          } catch {
+          } catch (error) {
             complete = false;
             markIncomplete(
-              "Memory mutation result could not be recorded safely.",
+              describeReplayFailure(
+                error,
+                "Memory mutation result could not be recorded safely.",
+              ),
+              getReplayReason(error, "recorded_evidence_unsupported"),
             );
           }
           // Each side fits the replay budget on its own; the node carries both.
@@ -826,7 +876,10 @@ export function createMemoryCaptureBinding(
             try {
               await options.recordMutation(event);
             } catch {
-              markIncomplete("Memory mutation evidence persistence failed.");
+              markIncomplete(
+                "Memory mutation evidence persistence failed.",
+                "recording_evidence_failed",
+              );
             }
           });
           return output;
@@ -885,17 +938,38 @@ export function createMemoryCaptureBinding(
 
   async function verifyEligibility(): Promise<void> {
     if (released || !lease) {
-      markIncomplete("Exclusive source-thread ownership is unavailable.");
+      markLeaseUnavailable("Exclusive source-thread ownership is unavailable.");
       return;
     }
     try {
       if (!(await boundedCoordination(lease.verifyEligibility(), waitMs)))
-        markIncomplete("Exclusive source-thread ownership was lost.");
+        markIncomplete(
+          "Exclusive source-thread ownership was lost.",
+          "memory_lease_conflict",
+        );
     } catch {
-      markIncomplete(
+      markLeaseUnavailable(
         "Exclusive source-thread ownership could not be verified.",
       );
     }
+  }
+
+  async function readInitialState() {
+    const thread = await options.domain.getThreadById({
+      threadId: options.threadId,
+    });
+    const resource = await options.domain.getResourceById({
+      resourceId: options.resourceId,
+    });
+    const { messages } = await options.domain.listMessages({
+      threadId: options.threadId,
+      perPage: false,
+    });
+    const records = await options.domain.getObservationalMemoryHistory(
+      options.threadId,
+      options.resourceId,
+    );
+    return { thread, resource, messages, records };
   }
 
   return {
@@ -905,6 +979,9 @@ export function createMemoryCaptureBinding(
     },
     get incompleteReasons() {
       return [...reasons];
+    },
+    get incompleteReason() {
+      return firstReason;
     },
     markIncomplete,
     async captureInitial(memory) {
@@ -929,15 +1006,19 @@ export function createMemoryCaptureBinding(
               onConflict: () =>
                 markIncomplete(
                   "Exclusive source-thread ownership was invalidated by an overlapping invocation.",
+                  "memory_lease_conflict",
                 ),
             },
             waitMs,
-            () => markIncomplete("Late source-thread lease release failed."),
+            () =>
+              markLeaseUnavailable("Late source-thread lease release failed."),
           );
           await verifyEligibility();
           if (reasons.length) return undefined;
         } catch {
-          markIncomplete("Exclusive source-thread ownership is unavailable.");
+          markLeaseUnavailable(
+            "Exclusive source-thread ownership is unavailable.",
+          );
           return undefined;
         }
         const capture = (async () => {
@@ -945,20 +1026,14 @@ export function createMemoryCaptureBinding(
           await mutations;
           readingSnapshot = true;
           try {
-            const thread = await options.domain.getThreadById({
-              threadId: options.threadId,
-            });
-            const resource = await options.domain.getResourceById({
-              resourceId: options.resourceId,
-            });
-            const { messages } = await options.domain.listMessages({
-              threadId: options.threadId,
-              perPage: false,
-            });
-            const records = await options.domain.getObservationalMemoryHistory(
-              options.threadId,
-              options.resourceId,
-            );
+            // Storage errors can quote stored data, so none of their text is kept.
+            const { thread, resource, messages, records } =
+              await readInitialState().catch(() => {
+                throw new MastraReplayReasonError(
+                  "Initial memory state could not be read from storage.",
+                  "memory_read_failed",
+                );
+              });
             const snapshot = {
               threadId: options.threadId,
               resourceId: options.resourceId,
@@ -974,6 +1049,7 @@ export function createMemoryCaptureBinding(
               decodeMemoryValue(
                 encodeMemoryValue(
                   options.sanitizeEvidence?.(snapshot) ?? snapshot,
+                  "Initial memory snapshot",
                 ),
               ),
             );
@@ -987,15 +1063,20 @@ export function createMemoryCaptureBinding(
           capture,
           options.captureWaitMs ?? 5_000,
           "Initial memory capture timed out.",
+          "memory_capture_timeout",
         );
         await verifyEligibility();
         return reasons.length === 0 ? copy : undefined;
       } catch (error) {
+        const reason = getReplayReason(error, "memory_store_shape_unsupported");
         markIncomplete(
-          error instanceof Error &&
-            error.message === "Initial memory capture timed out."
-            ? error.message
-            : "Initial memory capture failed: unsupported, altered, or Unjoined observational-memory state.",
+          reason === "memory_capture_timeout"
+            ? describeReplayFailure(error, "Initial memory capture timed out.")
+            : `Initial memory capture failed: ${describeReplayFailure(
+                error,
+                "the stored memory state cannot be represented for replay.",
+              )}`,
+          reason,
         );
         return undefined;
       } finally {
@@ -1031,7 +1112,7 @@ export function createMemoryCaptureBinding(
       try {
         await lease?.();
       } catch {
-        markIncomplete("Exclusive source-thread lease release failed.");
+        markLeaseUnavailable("Exclusive source-thread lease release failed.");
       }
     },
   };

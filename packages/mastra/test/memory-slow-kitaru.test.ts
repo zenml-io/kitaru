@@ -229,7 +229,7 @@ it("answers without waiting for hung evidence uploads and closes the session as 
   await vi.waitFor(
     () =>
       expect(outcomes(api)).toEqual([
-        "failed/ineligible/recording_flush_timeout",
+        "completed/ineligible/recording_flush_timeout",
       ]),
     { timeout: 3_000 },
   );
@@ -285,7 +285,7 @@ it("closes a session that opens after the setup wait as ineligible", async () =>
   await vi.waitFor(
     () =>
       expect(outcomes(api)).toEqual([
-        "failed/ineligible/recording_setup_timeout",
+        "completed/ineligible/recording_setup_timeout",
       ]),
     { timeout: 3_000 },
   );
@@ -332,7 +332,9 @@ it("answers natively when a declared file hangs and records why", async () => {
   // The native turn reuses the capture's download instead of a second fetch.
   expect(downloads).toEqual([REPORT, STALLED]);
   await vi.waitFor(() =>
-    expect(outcomes(api)).toEqual(["failed/ineligible/file_capture_timeout"]),
+    expect(outcomes(api)).toEqual([
+      "completed/ineligible/file_capture_timeout",
+    ]),
   );
   expect(JSON.stringify(api.calls)).not.toContain("test-token");
 });
@@ -366,7 +368,9 @@ it("hands a running file download to the native turn instead of fetching it agai
   // The download started before the wait ran out, so it ends at about 300 ms.
   expect(elapsed).toBeLessThan(1_000);
   await vi.waitFor(() =>
-    expect(outcomes(api)).toEqual(["failed/ineligible/file_capture_timeout"]),
+    expect(outcomes(api)).toEqual([
+      "completed/ineligible/file_capture_timeout",
+    ]),
   );
 });
 

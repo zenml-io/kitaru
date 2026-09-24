@@ -22,10 +22,16 @@ import {
   unsupportedContext,
 } from "./conversation-context.js";
 import { MastraOMDivergenceError } from "./om-result-tape.js";
+import { describeProviderError } from "./provider-errors.js";
 import {
   assertReplayToolCoverage,
   stripLiveMemoryOptions,
 } from "./replay-guards.js";
+import {
+  getReplayReason,
+  type MastraReplayReason,
+  MastraReplayReasonError,
+} from "./replay-reasons.js";
 import type { RequestEvidence } from "./request-capture.js";
 import { normalizeStep, type RecordedStep } from "./step-recorder.js";
 import { createToolHooks } from "./tool-policies.js";
@@ -43,20 +49,25 @@ type StreamAgent = {
   listConfiguredInputProcessors?: (requestContext?: unknown) => unknown;
 };
 
-export class StatefulRecordingError extends Error {
-  constructor(
-    message: string,
-    readonly reasonCode = "capture_incomplete",
-  ) {
-    super(message);
-  }
+/** How a turn that ran natively, without Kitaru recording it, ended. */
+export type NativeOutcome = "completed" | "failed";
+
+/** A turn run natively after its recording could not start. */
+export interface NativeFallbackRun {
+  result: unknown;
+  /** Settles once the native turn ends; it may never settle if the turn never ends. */
+  outcome: Promise<NativeOutcome>;
 }
 
 export interface StatefulStreamRecording {
   input: JsonValue;
   sanitizeEvidence?: <T>(value: T) => T;
   initialize(state: AdapterRunState): void;
-  takeRequest(): RequestEvidence | undefined;
+  /**
+   * Take the request evidence of the step that just finished. A failed step
+   * may take the attempt whose provider call threw.
+   */
+  takeRequest(failedStep: boolean): RequestEvidence | undefined;
   /** Start joining the invocation's background memory work without waiting. */
   beginFinalization?(): void;
   /**
@@ -83,8 +94,19 @@ interface StreamRecordingOptions {
   sessionName?: string;
   startedAt: string;
   replay: ReplayContext;
-  nativeFallback?: (error: unknown) => Promise<unknown>;
+  /**
+   * Run the turn natively when recording fails before the model starts.
+   * `reason` says why the turn is not recorded.
+   */
+  nativeFallback?: (
+    error: unknown,
+    reason: MastraReplayReason,
+  ) => Promise<NativeFallbackRun>;
   markNativeStart?: () => void;
+  /** How a native fallback turn ended, once one has run. */
+  fallbackOutcome?: Promise<NativeOutcome>;
+  /** Called when Kitaru could not open the recording session. */
+  onRecordingNotOpened?: () => void;
   /**
    * How long a baseline waits for Kitaru to open its session before the
    * stream starts. When it runs out, the stream fails over to `nativeFallback`
@@ -103,7 +125,6 @@ interface StreamRecordingOptions {
 const ERROR_STEP_GRACE_MS = 250;
 const SETUP_TIMEOUT = "Kitaru did not open the recording session in time.";
 const FLUSH_TIMEOUT = "Kitaru did not accept the recording evidence in time.";
-const MAX_STREAM_ERROR_NAME_LENGTH = 80;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -251,7 +272,11 @@ function getTripwireReason(value: unknown): string | undefined {
     : "Mastra processor tripwire triggered";
 }
 
+/** A stream failure whose message is already safe to record. */
+class SafeStreamError extends Error {}
+
 function getSafeStreamError(error: unknown): Error {
+  if (error instanceof SafeStreamError) return error;
   if (
     error instanceof MastraOMDivergenceError ||
     (error instanceof Error &&
@@ -260,18 +285,22 @@ function getSafeStreamError(error: unknown): Error {
       ) ||
         error.message === OM_DIVERGED))
   )
-    return new Error(OM_DIVERGED);
-  const name =
-    error instanceof Error &&
-    error.name.length <= MAX_STREAM_ERROR_NAME_LENGTH &&
-    /^[A-Za-z][A-Za-z0-9_]*Error$/.test(error.name)
-      ? error.name
-      : undefined;
-  return new Error(
-    name && name !== "Error"
-      ? `Mastra stream failed (${name})`
-      : "Mastra stream failed",
+    return new SafeStreamError(OM_DIVERGED);
+  const detail = describeProviderError(error);
+  return new SafeStreamError(
+    detail ? `Mastra stream failed (${detail})` : "Mastra stream failed",
   );
+}
+
+function ineligibleMetadata(
+  reason: MastraReplayReason,
+  nativeState: string,
+): Record<string, JsonValue> {
+  return {
+    mastra_replay_state: "ineligible",
+    mastra_replay_reason: reason,
+    mastra_native_state: nativeState,
+  };
 }
 
 class StreamLifecycle {
@@ -285,7 +314,7 @@ class StreamLifecycle {
   #recordingError?: {
     error: unknown;
     stage: StreamRecordingErrorStage;
-    reasonCode: string;
+    reasonCode: MastraReplayReason;
   };
   #nativeState: "pending" | "completed" | "failed" = "pending";
   // Steps are converted and queued in order here; the uploads themselves run
@@ -305,7 +334,7 @@ class StreamLifecycle {
     if (this.#recordingError !== undefined) return;
     // Take the step's request evidence and end time now: the conversion can
     // run after the next step has started.
-    const request = this.stateful?.takeRequest();
+    const request = this.stateful?.takeRequest(step.finishReason === "error");
     const endedAt = new Date().toISOString();
     const queued = this.#stepTail.then(async () => {
       const normalized = await normalizeStep(
@@ -396,11 +425,16 @@ class StreamLifecycle {
   private requestRecordingFailure(
     stage: StreamRecordingErrorStage,
     error: unknown,
-    reasonCode: string,
+    reasonCode: MastraReplayReason,
   ): void {
     if (this.#recordingError !== undefined) return;
     this.#recordingError = { error, stage, reasonCode };
-    this.notify(stage, error);
+    this.notify(stage, error, reasonCode);
+  }
+
+  /** Whether this lifecycle records a memory baseline, which has a replay state. */
+  private get recordsBaseline(): boolean {
+    return this.stateful !== undefined && !this.recorder.state.spec;
   }
 
   private requestFailure(error: unknown): void {
@@ -443,9 +477,7 @@ class StreamLifecycle {
             this.requestRecordingFailure(
               "complete",
               error,
-              error instanceof StatefulRecordingError
-                ? error.reasonCode
-                : "recording_finalization_failed",
+              getReplayReason(error, "recording_finalization_failed"),
             );
         }
         await this.#uploadTail;
@@ -455,7 +487,13 @@ class StreamLifecycle {
           return;
         }
         if (this.#recordingError !== undefined) {
-          await this.cleanup(this.#recordingError.error, "recording");
+          // The native answer succeeded; only its recording is unusable.
+          if (complete && this.recordsBaseline)
+            await this.completeIneligible(
+              result,
+              this.#recordingError.reasonCode,
+            );
+          else await this.cleanup(this.#recordingError.error, "recording");
           return;
         }
         if (!this.#failureRequested && complete) {
@@ -464,20 +502,32 @@ class StreamLifecycle {
             ? this.stateful?.getReplayMetadata?.()
             : undefined;
           try {
-            await this.recorder.complete(
+            const completion = await this.recorder.complete(
               result,
-              this.stateful && !this.recorder.state.spec
+              this.recordsBaseline
                 ? {
                     inputs: finalInput,
                     metadata: {
                       mastra_replay_state: "eligible",
                       mastra_native_state: "completed",
                     },
+                    rejectedMetadata: ineligibleMetadata(
+                      "server_rejected_finalization",
+                      "completed",
+                    ),
                   }
                 : replayMetadata
                   ? { metadata: replayMetadata }
                   : undefined,
             );
+            if (this.recordsBaseline && !completion.finalizationAccepted)
+              this.notify(
+                "complete",
+                new Error(
+                  "Kitaru refused the replay inputs, so the session is stored without them.",
+                ),
+                "server_rejected_finalization",
+              );
           } catch (error) {
             this.requestRecordingFailure(
               "complete",
@@ -499,28 +549,44 @@ class StreamLifecycle {
     await this.#finalizerPromise;
   }
 
+  /** Complete a baseline whose native answer succeeded but whose recording is unusable. */
+  private async completeIneligible(
+    result: unknown,
+    reasonCode: MastraReplayReason,
+  ): Promise<void> {
+    this.#completionStarted = true;
+    try {
+      await this.recorder.completeIncompleteRecording(
+        result,
+        ineligibleMetadata(reasonCode, "completed"),
+      );
+    } catch (error) {
+      await this.cleanup(error, "recording");
+    }
+  }
+
   private cleanup(error: unknown, kind: "recording" | "run"): Promise<void> {
     this.#cleanupPromise ??= (async () => {
       const reasonCode = this.#recordingError?.reasonCode;
       const safeError = getSafeStreamError(error);
       const omDiverged = safeError.message === OM_DIVERGED;
-      const metadata: Record<string, JsonValue> | undefined =
-        this.stateful && !this.recorder.state.spec
+      const metadata: Record<string, JsonValue> | undefined = this
+        .recordsBaseline
+        ? ineligibleMetadata(
+            reasonCode ??
+              (kind === "run"
+                ? "native_run_failed"
+                : "recording_finalization_failed"),
+            this.#nativeState,
+          )
+        : this.stateful && this.recorder.state.spec
           ? {
-              mastra_replay_state: "ineligible",
-              mastra_replay_reason:
-                reasonCode ??
-                (kind === "run" ? "native_run_failed" : "recording_failed"),
-              mastra_native_state: this.#nativeState,
+              mastra_replay_state: omDiverged ? "diverged" : "failed",
+              mastra_replay_reason: omDiverged
+                ? "mastra_om_call_order"
+                : "replay_failed",
             }
-          : this.stateful && this.recorder.state.spec
-            ? {
-                mastra_replay_state: omDiverged ? "diverged" : "failed",
-                mastra_replay_reason: omDiverged
-                  ? "mastra_om_call_order"
-                  : "replay_failed",
-              }
-            : undefined;
+          : undefined;
       if (kind === "recording") {
         await this.recorder.failRecording(
           new Error(`KITARU_RECORDING_INCOMPLETE:${reasonCode ?? "unknown"}`),
@@ -540,13 +606,18 @@ class StreamLifecycle {
     return this.#cleanupPromise;
   }
 
-  private notify(stage: StreamRecordingErrorStage, error: unknown): void {
+  private notify(
+    stage: StreamRecordingErrorStage,
+    error: unknown,
+    reason?: MastraReplayReason,
+  ): void {
     if (this.#notified) return;
     this.#notified = true;
     const event = {
       error,
       sessionId: this.recorder.state.sessionId,
       stage,
+      ...(reason === undefined ? {} : { reason }),
     };
     if (this.options.onRecordingError) {
       void Promise.resolve()
@@ -574,6 +645,8 @@ async function recordedStreamWithRecording({
   startedAt,
   replay,
   markNativeStart,
+  fallbackOutcome,
+  onRecordingNotOpened,
   setupWaitMs,
   flushWaitMs,
 }: StreamRecordingOptions): Promise<unknown> {
@@ -721,34 +794,47 @@ async function recordedStreamWithRecording({
       startedAt,
       spec: replay.spec,
     });
-    const closeUnopened = (reasonCode: string, nativeState: string) =>
-      recorder
-        .failRecording(
+    const baseline = stateful !== undefined && !replay.spec;
+    // A baseline fails over to its native fallback, so its session records
+    // how that native turn ended.
+    const closeUnopened = (reasonCode: MastraReplayReason): Promise<void> =>
+      (async () => {
+        const native = baseline ? await fallbackOutcome : undefined;
+        if (native === "completed") {
+          await recorder.completeIncompleteRecording(
+            null,
+            ineligibleMetadata(reasonCode, native),
+          );
+          return;
+        }
+        await recorder.failRecording(
           new Error(`KITARU_RECORDING_INCOMPLETE:${reasonCode}`),
-          stateful && !replay.spec
-            ? {
-                mastra_replay_state: "ineligible",
-                mastra_replay_reason: reasonCode,
-                mastra_native_state: nativeState,
-              }
+          baseline
+            ? ineligibleMetadata(reasonCode, native ?? "pending")
             : undefined,
-        )
-        .catch(() => undefined);
+        );
+      })().catch(() => undefined);
     if (!setupAbandoned) {
       try {
         await recorder.initialize();
       } catch (error) {
-        await (setupAbandoned
-          ? closeUnopened("recording_setup_timeout", "started")
-          : closeUnopened("capture_setup_failed", "pending"));
+        const closing = closeUnopened(
+          setupAbandoned ? "recording_setup_timeout" : "recording_setup_failed",
+        );
+        // The native fallback starts only after this throw, so a baseline
+        // cannot wait here for its outcome.
+        if (!baseline) await closing;
         throw error;
       }
     }
     // The turn has already failed over to its native fallback, so a session
     // that opens late must not stay pending.
     if (setupAbandoned) {
-      await closeUnopened("recording_setup_timeout", "started");
-      throw new Error(SETUP_TIMEOUT);
+      void closeUnopened("recording_setup_timeout");
+      throw new MastraReplayReasonError(
+        SETUP_TIMEOUT,
+        "recording_setup_timeout",
+      );
     }
     stateful?.initialize(recorder.state);
     const active = new StreamLifecycle(
@@ -775,7 +861,10 @@ async function recordedStreamWithRecording({
   };
   const initialize = (): Promise<StreamLifecycle> => {
     initializePromise ??= (async () => {
-      const setup = openRecording();
+      const setup = openRecording().catch((error: unknown) => {
+        onRecordingNotOpened?.();
+        throw error;
+      });
       if (setupWaitMs === undefined || replay.spec) return setup;
       void setup.catch(() => undefined);
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -785,7 +874,12 @@ async function recordedStreamWithRecording({
           new Promise<never>((_resolve, reject) => {
             timer = setTimeout(() => {
               setupAbandoned = true;
-              reject(new Error(SETUP_TIMEOUT));
+              reject(
+                new MastraReplayReasonError(
+                  SETUP_TIMEOUT,
+                  "recording_setup_timeout",
+                ),
+              );
             }, setupWaitMs);
           }),
         ]);
@@ -944,16 +1038,43 @@ export async function streamWithRecording(
   options: StreamRecordingOptions,
 ): Promise<unknown> {
   let nativeStarted = false;
+  let recordingOpened = true;
+  let reportOutcome: (outcome: Promise<NativeOutcome>) => void = () => {};
+  const fallbackOutcome = new Promise<NativeOutcome>((resolve) => {
+    reportOutcome = (outcome) => {
+      outcome.then(resolve, () => resolve("failed"));
+    };
+  });
   try {
     return await recordedStreamWithRecording({
       ...options,
       markNativeStart: () => {
         nativeStarted = true;
       },
+      fallbackOutcome: options.nativeFallback ? fallbackOutcome : undefined,
+      onRecordingNotOpened: () => {
+        recordingOpened = false;
+      },
     });
   } catch (error) {
-    if (!nativeStarted && !options.replay.spec && options.nativeFallback)
-      return options.nativeFallback(error);
-    throw error;
+    if (nativeStarted || options.replay.spec || !options.nativeFallback)
+      throw error;
+    let run: NativeFallbackRun;
+    try {
+      run = await options.nativeFallback(
+        error,
+        getReplayReason(
+          error,
+          recordingOpened
+            ? "agent_config_unsupported"
+            : "recording_setup_failed",
+        ),
+      );
+    } catch (fallbackError) {
+      reportOutcome(Promise.resolve("failed"));
+      throw fallbackError;
+    }
+    reportOutcome(run.outcome);
+    return run.result;
   }
 }

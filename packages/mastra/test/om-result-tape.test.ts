@@ -137,7 +137,10 @@ it("stops oversized OM capture while preserving every native stream chunk", asyn
     "observer",
   );
   const output = await wrapped.doStream({});
-  await expect(tape.finish()).rejects.toThrow(/incomplete/);
+  await expect(tape.finish()).rejects.toMatchObject({
+    message: expect.stringMatching(/incomplete/),
+    reason: "om_tape_incomplete",
+  });
   expect(onIncomplete).toHaveBeenCalledTimes(1);
   expect(produced).toBeLessThan(total);
   const native = await collect(output.stream);

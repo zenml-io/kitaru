@@ -1097,20 +1097,37 @@ describe("stream recording lifecycle", () => {
   it.each([
     {
       errorName: "AI_APICallError",
-      expectedError: "Mastra stream failed (AI_APICallError)",
+      message: "Bearer private-token",
+      expectedError: "Mastra stream failed (AI_APICallError: Bearer REDACTED)",
       scenario: "AI SDK",
     },
     {
+      errorName: "AI_APICallError",
+      message: "Rate limit reached for key sk-private-token-1234 (req abc)",
+      statusCode: 429,
+      expectedError:
+        "Mastra stream failed (AI_APICallError, HTTP 429: Rate limit reached for key REDACTED (req abc))",
+      scenario: "rate-limited provider",
+    },
+    {
+      errorName: "TypeError",
+      message: "Bearer private-token",
+      expectedError: "Mastra stream failed (TypeError)",
+      scenario: "application",
+    },
+    {
       errorName: `A${"x".repeat(80)}Error`,
+      message: "Bearer private-token",
       expectedError: "Mastra stream failed",
       scenario: "oversized",
     },
   ])(
     "records a bounded category for $scenario error-only streams",
-    async ({ errorName, expectedError }) => {
+    async ({ errorName, message, statusCode, expectedError }) => {
       const api = installTestApi();
-      const modelError = Object.assign(new Error("Bearer private-token"), {
+      const modelError = Object.assign(new Error(message), {
         name: errorName,
+        statusCode,
       });
       const nativeResult = { native: true };
       const agent = Object.assign(new FakeAgent(), {

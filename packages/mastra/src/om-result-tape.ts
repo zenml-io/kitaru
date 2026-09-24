@@ -6,6 +6,7 @@ import {
   redactUrlCredentials,
 } from "@zenml-io/kitaru/adapter";
 import { decodeMemoryValue, encodeMemoryValue } from "./memory-snapshot.js";
+import { MastraReplayReasonError } from "./replay-reasons.js";
 
 export type OMPhase = "observer" | "reflector";
 type OMMethod = "doGenerate" | "doStream";
@@ -464,7 +465,10 @@ export function createOMResultTape(
       (_, ordinal) => entries[ordinal],
     );
     if (incomplete || recordedEntries.some((entry) => !entry))
-      throw new Error("Observational-memory result tape is incomplete.");
+      throw new MastraReplayReasonError(
+        "Observational-memory result tape is incomplete.",
+        "om_tape_incomplete",
+      );
     return {
       entries: recordedEntries as OMResultEntry[],
       divergence: { ...divergence },
