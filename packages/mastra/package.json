@@ -56,6 +56,7 @@
   "devDependencies": {
     "@mastra/core": "1.67.0",
     "@mastra/memory": "1.30.0",
+    "@mastra/pg": "1.25.0",
     "zod": "3.25.76"
   },
   "scripts": {

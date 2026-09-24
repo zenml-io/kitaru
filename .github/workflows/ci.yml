@@ -72,7 +72,12 @@ jobs:
       - run: pnpm run generate:check
       - run: pnpm run lint
       - run: pnpm run typecheck
-      - run: pnpm run test:built
+      - name: Test TypeScript packages, including Mastra memory on PostgreSQL
+        env:
+          POSTGRES_PASSWORD: password
+        run: >-
+          KITARU_TEST_MASTRA_POSTGRES_URL="postgres://postgres:${POSTGRES_PASSWORD}@localhost:5433/postgres"
+          pnpm run test:built
       - run: pnpm run pack:check:built
       - run: uv sync --frozen --extra server --extra cli --extra worker
       - name: Test compiled TypeScript adapters through Worker
