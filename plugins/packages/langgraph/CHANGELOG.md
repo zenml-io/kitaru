@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Preserve LangGraph chain and middleware names in recorded spans.
+
 ## 0.2.0 - 2026-09-21
 
 - Fixed capture byte-budget accounting for enum values while retaining bounded unwrapping.
