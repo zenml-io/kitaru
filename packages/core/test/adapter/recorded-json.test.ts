@@ -193,6 +193,7 @@ describe("recording limits", () => {
     [{ maxItems: 9_001 }, "maxItems must be an integer from 1 to 9000"],
     [{ maxStringChars: MAX_RECORDED_PAYLOAD_CHARS - 10 }, "maxStringChars"],
     [{ maxDepth: 0 }, "maxDepth must be an integer from 1 to 64"],
+    [{ maxItems: 1.5 }, "maxItems must be an integer from 1 to 9000"],
   ])("rejects %j", (limits, why) => {
     expect(() => normalizeRecordingLimits(limits)).toThrow(why);
   });

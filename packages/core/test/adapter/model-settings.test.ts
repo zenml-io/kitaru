@@ -35,12 +35,15 @@ describe("replay override model settings", () => {
     ["temperature", -0.1],
     ["temperature", 2.1],
     ["temperature", Number.NaN],
+    ["topP", -0.1],
     ["topP", 1.1],
     ["topK", 0],
     ["topK", 1_000_001],
     ["presencePenalty", -2.1],
     ["frequencyPenalty", 2.1],
     ["seed", 1.5],
+    ["seed", Number.MIN_SAFE_INTEGER - 1],
+    ["seed", Number.MAX_SAFE_INTEGER + 1],
   ])("rejects %s set to %j", (key, value) => {
     expect(() => parseModelSettings({ [key]: value })).toThrow(
       new RegExp(`^${key} must be`),
