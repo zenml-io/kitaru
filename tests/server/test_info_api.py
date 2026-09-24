@@ -63,3 +63,10 @@ async def test_analytics_enabled_reflects_the_opt_in_setting() -> None:
     payload = await _get_info(local_settings(ANALYTICS_OPT_IN=False))
 
     assert payload["analytics_enabled"] is False
+
+
+async def test_max_blob_size_reports_the_effective_server_limit() -> None:
+    """Report the configured blob upload limit to clients."""
+    payload = await _get_info(local_settings(MAX_BLOB_SIZE_BYTES=12_345))
+
+    assert payload["max_blob_size_bytes"] == 12_345

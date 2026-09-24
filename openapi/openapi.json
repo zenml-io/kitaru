@@ -7984,6 +7984,19 @@
             "description": "Server ID.",
             "title": "Id"
           },
+          "max_blob_size_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum accepted blob size in bytes.",
+            "title": "Max Blob Size Bytes"
+          },
           "server_url": {
             "anyOf": [
               {

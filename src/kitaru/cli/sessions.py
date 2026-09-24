@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
@@ -68,11 +69,12 @@ from kitaru.cli.registration import (
 from kitaru.cli.session_selection import get_cohort_version
 from kitaru.client.exceptions import APIError
 
+_MIB_BYTES = 1024 * 1024
 
-def _read_payload(path: Path) -> bytes:
+
+def _read_payload(path: Path, *, max_size_bytes: int | None = None) -> bytes:
     """Read one regular local file without exposing its path in failures."""
-    if not path.is_file():
-        raise CLIError("invalid_arguments", "FILE must be an existing regular file.")
+    _check_payload_size(path, max_size_bytes)
     try:
         return path.read_bytes()
     except OSError as error:
@@ -80,6 +82,27 @@ def _read_payload(path: Path) -> bytes:
         raise CLIError(
             "invalid_arguments", f"FILE could not be read: {reason}."
         ) from None
+
+
+def _check_payload_size(path: Path, max_size_bytes: int | None) -> None:
+    """Reject a local payload whose metadata exceeds an upload limit."""
+    if not path.is_file():
+        raise CLIError("invalid_arguments", "FILE must be an existing regular file.")
+    if max_size_bytes is None:
+        return
+    try:
+        size = path.stat().st_size
+    except OSError as error:
+        reason = error.strerror or type(error).__name__
+        raise CLIError(
+            "invalid_arguments", f"FILE could not be read: {reason}."
+        ) from None
+    if size > max_size_bytes:
+        raise CLIError(
+            "invalid_arguments",
+            f"FILE exceeds the upload limit of {max_size_bytes} bytes. "
+            "Split the payload into smaller files and import each slice.",
+        )
 
 
 _RELATIVE_DURATION = re.compile(r"(?P<amount>\d+)(?P<unit>[dhm])")
@@ -341,6 +364,7 @@ async def import_sessions(
     analyzer_params: Sequence[str] | None = None,
     analyzer_connections: Sequence[str] | None = None,
     media_type: str | None,
+    max_upload_mib: int | None = None,
     max_sessions: int | None = None,
     wait: bool,
     interval: float | None,
@@ -422,12 +446,31 @@ async def import_sessions(
             "invalid_arguments",
             "--media-type requires FILE.",
         )
+    if path is None and max_upload_mib is not None:
+        raise CLIError("invalid_arguments", "--max-upload-mib requires FILE.")
     if path is None and api_query is None:
         raise CLIError(
             "invalid_arguments",
             "Provide FILE or one of --since, --until, --trace-id, --query.",
         )
-    content = _read_payload(path) if path is not None else None
+    if max_upload_mib is not None and max_upload_mib <= 0:
+        raise CLIError("invalid_arguments", "--max-upload-mib must be positive.")
+    max_upload_bytes = (
+        max_upload_mib * _MIB_BYTES if max_upload_mib is not None else None
+    )
+    if path is not None:
+        _check_payload_size(path, max_upload_bytes)
+        info = await client.info.get()
+        server_max_bytes = info.max_blob_size_bytes
+        if server_max_bytes is not None:
+            max_upload_bytes = (
+                min(max_upload_bytes, server_max_bytes)
+                if max_upload_bytes is not None
+                else server_max_bytes
+            )
+        content = _read_payload(path, max_size_bytes=max_upload_bytes)
+    else:
+        content = None
 
     importer_parent, importer_version = await get_plugin_version(
         client.importers, importer, "Importer"
@@ -469,11 +512,33 @@ async def import_sessions(
     blob_identity: dict[str, Any] | None = None
     if path is not None:
         assert content is not None
-        blob = await client.blobs.upload(
-            content,
-            media_type=media_type or "application/octet-stream",
-            filename=path.name,
-        )
+        try:
+            blob = await client.blobs.upload(
+                content,
+                media_type=media_type or "application/octet-stream",
+                filename=path.name,
+            )
+        except APIError as error:
+            if error.status_code != 413:
+                raise
+            raise CLIError(
+                "invalid_arguments",
+                error.detail
+                or "The server rejected the payload because it is too large.",
+                details={"status_code": error.status_code},
+                hint=(
+                    "Check the server upload limit and split the payload into "
+                    "smaller files."
+                ),
+            ) from error
+        except (httpx.ReadError, httpx.RemoteProtocolError) as error:
+            raise CLIError(
+                "network_error",
+                "The upload connection closed unexpectedly; the payload may have "
+                "been rejected for size.",
+                details={"error_type": type(error).__name__},
+                hint="Check the upload limit and split the payload into smaller files.",
+            ) from error
         blob_identity = _blob_metadata(blob)
         identity["blob"] = blob_identity
         source: ImportSource = BlobImportSource(blob_id=blob.id)

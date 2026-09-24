@@ -58,3 +58,8 @@ class ServerInfoResponse(ResponseModel):
         default=None,
         description="Whether the server sends analytics events.",
     )
+    max_blob_size_bytes: int | None = Field(
+        default=None,
+        gt=0,
+        description="Maximum accepted blob size in bytes.",
+    )
