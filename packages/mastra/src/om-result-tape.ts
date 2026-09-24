@@ -52,6 +52,21 @@ interface ModelLike {
   doStream?: (input: unknown) => Promise<unknown>;
 }
 
+const nativeModels = new WeakMap<object, unknown>();
+
+/** Return the configured model value that an instrumented OM model replaced. */
+export function getNativeOMModel(model: unknown): unknown {
+  return typeof model === "object" && model !== null && nativeModels.has(model)
+    ? nativeModels.get(model)
+    : model;
+}
+
+function serializeNativeModel(native: unknown): unknown {
+  if (typeof native !== "object" || native === null) return native;
+  const toJSON: unknown = Reflect.get(native, "toJSON");
+  return typeof toJSON === "function" ? toJSON.call(native) : native;
+}
+
 /** Intercept only OM model calls; the actor model remains untouched. */
 export function createOMResultTape(
   recorded: readonly OMResultEntry[] | undefined,
@@ -93,9 +108,21 @@ export function createOMResultTape(
     return entry;
   }
 
-  function instrument<T extends ModelLike>(model: T, phase: OMPhase): T {
+  /**
+   * Wrap an OM model so its calls go through the tape.
+   *
+   * `native` is the value from the source memory configuration, such as a
+   * model id string. Mastra persists the OM configuration into the record, so
+   * a store that serializes the wrapper writes this value instead.
+   */
+  function instrument<T extends ModelLike>(
+    model: T,
+    phase: OMPhase,
+    native: unknown = model,
+  ): T {
     const proxy = new Proxy(model, {
       get(target, key) {
+        if (key === "toJSON") return () => serializeNativeModel(native);
         const value = Reflect.get(target, key, target);
         if (key !== "doGenerate" && key !== "doStream")
           return typeof value === "function" ? value.bind(target) : value;
@@ -188,6 +215,7 @@ export function createOMResultTape(
         };
       },
     });
+    nativeModels.set(proxy, native);
     return proxy;
   }
 

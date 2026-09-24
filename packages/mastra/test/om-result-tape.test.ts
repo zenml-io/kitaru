@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import { decodeMemoryValue } from "../src/memory-snapshot.js";
 import {
   createOMResultTape,
+  getNativeOMModel,
   MastraOMDivergenceError,
 } from "../src/om-result-tape.js";
 
@@ -55,6 +56,22 @@ it("reuses ordered recorded OM output without calling the live model", async () 
   expect(live.doStream).not.toHaveBeenCalled();
   expect(mismatch).toHaveBeenCalledTimes(1);
   await replay.finish();
+});
+
+it("serializes an instrumented OM model as its configured value", () => {
+  const tape = createOMResultTape(undefined, () => {});
+  const fromId = tape.instrument(model(), "observer", "fixture/observer");
+  expect(JSON.stringify({ model: fromId })).toBe(
+    '{"model":"fixture/observer"}',
+  );
+  expect(getNativeOMModel(fromId)).toBe("fixture/observer");
+  const configured = model();
+  const fromObject = tape.instrument(configured, "reflector");
+  expect(JSON.parse(JSON.stringify(fromObject))).toEqual(
+    JSON.parse(JSON.stringify(configured)),
+  );
+  expect(getNativeOMModel(fromObject)).toBe(configured);
+  expect(getNativeOMModel(configured)).toBe(configured);
 });
 
 it("rejects an extra or missing OM call", async () => {

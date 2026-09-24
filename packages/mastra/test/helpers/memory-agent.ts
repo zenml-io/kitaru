@@ -1,7 +1,7 @@
 import { Agent } from "@mastra/core/agent";
 import type { InputProcessor } from "@mastra/core/processors";
 import { RequestContext } from "@mastra/core/request-context";
-import { InMemoryStore } from "@mastra/core/storage";
+import { InMemoryStore, type MemoryStorage } from "@mastra/core/storage";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
 import { LocalSkillSource, Workspace } from "@mastra/core/workspace";
@@ -73,6 +73,39 @@ export function memoryModel(
       },
     }),
   };
+}
+
+/** Run one short native Mastra turn and return the OM configuration it stores. */
+export async function getNativeOMRecordConfig(
+  options: NonNullable<ConstructorParameters<typeof Memory>[0]>["options"],
+  prepare?: (domain: MemoryStorage) => void,
+): Promise<unknown> {
+  const store = new InMemoryStore();
+  const domain = store.stores.memory;
+  if (!domain) throw new Error("Missing native memory domain");
+  prepare?.(domain);
+  const agent = new Agent({
+    id: "native-om-record",
+    name: "Native OM record",
+    instructions: "Answer briefly.",
+    model: new MastraLanguageModelV2Mock({
+      modelId: "actor",
+      provider: "fixture",
+      doStream: async () => textStream("noted"),
+    }),
+    memory: new Memory({ storage: store, options }),
+  });
+  try {
+    const result = await agent.stream("Hello.", {
+      memory: { thread: THREAD, resource: RESOURCE },
+    });
+    await result.consumeStream();
+    const [row] = await domain.getObservationalMemoryHistory(THREAD, RESOURCE);
+    if (!row) throw new Error("Native Mastra did not create an OM record");
+    return row.config;
+  } finally {
+    await store.close();
+  }
 }
 
 export function createMemoryRuntime(

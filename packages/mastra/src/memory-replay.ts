@@ -169,7 +169,7 @@ export async function bindOMResultModels(
         : modelIdentity;
     if (!record(model) || typeof model.doStream !== "function")
       unsupported("OM model resolution did not return a stream-capable model.");
-    settings.model = tape.instrument(model, phase);
+    settings.model = tape.instrument(model, phase, modelIdentity);
     bound[name] = settings;
   }
   return { ...config, observationalMemory: bound } as MemoryConfigInternal;

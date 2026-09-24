@@ -8,6 +8,7 @@ import {
   normalizeStoredMemoryDates,
   validateMemorySnapshot,
 } from "./memory-snapshot.js";
+import { getNativeOMModel } from "./om-result-tape.js";
 
 export interface MastraMemorySelector {
   threadId: string;
@@ -273,37 +274,105 @@ function modelIdentity(model: unknown): string {
   throw new Error("Observational-memory model has no stable identity.");
 }
 
+const BUILTIN_EXTRACTORS = new Set([
+  "current-task",
+  "suggested-response",
+  "thread-title",
+]);
+
+function extractorIdentity(extractor: unknown): {
+  mastraBuiltinExtractor: string;
+} {
+  if (
+    record(extractor) &&
+    typeof extractor.mastraBuiltinExtractor === "string" &&
+    BUILTIN_EXTRACTORS.has(extractor.mastraBuiltinExtractor)
+  )
+    return { mastraBuiltinExtractor: extractor.mastraBuiltinExtractor };
+  if (
+    record(extractor) &&
+    extractor.internal === true &&
+    typeof extractor.slug === "string" &&
+    BUILTIN_EXTRACTORS.has(extractor.slug)
+  )
+    return { mastraBuiltinExtractor: extractor.slug };
+  throw new Error("Unsupported observational-memory extractor.");
+}
+
+/** Replace OM models with identities and built-in extractors with their slugs. */
+function projectOMConfig(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const projected = { ...config };
+  if (projected.model !== undefined)
+    projected.model = modelIdentity(projected.model);
+  for (const name of ["observation", "reflection"]) {
+    const phase = projected[name];
+    if (!record(phase)) continue;
+    const copy = { ...phase };
+    if (copy.model !== undefined) copy.model = modelIdentity(copy.model);
+    if (Array.isArray(copy.extractors))
+      copy.extractors = copy.extractors.map(extractorIdentity);
+    projected[name] = copy;
+  }
+  return projected;
+}
+
+/**
+ * Project the OM configuration held by stored records.
+ *
+ * Mastra keeps its resolved OM configuration, including model and Extractor
+ * objects, in every record. Stores that keep objects in memory return them
+ * as they are, and those objects have no stable encoding.
+ */
+function projectOMRecords(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(projectOMRecords);
+  if (!record(value)) return value;
+  const projected = { ...value };
+  if (record(value.config)) projected.config = projectOMConfig(value.config);
+  if (record(value.currentRecord))
+    projected.currentRecord = projectOMRecords(value.currentRecord);
+  return projected;
+}
+
+const OM_RECORD_METHODS = new Set<PropertyKey>([
+  "initializeObservationalMemory",
+  "insertObservationalMemoryRecord",
+  "createReflectionGeneration",
+  "swapBufferedReflectionToActive",
+]);
+
 /** Keep provider clients out of evidence without changing native storage calls. */
 function mutationEvidenceValue(method: PropertyKey, value: unknown): unknown {
-  if (method !== "initializeObservationalMemory") return value;
-  function project(input: unknown): unknown {
+  return OM_RECORD_METHODS.has(method) ? projectOMRecords(value) : value;
+}
+
+/**
+ * Give the source store the OM models from the source configuration.
+ *
+ * Mastra persists its OM configuration into the record it initializes. Tape
+ * instrumented models must not reach production rows, where they would add
+ * Kitaru objects or a serialized provider client.
+ */
+function nativeStorageArguments(
+  method: PropertyKey,
+  args: unknown[],
+): unknown[] {
+  if (method !== "initializeObservationalMemory") return args;
+  return args.map((input) => {
     if (!record(input) || !record(input.config)) return input;
+    let changed = false;
     const config = { ...input.config };
-    if (config.model !== undefined) config.model = modelIdentity(config.model);
     for (const name of ["observation", "reflection"]) {
       const phase = config[name];
       if (!record(phase)) continue;
-      const projected = { ...phase };
-      if (projected.model !== undefined)
-        projected.model = modelIdentity(projected.model);
-      if (Array.isArray(projected.extractors))
-        projected.extractors = projected.extractors.map((extractor) => {
-          if (
-            record(extractor) &&
-            extractor.internal === true &&
-            typeof extractor.slug === "string" &&
-            ["current-task", "suggested-response", "thread-title"].includes(
-              extractor.slug,
-            )
-          )
-            return { mastraBuiltinExtractor: extractor.slug };
-          throw new Error("Unsupported observational-memory extractor.");
-        });
-      config[name] = projected;
+      const native = getNativeOMModel(phase.model);
+      if (native === phase.model) continue;
+      config[name] = { ...phase, model: native };
+      changed = true;
     }
-    return { ...input, config };
-  }
-  return Array.isArray(value) ? value.map(project) : project(value);
+    return changed ? { ...input, config } : input;
+  });
 }
 
 /** Capture one native invocation without changing the shared source domain or Agent. */
@@ -342,7 +411,8 @@ export function createMemoryCaptureBinding(
         methods.set(property, bound);
         return bound;
       }
-      const bound = (...args: unknown[]): Promise<unknown> => {
+      const bound = (...callerArgs: unknown[]): Promise<unknown> => {
+        const args = nativeStorageArguments(property, callerArgs);
         let encodedArguments: JsonValue = null;
         let complete = true;
         let requestId: string | undefined;
@@ -596,7 +666,7 @@ export function createMemoryCaptureBinding(
               thread,
               resource,
               messages,
-              records,
+              records: projectOMRecords(records),
             };
             // No storage-owned objects or Dates escape the explicit codec.
             const copy = normalizeStoredMemoryDates(

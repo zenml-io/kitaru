@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ModelRouterLanguageModel } from "@mastra/core/llm";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { Memory } from "@mastra/memory";
 import { PostgresStore } from "@mastra/pg";
@@ -8,7 +9,7 @@ import {
   createProcessLocalMemoryAccess,
 } from "../src/memory.js";
 import { decodeMemoryReplayEnvelope } from "../src/memory-snapshot.js";
-import { textStream } from "./helpers/memory-agent.js";
+import { getNativeOMRecordConfig, textStream } from "./helpers/memory-agent.js";
 import {
   AGENT_ID,
   type ApiCall,
@@ -27,7 +28,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function omModel(kind: "observer" | "reflector") {
+const OPTIONS = {
+  lastMessages: 20,
+  observationalMemory: {
+    observation: {
+      model: "fixture/observer",
+      messageTokens: 300,
+      bufferTokens: 0.2,
+      bufferActivation: 1,
+      blockAfter: 1.1,
+    },
+    reflection: {
+      model: "fixture/reflector",
+      observationTokens: 200,
+      bufferActivation: 1,
+    },
+  },
+};
+
+function omModel(kind: "observer" | "reflector", router: boolean) {
   const doStream = vi.fn(async () =>
     textStream(
       kind === "observer"
@@ -35,14 +54,19 @@ function omModel(kind: "observer" | "reflector") {
         : "<observations>\nREFLECTED: the user is planning a spring trip.\n</observations>",
     ),
   );
-  return {
-    doStream,
-    model: new MastraLanguageModelV2Mock({
-      modelId: kind,
-      provider: "fixture",
+  if (!router)
+    return {
       doStream,
-    }),
-  };
+      model: new MastraLanguageModelV2Mock({
+        modelId: kind,
+        provider: "fixture",
+        doStream,
+      }),
+    };
+  // The router model carries the gateway catalog as enumerable state.
+  const model = new ModelRouterLanguageModel("openai/gpt-5-nano");
+  Object.assign(model, { doStream });
+  return { doStream, model };
 }
 
 function lastUpdate(calls: ApiCall[], sessionId: string) {
@@ -51,9 +75,13 @@ function lastUpdate(calls: ApiCall[], sessionId: string) {
   )?.body;
 }
 
-it.skipIf(!POSTGRES_URL)(
-  "records every turn on @mastra/pg and replays a reflection from the tape",
-  async () => {
+it.skipIf(!POSTGRES_URL).each(["mock", "router"] as const)(
+  "records every turn on @mastra/pg and replays a reflection from the tape (%s OM models)",
+  async (modelKind) => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test-placeholder");
+    const nativeConfigBytes = JSON.stringify(
+      await getNativeOMRecordConfig(OPTIONS),
+    ).length;
     const schemaName = `kitaru_mastra_${randomUUID().replaceAll("-", "")}`;
     const store = new PostgresStore({
       id: "kitaru-postgres-replay",
@@ -64,28 +92,9 @@ it.skipIf(!POSTGRES_URL)(
       await store.init();
       const domain = await store.getStore("memory");
       if (!domain) throw new Error("Missing PostgreSQL memory domain");
-      const source = new Memory({
-        storage: store,
-        options: {
-          lastMessages: 20,
-          observationalMemory: {
-            observation: {
-              model: "fixture/observer",
-              messageTokens: 300,
-              bufferTokens: 0.2,
-              bufferActivation: 1,
-              blockAfter: 1.1,
-            },
-            reflection: {
-              model: "fixture/reflector",
-              observationTokens: 200,
-              bufferActivation: 1,
-            },
-          },
-        },
-      });
-      const observer = omModel("observer");
-      const reflector = omModel("reflector");
+      const source = new Memory({ storage: store, options: OPTIONS });
+      const observer = omModel("observer", modelKind === "router");
+      const reflector = omModel("reflector", modelKind === "router");
       const actor = new MastraLanguageModelV2Mock({
         modelId: "actor",
         provider: "fixture",
@@ -144,6 +153,20 @@ it.skipIf(!POSTGRES_URL)(
           sessionId,
           inputs: body?.inputs as Record<string, unknown>,
         });
+      }
+
+      // PostgreSQL reorders JSONB keys, so compare sizes rather than text.
+      for (const row of await domain.getObservationalMemoryHistory(
+        THREAD,
+        RESOURCE,
+      )) {
+        expect(row.config.observation).toMatchObject({
+          model: "fixture/observer",
+        });
+        expect(row.config.reflection).toMatchObject({
+          model: "fixture/reflector",
+        });
+        expect(JSON.stringify(row.config).length).toBe(nativeConfigBytes);
       }
 
       const envelopes = turns.map(({ inputs }) =>
