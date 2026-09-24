@@ -76,12 +76,22 @@ def _read_payload(path: Path, *, max_size_bytes: int | None = None) -> bytes:
     """Read one regular local file without exposing its path in failures."""
     _check_payload_size(path, max_size_bytes)
     try:
-        return path.read_bytes()
+        if max_size_bytes is None:
+            return path.read_bytes()
+        with path.open("rb") as payload_file:
+            content = payload_file.read(max_size_bytes + 1)
     except OSError as error:
         reason = error.strerror or type(error).__name__
         raise CLIError(
             "invalid_arguments", f"FILE could not be read: {reason}."
         ) from None
+    if len(content) > max_size_bytes:
+        raise CLIError(
+            "invalid_arguments",
+            f"FILE exceeds the upload limit of {max_size_bytes} bytes. "
+            "Split the payload into smaller files and import each slice.",
+        )
+    return content
 
 
 def _check_payload_size(path: Path, max_size_bytes: int | None) -> None:

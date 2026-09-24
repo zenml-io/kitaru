@@ -661,6 +661,25 @@ async def test_session_import_rejects_server_oversize_before_read_or_upload(
     assert client.uploads == []
 
 
+def test_read_payload_rejects_growth_after_size_check(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A file growing after stat cannot bypass the read-time upload cap."""
+    payload = tmp_path / "growing.jsonl"
+    payload.write_bytes(b"ok")
+    original_open = Path.open
+
+    def grow_before_open(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == payload:
+            with original_open(self, "ab") as file:
+                file.write(b"more")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", grow_before_open)
+    with pytest.raises(CLIError, match="Split the payload"):
+        sessions._read_payload(payload, max_size_bytes=2)
+
+
 async def test_session_import_rejects_client_oversize_before_server_lookup(
     tmp_path: Path, monkeypatch
 ) -> None:

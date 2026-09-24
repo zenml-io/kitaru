@@ -14,6 +14,8 @@
 """Tests for the server info route."""
 
 import httpx
+import pytest
+from pydantic import ValidationError
 
 from conftest import control_plane_settings, local_settings
 from kitaru.api_models.v1.info import AuthScheme
@@ -77,3 +79,9 @@ async def test_max_blob_size_reports_zero_limit() -> None:
     payload = await _get_info(local_settings(MAX_BLOB_SIZE_BYTES=0))
 
     assert payload["max_blob_size_bytes"] == 0
+
+
+def test_negative_blob_limit_is_rejected_at_startup() -> None:
+    """Reject invalid settings before the info route can serve requests."""
+    with pytest.raises(ValidationError, match="MAX_BLOB_SIZE_BYTES"):
+        local_settings(MAX_BLOB_SIZE_BYTES=-1)
