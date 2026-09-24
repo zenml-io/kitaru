@@ -1,4 +1,3 @@
-import { ModelRouterLanguageModel } from "@mastra/core/llm";
 import type { MemoryStorage } from "@mastra/core/storage";
 import { InMemoryStore } from "@mastra/core/storage";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
@@ -9,10 +8,15 @@ import {
   createProcessLocalMemoryAccess,
 } from "../src/memory.js";
 import { decodeMemoryReplayEnvelope } from "../src/memory-snapshot.js";
-import { getNativeOMRecordConfig, textStream } from "./helpers/memory-agent.js";
+import {
+  createTripOMModel,
+  getNativeOMRecordConfig,
+  TRIP_OM_OPTIONS,
+  textStream,
+} from "./helpers/memory-agent.js";
 import {
   AGENT_ID,
-  type ApiCall,
+  getLastSessionUpdate,
   installTestApi,
   REPLAY_ID,
 } from "./helpers.js";
@@ -21,54 +25,10 @@ const THREAD = "row-thread";
 const RESOURCE = "row-resource";
 const TURNS = 5;
 
-// Default continuation hints put Mastra's built-in extractors into the record.
-const OPTIONS = {
-  lastMessages: 20,
-  observationalMemory: {
-    observation: {
-      model: "fixture/observer",
-      messageTokens: 300,
-      bufferTokens: 0.2,
-      bufferActivation: 1,
-      blockAfter: 1.1,
-    },
-    reflection: {
-      model: "fixture/reflector",
-      observationTokens: 200,
-      bufferActivation: 1,
-    },
-  },
-};
-
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
-
-function omOutput(kind: "observer" | "reflector") {
-  return textStream(
-    kind === "observer"
-      ? `<observations>\n${"The user keeps sharing travel plans for the spring trip. ".repeat(12)}\n</observations>\n<current-task>Continue.</current-task>`
-      : "<observations>\nREFLECTED: the user is planning a spring trip.\n</observations>",
-  );
-}
-
-function omModel(kind: "observer" | "reflector", router: boolean) {
-  const doStream = vi.fn(async () => omOutput(kind));
-  if (!router)
-    return {
-      doStream,
-      model: new MastraLanguageModelV2Mock({
-        modelId: kind,
-        provider: "fixture",
-        doStream,
-      }),
-    };
-  // The router model carries the gateway catalog as enumerable state.
-  const model = new ModelRouterLanguageModel("openai/gpt-5-nano");
-  Object.assign(model, { doStream });
-  return { doStream, model };
-}
 
 // Store `config` the way a JSON column does, as PostgreSQL and LibSQL do.
 function storeConfigAsJson(domain: MemoryStorage): void {
@@ -86,12 +46,6 @@ function storeConfigAsJson(domain: MemoryStorage): void {
     });
 }
 
-function lastUpdate(calls: ApiCall[], sessionId: string) {
-  return calls.findLast(
-    (call) => call.method === "PATCH" && call.path.endsWith(sessionId),
-  )?.body;
-}
-
 it.each([
   { store: "in-memory", model: "mock" },
   { store: "in-memory", model: "router" },
@@ -103,16 +57,16 @@ it.each([
     vi.stubEnv("OPENAI_API_KEY", "sk-test-placeholder");
     const nativeConfig = JSON.stringify(
       await getNativeOMRecordConfig(
-        OPTIONS,
+        TRIP_OM_OPTIONS,
         storeKind === "json" ? storeConfigAsJson : undefined,
       ),
     );
     const store = new InMemoryStore();
     const domain = store.stores.memory as MemoryStorage;
     if (storeKind === "json") storeConfigAsJson(domain);
-    const source = new Memory({ storage: store, options: OPTIONS });
-    const observer = omModel("observer", modelKind === "router");
-    const reflector = omModel("reflector", modelKind === "router");
+    const source = new Memory({ storage: store, options: TRIP_OM_OPTIONS });
+    const observer = createTripOMModel("observer", modelKind === "router");
+    const reflector = createTripOMModel("reflector", modelKind === "router");
     const actor = new MastraLanguageModelV2Mock({
       modelId: "actor",
       provider: "fixture",
@@ -157,12 +111,12 @@ it.each([
         const sessionId = api.sessionIds[turn - 1] as string;
         await vi.waitFor(
           () =>
-            expect(lastUpdate(api.calls, sessionId)?.metadata).toHaveProperty(
-              "mastra_replay_state",
-            ),
+            expect(
+              getLastSessionUpdate(api.calls, sessionId)?.metadata,
+            ).toHaveProperty("mastra_replay_state"),
           { timeout: 10_000 },
         );
-        const body = lastUpdate(api.calls, sessionId);
+        const body = getLastSessionUpdate(api.calls, sessionId);
         expect(body?.metadata, `turn ${turn}`).toMatchObject({
           mastra_replay_state: "eligible",
         });
@@ -205,7 +159,9 @@ it.each([
         const replaySession = api.sessionIds.at(-1) as string;
         await vi.waitFor(
           () =>
-            expect(lastUpdate(api.calls, replaySession)).toMatchObject({
+            expect(
+              getLastSessionUpdate(api.calls, replaySession),
+            ).toMatchObject({
               status: "completed",
             }),
           { timeout: 10_000 },

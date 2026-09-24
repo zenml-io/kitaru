@@ -28,6 +28,7 @@ import {
   stripLiveMemoryOptions,
 } from "./replay-guards.js";
 import {
+  createIneligibleMetadata,
   getReplayReason,
   type MastraReplayReason,
   MastraReplayReasonError,
@@ -292,17 +293,6 @@ function getSafeStreamError(error: unknown): Error {
   );
 }
 
-function ineligibleMetadata(
-  reason: MastraReplayReason,
-  nativeState: string,
-): Record<string, JsonValue> {
-  return {
-    mastra_replay_state: "ineligible",
-    mastra_replay_reason: reason,
-    mastra_native_state: nativeState,
-  };
-}
-
 class StreamLifecycle {
   #cleanupPromise?: Promise<void>;
   #completionStarted = false;
@@ -511,7 +501,7 @@ class StreamLifecycle {
                       mastra_replay_state: "eligible",
                       mastra_native_state: "completed",
                     },
-                    rejectedMetadata: ineligibleMetadata(
+                    rejectedMetadata: createIneligibleMetadata(
                       "server_rejected_finalization",
                       "completed",
                     ),
@@ -558,7 +548,7 @@ class StreamLifecycle {
     try {
       await this.recorder.completeIncompleteRecording(
         result,
-        ineligibleMetadata(reasonCode, "completed"),
+        createIneligibleMetadata(reasonCode, "completed"),
       );
     } catch (error) {
       await this.cleanup(error, "recording");
@@ -572,7 +562,7 @@ class StreamLifecycle {
       const omDiverged = safeError.message === OM_DIVERGED;
       const metadata: Record<string, JsonValue> | undefined = this
         .recordsBaseline
-        ? ineligibleMetadata(
+        ? createIneligibleMetadata(
             reasonCode ??
               (kind === "run"
                 ? "native_run_failed"
@@ -803,14 +793,14 @@ async function recordedStreamWithRecording({
         if (native === "completed") {
           await recorder.completeIncompleteRecording(
             null,
-            ineligibleMetadata(reasonCode, native),
+            createIneligibleMetadata(reasonCode, native),
           );
           return;
         }
         await recorder.failRecording(
           new Error(`KITARU_RECORDING_INCOMPLETE:${reasonCode}`),
           baseline
-            ? ineligibleMetadata(reasonCode, native ?? "pending")
+            ? createIneligibleMetadata(reasonCode, native ?? "pending")
             : undefined,
         );
       })().catch(() => undefined);

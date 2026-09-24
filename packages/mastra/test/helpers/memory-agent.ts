@@ -1,4 +1,5 @@
 import { Agent } from "@mastra/core/agent";
+import { ModelRouterLanguageModel } from "@mastra/core/llm";
 import type { InputProcessor } from "@mastra/core/processors";
 import { RequestContext } from "@mastra/core/request-context";
 import { InMemoryStore, type MemoryStorage } from "@mastra/core/storage";
@@ -6,6 +7,7 @@ import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
 import { LocalSkillSource, Workspace } from "@mastra/core/workspace";
 import { Memory } from "@mastra/memory";
+import { type Mock, vi } from "vitest";
 import { z } from "zod/v4";
 
 export const THREAD = "historical-thread";
@@ -106,6 +108,55 @@ export async function getNativeOMRecordConfig(
   } finally {
     await store.close();
   }
+}
+
+// Default continuation hints put Mastra's built-in extractors into the record.
+export const TRIP_OM_OPTIONS = {
+  lastMessages: 20,
+  observationalMemory: {
+    observation: {
+      model: "fixture/observer",
+      messageTokens: 300,
+      bufferTokens: 0.2,
+      bufferActivation: 1,
+      blockAfter: 1.1,
+    },
+    reflection: {
+      model: "fixture/reflector",
+      observationTokens: 200,
+      bufferActivation: 1,
+    },
+  },
+};
+
+/** An OM model that observes spring-trip plans, as a mock or a model-router model. */
+export function createTripOMModel(
+  kind: "observer" | "reflector",
+  router: boolean,
+): {
+  doStream: Mock<() => Promise<ReturnType<typeof textStream>>>;
+  model: MastraLanguageModelV2Mock | ModelRouterLanguageModel;
+} {
+  const doStream = vi.fn(async () =>
+    textStream(
+      kind === "observer"
+        ? `<observations>\n${"The user keeps sharing travel plans for the spring trip. ".repeat(12)}\n</observations>\n<current-task>Continue.</current-task>`
+        : "<observations>\nREFLECTED: the user is planning a spring trip.\n</observations>",
+    ),
+  );
+  if (!router)
+    return {
+      doStream,
+      model: new MastraLanguageModelV2Mock({
+        modelId: kind,
+        provider: "fixture",
+        doStream,
+      }),
+    };
+  // The router model carries the gateway catalog as enumerable state.
+  const model = new ModelRouterLanguageModel("openai/gpt-5-nano");
+  Object.assign(model, { doStream });
+  return { doStream, model };
 }
 
 export function createMemoryRuntime(

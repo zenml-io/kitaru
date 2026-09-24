@@ -1,3 +1,4 @@
+import type { JsonValue } from "@zenml-io/kitaru";
 import {
   MastraReplayBudgetError,
   RecordedSensitiveKeyError,
@@ -125,4 +126,16 @@ export function describeReplayFailure(
     error instanceof RecordedSensitiveKeyError
     ? error.message
     : fallback;
+}
+
+/** Build the session metadata of a baseline turn that cannot be replayed. */
+export function createIneligibleMetadata(
+  reason: MastraReplayReason,
+  nativeState: string,
+): Record<string, JsonValue> {
+  return {
+    mastra_replay_state: "ineligible",
+    mastra_replay_reason: reason,
+    mastra_native_state: nativeState,
+  };
 }

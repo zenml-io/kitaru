@@ -115,6 +115,13 @@ export function installTestApi(options: TestApiOptions = {}): TestApi {
   };
 }
 
+/** Return the body of the latest update sent for `sessionId`. */
+export function getLastSessionUpdate(calls: ApiCall[], sessionId: string) {
+  return calls.findLast(
+    (call) => call.method === "PATCH" && call.path.endsWith(sessionId),
+  )?.body;
+}
+
 export function textStep(suffix = "one"): RecordedStep {
   return {
     content: [{ text: `text-${suffix}`, type: "text" }],

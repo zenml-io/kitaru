@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { ModelRouterLanguageModel } from "@mastra/core/llm";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { Memory } from "@mastra/memory";
 import { PostgresStore } from "@mastra/pg";
@@ -9,10 +8,15 @@ import {
   createProcessLocalMemoryAccess,
 } from "../src/memory.js";
 import { decodeMemoryReplayEnvelope } from "../src/memory-snapshot.js";
-import { getNativeOMRecordConfig, textStream } from "./helpers/memory-agent.js";
+import {
+  createTripOMModel,
+  getNativeOMRecordConfig,
+  TRIP_OM_OPTIONS,
+  textStream,
+} from "./helpers/memory-agent.js";
 import {
   AGENT_ID,
-  type ApiCall,
+  getLastSessionUpdate,
   installTestApi,
   REPLAY_ID,
 } from "./helpers.js";
@@ -28,59 +32,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const OPTIONS = {
-  lastMessages: 20,
-  observationalMemory: {
-    observation: {
-      model: "fixture/observer",
-      messageTokens: 300,
-      bufferTokens: 0.2,
-      bufferActivation: 1,
-      blockAfter: 1.1,
-    },
-    reflection: {
-      model: "fixture/reflector",
-      observationTokens: 200,
-      bufferActivation: 1,
-    },
-  },
-};
-
-function omModel(kind: "observer" | "reflector", router: boolean) {
-  const doStream = vi.fn(async () =>
-    textStream(
-      kind === "observer"
-        ? `<observations>\n${"The user keeps sharing travel plans for the spring trip. ".repeat(12)}\n</observations>\n<current-task>Continue.</current-task>`
-        : "<observations>\nREFLECTED: the user is planning a spring trip.\n</observations>",
-    ),
-  );
-  if (!router)
-    return {
-      doStream,
-      model: new MastraLanguageModelV2Mock({
-        modelId: kind,
-        provider: "fixture",
-        doStream,
-      }),
-    };
-  // The router model carries the gateway catalog as enumerable state.
-  const model = new ModelRouterLanguageModel("openai/gpt-5-nano");
-  Object.assign(model, { doStream });
-  return { doStream, model };
-}
-
-function lastUpdate(calls: ApiCall[], sessionId: string) {
-  return calls.findLast(
-    (call) => call.method === "PATCH" && call.path.endsWith(sessionId),
-  )?.body;
-}
-
 it.skipIf(!POSTGRES_URL).each(["mock", "router"] as const)(
   "records every turn on @mastra/pg and replays a reflection from the tape (%s OM models)",
   async (modelKind) => {
     vi.stubEnv("OPENAI_API_KEY", "sk-test-placeholder");
     const nativeConfigBytes = JSON.stringify(
-      await getNativeOMRecordConfig(OPTIONS),
+      await getNativeOMRecordConfig(TRIP_OM_OPTIONS),
     ).length;
     const schemaName = `kitaru_mastra_${randomUUID().replaceAll("-", "")}`;
     const store = new PostgresStore({
@@ -92,9 +49,9 @@ it.skipIf(!POSTGRES_URL).each(["mock", "router"] as const)(
       await store.init();
       const domain = await store.getStore("memory");
       if (!domain) throw new Error("Missing PostgreSQL memory domain");
-      const source = new Memory({ storage: store, options: OPTIONS });
-      const observer = omModel("observer", modelKind === "router");
-      const reflector = omModel("reflector", modelKind === "router");
+      const source = new Memory({ storage: store, options: TRIP_OM_OPTIONS });
+      const observer = createTripOMModel("observer", modelKind === "router");
+      const reflector = createTripOMModel("reflector", modelKind === "router");
       const actor = new MastraLanguageModelV2Mock({
         modelId: "actor",
         provider: "fixture",
@@ -140,12 +97,12 @@ it.skipIf(!POSTGRES_URL).each(["mock", "router"] as const)(
         const sessionId = api.sessionIds[turn - 1] as string;
         await vi.waitFor(
           () =>
-            expect(lastUpdate(api.calls, sessionId)?.metadata).toHaveProperty(
-              "mastra_replay_state",
-            ),
+            expect(
+              getLastSessionUpdate(api.calls, sessionId)?.metadata,
+            ).toHaveProperty("mastra_replay_state"),
           { timeout: 10_000 },
         );
-        const body = lastUpdate(api.calls, sessionId);
+        const body = getLastSessionUpdate(api.calls, sessionId);
         expect(body?.metadata, `turn ${turn}`).toMatchObject({
           mastra_replay_state: "eligible",
         });
@@ -209,7 +166,7 @@ it.skipIf(!POSTGRES_URL).each(["mock", "router"] as const)(
       const replaySession = api.sessionIds.at(-1) as string;
       await vi.waitFor(
         () =>
-          expect(lastUpdate(api.calls, replaySession)).toMatchObject({
+          expect(getLastSessionUpdate(api.calls, replaySession)).toMatchObject({
             status: "completed",
           }),
         { timeout: 10_000 },

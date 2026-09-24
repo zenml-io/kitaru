@@ -59,6 +59,7 @@ import { describeProviderError } from "./provider-errors.js";
 import { createRecordedClock } from "./replay-clock.js";
 import { assertStableToolName } from "./replay-guards.js";
 import {
+  createIneligibleMetadata,
   getReplayReason,
   type MastraReplayReason,
   MastraReplayReasonError,
@@ -528,11 +529,7 @@ export function createMemoryReplayAgent(
         inputs: {
           [MEMORY_REPLAY_KEY]: { version: 2, complete: false },
         },
-        metadata: {
-          mastra_replay_state: "ineligible",
-          mastra_replay_reason: reasonCode,
-          mastra_native_state: "started",
-        },
+        metadata: createIneligibleMetadata(reasonCode, "started"),
         name: options.sessionName,
         origin: "recorded",
         outputs: null,
@@ -546,27 +543,17 @@ export function createMemoryReplayAgent(
     reportLocalRecordingError(error, reasonCode, "setup", sessionId);
     if (sessionId === undefined) return;
     const native = await outcome;
-    const metadata = {
-      mastra_replay_state: "ineligible",
-      mastra_replay_reason: reasonCode,
-      mastra_native_state: native,
-    };
     await client
-      .updateSession(
-        sessionId,
-        native === "completed"
-          ? {
-              ended_at: new Date().toISOString(),
-              metadata,
-              status: "completed",
-            }
+      .updateSession(sessionId, {
+        ended_at: new Date().toISOString(),
+        metadata: createIneligibleMetadata(reasonCode, native),
+        ...(native === "completed"
+          ? { status: "completed" as const }
           : {
               error: `KITARU_RECORDING_INCOMPLETE:${reasonCode}`,
-              ended_at: new Date().toISOString(),
-              metadata,
-              status: "failed",
-            },
-      )
+              status: "failed" as const,
+            }),
+      })
       .catch(() => undefined);
   }
 

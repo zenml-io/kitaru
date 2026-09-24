@@ -131,8 +131,16 @@ function requireWithinBudget(
     );
 }
 
-function hash(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
+function hash(data: Uint8Array | string): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+/** Read a string that is exactly a `Date#toISOString` rendering. */
+function parseIsoDate(value: string): Date | undefined {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) && date.toISOString() === value
+    ? date
+    : undefined;
 }
 
 function binary(bytes: Uint8Array): {
@@ -315,12 +323,8 @@ export function decodeMemoryValue(value: JsonValue): unknown {
         typeof current.value === "string"
       ) {
         if (kind === "url") return validateUrl(current.value);
-        const date = new Date(current.value);
-        requireValue(
-          Number.isFinite(date.getTime()) &&
-            date.toISOString() === current.value,
-          "Malformed memory Date.",
-        );
+        const date = parseIsoDate(current.value);
+        requireValue(date, "Malformed memory Date.");
         return date;
       }
       if (kind === "bytes" && Object.keys(current).length === 4)
@@ -433,7 +437,7 @@ function withKeyOrder(envelope: JsonValue): MastraMemoryReplayEnvelope {
   const json = JSON.stringify(content);
   const keyOrder: MastraKeyOrder = {
     permutations: describeKeyOrder(content),
-    sha256: createHash("sha256").update(json).digest("hex"),
+    sha256: hash(json),
   };
   const bytes =
     Buffer.byteLength(json, "utf8") +
@@ -474,8 +478,7 @@ function restoreKeyOrder(envelope: Record<string, JsonValue>): {
     restored,
     verify: () =>
       requireValue(
-        createHash("sha256").update(JSON.stringify(restored)).digest("hex") ===
-          keyOrder.sha256,
+        hash(JSON.stringify(restored)) === keyOrder.sha256,
         "Restored envelope differs from the recorded envelope.",
       ),
   };
@@ -487,11 +490,10 @@ function readStoredDates(value: unknown, keys: readonly string[]): unknown {
   for (const key of keys) {
     const stored = copy[key];
     if (typeof stored !== "string") continue;
-    const date = new Date(stored);
     // Only an exact ISO rendering is a serialized Date; other strings stay
     // unchanged so validation still rejects them.
-    if (Number.isFinite(date.getTime()) && date.toISOString() === stored)
-      copy[key] = date;
+    const date = parseIsoDate(stored);
+    if (date) copy[key] = date;
   }
   return copy;
 }
@@ -983,13 +985,10 @@ function decodeConvertedMemoryReplayEnvelope(
   );
   const turnStartedAt =
     value.version === 3 && typeof value.turnStartedAt === "string"
-      ? new Date(value.turnStartedAt)
+      ? parseIsoDate(value.turnStartedAt)
       : undefined;
   requireValue(
-    value.version === 2 ||
-      (turnStartedAt !== undefined &&
-        Number.isFinite(turnStartedAt.getTime()) &&
-        turnStartedAt.toISOString() === value.turnStartedAt),
+    value.version === 2 || turnStartedAt !== undefined,
     "Missing or malformed recorded turn start time.",
   );
   for (const key of [
