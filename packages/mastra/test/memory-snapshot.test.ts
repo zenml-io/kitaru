@@ -247,6 +247,33 @@ it("finalizes a separate version-3 envelope with an ordered OM tape", async () =
   ).toThrow();
 });
 
+it("keeps recorded attachment token counts and refuses malformed ones", async () => {
+  const provisional = createMemoryReplayEnvelope(await fixture());
+  const reference = `kitaru-file://sha256/${"a".repeat(64)}`;
+  const counts = { [reference]: { sync: 20, async: 1_500 } };
+  const final = finalizeMemoryReplayEnvelope(
+    provisional,
+    [],
+    undefined,
+    counts,
+  );
+  expect(decodeMemoryReplayEnvelope(final).attachmentTokens).toEqual(counts);
+  expect(
+    decodeMemoryReplayEnvelope(finalizeMemoryReplayEnvelope(provisional, []))
+      .attachmentTokens,
+  ).toBeUndefined();
+  expect(() =>
+    finalizeMemoryReplayEnvelope(provisional, [], undefined, {
+      [reference]: { sync: -1 },
+    }),
+  ).toThrow(/attachment token counts/);
+  expect(() =>
+    finalizeMemoryReplayEnvelope(provisional, [], undefined, {
+      "https://files.invalid/a.pdf": { sync: 1 },
+    }),
+  ).toThrow(/attachment token counts/);
+});
+
 it("normalizes implicit thread OM and rejects old OM envelopes without a tape", async () => {
   const input = await fixture();
   delete (input.configuration.memory.observationalMemory as { scope?: string })

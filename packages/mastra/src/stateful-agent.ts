@@ -25,6 +25,10 @@ import {
   resolveReplayContext,
 } from "@zenml-io/kitaru/adapter";
 import {
+  recordAttachmentTokens,
+  replayAttachmentTokens,
+} from "./attachment-tokens.js";
+import {
   createMemoryCaptureBinding,
   createRegisteredWriteDomain,
   type MastraExclusiveMemoryAccess,
@@ -820,7 +824,18 @@ export function createMemoryReplayAgent(
         release: () => binding.release(),
       };
     }
-    if (historical) omEngine = await runtime.memory.omEngine;
+    omEngine = await runtime.memory.omEngine;
+    const attachmentTokens =
+      omEngine && !historical
+        ? recordAttachmentTokens(omEngine, (value) => {
+            const reference = sanitizer.replace(value);
+            return reference.startsWith("kitaru-file://")
+              ? reference
+              : undefined;
+          })
+        : undefined;
+    if (omEngine && historical)
+      replayAttachmentTokens(omEngine, historical.attachmentTokens ?? {});
     markUnsupportedOnBinding = () =>
       runtime.binding.markIncomplete(
         "Recorded evidence contains an unsupported value.",
@@ -1292,6 +1307,7 @@ export function createMemoryReplayAgent(
                   ...(entry.failed ? { failed: true } : {}),
                 })),
                 sanitizer.replace,
+                attachmentTokens?.counts(),
               ),
             };
           },

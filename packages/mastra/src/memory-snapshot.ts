@@ -23,6 +23,10 @@ import {
   strictMastraReplayValue,
 } from "@zenml-io/kitaru/adapter";
 import {
+  type AttachmentTokenCounts,
+  readAttachmentTokenCounts,
+} from "./attachment-tokens.js";
+import {
   describeReplayFailure,
   getReplayReason,
   type MastraReplayReason,
@@ -72,6 +76,8 @@ export interface MastraMemoryReplayInput {
    * version-2 envelopes.
    */
   turnStartedAt?: Date;
+  /** The tokens the recorded turn counted for each captured attachment. */
+  attachmentTokens?: AttachmentTokenCounts;
 }
 
 /** How to restore each object's recorded key order after storage re-sorts keys. */
@@ -938,11 +944,18 @@ export function finalizeMemoryReplayEnvelope(
   envelope: MastraMemoryReplayEnvelope,
   omTape: JsonValue[],
   sanitize: MemoryReplayEnvelopeSanitizer = (value) => value,
+  attachmentTokens: AttachmentTokenCounts = {},
 ): MastraMemoryReplayEnvelope {
   const final = withKeyOrder(
     sanitize(
       strictMastraReplayValue(
-        { ...envelope, omTape },
+        {
+          ...envelope,
+          omTape,
+          ...(Object.keys(attachmentTokens).length > 0
+            ? { attachmentTokens }
+            : {}),
+        },
         "Mastra memory replay envelope",
       ),
     ),
@@ -990,6 +1003,14 @@ function decodeConvertedMemoryReplayEnvelope(
   requireValue(
     value.version === 2 || turnStartedAt !== undefined,
     "Missing or malformed recorded turn start time.",
+  );
+  const attachmentTokens =
+    value.version === 3
+      ? readAttachmentTokenCounts(value.attachmentTokens as JsonValue)
+      : undefined;
+  requireValue(
+    !Object.hasOwn(value, "attachmentTokens") || attachmentTokens !== undefined,
+    "Malformed recorded attachment token counts.",
   );
   for (const key of [
     "rawInput",
@@ -1059,6 +1080,7 @@ function decodeConvertedMemoryReplayEnvelope(
     ...(value.version === 3
       ? { omTape: value.omTape as JsonValue[], turnStartedAt }
       : {}),
+    ...(attachmentTokens ? { attachmentTokens } : {}),
   };
 }
 
