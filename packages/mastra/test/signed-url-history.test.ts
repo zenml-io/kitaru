@@ -1,6 +1,7 @@
 import type { InputProcessor } from "@mastra/core/processors";
 import { InMemoryStore } from "@mastra/core/storage";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
+import { Memory } from "@mastra/memory";
 import { afterEach, expect, it, vi } from "vitest";
 import { createProcessLocalMemoryAccess } from "../src/memory-binding.js";
 import {
@@ -59,7 +60,7 @@ function createAttachmentProcessor(
 }
 
 /** A thread whose history holds the attachment's signed URL, not its bytes. */
-async function seedAttachmentHistory() {
+async function seedAttachmentHistory(padding = "") {
   const store = new InMemoryStore();
   const domain = store.stores.memory;
   if (!domain) throw new Error("Missing native memory domain");
@@ -84,7 +85,10 @@ async function seedAttachmentHistory() {
         content: {
           format: 2,
           parts: [
-            { type: "text", text: `Here is my quote: ${ATTACHMENT_URL}` },
+            {
+              type: "text",
+              text: `Here is my quote: ${ATTACHMENT_URL}${padding}`,
+            },
             { type: "file", data: ATTACHMENT_URL, mimeType: "application/pdf" },
           ],
         },
@@ -260,3 +264,140 @@ it("records a turn as ineligible when history holds an undeclared attachment URL
     await store.close();
   }
 });
+
+it.each([
+  ["reads attachment URLs itself", { "application/pdf": [/^https:\/\//] }],
+  ["needs the attachment's bytes", {}],
+])(
+  "replays a blocking observation over a declared attachment when the observer %s",
+  async (_, supportedUrls) => {
+    const nativeFetch = globalThis.fetch;
+    const api = installTestApi();
+    const apiFetch = globalThis.fetch;
+    const downloads: string[] = [];
+    vi.stubGlobal("fetch", ((
+      input: Parameters<typeof fetch>[0],
+      init: Parameters<typeof fetch>[1],
+    ) => {
+      const url = String(input);
+      if (url.startsWith("data:")) return nativeFetch(input, init);
+      if (url.startsWith("https://firebasestorage")) {
+        downloads.push(url);
+        return Promise.resolve(
+          new Response(ATTACHMENT_BYTES, {
+            headers: { "content-type": "application/pdf" },
+          }),
+        );
+      }
+      if (url.startsWith("kitaru-file:")) downloads.push(url);
+      return apiFetch(input, init);
+    }) as typeof fetch);
+    // Enough history that Mastra observes it, attachment included, before the
+    // actor's first call.
+    const { store, domain } = await seedAttachmentHistory(
+      " The quote covers two nights at the lake house.".repeat(80),
+    );
+    let observerCalls = 0;
+    const observer = new MastraLanguageModelV2Mock({
+      provider: "fixture",
+      modelId: "observer",
+      doStream: async () => {
+        observerCalls += 1;
+        return textStream(
+          "<observations>\nThe user shared a quote for two nights.\n</observations>",
+        );
+      },
+    });
+    Object.assign(observer, { supportedUrls });
+    const model = new MastraLanguageModelV2Mock({
+      provider: "fixture",
+      modelId: "actor",
+      doStream: async () => textStream("The quote covers two nights."),
+    });
+    const memory = new Memory({
+      storage: store,
+      options: {
+        lastMessages: 20,
+        semanticRecall: false,
+        observationalMemory: {
+          scope: "thread",
+          observation: {
+            model: "fixture/observer",
+            messageTokens: 600,
+            bufferTokens: false,
+          },
+          reflection: {
+            model: "fixture/reflector",
+            observationTokens: 100_000,
+          },
+        },
+      },
+    });
+    const adapter = createMemoryReplayAgent(
+      ({ memory: owned, resolveFile }) => ({
+        id: "observed-attachment",
+        name: "Observed attachment",
+        instructions: "Answer about the attachment.",
+        memory: owned,
+        model,
+        inputProcessors: [createAttachmentProcessor(resolveFile)],
+      }),
+      {
+        agentId: AGENT_ID,
+        apiUrl: "https://kitaru.invalid",
+        apiKey: "fixture",
+        requestedModelId: "fixture/actor",
+        sourceMemory: () => ({
+          settled: () => memory.settled(),
+          domain,
+          configuration: memory.getMergedThreadConfig(),
+          exclusiveAccess: createProcessLocalMemoryAccess(),
+        }),
+        resolveModel: (id) =>
+          id === "fixture/observer" || id === "fixture/reflector"
+            ? observer
+            : model,
+        files: [ATTACHMENT_URL],
+        resolveFile: async () => ({
+          bytes: ATTACHMENT_BYTES,
+          mediaType: "application/pdf",
+        }),
+      },
+    );
+    const closed = (index: number) =>
+      api.calls
+        .filter(
+          (call) =>
+            call.method === "PATCH" &&
+            call.path.endsWith(`/${api.sessionIds[index]}`) &&
+            call.body?.status !== "in_progress",
+        )
+        .at(-1)?.body;
+    try {
+      const output = await adapter.stream("What does it cost?", {
+        memory: { thread: THREAD, resource: RESOURCE },
+      });
+      await output.consumeStream();
+      await vi.waitFor(() =>
+        expect(closed(0)?.metadata).toMatchObject({
+          mastra_replay_state: "eligible",
+        }),
+      );
+      expect(observerCalls).toBe(1);
+      downloads.length = 0;
+      vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+      vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(closed(0)?.inputs));
+      const replay = await adapter.stream("ignored");
+      await replay.consumeStream();
+      await vi.waitFor(() => expect(closed(1)?.status).toBeDefined());
+      // The recorded observation answers the call, so neither Mastra nor the
+      // provider fetches the captured reference, and its input matches.
+      expect(closed(1)).toMatchObject({ status: "completed" });
+      expect(closed(1)?.metadata).toBeUndefined();
+      expect(downloads).toEqual([]);
+      expect(observerCalls).toBe(1);
+    } finally {
+      await store.close();
+    }
+  },
+);

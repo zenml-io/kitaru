@@ -215,6 +215,23 @@ export async function bindOMResultModels(
   return { ...config, observationalMemory: bound } as MemoryConfigInternal;
 }
 
+/** Whether Mastra's async buffering of `kind` is running on a thread in this process. */
+export function isAsyncBufferingRunning(
+  engine: NonNullable<Awaited<Memory["omEngine"]>>,
+  selector: { threadId: string; resourceId: string },
+  kind: "observation" | "reflection",
+): boolean {
+  const lockKey = engine.buffering.getLockKey(
+    selector.threadId,
+    selector.resourceId,
+  );
+  return engine.buffering.isAsyncBufferingInProgress(
+    kind === "observation"
+      ? engine.buffering.getObservationBufferKey(lockKey)
+      : engine.buffering.getReflectionBufferKey(lockKey),
+  );
+}
+
 /**
  * Evaluate a Memory's observational-memory time checks on a recorded clock.
  *

@@ -38,6 +38,7 @@ import {
   createIsolatedMemoryReplay,
   getMemoryModelId,
   getMemoryStoreSemantics,
+  isAsyncBufferingRunning,
   type MastraMemoryStoreSemantics,
   pinMemoryClock,
   serializeMemoryConfiguration,
@@ -685,11 +686,6 @@ export function createMemoryReplayAgent(
           evidence_truncation_reasons: event.truncationReasons ?? [],
         },
       });
-    const omCaptureErrors: string[] = [];
-    const omTape = createOMResultTape(
-      historical?.omTape as OMResultEntry[] | undefined,
-      (reason) => omCaptureErrors.push(reason),
-    );
     let replayMetadata: Record<string, JsonValue> | undefined;
     let tripwireListener: ((reason: string) => void) | undefined;
     let runtime: {
@@ -712,6 +708,22 @@ export function createMemoryReplayAgent(
       : baselineFiles?.evidenceSanitizer(markUnsupportedEvidence);
     if (!sanitizer)
       throw new Error("Controlled evidence sanitizer was not initialized.");
+    const omCaptureErrors: string[] = [];
+    let omEngine: Awaited<Memory["omEngine"]> = null;
+    const omTape = createOMResultTape(
+      historical?.omTape as OMResultEntry[] | undefined,
+      (reason) => omCaptureErrors.push(reason),
+      {
+        mapString: (value) => sanitizer.replace(value),
+        isBuffered: (phase) =>
+          omEngine !== null &&
+          isAsyncBufferingRunning(
+            omEngine,
+            selector,
+            phase === "observer" ? "observation" : "reflection",
+          ),
+      },
+    );
     let memoryStore: MastraMemoryStoreSemantics;
     if (historical) {
       memoryStore =
@@ -767,18 +779,10 @@ export function createMemoryReplayAgent(
       const initialSnapshot = await binding.captureInitial({
         settled: async () => {
           const engine = await memory.omEngine;
-          if (!engine) return;
-          const lockKey = engine.buffering.getLockKey(
-            selector.threadId,
-            selector.resourceId,
-          );
           if (
-            engine.buffering.isAsyncBufferingInProgress(
-              engine.buffering.getObservationBufferKey(lockKey),
-            ) ||
-            engine.buffering.isAsyncBufferingInProgress(
-              engine.buffering.getReflectionBufferKey(lockKey),
-            )
+            engine &&
+            (isAsyncBufferingRunning(engine, selector, "observation") ||
+              isAsyncBufferingRunning(engine, selector, "reflection"))
           )
             throw new MastraReplayReasonError(
               "Observational-memory buffering from an earlier turn is still running.",
@@ -816,6 +820,7 @@ export function createMemoryReplayAgent(
         release: () => binding.release(),
       };
     }
+    if (historical) omEngine = await runtime.memory.omEngine;
     markUnsupportedOnBinding = () =>
       runtime.binding.markIncomplete(
         "Recorded evidence contains an unsupported value.",

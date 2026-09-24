@@ -10,6 +10,7 @@ import {
 } from "../src/memory.js";
 import {
   type MemoryRuntime,
+  type ModelCall,
   memoryModel,
   RESOURCE,
   seedMemory,
@@ -41,9 +42,24 @@ function setup(options: {
   const domain = store.stores.memory;
   if (!domain) throw new Error("Missing memory store");
   let observed = 0;
-  const observer = memoryModel("observer", async () => {
-    await options.observe(++observed);
-  });
+  const observerCalls: ModelCall[] = [];
+  // The observation names the evidence markers the observer was shown, so a
+  // test can tell which tool results an observation covers.
+  const observer = {
+    calls: observerCalls,
+    model: new MastraLanguageModelV2Mock({
+      modelId: "observer",
+      provider: "fixture",
+      doStream: async (call) => {
+        observerCalls.push(call);
+        await options.observe(++observed);
+        const seen = markers(JSON.stringify(call.prompt), "EVIDENCE");
+        return textStream(
+          `<observations>\nOBSERVED: ${seen.map((n) => `OBSERVED_${n}_MARK`).join(" ")} ${"The user changed the preference to replay-green. ".repeat(15)}\n</observations>\n<current-task>Continue.</current-task>`,
+        );
+      },
+    }),
+  };
   const reflector = memoryModel("reflector");
   const memory = new Memory({
     storage: store,
@@ -69,13 +85,17 @@ function setup(options: {
     },
   });
   let step = 0;
+  let evidence = 0;
+  const actorPrompts: string[] = [];
   const actor = new MastraLanguageModelV2Mock({
     modelId: "actor",
     provider: "fixture",
-    doStream: async () => {
+    doStream: async ({ prompt }) => {
+      actorPrompts.push(JSON.stringify(prompt));
       step += 1;
       if (step > options.toolSteps()) {
         step = 0;
+        evidence = 0;
         return textStream("done");
       }
       return streamParts(
@@ -106,9 +126,9 @@ function setup(options: {
           description: "Read evidence",
           inputSchema: z.object({}),
           execute: async () =>
-            "The user now prefers replay-green. ".repeat(
+            `EVIDENCE_${++evidence}_MARK ${"The user now prefers replay-green. ".repeat(
               options.evidenceRepeats ?? 30,
-            ),
+            )}`,
         }),
       },
     }),
@@ -131,7 +151,31 @@ function setup(options: {
     },
   );
   const runtime = { store, domain, memory, observer, reflector };
-  return { api, adapter, runtime: runtime as unknown as MemoryRuntime };
+  return {
+    actorPrompts,
+    api,
+    adapter,
+    runtime: runtime as unknown as MemoryRuntime,
+  };
+}
+
+/** The numbers of the `<kind>_<n>_MARK` markers in `text`. */
+function markers(text: string, kind: "EVIDENCE" | "OBSERVED"): string[] {
+  return [
+    ...new Set(
+      [...text.matchAll(new RegExp(`${kind}_(\\d+)_MARK`, "g"))].map((match) =>
+        String(match[1]),
+      ),
+    ),
+  ];
+}
+
+/** Which tool results each actor prompt holds raw and which it holds observed. */
+function contextOf(prompts: readonly string[]): string[] {
+  return prompts.map(
+    (prompt) =>
+      `raw=${markers(prompt, "EVIDENCE")} observed=${markers(prompt, "OBSERVED")}`,
+  );
 }
 
 function patches(calls: ApiCall[]) {
@@ -205,22 +249,55 @@ it("replays a baseline whose slow observer merged buffer rounds without live OM 
   expect(baseline?.metadata).toMatchObject({ mastra_replay_state: "eligible" });
   const recorded = fixture.runtime.observer.calls.length;
   expect(recorded).toBeGreaterThan(0);
+  const baselineContext = contextOf(fixture.actorPrompts.splice(0));
+  // The slow observer was still running over the first evidence while the
+  // actor read more, and its result covers the later evidence too.
+  expect(baselineContext).toContain("raw=2,3,4 observed=1");
   delayMs = 0;
   await clearProcessBufferingState();
   const calls = await replay(fixture, baseline?.inputs);
   const [closed] = patches(calls);
-  expect(closed?.body).toMatchObject({
-    status: "completed",
-    metadata: { mastra_om_divergence: { unused_results: 0 } },
-  });
-  const metadata = closed?.body?.metadata as
-    | { mastra_om_divergence?: { surplus_calls: number } }
-    | undefined;
-  // The instant replay starts buffer rounds the slow baseline merged.
-  expect(metadata?.mastra_om_divergence?.surplus_calls).toBeGreaterThan(0);
-  expect(nodeNames(calls)).toContain("om_call_divergence");
+  expect(closed?.body).toMatchObject({ status: "completed" });
+  // The instant replay starts buffer rounds earlier than the slow baseline
+  // did. None of them may show the actor evidence it has not read yet.
+  expect(contextOf(fixture.actorPrompts)).toEqual(baselineContext);
+  const divergence = (
+    closed?.body?.metadata as
+      | { mastra_om_divergence?: { unused_results: number } }
+      | undefined
+  )?.mastra_om_divergence;
+  expect(divergence?.unused_results ?? 0).toBe(0);
   expect(fixture.runtime.observer.calls).toHaveLength(recorded);
   expect(fixture.runtime.reflector.calls).toHaveLength(0);
+  await fixture.runtime.store.close();
+});
+
+it("fails a replay closed when a blocking observation has no recorded result left", async () => {
+  let toolSteps = 1;
+  const fixture = setup({
+    observation: { messageTokens: 600, bufferTokens: false },
+    observe: () => {},
+    toolSteps: () => toolSteps,
+    evidenceRepeats: 400,
+  });
+  const baseline = await recordBaseline(fixture);
+  expect(baseline?.metadata).toMatchObject({ mastra_replay_state: "eligible" });
+  const recorded = fixture.runtime.observer.calls.length;
+  expect(recorded).toBe(1);
+  // The replayed actor reads more evidence than the baseline did, so it needs
+  // blocking observations production never made. An empty one would drop
+  // that evidence from the actor's context.
+  toolSteps = 4;
+  const calls = await replay(fixture, baseline?.inputs);
+  expect(patches(calls)[0]?.body).toMatchObject({
+    status: "failed",
+    error: "KITARU_REPLAY_DIVERGED:mastra_om_call_order",
+    metadata: {
+      mastra_replay_state: "diverged",
+      mastra_replay_reason: "mastra_om_call_order",
+    },
+  });
+  expect(fixture.runtime.observer.calls).toHaveLength(recorded);
   await fixture.runtime.store.close();
 });
 

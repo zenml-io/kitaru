@@ -6,8 +6,10 @@ import {
   getOMInputFingerprint,
   MastraOMDivergenceError,
   MastraOMRecordedFailureError,
+  MastraOMSkippedCallError,
   type OMResultEntry,
 } from "../src/om-result-tape.js";
+import { fileReference } from "../src/stateful-files.js";
 
 function model() {
   return {
@@ -234,40 +236,67 @@ async function recordCalls(
   return (await tape.finish()).entries;
 }
 
-it("replays a timing-merged baseline instantly without any live OM call", async () => {
-  // A slow production observer merged four buffer rounds into two calls.
+it("leaves buffered calls outside the recorded windows unobserved", async () => {
+  // A slow production observer merged three buffer rounds into its second call.
   const entries = await recordCalls([
-    { phase: "observer", prompt: "messages 1-2" },
-    { phase: "observer", prompt: "messages 3-4" },
+    { phase: "observer", prompt: "message 1" },
+    { phase: "observer", prompt: "messages 2-4" },
     { phase: "reflector", prompt: "observations" },
   ]);
   const liveObserver = answering(() => "live");
   const liveReflector = answering(() => "live");
-  const replay = createOMResultTape(entries, () => {});
+  const replay = createOMResultTape(entries, () => {}, {
+    isBuffered: () => true,
+  });
   const observer = replay.instrument(liveObserver, "observer");
   const reflector = replay.instrument(liveReflector, "reflector");
   const answers: string[] = [];
-  for (const prompt of ["message 1", "message 2", "message 3", "message 4"])
+  for (const prompt of [
+    "message 1",
+    "message 2",
+    "messages 2-3",
+    "messages 2-4",
+    "message 5",
+  ])
     answers.push(await text(await observer.doStream({ prompt })));
-  answers.push(await text(await reflector.doStream({ prompt: "one" })));
-  answers.push(await text(await reflector.doStream({ prompt: "two" })));
   expect(answers).toEqual([
-    "observed messages 1-2",
-    "observed messages 3-4",
-    // Surplus observer calls get an empty observation instead of a repeat.
+    "observed message 1",
+    // An earlier, smaller window gets no observation instead of a result
+    // that describes messages the replay has not produced yet.
     "",
     "",
-    "reflected observations",
-    // Mastra rejects an empty reflection, so a surplus call repeats the last.
-    "reflected observations",
+    "observed messages 2-4",
+    "",
   ]);
+  await expect(
+    reflector.doStream({ prompt: "other observations" }),
+  ).rejects.toBeInstanceOf(MastraOMSkippedCallError);
+  expect(await text(await reflector.doStream({ prompt: "observations" }))).toBe(
+    "reflected observations",
+  );
   expect(liveObserver.doStream).not.toHaveBeenCalled();
   expect(liveReflector.doStream).not.toHaveBeenCalled();
   expect((await replay.finish()).divergence).toEqual({
-    inputMismatches: 3,
-    surplusCalls: 3,
+    inputMismatches: 0,
+    surplusCalls: 1,
     unusedResults: 0,
   });
+});
+
+it("fails a blocking call closed once its phase's recorded results are used", async () => {
+  const entries = await recordCalls([{ phase: "observer", prompt: "first" }]);
+  const live = answering(() => "live");
+  const replay = createOMResultTape(entries, () => {});
+  const observer = replay.instrument(live, "observer");
+  expect(await text(await observer.doStream({ prompt: "changed" }))).toBe(
+    "observed first",
+  );
+  // An empty observation would drop the observed messages from context.
+  await expect(observer.doStream({ prompt: "more" })).rejects.toBeInstanceOf(
+    MastraOMDivergenceError,
+  );
+  expect(live.doStream).not.toHaveBeenCalled();
+  await expect(replay.finish()).rejects.toBeInstanceOf(MastraOMDivergenceError);
 });
 
 it("matches recorded OM results by input rather than call order", async () => {
@@ -420,6 +449,60 @@ it("ignores wall-clock values and generated ids in the OM input fingerprint", ()
   expect(getOMInputFingerprint({ ...replay, temperature: 0.7 })).not.toBe(
     getOMInputFingerprint(baseline),
   );
+});
+
+it("fingerprints an attachment as the reference replay history holds", () => {
+  const bytes = new Uint8Array([37, 80, 68, 70]);
+  const reference = fileReference({ bytes, mediaType: "application/pdf" });
+  const declared =
+    "https://files.example.com/v0/b/app/o/uploads%2Fquote.pdf?alt=media&token=fixture";
+  const call = (label: string, data: unknown) => ({
+    prompt: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: `User: see [File #1: ${label}]` },
+          { type: "file", data, mediaType: "application/pdf" },
+        ],
+      },
+    ],
+  });
+  const mapString = (value: string) => (value === declared ? reference : value);
+  const replay = getOMInputFingerprint(
+    call(reference.slice("kitaru-file://sha256/".length), new URL(reference)),
+    mapString,
+  );
+  // Production read the URL, or Mastra downloaded it into bytes first.
+  expect(
+    getOMInputFingerprint(
+      call("uploads/quote.pdf", new URL(declared)),
+      mapString,
+    ),
+  ).toBe(replay);
+  expect(
+    getOMInputFingerprint(call("uploads/quote.pdf", bytes), mapString),
+  ).toBe(replay);
+  expect(
+    getOMInputFingerprint(
+      call("uploads/quote.pdf", new Uint8Array([1])),
+      mapString,
+    ),
+  ).not.toBe(replay);
+});
+
+it("lets Mastra hand a replayed OM model captured references unread", async () => {
+  const replay = createOMResultTape([], () => {});
+  const observer = replay.instrument(
+    { ...model(), supportedUrls: { "image/*": [/^https:\/\//] } },
+    "observer",
+  ) as unknown as { supportedUrls: Promise<Record<string, RegExp[]>> };
+  const supported = await observer.supportedUrls;
+  expect(supported["image/*"]).toEqual([/^https:\/\//]);
+  expect(
+    supported["*/*"]?.some((pattern) =>
+      pattern.test(`kitaru-file://sha256/${"0".repeat(64)}`),
+    ),
+  ).toBe(true);
 });
 
 it("waits for an OM call that is still in flight when the tape finishes", async () => {

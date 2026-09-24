@@ -7,6 +7,7 @@ import {
 } from "@zenml-io/kitaru/adapter";
 import { decodeMemoryValue, encodeMemoryValue } from "./memory-snapshot.js";
 import { MastraReplayReasonError } from "./replay-reasons.js";
+import { fileReference } from "./stateful-files.js";
 
 export type OMPhase = "observer" | "reflector";
 type OMMethod = "doGenerate" | "doStream";
@@ -23,9 +24,9 @@ export interface OMResultEntry {
 
 /** How a replay's OM calls departed from the recorded calls without a live call. */
 export interface OMReplayDivergence {
-  /** Calls whose input matched no unused recorded call and took the next one. */
+  /** Blocking calls whose input matched no unused recorded call and took the next one. */
   inputMismatches: number;
-  /** Calls after every recorded result of their phase was used. */
+  /** Buffered calls after every recorded result of their phase was used. */
   surplusCalls: number;
   /** Recorded results that the replay never requested. */
   unusedResults: number;
@@ -53,6 +54,32 @@ export class MastraOMRecordedFailureError extends Error {
   }
 }
 
+/** Ends a buffered reflection that matched no recorded call without a result. */
+export class MastraOMSkippedCallError extends Error {
+  readonly code = "mastra_om_skipped_call";
+
+  constructor() {
+    super(
+      "Replay skipped a buffered reflection that matched no recorded result.",
+    );
+  }
+}
+
+/** Options for a result tape. */
+export interface OMResultTapeOptions {
+  /**
+   * Map each string in an OM call's input before it is fingerprinted, such as
+   * a declared file URL to its captured reference. A replay's history holds
+   * the mapped form, so the baseline must fingerprint that form too.
+   */
+  mapString?: (value: string) => string;
+  /**
+   * Whether a replay call of `phase` runs inside Mastra's async buffering
+   * rather than blocking the actor.
+   */
+  isBuffered?: (phase: OMPhase) => boolean;
+}
+
 const VOLATILE_KEYS = new Set(["createdAt", "updatedAt", "abortSignal"]);
 const VOLATILE_TEXT: ReadonlyArray<readonly [RegExp, string]> = [
   [
@@ -74,12 +101,17 @@ const VOLATILE_TEXT: ReadonlyArray<readonly [RegExp, string]> = [
   ],
 ];
 
+// Mastra labels an attachment by its file name or URL, and a replay's history
+// holds the captured reference in place of the URL. The part's data still
+// identifies the file.
+const ATTACHMENT_LABEL = /\[(File|Image) #(\d+): [^\]\n]*\]/g;
+
 function normalizeText(text: string): string {
   // Replay history holds redacted URLs, so the baseline hashes them redacted too.
   return VOLATILE_TEXT.reduce(
     (current, [pattern, replacement]) => current.replace(pattern, replacement),
     redactUrlCredentials(text),
-  );
+  ).replace(ATTACHMENT_LABEL, "[$1 #$2]");
 }
 
 /**
@@ -87,16 +119,32 @@ function normalizeText(text: string): string {
  *
  * Mastra renders message times and ids into the observer prompt and stamps
  * each prompt part with its creation time, so an unchanged replay would never
- * match its baseline if those values were hashed.
+ * match its baseline if those values were hashed. Attachment bytes hash as
+ * their content reference, the form a replay's recorded history holds.
  */
-export function getOMInputFingerprint(input: unknown): string {
+export function getOMInputFingerprint(
+  input: unknown,
+  mapString: (value: string) => string = (value) => value,
+): string {
   try {
-    const text = JSON.stringify(input, (key, value: unknown) =>
-      VOLATILE_KEYS.has(key)
-        ? undefined
-        : typeof value === "string"
-          ? normalizeText(value)
-          : value,
+    const text = JSON.stringify(
+      input,
+      function (this: unknown, key: string, value: unknown) {
+        if (VOLATILE_KEYS.has(key)) return undefined;
+        if (typeof value === "string") return normalizeText(mapString(value));
+        // The holder keeps the bytes as they were before a Buffer's toJSON.
+        const holder =
+          typeof this === "object" && this !== null
+            ? (this as Record<string, unknown>)
+            : undefined;
+        const bytes = holder?.[key];
+        if (
+          bytes instanceof Uint8Array &&
+          typeof holder?.mediaType === "string"
+        )
+          return fileReference({ bytes, mediaType: holder.mediaType });
+        return value;
+      },
     );
     return createHash("sha256")
       .update(text ?? "undefined")
@@ -201,22 +249,44 @@ function isTextPart(value: unknown): boolean {
   );
 }
 
+// A replay's file parts hold captured references that only the tape reads.
+const FILE_REFERENCE_URL = /^kitaru-file:\/\//i;
+
+async function withFileReferenceUrls(
+  supported: unknown,
+): Promise<Record<string, RegExp[]>> {
+  const urls = await supported;
+  const record =
+    typeof urls === "object" && urls !== null
+      ? (urls as Record<string, RegExp[]>)
+      : {};
+  return { ...record, "*/*": [...(record["*/*"] ?? []), FILE_REFERENCE_URL] };
+}
+
 /**
  * Intercept only OM model calls; the actor model remains untouched.
  *
  * With `recorded`, every call is answered from the recorded results and never
- * reaches the provider. Mastra's number of OM calls depends on timing: a slow
- * production observer merges buffer rounds that an instant replay makes
- * separately. A call therefore takes the unused recorded call of its phase
- * with the same input fingerprint, else the next unused one. Once a phase's
- * results are all used, an observer call gets an empty observation, so no
- * observation is duplicated, and a reflector call repeats the last
- * reflection, because Mastra refuses an empty one. Only a phase with no
- * recorded result at all fails replay.
+ * reaches the provider. A call takes the unused recorded call of its phase
+ * with the same input fingerprint. Otherwise what it gets depends on how
+ * Mastra made it:
+ *
+ * - A buffered call runs beside the actor, so an instant replay makes it
+ *   earlier than a slow production observer did, over fewer messages.
+ *   Another recorded result could describe messages the replay has not
+ *   produced yet. A buffered observation therefore observes nothing, which
+ *   leaves its messages in context as production had them while its observer
+ *   ran, and a buffered reflection ends without a result.
+ * - A blocking call takes the next unused recorded call of its phase. With
+ *   none left, replay fails, because an empty observation would drop the
+ *   observed messages from the actor's context.
+ *
+ * A phase with no recorded result at all also fails replay.
  */
 export function createOMResultTape(
   recorded: readonly OMResultEntry[] | undefined,
   onIncomplete: (reason: string) => void,
+  options: OMResultTapeOptions = {},
 ) {
   const entries: Array<OMResultEntry | undefined> = [];
   const pending = new Set<Promise<void>>();
@@ -281,32 +351,36 @@ export function createOMResultTape(
     };
   }
 
+  function use(call: RecordedCall, method: OMMethod): unknown {
+    call.used = true;
+    if (!call.result) throw new MastraOMRecordedFailureError();
+    return play(call.result, method);
+  }
+
   function serve(phase: OMPhase, method: OMMethod, input: unknown): unknown {
     if (malformed) failClosed("malformed recorded tape");
     const calls = recordedCalls.get(`${phase}:${method}`) ?? [];
     if (calls.length === 0) failClosed(`no recorded ${phase} result`);
-    const fingerprint = getOMInputFingerprint(input);
-    let call = calls.find(
+    const fingerprint = getOMInputFingerprint(input, options.mapString);
+    const matching = calls.find(
       (candidate) => !candidate.used && candidate.fingerprint === fingerprint,
     );
-    if (!call) {
-      call = calls.find((candidate) => !candidate.used);
-      if (call) divergence.inputMismatches++;
+    if (matching) return use(matching, method);
+    const unused = calls.find((candidate) => !candidate.used);
+    if (options.isBuffered?.(phase)) {
+      // A later buffered call usually covers the window production recorded,
+      // so only a call with nothing left to match is a departure.
+      if (!unused) divergence.surplusCalls++;
+      if (phase === "reflector") throw new MastraOMSkippedCallError();
+      // Mastra stores no buffered chunk for an empty observation.
+      const template = calls.find((candidate) => candidate.result)?.result;
+      if (!template) throw new MastraOMRecordedFailureError();
+      return play(template, method, true);
     }
-    if (call) {
-      call.used = true;
-      if (!call.result) throw new MastraOMRecordedFailureError();
-      return play(call.result, method);
-    }
-    divergence.surplusCalls++;
-    const succeeded = calls.filter((candidate) => candidate.result);
-    const reused = (
-      succeeded.findLast(
-        (candidate) => candidate.fingerprint === fingerprint,
-      ) ?? succeeded.at(-1)
-    )?.result;
-    if (!reused) throw new MastraOMRecordedFailureError();
-    return play(reused, method, phase === "observer");
+    if (!unused)
+      failClosed(`no recorded ${phase} result left for a blocking call`);
+    divergence.inputMismatches++;
+    return use(unused, method);
   }
 
   function record(
@@ -345,6 +419,10 @@ export function createOMResultTape(
       get(target, key) {
         if (key === "toJSON") return () => serializeNativeModel(native);
         const value = Reflect.get(target, key, target);
+        // Mastra would otherwise download a captured reference before the
+        // call, and the tape answers without reading the file.
+        if (recorded && key === "supportedUrls")
+          return withFileReferenceUrls(value);
         if (key !== "doGenerate" && key !== "doStream")
           return typeof value === "function" ? value.bind(target) : value;
         const method = key as OMMethod;
@@ -352,7 +430,10 @@ export function createOMResultTape(
           return async (input: unknown) => serve(phase, method, input);
         return async (input: unknown) => {
           const ordinal = next++;
-          const inputFingerprint = getOMInputFingerprint(input);
+          const inputFingerprint = getOMInputFingerprint(
+            input,
+            options.mapString,
+          );
           // Track the call from its start: finish() must wait for a call that
           // is still waiting on the provider, not report its slot as missing.
           let settleCall!: () => void;
@@ -447,7 +528,7 @@ export function createOMResultTape(
   /**
    * Wait for started calls and return the recorded entries.
    *
-   * A replay fails only when a call had no recorded result to use; the other
+   * A replay fails when a call had no recorded result to use; the other
    * departures are counted in `divergence`.
    */
   async function finish(): Promise<OMTapeResult> {
