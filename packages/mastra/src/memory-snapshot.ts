@@ -257,6 +257,63 @@ export function decodeMemoryValue(value: JsonValue): unknown {
   return visit(converted);
 }
 
+function readStoredDates(value: unknown, keys: readonly string[]): unknown {
+  if (!isRecord(value)) return value;
+  const copy = { ...value };
+  for (const key of keys) {
+    const stored = copy[key];
+    if (typeof stored !== "string") continue;
+    const date = new Date(stored);
+    // Only an exact ISO rendering is a serialized Date; other strings stay
+    // unchanged so validation still rejects them.
+    if (Number.isFinite(date.getTime()) && date.toISOString() === stored)
+      copy[key] = date;
+  }
+  return copy;
+}
+
+/**
+ * Convert ISO-string dates at known snapshot fields back to Dates.
+ *
+ * SQL stores keep buffered observation chunks in a JSON column, so reading a
+ * record back returns each chunk's `createdAt` and `lastObservedAt` as strings.
+ */
+export function normalizeStoredMemoryDates(snapshot: unknown): unknown {
+  if (!isRecord(snapshot)) return snapshot;
+  const timestamps = ["createdAt", "updatedAt"];
+  const records = Array.isArray(snapshot.records)
+    ? snapshot.records.map((value) => {
+        const record = readStoredDates(value, [
+          ...timestamps,
+          "lastObservedAt",
+          "lastBufferedAtTime",
+        ]);
+        if (
+          !isRecord(record) ||
+          !Array.isArray(record.bufferedObservationChunks)
+        )
+          return record;
+        return {
+          ...record,
+          bufferedObservationChunks: record.bufferedObservationChunks.map(
+            (chunk) => readStoredDates(chunk, ["createdAt", "lastObservedAt"]),
+          ),
+        };
+      })
+    : snapshot.records;
+  return {
+    ...snapshot,
+    thread: readStoredDates(snapshot.thread, timestamps),
+    resource: readStoredDates(snapshot.resource, timestamps),
+    messages: Array.isArray(snapshot.messages)
+      ? snapshot.messages.map((message) =>
+          readStoredDates(message, ["createdAt"]),
+        )
+      : snapshot.messages,
+    records,
+  };
+}
+
 /** Validate the complete native state before an isolated store receives any writes. */
 export function validateMemorySnapshot(
   value: unknown,

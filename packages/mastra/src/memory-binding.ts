@@ -5,6 +5,7 @@ import {
   decodeMemoryValue,
   encodeMemoryValue,
   type MastraMemorySnapshot,
+  normalizeStoredMemoryDates,
   validateMemorySnapshot,
 } from "./memory-snapshot.js";
 
@@ -598,7 +599,9 @@ export function createMemoryCaptureBinding(
               records,
             };
             // No storage-owned objects or Dates escape the explicit codec.
-            const copy = decodeMemoryValue(encodeMemoryValue(snapshot));
+            const copy = normalizeStoredMemoryDates(
+              decodeMemoryValue(encodeMemoryValue(snapshot)),
+            );
             validateMemorySnapshot(copy);
             return copy;
           } finally {

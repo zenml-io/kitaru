@@ -381,6 +381,61 @@ it("serializes overlapping native mutations and preserves original storage error
   await binding.release();
 });
 
+async function readChunksLikeDatabase(
+  runtime: Awaited<ReturnType<typeof fixture>>["runtime"],
+  createdAt: string,
+) {
+  const record = required(
+    await runtime.domain.getObservationalMemory(THREAD, RESOURCE),
+  );
+  await runtime.domain.updateBufferedObservations({
+    id: record.id,
+    chunk: {
+      cycleId: "cycle",
+      observations: "buffer",
+      tokenCount: 3,
+      messageIds: ["historical-message"],
+      messageTokens: 20,
+      lastObservedAt: new Date("2026-02-01T10:00:00.000Z"),
+    },
+  });
+  const history = runtime.domain.getObservationalMemoryHistory.bind(
+    runtime.domain,
+  );
+  // @mastra/pg and LibSQL JSON.parse this column on every read.
+  vi.spyOn(runtime.domain, "getObservationalMemoryHistory").mockImplementation(
+    async (...args) =>
+      (await history(...args)).map((value) => ({
+        ...value,
+        bufferedObservationChunks: value.bufferedObservationChunks?.map(
+          (chunk) => ({
+            ...JSON.parse(JSON.stringify(chunk)),
+            createdAt,
+          }),
+        ),
+      })),
+  );
+}
+
+it("captures buffered chunk dates that a database returns as ISO strings", async () => {
+  const { runtime, binding } = await fixture();
+  await readChunksLikeDatabase(runtime, "2026-02-01T10:00:01.000Z");
+  const initial = await binding.captureInitial(runtime.memory);
+  expect(binding.incompleteReasons).toEqual([]);
+  const chunk = required(initial?.records[0]?.bufferedObservationChunks?.[0]);
+  expect(chunk.createdAt).toEqual(new Date("2026-02-01T10:00:01.000Z"));
+  expect(chunk.lastObservedAt).toEqual(new Date("2026-02-01T10:00:00.000Z"));
+  await binding.release();
+});
+
+it("still refuses buffered chunk dates that are not ISO timestamps", async () => {
+  const { runtime, binding } = await fixture();
+  await readChunksLikeDatabase(runtime, "Sun Feb 01 2026");
+  expect(await binding.captureInitial(runtime.memory)).toBeUndefined();
+  expect(binding.incompleteReasons.join()).toMatch(/Initial memory capture/);
+  await binding.release();
+});
+
 it("records OM flags, buffers, config, activation and working memory with stable request identity", async () => {
   const { runtime, binding, recordMutation } = await fixture();
   await binding.captureInitial(runtime.memory);
