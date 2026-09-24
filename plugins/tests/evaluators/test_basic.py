@@ -218,6 +218,49 @@ def test_cost_uses_root_aggregate_when_tool_cost_is_missing() -> None:
     assert result.score == 0.03
 
 
+def test_cost_reports_priced_calls_with_costless_tool() -> None:
+    """Include paid tools while ignoring absent tool cost metadata."""
+    view = _view(cost=Decimal("0.03"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            name="model request",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.TOOL_CALL,
+            name="paid search",
+            cost=Decimal("0.02"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.TOOL_CALL,
+            name="ordinary tool",
+            cost=None,
+        ),
+    ]
+
+    assert cost(view).score == 0.03
+
+
+def test_cost_sums_priced_calls_when_aggregate_is_missing() -> None:
+    """Do not let a costless tool hide complete priced calls."""
+    view = _view(cost=None)
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            name="model request",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.TOOL_CALL,
+            name="ordinary tool",
+            cost=None,
+        ),
+    ]
+
+    assert cost(view).score == 0.01
+
+
 def test_cost_excludes_multiple_root_span_aggregates() -> None:
     """Sum direct calls instead of duplicate aggregate costs from each trace."""
     first_root_id = uuid.uuid4()

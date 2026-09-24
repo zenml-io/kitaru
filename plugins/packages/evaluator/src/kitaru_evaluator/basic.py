@@ -53,6 +53,21 @@ def cost(session: SessionView) -> EvaluationResult:
             and (not direct_nodes or session_cost > 0)
         ):
             recorded_cost = session_cost
+        elif (
+            llm_costs_are_complete
+            and not any(
+                node.node_type is NodeType.SPAN and node.cost is not None
+                for node in root_nodes
+            )
+            and any(node.cost is not None for node in direct_nodes)
+            and all(
+                node.cost is None or (node.cost.is_finite() and node.cost >= 0)
+                for node in direct_nodes
+            )
+        ):
+            recorded_cost = sum_decimals(
+                [node.cost for node in direct_nodes if node.cost is not None]
+            )
         else:
             recorded_cost = None
     if recorded_cost is None:

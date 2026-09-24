@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Report priced call costs when ordinary tool calls have no cost metadata, while retaining aggregate fallback behavior.
+
 ## 0.2.0 - 2026-09-21
 
 - Deterministic evaluators now sum finite decimal values exactly across wide exponent ranges.
