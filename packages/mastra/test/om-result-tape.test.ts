@@ -3,7 +3,10 @@ import { decodeMemoryValue } from "../src/memory-snapshot.js";
 import {
   createOMResultTape,
   getNativeOMModel,
+  getOMInputFingerprint,
   MastraOMDivergenceError,
+  MastraOMRecordedFailureError,
+  type OMResultEntry,
 } from "../src/om-result-tape.js";
 
 function model() {
@@ -35,7 +38,7 @@ async function collect(stream: ReadableStream<unknown>): Promise<unknown[]> {
   return chunks;
 }
 
-it("reuses ordered recorded OM output without calling the live model", async () => {
+it("reuses recorded OM output without calling the live model", async () => {
   const capture = createOMResultTape(undefined, () => {
     throw new Error("unexpected incomplete result");
   });
@@ -43,19 +46,21 @@ it("reuses ordered recorded OM output without calling the live model", async () 
   const baseline = capture.instrument(native, "observer");
   const output = await baseline.doStream({ prompt: "before" });
   expect(await collect(output.stream)).toHaveLength(2);
-  const entries = await capture.finish();
+  const { entries } = await capture.finish();
   expect(entries).toMatchObject([{ phase: "observer", ordinal: 0 }]);
   const live = model();
-  const mismatch = vi.fn();
-  const replay = createOMResultTape(entries, () => {}, mismatch);
+  const replay = createOMResultTape(entries, () => {});
   const recorded = replay.instrument(live, "observer");
   const replayOutput = await recorded.doStream({ prompt: "after" });
   expect(await collect(replayOutput.stream)).toEqual(
     await collect((await native.doStream({ prompt: "before" })).stream),
   );
   expect(live.doStream).not.toHaveBeenCalled();
-  expect(mismatch).toHaveBeenCalledTimes(1);
-  await replay.finish();
+  expect((await replay.finish()).divergence).toEqual({
+    inputMismatches: 1,
+    surplusCalls: 0,
+    unusedResults: 0,
+  });
 });
 
 it("serializes an instrumented OM model as its configured value", () => {
@@ -72,23 +77,6 @@ it("serializes an instrumented OM model as its configured value", () => {
   );
   expect(getNativeOMModel(fromObject)).toBe(configured);
   expect(getNativeOMModel(configured)).toBe(configured);
-});
-
-it("rejects an extra or missing OM call", async () => {
-  const capture = createOMResultTape(undefined, () => {});
-  const output = await capture.instrument(model(), "reflector").doStream({});
-  await collect(output.stream);
-  const entries = await capture.finish();
-  const extra = createOMResultTape(entries, () => {});
-  const instrumented = extra.instrument(model(), "reflector");
-  await collect((await instrumented.doStream({})).stream);
-  await expect(instrumented.doStream({})).rejects.toBeInstanceOf(
-    MastraOMDivergenceError,
-  );
-  const missing = createOMResultTape(entries, () => {});
-  await expect(missing.finish()).rejects.toBeInstanceOf(
-    MastraOMDivergenceError,
-  );
 });
 
 it("captures non-JSON OM stream chunks without encoding codec tags twice", async () => {
@@ -117,7 +105,7 @@ it("captures non-JSON OM stream chunks without encoding codec tags twice", async
   );
   const output = await wrapped.doStream({});
   expect(await collect(output.stream)).toEqual(chunks);
-  const entries = await tape.finish();
+  const { entries } = await tape.finish();
   expect(decodeMemoryValue(entries[0]?.output ?? null)).toEqual(chunks);
 });
 
@@ -190,4 +178,271 @@ it("stops OM capture at the aggregate byte limit without truncating native outpu
   const native = await collect(output.stream);
   expect(native).toHaveLength(total);
   expect(native[total - 1]).toBe(chunk);
+});
+
+function answering(answer: (input: { prompt?: unknown }) => string) {
+  return {
+    doStream: vi.fn(async (input: unknown) => ({
+      stream: new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings: [] });
+          controller.enqueue({
+            type: "text-delta",
+            delta: answer(input as { prompt?: unknown }),
+          });
+          controller.enqueue({ type: "finish", finishReason: "stop" });
+          controller.close();
+        },
+      }),
+    })),
+  };
+}
+
+async function text(output: { stream: ReadableStream<unknown> }) {
+  return (await collect(output.stream))
+    .map((chunk) =>
+      (chunk as { type: string }).type === "text-delta"
+        ? (chunk as { delta: string }).delta
+        : "",
+    )
+    .join("");
+}
+
+async function recordCalls(
+  calls: Array<{ phase: "observer" | "reflector"; prompt: string }>,
+): Promise<OMResultEntry[]> {
+  const tape = createOMResultTape(undefined, () => {
+    throw new Error("unexpected incomplete result");
+  });
+  const models = {
+    observer: tape.instrument(
+      answering((input) => `observed ${String(input.prompt)}`),
+      "observer",
+    ),
+    reflector: tape.instrument(
+      answering((input) => `reflected ${String(input.prompt)}`),
+      "reflector",
+    ),
+  };
+  for (const call of calls)
+    await collect(
+      (await models[call.phase].doStream({ prompt: call.prompt })).stream,
+    );
+  return (await tape.finish()).entries;
+}
+
+it("replays a timing-merged baseline instantly without any live OM call", async () => {
+  // A slow production observer merged four buffer rounds into two calls.
+  const entries = await recordCalls([
+    { phase: "observer", prompt: "messages 1-2" },
+    { phase: "observer", prompt: "messages 3-4" },
+    { phase: "reflector", prompt: "observations" },
+  ]);
+  const liveObserver = answering(() => "live");
+  const liveReflector = answering(() => "live");
+  const replay = createOMResultTape(entries, () => {});
+  const observer = replay.instrument(liveObserver, "observer");
+  const reflector = replay.instrument(liveReflector, "reflector");
+  const answers: string[] = [];
+  for (const prompt of ["message 1", "message 2", "message 3", "message 4"])
+    answers.push(await text(await observer.doStream({ prompt })));
+  answers.push(await text(await reflector.doStream({ prompt: "one" })));
+  answers.push(await text(await reflector.doStream({ prompt: "two" })));
+  expect(answers).toEqual([
+    "observed messages 1-2",
+    "observed messages 3-4",
+    // Surplus observer calls get an empty observation instead of a repeat.
+    "",
+    "",
+    "reflected observations",
+    // Mastra rejects an empty reflection, so a surplus call repeats the last.
+    "reflected observations",
+  ]);
+  expect(liveObserver.doStream).not.toHaveBeenCalled();
+  expect(liveReflector.doStream).not.toHaveBeenCalled();
+  expect((await replay.finish()).divergence).toEqual({
+    inputMismatches: 3,
+    surplusCalls: 3,
+    unusedResults: 0,
+  });
+});
+
+it("matches recorded OM results by input rather than call order", async () => {
+  const entries = await recordCalls([
+    { phase: "observer", prompt: "first" },
+    { phase: "observer", prompt: "second" },
+    { phase: "observer", prompt: "second" },
+  ]);
+  const replay = createOMResultTape(entries, () => {});
+  const observer = replay.instrument(
+    answering(() => "live"),
+    "observer",
+  );
+  const answers = [
+    await text(await observer.doStream({ prompt: "second" })),
+    await text(await observer.doStream({ prompt: "first" })),
+    await text(await observer.doStream({ prompt: "second" })),
+  ];
+  expect(answers).toEqual([
+    "observed second",
+    "observed first",
+    "observed second",
+  ]);
+  expect((await replay.finish()).divergence).toEqual({
+    inputMismatches: 0,
+    surplusCalls: 0,
+    unusedResults: 0,
+  });
+  const fewer = createOMResultTape(entries, () => {});
+  await collect(
+    (
+      await fewer
+        .instrument(
+          answering(() => "live"),
+          "observer",
+        )
+        .doStream({ prompt: "first" })
+    ).stream,
+  );
+  expect((await fewer.finish()).divergence.unusedResults).toBe(2);
+});
+
+it("fails replay closed when a phase has no recorded result", async () => {
+  const entries = await recordCalls([{ phase: "observer", prompt: "only" }]);
+  const live = answering(() => "live");
+  const replay = createOMResultTape(entries, () => {});
+  await expect(
+    replay.instrument(live, "reflector").doStream({ prompt: "x" }),
+  ).rejects.toBeInstanceOf(MastraOMDivergenceError);
+  expect(live.doStream).not.toHaveBeenCalled();
+  await expect(replay.finish()).rejects.toBeInstanceOf(MastraOMDivergenceError);
+  const malformed = createOMResultTape(
+    [{ phase: "observer" } as unknown as OMResultEntry],
+    () => {},
+  );
+  await expect(
+    malformed.instrument(live, "observer").doStream({ prompt: "x" }),
+  ).rejects.toBeInstanceOf(MastraOMDivergenceError);
+  expect(live.doStream).not.toHaveBeenCalled();
+});
+
+it("records failed OM attempts so a baseline with a successful retry replays", async () => {
+  const onIncomplete = vi.fn();
+  const tape = createOMResultTape(undefined, onIncomplete);
+  let attempts = 0;
+  const flaky = answering(() => "observed after retry");
+  const native = flaky.doStream;
+  flaky.doStream = vi.fn(async (input: unknown) => {
+    attempts += 1;
+    if (attempts === 1)
+      throw Object.assign(new Error("Rate limit exceeded"), {
+        statusCode: 429,
+        isRetryable: true,
+      });
+    if (attempts === 2)
+      return {
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "stream-start", warnings: [] });
+            controller.error(new Error("connection reset"));
+          },
+        }),
+      };
+    return native(input);
+  });
+  const observer = tape.instrument(flaky, "observer");
+  // Mastra retries each failure with the same call options.
+  const input = { prompt: "messages" };
+  await expect(observer.doStream(input)).rejects.toThrow("Rate limit");
+  await expect(
+    collect((await observer.doStream(input)).stream),
+  ).rejects.toThrow("connection reset");
+  expect(await text(await observer.doStream(input))).toBe(
+    "observed after retry",
+  );
+  const { entries } = await tape.finish();
+  expect(onIncomplete).not.toHaveBeenCalled();
+  expect(entries.map((entry) => entry.failed ?? false)).toEqual([
+    true,
+    true,
+    false,
+  ]);
+  const live = answering(() => "live");
+  const replay = createOMResultTape(entries, () => {});
+  expect(
+    await text(await replay.instrument(live, "observer").doStream(input)),
+  ).toBe("observed after retry");
+  expect(live.doStream).not.toHaveBeenCalled();
+  expect((await replay.finish()).divergence).toEqual({
+    inputMismatches: 0,
+    surplusCalls: 0,
+    unusedResults: 0,
+  });
+  const failedOnly = createOMResultTape(entries.slice(0, 1), () => {});
+  await expect(
+    failedOnly.instrument(live, "observer").doStream(input),
+  ).rejects.toBeInstanceOf(MastraOMRecordedFailureError);
+  expect(live.doStream).not.toHaveBeenCalled();
+});
+
+it("ignores wall-clock values and generated ids in the OM input fingerprint", () => {
+  const prompt = (at: Date, clock: string, day: string, id: string) => ({
+    prompt: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: `--- message boundary (${at.toISOString()}) ---\n${day}:\nUser (${clock}): remember green (${id}). 2 hours ago`,
+            providerOptions: { mastra: { createdAt: at.getTime() } },
+          },
+        ],
+      },
+    ],
+    temperature: 0.3,
+  });
+  const baseline = prompt(
+    new Date("2026-09-24T08:28:59.024Z"),
+    "10:28 AM",
+    "Sep 24 2026",
+    "0f4c2f2e-4f3b-4f0e-9d7c-2a4b6c8d0e1f",
+  );
+  const replay = prompt(
+    new Date("2026-09-25T17:02:11.070Z"),
+    "7:02 PM",
+    "Friday, Sep 25 2026",
+    "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+  );
+  expect(getOMInputFingerprint(replay)).toBe(getOMInputFingerprint(baseline));
+  expect(getOMInputFingerprint({ ...replay, temperature: 0.7 })).not.toBe(
+    getOMInputFingerprint(baseline),
+  );
+});
+
+it("waits for an OM call that is still in flight when the tape finishes", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const reflector = answering(() => "reflected late");
+  const native = reflector.doStream;
+  reflector.doStream = vi.fn(async (input: unknown) => {
+    await gate;
+    return native(input);
+  });
+  const onIncomplete = vi.fn();
+  const tape = createOMResultTape(undefined, onIncomplete);
+  const call = tape.instrument(reflector, "reflector").doStream({});
+  let finished = false;
+  const done = tape.finish().then((result) => {
+    finished = true;
+    return result;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(finished).toBe(false);
+  release();
+  await collect((await call).stream);
+  const { entries } = await done;
+  expect(onIncomplete).not.toHaveBeenCalled();
+  expect(entries).toMatchObject([{ phase: "reflector", ordinal: 0 }]);
 });

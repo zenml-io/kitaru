@@ -57,7 +57,14 @@ export interface StatefulStreamRecording {
   takeRequest(): RequestEvidence | undefined;
   /** Start joining the invocation's background memory work without waiting. */
   beginFinalization?(): void;
+  /**
+   * Receive a native tripwire that ends the run without Mastra calling
+   * `onFinish` or `onError`, so the session can still be closed.
+   */
+  setTripwireListener?(listener: (reason: string) => void): void;
   finish(): Promise<JsonValue>;
+  /** Session metadata for a completed replay, read after `finish()`. */
+  getReplayMetadata?(): Record<string, JsonValue> | undefined;
   release(): Promise<void>;
 }
 
@@ -185,6 +192,8 @@ async function assertSupportedOptions(
   }
 }
 
+const OM_DIVERGED = "KITARU_REPLAY_DIVERGED:mastra_om_call_order";
+
 function getTripwireReason(value: unknown): string | undefined {
   if (!isRecord(value) || !isRecord(value.tripwire)) return undefined;
   return typeof value.tripwire.reason === "string" && value.tripwire.reason
@@ -199,9 +208,9 @@ function getSafeStreamError(error: unknown): Error {
       (error.message.includes(
         "Recorded Mastra observational memory diverged:",
       ) ||
-        error.message === "KITARU_REPLAY_DIVERGED:mastra_om_call_order"))
+        error.message === OM_DIVERGED))
   )
-    return new Error("KITARU_REPLAY_DIVERGED:mastra_om_call_order");
+    return new Error(OM_DIVERGED);
   const name =
     error instanceof Error &&
     error.name.length <= MAX_STREAM_ERROR_NAME_LENGTH &&
@@ -362,6 +371,9 @@ class StreamLifecycle {
         }
         if (!this.#failureRequested && complete) {
           this.#completionStarted = true;
+          const replayMetadata = this.recorder.state.spec
+            ? this.stateful?.getReplayMetadata?.()
+            : undefined;
           try {
             await this.recorder.complete(
               result,
@@ -373,7 +385,9 @@ class StreamLifecycle {
                       mastra_native_state: "completed",
                     },
                   }
-                : undefined,
+                : replayMetadata
+                  ? { metadata: replayMetadata }
+                  : undefined,
             );
           } catch (error) {
             this.requestRecordingFailure(
@@ -399,8 +413,7 @@ class StreamLifecycle {
     this.#cleanupPromise ??= (async () => {
       const reasonCode = this.#recordingError?.reasonCode;
       const safeError = getSafeStreamError(error);
-      const omDiverged =
-        safeError.message === "KITARU_REPLAY_DIVERGED:mastra_om_call_order";
+      const omDiverged = safeError.message === OM_DIVERGED;
       const metadata: Record<string, JsonValue> | undefined =
         this.stateful && !this.recorder.state.spec
           ? {
@@ -629,8 +642,17 @@ async function recordedStreamWithRecording({
         throw error;
       }
       stateful?.initialize(recorder.state);
-      lifecycle = new StreamLifecycle(recorder, options, stateful);
-      return lifecycle;
+      const active = new StreamLifecycle(recorder, options, stateful);
+      lifecycle = active;
+      stateful?.setTripwireListener?.((reason) => {
+        active.markNativeFailed();
+        const error = new Error(reason);
+        const safe = getSafeStreamError(error);
+        void active
+          .fail(safe.message === OM_DIVERGED ? safe : error)
+          .catch(() => undefined);
+      });
+      return active;
     })();
     return initializePromise;
   };

@@ -11,7 +11,11 @@ import {
 } from "@mastra/core/request-context";
 import type { MemoryStorage } from "@mastra/core/storage";
 import type { Memory } from "@mastra/memory";
-import { KitaruClient, type SessionNodeCreateRequest } from "@zenml-io/kitaru";
+import {
+  type JsonValue,
+  KitaruClient,
+  type SessionNodeCreateRequest,
+} from "@zenml-io/kitaru";
 import {
   type AdapterClient,
   type AdapterRunState,
@@ -64,6 +68,7 @@ import {
 import {
   bindMemoryToolIdentity,
   createStatefulToolProcessors,
+  reportMemoryProcessorTripwires,
 } from "./stateful-tools.js";
 import { loadSkillsWorkspace } from "./stateful-workspace.js";
 import {
@@ -520,12 +525,12 @@ export function createMemoryReplayAgent(
         },
       });
     const omCaptureErrors: string[] = [];
-    const omMismatches: OMResultEntry[] = [];
     const omTape = createOMResultTape(
       historical?.omTape as OMResultEntry[] | undefined,
       (reason) => omCaptureErrors.push(reason),
-      (entry) => omMismatches.push(entry),
     );
+    let replayMetadata: Record<string, JsonValue> | undefined;
+    let tripwireListener: ((reason: string) => void) | undefined;
     let runtime: {
       memory: Memory;
       binding: MastraMemoryCaptureBinding;
@@ -668,7 +673,11 @@ export function createMemoryReplayAgent(
         : undefined;
       if (historical?.configuration.workspaceManifest && !workspace)
         throw new Error("Recorded skills workspace is missing.");
-      const owned = bindMemoryToolIdentity(runtime.memory);
+      const owned = bindMemoryToolIdentity(
+        reportMemoryProcessorTripwires(runtime.memory, (reason) =>
+          tripwireListener?.(reason),
+        ),
+      );
       const config = await factory({
         memory: owned.memory,
         resolveFile: files.resolveFile,
@@ -962,6 +971,10 @@ export function createMemoryReplayAgent(
           beginFinalization() {
             runtime.beginFinalization?.();
           },
+          setTripwireListener(listener) {
+            tripwireListener = listener;
+          },
+          getReplayMetadata: () => replayMetadata,
           async finish() {
             const settled = await runtime.finish();
             await capture.drain();
@@ -973,10 +986,12 @@ export function createMemoryReplayAgent(
             await runtime.binding.drain();
             // An OM call past the deadline may never return; the turn is
             // already ineligible, so do not wait for its tape entry.
-            const omResults = settled ? await omTape.finish() : [];
+            const tape = settled ? await omTape.finish() : undefined;
+            const omResults = tape?.entries ?? [];
             for (const reason of omCaptureErrors)
               runtime.binding.markIncomplete(reason);
-            if (omMismatches.length)
+            const divergence = historical ? tape?.divergence : undefined;
+            if (divergence?.inputMismatches)
               await writeNode({
                 external_id: `${invocationId}:om-input-mismatch`,
                 parent_external_id: ROOT_NODE_EXTERNAL_ID,
@@ -985,8 +1000,30 @@ export function createMemoryReplayAgent(
                 status: "completed",
                 inputs: null,
                 outputs: null,
-                attributes: { count: omMismatches.length },
+                attributes: { count: divergence.inputMismatches },
               });
+            if (divergence?.surplusCalls || divergence?.unusedResults)
+              await writeNode({
+                external_id: `${invocationId}:om-call-divergence`,
+                parent_external_id: ROOT_NODE_EXTERNAL_ID,
+                node_type: "span",
+                name: "om_call_divergence",
+                status: "completed",
+                inputs: null,
+                outputs: null,
+                attributes: {
+                  surplus_calls: divergence.surplusCalls,
+                  unused_results: divergence.unusedResults,
+                },
+              });
+            if (divergence && Object.values(divergence).some(Boolean))
+              replayMetadata = {
+                mastra_om_divergence: {
+                  input_mismatches: divergence.inputMismatches,
+                  surplus_calls: divergence.surplusCalls,
+                  unused_results: divergence.unusedResults,
+                },
+              };
             for (const pending of capture.flushUnfinished())
               await writeAttempt(
                 pending,
@@ -1019,6 +1056,7 @@ export function createMemoryReplayAgent(
                   method: entry.method,
                   inputFingerprint: entry.inputFingerprint,
                   output: entry.output,
+                  ...(entry.failed ? { failed: true } : {}),
                 })),
               ),
             };
