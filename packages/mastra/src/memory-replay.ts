@@ -278,6 +278,8 @@ export interface IsolatedMemoryReplayOptions {
   getRequestId?: MastraMemoryCaptureOptions["getRequestId"];
   onIncomplete?: MastraMemoryCaptureOptions["onIncomplete"];
   omTape?: ReturnType<typeof createOMResultTape>;
+  /** Fail the replay when its memory work has not settled after this long. */
+  finalizationWaitMs: number;
 }
 
 /** Restore historical state into a fresh store; no production store is accepted. */
@@ -350,7 +352,17 @@ export async function createIsolatedMemoryReplay(
       finish(): Promise<boolean> {
         finished ??= (async () => {
           try {
-            return await binding.settle(memory);
+            // A buffering operation that another turn left hung on the same
+            // thread would otherwise stall this replay indefinitely.
+            const settled = await binding.settle(
+              memory,
+              options.finalizationWaitMs,
+            );
+            if (!settled)
+              binding.markIncomplete(
+                "Observational-memory work did not settle before the finalization deadline.",
+              );
+            return settled;
           } finally {
             await binding.release();
             await store.close();

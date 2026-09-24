@@ -1,6 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  MASTRA_RESOURCE_ID_KEY,
+  MASTRA_THREAD_ID_KEY,
+  RequestContext,
+} from "@mastra/core/request-context";
 import { InMemoryStore } from "@mastra/core/storage";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
@@ -207,14 +212,16 @@ async function setup(
   );
   async function turn(
     message: string,
-    selector: { thread: string; resource: string } | null = {
+    selector: { thread: string; resource?: string } | null = {
       thread,
       resource: RESOURCE,
     },
+    requestContext?: RequestContext,
   ) {
     const output = await adapter.stream(message, {
       maxSteps: 5,
       ...(selector ? { memory: selector } : {}),
+      ...(requestContext ? { requestContext } : {}),
     });
     await output.consumeStream();
   }
@@ -375,6 +382,72 @@ it.each(LEASES)(
 );
 
 it.each(LEASES)(
+  "records two turns 100 ms apart as eligible while every Kitaru request is slow (%s lease)",
+  async (_kind, createAccess) => {
+    const { api, turn } = await setup(await createAccess(), {
+      // Evidence uploads after the stream closes must not keep the thread leased.
+      wrapFetch: (recorded) => async (input, init) => {
+        await pause(250);
+        return recorded(input, init);
+      },
+    });
+    await turn("Turn one.");
+    await pause(100);
+    await turn("Turn two.");
+    await vi.waitFor(
+      () =>
+        expect(outcomes(api)).toEqual([
+          "completed/eligible",
+          "completed/eligible",
+        ]),
+      { timeout: 5000 },
+    );
+  },
+  15_000,
+);
+
+it.each(LEASES)(
+  "does not let a call whose selectors come from the request context affect other threads (%s lease)",
+  async (_kind, createAccess) => {
+    const access = await createAccess();
+    const markUnsafeWrite = vi.spyOn(access, "markUnsafeWrite");
+    const { api, domain, turn } = await setup(access);
+    const resourceOnly = new RequestContext();
+    resourceOnly.set(MASTRA_RESOURCE_ID_KEY, "context-resource");
+    await turn(
+      "Thread in options, resource in context.",
+      { thread: "context-thread-a" },
+      resourceOnly,
+    );
+    const both = new RequestContext();
+    both.set(MASTRA_THREAD_ID_KEY, "context-thread-b");
+    both.set(MASTRA_RESOURCE_ID_KEY, "context-resource");
+    await turn("Both selectors in context.", null, both);
+    await turn("An unrelated user.", {
+      thread: "unrelated-thread",
+      resource: "unrelated-resource",
+    });
+    await vi.waitFor(
+      () =>
+        expect(outcomes(api).sort()).toEqual([
+          "completed/eligible",
+          "setup-failure",
+          "setup-failure",
+        ]),
+      { timeout: 3000 },
+    );
+    expect(markUnsafeWrite).not.toHaveBeenCalled();
+    for (const threadId of ["context-thread-a", "context-thread-b"]) {
+      const { messages } = await domain.listMessages({ threadId });
+      expect(messages.length).toBeGreaterThan(0);
+      expect(
+        messages.every((message) => message.resourceId === "context-resource"),
+      ).toBe(true);
+    }
+  },
+);
+
+it.each(LEASES)(
   "keeps a thread ineligible after an unregistered writer until quiescence reset (%s lease)",
   async (_kind, createAccess) => {
     const access = await createAccess();
@@ -445,4 +518,25 @@ it("lets the source Memory's settled() join a turn's observational-memory work",
   expect(observed).toBe(false);
   await memory.settled();
   expect(observed).toBe(true);
+});
+
+it("bounds the source Memory's settled() by the finalization deadline when OM work hangs", async () => {
+  const hung = gate();
+  const { memory, turn } = await setup(createProcessLocalMemoryAccess(), {
+    thread: "hung-settled-thread",
+    backgroundObservation: true,
+    joinSourceMemory: true,
+    finalizationWaitMs: 200,
+    observerWait: () => hung.opened,
+  });
+  try {
+    await turn(LONG_MESSAGE);
+    const outcome = await Promise.race([
+      memory.settled().then(() => "settled"),
+      pause(3000).then(() => "still waiting"),
+    ]);
+    expect(outcome).toBe("settled");
+  } finally {
+    hung.open();
+  }
 });

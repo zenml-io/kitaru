@@ -47,6 +47,12 @@ export interface MastraMemoryLease {
  * A write Kitaru makes outside that lease registers through
  * `acquire(selector, { waitMs: 0 })` and releases immediately afterwards.
  *
+ * Kitaru never renews a lease. A shared implementation must still end a lease
+ * whose holder process died without releasing it, through a time-to-live
+ * longer than the longest turn plus its finalization wait, or a liveness check
+ * of the holder. `verifyEligibility` must return false once the lease has
+ * expired, so a turn that outlives its lease is ineligible rather than unsafe.
+ *
  * `markUnsafeWrite` is only for a write that could not register: its selector
  * is unknown or coordination failed. That marker must survive process loss and
  * keep both selectors ineligible until `resetAfterQuiescence`. Kitaru never
@@ -243,16 +249,21 @@ export interface MastraMemoryCaptureBinding {
     settled(): Promise<void>;
   }): Promise<MastraMemorySnapshot | undefined>;
   markIncomplete(reason: string): void;
+  /** Wait for every storage write and its evidence upload to finish. */
   drain(): Promise<void>;
   /**
    * Join the invocation's memory work, including buffered observation and
-   * reflection, and record its evidence. Without `waitMs` this waits until the
-   * work settles; with it, resolve false once `waitMs` passes first. A failed
-   * join rejects either way.
+   * reflection, until its storage writes settle. Without `waitMs` this waits
+   * until the work settles; with it, resolve false once `waitMs` passes first
+   * and stop joining further rounds. A failed join rejects either way.
    */
   settle(memory: MastraSettlingMemory, waitMs?: number): Promise<boolean>;
   /** Check shared ownership immediately before persisting eligible inputs. */
   verifyEligibility(): Promise<void>;
+  /**
+   * Release ownership once storage writes have settled. Evidence uploads can
+   * still be running; `drain()` before reading `incompleteReasons`.
+   */
   release(): Promise<void>;
 }
 
@@ -601,6 +612,9 @@ export function createMemoryCaptureBinding(
     resourceId: options.resourceId,
   };
   let settling: Promise<void> | undefined;
+  // A hung buffering operation stays in Mastra's process-wide map; stop
+  // polling it once a bounded caller has given up on this invocation.
+  let joinAbandoned = false;
   const registerWrite = createWriteRegistrar(
     options.exclusiveAccess,
     () => selector,
@@ -751,6 +765,14 @@ export function createMemoryCaptureBinding(
     },
   });
 
+  async function settleMutations(): Promise<void> {
+    while (true) {
+      const current = mutations;
+      await current;
+      if (current === mutations) return;
+    }
+  }
+
   async function drain(): Promise<void> {
     // Evidence can grow while a storage operation settles; follow both tails.
     while (true) {
@@ -767,7 +789,8 @@ export function createMemoryCaptureBinding(
     const engine = await memory.omEngine;
     // Mastra's settled() does not join a buffered reflection, and settled
     // work can start more buffering. Repeat until a round records no write.
-    while (true) {
+    // Evidence uploads do not change storage, so they are not joined here.
+    while (!joinAbandoned) {
       const before = revision;
       await memory.settled();
       const waitStarted = Date.now();
@@ -776,7 +799,7 @@ export function createMemoryCaptureBinding(
         options.resourceId,
         BUFFERING_WAIT_MS,
       );
-      await drain();
+      await settleMutations();
       // waitForBuffering resolves, rather than rejects, when it times out.
       if (Date.now() - waitStarted >= BUFFERING_WAIT_MS) continue;
       if (revision === before) return;
@@ -905,12 +928,14 @@ export function createMemoryCaptureBinding(
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        return await Promise.race([
+        const settled = await Promise.race([
           settling.then(() => true),
           new Promise<boolean>((resolve) => {
             timer = setTimeout(() => resolve(false), settleWaitMs);
           }),
         ]);
+        if (!settled) joinAbandoned = true;
+        return settled;
       } finally {
         if (timer) clearTimeout(timer);
       }
@@ -918,7 +943,7 @@ export function createMemoryCaptureBinding(
     verifyEligibility,
     async release() {
       if (released) return;
-      await drain();
+      await settleMutations();
       released = true;
       try {
         await lease?.();

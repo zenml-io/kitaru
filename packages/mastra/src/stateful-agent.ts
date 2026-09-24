@@ -4,7 +4,11 @@ import type { MastraModelConfig } from "@mastra/core/llm";
 import type { Mastra } from "@mastra/core/mastra";
 import type { MemoryConfigInternal } from "@mastra/core/memory";
 import type { InputProcessor } from "@mastra/core/processors";
-import { RequestContext } from "@mastra/core/request-context";
+import {
+  MASTRA_RESOURCE_ID_KEY,
+  MASTRA_THREAD_ID_KEY,
+  RequestContext,
+} from "@mastra/core/request-context";
 import type { MemoryStorage } from "@mastra/core/storage";
 import type { Memory } from "@mastra/memory";
 import { KitaruClient, type SessionNodeCreateRequest } from "@zenml-io/kitaru";
@@ -122,9 +126,10 @@ export interface MemoryReplayAgentOptions extends KitaruAgentOptions {
   skillsDirectory?: string;
   resolveModel: (id: string) => MastraModelConfig | Promise<MastraModelConfig>;
   /**
-   * How long a baseline waits after its stream closes for observational-memory
-   * work before it releases the source lease. A turn whose work does not settle
-   * in time is recorded as ineligible. Defaults to 60 seconds.
+   * How long a turn waits after its stream closes for observational-memory
+   * work. A baseline then releases the source lease, and a turn whose work did
+   * not settle in time is recorded as ineligible; a replay whose work did not
+   * settle fails. Defaults to 60 seconds.
    */
   finalizationWaitMs?: number;
 }
@@ -264,6 +269,8 @@ export function createMemoryReplayAgent(
     ...supplied,
     recordingLimits: normalizeRecordingLimits(supplied.recordingLimits),
   };
+  const finalizationWaitMs =
+    supplied.finalizationWaitMs ?? DEFAULT_FINALIZATION_WAIT_MS;
   const client = new KitaruClient({
     apiKey: options.apiKey,
     apiUrl: options.apiUrl,
@@ -311,29 +318,42 @@ export function createMemoryReplayAgent(
     return native.stream(rawInput, callerOptions);
   }
 
-  /** Resolve the selectors a native call writes, or undefined when unknown. */
+  /**
+   * Resolve the selectors a native call writes, or undefined when unknown.
+   *
+   * Follows Mastra's precedence: the reserved request-context keys override
+   * the merged default and caller memory options.
+   */
   async function getNativeSelector(
     config: AgentConfig,
     callerOptions: RuntimeStreamOptions,
   ): Promise<MastraMemorySelector | undefined> {
     try {
+      const requestContext =
+        callerOptions.requestContext ?? new RequestContext();
       const defaults = requireRecord(
         typeof config.defaultOptions === "function"
           ? await config.defaultOptions({
-              requestContext:
-                callerOptions.requestContext ?? new RequestContext(),
+              requestContext,
               mastra: options.mastra,
             })
           : (config.defaultOptions ?? {}),
         "default options",
       );
       const { deepMerge } = await import("@mastra/core/utils");
-      return getSelector(
-        deepMerge(
-          record(defaults.memory) ? { memory: defaults.memory } : {},
-          record(callerOptions.memory) ? { memory: callerOptions.memory } : {},
-        ),
+      const merged = deepMerge(
+        record(defaults.memory) ? defaults.memory : {},
+        record(callerOptions.memory) ? callerOptions.memory : {},
       );
+      const contextThread = requestContext.get(MASTRA_THREAD_ID_KEY);
+      const contextResource = requestContext.get(MASTRA_RESOURCE_ID_KEY);
+      return getSelector({
+        memory: {
+          ...merged,
+          ...(contextThread ? { thread: contextThread } : {}),
+          ...(contextResource ? { resource: contextResource } : {}),
+        },
+      });
     } catch {
       return undefined;
     }
@@ -546,6 +566,7 @@ export function createMemoryReplayAgent(
         onIncomplete,
         getRequestId: () => requestCapture?.currentRequestId,
         omTape,
+        finalizationWaitMs,
       });
     } else {
       const source = await options.sourceMemory();
@@ -595,7 +616,7 @@ export function createMemoryReplayAgent(
         if (tracked || !sourceEngine) return;
         tracked = true;
         void sourceEngine
-          .trackBackgroundWork(binding.settle(memory))
+          .trackBackgroundWork(binding.settle(memory, finalizationWaitMs))
           .catch(() => undefined);
       };
       let finished: Promise<boolean> | undefined;
@@ -607,10 +628,7 @@ export function createMemoryReplayAgent(
         finish() {
           finished ??= (async () => {
             trackSourceWork();
-            const settled = await binding.settle(
-              memory,
-              options.finalizationWaitMs ?? DEFAULT_FINALIZATION_WAIT_MS,
-            );
+            const settled = await binding.settle(memory, finalizationWaitMs);
             if (!settled)
               binding.markIncomplete(
                 "Observational-memory work did not settle before the finalization deadline.",
@@ -949,8 +967,10 @@ export function createMemoryReplayAgent(
             await capture.drain();
             if (!historical) await runtime.binding.verifyEligibility();
             // The turn's writes are settled and checked, so the next turn on
-            // this thread can acquire while the session update is sent.
+            // this thread can acquire while evidence uploads and the session
+            // update are sent.
             await runtime.release();
+            await runtime.binding.drain();
             // An OM call past the deadline may never return; the turn is
             // already ineligible, so do not wait for its tape entry.
             const omResults = settled ? await omTape.finish() : [];

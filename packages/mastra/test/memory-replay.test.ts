@@ -45,6 +45,7 @@ it("restores historical memory with original timestamps into independent native 
     resolveModel: async (id: string) =>
       id.endsWith("observer") ? source.observer.model : source.reflector.model,
     recordMutation: async () => {},
+    finalizationWaitMs: 60_000,
   };
   const one = await createIsolatedMemoryReplay({
     ...options,
@@ -105,6 +106,7 @@ it("rejects unsupported memory dependencies and unjoined work before model resol
         throw new Error("must not resolve");
       },
       recordMutation: async () => {},
+      finalizationWaitMs: 60_000,
     }),
   ).rejects.toThrow(/Unjoined/);
   expect(resolved).toBe(false);
@@ -129,6 +131,7 @@ it("runs native observation, reflection and working-memory changes with ordered 
     recordMutation: async (event) => {
       changes.push(event);
     },
+    finalizationWaitMs: 60_000,
   });
   const calls: ModelCall[] = [];
   const model = new MastraLanguageModelV2Mock({
@@ -227,6 +230,7 @@ it("waits for native background observation and evidence before releasing replay
     resolveModel: (id) =>
       id.endsWith("observer") ? source.observer.model : source.reflector.model,
     recordMutation: async () => {},
+    finalizationWaitMs: 60_000,
   });
   try {
     const agent = new Agent({
@@ -260,6 +264,64 @@ it("waits for native background observation and evidence before releasing replay
   }
 }, 20000);
 
+it("fails a replay whose background observation misses the finalization deadline", async () => {
+  let release!: () => void;
+  let signalStarted!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    signalStarted = resolve;
+  });
+  const source = createMemoryRuntime({
+    messageTokens: 10000,
+    observerWait: async () => {
+      signalStarted();
+      await blocked;
+    },
+  });
+  await seedMemory(source);
+  const runtime = await createIsolatedMemoryReplay({
+    invocationId: "hung-background",
+    initialSnapshot: {
+      ...(await snapshotMemory(source, true)),
+      threadId: THREAD,
+      resourceId: RESOURCE,
+    },
+    configuration: serializeMemoryConfiguration(
+      source.memory.getMergedThreadConfig(),
+    ),
+    resolveModel: (id) =>
+      id.endsWith("observer") ? source.observer.model : source.reflector.model,
+    recordMutation: async () => {},
+    finalizationWaitMs: 200,
+  });
+  try {
+    const agent = new Agent({
+      id: "hung-background",
+      name: "Hung background",
+      instructions: "Answer",
+      model: new MastraLanguageModelV2Mock({
+        doStream: async () => textStream("done"),
+      }),
+      memory: runtime.memory,
+    });
+    const result = await agent.stream("Remember this preference.", {
+      memory: { thread: THREAD, resource: RESOURCE },
+    });
+    for await (const _ of result.textStream) {
+      /* Consume native stream. */
+    }
+    await started;
+    expect(await runtime.finish()).toBe(false);
+    expect(runtime.binding.incompleteReasons).toContain(
+      "Observational-memory work did not settle before the finalization deadline.",
+    );
+  } finally {
+    release();
+  }
+}, 20000);
+
 it("replays on the record semantics of a database store unless the source was in memory", async () => {
   const { source, initialSnapshot, configuration } = await baseline();
   const historical = initialSnapshot.records[0];
@@ -273,6 +335,7 @@ it("replays on the record semantics of a database store unless the source was in
     resolveModel: async (id: string) =>
       id.endsWith("observer") ? source.observer.model : source.reflector.model,
     recordMutation: async () => {},
+    finalizationWaitMs: 60_000,
   };
   const persistent = await createIsolatedMemoryReplay({
     ...options,
