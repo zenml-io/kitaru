@@ -688,3 +688,131 @@ def test_human_registration_receipt_keeps_parent_and_version_identity() -> None:
     assert "019f0000-1111-7222-8333-444444444444" in stdout
     assert "019f0000-1111-7222-8333-555555555555" in stdout
     assert "Phases" in stdout
+
+
+def _emit_error_to(
+    command: str,
+    error: CLIError,
+    *,
+    rich: bool = False,
+    debug: bool = False,
+    exception: BaseException | None = None,
+) -> str:
+    """Emit one error and return what reached stderr, without terminal styling."""
+    stderr = io.StringIO()
+    token = set_output_context(
+        OutputContext(
+            command=command,
+            mode="text",
+            debug=debug,
+            traceback=debug,
+            stdout=io.StringIO(),
+            stderr=stderr,
+            rich=rich,
+            terminal_width=100,
+        )
+    )
+    try:
+        emit_error(
+            error,
+            exception=exception,
+            traceback=exception.__traceback__ if exception else None,
+        )
+    finally:
+        reset_output_context(token)
+    return Text.from_ansi(stderr.getvalue()).plain
+
+
+def test_debug_error_includes_a_redacted_traceback() -> None:
+    """`--debug` shows where a failure came from without leaking credentials."""
+    try:
+        raise RuntimeError("request failed with Bearer debug-secret-token")
+    except RuntimeError as exception:
+        caught = exception
+    error = CLIError("internal_error", "Request failed.")
+
+    debug = _emit_error_to("status", error, debug=True, exception=caught)
+    plain = _emit_error_to("status", error, exception=caught)
+
+    assert "Traceback" in debug
+    assert "RuntimeError" in debug
+    assert "debug-secret-token" not in debug
+    assert plain == "Error: Request failed.\n"
+
+
+def test_plain_text_error_prints_the_hint_line() -> None:
+    """Scripts reading plain text still receive the recovery hint."""
+    rendered = _emit_error_to(
+        "local.logs",
+        CLIError("invalid_arguments", "Bad flag.", hint="Pass `--output jsonl`."),
+    )
+
+    assert rendered == "Error: Bad flag.\nHint: Pass `--output jsonl`.\n"
+
+
+@pytest.mark.parametrize(
+    ("command", "kind", "hint"),
+    [
+        ("cli", "invalid_arguments", "Run `kitaru --help`"),
+        (
+            "agent.version.get",
+            "invalid_arguments",
+            "Run `kitaru agent version get --help`",
+        ),
+        ("session.list", "authentication_failed", "Run `kitaru login`"),
+        ("status", "network_error", "Run `kitaru status`"),
+        ("agent.get", "not_found", "Run `kitaru agent list`"),
+    ],
+)
+def test_human_error_falls_back_to_a_command_specific_hint(
+    command: str, kind: str, hint: str
+) -> None:
+    """Interactive errors without their own hint still suggest a next step."""
+    rendered = _emit_error_to(command, CLIError(kind, "It failed."), rich=True)
+
+    assert f"Try: {hint}" in rendered
+
+
+def test_human_not_found_outside_listable_groups_has_no_hint() -> None:
+    """A not-found error only suggests a list command that actually exists."""
+    rendered = _emit_error_to(
+        "config.get", CLIError("not_found", "It failed."), rich=True
+    )
+
+    assert "Try:" not in rendered
+
+
+def test_human_setup_renders_steps_and_the_manual_mcp_snippet() -> None:
+    """Setup shows each step and the snippet to paste when no client was found."""
+    snippet = {"mcpServers": {"kitaru": {"command": "uvx", "args": ["kitaru-mcp"]}}}
+    stdout, _ = _render_text(
+        "setup",
+        CommandResult(
+            item={
+                "install": "project",
+                "server_url": "http://localhost:8000",
+                "mode": "standard",
+                "steps": [
+                    {
+                        "kind": "skills",
+                        "target": "/repo/.agents/skills",
+                        "status": "done",
+                        "detail": "Installed 2 skills.",
+                    },
+                    {
+                        "kind": "mcp",
+                        "target": "manual",
+                        "status": "skipped",
+                        "detail": "No configurable MCP client detected.",
+                    },
+                ],
+                "mcp_snippet": snippet,
+            }
+        ),
+        rich=True,
+    )
+
+    assert "Kitaru MCP server: http://localhost:8000 in standard mode" in stdout
+    assert "Installed 2 skills." in stdout
+    assert "For any other MCP client, add:" in stdout
+    assert json.loads(stdout.split("add:\n", 1)[1]) == snippet
