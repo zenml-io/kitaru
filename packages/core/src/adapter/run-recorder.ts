@@ -1,5 +1,5 @@
 import { writeFile } from "node:fs/promises";
-
+import { KitaruApiError } from "../errors.js";
 import type {
   JsonValue,
   ReplaySpec,
@@ -73,6 +73,11 @@ export interface RunRecorderOptions {
   startedAt?: string;
 }
 
+export interface RunCompletion {
+  /** Whether the server stored the inputs and metadata passed to `complete`. */
+  finalizationAccepted: boolean;
+}
+
 export class RunRecorder {
   readonly state: AdapterRunState;
 
@@ -144,7 +149,7 @@ export class RunRecorder {
       inputs?: JsonValue;
       metadata?: Record<string, JsonValue>;
     } = {},
-  ): Promise<void> {
+  ): Promise<RunCompletion> {
     await this.state.awaitSteps();
     // The run has finished by the time its result is recorded, so a result too
     // large or too circular to record is bounded instead of turning a
@@ -162,13 +167,35 @@ export class RunRecorder {
         }),
       ],
     });
-    await this.#client.updateSession(this.state.sessionId, {
+    const completion = {
       ended_at: endedAt,
+      outputs: serializedOutput,
+      status: "completed" as const,
+    };
+    const finalization = {
       ...("inputs" in options ? { inputs: options.inputs } : {}),
       ...(options.metadata ? { metadata: options.metadata } : {}),
-      outputs: serializedOutput,
-      status: "completed",
-    });
+    };
+    try {
+      await this.#client.updateSession(this.state.sessionId, {
+        ...completion,
+        ...finalization,
+      });
+      return { finalizationAccepted: true };
+    } catch (error) {
+      // A server that predates these fields, or that refuses the replay
+      // inputs, answers 422 before it writes anything. The run itself
+      // succeeded, so it is still recorded as completed with its outputs,
+      // just without replay inputs.
+      if (
+        Object.keys(finalization).length === 0 ||
+        !(error instanceof KitaruApiError) ||
+        error.status !== 422
+      )
+        throw error;
+    }
+    await this.#client.updateSession(this.state.sessionId, completion);
+    return { finalizationAccepted: false };
   }
 
   async fail(

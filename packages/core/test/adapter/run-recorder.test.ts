@@ -1,7 +1,27 @@
 import { describe, expect, it } from "vitest";
 import type { AdapterClient } from "../../src/adapter/index.js";
 import { RunRecorder, recordNormalizedStep } from "../../src/adapter/index.js";
-import { fakeClient, SESSION_ID } from "./helpers.js";
+import { KitaruApiError } from "../../src/errors.js";
+import { type FakeClient, fakeClient, SESSION_ID } from "./helpers.js";
+
+/** Reject session updates that carry replay inputs, as an older server does. */
+function rejectingFinalization(error: unknown): FakeClient {
+  const client = fakeClient();
+  const updateSession = client.updateSession;
+  client.updateSession = async (sessionId, request) => {
+    if ("inputs" in request) {
+      client.updates.push(request);
+      throw error;
+    }
+    return updateSession(sessionId, request);
+  };
+  return client;
+}
+
+const FINALIZATION = {
+  inputs: { mastra_memory_replay: { version: 3, complete: true } },
+  metadata: { mastra_replay_state: "eligible" },
+};
 
 async function recorder(client: AdapterClient): Promise<RunRecorder> {
   return RunRecorder.create({
@@ -58,6 +78,51 @@ describe("normalized run lifecycle", () => {
       status: "completed",
     });
     expect(client.nodes.at(-1)?.nodes[0]?.inputs).toEqual(finalInputs);
+  });
+
+  it("keeps a completed run when the server rejects its replay inputs", async () => {
+    const client = rejectingFinalization(
+      new KitaruApiError(
+        "PATCH",
+        `/api/v1/sessions/${SESSION_ID}`,
+        422,
+        "Extra inputs are not permitted",
+      ),
+    );
+    const run = await recorder(client);
+    await run.initialize();
+
+    const completion = await run.complete({ text: "done" }, FINALIZATION);
+
+    expect(completion).toEqual({ finalizationAccepted: false });
+    expect(client.updates).toHaveLength(2);
+    expect(client.updates[0]).toMatchObject(FINALIZATION);
+    expect(client.updates[1]).toEqual({
+      ended_at: expect.any(String),
+      outputs: { text: "done" },
+      status: "completed",
+    });
+    expect(client.nodes.at(-1)?.nodes[0]).toMatchObject({
+      outputs: { text: "done" },
+      status: "completed",
+    });
+  });
+
+  it("does not retry a completion rejected for another reason", async () => {
+    const conflict = new KitaruApiError(
+      "PATCH",
+      `/api/v1/sessions/${SESSION_ID}`,
+      409,
+      "Session does not accept updates",
+    );
+    const client = rejectingFinalization(conflict);
+    const run = await recorder(client);
+    await run.initialize();
+
+    await expect(run.complete({ text: "done" }, FINALIZATION)).rejects.toBe(
+      conflict,
+    );
+    expect(client.updates).toHaveLength(1);
   });
 
   it("creates, records, and completes one run", async () => {
