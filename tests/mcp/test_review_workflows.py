@@ -1297,7 +1297,7 @@ async def test_activity_result_session_exposes_durable_replay_failure_reason(
 async def test_experiment_run_start_reports_safe_mastra_replay_reason(
     reason: str,
 ) -> None:
-    """MCP preserves a safe eligibility reason when the server rejects a run."""
+    """MCP keeps the refused session id and safe reason from a server conflict."""
     baseline_session_id = uuid.uuid4()
 
     async def start_run(
@@ -1325,7 +1325,10 @@ async def test_experiment_run_start_reports_safe_mastra_replay_reason(
     assert result.is_error is True
     assert result.structured_content is not None
     assert result.structured_content["error"]["code"] == "conflict"
-    assert result.structured_content["error"]["details"] == {"reason": reason}
+    assert result.structured_content["error"]["details"] == {
+        "session_id": str(baseline_session_id),
+        "reason": reason,
+    }
     assert json.loads(cast(TextContent, result.content[0]).text) == (
         result.structured_content
     )

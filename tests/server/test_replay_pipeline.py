@@ -53,8 +53,10 @@ from kitaru.server.application.models.experiment import ExperimentCreate
 from kitaru.server.application.models.experiment_run import ExperimentRunCreate
 from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
+from kitaru.server.application.models.session import SessionUpdate
 from kitaru.server.application.models.task import TaskFilter, TaskUpdate
 from kitaru.server.application.services.plugin_resolution import PLUGIN_PROVIDER_LABEL
+from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
     AgentVersion,
@@ -261,10 +263,80 @@ async def test_old_mastra_working_memory_remains_replayable(
     assert bundle.replay.baseline_session_id == baseline.id
 
 
-async def test_experiment_rejects_pending_mastra_baseline_before_run(
+async def test_experiment_run_reports_refused_mastra_baselines_per_session(
     services: ReplayServices,
 ) -> None:
-    """Cohort fan-out refuses pending memory input before it creates a run."""
+    """Refused memory recordings fail their own replay while the rest still run."""
+    version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, version.agent_id
+    )
+    replayable = await _baseline_session(services, version)
+    pending = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        framework="mastra",
+        inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+        metadata={"mastra_replay_state": "pending"},
+    )
+    ineligible = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.FAILED,
+        framework="mastra",
+        inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+        metadata={
+            "mastra_replay_state": "ineligible",
+            "mastra_replay_reason": "native_run_failed",
+        },
+    )
+    cohort = await _cohort_version(
+        services, version.agent_id, [replayable.id, pending.id, ineligible.id]
+    )
+
+    # IF_MISSING checks baseline evaluability, which the in-progress pending
+    # recording would fail if it were not refused first.
+    run, counts = await services.experiment_service.start_run(
+        experiment_id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort.id,
+            agent_version_id=version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
+        ),
+        actor=ACTOR,
+    )
+
+    assert run.status is ExperimentRunStatus.RUNNING
+    assert (counts.total, counts.pending, counts.failed) == (3, 1, 2)
+    replays = {
+        replay.baseline_session_id: replay
+        for replay in await services.replays.list_by_experiment_run(run.id)
+    }
+    assert replays[replayable.id].status is ReplayStatus.PENDING
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=get_replay_job_id(replays[replayable.id])), actor=ACTOR
+    )
+    assert any(isinstance(task, AgentTask) for task in tasks)
+    for session, reason in [
+        (pending, "mastra_replay_pending"),
+        (ineligible, "mastra_replay_native_run_failed"),
+    ]:
+        refused = replays[session.id]
+        assert refused.status is ReplayStatus.FAILED
+        assert refused.error == f"Session {session.id}: {reason}"
+        assert refused.job_id is None
+
+
+async def test_experiment_run_of_only_refused_baselines_fails_immediately(
+    services: ReplayServices,
+) -> None:
+    """A run whose every baseline is refused cannot wait on a job that never runs."""
     version = await _agent_version_with_run_spec(services)
     experiment_id, _ = await _create_experiment_with_evaluator(
         services, version.agent_id
@@ -280,17 +352,63 @@ async def test_experiment_rejects_pending_mastra_baseline_before_run(
         metadata={"mastra_replay_state": "pending"},
     )
     cohort = await _cohort_version(services, version.agent_id, [baseline.id])
-    with pytest.raises(SessionReplayNotReady, match="mastra_replay_pending"):
-        await services.experiment_service.start_run(
-            experiment_id,
-            ExperimentRunCreate(
-                cohort_version_id=cohort.id,
-                agent_version_id=version.id,
+
+    run, counts = await services.experiment_service.start_run(
+        experiment_id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort.id,
+            agent_version_id=version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+        ),
+        actor=ACTOR,
+    )
+
+    assert run.status is ExperimentRunStatus.FAILED
+    assert (counts.total, counts.failed) == (1, 1)
+    stored = await services.experiment_runs.get(run.id)
+    assert stored.status is ExperimentRunStatus.FAILED
+    [replay] = await services.replays.list_by_experiment_run(run.id)
+    assert replay.error == f"Session {baseline.id}: mastra_replay_pending"
+    tasks, _ = await services.task_service.list_tasks(TaskFilter(), actor=ACTOR)
+    assert tasks == []
+
+
+async def test_abandoned_mastra_baseline_is_refused_with_its_reason(
+    services: ReplayServices,
+) -> None:
+    """A pending recording closed as failed is refused as abandoned."""
+    version = await _agent_version_with_run_spec(services)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        framework="mastra",
+        inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+        metadata={"mastra_replay_state": "pending"},
+    )
+    await SessionService(
+        repository=services.sessions,
+        task_repository=services.tasks,
+        agent_version_repository=services.agent_versions,
+        replay_repository=services.replays,
+        import_repository=services.imports,
+        payload_store=services.payload_store,
+    ).update_session(
+        baseline.id,
+        SessionUpdate(status=SessionStatus.FAILED, error="worker died"),
+        actor=ACTOR,
+    )
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_abandoned"):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[],
                 baseline_evaluation_mode=BaselineEvaluationMode.NONE,
             ),
             actor=ACTOR,
         )
-    assert await services.experiment_runs.list_by_experiment(experiment_id) == []
 
 
 async def _cohort_version(

@@ -102,7 +102,7 @@ from kitaru.client.device_grant import DeviceLoginError
 from kitaru.client.exceptions import (
     APIError,
     InvalidServerResponseError,
-    parse_mastra_replay_reason,
+    parse_mastra_replay_refusal,
 )
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -5286,9 +5286,9 @@ def _convert_error(
         if exception.status_code == 404:
             return CLIError("not_found", detail, details=details)
         if exception.status_code == 409:
-            reason = parse_mastra_replay_reason(detail)
-            if reason is not None:
-                details["reason"] = reason
+            refusal = parse_mastra_replay_refusal(detail)
+            if refusal is not None:
+                details.update(refusal)
             return CLIError("conflict", detail, details=details)
         if exception.status_code in {400, 413, 422}:
             return CLIError("invalid_arguments", detail, details=details)

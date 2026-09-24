@@ -68,15 +68,26 @@ class APIError(KitaruClientError):
         self.detail = detail
 
 
-_MASTRA_REPLAY_REASON = re.compile(
-    r"Session [0-9a-f-]{36}: (mastra_replay_[a-z][a-z0-9_]{0,63})"
+_MASTRA_REPLAY_REFUSAL = re.compile(
+    r"Session ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}): "
+    r"(mastra_replay_[a-z][a-z0-9_]{0,63})"
 )
 
 
-def parse_mastra_replay_reason(detail: str) -> str | None:
-    """Extract a safe replay refusal code from a session conflict detail."""
-    match = _MASTRA_REPLAY_REASON.fullmatch(detail)
-    return match.group(1) if match is not None else None
+def parse_mastra_replay_refusal(detail: str) -> dict[str, str] | None:
+    """Extract the refused session id and safe reason code from a conflict detail.
+
+    Args:
+        detail: Error detail returned by the server.
+
+    Returns:
+        ``session_id`` and ``reason`` of the refusal, or ``None`` when the
+        detail is not a Mastra replay refusal.
+    """
+    match = _MASTRA_REPLAY_REFUSAL.fullmatch(detail)
+    if match is None:
+        return None
+    return {"session_id": match.group(1), "reason": match.group(2)}
 
 
 class AuthenticationError(APIError):

@@ -380,7 +380,11 @@ def test_public_create_reports_safe_mastra_ineligibility_reason(
     )
     error = json.loads(capsys.readouterr().err)["error"]
     assert error["kind"] == "conflict"
-    assert error["details"] == {"status_code": 409, "reason": reason}
+    assert error["details"] == {
+        "status_code": 409,
+        "session_id": str(client.baseline_id),
+        "reason": reason,
+    }
 
 
 def test_public_create_keeps_unrelated_conflict_generic(

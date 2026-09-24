@@ -13,7 +13,7 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.base import JsonValue
-from kitaru.client.exceptions import APIError, parse_mastra_replay_reason
+from kitaru.client.exceptions import APIError, parse_mastra_replay_refusal
 from kitaru.mcp.connection import ConnectionConfigurationError
 from kitaru.mcp.models.common import ToolError, ToolResult
 from kitaru.mcp.redaction import redact, redact_data
@@ -156,12 +156,13 @@ def map_exception(error: BaseException) -> MCPToolError:
             "rate_limited": "The Kitaru server rate limited the request.",
             "remote_failed": "The Kitaru server failed the request.",
         }
-        details = None
-        if status == 409:
-            reason = parse_mastra_replay_reason(error.detail)
-            if reason is not None:
-                details = {"reason": reason}
-        return MCPToolError(code, messages[code], retryable=retryable, details=details)
+        refusal = parse_mastra_replay_refusal(error.detail) if status == 409 else None
+        return MCPToolError(
+            code,
+            messages[code],
+            retryable=retryable,
+            details=dict(refusal) if refusal is not None else None,
+        )
     if isinstance(error, httpx.TimeoutException):
         return MCPToolError("timeout", "The Kitaru request timed out.", retryable=True)
     if isinstance(error, httpx.TransportError):

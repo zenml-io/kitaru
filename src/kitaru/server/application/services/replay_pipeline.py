@@ -106,12 +106,41 @@ async def validate_replay_baselines(
     Args:
         baselines: Sessions selected for replay.
         payload_store: Store used to resolve offloaded session inputs.
+
+    Raises:
+        SessionReplayNotReady: The first baseline that cannot be replayed.
+    """
+    _, refusals = await split_replay_baselines(baselines, payload_store)
+    if refusals:
+        raise refusals[0]
+
+
+async def split_replay_baselines(
+    baselines: Sequence[Session], payload_store: PayloadStore
+) -> tuple[list[Session], list[SessionReplayNotReady]]:
+    """Resolve memory replay inputs and separate replayable baselines from refusals.
+
+    Args:
+        baselines: Sessions selected for replay.
+        payload_store: Store used to resolve offloaded session inputs.
+
+    Returns:
+        Replayable baselines and one refusal per other baseline, both in
+        baseline order.
     """
     await payload_store.resolve(
         [baseline.inputs for baseline in baselines if baseline.inputs is not None]
     )
+    ready: list[Session] = []
+    refusals: list[SessionReplayNotReady] = []
     for baseline in baselines:
-        _check_mastra_replay_ready(baseline)
+        try:
+            _check_mastra_replay_ready(baseline)
+        except SessionReplayNotReady as refusal:
+            refusals.append(refusal)
+        else:
+            ready.append(baseline)
+    return ready, refusals
 
 
 async def create_replay_pipelines(
@@ -134,7 +163,9 @@ async def create_replay_pipelines(
     ``NONE``, one baseline evaluator task is appended per evaluator, unless
     ``IF_MISSING`` finds prior evaluations of the same identity (baseline
     session, evaluator version, params) to adopt instead, linking the
-    baseline's replay to every one of them.
+    baseline's replay to every one of them. A baseline whose Mastra memory
+    recording cannot be replayed gets a replay that is already failed with
+    the refusal as its error, and no job or tasks.
 
     Args:
         baselines: Sessions being replayed.
@@ -160,12 +191,26 @@ async def create_replay_pipelines(
     """
     if not baselines:
         return []
+    # Refusals are split off first so that a pending memory recording, which
+    # is still in progress, is reported per baseline instead of failing the
+    # evaluability check for every baseline.
+    ready, refusals = await split_replay_baselines(baselines, payload_store)
     evaluate_baselines = baseline_evaluation_mode is not BaselineEvaluationMode.NONE
     if evaluate_baselines:
-        for baseline in baselines:
+        for baseline in ready:
             baseline.check_evaluate()
-    await validate_replay_baselines(baselines, payload_store)
-    jobs = [Job(owner_id=actor.account.id, kind=JobKind.REPLAY) for _ in baselines]
+    refused_replays: list[Replay] = []
+    for refusal in refusals:
+        refused = Replay(
+            owner_id=actor.account.id,
+            experiment_run_id=experiment_run_id,
+            replay_config_id=config.id,
+            baseline_session_id=refusal.session_id,
+            baseline_evaluation_mode=baseline_evaluation_mode,
+        )
+        refused.fail(str(refusal))
+        refused_replays.append(refused)
+    jobs = [Job(owner_id=actor.account.id, kind=JobKind.REPLAY) for _ in ready]
     replays = [
         Replay(
             owner_id=actor.account.id,
@@ -175,12 +220,12 @@ async def create_replay_pipelines(
             baseline_session_id=baseline.id,
             baseline_evaluation_mode=baseline_evaluation_mode,
         )
-        for job, baseline in zip(jobs, baselines, strict=True)
+        for job, baseline in zip(jobs, ready, strict=True)
     ]
     adoptable: dict[tuple[uuid.UUID, uuid.UUID, str], list[uuid.UUID]] = {}
-    if baseline_evaluation_mode is BaselineEvaluationMode.IF_MISSING:
+    if ready and baseline_evaluation_mode is BaselineEvaluationMode.IF_MISSING:
         adoptable = await evaluation_repository.get_latest_evaluation_ids_by_identity(
-            [baseline.id for baseline in baselines]
+            [baseline.id for baseline in ready]
         )
     evaluator_hashes = {
         evaluator.evaluator_version_id: hash_params(evaluator.params)
@@ -188,7 +233,7 @@ async def create_replay_pipelines(
     }
     tasks: list[Task] = []
     adopted_links: list[tuple[uuid.UUID, uuid.UUID]] = []
-    for job, baseline, replay in zip(jobs, baselines, replays, strict=True):
+    for job, baseline, replay in zip(jobs, ready, replays, strict=True):
         tasks.append(
             AgentTask(
                 job_id=job.id,
@@ -229,7 +274,14 @@ async def create_replay_pipelines(
                 )
             )
     await job_repository.create_many(jobs)
-    stored_replays = await replay_repository.create_many(replays)
+    refused_ids = {refusal.session_id for refusal in refusals}
+    ready_iter, refused_iter = iter(replays), iter(refused_replays)
+    stored_replays = await replay_repository.create_many(
+        [
+            next(refused_iter) if baseline.id in refused_ids else next(ready_iter)
+            for baseline in baselines
+        ]
+    )
     await task_repository.create_many(tasks)
     await evaluation_repository.add_replay_links(adopted_links)
     return stored_replays
