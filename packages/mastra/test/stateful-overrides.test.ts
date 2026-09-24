@@ -10,6 +10,7 @@ import {
   createMemoryRuntime,
   RESOURCE,
   seedMemory,
+  settleBuffering,
   streamParts,
   THREAD,
   textStream,
@@ -238,10 +239,11 @@ import {
   REPLAY_ID,
 } from "./helpers.js";
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  await settleBuffering();
 });
 
 it("records and replays native evolving memory without re-resolving live configuration", async () => {

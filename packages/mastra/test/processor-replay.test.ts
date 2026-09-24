@@ -16,6 +16,7 @@ import {
   FILE_URL,
   RESOURCE,
   seedMemory,
+  settleBuffering,
   streamParts,
   THREAD,
   textStream,
@@ -27,10 +28,11 @@ import {
   REPLAY_ID,
 } from "./helpers.js";
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  await settleBuffering();
 });
 
 it("runs the native file processor with historical bytes, skills and complete large request evidence", async () => {

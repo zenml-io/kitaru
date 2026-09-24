@@ -11,6 +11,8 @@ import {
 } from "../src/memory.js";
 import type { ResolvedMemoryFile } from "../src/stateful-files.js";
 import {
+  createMemoryRuntime,
+  type MemoryRuntime,
   RESOURCE,
   seedMemory,
   streamParts,
@@ -383,6 +385,110 @@ it("starts a recorded turn without waiting for other threads' source memory work
   expect(modelCalls[0]).toBeLessThan(1_000);
   await vi.waitFor(
     () => expect(outcomes(api)).toEqual(["completed/eligible/"]),
+    { timeout: 3_000 },
+  );
+});
+
+/**
+ * Register an async buffered observation on THREAD that an earlier turn left
+ * running, in Mastra's process-wide buffering map.
+ */
+async function holdBuffering(runtime: MemoryRuntime): Promise<void> {
+  const engine = await runtime.memory.omEngine;
+  if (!engine) throw new Error("Missing observational-memory engine");
+  const ops = (
+    engine.buffering.constructor as unknown as {
+      asyncBufferingOps: Map<string, Promise<void>>;
+    }
+  ).asyncBufferingOps;
+  const key = engine.buffering.getObservationBufferKey(
+    engine.buffering.getLockKey(THREAD, RESOURCE),
+  );
+  const running = new Promise<void>((resolve) => hung.push(resolve));
+  ops.set(key, running);
+  void running.then(() => ops.delete(key));
+}
+
+async function bufferingSetup(options: { kitaruDown?: boolean }) {
+  const api = installTestApi();
+  const recorded = globalThis.fetch;
+  vi.stubGlobal("fetch", (async (input, init) => {
+    if (options.kitaruDown && init?.method !== "PATCH")
+      throw new TypeError("fetch failed");
+    return recorded(input, init);
+  }) satisfies Fetch);
+  const runtime = createMemoryRuntime();
+  stores.push(runtime.store);
+  await seedMemory(runtime);
+  const access = createProcessLocalMemoryAccess();
+  let startedAt = 0;
+  const modelCalls: number[] = [];
+  const actor = new MastraLanguageModelV2Mock({
+    modelId: "actor",
+    provider: "fixture",
+    doStream: async () => {
+      modelCalls.push(Date.now() - startedAt);
+      return textStream("done");
+    },
+  });
+  const adapter = createMemoryReplayAgent(
+    ({ memory }) => ({
+      id: "buffering",
+      name: "Buffering",
+      instructions: "Answer",
+      memory,
+      model: actor,
+    }),
+    {
+      agentId: AGENT_ID,
+      apiUrl: "https://kitaru.invalid",
+      apiKey: "fixture",
+      timeoutMs: 60_000,
+      requestedModelId: "fixture/actor",
+      onRecordingError: () => undefined,
+      sourceMemory: () => ({
+        settled: () => runtime.memory.settled(),
+        domain: runtime.domain,
+        configuration: runtime.memory.getMergedThreadConfig(),
+        exclusiveAccess: access,
+      }),
+      resolveModel: () => actor,
+    },
+  );
+  async function turn() {
+    startedAt = Date.now();
+    const output = (await adapter.stream("Hello", {
+      memory: { thread: THREAD, resource: RESOURCE },
+    })) as { consumeStream(): Promise<void>; text: Promise<string> };
+    await output.consumeStream();
+    return await output.text;
+  }
+  return { access, api, modelCalls, runtime, turn };
+}
+
+it("answers natively without waiting for an earlier turn's buffered observation", async () => {
+  const { access, modelCalls, runtime, turn } = await bufferingSetup({
+    kitaruDown: true,
+  });
+  // The earlier turn still holds its lease while its observation runs.
+  const earlier = await access.acquire({
+    threadId: THREAD,
+    resourceId: RESOURCE,
+  });
+  await holdBuffering(runtime);
+  expect(await turn()).toBe("done");
+  expect(modelCalls[0]).toBeLessThan(1_000);
+  await earlier();
+});
+
+it("records a turn as ineligible instead of waiting for buffering an earlier turn left running", async () => {
+  const { api, modelCalls, runtime, turn } = await bufferingSetup({});
+  await holdBuffering(runtime);
+  expect(await turn()).toBe("done");
+  expect(modelCalls[0]).toBeLessThan(1_000);
+  await vi.waitFor(
+    () =>
+      expect(outcomes(api)).toEqual(["completed/ineligible/om_work_unjoined"]),
     { timeout: 3_000 },
   );
 });

@@ -159,6 +159,22 @@ export function createTripOMModel(
   return { doStream, model };
 }
 
+let bufferingOps: Map<string, Promise<void>> | undefined;
+
+/**
+ * Wait, up to `waitMs`, for buffered observational-memory work that earlier
+ * turns left running in Mastra's process-wide buffering map. Tests share one
+ * thread id, and a recorded turn does not start eligible while such work runs.
+ */
+export async function settleBuffering(waitMs = 5_000): Promise<void> {
+  const deadline = Date.now() + waitMs;
+  while (bufferingOps?.size && Date.now() < deadline)
+    await Promise.race([
+      Promise.allSettled([...bufferingOps.values()]),
+      new Promise((resolve) => setTimeout(resolve, deadline - Date.now())),
+    ]);
+}
+
 export function createMemoryRuntime(
   options: { observerWait?: () => Promise<void>; messageTokens?: number } = {},
 ) {
@@ -198,6 +214,13 @@ export function createMemoryRuntime(
         },
       },
     },
+  });
+  void memory.omEngine.then((engine) => {
+    bufferingOps ??= (
+      engine?.buffering.constructor as
+        | { asyncBufferingOps?: Map<string, Promise<void>> }
+        | undefined
+    )?.asyncBufferingOps;
   });
   return { store, domain, memory, observer, reflector };
 }

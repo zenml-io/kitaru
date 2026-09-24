@@ -443,27 +443,21 @@ it("rejects replay envelopes with selectors inconsistent with the snapshot", () 
   ).toThrow(/selector/i);
 });
 
-it("preserves setup errors when settling memory also rejects", async () => {
+it("preserves setup errors without joining the turn's memory work", async () => {
   const original = new Error("Original setup error");
-  const cleanup = new Error("Memory cleanup error");
-  const onRecordingError = vi.fn();
-  const { adapter, lease } = fixture(
-    ({ memory }) => {
-      vi.spyOn(memory, "settled").mockRejectedValue(cleanup);
-      throw original;
-    },
-    { onRecordingError },
-  );
+  const settled = vi.fn(async () => undefined);
+  const { adapter, lease } = fixture(({ memory }) => {
+    vi.spyOn(memory, "settled").mockImplementation(settled);
+    throw original;
+  });
   await expect(
     adapter.stream("hello", {
       memory: { thread: "thread", resource: "resource" },
     }),
   ).rejects.toBe(original);
-  await vi.waitFor(() =>
-    expect(onRecordingError).toHaveBeenCalledWith(
-      expect.objectContaining({ error: cleanup, stage: "complete" }),
-    ),
-  );
+  // Joining waits for other turns' buffering on the thread, which would hold
+  // the native answer back.
+  expect(settled).not.toHaveBeenCalled();
   const release = await lease.acquire({
     threadId: "thread",
     resourceId: "resource",

@@ -25,7 +25,7 @@ export type MastraReplayReason =
   | "model_identity_unsupported"
   /** The memory store returned records Kitaru cannot represent or validate. */
   | "memory_store_shape_unsupported"
-  /** Stored observational-memory records show work that was still running or never cleared. */
+  /** Observational-memory work from an earlier turn was still running, or stored records show work that never cleared. */
   | "om_work_unjoined"
   /** Reading the initial memory state from storage failed. */
   | "memory_read_failed"

@@ -201,7 +201,6 @@ export type MemoryReplayAgentFactory = (
 const DEFAULT_FINALIZATION_WAIT_MS = 60_000;
 const DEFAULT_SESSION_SETUP_WAIT_MS = 2_000;
 const DEFAULT_FILE_CAPTURE_WAIT_MS = 10_000;
-const CAPTURE_BUFFERING_WAIT_MS = 5_000;
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -748,16 +747,29 @@ export function createMemoryReplayAgent(
       const sourceEngine = source.memory
         ? await source.memory.omEngine.catch(() => null)
         : null;
-      // The source settled() waits for work on every thread of that Memory.
-      // Mastra tracks buffering per thread for the whole process, so join only
-      // this thread's; the snapshot check rejects any other unjoined work.
+      // Buffering an earlier turn left running on this thread would change
+      // the snapshot after capture. Waiting for it would delay the native
+      // answer, so the turn is ineligible at once instead.
       const initialSnapshot = await binding.captureInitial({
         settled: async () => {
-          await (await memory.omEngine)?.waitForBuffering(
+          const engine = await memory.omEngine;
+          if (!engine) return;
+          const lockKey = engine.buffering.getLockKey(
             selector.threadId,
             selector.resourceId,
-            CAPTURE_BUFFERING_WAIT_MS,
           );
+          if (
+            engine.buffering.isAsyncBufferingInProgress(
+              engine.buffering.getObservationBufferKey(lockKey),
+            ) ||
+            engine.buffering.isAsyncBufferingInProgress(
+              engine.buffering.getReflectionBufferKey(lockKey),
+            )
+          )
+            throw new MastraReplayReasonError(
+              "Observational-memory buffering from an earlier turn is still running.",
+              "om_work_unjoined",
+            );
         },
       });
       let tracked = false;
@@ -1123,7 +1135,8 @@ export function createMemoryReplayAgent(
         replay,
         nativeFallback: async (error, reason) => {
           try {
-            await runtime.finish();
+            // The turn's Memory has not run, so there is no work of its own
+            // to join; joining would wait for other turns' buffering.
             await runtime.release();
           } catch (cleanupError) {
             reportLocalRecordingError(
@@ -1255,7 +1268,10 @@ export function createMemoryReplayAgent(
       });
     } catch (error) {
       try {
-        await runtime.finish();
+        // Joining would hold a baseline's native answer or error behind other
+        // turns' buffering. A late write of this Memory still registers and
+        // makes an overlapping turn ineligible.
+        if (historical) await runtime.finish();
         await runtime.release();
       } catch (cleanupError) {
         if (options.onRecordingError) {
