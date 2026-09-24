@@ -15,8 +15,11 @@
 
 import subprocess
 import sys
+from collections.abc import Sequence
+from importlib.metadata import version
 
 from kitaru import mcp_entrypoint
+from kitaru.mcp import server as mcp_server
 
 
 def test_base_imports_do_not_load_mcp() -> None:
@@ -52,6 +55,26 @@ def test_help_and_version_do_not_load_optional_dependency(capsys, monkeypatch) -
     assert mcp_entrypoint.main(["--version"]) == 0
     assert capsys.readouterr().out == "1.2.3\n"
     assert imported == []
+
+
+def test_version_reports_the_installed_distribution(capsys) -> None:
+    assert mcp_entrypoint.main(["--version"]) == 0
+    assert capsys.readouterr().out == f"{version('kitaru')}\n"
+
+
+def test_startup_forwards_arguments_and_exit_code_to_runtime(monkeypatch) -> None:
+    """The launcher hands every argument to the MCP runtime and returns its code."""
+    received: list[list[str]] = []
+
+    def fake_main(argv: Sequence[str] | None = None) -> int:
+        received.append(list(argv or ()))
+        return 7
+
+    monkeypatch.setattr(mcp_server, "main", fake_main)
+
+    arguments = ["--mode", "standard", "--server", "https://example.test"]
+    assert mcp_entrypoint.main(arguments) == 7
+    assert received == [arguments]
 
 
 def test_missing_extra_has_actionable_error_without_traceback(
