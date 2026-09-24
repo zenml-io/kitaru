@@ -80,6 +80,7 @@ import {
   bindMemoryToolIdentity,
   createStatefulToolProcessors,
   reportMemoryProcessorTripwires,
+  reportProcessorTripwires,
 } from "./stateful-tools.js";
 import { loadSkillsWorkspace } from "./stateful-workspace.js";
 import {
@@ -236,6 +237,8 @@ function unsupportedAgentConfiguration(message: string): never {
 function observeNativeOutcome(callerOptions: RuntimeStreamOptions): {
   options: RuntimeStreamOptions;
   outcome: Promise<NativeOutcome>;
+  /** Report a processor tripwire, which ends the turn without a callback. */
+  reportTripwire(): void;
 } {
   let settle: (outcome: NativeOutcome) => void = () => {};
   const outcome = new Promise<NativeOutcome>((resolve) => {
@@ -250,6 +253,7 @@ function observeNativeOutcome(callerOptions: RuntimeStreamOptions): {
   };
   return {
     outcome,
+    reportTripwire: () => settle("failed"),
     options: {
       ...callerOptions,
       onFinish: async (event) => {
@@ -430,10 +434,20 @@ export function createMemoryReplayAgent(
       workspace: workspace?.workspace,
     });
     selector = await getNativeSelector(config, callerOptions);
-    const native = new Agent({ ...config, memory }) as unknown as {
+    const observed = observeNativeOutcome(callerOptions);
+    const native = new Agent({
+      ...config,
+      memory: reportMemoryProcessorTripwires(memory, observed.reportTripwire),
+      ...(Array.isArray(config.inputProcessors)
+        ? {
+            inputProcessors: config.inputProcessors.map((processor) =>
+              reportProcessorTripwires(processor, observed.reportTripwire),
+            ),
+          }
+        : {}),
+    }) as unknown as {
       stream(input: unknown, options: RuntimeStreamOptions): Promise<unknown>;
     };
-    const observed = observeNativeOutcome(callerOptions);
     return {
       result: await native.stream(rawInput, observed.options),
       outcome: observed.outcome,
@@ -1097,7 +1111,12 @@ export function createMemoryReplayAgent(
         defaultOptions: {},
         inputProcessors: [
           policy.first,
-          ...((config.inputProcessors as InputProcessor[]) ?? []),
+          ...((config.inputProcessors as InputProcessor[]) ?? []).map(
+            (processor) =>
+              reportProcessorTripwires(processor, (reason) =>
+                tripwireListener?.(reason),
+              ),
+          ),
           policy.last,
           requestProcessor,
         ],

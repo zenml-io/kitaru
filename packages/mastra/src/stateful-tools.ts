@@ -41,43 +41,57 @@ export function bindMemoryToolIdentity(memory: Memory) {
   return { memory: bound, tokens };
 }
 
+const TRIPWIRE_METHODS = new Set<PropertyKey>([
+  "processInput",
+  "processInputStep",
+]);
+
 /**
- * Report a tripwire raised by one of the Memory's own input processors.
+ * Wrap an input processor so a tripwire it raises also reaches `onTripwire`.
  *
- * Such a tripwire, for example a failed blocking observation, ends Mastra's
- * run without calling `onFinish` or `onError`. The error still propagates.
+ * A processor tripwire, for example an `abort()` or a failed blocking
+ * observation, ends Mastra's run without calling `onFinish`, `onError` or
+ * `onAbort`. The tripwire still propagates to Mastra unchanged.
  */
+export function reportProcessorTripwires<T>(
+  processor: T,
+  onTripwire: (reason: string) => void,
+): T {
+  if (!record(processor)) return processor;
+  return new Proxy(processor, {
+    get(target, key) {
+      const value = Reflect.get(target, key, target);
+      if (!TRIPWIRE_METHODS.has(key) || typeof value !== "function")
+        return typeof value === "function" ? value.bind(target) : value;
+      return async (...args: unknown[]) => {
+        try {
+          return await Reflect.apply(value, target, args);
+        } catch (error) {
+          if (error instanceof TripWire) {
+            try {
+              onTripwire(error.message);
+            } catch {
+              // Recording diagnostics never replace Mastra's tripwire.
+            }
+          }
+          throw error;
+        }
+      };
+    },
+  });
+}
+
+/** Report a tripwire raised by one of the Memory's own input processors. */
 export function reportMemoryProcessorTripwires(
   memory: Memory,
   onTripwire: (reason: string) => void,
 ): Memory {
-  const wrapped = new WeakMap<object, object>();
+  const wrapped = new WeakMap<object, unknown>();
   const watch = (processor: unknown): unknown => {
-    if (!record(processor) || typeof processor.processInputStep !== "function")
-      return processor;
+    if (!record(processor)) return processor;
     let copy = wrapped.get(processor);
     if (!copy) {
-      copy = new Proxy(processor, {
-        get(target, key) {
-          const value = Reflect.get(target, key, target);
-          if (key !== "processInputStep" || typeof value !== "function")
-            return typeof value === "function" ? value.bind(target) : value;
-          return async (...args: unknown[]) => {
-            try {
-              return await Reflect.apply(value, target, args);
-            } catch (error) {
-              if (error instanceof TripWire) {
-                try {
-                  onTripwire(error.message);
-                } catch {
-                  // Recording diagnostics never replace Mastra's tripwire.
-                }
-              }
-              throw error;
-            }
-          };
-        },
-      });
+      copy = reportProcessorTripwires(processor, onTripwire);
       wrapped.set(processor, copy);
     }
     return copy;
