@@ -407,6 +407,8 @@ def complete_mastra_memory_replay_inputs() -> dict[str, Any]:
                 }
             ],
             "omTape": [],
+            "turnStartedAt": "2026-01-01T00:00:00.000Z",
+            "keyOrder": {"permutations": "", "sha256": "0" * 64},
         }
     }
 

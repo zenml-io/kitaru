@@ -195,6 +195,40 @@ async def test_malformed_eligible_mastra_baseline_creates_no_replay(
     assert not replays
 
 
+@pytest.mark.parametrize("missing_field", ["keyOrder", "turnStartedAt"])
+async def test_mastra_baseline_in_an_outdated_v3_format_is_refused(
+    services: ReplayServices,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    missing_field: str,
+) -> None:
+    """Refuse an early v3 input the adapter can no longer decode."""
+    version = await _agent_version_with_run_spec(services)
+    outdated = deepcopy(complete_mastra_memory_replay_inputs)
+    del outdated["mastra_memory_replay"][missing_field]
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        framework="mastra",
+        inputs=outdated,
+        metadata={"mastra_replay_state": "eligible"},
+    )
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_recording_outdated"):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[],
+                baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+            ),
+            actor=ACTOR,
+        )
+    replays, _ = await services.replays.query(ReplayFilter())
+    assert not replays
+
+
 async def test_old_mastra_om_without_result_tape_is_not_replayable(
     services: ReplayServices,
 ) -> None:

@@ -240,6 +240,28 @@ def mastra_replay_uses_observational_memory(envelope: dict[str, Any]) -> bool:
     return om is True or (isinstance(om, dict) and om.get("enabled") is not False)
 
 
+def mastra_replay_v3_current(envelope: dict[str, Any]) -> bool:
+    """Check that a version-3 input carries its recorded key order and turn start.
+
+    Early version-3 inputs lack both, and the adapter can no longer decode them.
+    """
+    key_order = envelope.get("keyOrder")
+    started = envelope.get("turnStartedAt")
+    if not (
+        isinstance(key_order, dict)
+        and isinstance(key_order.get("permutations"), str)
+        and isinstance(key_order.get("sha256"), str)
+        and re.fullmatch(r"[a-f0-9]{64}", key_order["sha256"]) is not None
+        and isinstance(started, str)
+    ):
+        return False
+    try:
+        datetime.fromisoformat(started)
+    except ValueError:
+        return False
+    return True
+
+
 def mastra_replay_v3_complete(envelope: dict[str, Any]) -> bool:
     """Check the required shape of a finalized Mastra replay input."""
     snapshot = envelope.get("initialSnapshot")
@@ -263,6 +285,7 @@ def mastra_replay_v3_complete(envelope: dict[str, Any]) -> bool:
         and isinstance(files, list)
         and _mastra_replay_files_complete(files)
         and isinstance(envelope.get("omTape"), list)
+        and mastra_replay_v3_current(envelope)
     )
 
 
