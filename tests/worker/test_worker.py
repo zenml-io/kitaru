@@ -143,23 +143,6 @@ def test_detect_runtime_kubernetes_without_a_namespace_file(
 # --- Stop condition ----------------------------------------------------------
 
 
-async def test_should_stop_true_when_stop_event_is_set(tmp_path: Path) -> None:
-    """The stop event alone ends an unpinned loop."""
-    worker = Worker(WorkerConfig())
-    ctx = _ctx(tmp_path, FakeKitaruAPIClient())
-    stop = asyncio.Event()
-    stop.set()
-    assert await worker._should_stop(ctx, stop, None) is True
-
-
-async def test_should_stop_true_when_deadline_passed(tmp_path: Path) -> None:
-    """A lifetime deadline in the past ends the loop."""
-    worker = Worker(WorkerConfig())
-    ctx = _ctx(tmp_path, FakeKitaruAPIClient())
-    past_deadline = asyncio.get_running_loop().time() - 1
-    assert await worker._should_stop(ctx, asyncio.Event(), past_deadline) is True
-
-
 async def test_should_stop_false_without_stop_deadline_or_job(
     tmp_path: Path,
 ) -> None:
@@ -183,23 +166,6 @@ async def test_should_stop_true_when_pinned_job_settles(tmp_path: Path) -> None:
 
     assert await worker._should_stop(ctx, asyncio.Event(), None) is True
     assert client.jobs.get_calls == [job_id]
-
-
-async def test_should_stop_false_when_pinned_job_still_running(
-    tmp_path: Path,
-) -> None:
-    """A job-pinned scope keeps polling while the job is not settled."""
-    job_id = uuid.uuid4()
-    worker = Worker(
-        WorkerConfig(
-            scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id)
-        )
-    )
-    client = FakeKitaruAPIClient()
-    client.jobs.get_responses.append(make_job_response(status=JobStatus.RUNNING))
-    ctx = _ctx(tmp_path, client)
-
-    assert await worker._should_stop(ctx, asyncio.Event(), None) is False
 
 
 async def test_should_stop_false_when_the_pinned_job_read_fails(

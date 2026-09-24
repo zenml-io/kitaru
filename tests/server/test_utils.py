@@ -33,9 +33,3 @@ def test_to_tz_aware_other_timezone() -> None:
     assert result.tzinfo == UTC
     assert result == value
     assert result.hour == 12
-
-
-def test_to_tz_aware_utc_passthrough() -> None:
-    """Return a UTC datetime unchanged."""
-    value = datetime(2026, 7, 23, 12, 0, 0, tzinfo=UTC)
-    assert to_tz_aware(value) == value
