@@ -293,7 +293,7 @@ async def main() -> None:
         raise RuntimeError("OPENAI_API_KEY is required")
     node = shutil.which("node")
     if node is None:
-        raise RuntimeError("Node 22 must be available on PATH")
+        raise RuntimeError("Node must be available on PATH")
     _create_wrapper(node)
     if not (EXAMPLE_DIR / "dist/main.js").is_file():
         raise RuntimeError("Build the adaptive conversation example first")

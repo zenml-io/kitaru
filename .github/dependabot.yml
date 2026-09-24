@@ -468,7 +468,7 @@ updates:
           - minor
           - patch
     ignore:
-      # Every package supports Node 22 and 26, but the release/build gate reads
+      # Every package supports Node 22, 24, and 26, but the release/build gate reads
       # Node 22 from .node-version. Keep the Node type definitions on 22.x so
       # package builds do not accidentally depend on APIs absent from Node 22.
       - dependency-name: "@types/node"

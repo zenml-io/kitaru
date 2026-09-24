@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=22.22.0 <23 || >=26 <27"
+    "node": ">=22.22.0 <23 || >=24 <25 || >=26 <27"
   },
   "scripts": {
     "build": "pnpm run build:packages && pnpm --filter @zenml-io/kitaru-example-mastra-support-triage build && pnpm --filter @zenml-io/kitaru-example-vercel-ai-support-triage build && pnpm --filter @zenml-io/kitaru-example-mastra-adaptive-conversation build",

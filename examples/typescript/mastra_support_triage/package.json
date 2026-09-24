@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=22.22.0 <23 || >=26 <27"
+    "node": ">=22.22.0 <23 || >=24 <25 || >=26 <27"
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.71",

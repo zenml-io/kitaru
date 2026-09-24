@@ -2,7 +2,8 @@ import type { KitaruEnvironmentVariables } from "@zenml-io/kitaru";
 
 export type ModelProvider = "deterministic" | "openai";
 
-const SUPPORTED_NODE = "Node >=22.22.0 <23 or >=26.0.0 <27 is required";
+const SUPPORTED_NODE =
+  "Node >=22.22.0 <23, >=24.0.0 <25, or >=26.0.0 <27 is required";
 
 export function assertSupportedNodeVersion(
   version = process.versions.node,
@@ -11,8 +12,9 @@ export function assertSupportedNodeVersion(
   const major = Number(match?.[1]);
   const minor = Number(match?.[2]);
   const supportsNode22 = major === 22 && minor >= 22;
+  const supportsNode24 = major === 24;
   const supportsNode26 = major === 26;
-  if (!supportsNode22 && !supportsNode26) {
+  if (!supportsNode22 && !supportsNode24 && !supportsNode26) {
     throw new Error(`${SUPPORTED_NODE}; found ${version}`);
   }
 }
