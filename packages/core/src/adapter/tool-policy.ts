@@ -5,6 +5,7 @@ import type { JsonValue, ToolLookupRequest, ToolPolicy } from "../types.js";
 import { isRecord } from "../validation.js";
 import {
   boundedRecorderConversion,
+  type RecordedConversion,
   type RecordingLimits,
 } from "./recorded-json.js";
 import type { AdapterRunState } from "./run-state.js";
@@ -26,6 +27,9 @@ export interface ToolCallInput {
   // The untouched arguments supplied by the framework. Static policies match
   // these instead of the bounded/redacted ledger value.
   originalInputs?: unknown;
+  // Convert a served result for the ledger. Defaults to the recorder's
+  // conversion, whose item ceiling a larger recording budget can exceed.
+  recordOutput?: (value: unknown) => JsonValue;
   toolName: string;
 }
 
@@ -208,7 +212,9 @@ export async function decideToolCall(
       if (matchingCase) {
         entry.mocked = true;
         entry.outcome = "completed";
-        entry.output = toRecorderJson(matchingCase.result);
+        entry.output = (input.recordOutput ?? toRecorderJson)(
+          matchingCase.result,
+        );
         entry.policy = "static";
         return { output: matchingCase.result, type: "mocked_result" };
       }
@@ -267,7 +273,9 @@ export async function decideToolCall(
     entry.mocked = true;
     if (lookup.match.status === "completed") {
       entry.outcome = "completed";
-      entry.output = toRecorderJson(lookup.match.result);
+      entry.output = (input.recordOutput ?? toRecorderJson)(
+        lookup.match.result,
+      );
       return { output: lookup.match.result, type: "mocked_result" };
     }
     if (lookup.match.status === "failed") {
@@ -304,6 +312,11 @@ export function completeToolCall(
   callId: string,
   output: unknown,
   limits?: RecordingLimits,
+  convertPayload: (
+    value: unknown,
+    path: string,
+    limits?: RecordingLimits,
+  ) => RecordedConversion = boundedRecorderConversion,
 ): void {
   const entry = requiredEntry(state, callId);
   if (entry.mocked) {
@@ -312,7 +325,7 @@ export function completeToolCall(
   // A passthrough tool during a replay has already fired its side effect by
   // the time its result is recorded, so an oversized or circular result is
   // bounded rather than thrown: crashing here would strand a sent email.
-  const conversion = boundedRecorderConversion(
+  const conversion = convertPayload(
     output,
     `tool '${entry.toolName}' output`,
     limits,

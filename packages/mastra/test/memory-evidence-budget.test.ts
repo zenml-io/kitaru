@@ -16,7 +16,14 @@ import {
   THREAD,
   textStream,
 } from "./helpers/memory-agent.js";
-import { AGENT_ID, installTestApi, type TestApi } from "./helpers.js";
+import {
+  AGENT_ID,
+  installTestApi,
+  ORIGINAL_SESSION_ID,
+  REPLAY_ID,
+  type TestApi,
+  type TestApiOptions,
+} from "./helpers.js";
 
 const runtimes: MemoryRuntime[] = [];
 
@@ -71,13 +78,17 @@ async function seedLongThread(runtime: MemoryRuntime): Promise<void> {
 }
 
 async function setup(
-  options: { recordingLimits?: { maxStringChars: number } } = {},
+  options: {
+    recordingLimits?: { maxStringChars: number };
+    api?: TestApiOptions;
+  } = {},
 ) {
-  const api = installTestApi();
+  const api = installTestApi(options.api);
   const runtime = createMemoryRuntime({ messageTokens: 10_000_000 });
   runtimes.push(runtime);
   await seedLongThread(runtime);
   let actorCalls = 0;
+  let executions = 0;
   const actor = new MastraLanguageModelV2Mock({
     modelId: "actor",
     provider: "fixture",
@@ -110,7 +121,10 @@ async function setup(
           id: "searchHotels",
           description: "Search hotels",
           inputSchema: z.object({}),
-          execute: async () => hotelRows(),
+          execute: async () => {
+            executions += 1;
+            return hotelRows();
+          },
         }),
       },
     }),
@@ -145,7 +159,7 @@ async function setup(
     await output.consumeStream();
     expect(await output.text).toBe("done");
   }
-  return { api, turn };
+  return { adapter, api, executions: () => executions, turn };
 }
 
 /** The final status and replay state of every recorded session. */
@@ -242,5 +256,60 @@ it("applies application recordingLimits to request evidence without making the t
       ]),
     });
     expect(JSON.stringify(request.inputs)).toContain("[truncated]");
+  }
+}, 30_000);
+
+it("records a 1,400-row tool result whole so replay serves it from history", async () => {
+  let history: unknown;
+  const { adapter, api, executions, turn } = await setup({
+    api: {
+      replaySpec: {
+        id: REPLAY_ID,
+        baseline_session_id: ORIGINAL_SESSION_ID,
+        status: "pending",
+        override: null,
+        tool_policy: {
+          default: { type: "history", on_miss: "fail", scope: "baseline" },
+          tools: {},
+        },
+      },
+      lookup: () => ({ match: { result: history, status: "completed" } }),
+    },
+  });
+  await turn("Find hotels.");
+  await vi.waitFor(
+    () => expect(outcomes(api)).toEqual(["completed/eligible"]),
+    { timeout: 5_000 },
+  );
+  const [baselineId] = api.sessionIds;
+  const [recorded] = nodes(api, String(baselineId), "tool_call");
+  // The server serves a history lookup only from a result recorded whole.
+  expect(recorded?.attributes).not.toHaveProperty("outputs_bounded");
+  expect(recorded?.outputs).toEqual(hotelRows());
+  history = recorded?.outputs;
+  const baseline = api.calls.findLast(
+    (call) =>
+      call.method === "PATCH" &&
+      call.path.endsWith(String(baselineId)) &&
+      call.body?.status === "completed",
+  )?.body;
+  vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+  vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(baseline?.inputs));
+  try {
+    const replay = await adapter.stream("ignored");
+    await replay.consumeStream();
+    await vi.waitFor(
+      () =>
+        expect(outcomes(api)).toEqual([
+          "completed/eligible",
+          "completed/undefined",
+        ]),
+      { timeout: 5_000 },
+    );
+    expect(executions()).toBe(1);
+    const [served] = nodes(api, String(api.sessionIds[1]), "tool_call");
+    expect(served?.outputs).toEqual(hotelRows());
+  } finally {
+    vi.unstubAllEnvs();
   }
 }, 30_000);

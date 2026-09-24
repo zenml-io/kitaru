@@ -3,7 +3,9 @@ import type { JsonValue } from "@zenml-io/kitaru";
 import {
   type AdapterClient,
   type AdapterRunState,
+  mastraReplayToolConversion,
   parseModelSettings,
+  type RecordingLimits,
   type ReplayContext,
   ROOT_NODE_EXTERNAL_ID,
   type RunRecorder,
@@ -69,6 +71,11 @@ export interface StatefulStreamRecording {
    * may take the attempt whose provider call threw.
    */
   takeRequest(failedStep: boolean): RequestEvidence | undefined;
+  /**
+   * Per-value bounds the application chose for tool payloads. Tool payloads
+   * otherwise share the memory replay input's budget.
+   */
+  recordingLimits?: RecordingLimits;
   /** Start joining the invocation's background memory work without waiting. */
   beginFinalization?(): void;
   /**
@@ -331,10 +338,15 @@ class StreamLifecycle {
         this.recorder.state,
         step,
         this.options.costCalculator,
-        this.options.recordingLimits,
+        this.stateful
+          ? this.stateful.recordingLimits
+          : this.options.recordingLimits,
         request,
         this.stateful?.sanitizeEvidence,
         endedAt,
+        // Replay serves a memory turn's tools from history only when their
+        // recorded results were kept whole.
+        this.stateful ? mastraReplayToolConversion : undefined,
       );
       this.#uploadTail = recordNormalizedStep(
         this.recorder.state,

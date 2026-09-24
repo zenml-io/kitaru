@@ -20,6 +20,7 @@ export {
   MAX_RECORDED_PAYLOAD_CHARS,
   MAX_RECORDED_STRING_CHARS,
   MastraReplayBudgetError,
+  mastraReplayToolConversion,
   normalizeRecordingLimits,
   projectMastraReplayInput,
   projectRecordedInput,

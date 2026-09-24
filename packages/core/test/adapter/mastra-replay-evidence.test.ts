@@ -1,8 +1,10 @@
 import { expect, it } from "vitest";
 import {
+  boundedRecorderConversion,
   boundMastraReplayEvidence,
   MAX_MASTRA_REPLAY_ITEMS,
   MastraReplayBudgetError,
+  mastraReplayToolConversion,
   strictMastraReplayValue,
 } from "../../src/adapter/index.js";
 
@@ -48,4 +50,24 @@ it("degrades over-budget evidence and truncates to explicit limits with a reason
     lossReason:
       "evidence exceeds the configured recordingLimits and was truncated",
   });
+});
+
+it("keeps a tool result past the tool recorder's bounds whole on the replay budget", () => {
+  const rows = Array.from({ length: 1_400 }, (_, row) =>
+    Object.fromEntries(
+      Array.from({ length: 10 }, (_, field) => [`f${field}`, `${row}`]),
+    ),
+  );
+  expect(boundedRecorderConversion(rows, "tool output").lossy).toBe(true);
+  expect(mastraReplayToolConversion(rows, "tool output")).toEqual({
+    lossy: false,
+    value: rows,
+  });
+  // Credentials are still redacted, and limits the application set apply.
+  expect(
+    mastraReplayToolConversion({ rows, token: "secret" }, "tool output"),
+  ).toMatchObject({ lossy: true, value: { rows, token: "[redacted]" } });
+  expect(
+    mastraReplayToolConversion(rows, "tool output", { maxItems: 100 }).lossy,
+  ).toBe(true);
 });

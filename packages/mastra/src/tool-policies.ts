@@ -12,6 +12,7 @@ import {
   decideToolCall,
   failToolCall,
   isMockedToolCall,
+  type RecordedConversion,
   type RecordingLimits,
 } from "@zenml-io/kitaru/adapter";
 
@@ -27,9 +28,17 @@ interface ToolHookOptions {
   configuredAfterToolCall?: ConfiguredAfterToolCall;
   configuredBeforeToolCall?: ConfiguredBeforeToolCall;
   limits?: RecordingLimits;
+  /** Convert tool arguments and results for recording. */
+  convertPayload?: PayloadConversion;
   sanitizeEvidence?: <T>(value: T) => T;
   state: AdapterRunState;
 }
+
+type PayloadConversion = (
+  value: unknown,
+  path: string,
+  limits?: RecordingLimits,
+) => RecordedConversion;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -67,6 +76,7 @@ async function invokePassthroughBeforeHooks(
   callerHook?: ToolHooks["beforeToolCall"],
   limits?: RecordingLimits,
   sanitizeEvidence?: <T>(value: T) => T,
+  convertPayload?: PayloadConversion,
 ): Promise<undefined | ToolBeforeHookResult<unknown>> {
   try {
     const configuredResult = await configuredHook?.(hookContext);
@@ -76,6 +86,7 @@ async function invokePassthroughBeforeHooks(
         callId,
         sanitizeEvidence?.(configuredResult.output) ?? configuredResult.output,
         limits,
+        convertPayload,
       );
       return configuredResult;
     }
@@ -86,6 +97,7 @@ async function invokePassthroughBeforeHooks(
         callId,
         sanitizeEvidence?.(callerResult.output) ?? callerResult.output,
         limits,
+        convertPayload,
       );
       return callerResult;
     }
@@ -102,6 +114,7 @@ export function createToolHooks(options: ToolHookOptions): ToolHooks {
     callerHooks,
     configuredAfterToolCall,
     configuredBeforeToolCall,
+    convertPayload = boundedRecorderConversion,
     limits,
     sanitizeEvidence,
     state,
@@ -116,7 +129,7 @@ export function createToolHooks(options: ToolHookOptions): ToolHooks {
           throw state.failure;
         }
         const callId = toolCallId(hookContext.context);
-        const converted = boundedRecorderConversion(
+        const converted = convertPayload(
           sanitizeEvidence?.(hookContext.input) ?? hookContext.input,
           `tool '${hookContext.toolName}' input`,
           limits,
@@ -128,6 +141,12 @@ export function createToolHooks(options: ToolHookOptions): ToolHooks {
             inputsLossy: converted.lossy,
             originalInputs:
               sanitizeEvidence?.(hookContext.input) ?? hookContext.input,
+            recordOutput: (value) =>
+              convertPayload(
+                value,
+                `tool '${hookContext.toolName}' output`,
+                limits,
+              ).value,
             toolName: hookContext.toolName,
           });
           if (decision.type !== "execute") {
@@ -152,6 +171,7 @@ export function createToolHooks(options: ToolHookOptions): ToolHooks {
           callerHooks?.beforeToolCall,
           limits,
           sanitizeEvidence,
+          convertPayload,
         );
       } catch (error) {
         abortReplay?.(error);
@@ -172,6 +192,7 @@ export function createToolHooks(options: ToolHookOptions): ToolHooks {
           callId,
           sanitizeEvidence?.(hookContext.output) ?? hookContext.output,
           limits,
+          convertPayload,
         );
       }
 

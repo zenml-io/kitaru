@@ -1054,9 +1054,16 @@ export function createMemoryReplayAgent(
           ),
       });
       requestCapture = capture;
+      // Only limits the application chose bound tool payloads, as for
+      // request evidence.
+      const toolRecordingLimits =
+        supplied.recordingLimits === undefined
+          ? undefined
+          : options.recordingLimits;
       const policy = createStatefulToolProcessors({
         tokens: owned.tokens,
         getState,
+        recordingLimits: toolRecordingLimits,
         sanitizeEvidence: sanitizer.replace,
         abort(reason) {
           state?.storeFailure(reason);
@@ -1183,6 +1190,7 @@ export function createMemoryReplayAgent(
         stateful: {
           input: { [MEMORY_REPLAY_KEY]: envelope },
           sanitizeEvidence: sanitizer.replace,
+          recordingLimits: toolRecordingLimits,
           initialize(value) {
             state = value;
           },

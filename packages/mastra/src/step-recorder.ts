@@ -7,6 +7,7 @@ import {
   type NormalizedModelStep,
   type NormalizedToolCall,
   projectRecordedMetadata,
+  type RecordedConversion,
   type RecordingLimits,
   recordNormalizedStep,
   resolveCost,
@@ -194,6 +195,11 @@ export async function normalizeStep(
   requestEvidence?: RequestEvidence,
   sanitizeEvidence?: <T>(value: T) => T,
   endedAt?: string,
+  convertToolPayload: (
+    value: unknown,
+    path: string,
+    limits?: RecordingLimits,
+  ) => RecordedConversion = boundedRecorderConversion,
 ): Promise<NormalizedModelStep> {
   const calls = step.toolCalls.flatMap((item) => {
     const call = toolCallPayload(item);
@@ -207,13 +213,13 @@ export async function normalizeStep(
   );
   const tools: NormalizedToolCall[] = calls.map((call) => {
     const result = results.get(call.toolCallId);
-    const inputs = boundedRecorderConversion(
+    const inputs = convertToolPayload(
       sanitizeEvidence?.(call.args) ?? call.args,
       `tool '${call.toolName}' input`,
       limits,
     );
     const recordedResult = result
-      ? boundedRecorderConversion(
+      ? convertToolPayload(
           sanitizeEvidence?.(result.result) ?? result.result,
           `tool '${call.toolName}' output`,
           limits,

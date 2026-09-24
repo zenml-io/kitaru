@@ -5,6 +5,8 @@ import {
   type AdapterRunState,
   assertInterceptableTool,
   assertSupportedToolPolicy,
+  mastraReplayToolConversion,
+  type RecordingLimits,
 } from "@zenml-io/kitaru/adapter";
 import { assertStableToolName } from "./replay-guards.js";
 import { createToolHooks } from "./tool-policies.js";
@@ -115,6 +117,8 @@ export function createStatefulToolProcessors(options: {
   getState(): AdapterRunState;
   abort(reason: unknown): void;
   adapter: KitaruAgentOptions;
+  /** Per-value bounds the application chose; the replay budget applies otherwise. */
+  recordingLimits?: RecordingLimits;
   sanitizeEvidence?: <T>(value: T) => T;
 }) {
   const trusted = new WeakSet<(...args: never[]) => unknown>();
@@ -171,7 +175,8 @@ export function createStatefulToolProcessors(options: {
             trustedMemoryTool: isMemory,
             configuredBeforeToolCall: options.adapter.configuredBeforeToolCall,
             configuredAfterToolCall: options.adapter.configuredAfterToolCall,
-            limits: options.adapter.recordingLimits,
+            limits: options.recordingLimits,
+            convertPayload: mastraReplayToolConversion,
             sanitizeEvidence: options.sanitizeEvidence,
           });
           wrapper = async (input: unknown, context: unknown) => {

@@ -656,6 +656,44 @@ export function boundMastraReplayEvidence(
   }
 }
 
+/**
+ * Convert tool arguments or results on a Mastra memory replay's budget.
+ *
+ * A memory recording keeps a turn's tool results in full in its memory
+ * evidence, and replay serves a tool from history only when its recorded
+ * result was kept whole. The whole value therefore shares the replay input's
+ * byte and item budget instead of the tool recorder's, and per-value `limits`
+ * apply only when the application set them. Credentials are redacted as
+ * `boundedRecorderConversion` redacts them, and a value over the budget
+ * becomes a degraded marker.
+ */
+export function mastraReplayToolConversion(
+  value: unknown,
+  path: string,
+  limits?: RecordingLimits,
+): RecordedConversion {
+  const resolved = limits && normalizeRecordingLimits(limits);
+  const options: CloneOptions = {
+    budget: {
+      chars: MAX_MASTRA_REPLAY_JSON_BYTES * 2,
+      items: MAX_MASTRA_REPLAY_ITEMS,
+    },
+    lossy: false,
+    maxDepth: resolved?.maxDepth ?? MAX_RECORDED_PAYLOAD_DEPTH,
+    maxItems: resolved?.maxItems ?? MAX_MASTRA_REPLAY_ITEMS,
+    maxStringChars: resolved?.maxStringChars ?? MAX_MASTRA_REPLAY_JSON_BYTES,
+    path,
+    rejectLongStrings: false,
+    sensitiveKeyMode: "redact",
+    sensitiveKeys: SECRET_KEYS,
+  };
+  return withoutFailing(options, () => {
+    const converted = convert(value, options);
+    assertMastraReplayBytes(converted, path);
+    return converted;
+  });
+}
+
 /** Require a real version-3 envelope before using the larger Mastra bound. */
 export function projectMastraReplayInput(value: unknown): JsonValue {
   if (
