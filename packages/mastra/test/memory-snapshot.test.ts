@@ -11,6 +11,7 @@ import {
   encodeMemoryValue,
   finalizeMemoryReplayEnvelope,
 } from "../src/memory-snapshot.js";
+import { createRecordedEvidenceSanitizer } from "../src/stateful-files.js";
 import {
   createMemoryRuntime,
   FILE_BYTES,
@@ -51,6 +52,7 @@ async function fixture() {
     requestContext: { locale: "en" },
     files: [{ url: FILE_REF, mediaType: "application/pdf", bytes: FILE_BYTES }],
     omTape: [],
+    turnStartedAt: new Date("2026-09-01T09:00:00.000Z"),
   };
 }
 
@@ -344,4 +346,105 @@ it("rejects changed file lengths, noncanonical base64, and malformed date tags",
   expect(() =>
     decodeMemoryValue({ $mastra: "date", value: "2026-01-01" }),
   ).toThrow(/Date/);
+});
+
+/** Rebuild objects in PostgreSQL `jsonb` key order: shorter keys first, then bytes. */
+function jsonbOrder(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(jsonbOrder);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(
+        ([left], [right]) =>
+          Buffer.byteLength(left) - Buffer.byteLength(right) ||
+          Buffer.compare(Buffer.from(left), Buffer.from(right)),
+      )
+      .map(([key, item]) => [key, jsonbOrder(item)]),
+  );
+}
+
+it("restores recorded key order after storage re-sorts object keys", async () => {
+  const input = await fixture();
+  input.configuration.memory.workingMemory.schema = {
+    type: "object",
+    properties: {
+      favoriteColor: { type: "string" },
+      name: { type: "string" },
+      city: { type: "string" },
+    },
+    required: ["favoriteColor"],
+  } as never;
+  required(input.initialSnapshot.messages[0]).content.parts = [
+    {
+      type: "tool-invocation",
+      toolInvocation: {
+        state: "result",
+        toolCallId: "call-1",
+        toolName: "lookupOrder",
+        args: { orderNumber: "A-1", zip: "2611" },
+        result: { status: "shipped", eta: "tomorrow" },
+      },
+    },
+  ];
+  const envelope = createMemoryReplayEnvelope(input);
+  expect(envelope.complete, envelope.reasons.join("; ")).toBe(true);
+  const stored = jsonbOrder(JSON.parse(JSON.stringify(envelope)));
+  expect(JSON.stringify(stored)).not.toBe(JSON.stringify(envelope));
+  const decoded = decodeMemoryReplayEnvelope(stored);
+  expect(JSON.stringify(decoded.configuration)).toBe(
+    JSON.stringify(input.configuration),
+  );
+  expect(JSON.stringify(decoded.initialSnapshot.messages)).toBe(
+    JSON.stringify(input.initialSnapshot.messages),
+  );
+  expect(decoded).toEqual(input);
+});
+
+it("refuses envelopes whose key order is missing or does not restore them", async () => {
+  const envelope = createMemoryReplayEnvelope(await fixture());
+  const { keyOrder, ...withoutOrder } = envelope;
+  expect(() => decodeMemoryReplayEnvelope(withoutOrder)).toThrow(
+    /Missing recorded key order/,
+  );
+  for (const permutations of ["x", "0:0,0", "0:5,1,0"])
+    expect(() =>
+      decodeMemoryReplayEnvelope({
+        ...envelope,
+        keyOrder: { ...keyOrder, permutations },
+      }),
+    ).toThrow(/key order/);
+  expect(() =>
+    decodeMemoryReplayEnvelope({ ...envelope, invocationId: "invocation-2" }),
+  ).toThrow(/differs from the recorded envelope/);
+  const withoutTime = { ...envelope, turnStartedAt: "yesterday" };
+  expect(() => decodeMemoryReplayEnvelope(withoutTime)).toThrow(
+    /turn start time/,
+  );
+});
+
+it("records key order after the upload sanitizer rewrites declared file URLs", async () => {
+  const input = {
+    ...(await fixture()),
+    requestContext: { attachment: "https://files.invalid/quote.pdf" },
+  };
+  const sanitizer = createRecordedEvidenceSanitizer(
+    new Map([["https://files.invalid/quote.pdf", FILE_REF]]),
+    () => undefined,
+  );
+  const provisional = createMemoryReplayEnvelope(input, sanitizer.replace);
+  expect(provisional.complete, provisional.reasons.join("; ")).toBe(true);
+  const final = finalizeMemoryReplayEnvelope(
+    provisional,
+    [{ output: "https://files.invalid/quote.pdf" }],
+    sanitizer.replace,
+  );
+  for (const envelope of [provisional, final]) {
+    const uploaded = sanitizer.replace(envelope);
+    expect(decodeMemoryReplayEnvelope(uploaded).requestContext).toEqual({
+      attachment: FILE_REF,
+    });
+  }
+  expect(decodeMemoryReplayEnvelope(final).omTape).toEqual([
+    { output: FILE_REF },
+  ]);
 });

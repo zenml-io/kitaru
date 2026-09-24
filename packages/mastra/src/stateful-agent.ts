@@ -39,6 +39,7 @@ import {
   getMemoryModelId,
   getMemoryStoreSemantics,
   type MastraMemoryStoreSemantics,
+  pinMemoryClock,
   serializeMemoryConfiguration,
 } from "./memory-replay.js";
 import {
@@ -53,6 +54,7 @@ import {
   validateMemoryReplaySelectors,
 } from "./memory-snapshot.js";
 import { createOMResultTape, type OMResultEntry } from "./om-result-tape.js";
+import { createRecordedClock } from "./replay-clock.js";
 import { assertStableToolName } from "./replay-guards.js";
 import {
   createRequestCapture,
@@ -834,14 +836,28 @@ export function createMemoryReplayAgent(
         recordedRawInput =
           baselineFiles.replaceDeclaredFileUrls(invocationInput);
       }
-      const envelope = createMemoryReplayEnvelope({
-        invocationId,
-        rawInput: recordedRawInput,
-        initialSnapshot: runtime.initialSnapshot as MastraMemorySnapshot,
-        configuration,
-        requestContext: effectiveContext,
-        files: files.files,
-      });
+      // A replay's clock starts at the recorded turn's start, measured at the
+      // same point before the stream as the baseline measured it.
+      const turnStartedAt = historical ? historical.turnStartedAt : new Date();
+      if (historical?.turnStartedAt)
+        await pinMemoryClock(
+          runtime.memory,
+          createRecordedClock(historical.turnStartedAt),
+        );
+      const envelope = createMemoryReplayEnvelope(
+        {
+          invocationId,
+          rawInput: recordedRawInput,
+          initialSnapshot: runtime.initialSnapshot as MastraMemorySnapshot,
+          configuration,
+          requestContext: effectiveContext,
+          files: files.files,
+          turnStartedAt,
+        },
+        // Uploads pass through this sanitizer too; applying it first keeps
+        // the recorded hash valid for the stored envelope.
+        sanitizer.replace,
+      );
       if (!envelope.complete && historical)
         throw new Error(envelope.reasons.join(" "));
       const writeAttempt = (evidence: RequestEvidence, error: unknown) =>
@@ -1098,6 +1114,7 @@ export function createMemoryReplayAgent(
                   output: entry.output,
                   ...(entry.failed ? { failed: true } : {}),
                 })),
+                sanitizer.replace,
               ),
             };
           },

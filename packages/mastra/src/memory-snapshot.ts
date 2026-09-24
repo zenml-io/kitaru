@@ -60,6 +60,21 @@ export interface MastraMemoryReplayInput {
   requestContext: Record<string, unknown>;
   files: MastraRecordedFile[];
   omTape?: JsonValue[];
+  /**
+   * When the recorded turn started; replay evaluates memory time checks at
+   * this time. Defaults to the envelope's creation time and is absent only in
+   * version-2 envelopes.
+   */
+  turnStartedAt?: Date;
+}
+
+/** How to restore each object's recorded key order after storage re-sorts keys. */
+export interface MastraKeyOrder {
+  [key: string]: JsonValue;
+  /** Permutations of non-sorted objects, in sorted depth-first order. */
+  permutations: string;
+  /** SHA-256 of the envelope's JSON, without this field, in recorded order. */
+  sha256: string;
 }
 
 export interface MastraMemoryReplayEnvelope {
@@ -74,6 +89,8 @@ export interface MastraMemoryReplayEnvelope {
   requestContext: JsonValue;
   files: MastraFileManifestEntry[];
   omTape: JsonValue[];
+  turnStartedAt: string;
+  keyOrder: MastraKeyOrder;
 }
 
 class MemoryReplayError extends Error {}
@@ -306,6 +323,150 @@ export function decodeMemoryValue(value: JsonValue): unknown {
     );
   }
   return visit(converted);
+}
+
+const KEY_ORDER_KEY = "keyOrder";
+const PERMUTATIONS_PATTERN = /^(?:\d+:\d+(?:,\d+)*(?:;\d+:\d+(?:,\d+)*)*)?$/;
+
+/**
+ * Describe the key order of every object that is not already sorted.
+ *
+ * Entries follow a depth-first walk that visits keys in sorted order, so the
+ * description does not depend on the order storage returns keys in. Each entry
+ * is `gap:permutation`: the object's walk index minus the previous entry's,
+ * then each recorded key's position in the sorted key list.
+ */
+function describeKeyOrder(value: JsonValue): string {
+  const entries: string[] = [];
+  let index = 0;
+  let previous = 0;
+  const visit = (current: JsonValue): void => {
+    if (Array.isArray(current)) {
+      for (const item of current) visit(item);
+      return;
+    }
+    if (!isRecord(current)) return;
+    const position = index++;
+    const recorded = Object.keys(current);
+    const sorted = [...recorded].sort();
+    if (recorded.some((key, i) => key !== sorted[i])) {
+      const rank = new Map(sorted.map((key, i) => [key, i]));
+      entries.push(
+        `${position - previous}:${recorded.map((key) => rank.get(key)).join(",")}`,
+      );
+      previous = position;
+    }
+    for (const key of sorted) visit(current[key] as JsonValue);
+  };
+  visit(value);
+  return entries.join(";");
+}
+
+/** Rebuild every object of `value` in the key order `permutations` describes. */
+function applyKeyOrder(value: JsonValue, permutations: string): JsonValue {
+  requireValue(
+    PERMUTATIONS_PATTERN.test(permutations),
+    "Malformed recorded key order.",
+  );
+  const pending = new Map<number, number[]>();
+  let position = 0;
+  for (const entry of permutations ? permutations.split(";") : []) {
+    const [gap, order] = entry.split(":") as [string, string];
+    position += Number(gap);
+    requireValue(!pending.has(position), "Malformed recorded key order.");
+    pending.set(position, order.split(",").map(Number));
+  }
+  let index = 0;
+  const visit = (current: JsonValue): JsonValue => {
+    if (Array.isArray(current)) return current.map(visit);
+    if (!isRecord(current)) return current;
+    const own = index++;
+    const sorted = Object.keys(current).sort();
+    const children = new Map(
+      sorted.map((key) => [key, visit(current[key] as JsonValue)]),
+    );
+    const permutation = pending.get(own);
+    pending.delete(own);
+    requireValue(
+      permutation === undefined ||
+        (permutation.length === sorted.length &&
+          new Set(permutation).size === sorted.length &&
+          permutation.every((rank) => rank < sorted.length)),
+      "Recorded key order does not match the stored envelope.",
+    );
+    const order = permutation?.map((rank) => sorted[rank] as string) ?? sorted;
+    return Object.fromEntries(
+      order.map((key) => [key, children.get(key) as JsonValue]),
+    );
+  };
+  const restored = visit(value);
+  requireValue(
+    pending.size === 0,
+    "Recorded key order does not match the stored envelope.",
+  );
+  return restored;
+}
+
+/**
+ * Add the key order that restores an envelope byte for byte after storage.
+ *
+ * PostgreSQL `jsonb` re-sorts object keys, and replay sends the restored
+ * values to the provider, so tool arguments, tool results, schemas, and
+ * working-memory templates would otherwise reach the model in a different
+ * order than production sent them.
+ */
+function withKeyOrder(envelope: JsonValue): MastraMemoryReplayEnvelope {
+  requireValue(isRecord(envelope), "Malformed memory replay envelope.");
+  const { [KEY_ORDER_KEY]: _previous, ...content } = envelope;
+  const json = JSON.stringify(content);
+  const keyOrder: MastraKeyOrder = {
+    permutations: describeKeyOrder(content),
+    sha256: createHash("sha256").update(json).digest("hex"),
+  };
+  const bytes =
+    Buffer.byteLength(json, "utf8") +
+    Buffer.byteLength(JSON.stringify({ [KEY_ORDER_KEY]: keyOrder }), "utf8");
+  if (bytes > MAX_MASTRA_REPLAY_JSON_BYTES)
+    throw new MastraReplayBudgetError(
+      `Mastra memory replay envelope exceeds maximum JSON bytes ${MAX_MASTRA_REPLAY_JSON_BYTES}`,
+    );
+  return {
+    ...content,
+    [KEY_ORDER_KEY]: keyOrder,
+  } as MastraMemoryReplayEnvelope;
+}
+
+/**
+ * Restore a stored envelope's recorded key order.
+ *
+ * `verify` then confirms the restored envelope matches the recorded one byte
+ * for byte; decoding runs it last so malformed content reports its own reason.
+ */
+function restoreKeyOrder(envelope: Record<string, JsonValue>): {
+  restored: Record<string, JsonValue>;
+  verify(): void;
+} {
+  const keyOrder = envelope[KEY_ORDER_KEY];
+  requireValue(
+    isRecord(keyOrder) &&
+      typeof keyOrder.permutations === "string" &&
+      typeof keyOrder.sha256 === "string",
+    "Missing recorded key order.",
+  );
+  const { [KEY_ORDER_KEY]: _keyOrder, ...content } = envelope;
+  const restored = applyKeyOrder(content, keyOrder.permutations) as Record<
+    string,
+    JsonValue
+  >;
+  return {
+    restored,
+    verify: () =>
+      requireValue(
+        createHash("sha256").update(JSON.stringify(restored)).digest("hex") ===
+          keyOrder.sha256,
+        "Restored envelope differs from the recorded envelope.",
+      ),
+  };
 }
 
 function readStoredDates(value: unknown, keys: readonly string[]): unknown {
@@ -631,9 +792,22 @@ export function validateMemoryReplaySelectors(
   }
 }
 
-/** Build safe diagnostic evidence even when complete replay prerequisites are unavailable. */
+/**
+ * Rewrites an encoded envelope before its key order and hash are recorded.
+ *
+ * Recording the order after the rewrite keeps the hash valid for the content
+ * that reaches storage.
+ */
+export type MemoryReplayEnvelopeSanitizer = (value: JsonValue) => JsonValue;
+
+/**
+ * Build safe diagnostic evidence even when complete replay prerequisites are unavailable.
+ *
+ * `sanitize` receives the encoded envelope before its key order is recorded.
+ */
 export function createMemoryReplayEnvelope(
   input: MastraMemoryReplayInput,
+  sanitize: MemoryReplayEnvelopeSanitizer = (value) => value,
 ): MastraMemoryReplayEnvelope {
   const incomplete = (reason: string): MastraMemoryReplayEnvelope => ({
     version: 3,
@@ -646,10 +820,17 @@ export function createMemoryReplayEnvelope(
     requestContext: null,
     files: [],
     omTape: [],
+    turnStartedAt: "",
+    keyOrder: { permutations: "", sha256: "" },
   });
   try {
     validateMemorySnapshot(input.initialSnapshot);
-    const envelope: MastraMemoryReplayEnvelope = {
+    const turnStartedAt = input.turnStartedAt ?? new Date();
+    requireValue(
+      Number.isFinite(turnStartedAt.getTime()),
+      "Invalid recorded turn start time.",
+    );
+    const envelope: Omit<MastraMemoryReplayEnvelope, "keyOrder"> = {
       version: 3,
       complete: true,
       reasons: [],
@@ -666,14 +847,16 @@ export function createMemoryReplayEnvelope(
         ...binary(file.bytes),
       })),
       omTape: input.omTape === undefined ? [] : input.omTape,
+      turnStartedAt: turnStartedAt.toISOString(),
     };
     // The combined envelope, including encoded bytes and metadata, shares one budget.
-    const converted = strictMastraReplayValue(
-      envelope,
-      "Mastra memory replay envelope",
+    const converted = withKeyOrder(
+      sanitize(
+        strictMastraReplayValue(envelope, "Mastra memory replay envelope"),
+      ),
     );
     decodeConvertedMemoryReplayEnvelope(converted);
-    return converted as MastraMemoryReplayEnvelope;
+    return converted;
   } catch (error) {
     return incomplete(
       error instanceof MemoryReplayError
@@ -685,15 +868,24 @@ export function createMemoryReplayEnvelope(
   }
 }
 
-/** Produce the immutable final envelope after recorded OM work has settled. */
+/**
+ * Produce the immutable final envelope after recorded OM work has settled.
+ *
+ * `sanitize` receives the encoded envelope before its key order is recorded.
+ */
 export function finalizeMemoryReplayEnvelope(
   envelope: MastraMemoryReplayEnvelope,
   omTape: JsonValue[],
+  sanitize: MemoryReplayEnvelopeSanitizer = (value) => value,
 ): MastraMemoryReplayEnvelope {
-  const final = strictMastraReplayValue(
-    { ...envelope, omTape },
-    "Mastra memory replay envelope",
-  ) as MastraMemoryReplayEnvelope;
+  const final = withKeyOrder(
+    sanitize(
+      strictMastraReplayValue(
+        { ...envelope, omTape },
+        "Mastra memory replay envelope",
+      ),
+    ),
+  );
   decodeConvertedMemoryReplayEnvelope(final);
   return final;
 }
@@ -707,8 +899,14 @@ export function decodeMemoryReplayEnvelope(
 
 /** Validate a value already copied through the strict replay codec. */
 function decodeConvertedMemoryReplayEnvelope(
-  value: JsonValue,
+  stored: JsonValue,
 ): MastraMemoryReplayInput {
+  requireValue(
+    isRecord(stored) && (stored.version === 2 || stored.version === 3),
+    "Missing, incomplete, or unknown version of memory replay envelope.",
+  );
+  const ordered = stored.version === 3 ? restoreKeyOrder(stored) : undefined;
+  const value = ordered?.restored ?? stored;
   requireValue(
     isRecord(value) &&
       (value.version === 2 || value.version === 3) &&
@@ -723,6 +921,17 @@ function decodeConvertedMemoryReplayEnvelope(
   requireValue(
     value.version === 2 || Array.isArray(value.omTape),
     "Malformed recorded observational-memory tape.",
+  );
+  const turnStartedAt =
+    value.version === 3 && typeof value.turnStartedAt === "string"
+      ? new Date(value.turnStartedAt)
+      : undefined;
+  requireValue(
+    value.version === 2 ||
+      (turnStartedAt !== undefined &&
+        Number.isFinite(turnStartedAt.getTime()) &&
+        turnStartedAt.toISOString() === value.turnStartedAt),
+    "Missing or malformed recorded turn start time.",
   );
   for (const key of [
     "rawInput",
@@ -780,14 +989,18 @@ function decodeConvertedMemoryReplayEnvelope(
       bytes,
     };
   });
+  const rawInput = decodeMemoryValue(value.rawInput as JsonValue);
+  ordered?.verify();
   return {
     invocationId: value.invocationId,
-    rawInput: decodeMemoryValue(value.rawInput as JsonValue),
+    rawInput,
     initialSnapshot,
     configuration,
     requestContext,
     files,
-    ...(value.version === 3 ? { omTape: value.omTape as JsonValue[] } : {}),
+    ...(value.version === 3
+      ? { omTape: value.omTape as JsonValue[], turnStartedAt }
+      : {}),
   };
 }
 

@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import type { MastraModelConfig } from "@mastra/core/llm";
 import type { MemoryConfigInternal } from "@mastra/core/memory";
 import type { MemoryStorage } from "@mastra/core/storage";
+import type { Memory } from "@mastra/memory";
 import {
   createMemoryCaptureBinding,
   createProcessLocalMemoryAccess,
@@ -14,6 +15,7 @@ import {
   validateMemorySnapshot,
 } from "./memory-snapshot.js";
 import type { createOMResultTape } from "./om-result-tape.js";
+import type { RecordedClock } from "./replay-clock.js";
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -173,6 +175,30 @@ export async function bindOMResultModels(
     bound[name] = settings;
   }
   return { ...config, observationalMemory: bound } as MemoryConfigInternal;
+}
+
+/**
+ * Evaluate a Memory's observational-memory time checks on a recorded clock.
+ *
+ * Mastra labels observation dates relative to the current date ("today",
+ * "2 weeks ago") and activates buffered observations once the last assistant
+ * message is older than `activateAfterIdle`. Both read the wall clock, so a
+ * replay run days or minutes after its baseline would otherwise send the
+ * actor different memory than production did.
+ */
+export async function pinMemoryClock(
+  memory: Pick<Memory, "omEngine">,
+  clock: RecordedClock,
+): Promise<void> {
+  const engine = await memory.omEngine;
+  if (!engine) return;
+  const buildContext = engine.buildContextSystemMessages.bind(engine);
+  // Instance properties shadow the prototype, so Mastra's own `this.` calls
+  // and its processors use these versions too.
+  engine.buildContextSystemMessages = (opts) =>
+    buildContext({ ...opts, currentDate: opts.currentDate ?? clock.now() });
+  const activate = engine.activate.bind(engine);
+  engine.activate = (opts) => clock.run(() => activate(opts));
 }
 
 /**
