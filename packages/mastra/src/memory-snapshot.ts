@@ -11,8 +11,13 @@ import type {
 } from "@mastra/core/storage";
 import type { JsonValue } from "@zenml-io/kitaru";
 import {
+  boundMastraReplayEvidence,
+  degradedMastraReplayEvidence,
   MAX_MASTRA_REPLAY_ITEMS,
   MAX_MASTRA_REPLAY_JSON_BYTES,
+  MastraReplayBudgetError,
+  type MastraReplayEvidence,
+  type RecordingLimits,
   strictMastraReplayValue,
 } from "@zenml-io/kitaru/adapter";
 import { fileReference } from "./stateful-files.js";
@@ -83,6 +88,19 @@ function requireValue(condition: unknown, reason: string): asserts condition {
   if (!condition) throw unsupported(reason);
 }
 
+function requireWithinBudget(
+  condition: boolean,
+  path: string | undefined,
+  bound: string,
+): void {
+  if (!condition)
+    throw new MastraReplayBudgetError(
+      path === undefined
+        ? `Unsupported Mastra memory replay: Memory value ${bound}.`
+        : `${path} ${bound}`,
+    );
+}
+
 function hash(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -149,21 +167,29 @@ function validateUrl(value: string): URL {
   return url;
 }
 
-/** Encode the few non-JSON values in native memory without losing their types. */
-export function encodeMemoryValue(value: unknown): JsonValue {
+/**
+ * Encode the few non-JSON values in native memory without losing their types.
+ *
+ * `path` names the value in a budget error; other failures keep the replay
+ * codec's own reasons.
+ */
+export function encodeMemoryValue(value: unknown, path?: string): JsonValue {
   let items = 0;
   const active = new Set<object>();
   function visit(current: unknown, depth: number): JsonValue {
-    requireValue(
-      ++items <= MAX_MASTRA_REPLAY_ITEMS && depth < 64,
-      `Memory value exceeds maximum items ${MAX_MASTRA_REPLAY_ITEMS} or depth 64.`,
+    requireWithinBudget(
+      ++items <= MAX_MASTRA_REPLAY_ITEMS,
+      path,
+      `exceeds maximum item count ${MAX_MASTRA_REPLAY_ITEMS}`,
     );
+    requireWithinBudget(depth < 64, path, "exceeds maximum depth 64");
     if (current === undefined) return { [CODEC_KEY]: "undefined" };
     if (current === null || typeof current === "boolean") return current;
     if (typeof current === "string") {
-      requireValue(
+      requireWithinBudget(
         current.length <= MAX_MASTRA_REPLAY_JSON_BYTES,
-        `Memory value exceeds maximum string length ${MAX_MASTRA_REPLAY_JSON_BYTES}.`,
+        path,
+        `exceeds maximum JSON bytes ${MAX_MASTRA_REPLAY_JSON_BYTES}`,
       );
       return current;
     }
@@ -216,7 +242,32 @@ export function encodeMemoryValue(value: unknown): JsonValue {
     }
   }
   const encoded = visit(value, 0);
-  return strictMastraReplayValue(encoded);
+  return strictMastraReplayValue(encoded, path);
+}
+
+/**
+ * Encode diagnostic evidence with the replay codec without failing on size.
+ *
+ * A value over the replay budget becomes a degraded marker that names the
+ * exceeded bound, and optional per-value `limits` truncate the encoded value.
+ * Values the codec cannot represent, or that carry credentials, still throw.
+ */
+export function encodeMemoryEvidence(
+  value: unknown,
+  path: string,
+  limits?: RecordingLimits,
+): MastraReplayEvidence {
+  let encoded: JsonValue;
+  try {
+    encoded = encodeMemoryValue(value, path);
+  } catch (error) {
+    if (error instanceof MastraReplayBudgetError)
+      return degradedMastraReplayEvidence(path, error);
+    throw error;
+  }
+  return limits === undefined
+    ? { value: encoded }
+    : boundMastraReplayEvidence(encoded, path, limits);
 }
 
 /** Decode an already bounded value, rejecting ambiguous or damaged codec records. */

@@ -538,6 +538,44 @@ export function projectRecordedInput(
   return converted;
 }
 
+/** A Mastra replay value exceeded the replay input's byte, item, or depth budget. */
+export class MastraReplayBudgetError extends TypeError {}
+
+/** Restate a walk's budget error as the replay bound it exceeded. */
+function mastraReplayBudgetError(
+  error: unknown,
+  path: string,
+): MastraReplayBudgetError | undefined {
+  if (!(error instanceof TypeError)) return undefined;
+  if (
+    /recorded item count|maximum array length|maximum object size/.test(
+      error.message,
+    )
+  )
+    return new MastraReplayBudgetError(
+      `${path} exceeds maximum item count ${MAX_MASTRA_REPLAY_ITEMS}`,
+    );
+  if (/recorded JSON size|maximum string length/.test(error.message))
+    return new MastraReplayBudgetError(
+      `${path} exceeds maximum JSON bytes ${MAX_MASTRA_REPLAY_JSON_BYTES}`,
+    );
+  if (/maximum depth/.test(error.message))
+    return new MastraReplayBudgetError(
+      `${path} exceeds maximum depth ${MAX_RECORDED_PAYLOAD_DEPTH}`,
+    );
+  return undefined;
+}
+
+function assertMastraReplayBytes(value: JsonValue, path: string): void {
+  if (
+    Buffer.byteLength(JSON.stringify(value), "utf8") >
+    MAX_MASTRA_REPLAY_JSON_BYTES
+  )
+    throw new MastraReplayBudgetError(
+      `${path} exceeds maximum JSON bytes ${MAX_MASTRA_REPLAY_JSON_BYTES}`,
+    );
+}
+
 /** Strict, independently bounded JSON for the Mastra historical read-set. */
 export function strictMastraReplayValue(
   value: unknown,
@@ -562,30 +600,76 @@ export function strictMastraReplayValue(
   try {
     converted = convert(value, options);
   } catch (error) {
-    if (
-      error instanceof TypeError &&
-      /recorded item count|maximum array length|maximum object size/.test(
-        error.message,
-      )
-    )
-      throw new TypeError(
-        `${path} exceeds maximum item count ${MAX_MASTRA_REPLAY_ITEMS}`,
-      );
-    if (error instanceof TypeError && /recorded JSON size/.test(error.message))
-      throw new TypeError(
-        `${path} exceeds maximum JSON bytes ${MAX_MASTRA_REPLAY_JSON_BYTES}`,
-      );
-    throw error;
+    throw mastraReplayBudgetError(error, path) ?? error;
   }
   if (options.lossy) throw new TypeError(`${path} contains unsupported values`);
-  if (
-    Buffer.byteLength(JSON.stringify(converted), "utf8") >
-    MAX_MASTRA_REPLAY_JSON_BYTES
-  )
-    throw new TypeError(
-      `${path} exceeds maximum JSON bytes ${MAX_MASTRA_REPLAY_JSON_BYTES}`,
-    );
+  assertMastraReplayBytes(converted, path);
   return converted;
+}
+
+/** Diagnostic evidence bounded by the Mastra replay budget, and why it lost information. */
+export interface MastraReplayEvidence {
+  value: JsonValue;
+  /** Set when the recorded value is truncated or degraded. */
+  lossReason?: string;
+}
+
+/** Record a replay budget overflow as a degraded marker that names the exceeded bound. */
+export function degradedMastraReplayEvidence(
+  path: string,
+  error: MastraReplayBudgetError,
+): MastraReplayEvidence {
+  return {
+    value: degradedPayload(path, error.message),
+    lossReason: error.message,
+  };
+}
+
+/**
+ * Bound already encoded Mastra evidence without failing the recording.
+ *
+ * The whole value shares the replay input's byte, item, and depth budget, and
+ * a value over it becomes a degraded marker. Per-value `limits` truncate
+ * strings, containers, and nesting as they do for tool payloads.
+ */
+export function boundMastraReplayEvidence(
+  value: JsonValue,
+  path: string,
+  limits?: RecordingLimits,
+): MastraReplayEvidence {
+  const resolved = limits && normalizeRecordingLimits(limits);
+  const options: CloneOptions = {
+    budget: {
+      chars: MAX_MASTRA_REPLAY_JSON_BYTES * 2,
+      items: MAX_MASTRA_REPLAY_ITEMS,
+    },
+    lossy: false,
+    maxDepth: resolved?.maxDepth ?? MAX_RECORDED_PAYLOAD_DEPTH,
+    maxItems: resolved?.maxItems ?? MAX_MASTRA_REPLAY_ITEMS,
+    maxStringChars: resolved?.maxStringChars ?? MAX_MASTRA_REPLAY_JSON_BYTES,
+    path,
+    rejectLongStrings: false,
+    sensitiveKeyMode: "allow",
+    sensitiveKeys: SECRET_KEYS,
+  };
+  try {
+    const converted = convert(value, options);
+    assertMastraReplayBytes(converted, path);
+    if (!options.lossy) return { value: converted };
+    return {
+      value: converted,
+      lossReason: resolved
+        ? `${path} exceeds the configured recordingLimits and was truncated`
+        : `${path} exceeds maximum depth ${MAX_RECORDED_PAYLOAD_DEPTH} and was truncated`,
+    };
+  } catch (error) {
+    const overflow =
+      error instanceof MastraReplayBudgetError
+        ? error
+        : mastraReplayBudgetError(error, path);
+    if (overflow) return degradedMastraReplayEvidence(path, overflow);
+    throw error;
+  }
 }
 
 /** Require a real version-3 envelope before using the larger Mastra bound. */

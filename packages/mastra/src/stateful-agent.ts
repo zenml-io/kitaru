@@ -521,7 +521,9 @@ export function createMemoryReplayAgent(
           memory_revision: event.revision,
           memory_method: event.method,
           request_id: event.requestId ?? null,
-          evidence_complete: event.complete,
+          evidence_complete: event.complete && !event.truncationReasons,
+          evidence_truncated: event.truncationReasons !== undefined,
+          evidence_truncation_reasons: event.truncationReasons ?? [],
         },
       });
     const omCaptureErrors: string[] = [];
@@ -834,6 +836,12 @@ export function createMemoryReplayAgent(
         });
       const capture = createRequestCapture({
         invocationId,
+        // Only limits the application chose bound request evidence; the
+        // tool-sized defaults would truncate nearly every prompt.
+        recordingLimits:
+          supplied.recordingLimits === undefined
+            ? undefined
+            : options.recordingLimits,
         sanitizeEvidence: sanitizer.replace,
         getMemoryRevision: () => runtime.binding.revision,
         onFailedAttempt: writeAttempt,
@@ -962,7 +970,9 @@ export function createMemoryReplayAgent(
           },
           takeRequest() {
             const evidence = capture.takeSuccessful();
-            if (evidence && !evidence.complete)
+            // Truncation to size bounds loses diagnostic detail only; replay
+            // input comes from the envelope, not from request evidence.
+            if (evidence?.reasons.length)
               runtime.binding.markIncomplete(
                 "Actor request evidence was incomplete.",
               );

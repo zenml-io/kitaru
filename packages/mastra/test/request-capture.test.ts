@@ -276,7 +276,67 @@ it("marks unsupported or bounded evidence incomplete without failing native call
       toolChoice: { type: "auto" },
     }),
   ).resolves.toBe("native");
-  expect(capture.takeSuccessful()).toMatchObject({ complete: false });
+  const evidence = required(capture.takeSuccessful());
+  expect(evidence).toMatchObject({
+    complete: false,
+    reasons: [],
+    truncationReasons: [
+      "Effective model request exceeds the configured recordingLimits and was truncated",
+    ],
+  });
+  expect(JSON.stringify(evidence.inputs)).toContain("aaaaaaaaaa[truncated]");
+});
+
+it("keeps a request over 1 MiB complete and degrades one over the replay budget with its bound", async () => {
+  const onCaptureError = vi.fn();
+  const capture = createRequestCapture({
+    invocationId: "budget",
+    getMemoryRevision: () => 0,
+    onCaptureError,
+  });
+  capture.beginStep({ stepNumber: 0, messageList: new MessageList() });
+  const model = capture.instrumentModel({
+    specificationVersion: "v2",
+    modelId: "actor",
+    provider: "fixture",
+    doGenerate: async (_args: unknown) => "native",
+  });
+  const content = "x".repeat(2 * 1_048_576);
+  await model.doGenerate({ prompt: [{ role: "user", content }] });
+  const large = required(capture.takeSuccessful());
+  expect(large).toMatchObject({
+    complete: true,
+    reasons: [],
+    truncationReasons: [],
+  });
+  expect(JSON.stringify(large.inputs)).toContain(content);
+  await expect(
+    model.doGenerate({
+      prompt: [
+        {
+          role: "user",
+          content: Array.from({ length: 210_000 }, () => ({
+            type: "text",
+            text: "",
+          })),
+        },
+      ],
+    }),
+  ).resolves.toBe("native");
+  const overflow = required(capture.takeSuccessful());
+  expect(overflow).toMatchObject({
+    complete: false,
+    reasons: [],
+    truncationReasons: [
+      "Effective model request exceeds maximum item count 200000",
+    ],
+    inputs: {
+      kitaru_recording: "degraded",
+      path: "Effective model request",
+      reason: "Effective model request exceeds maximum item count 200000",
+    },
+  });
+  expect(onCaptureError).not.toHaveBeenCalled();
 });
 
 it("retains unfinished calls and captures independently replaced models", async () => {

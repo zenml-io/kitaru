@@ -1,0 +1,246 @@
+import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
+import { createTool } from "@mastra/core/tools";
+import { afterEach, expect, it, vi } from "vitest";
+import { z } from "zod/v4";
+import {
+  createMemoryReplayAgent,
+  createProcessLocalMemoryAccess,
+  MEMORY_REPLAY_KEY,
+} from "../src/memory.js";
+import {
+  createMemoryRuntime,
+  type MemoryRuntime,
+  RESOURCE,
+  seedMemory,
+  streamParts,
+  THREAD,
+  textStream,
+} from "./helpers/memory-agent.js";
+import { AGENT_ID, installTestApi, type TestApi } from "./helpers.js";
+
+const runtimes: MemoryRuntime[] = [];
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  for (const runtime of runtimes.splice(0)) await runtime.store.close();
+});
+
+/** A hotel search result: 1,400 rows of 10 fields, about 14,000 JSON values. */
+function hotelRows() {
+  return Array.from({ length: 1_400 }, (_, row) =>
+    Object.fromEntries(
+      Array.from({ length: 10 }, (_, field) => [
+        `field${field}`,
+        `hotel-${row}-${field}`,
+      ]),
+    ),
+  );
+}
+
+/** Grow the seeded thread to 830 messages carrying 15,000 nested values. */
+async function seedLongThread(runtime: MemoryRuntime): Promise<void> {
+  await seedMemory(runtime);
+  await runtime.domain.saveMessages({
+    messages: Array.from({ length: 829 }, (_, index) => ({
+      id: `long-${index}`,
+      role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      content: {
+        format: 2 as const,
+        parts: [{ type: "text" as const, text: `history ${index}` }],
+        ...(index === 0
+          ? {
+              metadata: {
+                hotels: Array.from({ length: 1_500 }, (_, hotel) =>
+                  Object.fromEntries(
+                    Array.from({ length: 10 }, (_, field) => [
+                      `field${field}`,
+                      hotel * field,
+                    ]),
+                  ),
+                ),
+              },
+            }
+          : {}),
+      },
+      createdAt: new Date(Date.UTC(2026, 0, 2, 0, 0, index)),
+      threadId: THREAD,
+      resourceId: RESOURCE,
+    })),
+  });
+}
+
+async function setup(
+  options: { recordingLimits?: { maxStringChars: number } } = {},
+) {
+  const api = installTestApi();
+  const runtime = createMemoryRuntime({ messageTokens: 10_000_000 });
+  runtimes.push(runtime);
+  await seedLongThread(runtime);
+  let actorCalls = 0;
+  const actor = new MastraLanguageModelV2Mock({
+    modelId: "actor",
+    provider: "fixture",
+    doStream: async () => {
+      actorCalls += 1;
+      if (actorCalls % 2 === 0) return textStream("done");
+      return streamParts(
+        [
+          {
+            type: "tool-call",
+            toolCallId: `search-${actorCalls}`,
+            toolName: "searchHotels",
+            input: "{}",
+          },
+        ],
+        "tool-calls",
+      );
+    },
+  });
+  const exclusiveAccess = createProcessLocalMemoryAccess();
+  const adapter = createMemoryReplayAgent(
+    ({ memory }) => ({
+      id: "hotel-search",
+      name: "Hotel search",
+      instructions: "Answer",
+      memory,
+      model: actor,
+      tools: {
+        searchHotels: createTool({
+          id: "searchHotels",
+          description: "Search hotels",
+          inputSchema: z.object({}),
+          execute: async () => hotelRows(),
+        }),
+      },
+    }),
+    {
+      agentId: AGENT_ID,
+      apiUrl: "https://kitaru.invalid",
+      apiKey: "fixture",
+      requestedModelId: "fixture/actor",
+      ...(options.recordingLimits
+        ? { recordingLimits: options.recordingLimits }
+        : {}),
+      onRecordingError: () => undefined,
+      sourceMemory: () => ({
+        settled: () => runtime.memory.settled(),
+        domain: runtime.domain,
+        configuration: runtime.memory.getMergedThreadConfig(),
+        exclusiveAccess,
+      }),
+      resolveModel: (id) =>
+        id.endsWith("observer")
+          ? runtime.observer.model
+          : id.endsWith("reflector")
+            ? runtime.reflector.model
+            : actor,
+    },
+  );
+  async function turn(message: string): Promise<void> {
+    const output = await adapter.stream(message, {
+      maxSteps: 5,
+      memory: { thread: THREAD, resource: RESOURCE },
+    });
+    await output.consumeStream();
+    expect(await output.text).toBe("done");
+  }
+  return { api, turn };
+}
+
+/** The final status and replay state of every recorded session. */
+function outcomes(api: TestApi): string[] {
+  return api.sessionIds.map((id) => {
+    const update = api.calls
+      .filter(
+        (call) =>
+          call.method === "PATCH" &&
+          call.path.endsWith(id) &&
+          call.body?.status !== "in_progress",
+      )
+      .at(-1);
+    const metadata = update?.body?.metadata as
+      | Record<string, unknown>
+      | undefined;
+    return `${String(update?.body?.status)}/${String(metadata?.mastra_replay_state)}`;
+  });
+}
+
+function nodes(api: TestApi, sessionId: string, name: string) {
+  return api
+    .nodeBatches(sessionId)
+    .flat()
+    .filter((node) => node.name === name || node.node_type === name);
+}
+
+it("keeps 1,400-row tool turns on an 830-message thread eligible and stores saved messages once", async () => {
+  const { api, turn } = await setup();
+  for (const message of ["Find hotels.", "Find more.", "And again."])
+    await turn(message);
+  await vi.waitFor(
+    () =>
+      expect(outcomes(api)).toEqual([
+        "completed/eligible",
+        "completed/eligible",
+        "completed/eligible",
+      ]),
+    { timeout: 5_000 },
+  );
+  const created = api.calls.find(
+    (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+  )?.body?.inputs as Record<string, { complete: boolean }>;
+  expect(created[MEMORY_REPLAY_KEY]?.complete).toBe(true);
+  for (const sessionId of api.sessionIds) {
+    const [save] = nodes(api, sessionId, "memory_mutation").filter(
+      (node) =>
+        (node.attributes as Record<string, unknown>).memory_method ===
+        "saveMessages",
+    );
+    if (!save) throw new Error("Expected a saveMessages node");
+    expect(save.attributes).toMatchObject({
+      evidence_complete: true,
+      evidence_truncated: false,
+    });
+    // The tool result is stored with the saved arguments, not again as the result.
+    expect(JSON.stringify(save.inputs)).toContain("hotel-1399-9");
+    expect(JSON.stringify(save.outputs)).not.toContain("hotel-1399-9");
+    const saved = (save.outputs as { messages: unknown[] }).messages;
+    expect(saved.length).toBeGreaterThan(0);
+    for (const message of saved)
+      expect(message).toEqual({
+        savedMessageRef: {
+          id: expect.any(String),
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      });
+    for (const request of nodes(api, sessionId, "llm_call"))
+      expect(request.attributes).toMatchObject({
+        request_complete: true,
+        request_evidence_truncated: false,
+      });
+  }
+}, 30_000);
+
+it("applies application recordingLimits to request evidence without making the turn ineligible", async () => {
+  const { api, turn } = await setup({
+    recordingLimits: { maxStringChars: 20 },
+  });
+  await turn("Find hotels with a long enough question.");
+  await vi.waitFor(
+    () => expect(outcomes(api)).toEqual(["completed/eligible"]),
+    { timeout: 5_000 },
+  );
+  const [sessionId] = api.sessionIds;
+  const requests = nodes(api, String(sessionId), "llm_call");
+  expect(requests.length).toBeGreaterThan(0);
+  for (const request of requests) {
+    expect(request.attributes).toMatchObject({
+      request_complete: false,
+      request_evidence_truncated: true,
+      request_incomplete_reasons: expect.arrayContaining([
+        "Effective model request exceeds the configured recordingLimits and was truncated",
+      ]),
+    });
+    expect(JSON.stringify(request.inputs)).toContain("[truncated]");
+  }
+}, 30_000);

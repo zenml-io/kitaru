@@ -1,8 +1,13 @@
+import { createHash } from "node:crypto";
 import type { MemoryStorage } from "@mastra/core/storage";
-import { type JsonValue, toRecorderJson } from "@zenml-io/kitaru";
-import { recordedToolPayloadConversion } from "@zenml-io/kitaru/adapter";
+import type { JsonValue } from "@zenml-io/kitaru";
+import {
+  boundMastraReplayEvidence,
+  type MastraReplayEvidence,
+} from "@zenml-io/kitaru/adapter";
 import {
   decodeMemoryValue,
+  encodeMemoryEvidence,
   encodeMemoryValue,
   type MastraMemorySnapshot,
   normalizeStoredMemoryDates,
@@ -218,11 +223,14 @@ export interface MastraMemoryMutation {
   id: string;
   invocationId: string;
   revision: number;
+  /** False when the arguments or result could not be recorded safely. */
   complete: boolean;
   method: string;
   arguments: JsonValue;
   result: JsonValue;
   requestId?: string;
+  /** Why size bounds truncated this evidence; the storage call itself succeeded. */
+  truncationReasons?: string[];
 }
 
 export interface MastraMemoryCaptureOptions extends MastraMemorySelector {
@@ -564,6 +572,54 @@ function mutationEvidenceValue(method: PropertyKey, value: unknown): unknown {
   return OM_RECORD_METHODS.has(method) ? projectOMRecords(value) : value;
 }
 
+function canonicalJson(value: JsonValue): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key] ?? null)}`)
+    .join(",")}}`;
+}
+
+/**
+ * Replace saved messages that repeat an argument message with a reference.
+ *
+ * Storage returns the messages it just saved, so recording both sides stores
+ * every new message, including large tool results, twice. A returned message
+ * that differs from its argument stays in full.
+ */
+function referenceSavedMessages(
+  encodedArguments: JsonValue,
+  encodedResult: JsonValue,
+): JsonValue {
+  const [input] = Array.isArray(encodedArguments) ? encodedArguments : [];
+  if (
+    !record(input) ||
+    !Array.isArray(input.messages) ||
+    !record(encodedResult) ||
+    !Array.isArray(encodedResult.messages)
+  )
+    return encodedResult;
+  const saved = new Map<string, string>();
+  for (const message of input.messages)
+    if (record(message) && typeof message.id === "string")
+      saved.set(message.id, canonicalJson(message));
+  return {
+    ...encodedResult,
+    messages: encodedResult.messages.map((message) => {
+      if (!record(message) || typeof message.id !== "string") return message;
+      const canonical = canonicalJson(message);
+      if (saved.get(message.id) !== canonical) return message;
+      return {
+        savedMessageRef: {
+          id: message.id,
+          sha256: createHash("sha256").update(canonical).digest("hex"),
+        },
+      };
+    }),
+  };
+}
+
 /**
  * Give the source store the OM models from the source configuration.
  *
@@ -666,10 +722,18 @@ export function createMemoryCaptureBinding(
         let encodedArguments: JsonValue = null;
         let complete = true;
         let requestId: string | undefined;
+        const truncationReasons: string[] = [];
+        const keep = (evidence: MastraReplayEvidence): JsonValue => {
+          if (evidence.lossReason) truncationReasons.push(evidence.lossReason);
+          return evidence.value;
+        };
         try {
           const evidence = mutationEvidenceValue(property, args);
-          encodedArguments = encodeMemoryValue(
-            options.sanitizeEvidence?.(evidence) ?? evidence,
+          encodedArguments = keep(
+            encodeMemoryEvidence(
+              options.sanitizeEvidence?.(evidence) ?? evidence,
+              "Memory mutation arguments",
+            ),
           );
           requestId = options.getRequestId?.();
         } catch {
@@ -708,16 +772,43 @@ export function createMemoryCaptureBinding(
           let encodedResult: JsonValue = null;
           try {
             const evidence = mutationEvidenceValue(property, output);
-            encodedResult = encodeMemoryValue(
-              options.sanitizeEvidence?.(evidence) ?? evidence,
+            encodedResult = keep(
+              encodeMemoryEvidence(
+                options.sanitizeEvidence?.(evidence) ?? evidence,
+                "Memory mutation result",
+              ),
             );
+            if (property === "saveMessages")
+              encodedResult = referenceSavedMessages(
+                encodedArguments,
+                encodedResult,
+              );
           } catch {
             complete = false;
             markIncomplete(
               "Memory mutation result could not be recorded safely.",
             );
           }
-          let event: MastraMemoryMutation = {
+          // Each side fits the replay budget on its own; the node carries both.
+          const combined = boundMastraReplayEvidence(
+            { arguments: encodedArguments, result: encodedResult },
+            "Memory mutation evidence",
+          );
+          if (combined.lossReason) {
+            truncationReasons.push(combined.lossReason);
+            const bounded =
+              record(combined.value) &&
+              Object.hasOwn(combined.value, "arguments")
+                ? combined.value
+                : undefined;
+            encodedArguments = bounded
+              ? (bounded.arguments ?? null)
+              : combined.value;
+            encodedResult = bounded ? (bounded.result ?? null) : null;
+          }
+          // Size truncation loses diagnostic detail only: replay rebuilds
+          // memory from the initial snapshot, never from these events.
+          const event: MastraMemoryMutation = {
             id: `${options.invocationId}:memory:${revision}`,
             invocationId: options.invocationId,
             revision,
@@ -726,25 +817,8 @@ export function createMemoryCaptureBinding(
             arguments: encodedArguments,
             result: encodedResult,
             ...(requestId === undefined ? {} : { requestId }),
+            ...(truncationReasons.length ? { truncationReasons } : {}),
           };
-          try {
-            toRecorderJson(event);
-            if (
-              recordedToolPayloadConversion(event, "Mastra memory mutation")
-                .lossy
-            )
-              throw new Error("Lossy event");
-          } catch {
-            markIncomplete(
-              "Memory mutation evidence exceeds replay payload bounds or contains credentials.",
-            );
-            event = {
-              ...event,
-              complete: false,
-              arguments: null,
-              result: null,
-            };
-          }
           evidence = evidence.then(async () => {
             try {
               await options.recordMutation(event);

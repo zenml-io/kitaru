@@ -1,11 +1,10 @@
 import type { MessageList } from "@mastra/core/agent/message-list";
 import type { JsonValue } from "@zenml-io/kitaru";
 import {
-  boundedRecorderConversion,
+  boundMastraReplayEvidence,
   type RecordingLimits,
-  recordedToolPayloadConversion,
 } from "@zenml-io/kitaru/adapter";
-import { encodeMemoryValue } from "./memory-snapshot.js";
+import { encodeMemoryEvidence } from "./memory-snapshot.js";
 
 export interface RequestEvidence {
   externalId: string;
@@ -21,12 +20,16 @@ export interface RequestEvidence {
   modelSettings: Record<string, JsonValue>;
   provenance: JsonValue;
   complete: boolean;
+  /** Why the evidence cannot be trusted as the request that was sent. */
   reasons: string[];
+  /** Why size bounds truncated otherwise faithful evidence. */
+  truncationReasons: string[];
 }
 
 export interface RequestCaptureOptions {
   invocationId: string;
   getMemoryRevision: () => number;
+  /** Per-value bounds for request evidence; the replay budget always applies. */
   recordingLimits?: RecordingLimits;
   onFailedAttempt?: (
     evidence: RequestEvidence,
@@ -76,10 +79,12 @@ export function createRequestCapture(options: RequestCaptureOptions) {
     stepNumber: number;
     provenance: JsonValue;
     reasons: string[];
+    truncationReasons: string[];
   } = {
     stepNumber: 0,
     provenance: null,
     reasons: ["Step provenance was not supplied."],
+    truncationReasons: [],
   };
   const attempts = new Map<number, number>();
   const unfinished = new Map<
@@ -101,11 +106,15 @@ export function createRequestCapture(options: RequestCaptureOptions) {
     value: unknown,
     label: string,
     reasons: string[],
+    truncationReasons: string[],
   ): JsonValue {
     try {
-      const encoded = encodeMemoryValue(
+      const evidence = encodeMemoryEvidence(
         options.sanitizeEvidence ? options.sanitizeEvidence(value) : value,
+        label,
+        options.recordingLimits,
       );
+      const encoded = evidence.value;
       // Provider options can contain custom transport headers whose keys are
       // not recognizable credential names. Do not persist that transport bag.
       function containsTransport(current: JsonValue): boolean {
@@ -120,17 +129,8 @@ export function createRequestCapture(options: RequestCaptureOptions) {
         reasons.push(`${label} contains transport metadata.`);
         return null;
       }
-      if (options.recordingLimits === undefined) return encoded;
-      const converted = boundedRecorderConversion(
-        encoded,
-        label,
-        options.recordingLimits,
-      );
-      if (converted.lossy)
-        reasons.push(
-          `${label} exceeded recording limits or required redaction.`,
-        );
-      return converted.value;
+      if (evidence.lossReason) truncationReasons.push(evidence.lossReason);
+      return encoded;
     } catch (error) {
       reasons.push(`${label} could not be recorded losslessly.`);
       report(error);
@@ -140,6 +140,7 @@ export function createRequestCapture(options: RequestCaptureOptions) {
 
   function beginStep(step: RequestStepContext): void {
     const reasons: string[] = [];
+    const truncationReasons: string[] = [];
     let provenance: JsonValue = null;
     try {
       const list = step.messageList;
@@ -180,12 +181,18 @@ export function createRequestCapture(options: RequestCaptureOptions) {
         },
         "Prompt provenance",
         reasons,
+        truncationReasons,
       );
     } catch (error) {
       reasons.push("Prompt provenance could not be read.");
       report(error);
     }
-    context = { stepNumber: step.stepNumber, provenance, reasons };
+    context = {
+      stepNumber: step.stepNumber,
+      provenance,
+      reasons,
+      truncationReasons,
+    };
   }
 
   function capture(
@@ -194,6 +201,7 @@ export function createRequestCapture(options: RequestCaptureOptions) {
     args: unknown,
   ): RequestEvidence {
     const reasons = [...context.reasons];
+    const truncationReasons = [...context.truncationReasons];
     const attemptNumber = (attempts.get(context.stepNumber) ?? 0) + 1;
     attempts.set(context.stepNumber, attemptNumber);
     let memoryRevision: number | null = null;
@@ -215,6 +223,7 @@ export function createRequestCapture(options: RequestCaptureOptions) {
         },
         "Effective model request",
         reasons,
+        truncationReasons,
       );
       for (const key of SETTINGS) {
         if (request[key] !== undefined)
@@ -222,19 +231,21 @@ export function createRequestCapture(options: RequestCaptureOptions) {
             request[key],
             `Model setting ${key}`,
             reasons,
+            truncationReasons,
           );
       }
     } catch (error) {
       reasons.push("Effective model arguments could not be read.");
       report(error);
     }
-    const combined = recordedToolPayloadConversion(
+    // Each part fits the replay budget on its own; the node carries all three.
+    const combined = boundMastraReplayEvidence(
       { inputs, modelSettings, provenance: context.provenance },
       "Effective request evidence",
     );
-    if (combined.lossy) {
-      reasons.push("Combined request evidence exceeded recording limits.");
-      inputs = null;
+    if (combined.lossReason) {
+      truncationReasons.push(combined.lossReason);
+      inputs = combined.value;
     }
     return {
       externalId: globalThis.crypto.randomUUID(),
@@ -247,10 +258,11 @@ export function createRequestCapture(options: RequestCaptureOptions) {
       provider: model.provider,
       startedAt: new Date().toISOString(),
       inputs,
-      modelSettings: combined.lossy ? {} : modelSettings,
-      provenance: combined.lossy ? null : context.provenance,
-      complete: reasons.length === 0,
+      modelSettings: combined.lossReason ? {} : modelSettings,
+      provenance: combined.lossReason ? null : context.provenance,
+      complete: reasons.length === 0 && truncationReasons.length === 0,
       reasons,
+      truncationReasons,
     };
   }
 
@@ -344,7 +356,11 @@ export function requestEvidenceAttributes(
     memory_revision: evidence.memoryRevision,
     request_method: evidence.method,
     request_complete: evidence.complete,
-    request_incomplete_reasons: evidence.reasons,
+    request_incomplete_reasons: [
+      ...evidence.reasons,
+      ...evidence.truncationReasons,
+    ],
+    request_evidence_truncated: evidence.truncationReasons.length > 0,
     prompt_provenance: evidence.provenance,
   };
 }

@@ -611,3 +611,107 @@ it("rejects same-invocation writes that interleave with initial snapshot reads",
   expect(binding.incompleteReasons.join()).toMatch(/overlapped initial/);
   await binding.release();
 });
+
+it("records a saved message once and keeps a 1,400-row tool result complete", async () => {
+  const { runtime, binding, recordMutation } = await fixture();
+  await binding.captureInitial(runtime.memory);
+  const rows = Array.from({ length: 1_400 }, (_, row) =>
+    Object.fromEntries(
+      Array.from({ length: 10 }, (_, field) => [
+        `field${field}`,
+        `row-${row}-${field}`,
+      ]),
+    ),
+  );
+  await binding.domain.saveMessages({
+    messages: [
+      {
+        id: "tool-result",
+        role: "assistant",
+        content: {
+          format: 2,
+          parts: [
+            {
+              type: "tool-invocation",
+              toolInvocation: {
+                state: "result",
+                toolCallId: "search",
+                toolName: "searchHotels",
+                args: {},
+                result: rows,
+              },
+            },
+          ],
+        },
+        createdAt: new Date("2026-02-01T00:00:00Z"),
+        threadId: THREAD,
+        resourceId: RESOURCE,
+      },
+    ],
+  });
+  await binding.drain();
+  expect(binding.incompleteReasons).toEqual([]);
+  const event = recordMutation.mock.calls[0]?.[0] as Record<string, unknown>;
+  expect(event).toMatchObject({ method: "saveMessages", complete: true });
+  expect(event.truncationReasons).toBeUndefined();
+  expect(JSON.stringify(event).split("row-1399-9").length - 1).toBe(1);
+  expect(event.result).toEqual({
+    messages: [
+      {
+        savedMessageRef: {
+          id: "tool-result",
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      },
+    ],
+  });
+  await binding.release();
+});
+
+it("truncates over-budget mutation evidence with its bound and keeps the turn eligible", async () => {
+  const { runtime, binding, recordMutation } = await fixture();
+  await binding.captureInitial(runtime.memory);
+  const tooMany = Array.from({ length: 210_000 }, (_, index) => index);
+  const updated = await binding.domain.updateThread({
+    id: THREAD,
+    metadata: { rows: tooMany },
+  });
+  expect(updated.metadata?.rows).toHaveLength(210_000);
+  // Each side fits on its own; together they exceed the node's budget.
+  const half = Array.from({ length: 110_000 }, (_, index) => index);
+  await binding.domain.updateThread({ id: THREAD, metadata: { rows: half } });
+  await binding.drain();
+  expect(binding.incompleteReasons).toEqual([]);
+  const [separate, combined] = recordMutation.mock.calls.map(
+    ([event]) => event as Record<string, unknown>,
+  );
+  expect(separate).toMatchObject({
+    complete: true,
+    arguments: {
+      kitaru_recording: "degraded",
+      path: "Memory mutation arguments",
+      reason: "Memory mutation arguments exceeds maximum item count 200000",
+    },
+    result: {
+      kitaru_recording: "degraded",
+      path: "Memory mutation result",
+    },
+    truncationReasons: [
+      "Memory mutation arguments exceeds maximum item count 200000",
+      "Memory mutation result exceeds maximum item count 200000",
+    ],
+  });
+  expect(combined).toMatchObject({
+    complete: true,
+    arguments: {
+      kitaru_recording: "degraded",
+      path: "Memory mutation evidence",
+      reason: "Memory mutation evidence exceeds maximum item count 200000",
+    },
+    result: null,
+    truncationReasons: [
+      "Memory mutation evidence exceeds maximum item count 200000",
+    ],
+  });
+  await binding.release();
+});

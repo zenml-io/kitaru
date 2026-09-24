@@ -2,17 +2,24 @@ export type { CostCalculator, CostInput, ResolvedCost } from "./cost.js";
 export { resolveCost } from "./cost.js";
 export { MODEL_SETTING_KEYS, parseModelSettings } from "./model-settings.js";
 export { providerFamily } from "./provider.js";
-export type { RecordedConversion, RecordingLimits } from "./recorded-json.js";
+export type {
+  MastraReplayEvidence,
+  RecordedConversion,
+  RecordingLimits,
+} from "./recorded-json.js";
 export {
   assertSafeKeys,
   boundedRecordedText,
   boundedRecorderConversion,
   boundedRecorderJson,
+  boundMastraReplayEvidence,
   boundRecordedSize,
+  degradedMastraReplayEvidence,
   MAX_MASTRA_REPLAY_ITEMS,
   MAX_MASTRA_REPLAY_JSON_BYTES,
   MAX_RECORDED_PAYLOAD_CHARS,
   MAX_RECORDED_STRING_CHARS,
+  MastraReplayBudgetError,
   normalizeRecordingLimits,
   projectMastraReplayInput,
   projectRecordedInput,
