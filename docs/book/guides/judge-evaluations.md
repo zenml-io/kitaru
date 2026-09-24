@@ -100,7 +100,7 @@ Save the following as `questions.json` in your working directory. Keep that file
     "action_executed": {
       "type": "noul",
       "pass_when": "yes",
-      "instructions": "Does `tool_calls` contain a successful call that performs the action named in `final_answer.action` (issue_refund for refund, create_replacement for replacement, escalate_to_human for escalate)?"
+      "instructions": "Does `tool_calls` contain a successful call that performs the action named in `final_answer.action` (issue_refund for refund, create_replacement for replacement, escalate_to_human for escalate, decline_request for reject)?"
     }
   }
 }
