@@ -70,3 +70,10 @@ async def test_max_blob_size_reports_the_effective_server_limit() -> None:
     payload = await _get_info(local_settings(MAX_BLOB_SIZE_BYTES=12_345))
 
     assert payload["max_blob_size_bytes"] == 12_345
+
+
+async def test_max_blob_size_reports_zero_limit() -> None:
+    """Keep the info route available when nonempty blobs are disabled."""
+    payload = await _get_info(local_settings(MAX_BLOB_SIZE_BYTES=0))
+
+    assert payload["max_blob_size_bytes"] == 0

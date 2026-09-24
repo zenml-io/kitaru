@@ -26,12 +26,22 @@ def test_server_info_accepts_payloads_from_older_servers() -> None:
     assert response.max_blob_size_bytes is None
 
 
-@pytest.mark.parametrize("value", [0, -1])
-def test_server_info_rejects_non_positive_blob_limits(value: int) -> None:
-    """Require an advertised blob limit to be positive."""
+def test_server_info_accepts_zero_blob_limit() -> None:
+    """A server may disable nonempty blob uploads with a zero-byte limit."""
+    response = ServerInfoResponse(
+        version="1.0.0",
+        auth_scheme=AuthScheme.LOCAL,
+        max_blob_size_bytes=0,
+    )
+
+    assert response.max_blob_size_bytes == 0
+
+
+def test_server_info_rejects_negative_blob_limit() -> None:
+    """Reject invalid negative upload limits."""
     with pytest.raises(ValidationError):
         ServerInfoResponse(
             version="1.0.0",
             auth_scheme=AuthScheme.LOCAL,
-            max_blob_size_bytes=value,
+            max_blob_size_bytes=-1,
         )

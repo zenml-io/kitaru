@@ -7987,7 +7987,7 @@
           "max_blob_size_bytes": {
             "anyOf": [
               {
-                "exclusiveMinimum": 0.0,
+                "minimum": 0.0,
                 "type": "integer"
               },
               {
