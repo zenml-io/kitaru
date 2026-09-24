@@ -228,6 +228,7 @@ class SessionReplayNotReady(ConflictError):
             reason: Stable replay eligibility reason code.
         """
         super().__init__(f"Session {session_id}: {reason}")
+        self.session_id = session_id
         self.reason = reason
 
 
@@ -445,20 +446,32 @@ class Session(DomainModel):
         if self.status != SessionStatus.IN_PROGRESS:
             raise SessionNotUpdatable(self.id)
 
-    def check_replay_finalization(
+    def resolve_replay_metadata(
         self,
         status: SessionStatus,
         metadata: dict[str, Any],
         inputs: Any,
         replacing_inputs: bool,
-    ) -> None:
-        """Require an atomic, one-time transition for final Mastra replay inputs.
+    ) -> dict[str, Any]:
+        """Validate a Mastra replay input transition and return the metadata to store.
+
+        A pending Mastra recording that ends without a replay decision is
+        stored as ineligible: ``abandoned`` when it failed, ``unfinalized``
+        when it completed.
 
         Args:
             status: Session status after the update.
             metadata: Session metadata after the update.
             inputs: Replacement input value, when supplied.
             replacing_inputs: Whether the request explicitly supplied inputs.
+
+        Raises:
+            SessionReplayFinalizationInvalid: The update replaces inputs outside
+                a pending Mastra finalization, or publishes an invalid replay
+                state or input.
+
+        Returns:
+            Metadata to store with the update.
         """
         is_mastra_recording = (
             self.framework == "mastra" and self.origin == SessionOrigin.RECORDED
@@ -466,17 +479,27 @@ class Session(DomainModel):
         if not is_mastra_recording:
             if replacing_inputs:
                 raise SessionReplayFinalizationInvalid(self.id)
-            return
+            return metadata
         prior = self.metadata.get("mastra_replay_state")
         next_state = metadata.get("mastra_replay_state")
         if prior != "pending":
             if replacing_inputs:
                 raise SessionReplayFinalizationInvalid(self.id)
-            return
+            return metadata
         if status == SessionStatus.IN_PROGRESS:
             if replacing_inputs or next_state != "pending":
                 raise SessionReplayFinalizationInvalid(self.id)
-            return
+            return metadata
+        if next_state in {None, "pending"} and not replacing_inputs:
+            # Cleanup of a recorder that died mid-turn, and clients that do not
+            # send a replay decision, must still be able to close the session.
+            return {
+                **metadata,
+                "mastra_replay_state": "ineligible",
+                "mastra_replay_reason": "abandoned"
+                if status == SessionStatus.FAILED
+                else "unfinalized",
+            }
         if next_state not in {"eligible", "ineligible"}:
             raise SessionReplayFinalizationInvalid(self.id)
         if replacing_inputs and (
@@ -500,6 +523,7 @@ class Session(DomainModel):
                 envelope.get("omTape"), list
             ):
                 raise SessionReplayFinalizationInvalid(self.id)
+        return metadata
 
     def check_evaluate(self) -> None:
         """Require the session to currently accept evaluations.

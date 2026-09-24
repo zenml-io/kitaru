@@ -393,6 +393,9 @@ class SessionService:
             SessionNotUpdatable: The session is not in progress.
             SessionStatusCannotBeCleared: The command clears the status with
                 an explicit null.
+            SessionReplayFinalizationInvalid: The command replaces inputs or
+                publishes a replay state that the Mastra finalization rules
+                do not allow.
 
         Returns:
             Updated session.
@@ -409,14 +412,11 @@ class SessionService:
             if command.status is None:
                 raise SessionStatusCannotBeCleared(session_id)
             target_status = command.status
-        next_metadata = (
-            (command.metadata if command.metadata is not None else {})
-            if "metadata" in fields
-            else session.metadata
-        )
-        session.check_replay_finalization(
+        next_metadata = session.resolve_replay_metadata(
             status=target_status,
-            metadata=next_metadata,
+            metadata=(command.metadata if command.metadata is not None else {})
+            if "metadata" in fields
+            else session.metadata,
             inputs=command.inputs,
             replacing_inputs="inputs" in fields,
         )
@@ -453,7 +453,7 @@ class SessionService:
             await self._payload_store.offload([session.inputs], session.owner_id)
         if "name" in fields:
             session.update_name(command.name)
-        if "metadata" in fields:
+        if "metadata" in fields or next_metadata != session.metadata:
             session.update_metadata(next_metadata)
         if "inputs" in fields:
             return await self._repository.finalize_replay_inputs(session)

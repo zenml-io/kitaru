@@ -585,6 +585,71 @@ async def test_pending_mastra_ineligibility_is_terminal(
     assert updated.metadata["mastra_replay_reason"] == "capture_incomplete"
 
 
+@pytest.mark.parametrize(
+    ("status", "metadata", "reason"),
+    [
+        (SessionStatus.FAILED, None, "abandoned"),
+        (SessionStatus.FAILED, {}, "abandoned"),
+        (SessionStatus.COMPLETED, None, "unfinalized"),
+    ],
+)
+async def test_pending_mastra_session_closes_without_replay_decision(
+    service: SessionService,
+    status: SessionStatus,
+    metadata: dict[str, Any] | None,
+    reason: str,
+) -> None:
+    """A terminal update without a replay decision stores the session as ineligible."""
+    created = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(),
+            origin=SessionOrigin.RECORDED,
+            framework="mastra",
+            inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+            metadata={"mastra_replay_state": "pending"},
+        ),
+        actor=ACTOR,
+    )
+    fields: dict[str, Any] = {"status": status, "outputs": {"text": "answer"}}
+    if metadata is not None:
+        fields["metadata"] = metadata
+    updated = await service.update_session(
+        created.id, SessionUpdate(**fields), actor=ACTOR
+    )
+    assert updated.status == status
+    assert updated.metadata == {
+        "mastra_replay_state": "ineligible",
+        "mastra_replay_reason": reason,
+    }
+    stored = await service.get_session(created.id, actor=ACTOR)
+    assert stored.outputs is not None and stored.outputs.value == {"text": "answer"}
+    assert stored.metadata["mastra_replay_reason"] == reason
+
+
+async def test_pending_mastra_session_rejects_unknown_replay_state(
+    service: SessionService,
+) -> None:
+    """Only eligible, ineligible, or no replay decision closes a pending recording."""
+    created = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(),
+            origin=SessionOrigin.RECORDED,
+            framework="mastra",
+            metadata={"mastra_replay_state": "pending"},
+        ),
+        actor=ACTOR,
+    )
+    with pytest.raises(SessionReplayFinalizationInvalid):
+        await service.update_session(
+            created.id,
+            SessionUpdate(
+                status=SessionStatus.FAILED,
+                metadata={"mastra_replay_state": "abandoned"},
+            ),
+            actor=ACTOR,
+        )
+
+
 async def test_mastra_om_cannot_be_finalized_without_result_tape(
     service: SessionService,
 ) -> None:

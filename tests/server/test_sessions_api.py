@@ -679,6 +679,37 @@ async def test_finalize_mastra_inputs_through_session_patch(
     assert repeat.status_code == 409
 
 
+async def test_plain_failed_patch_closes_pending_mastra_session(
+    client: httpx.AsyncClient,
+) -> None:
+    """Close a recording whose process died before it decided replay eligibility."""
+    created = (
+        await client.post(
+            "/api/v1/sessions",
+            json=_session_body(
+                framework="mastra",
+                inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+                metadata={
+                    "mastra_replay_state": "pending",
+                    "mastra_native_state": "pending",
+                },
+            ),
+        )
+    ).json()
+    response = await client.patch(
+        f"/api/v1/sessions/{created['id']}",
+        json={"status": "failed", "error": "worker died"},
+    )
+    assert response.status_code == 200
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["status"] == "failed"
+    assert fetched["metadata"] == {
+        "mastra_replay_state": "ineligible",
+        "mastra_replay_reason": "abandoned",
+        "mastra_native_state": "pending",
+    }
+
+
 async def test_update_session_omitted_outputs_unchanged(
     client: httpx.AsyncClient,
 ) -> None:
