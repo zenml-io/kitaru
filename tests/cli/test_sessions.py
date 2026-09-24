@@ -680,6 +680,32 @@ def test_read_payload_rejects_growth_after_size_check(
         sessions._read_payload(payload, max_size_bytes=2)
 
 
+def test_read_payload_uses_bounded_reads_with_large_server_limit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A large advertised cap must not set the size of a single allocation."""
+    payload = tmp_path / "small.jsonl"
+    payload.write_bytes(b"ok")
+
+    class BoundedReader:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def __enter__(self) -> "BoundedReader":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self, size: int) -> bytes:
+            assert size <= 1024 * 1024
+            self.reads += 1
+            return b"ok" if self.reads == 1 else b""
+
+    monkeypatch.setattr(Path, "open", lambda *_args, **_kwargs: BoundedReader())
+    assert sessions._read_payload(payload, max_size_bytes=1024 * 1024 * 1024) == b"ok"
+
+
 async def test_session_import_rejects_client_oversize_before_server_lookup(
     tmp_path: Path, monkeypatch
 ) -> None:
