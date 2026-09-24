@@ -70,6 +70,21 @@ describe("redactUrlCredentials", () => {
       "https://hooks.slack.com/services/T000/B000/REDACTED https://api.telegram.org/REDACTED/getMe https://discord.com/api/webhooks/42/REDACTED https://api.example.com/token/REDACTED https://api.example.com/v/REDACTED",
     ],
     [
+      "JSON-escaped ampersands",
+      String.raw`{"url":"https://files.example.com/v0/b/app/o/q.pdf?alt=media\u0026token=ESCAPED_SECRET"}`,
+      String.raw`{"url":"https://files.example.com/v0/b/app/o/q.pdf?alt=media\u0026token=REDACTED"}`,
+    ],
+    [
+      "a nested URL percent-encoded twice",
+      `https://example.com/r?u=${encodeURIComponent(encodeURIComponent("https://files.example.com/q.pdf?alt=media&token=TWICE_SECRET"))}`,
+      `https://example.com/r?u=${encodeURIComponent(encodeURIComponent("https://files.example.com/q.pdf?alt=media&token=REDACTED"))}`,
+    ],
+    [
+      "a nested URL after a plus sign",
+      "https://x.example/?n=%E2%82%AC+https://y.example?token=PLUS_SECRET",
+      "https://x.example/?n=%E2%82%AC+https://y.example?token=REDACTED",
+    ],
+    [
       "a JWT under any parameter name",
       `https://app.example.com/?state=${JWT_VALUE}`,
       "https://app.example.com/?state=REDACTED",

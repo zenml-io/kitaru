@@ -2,11 +2,14 @@
 const REDACTED_URL_CREDENTIAL = "REDACTED";
 
 const SCHEME_SEPARATOR = /:(?:\\?\/){2}/;
-// JSON-escaped text writes each slash as "\/", so the separator allows it.
-const URL_IN_TEXT =
-  /(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:(?:\\?\/){2}[^\s"'<>`]+/gi;
+// JSON-escaped text writes each slash as "\/", so the separator allows it. A
+// URL may follow any character, such as the "+" of a form-encoded value.
+const URL_IN_TEXT = /[a-z][a-z0-9+.-]*:(?:\\?\/){2}[^\s"'<>`]+/gi;
 const TRAILING_PUNCTUATION = /[.,;:!?)\]}\\]+$/;
-const PARAMETER_SEPARATOR = /(&amp;|&|;)/i;
+// JSON encoders such as Go's encoding/json and Rails write "&" as "\u0026".
+const PARAMETER_SEPARATOR = /(&amp;|\\u0026|&|;)/i;
+// A redirect target inside another redirect parameter is encoded twice.
+const MAX_NESTED_ENCODINGS = 4;
 const JWT_SHAPE = /^[\w-]+\.[\w-]+\.[\w-]*$/;
 const TELEGRAM_BOT_TOKEN = /^bot\d+:[\w-]{20,}$/;
 
@@ -114,11 +117,20 @@ function isCredentialName(name: string): boolean {
 }
 
 function redactNestedValue(value: string): string {
-  const decoded = decodeComponent(value);
-  if (!SCHEME_SEPARATOR.test(decoded)) return value;
+  let decoded = value;
+  let encodings = 0;
+  while (!SCHEME_SEPARATOR.test(decoded)) {
+    const next = decodeComponent(decoded);
+    if (next === decoded || encodings === MAX_NESTED_ENCODINGS) return value;
+    decoded = next;
+    encodings += 1;
+  }
   const redacted = redactUrlCredentials(decoded);
   if (redacted === decoded) return value;
-  return decoded === value ? redacted : encodeURIComponent(redacted);
+  let encoded = redacted;
+  for (let layer = 0; layer < encodings; layer += 1)
+    encoded = encodeURIComponent(encoded);
+  return encoded;
 }
 
 function redactParameters(parameters: string): string {
@@ -205,9 +217,9 @@ function redactUrl(candidate: string): string {
  * Replace the credentials in every URL inside `text`, keeping the rest intact.
  *
  * Covers userinfo, credential-named query, fragment and path parameters
- * (including `&amp;`-escaped and `;`-separated ones), JWT-shaped values,
- * credential-bearing path segments, and URLs nested inside parameter values,
- * whether percent-encoded or not. Returns `text` itself when nothing matched,
+ * (including `&amp;`-escaped, `\u0026`-escaped and `;`-separated ones),
+ * JWT-shaped values, credential-bearing path segments, and URLs nested inside
+ * parameter values, whether percent-encoded once, several times or not at all. Returns `text` itself when nothing matched,
  * and applying it twice gives the same result as applying it once.
  */
 export function redactUrlCredentials(text: string): string {
