@@ -424,7 +424,7 @@ class TestExtractedPublicApi:
 
     def test_root_module_is_kitaru(self, public_api: dict) -> None:
         assert public_api["name"] == "kitaru"
-        assert set(public_api["modules"]) == {"api_models", "client", "task"}
+        assert set(public_api["modules"]) == {"api_models", "client", "json_pointer", "task"}
 
     def test_api_models_containers_publish_no_symbols(self, public_api: dict) -> None:
         api_models = public_api["modules"]["api_models"]
