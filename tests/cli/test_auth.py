@@ -17,7 +17,7 @@ import io
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -44,6 +44,14 @@ class FakeAuthResource:
     error: Exception | None = None
     exchanged: str | None = None
     control_plane_exchanged: str | None = None
+    logged_in: tuple[str, str] | None = None
+
+    async def login(self, username: str, password: str) -> TokenResponse:
+        """Accept one username and password."""
+        self.logged_in = (username, password)
+        return TokenResponse(
+            access_token="password-session", token_type="bearer", expires_in=3600
+        )
 
     async def exchange_api_key(self, api_key: str) -> TokenResponse:
         """Validate one API key or raise the configured error."""
@@ -867,3 +875,315 @@ async def test_non_interactive_device_login_fails_without_mutation(
     assert raised.value.kind == "interaction_required"
     assert credential_store.list() == []
     assert client.closed is True
+
+
+def login_kwargs(tmp_path: Path, **overrides: object) -> dict[str, Any]:
+    """Build non-interactive self-hosted login arguments."""
+    kwargs: dict[str, Any] = {
+        "server": "https://api.example.com",
+        "local": False,
+        "username": None,
+        "password_stdin": False,
+        "api_key_stdin": False,
+        "credential_store": CredentialStore(tmp_path / "credentials.json"),
+        "timeout": 30,
+        "non_interactive": True,
+        "no_browser": True,
+        "stdin": io.StringIO(),
+    }
+    kwargs.update(overrides)
+    return kwargs
+
+
+@pytest.mark.parametrize(
+    ("overrides", "fragment"),
+    [
+        ({"local": True}, "either SERVER or --local"),
+        ({"upgrade": True}, "--upgrade requires --local"),
+        ({"password_stdin": True, "api_key_stdin": True}, "cannot be combined"),
+        ({"server": None, "api_key_stdin": True}, "does not accept --api-key-stdin"),
+    ],
+)
+async def test_login_rejects_conflicting_options_before_contacting_a_server(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, object],
+    fragment: str,
+) -> None:
+    """Contradictory login flags fail as invalid arguments without any request."""
+    monkeypatch.setattr(
+        auth, "KitaruAPIClient", lambda **_: pytest.fail("no server contact")
+    )
+    monkeypatch.setattr(
+        auth, "ControlPlaneSession", lambda *_a, **_k: pytest.fail("no server contact")
+    )
+
+    with pytest.raises(CLIError) as raised:
+        await auth.login(**login_kwargs(tmp_path, **overrides))
+
+    assert raised.value.kind == "invalid_arguments"
+    assert fragment in raised.value.message
+
+
+async def test_local_login_refuses_a_local_server_that_requires_authentication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A CLI-owned local server demanding auth is a conflict, not a new target."""
+
+    async def fake_start(**_kwargs):
+        return {"server_url": "http://localhost:8000"}, []
+
+    monkeypatch.setattr(auth.local_runtime, "start_local_runtime", fake_start)
+    client = FakeClient(AuthScheme.LOCAL)
+    monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
+    set_server_url("https://existing.example.com")
+
+    with pytest.raises(CLIError) as raised:
+        await auth.login(**login_kwargs(tmp_path, server=None, local=True))
+
+    assert raised.value.kind == "conflict"
+    assert "kitaru local logs" in str(raised.value.hint)
+    assert get_server_url() == "https://existing.example.com"
+    assert client.closed is True
+
+
+async def test_password_stdin_login_stores_a_session_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Username plus --password-stdin logs in and stores only the issued token."""
+    client = FakeClient(AuthScheme.LOCAL)
+    monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+
+    result = await auth.login(
+        **login_kwargs(
+            tmp_path,
+            username="alice",
+            password_stdin=True,
+            credential_store=credential_store,
+            stdin=io.StringIO("s3cret\n"),
+        )
+    )
+
+    assert client.auth.logged_in == ("alice", "s3cret")
+    assert result.item["credential_kind"] == "password"
+    stored = credential_store.get("https://api.example.com")
+    assert stored is not None
+    assert stored.api_token is not None
+    assert stored.api_token.access_token == "password-session"
+    assert get_server_url() == "https://api.example.com"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "kind", "fragment"),
+    [
+        ({"password_stdin": True}, "invalid_arguments", "requires --username"),
+        (
+            {"username": "alice", "password_stdin": True},
+            "invalid_arguments",
+            "password from stdin cannot be empty",
+        ),
+        ({"username": "alice"}, "interaction_required", "hidden prompt"),
+        (
+            {"username": "alice", "non_interactive": False},
+            "invalid_arguments",
+            "Password cannot be empty",
+        ),
+        (
+            {"username": "alice", "api_key_stdin": True},
+            "invalid_arguments",
+            "--username cannot be used with --api-key-stdin",
+        ),
+    ],
+)
+async def test_local_auth_login_rejects_unusable_password_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, object],
+    kind: str,
+    fragment: str,
+) -> None:
+    """Missing or empty local credentials fail without storing anything."""
+    client = FakeClient(AuthScheme.LOCAL)
+    monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+
+    with pytest.raises(CLIError) as raised:
+        await auth.login(
+            **login_kwargs(
+                tmp_path,
+                credential_store=credential_store,
+                password_prompt=lambda _prompt: "",
+                **overrides,
+            )
+        )
+
+    assert raised.value.kind == kind
+    assert fragment in raised.value.message
+    assert client.auth.logged_in is None
+    assert credential_store.list() == []
+    assert get_server_url() is None
+
+
+async def test_login_rejects_credentials_for_a_server_without_auth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A no-auth server does not silently discard a supplied API key."""
+    monkeypatch.setattr(
+        auth, "KitaruAPIClient", lambda **_: FakeClient(AuthScheme.NONE)
+    )
+
+    with pytest.raises(CLIError) as raised:
+        await auth.login(
+            **login_kwargs(tmp_path, api_key_stdin=True, stdin=io.StringIO("k\n"))
+        )
+
+    assert raised.value.kind == "invalid_arguments"
+    assert "'none' does not accept these credentials" in raised.value.message
+    assert get_server_url() is None
+
+
+@pytest.mark.parametrize(
+    ("overrides", "kind", "fragment"),
+    [
+        ({}, "interaction_required", "requires interaction"),
+        ({"username": "alice"}, "invalid_arguments", "does not accept --username"),
+    ],
+)
+async def test_control_plane_login_rejects_unusable_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    overrides: dict[str, object],
+    kind: str,
+    fragment: str,
+) -> None:
+    """Control-plane login refuses passwords and needs a key when non-interactive."""
+
+    async def reject_login(*_args, **_kwargs) -> None:
+        pytest.fail("control-plane login should not start")
+
+    monkeypatch.setattr(
+        auth, "KitaruAPIClient", lambda **_: FakeClient(AuthScheme.CONTROL_PLANE)
+    )
+    monkeypatch.setattr(auth, "control_plane_login", reject_login)
+
+    with pytest.raises(CLIError) as raised:
+        await auth.login(**login_kwargs(tmp_path, **overrides))
+
+    assert raised.value.kind == kind
+    assert fragment in raised.value.message
+
+
+@pytest.mark.parametrize(
+    ("workspace", "fragment"),
+    [
+        (
+            ControlPlaneWorkspace.model_validate(
+                {
+                    "id": str(WORKSPACE_ID),
+                    "name": "my-zenml",
+                    "workspace_type": "zenml",
+                    "status": "available",
+                }
+            ),
+            "not a Kitaru workspace",
+        ),
+        (managed_workspace(status="failed"), "'my-kitaru' is failed"),
+    ],
+)
+async def test_managed_workspace_wait_stops_on_unusable_workspaces(
+    workspace: ControlPlaneWorkspace, fragment: str
+) -> None:
+    """A wrong-type or failed workspace ends login instead of polling on."""
+
+    class FakeManagedCloudSession:
+        async def get_workspace(self, *_args) -> ControlPlaneWorkspace:
+            return workspace
+
+    with pytest.raises(CLIError) as raised:
+        await auth._wait_for_managed_workspace(
+            cast(ControlPlaneSession, FakeManagedCloudSession()), WORKSPACE_ID, "t"
+        )
+
+    assert raised.value.kind == "invalid_configuration"
+    assert fragment in raised.value.message
+
+
+async def test_managed_workspace_wait_times_out_after_bounded_polling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A workspace that never becomes ready fails with a timeout error."""
+    polls: list[uuid.UUID] = []
+
+    class FakeManagedCloudSession:
+        async def get_workspace(
+            self, workspace_id: uuid.UUID, _token: str
+        ) -> ControlPlaneWorkspace:
+            polls.append(workspace_id)
+            return managed_workspace(status="pending")
+
+    async def no_sleep(_delay: float) -> None:
+        pass
+
+    monkeypatch.setattr(auth.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(auth, "write_interaction", lambda _message: None)
+
+    with pytest.raises(CLIError) as raised:
+        await auth._wait_for_managed_workspace(
+            cast(ControlPlaneSession, FakeManagedCloudSession()), WORKSPACE_ID, "t"
+        )
+
+    assert raised.value.kind == "timeout"
+    assert len(polls) == auth._WORKSPACE_POLL_ATTEMPTS
+
+
+async def test_logout_all_clears_every_stored_credential(tmp_path: Path) -> None:
+    """Credential-wide logout reports how many servers it forgot."""
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+    credential_store.set_api_key("https://prod.example.com", "KITKEY_prod")
+    credential_store.set_api_key("https://dev.example.com", "KITKEY_dev")
+
+    result = await auth.logout(
+        server_url=None, all_servers=True, credential_store=credential_store
+    )
+
+    assert result.item == {"credentials_removed": 2, "scope": "all"}
+    assert credential_store.list() == []
+
+
+async def test_logout_rejects_a_server_combined_with_all(tmp_path: Path) -> None:
+    """SERVER and --all are contradictory scopes and nothing is removed."""
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+    credential_store.set_api_key("https://prod.example.com", "KITKEY_prod")
+
+    with pytest.raises(CLIError) as raised:
+        await auth.logout(
+            server_url="https://prod.example.com",
+            all_servers=True,
+            credential_store=credential_store,
+        )
+
+    assert raised.value.kind == "invalid_arguments"
+    assert len(credential_store.list()) == 1
+
+
+async def test_logout_reports_an_unwritable_credential_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A filesystem failure surfaces as a configuration error, not a traceback."""
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+
+    def fail_clear(_url: str) -> None:
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr(credential_store, "clear", fail_clear)
+
+    with pytest.raises(CLIError) as raised:
+        await auth.logout(
+            server_url="https://prod.example.com",
+            all_servers=False,
+            credential_store=credential_store,
+        )
+
+    assert raised.value.kind == "invalid_configuration"
+    assert "read-only file system" in raised.value.message
