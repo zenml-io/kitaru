@@ -4,6 +4,7 @@ import {
   type AdapterRunState,
   boundedRecorderConversion,
   boundedRecorderJson,
+  type NormalizedModelStep,
   type NormalizedToolCall,
   projectRecordedMetadata,
   type RecordingLimits,
@@ -179,14 +180,21 @@ function toolErrorFromContent(
   return errorMessage(resultPart.output, "Tool failed");
 }
 
-export async function recordStep(
+/**
+ * Convert a finished Mastra step into the model and tool nodes Kitaru records.
+ *
+ * `endedAt` defaults to the time of conversion; pass the step's end when the
+ * conversion runs later than the step finished.
+ */
+export async function normalizeStep(
   state: AdapterRunState,
   step: RecordedStep,
   costCalculator?: KitaruCostCalculator,
   limits?: RecordingLimits,
   requestEvidence?: RequestEvidence,
   sanitizeEvidence?: <T>(value: T) => T,
-): Promise<void> {
+  endedAt?: string,
+): Promise<NormalizedModelStep> {
   const calls = step.toolCalls.flatMap((item) => {
     const call = toolCallPayload(item);
     return call ? [call] : [];
@@ -247,7 +255,7 @@ export async function recordStep(
     tokens,
   });
 
-  await recordNormalizedStep(state, {
+  return {
     attributes: {
       cost: cost.attribute,
       ...(requestEvidence ? requestEvidenceAttributes(requestEvidence) : {}),
@@ -256,6 +264,7 @@ export async function recordStep(
         : {}),
     },
     cost: cost.cost,
+    endedAt,
     error: failed
       ? errorMessage(step.error ?? step.tripwire?.reason, "Model step failed")
       : undefined,
@@ -269,5 +278,26 @@ export async function recordStep(
     provider,
     tokens,
     tools,
-  });
+  };
+}
+
+export async function recordStep(
+  state: AdapterRunState,
+  step: RecordedStep,
+  costCalculator?: KitaruCostCalculator,
+  limits?: RecordingLimits,
+  requestEvidence?: RequestEvidence,
+  sanitizeEvidence?: <T>(value: T) => T,
+): Promise<void> {
+  await recordNormalizedStep(
+    state,
+    await normalizeStep(
+      state,
+      step,
+      costCalculator,
+      limits,
+      requestEvidence,
+      sanitizeEvidence,
+    ),
+  );
 }

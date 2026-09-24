@@ -172,10 +172,58 @@ export function createRecordedEvidenceSanitizer(
   return { replace };
 }
 
-/** Capture declared URLs once and convert persisted input to secret-free references. */
+/** Declared files did not finish downloading within the capture wait. */
+export class FileCaptureTimeoutError extends Error {
+  constructor() {
+    super("Controlled file capture timed out.");
+  }
+}
+
+/**
+ * One turn's downloads of declared files, shared between capture and a native
+ * fallback so a file is not fetched from its URL twice.
+ */
+export function createFileDownloads(resolveFile: MemoryFileResolver) {
+  const started = new Map<string, Promise<ResolvedMemoryFile>>();
+  return {
+    /** Start the download of `url`, or join the one already running. */
+    capture(url: string): Promise<ResolvedMemoryFile> {
+      const key = normalizeFileUrl(url);
+      let download = started.get(key);
+      if (!download) {
+        download = Promise.resolve().then(() => resolveFile(url));
+        // Capture can stop waiting for a download it started.
+        download.catch(() => undefined);
+        started.set(key, download);
+      }
+      return download;
+    },
+    /**
+     * Resolve `url` for a native turn. The first request for a URL capture
+     * started takes over that download, still running or finished; a failed
+     * download is fetched again, as the native turn would.
+     */
+    resolveNative(url: string): Promise<ResolvedMemoryFile> {
+      const key = normalizeFileUrl(url);
+      const download = started.get(key);
+      if (!download) return resolveFile(url);
+      started.delete(key);
+      return download.catch(() => resolveFile(url));
+    },
+  };
+}
+
+/**
+ * Capture declared URLs once and convert persisted input to secret-free references.
+ *
+ * Downloads run concurrently. With `waitMs`, capture rejects with
+ * `FileCaptureTimeoutError` once that long passes before every download has
+ * finished, and leaves the unfinished downloads running.
+ */
 export async function createCapturedFiles(
   urls: readonly string[],
-  resolveFile: MemoryFileResolver,
+  download: MemoryFileResolver,
+  waitMs?: number,
 ) {
   // Keyed by WHATWG form so a file part holding `new URL(declared)` matches.
   const declaredToReference = new Map<string, string>();
@@ -189,33 +237,60 @@ export async function createCapturedFiles(
     throw new Error(
       "Unsupported Mastra memory replay: file count limit exceeded.",
     );
+  const downloads = [...uniqueUrls].map(([normalized, url]) => {
+    const pending = Promise.resolve().then(() => download(url));
+    pending.catch(() => undefined);
+    return [normalized, pending] as const;
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline =
+    waitMs === undefined || downloads.length === 0
+      ? undefined
+      : new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new FileCaptureTimeoutError()),
+            waitMs,
+          );
+        });
+  deadline?.catch(() => undefined);
   let totalBytes = 0;
-  for (const [normalized, url] of uniqueUrls) {
-    let resolved: ResolvedMemoryFile;
-    try {
-      resolved = await resolveFile(url);
-    } catch {
-      // Resolver errors can contain a signed URL. Keep them out of diagnostics.
-      throw new Error("Controlled file capture failed.");
+  try {
+    for (const [normalized, pending] of downloads) {
+      let resolved: ResolvedMemoryFile;
+      try {
+        resolved = await (deadline
+          ? Promise.race([pending, deadline])
+          : pending);
+      } catch (error) {
+        if (error instanceof FileCaptureTimeoutError) throw error;
+        // Resolver errors can contain a signed URL. Keep them out of diagnostics.
+        throw new Error("Controlled file capture failed.");
+      }
+      if (
+        !(resolved.bytes instanceof Uint8Array) ||
+        typeof resolved.mediaType !== "string" ||
+        !resolved.mediaType
+      )
+        throw new TypeError("File resolver must return bytes and mediaType");
+      if (resolved.bytes.byteLength > MAX_FILE_BYTES)
+        throw new Error(
+          "Unsupported Mastra memory replay: file exceeds 8 MiB.",
+        );
+      totalBytes += resolved.bytes.byteLength;
+      if (totalBytes > MAX_TOTAL_FILE_BYTES)
+        throw new Error(
+          "Unsupported Mastra memory replay: files exceed 16 MiB.",
+        );
+      const file = {
+        url: fileReference(resolved),
+        bytes: new Uint8Array(resolved.bytes),
+        mediaType: resolved.mediaType,
+      };
+      declaredToReference.set(normalized, file.url);
+      filesByReference.set(file.url, file);
     }
-    if (
-      !(resolved.bytes instanceof Uint8Array) ||
-      typeof resolved.mediaType !== "string" ||
-      !resolved.mediaType
-    )
-      throw new TypeError("File resolver must return bytes and mediaType");
-    if (resolved.bytes.byteLength > MAX_FILE_BYTES)
-      throw new Error("Unsupported Mastra memory replay: file exceeds 8 MiB.");
-    totalBytes += resolved.bytes.byteLength;
-    if (totalBytes > MAX_TOTAL_FILE_BYTES)
-      throw new Error("Unsupported Mastra memory replay: files exceed 16 MiB.");
-    const file = {
-      url: fileReference(resolved),
-      bytes: new Uint8Array(resolved.bytes),
-      mediaType: resolved.mediaType,
-    };
-    declaredToReference.set(normalized, file.url);
-    filesByReference.set(file.url, file);
+  } finally {
+    clearTimeout(timer);
   }
   const captured = restoreCapturedFiles([...filesByReference.values()]);
   const lookup = createFileUrlLookup(declaredToReference);

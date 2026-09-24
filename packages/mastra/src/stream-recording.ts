@@ -5,8 +5,10 @@ import {
   type AdapterRunState,
   parseModelSettings,
   type ReplayContext,
+  ROOT_NODE_EXTERNAL_ID,
   type RunRecorder,
   recordedToolPayloadJson,
+  recordNormalizedStep,
   runResultSummary,
   serializedSettings,
   stripSystemMessages,
@@ -25,7 +27,7 @@ import {
   stripLiveMemoryOptions,
 } from "./replay-guards.js";
 import type { RequestEvidence } from "./request-capture.js";
-import { type RecordedStep, recordStep } from "./step-recorder.js";
+import { normalizeStep, type RecordedStep } from "./step-recorder.js";
 import { createToolHooks } from "./tool-policies.js";
 import type {
   KitaruAgentOptions,
@@ -83,9 +85,24 @@ interface StreamRecordingOptions {
   replay: ReplayContext;
   nativeFallback?: (error: unknown) => Promise<unknown>;
   markNativeStart?: () => void;
+  /**
+   * How long a baseline waits for Kitaru to open its session before the
+   * stream starts. When it runs out, the stream fails over to `nativeFallback`
+   * and a session that opens late is closed as ineligible. Unset waits for the
+   * client's own timeout.
+   */
+  setupWaitMs?: number;
+  /**
+   * How long a baseline's finalization waits, from its start, for queued
+   * evidence uploads. When it runs out, the uploads are cancelled and the
+   * session is closed as ineligible. Unset waits for every upload.
+   */
+  flushWaitMs?: number;
 }
 
 const ERROR_STEP_GRACE_MS = 250;
+const SETUP_TIMEOUT = "Kitaru did not open the recording session in time.";
+const FLUSH_TIMEOUT = "Kitaru did not accept the recording evidence in time.";
 const MAX_STREAM_ERROR_NAME_LENGTH = 80;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -194,6 +211,39 @@ async function assertSupportedOptions(
 
 const OM_DIVERGED = "KITARU_REPLAY_DIVERGED:mastra_om_call_order";
 
+/**
+ * Send every evidence node upload with `signal`, so aborting it cancels queued
+ * and in-flight evidence. Root span upserts open and close the session and
+ * keep only the client's own timeout.
+ */
+function withCancelableEvidence(
+  client: AdapterClient,
+  signal: AbortSignal,
+): AdapterClient {
+  return {
+    createSession: (request, options) => client.createSession(request, options),
+    getReplay: (replayId, options) => client.getReplay(replayId, options),
+    getTaskSpec: (taskId, options) => client.getTaskSpec(taskId, options),
+    lookupToolResult: (replayId, request, options) =>
+      client.lookupToolResult(replayId, request, options),
+    updateSession: (sessionId, request, options) =>
+      client.updateSession(sessionId, request, options),
+    upsertSessionNodes: (sessionId, request, options) =>
+      client.upsertSessionNodes(
+        sessionId,
+        request,
+        request.nodes.some((node) => node.external_id !== ROOT_NODE_EXTERNAL_ID)
+          ? {
+              ...options,
+              signal: options?.signal
+                ? AbortSignal.any([options.signal, signal])
+                : signal,
+            }
+          : options,
+      ),
+  };
+}
+
 function getTripwireReason(value: unknown): string | undefined {
   if (!isRecord(value) || !isRecord(value.tripwire)) return undefined;
   return typeof value.tripwire.reason === "string" && value.tripwire.reason
@@ -238,30 +288,45 @@ class StreamLifecycle {
     reasonCode: string;
   };
   #nativeState: "pending" | "completed" | "failed" = "pending";
+  // Steps are converted and queued in order here; the uploads themselves run
+  // in the run state's queue, and the last one settles after every earlier one.
   #stepTail: Promise<void> = Promise.resolve();
+  #uploadTail: Promise<void> = Promise.resolve();
 
   constructor(
     readonly recorder: RunRecorder,
     readonly options: KitaruAgentOptions,
     readonly stateful?: StatefulStreamRecording,
+    readonly evidenceFlush?: { waitMs: number; cancel(): void },
   ) {}
 
-  async record(step: RecordedStep): Promise<void> {
+  /** Queue a step's upload without waiting for Kitaru to accept it. */
+  record(step: RecordedStep): void {
     if (this.#recordingError !== undefined) return;
-    const write = this.#stepTail.then(() =>
-      recordStep(
+    // Take the step's request evidence and end time now: the conversion can
+    // run after the next step has started.
+    const request = this.stateful?.takeRequest();
+    const endedAt = new Date().toISOString();
+    const queued = this.#stepTail.then(async () => {
+      const normalized = await normalizeStep(
         this.recorder.state,
         step,
         this.options.costCalculator,
         this.options.recordingLimits,
-        this.stateful?.takeRequest(),
+        request,
         this.stateful?.sanitizeEvidence,
-      ),
-    );
-    this.#stepTail = write.catch((error: unknown) => {
+        endedAt,
+      );
+      this.#uploadTail = recordNormalizedStep(
+        this.recorder.state,
+        normalized,
+      ).catch((error: unknown) => {
+        this.requestRecordingFailure("step", error, "recording_step_failed");
+      });
+    });
+    this.#stepTail = queued.catch((error: unknown) => {
       this.requestRecordingFailure("step", error, "recording_step_failed");
     });
-    await this.#stepTail;
   }
 
   async complete(result: unknown): Promise<void> {
@@ -269,10 +334,29 @@ class StreamLifecycle {
     if (this.recorder.state.failure !== undefined) {
       this.requestFailure(this.recorder.state.failure);
     }
+    await this.settle(this.finalize(true, result));
+  }
+
+  async fail(error: unknown): Promise<void> {
+    this.cancelDeferredFailure();
+    if (this.#completionStarted) {
+      await this.settle(this.#finalizerPromise ?? Promise.resolve());
+      return;
+    }
+    this.requestFailure(error);
+    await this.settle(this.finalize(false));
+  }
+
+  /**
+   * Wait for finalization, or leave a baseline memory recording to finish in
+   * the background.
+   */
+  private async settle(finalization: Promise<void>): Promise<void> {
     if (this.stateful && !this.recorder.state.spec) {
-      // Mastra can start observational work after the actor finishes. Keep its
-      // recorder and source lease alive without delaying the native stream.
-      void this.finalize(true, result).catch((error: unknown) => {
+      // Mastra can start observational work after the actor finishes, and
+      // Kitaru uploads can be slow. Keep the recorder and source lease alive
+      // without delaying the native stream.
+      void finalization.catch((error: unknown) => {
         this.requestRecordingFailure(
           "complete",
           error,
@@ -281,17 +365,7 @@ class StreamLifecycle {
       });
       return;
     }
-    await this.finalize(true, result);
-  }
-
-  async fail(error: unknown): Promise<void> {
-    this.cancelDeferredFailure();
-    if (this.#completionStarted) {
-      await this.#finalizerPromise;
-      return;
-    }
-    this.requestFailure(error);
-    await this.finalize(false);
+    await finalization;
   }
 
   markNativeCompleted(): void {
@@ -338,10 +412,23 @@ class StreamLifecycle {
 
   private async finalize(complete: boolean, result?: unknown): Promise<void> {
     this.#finalizerPromise ??= (async () => {
+      let flushDeadline: ReturnType<typeof setTimeout> | undefined;
       try {
         // Start before the first await so a caller that joins background work
         // right after the stream closes already sees this invocation's work.
         this.stateful?.beginFinalization?.();
+        const flush = this.evidenceFlush;
+        if (flush)
+          flushDeadline = setTimeout(() => {
+            this.requestRecordingFailure(
+              "complete",
+              new Error(FLUSH_TIMEOUT),
+              "recording_flush_timeout",
+            );
+            flush.cancel();
+          }, flush.waitMs);
+        // Queue every step upload before the stateful finish queues its own
+        // evidence, so the run state uploads them in step order.
         await this.#stepTail;
         let finalInput: JsonValue | undefined;
         try {
@@ -361,6 +448,8 @@ class StreamLifecycle {
                 : "recording_finalization_failed",
             );
         }
+        await this.#uploadTail;
+        clearTimeout(flushDeadline);
         if (this.#failureRequested) {
           await this.cleanup(this.#failureReason, "run");
           return;
@@ -401,6 +490,7 @@ class StreamLifecycle {
         if (this.#failureRequested)
           await this.cleanup(this.#failureReason, "run");
       } finally {
+        clearTimeout(flushDeadline);
         await this.stateful
           ?.release()
           .catch((error: unknown) => this.notify("complete", error));
@@ -484,6 +574,8 @@ async function recordedStreamWithRecording({
   startedAt,
   replay,
   markNativeStart,
+  setupWaitMs,
+  flushWaitMs,
 }: StreamRecordingOptions): Promise<unknown> {
   assertStreamSupported(agent);
   const resolvedDefaults =
@@ -598,61 +690,108 @@ async function recordedStreamWithRecording({
       : replayInput);
   let lifecycle: StreamLifecycle | undefined;
   let initializePromise: Promise<StreamLifecycle> | undefined;
-  const initialize = (): Promise<StreamLifecycle> => {
-    initializePromise ??= (async () => {
-      const { RunRecorder } = await import("@zenml-io/kitaru/adapter");
-      const recorder = await RunRecorder.create({
-        adapterVersion,
-        agentId: options.agentId,
-        agentVersionId: options.agentVersionId,
-        client,
-        effectiveInput: recordedInput,
-        effectiveModelSettings: serializedSettings(effective.modelSettings),
-        framework: "mastra",
-        ...(stateful && !replay.spec
-          ? {
-              metadata: {
-                mastra_replay_state: "pending",
-                mastra_native_state: "pending",
-              },
-            }
-          : {}),
-        name: sessionName,
-        replayId: replay.replayId,
-        requestedModelId,
-        sessionIdFile: process.env.KITARU_SESSION_ID_FILE,
-        startedAt,
-        spec: replay.spec,
-      });
+  const evidenceUploads = new AbortController();
+  const recordingClient = withCancelableEvidence(
+    client,
+    evidenceUploads.signal,
+  );
+  let setupAbandoned = false;
+  const openRecording = async (): Promise<StreamLifecycle> => {
+    const { RunRecorder } = await import("@zenml-io/kitaru/adapter");
+    const recorder = await RunRecorder.create({
+      adapterVersion,
+      agentId: options.agentId,
+      agentVersionId: options.agentVersionId,
+      client: recordingClient,
+      effectiveInput: recordedInput,
+      effectiveModelSettings: serializedSettings(effective.modelSettings),
+      framework: "mastra",
+      ...(stateful && !replay.spec
+        ? {
+            metadata: {
+              mastra_replay_state: "pending",
+              mastra_native_state: "pending",
+            },
+          }
+        : {}),
+      name: sessionName,
+      replayId: replay.replayId,
+      requestedModelId,
+      sessionIdFile: process.env.KITARU_SESSION_ID_FILE,
+      startedAt,
+      spec: replay.spec,
+    });
+    const closeUnopened = (reasonCode: string, nativeState: string) =>
+      recorder
+        .failRecording(
+          new Error(`KITARU_RECORDING_INCOMPLETE:${reasonCode}`),
+          stateful && !replay.spec
+            ? {
+                mastra_replay_state: "ineligible",
+                mastra_replay_reason: reasonCode,
+                mastra_native_state: nativeState,
+              }
+            : undefined,
+        )
+        .catch(() => undefined);
+    if (!setupAbandoned) {
       try {
         await recorder.initialize();
       } catch (error) {
-        await recorder
-          .failRecording(
-            new Error("KITARU_RECORDING_INCOMPLETE:capture_setup_failed"),
-            stateful && !replay.spec
-              ? {
-                  mastra_replay_state: "ineligible",
-                  mastra_replay_reason: "capture_setup_failed",
-                  mastra_native_state: "pending",
-                }
-              : undefined,
-          )
-          .catch(() => undefined);
+        await (setupAbandoned
+          ? closeUnopened("recording_setup_timeout", "started")
+          : closeUnopened("capture_setup_failed", "pending"));
         throw error;
       }
-      stateful?.initialize(recorder.state);
-      const active = new StreamLifecycle(recorder, options, stateful);
-      lifecycle = active;
-      stateful?.setTripwireListener?.((reason) => {
-        active.markNativeFailed();
-        const error = new Error(reason);
-        const safe = getSafeStreamError(error);
-        void active
-          .fail(safe.message === OM_DIVERGED ? safe : error)
-          .catch(() => undefined);
-      });
-      return active;
+    }
+    // The turn has already failed over to its native fallback, so a session
+    // that opens late must not stay pending.
+    if (setupAbandoned) {
+      await closeUnopened("recording_setup_timeout", "started");
+      throw new Error(SETUP_TIMEOUT);
+    }
+    stateful?.initialize(recorder.state);
+    const active = new StreamLifecycle(
+      recorder,
+      options,
+      stateful,
+      flushWaitMs === undefined || replay.spec
+        ? undefined
+        : {
+            waitMs: flushWaitMs,
+            cancel: () => evidenceUploads.abort(new Error(FLUSH_TIMEOUT)),
+          },
+    );
+    lifecycle = active;
+    stateful?.setTripwireListener?.((reason) => {
+      active.markNativeFailed();
+      const error = new Error(reason);
+      const safe = getSafeStreamError(error);
+      void active
+        .fail(safe.message === OM_DIVERGED ? safe : error)
+        .catch(() => undefined);
+    });
+    return active;
+  };
+  const initialize = (): Promise<StreamLifecycle> => {
+    initializePromise ??= (async () => {
+      const setup = openRecording();
+      if (setupWaitMs === undefined || replay.spec) return setup;
+      void setup.catch(() => undefined);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          setup,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              setupAbandoned = true;
+              reject(new Error(SETUP_TIMEOUT));
+            }, setupWaitMs);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
     })();
     return initializePromise;
   };
@@ -694,7 +833,7 @@ async function recordedStreamWithRecording({
       pendingModelError !== undefined
         ? { ...step, error: getSafeStreamError(pendingModelError) }
         : step;
-    await active.record(recordedStep as RecordedStep);
+    active.record(recordedStep as RecordedStep);
     if (step.finishReason === "error") modelError = undefined;
     if (replay.spec && active.recorder.state.failure !== undefined) {
       await active.fail(active.recorder.state.failure);

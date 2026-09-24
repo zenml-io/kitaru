@@ -61,7 +61,9 @@ import {
 } from "./request-capture.js";
 import {
   createCapturedFiles,
+  createFileDownloads,
   createRecordedEvidenceSanitizer,
+  FileCaptureTimeoutError,
   restoreCapturedFiles,
 } from "./stateful-files.js";
 import {
@@ -80,8 +82,7 @@ interface MastraMemorySource {
   settled(): Promise<void>;
   /**
    * The source Memory instance. When supplied, its `settled()` also joins the
-   * memory work each recorded turn runs on its own Memory instance, and Kitaru
-   * joins only the recorded thread's buffered work before capturing a turn.
+   * memory work each recorded turn runs on its own Memory instance.
    */
   memory?: Memory;
   domain: MemoryStorage;
@@ -95,13 +96,14 @@ function recordingClient(
   unsafeReason: () => string | undefined,
 ): AdapterClient {
   return {
-    createSession: (request) => client.createSession(sanitize(request)),
+    createSession: (request, options) =>
+      client.createSession(sanitize(request), options),
     getReplay: client.getReplay.bind(client),
     getTaskSpec: client.getTaskSpec.bind(client),
     lookupToolResult: client.lookupToolResult.bind(client),
-    upsertSessionNodes: (sessionId, request) =>
-      client.upsertSessionNodes(sessionId, sanitize(request)),
-    updateSession: (sessionId, request) => {
+    upsertSessionNodes: (sessionId, request, options) =>
+      client.upsertSessionNodes(sessionId, sanitize(request), options),
+    updateSession: (sessionId, request, options) => {
       const safe = sanitize(request);
       const reason = unsafeReason();
       if (reason && safe.metadata?.mastra_replay_state === "eligible") {
@@ -111,7 +113,7 @@ function recordingClient(
           mastra_replay_reason: reason,
         };
       }
-      return client.updateSession(sessionId, safe);
+      return client.updateSession(sessionId, safe, options);
     },
   };
 }
@@ -138,9 +140,25 @@ export interface MemoryReplayAgentOptions extends KitaruAgentOptions {
    * How long a turn waits after its stream closes for observational-memory
    * work. A baseline then releases the source lease, and a turn whose work did
    * not settle in time is recorded as ineligible; a replay whose work did not
-   * settle fails. Defaults to 60 seconds.
+   * settle fails. A baseline's evidence uploads to Kitaru run in the
+   * background and must finish within twice this wait of the stream closing,
+   * or they are cancelled and the turn is recorded as ineligible. Defaults to
+   * 60 seconds.
    */
   finalizationWaitMs?: number;
+  /**
+   * How long a baseline turn waits for Kitaru to open its session before the
+   * model starts. When Kitaru has not answered in time, the turn runs natively
+   * and is not replayable. Defaults to 2 seconds.
+   */
+  sessionSetupWaitMs?: number;
+  /**
+   * How long a baseline turn waits for its declared files to download before
+   * the model starts. When a download has not finished in time, the turn runs
+   * natively, its file resolver takes over the running downloads, and the turn
+   * is not replayable. Defaults to 10 seconds.
+   */
+  fileCaptureWaitMs?: number;
 }
 
 /** The call a per-call `files` function declares file URLs for. */
@@ -159,11 +177,15 @@ export interface MemoryReplayAgentBindings {
   workspace?: Awaited<ReturnType<typeof loadSkillsWorkspace>>["workspace"];
 }
 
+type FileDownloads = ReturnType<typeof createFileDownloads>;
+
 export type MemoryReplayAgentFactory = (
   bindings: MemoryReplayAgentBindings,
 ) => AgentConfig | Promise<AgentConfig>;
 
 const DEFAULT_FINALIZATION_WAIT_MS = 60_000;
+const DEFAULT_SESSION_SETUP_WAIT_MS = 2_000;
+const DEFAULT_FILE_CAPTURE_WAIT_MS = 10_000;
 const CAPTURE_BUFFERING_WAIT_MS = 5_000;
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -298,6 +320,7 @@ export function createMemoryReplayAgent(
   async function runNativeBaseline(
     rawInput: unknown,
     callerOptions: RuntimeStreamOptions,
+    downloads: FileDownloads,
   ): Promise<unknown> {
     const { MastraCompositeStore } = await import("@mastra/core/storage");
     const { Memory } = await import("@mastra/memory");
@@ -323,11 +346,7 @@ export function createMemoryReplayAgent(
       : undefined;
     const config = await factory({
       memory,
-      resolveFile:
-        options.resolveFile ??
-        (async () => {
-          throw new Error("Missing controlled file resolver.");
-        }),
+      resolveFile: downloads.resolveNative,
       workspace: workspace?.workspace,
     });
     selector = await getNativeSelector(config, callerOptions);
@@ -428,7 +447,8 @@ export function createMemoryReplayAgent(
 
   async function recordedStream(
     rawInput: unknown,
-    callerOptions: RuntimeStreamOptions = {},
+    callerOptions: RuntimeStreamOptions,
+    downloads: FileDownloads,
     markRecordingStreamEntered: () => void,
   ): Promise<unknown> {
     assertMemoryReplayVersions();
@@ -448,10 +468,8 @@ export function createMemoryReplayAgent(
           typeof options.files === "function"
             ? await options.files({ input: rawInput, options: callerOptions })
             : (options.files ?? []),
-          options.resolveFile ??
-            (async () => {
-              throw new Error("Missing controlled file resolver.");
-            }),
+          downloads.capture,
+          supplied.fileCaptureWaitMs ?? DEFAULT_FILE_CAPTURE_WAIT_MS,
         );
         return encodeMemoryValue(baselineFiles.replaceDeclaredFileUrls(input));
       },
@@ -618,21 +636,18 @@ export function createMemoryReplayAgent(
       const sourceEngine = source.memory
         ? await source.memory.omEngine.catch(() => null)
         : null;
-      // Once the source Memory joins every turn's work, its settled() also
-      // waits for turns on other threads. Join only this thread's buffering.
-      const initialSnapshot = await binding.captureInitial(
-        source.memory
-          ? {
-              settled: async () => {
-                await (await memory.omEngine)?.waitForBuffering(
-                  selector.threadId,
-                  selector.resourceId,
-                  CAPTURE_BUFFERING_WAIT_MS,
-                );
-              },
-            }
-          : source,
-      );
+      // The source settled() waits for work on every thread of that Memory.
+      // Mastra tracks buffering per thread for the whole process, so join only
+      // this thread's; the snapshot check rejects any other unjoined work.
+      const initialSnapshot = await binding.captureInitial({
+        settled: async () => {
+          await (await memory.omEngine)?.waitForBuffering(
+            selector.threadId,
+            selector.resourceId,
+            CAPTURE_BUFFERING_WAIT_MS,
+          );
+        },
+      });
       let tracked = false;
       const trackSourceWork = () => {
         if (tracked || !sourceEngine) return;
@@ -967,8 +982,12 @@ export function createMemoryReplayAgent(
             reportLocalRecordingError(cleanupError);
           }
           reportLocalRecordingError(error);
-          return runNativeBaseline(rawInput, callerOptions);
+          return runNativeBaseline(rawInput, callerOptions, downloads);
         },
+        setupWaitMs: historical
+          ? undefined
+          : (supplied.sessionSetupWaitMs ?? DEFAULT_SESSION_SETUP_WAIT_MS),
+        flushWaitMs: historical ? undefined : 2 * finalizationWaitMs,
         requestedModelId:
           replay.replacementModelId ?? String(configuration.modelId),
         sessionName: options.sessionName,
@@ -1114,8 +1133,14 @@ export function createMemoryReplayAgent(
     callerOptions: RuntimeStreamOptions = {},
   ): Promise<unknown> {
     let enteredRecordingStream = false;
+    const downloads = createFileDownloads(
+      options.resolveFile ??
+        (async () => {
+          throw new Error("Missing controlled file resolver.");
+        }),
+    );
     try {
-      return await recordedStream(rawInput, callerOptions, () => {
+      return await recordedStream(rawInput, callerOptions, downloads, () => {
         enteredRecordingStream = true;
       });
     } catch (error) {
@@ -1132,8 +1157,14 @@ export function createMemoryReplayAgent(
           ? "version_mismatch"
           : error instanceof MemoryReplayContextError
             ? "context_unsupported"
-            : "capture_setup_failed";
-      const nativeResult = await runNativeBaseline(rawInput, callerOptions);
+            : error instanceof FileCaptureTimeoutError
+              ? "file_capture_timeout"
+              : "capture_setup_failed";
+      const nativeResult = await runNativeBaseline(
+        rawInput,
+        callerOptions,
+        downloads,
+      );
       void reportSetupFailure(error, reasonCode);
       return nativeResult;
     }
