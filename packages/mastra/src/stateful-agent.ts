@@ -1205,12 +1205,12 @@ export function createMemoryReplayAgent(
           getReplayMetadata: () => replayMetadata,
           async finish() {
             const settled = await runtime.finish();
-            await capture.drain();
             if (!historical) await runtime.binding.verifyEligibility();
             // The turn's writes are settled and checked, so the next turn on
-            // this thread can acquire while evidence uploads and the session
-            // update are sent.
+            // this thread can acquire while evidence uploads, including failed
+            // provider attempts, and the session update are sent.
             await runtime.release();
+            await capture.drain();
             await runtime.binding.drain();
             // An OM call past the deadline may never return; the turn is
             // already ineligible, so do not wait for its tape entry.

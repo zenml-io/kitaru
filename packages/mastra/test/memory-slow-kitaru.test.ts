@@ -3,6 +3,7 @@ import { InMemoryStore } from "@mastra/core/storage";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
 import { Memory } from "@mastra/memory";
+import { APICallError } from "ai";
 import { afterEach, expect, it, vi } from "vitest";
 import { z } from "zod/v4";
 import {
@@ -80,6 +81,8 @@ async function setup(
     sessionSetupWaitMs?: number;
     fileCaptureWaitMs?: number;
     finalizationWaitMs?: number;
+    /** Fail the first provider call with a retryable error. */
+    failFirstCall?: boolean;
   } = {},
 ) {
   const api = installTestApi();
@@ -118,10 +121,19 @@ async function setup(
   });
   const modelCalls: number[] = [];
   let startedAt = 0;
+  let failedCalls = 0;
   const actor = new MastraLanguageModelV2Mock({
     modelId: "actor",
     provider: "fixture",
     doStream: async () => {
+      if (options.failFirstCall && failedCalls++ === 0)
+        throw new APICallError({
+          message: "Service unavailable",
+          url: "https://provider.invalid",
+          requestBodyValues: {},
+          statusCode: 503,
+          isRetryable: true,
+        });
       modelCalls.push(Date.now() - startedAt);
       if (modelCalls.length % 2 === 0) return textStream("done");
       return streamParts(
@@ -137,6 +149,7 @@ async function setup(
       );
     },
   });
+  const access = createProcessLocalMemoryAccess();
   const adapter = createMemoryReplayAgent(
     ({ memory, resolveFile }) => ({
       id: "slow-kitaru",
@@ -174,7 +187,7 @@ async function setup(
         settled: options.sourceSettled ?? (() => memory.settled()),
         domain,
         configuration: memory.getMergedThreadConfig(),
-        exclusiveAccess: createProcessLocalMemoryAccess(),
+        exclusiveAccess: access,
       }),
       resolveModel: () => actor,
     },
@@ -183,12 +196,13 @@ async function setup(
     startedAt = Date.now();
     const output = (await adapter.stream(message, {
       maxSteps: 5,
+      modelSettings: { maxRetries: 1 },
       memory: { thread: THREAD, resource: RESOURCE },
     })) as { consumeStream(): Promise<void>; text: Promise<string> };
     await output.consumeStream();
     return { elapsed: Date.now() - startedAt, text: await output.text };
   }
-  return { api, modelCalls, turn };
+  return { access, api, modelCalls, turn };
 }
 
 /** Each session's closing status, replay state and reason. */
@@ -236,6 +250,31 @@ it("answers without waiting for hung evidence uploads and closes the session as 
     { timeout: 3_000 },
   );
 });
+
+it("releases the lease before uploading a retried provider attempt", async () => {
+  const { access, api, turn } = await setup({
+    delay: (kind) => (kind === "evidence" ? "hang" : undefined),
+    finalizationWaitMs: 2_000,
+    failFirstCall: true,
+  });
+  const { text } = await turn();
+  expect(text).toBe("done");
+  const started = Date.now();
+  const next = await access.acquire(
+    { threadId: THREAD, resourceId: RESOURCE },
+    { waitMs: 10_000 },
+  );
+  // The flush deadline is 4 s; the lease must not wait for it.
+  expect(Date.now() - started).toBeLessThan(1_000);
+  await next();
+  await vi.waitFor(
+    () =>
+      expect(outcomes(api)).toEqual([
+        "completed/ineligible/recording_flush_timeout",
+      ]),
+    { timeout: 6_000 },
+  );
+}, 15_000);
 
 it("keeps step order when evidence uploads are slow", async () => {
   const { api, turn } = await setup({
