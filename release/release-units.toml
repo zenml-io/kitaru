@@ -53,6 +53,21 @@ checks = [
 ]
 
 [[units]]
+slug = "atif-importer"
+path = "plugins/packages/atif-importer"
+distribution = "kitaru-atif-importer"
+registry = "pypi"
+version-source = "plugins/packages/atif-importer/pyproject.toml"
+changelog = "plugins/packages/atif-importer/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = false
+release-label = "requires:plugin:atif"
+impact-paths = ["plugins/packages/atif-importer/**"]
+tag-prefix = "python/kitaru-atif-importer/v"
+maintenance-branch-prefix = "release/atif/"
+checks = []
+
+[[units]]
 slug = "braintrust-importer"
 path = "plugins/packages/braintrust-importer"
 distribution = "kitaru-braintrust-importer"
