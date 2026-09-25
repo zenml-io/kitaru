@@ -388,26 +388,43 @@ export interface MastraSettlingMemory {
 const BUFFERING_WAIT_MS = 30_000;
 const ACQUIRE_RESPONSE_MARGIN_MS = 25;
 
+/**
+ * Call `onExpired` once `waitMs` has passed and every timer and I/O callback
+ * that was already due has run. Returns a function that cancels the bound.
+ */
+function startBound(waitMs: number, onExpired: () => void): () => void {
+  let immediate: ReturnType<typeof setImmediate> | undefined;
+  // Node runs every due timer of one duration together, so after an
+  // event-loop stall a bound can fire before a shorter deadline that expired
+  // first, such as the lease's own `waitMs`. The check phase runs after all
+  // due timers and completed I/O, so their answers win over the bound.
+  const timer = setTimeout(() => {
+    immediate = setImmediate(onExpired);
+  }, waitMs);
+  return () => {
+    clearTimeout(timer);
+    if (immediate) clearImmediate(immediate);
+  };
+}
+
 async function boundedCoordination<T>(
   operation: Promise<T>,
   waitMs: number,
   timeoutMessage = "Source-thread coordination timed out.",
   timeoutReason: MastraReplayReason = "memory_lease_unavailable",
 ): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopBound: (() => void) | undefined;
   try {
     return await Promise.race([
       operation,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () =>
-            reject(new MastraReplayReasonError(timeoutMessage, timeoutReason)),
-          waitMs,
+        stopBound = startBound(waitMs, () =>
+          reject(new MastraReplayReasonError(timeoutMessage, timeoutReason)),
         );
       }),
     ]);
   } finally {
-    if (timer) clearTimeout(timer);
+    stopBound?.();
   }
 }
 
@@ -424,10 +441,15 @@ async function acquireWithin(
   boundWaitMs: number,
   onLateReleaseFailure: () => void,
 ): Promise<MastraMemoryLease> {
-  const timeout = AbortSignal.timeout(boundWaitMs);
+  const bound = new AbortController();
+  const stopBound = startBound(boundWaitMs, () =>
+    bound.abort(
+      new DOMException("Source-thread lease wait timed out.", "TimeoutError"),
+    ),
+  );
   const signal = options.signal
-    ? AbortSignal.any([timeout, options.signal])
-    : timeout;
+    ? AbortSignal.any([bound.signal, options.signal])
+    : bound.signal;
   const attempted = access.acquire(selector, { ...options, signal });
   let accepted = false;
   void attempted.then(
@@ -441,18 +463,22 @@ async function acquireWithin(
     },
     () => undefined,
   );
-  const lease = await Promise.race([
-    attempted,
-    new Promise<never>((_resolve, reject) => {
-      if (signal.aborted) reject(signal.reason);
-      else
-        signal.addEventListener("abort", () => reject(signal.reason), {
-          once: true,
-        });
-    }),
-  ]);
-  accepted = true;
-  return lease;
+  try {
+    const lease = await Promise.race([
+      attempted,
+      new Promise<never>((_resolve, reject) => {
+        if (signal.aborted) reject(signal.reason);
+        else
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+      }),
+    ]);
+    accepted = true;
+    return lease;
+  } finally {
+    stopBound();
+  }
 }
 
 /**

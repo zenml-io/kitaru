@@ -823,3 +823,36 @@ it("names a quick reply that follows a finalizing turn on another thread neutral
   await binding.release();
   await holder();
 });
+
+it("lets a quick reply follow a finalizing turn after an event-loop stall", async () => {
+  const access = createProcessLocalMemoryAccess();
+  const holder = await access.acquire({
+    threadId: THREAD,
+    resourceId: RESOURCE,
+  });
+  await holder.markFinalizing?.();
+  const { runtime, binding } = await fixture("reply", access);
+  const block = (ms: number) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {}
+  };
+  // A timer with the bound's duration comes due before the lease's own
+  // 75 ms wait, so Node runs the bound in the same batch as that timer.
+  const earlierTimer = setTimeout(() => {}, 100);
+  block(40);
+  const captured = binding.captureInitial(runtime.memory);
+  // The stall ends after both the lease's wait and the bound have passed.
+  block(150);
+  expect(await captured).toBeUndefined();
+  expect(binding.incompleteReason).toBe("earlier_turn_finalizing");
+  // The reply's own writes follow the finalizing holder, so it stays eligible.
+  await binding.domain.updateThread({
+    id: THREAD,
+    metadata: { workingMemory: "reply" },
+  });
+  await binding.drain();
+  expect(await holder.verifyEligibility()).toBe(true);
+  clearTimeout(earlierTimer);
+  await binding.release();
+  await holder();
+});
