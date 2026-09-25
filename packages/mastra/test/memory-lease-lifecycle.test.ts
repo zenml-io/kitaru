@@ -811,6 +811,12 @@ it.each(["processInput", "processInputStep"] as const)(
     await vi.waitFor(() =>
       expect(outcomes(api)).toEqual(["failed/ineligible/native_run_failed"]),
     );
+    const failed = api.calls.find(
+      (call) => call.method === "PATCH" && call.body?.status === "failed",
+    );
+    expect(String(failed?.body?.error)).toMatch(
+      /; KITARU_RECORDING_INCOMPLETE:native_run_failed$/,
+    );
   },
 );
 

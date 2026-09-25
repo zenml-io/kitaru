@@ -595,10 +595,15 @@ class StreamLifecycle {
           metadata,
         );
       } else {
+        // A failed baseline is never replayable, so its error names the
+        // reason even when only the native turn went wrong.
+        const reason =
+          reasonCode ??
+          (this.recordsBaseline ? "native_run_failed" : undefined);
         await this.recorder.fail(
-          reasonCode
+          reason
             ? new Error(
-                `${safeError.message}; KITARU_RECORDING_INCOMPLETE:${reasonCode}`,
+                `${safeError.message}; KITARU_RECORDING_INCOMPLETE:${reason}`,
               )
             : error,
           metadata,
