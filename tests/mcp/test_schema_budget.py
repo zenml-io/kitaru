@@ -17,6 +17,6 @@ def test_committed_schema_report_matches_public_sdk_registry() -> None:
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
-    assert "read-only: 4 tools" in result.stdout
-    assert "standard: 12 tools" in result.stdout
-    assert "destructive: 14 tools" in result.stdout
+    assert "read-only: 5 tools" in result.stdout
+    assert "standard: 13 tools" in result.stdout
+    assert "destructive: 15 tools" in result.stdout

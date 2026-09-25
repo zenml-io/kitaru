@@ -3,10 +3,6 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Bounded investigation, annotation, and insight handlers."""
 
-import asyncio
-
-import httpx
-
 from kitaru.api_models.v1.annotation import (
     AnnotationListParams,
     AnnotationUpdateRequest,
@@ -17,6 +13,7 @@ from kitaru.api_models.v1.insight import InsightListParams, InsightUpdateRequest
 from kitaru.api_models.v1.investigation import (
     InvestigationCreateRequest,
     InvestigationListParams,
+    InvestigationResponse,
     InvestigationSessionsListParams,
     InvestigationSessionUpdateRequest,
     InvestigationUpdateRequest,
@@ -27,8 +24,8 @@ from kitaru.api_models.v1.tag import (
     TagUpdateRequest,
 )
 from kitaru.client.dashboard_urls import get_investigation_review_url
-from kitaru.client.exceptions import APIError
 from kitaru.mcp.lifecycle import MCPServerState
+from kitaru.mcp.links import get_dashboard_info
 from kitaru.mcp.models.common import PageData, ReviewItem, ToolSuccessPayload
 from kitaru.mcp.models.review import (
     AnnotationUpdate,
@@ -50,9 +47,6 @@ from kitaru.mcp.models.review import (
 from kitaru.mcp.tools.params import build_list_params
 from kitaru.mcp.tools.registry import build_page_data
 
-_INFO_LOOKUP_MAX_SECONDS = 5.0
-_INFO_LOOKUP_HANDLER_FRACTION = 0.25
-
 
 async def handle_review_read(
     state: MCPServerState, request: ReviewReadRequest
@@ -65,7 +59,32 @@ async def handle_review_read(
             resource = state.client.insights
         else:
             resource = state.client.annotations
-        return await resource.get(request.id)
+        item = await resource.get(request.id)
+        if request.kind != "investigation":
+            return item
+        assert isinstance(item, InvestigationResponse)
+        info, _, warnings = await get_dashboard_info(
+            state,
+            warning=(
+                "Could not resolve a dashboard review link because the server "
+                "info request failed. The investigation read succeeded."
+            ),
+        )
+        review_url = (
+            get_investigation_review_url(
+                info,
+                state.client.base_url,
+                agent_id=item.agent_id,
+                investigation_id=item.id,
+            )
+            if info is not None
+            else None
+        )
+        return ToolSuccessPayload(
+            data=item,
+            links={"review": review_url} if review_url else {},
+            warnings=warnings,
+        )
     if isinstance(request, ReviewListSessions):
         params = InvestigationSessionsListParams(
             cursor=request.cursor, size=request.size
@@ -94,23 +113,13 @@ async def handle_review_manage(
 ) -> object:
     """Perform one investigation, annotation, or insight mutation."""
     if isinstance(request, InvestigationCreate):
-        info = None
-        warnings: list[str] = []
-        try:
-            timeout = min(
-                _INFO_LOOKUP_MAX_SECONDS,
-                state.settings.handler_timeout * _INFO_LOOKUP_HANDLER_FRACTION,
-            )
-            async with asyncio.timeout(timeout):
-                info = await state.client.info.get()
-        # ValueError covers malformed info payloads: JSON decoding and Pydantic
-        # validation errors both derive from it. The short deadline reserves most
-        # of the handler budget for the mutation and its response.
-        except (APIError, httpx.HTTPError, TimeoutError, ValueError):
-            warnings.append(
+        info, _, warnings = await get_dashboard_info(
+            state,
+            warning=(
                 "Could not resolve a dashboard review link because the server "
                 "info request failed. The investigation was created."
-            )
+            ),
+        )
         dto = InvestigationCreateRequest(
             agent_id=request.agent_id,
             name=request.name,

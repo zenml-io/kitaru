@@ -1,6 +1,7 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 """Focused handler, pagination, protocol, and destructive contracts."""
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
@@ -23,6 +24,7 @@ from kitaru.api_models.v1.imports import (
     ImportListParams,
     ImportResponse,
 )
+from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.api_models.v1.investigation import InvestigationSessionResponse
 from kitaru.api_models.v1.session import SessionDetailResponse, TokenUsage
 from kitaru.api_models.v1.session_node import SessionNodeListParams, SessionNodeResponse
@@ -34,9 +36,10 @@ from kitaru.api_models.v1.worker import (
     WorkerRuntime,
     WorkerScope,
 )
+from kitaru.client.exceptions import InvalidServerResponseError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.activity import ActivityGetRequest, ActivityListRequest
-from kitaru.mcp.models.common import PageData
+from kitaru.mcp.models.common import PageData, ToolSuccessPayload
 from kitaru.mcp.models.management import (
     CohortCreate,
     CohortUpdate,
@@ -113,9 +116,11 @@ class FakeClient:
 
     def __init__(self) -> None:
         self.closed = 0
+        self.base_url = "https://api.example.com/"
         self.list_calls: list[object] = []
         self.get_calls: list[uuid.UUID] = []
         self.sessions = SimpleNamespace(list=self._list_sessions, get=self._get)
+        self.info = SimpleNamespace(get=self._get_info)
         self.imports = SimpleNamespace(list=self._list_imports, get=self._get_import)
         self.agents = SimpleNamespace(list=self._list_agents)
         self.investigations = SimpleNamespace(
@@ -129,6 +134,9 @@ class FakeClient:
     async def _get(self, _id: uuid.UUID) -> SessionDetailResponse:
         self.get_calls.append(_id)
         return _get_session(_id)
+
+    async def _get_info(self) -> ServerInfoResponse:
+        return ServerInfoResponse(version="0.0.0", auth_scheme=AuthScheme.LOCAL)
 
     async def _list_imports(self, params: object) -> Page[ImportResponse]:
         self.list_calls.append(params)
@@ -521,6 +529,164 @@ async def test_public_sdk_call_has_canonical_structured_text_parity() -> None:
     assert result.structured_content is not None
     assert json.loads(result.content[0].text) == result.structured_content
     assert result.structured_content["data"]["id"] == str(item_id)
+
+
+async def test_session_get_links_to_exact_session_in_dashboard_workspace() -> None:
+    client = FakeClient()
+
+    async def get_info() -> ServerInfoResponse:
+        return ServerInfoResponse(
+            version="0.0.0",
+            auth_scheme=AuthScheme.CONTROL_PLANE,
+            dashboard_url="https://cloud.example.com/workspaces/ws-1/",
+        )
+
+    client.info.get = get_info
+    server, context = _get_context(client)
+    session_id = uuid.uuid4()
+    result = await server.call_tool(
+        "kitaru_activity_read",
+        {"request": {"operation": "get", "kind": "session", "id": str(session_id)}},
+        context,
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.structured_content is not None
+    assert result.structured_content["data"]["id"] == str(session_id)
+    assert result.structured_content["links"] == {
+        "inspect": f"https://cloud.example.com/workspaces/ws-1/sessions/{session_id}"
+    }
+    assert json.loads(cast(TextContent, result.content[0]).text) == (
+        result.structured_content
+    )
+
+
+async def test_experiment_run_get_links_to_selected_run() -> None:
+    run_id = uuid.uuid4()
+    experiment_id = uuid.uuid4()
+
+    async def get_run(_id: uuid.UUID) -> object:
+        assert _id == run_id
+        return SimpleNamespace(id=run_id, experiment_id=experiment_id, number=3)
+
+    async def get_info() -> ServerInfoResponse:
+        return ServerInfoResponse(
+            version="0.0.0", auth_scheme=AuthScheme.LOCAL, ui_version="1.2.3"
+        )
+
+    client = SimpleNamespace(
+        base_url="https://api.example.com/base/",
+        experiment_runs=SimpleNamespace(get=get_run),
+        info=SimpleNamespace(get=get_info),
+    )
+    result = await handle_activity_read(
+        _get_state(cast(Any, client)),
+        ActivityGetRequest(operation="get", kind="experiment_run", id=run_id),
+    )
+
+    assert isinstance(result, ToolSuccessPayload)
+    assert result.links == {
+        "inspect": f"https://api.example.com/base/experiments/{experiment_id}?run=3"
+    }
+
+
+@pytest.mark.parametrize(
+    "dashboard_url",
+    [
+        "https://user:secret@cloud.example.com/ws",
+        "https://cloud.example.com/ws?token=secret",
+    ],
+)
+async def test_session_get_omits_unsafe_dashboard_link(dashboard_url: str) -> None:
+    client = FakeClient()
+
+    async def get_info() -> ServerInfoResponse:
+        return ServerInfoResponse(
+            version="0.0.0",
+            auth_scheme=AuthScheme.CONTROL_PLANE,
+            dashboard_url=dashboard_url,
+        )
+
+    client.info.get = get_info
+    session_id = uuid.uuid4()
+    result = await handle_activity_read(
+        _get_state(client),
+        ActivityGetRequest(operation="get", kind="session", id=session_id),
+    )
+
+    assert isinstance(result, ToolSuccessPayload)
+    assert cast(Any, result.data).id == session_id
+    assert result.links == {}
+    assert len(result.warnings) == 1
+    assert "secret" not in result.warnings[0]
+
+
+async def test_session_get_survives_dashboard_info_timeout() -> None:
+    client = FakeClient()
+
+    async def get_info() -> ServerInfoResponse:
+        await asyncio.sleep(1)
+        raise AssertionError("info lookup exceeded its deadline")
+
+    client.info.get = get_info
+    session_id = uuid.uuid4()
+    state = MCPServerState(MCPSettings(handler_timeout=0.1), cast(Any, client))
+    result = await handle_activity_read(
+        state, ActivityGetRequest(operation="get", kind="session", id=session_id)
+    )
+
+    assert isinstance(result, ToolSuccessPayload)
+    assert cast(Any, result.data).id == session_id
+    assert result.links == {}
+    assert len(result.warnings) == 1
+
+
+async def test_session_get_survives_invalid_dashboard_info_response() -> None:
+    client = FakeClient()
+
+    async def get_info() -> ServerInfoResponse:
+        raise InvalidServerResponseError("The server returned HTML")
+
+    client.info.get = get_info
+    session_id = uuid.uuid4()
+    result = await handle_activity_read(
+        _get_state(client),
+        ActivityGetRequest(operation="get", kind="session", id=session_id),
+    )
+
+    assert isinstance(result, ToolSuccessPayload)
+    assert cast(Any, result.data).id == session_id
+    assert result.links == {}
+    assert len(result.warnings) == 1
+    assert "HTML" not in result.warnings[0]
+
+
+async def test_session_get_preserves_read_near_handler_deadline() -> None:
+    client = FakeClient()
+
+    async def get_session(session_id: uuid.UUID) -> SessionDetailResponse:
+        await asyncio.sleep(0.33)
+        return _get_session(session_id)
+
+    async def get_info() -> ServerInfoResponse:
+        await asyncio.sleep(1)
+        raise AssertionError("info lookup exceeded its deadline")
+
+    client.sessions.get = get_session
+    client.info.get = get_info
+    state = MCPServerState(MCPSettings(handler_timeout=0.4), cast(Any, client))
+    session_id = uuid.uuid4()
+
+    result = await state.execute(
+        lambda: handle_activity_read(
+            state, ActivityGetRequest(operation="get", kind="session", id=session_id)
+        )
+    )
+
+    assert isinstance(result, ToolSuccessPayload)
+    assert cast(Any, result.data).id == session_id
+    assert result.links == {}
+    assert len(result.warnings) == 1
 
 
 async def test_public_import_get_returns_the_typed_import() -> None:

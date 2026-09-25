@@ -27,12 +27,14 @@ EXPECTED_TOOLS = {
         "kitaru_activity_read",
         "kitaru_review_read",
         "kitaru_connection_read",
+        "kitaru_docs_search",
     ],
     "standard": [
         "kitaru_registry_read",
         "kitaru_activity_read",
         "kitaru_review_read",
         "kitaru_connection_read",
+        "kitaru_docs_search",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
@@ -47,6 +49,7 @@ EXPECTED_TOOLS = {
         "kitaru_activity_read",
         "kitaru_review_read",
         "kitaru_connection_read",
+        "kitaru_docs_search",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
@@ -66,28 +69,33 @@ AGENT_ID = uuid.UUID("30000000-0000-0000-0000-000000000003")
 
 class _StubHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        if self.path != f"/api/v1/sessions/{SESSION_ID}":
+        if self.path == "/api/v1/info":
+            body = json.dumps(
+                {"version": "0.0.0", "auth_scheme": "none", "ui_version": "test-ui"}
+            ).encode()
+        elif self.path == f"/api/v1/sessions/{SESSION_ID}":
+            now = datetime.now(UTC).isoformat()
+            body = json.dumps(
+                {
+                    "id": str(SESSION_ID),
+                    "owner_id": str(OWNER_ID),
+                    "agent_id": str(AGENT_ID),
+                    "number": 1,
+                    "origin": "recorded",
+                    "status": "completed",
+                    "inputs": {},
+                    "outputs": {},
+                    "expected": None,
+                    "metadata": {},
+                    "llm_call_count": 0,
+                    "tool_call_count": 0,
+                    "created": now,
+                    "updated": now,
+                }
+            ).encode()
+        else:
             self.send_error(404)
             return
-        now = datetime.now(UTC).isoformat()
-        body = json.dumps(
-            {
-                "id": str(SESSION_ID),
-                "owner_id": str(OWNER_ID),
-                "agent_id": str(AGENT_ID),
-                "number": 1,
-                "origin": "recorded",
-                "status": "completed",
-                "inputs": {},
-                "outputs": {},
-                "expected": None,
-                "metadata": {},
-                "llm_call_count": 0,
-                "tool_call_count": 0,
-                "created": now,
-                "updated": now,
-            }
-        ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -155,6 +163,21 @@ async def _probe_mode(
                         assert json.loads(text) == result.structured_content
                         assert result.structured_content["data"]["id"] == str(
                             SESSION_ID
+                        )
+                        assert result.structured_content["links"] == {
+                            "inspect": f"{server_url}/sessions/{SESSION_ID}"
+                        }
+                        docs = await session.call_tool(
+                            "kitaru_docs_search",
+                            {"request": {"query": "replay on_miss"}},
+                        )
+                        assert not docs.is_error, docs
+                        assert docs.structured_content is not None
+                        matches = docs.structured_content["data"]["matches"]
+                        assert matches
+                        assert all(
+                            match["url"].startswith("https://docs.zenml.io/kitaru/")
+                            for match in matches
                         )
             except BaseException as error:
                 stderr.seek(0)

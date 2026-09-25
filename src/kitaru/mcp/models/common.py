@@ -151,6 +151,7 @@ class ActivityReadResult(ToolResult):
     """Typed activity read result."""
 
     data: ActivityItem | PageData[ActivityItem] | None = None
+    links: dict[Literal["inspect"], str] = Field(default_factory=dict)
 
 
 ReviewItem = (
@@ -165,6 +166,7 @@ class ReviewReadResult(ToolResult):
     """Typed investigation, annotation, and insight read result."""
 
     data: ReviewItem | PageData[ReviewItem] | None = None
+    links: dict[Literal["review"], str] = Field(default_factory=dict)
 
 
 class ReviewManageResult(ToolResult):
