@@ -810,6 +810,14 @@ export function collectFileNetworkUrls(value: unknown): string[] {
   return collectFileUrls(value, NETWORK_URL);
 }
 
+/**
+ * The network URLs held by file or image parts in `value`, or by message
+ * attachments that Mastra sends to the model.
+ */
+export function collectModelFileNetworkUrls(value: unknown): string[] {
+  return collectFileUrls(value, NETWORK_URL, true);
+}
+
 const MODEL_FILE_URL = /^(?:https?|kitaru-file):\/\//i;
 
 /**

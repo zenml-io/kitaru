@@ -86,6 +86,7 @@ import {
 } from "./request-capture.js";
 import {
   collectFileNetworkUrls,
+  collectModelFileNetworkUrls,
   containsModelFileUrl,
   createCapturedContentReferencer,
   createCapturedFiles,
@@ -1299,6 +1300,26 @@ export function createMemoryReplayAgent(
         },
         adapter: options,
       });
+      // Network URLs in the file parts the application's processors receive.
+      // Only these can have been fetched, so older history outside the
+      // recall window stays out of the check at the end of the turn.
+      const processedFileUrls = new Set<string>();
+      const noteProcessedFileUrls = (messageList: {
+        get: { all: { db(): unknown } };
+      }) => {
+        for (const url of collectModelFileNetworkUrls(messageList.get.all.db()))
+          processedFileUrls.add(url);
+      };
+      const fileUrlProcessor: InputProcessor = {
+        id: "kitaru-processed-file-urls",
+        processInput({ messageList }) {
+          noteProcessedFileUrls(messageList);
+          return messageList;
+        },
+        processInputStep({ messageList }) {
+          noteProcessedFileUrls(messageList);
+        },
+      };
       const contextAtCapture = new Map(requestContext.entries());
       const requestProcessor: InputProcessor = {
         id: "kitaru-effective-request",
@@ -1363,6 +1384,7 @@ export function createMemoryReplayAgent(
         defaultOptions: {},
         inputProcessors: [
           policy.first,
+          ...(historical ? [] : [fileUrlProcessor]),
           ...((config.inputProcessors as InputProcessor[]) ?? []).map(
             (processor) =>
               reportProcessorTripwires(processor, (reason) =>
@@ -1595,6 +1617,18 @@ export function createMemoryReplayAgent(
               if (collectFileNetworkUrls(recordedRawInput).length)
                 throw new MastraReplayReasonError(
                   "Unsupported Mastra memory replay: an input file URL was not resolved through resolveFile.",
+                  "file_url_undeclared",
+                );
+              // The same holds for a history URL a processor received: it
+              // did not reach the model as a URL, so the processor replaced
+              // it without the factory's `resolveFile`.
+              if (
+                [...processedFileUrls].some((url) =>
+                  baselineFiles?.isConversationUrl(url),
+                )
+              )
+                throw new MastraReplayReasonError(
+                  "Unsupported Mastra memory replay: a history file URL was not resolved through resolveFile.",
                   "file_url_undeclared",
                 );
               const turnFiles = files.files;

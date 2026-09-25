@@ -1433,3 +1433,81 @@ it("records a turn as ineligible when a processor fetches an input URL itself", 
     await store.close();
   }
 });
+
+it("records a turn as ineligible when a processor fetches a history URL itself", async () => {
+  const nativeFetch = globalThis.fetch;
+  const api = installTestApi();
+  const apiFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", ((
+    input: Parameters<typeof fetch>[0],
+    init: Parameters<typeof fetch>[1],
+  ) =>
+    String(input).startsWith("data:")
+      ? nativeFetch(input, init)
+      : apiFetch(input, init)) as typeof fetch);
+  const { store, domain } = await seedAttachmentHistory();
+  const model = new MastraLanguageModelV2Mock({
+    provider: "fixture",
+    modelId: "actor",
+    doStream: async () => textStream("The quote covers two nights."),
+  });
+  const factoryResolver = vi.fn(async () => ({
+    bytes: ATTACHMENT_BYTES,
+    mediaType: "application/pdf",
+  }));
+  // The processor downloads the history file with its own client, not the
+  // factory's `resolveFile`, so the turn never captures the bytes.
+  const ownFetch = vi.fn(async () => ({
+    bytes: ATTACHMENT_BYTES,
+    mediaType: "application/pdf",
+  }));
+  const adapter = createMemoryReplayAgent(
+    ({ memory }) => ({
+      id: "own-history-fetch",
+      name: "Own history fetch",
+      instructions: "Answer about the attachment.",
+      memory,
+      model,
+      inputProcessors: [createAttachmentProcessor(ownFetch)],
+    }),
+    {
+      agentId: AGENT_ID,
+      apiUrl: "https://kitaru.invalid",
+      apiKey: "fixture",
+      requestedModelId: "fixture/actor",
+      onRecordingError: () => undefined,
+      sourceMemory: () => ({
+        settled: async () => {},
+        domain,
+        configuration: { lastMessages: 20, semanticRecall: false },
+        exclusiveAccess: createProcessLocalMemoryAccess(),
+      }),
+      resolveModel: () => model,
+      files: [],
+      resolveFile: factoryResolver,
+    },
+  );
+  try {
+    const output = await adapter.stream("What does it cost?", {
+      memory: { thread: THREAD, resource: RESOURCE },
+    });
+    expect(await output.text).toBe("The quote covers two nights.");
+    expect(ownFetch).toHaveBeenCalledWith(ATTACHMENT_URL);
+    expect(factoryResolver).not.toHaveBeenCalled();
+    // Replay would fetch the redacted history URL over the network.
+    await vi.waitFor(() =>
+      expect(
+        api.calls.find(
+          (call) =>
+            call.method === "PATCH" && call.body?.status === "completed",
+        )?.body?.metadata,
+      ).toMatchObject({
+        mastra_replay_state: "ineligible",
+        mastra_replay_reason: "file_url_undeclared",
+      }),
+    );
+    expect(JSON.stringify(api.calls)).not.toContain(DOWNLOAD_TOKEN);
+  } finally {
+    await store.close();
+  }
+});
