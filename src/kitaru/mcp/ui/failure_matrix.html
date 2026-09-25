@@ -325,7 +325,7 @@ function render() {
   renderHeadline(d, measure);
   renderMatrix(d, cells, measure);
   renderTray(compare ? c : b);
-  $("#hint").replaceChildren("Click a cell to read its sessions. For another angle, ask Claude: ",
+  $("#hint").replaceChildren("Click a cell to read its sessions. For another angle, ask your assistant: ",
     el("q", { text: "group these by span" }), ", ", el("q", { text: "only count errors" }), " or ",
     el("q", { text: compare ? "which fixes held up?" : "compare with the latest replay" }), ".");
   reportSize();
@@ -473,7 +473,7 @@ function renderDrill(from, to, sides, cellData) {
   const scope = compare ? `"${labelOf("base")}" and "${labelOf("compare")}"` : `"${labelOf("base")}"`;
   const close = el("button", { class: "icon-btn", text: "✕", title: "Close", "aria-label": "Close" });
   close.onclick = () => { S.sel = null; $("#drill").hidden = true; render(); };
-  const ask = el("button", { class: "btn primary", text: `Ask Claude about these ${total}` });
+  const ask = el("button", { class: "btn primary", text: `Investigate these ${total}` });
   ask.onclick = () => sendMessage(`Look at the ${total} sessions that failed at ${pairText(from, to)} in the transition failure matrix for ${scope}. What do they have in common, and what change would fix most of them?`);
   const replay = el("button", { class: "btn brand", text: "Replay with a fix…" });
   replay.onclick = () => sendMessage(`Set up a replay experiment for the sessions failing at ${pairText(from, to)} in ${scope}: I want to try a change and compare the transition failure matrix before and after.`);
