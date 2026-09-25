@@ -283,7 +283,7 @@ Recording-only problems do not replace the baseline's native answer. When the na
 | `om_settle_timeout` | Observational-memory work did not finish within `finalizationWaitMs`. |
 | `request_evidence_incomplete` | The model request could not be recorded faithfully. |
 | `recorded_evidence_unsupported` | Evidence contains a value the replay codec cannot represent, such as a function. |
-| `context_unsupported`, `context_mutated_after_capture` | Request context could not be captured, or changed after capture. |
+| `context_unsupported`, `context_mutated_after_capture` | Request context could not be captured, or changed after capture, including a processor editing a captured value in place. |
 | `version_mismatch` | The installed Mastra packages are not the supported versions. |
 | `file_capture_timeout` | Declared files did not download within `fileCaptureWaitMs`. |
 | `file_capture_failed` | An input or thread history file that the turn resolved failed to download, or the turn's files exceed the capture limits. |

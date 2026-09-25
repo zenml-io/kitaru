@@ -1113,9 +1113,12 @@ export function createMemoryReplayAgent(
         ? Object.fromEntries(requestContext.entries())
         : (options.captureRequestContext?.(requestContext) ?? {});
       let effectiveContext: Record<string, unknown>;
+      let capturedContextJson: string;
       try {
+        const encodedContext = encodeMemoryValue(projectedContext);
+        capturedContextJson = JSON.stringify(encodedContext);
         effectiveContext = requireRecord(
-          decodeMemoryValue(encodeMemoryValue(projectedContext)),
+          decodeMemoryValue(encodedContext),
           "request context",
         );
         validateMemoryReplayContext(selector, effectiveContext);
@@ -1329,6 +1332,18 @@ export function createMemoryReplayAgent(
         },
       };
       const contextAtCapture = new Map(requestContext.entries());
+      // Processors receive the live context objects, so one can edit a
+      // captured value in place while its reference stays the same.
+      const isProjectionEdited = (): boolean => {
+        try {
+          return (
+            JSON.stringify(encodeMemoryValue(projectedContext)) !==
+            capturedContextJson
+          );
+        } catch {
+          return true;
+        }
+      };
       const requestProcessor: InputProcessor = {
         id: "kitaru-effective-request",
         async processInputStep(args) {
@@ -1345,7 +1360,8 @@ export function createMemoryReplayAgent(
             current.size !== contextAtCapture.size ||
             [...current].some(
               ([key, value]) => !Object.is(contextAtCapture.get(key), value),
-            )
+            ) ||
+            isProjectionEdited()
           ) {
             runtime.binding.markIncomplete(
               "Request context changed after replay capture.",

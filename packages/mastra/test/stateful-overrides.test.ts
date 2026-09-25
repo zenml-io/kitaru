@@ -616,6 +616,65 @@ it("keeps baseline output when initial snapshot evidence fails and rejects its i
   await runtime.store.close();
 });
 
+it("refuses replay when a processor edits a captured context value in place", async () => {
+  const runtime = createMemoryRuntime({ messageTokens: 10000 });
+  await seedMemory(runtime);
+  const api = installTestApi();
+  const model = new MastraLanguageModelV2Mock({
+    modelId: "actor",
+    provider: "fixture",
+    doStream: async () => textStream("native answer"),
+  });
+  const upgrade: InputProcessor = {
+    id: "upgrade-plan",
+    processInputStep({ requestContext }) {
+      const account = requestContext?.get("account") as { plan: string };
+      account.plan = "enterprise";
+    },
+  };
+  const adapter = createMemoryReplayAgent(
+    ({ memory }) => ({
+      id: "context-edit",
+      name: "Context edit",
+      instructions: "Answer",
+      memory,
+      model,
+      inputProcessors: [upgrade],
+    }),
+    {
+      agentId: AGENT_ID,
+      apiUrl: "https://kitaru.invalid",
+      requestedModelId: "fixture/actor",
+      sourceMemory: () => ({
+        settled: () => runtime.memory.settled(),
+        domain: runtime.domain,
+        configuration: runtime.memory.getMergedThreadConfig(),
+        exclusiveAccess: createProcessLocalMemoryAccess(),
+      }),
+      resolveModel: () => model,
+      captureRequestContext: (context) => ({
+        account: context.get("account"),
+      }),
+    },
+  );
+  const requestContext = new RequestContext();
+  requestContext.set("account", { plan: "free" });
+  const output = await adapter.stream("Hello", {
+    memory: { thread: THREAD, resource: RESOURCE },
+    requestContext,
+  });
+  await output.consumeStream();
+  expect(await output.text).toBe("native answer");
+  await vi.waitFor(() =>
+    expect(
+      api.calls.findLast((call) => call.method === "PATCH")?.body?.metadata,
+    ).toMatchObject({
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "context_mutated_after_capture",
+    }),
+  );
+});
+
 it("runs natively when request context cannot be captured safely", async () => {
   const runtime = createMemoryRuntime({ messageTokens: 10000 });
   await seedMemory(runtime);
