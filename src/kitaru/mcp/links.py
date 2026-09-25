@@ -16,6 +16,7 @@ from kitaru.mcp.lifecycle import MCPServerState
 
 _INFO_LOOKUP_MAX_SECONDS = 5.0
 _INFO_LOOKUP_HANDLER_FRACTION = 0.25
+_INFO_LOOKUP_DEADLINE_MARGIN_SECONDS = 0.02
 
 
 async def get_dashboard_info(
@@ -27,6 +28,11 @@ async def get_dashboard_info(
             _INFO_LOOKUP_MAX_SECONDS,
             state.settings.handler_timeout * _INFO_LOOKUP_HANDLER_FRACTION,
         )
+        remaining = state.get_remaining_handler_time()
+        if remaining is not None:
+            timeout = min(timeout, remaining - _INFO_LOOKUP_DEADLINE_MARGIN_SECONDS)
+        if timeout <= 0:
+            return None, None, [warning]
         async with asyncio.timeout(timeout):
             info = await state.client.info.get()
         base = get_dashboard_base_url(info, state.client.base_url)

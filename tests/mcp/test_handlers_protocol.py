@@ -640,6 +640,34 @@ async def test_session_get_survives_dashboard_info_timeout() -> None:
     assert len(result.warnings) == 1
 
 
+async def test_session_get_preserves_read_near_handler_deadline() -> None:
+    client = FakeClient()
+
+    async def get_session(session_id: uuid.UUID) -> SessionDetailResponse:
+        await asyncio.sleep(0.33)
+        return _get_session(session_id)
+
+    async def get_info() -> ServerInfoResponse:
+        await asyncio.sleep(1)
+        raise AssertionError("info lookup exceeded its deadline")
+
+    client.sessions.get = get_session
+    client.info.get = get_info
+    state = MCPServerState(MCPSettings(handler_timeout=0.4), cast(Any, client))
+    session_id = uuid.uuid4()
+
+    result = await state.execute(
+        lambda: handle_activity_read(
+            state, ActivityGetRequest(operation="get", kind="session", id=session_id)
+        )
+    )
+
+    assert isinstance(result, ToolSuccessPayload)
+    assert cast(Any, result.data).id == session_id
+    assert result.links == {}
+    assert len(result.warnings) == 1
+
+
 async def test_public_import_get_returns_the_typed_import() -> None:
     client = FakeClient()
     server, context = _get_context(client)
