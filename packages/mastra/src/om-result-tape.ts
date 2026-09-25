@@ -7,7 +7,11 @@ import {
 } from "@zenml-io/kitaru/adapter";
 import { decodeMemoryValue, encodeMemoryValue } from "./memory-snapshot.js";
 import { MastraReplayReasonError } from "./replay-reasons.js";
-import { fileReference } from "./stateful-files.js";
+import {
+  createInlineFileReader,
+  fileReference,
+  type InlineFileReader,
+} from "./stateful-files.js";
 
 export type OMPhase = "observer" | "reflector";
 type OMMethod = "doGenerate" | "doStream";
@@ -51,9 +55,21 @@ export interface OMLiveCall {
   endedAt: string;
 }
 
+/** A replay OM call whose input matched no unused recorded call. */
+export interface OMInputMismatch {
+  phase: OMPhase;
+  method: OMMethod;
+  /** The recorded tape ordinal of the result the call took instead. */
+  recordedOrdinal: number;
+  /** The call's position among the replay's OM calls, from 0. */
+  replayCall: number;
+}
+
 export interface OMTapeResult {
   entries: OMResultEntry[];
   divergence: OMReplayDivergence;
+  /** The calls counted in `divergence.inputMismatches`, in call order. */
+  inputMismatches: OMInputMismatch[];
   liveCalls: OMLiveCall[];
 }
 
@@ -119,6 +135,11 @@ export interface OMResultTapeOptions {
    * A recording tape asks only once the turn has finished.
    */
   isCapturedFile?: (reference: string) => boolean;
+  /**
+   * Read inline attachment content; share one reader with the rest of the
+   * turn so each attachment is hashed once.
+   */
+  readInlineFile?: InlineFileReader;
 }
 
 const VOLATILE_KEYS = new Set(["createdAt", "updatedAt", "abortSignal"]);
@@ -167,27 +188,42 @@ export function getOMInputFingerprint(
   input: unknown,
   mapString: (value: string) => string = (value) => value,
   onFileContent?: (reference: string) => void,
+  readInlineFile: InlineFileReader = createInlineFileReader(),
 ): string {
   try {
     const text = JSON.stringify(
       input,
       function (this: unknown, key: string, value: unknown) {
         if (VOLATILE_KEYS.has(key)) return undefined;
-        if (typeof value === "string") return normalizeText(mapString(value));
         // The holder keeps the bytes as they were before a Buffer's toJSON.
         const holder =
           typeof this === "object" && this !== null
             ? (this as Record<string, unknown>)
             : undefined;
+        // Inline attachment text hashes as its content reference, so the
+        // same file hashes alike as base64, a data URL, or bytes.
+        if (
+          typeof value === "string" &&
+          holder &&
+          (holder.type === "file" || holder.type === "image") &&
+          key === (holder.type === "image" ? "image" : "data")
+        ) {
+          const inline = readInlineFile(holder);
+          if (inline) return inline.reference;
+        }
+        if (typeof value === "string") return normalizeText(mapString(value));
         const bytes = holder?.[key];
         if (
           bytes instanceof Uint8Array &&
           typeof holder?.mediaType === "string"
         ) {
-          const reference = fileReference({
-            bytes,
-            mediaType: holder.mediaType,
-          });
+          const reference =
+            readInlineFile({
+              type: "file",
+              data: bytes,
+              mediaType: holder.mediaType,
+            })?.reference ??
+            fileReference({ bytes, mediaType: holder.mediaType });
           onFileContent?.(reference);
           return reference;
         }
@@ -239,6 +275,8 @@ function serializeNativeModel(native: unknown): unknown {
 /** One logical recorded call: its failed attempts and the result they led to. */
 interface RecordedCall {
   fingerprint: string;
+  /** The tape ordinal of the call's first recorded attempt. */
+  ordinal: number;
   result?: OMResultEntry;
   used: boolean;
 }
@@ -271,7 +309,11 @@ function groupRecordedCalls(
     const attempt = `${kind}:${entry.inputFingerprint}`;
     let call = retrying.get(attempt);
     if (!call) {
-      call = { fingerprint: entry.inputFingerprint, used: false };
+      call = {
+        fingerprint: entry.inputFingerprint,
+        ordinal: entry.ordinal,
+        used: false,
+      };
       const list = calls.get(kind) ?? [];
       list.push(call);
       calls.set(kind, list);
@@ -359,9 +401,12 @@ export function createOMResultTape(
     unusedResults: 0,
     liveCalls: 0,
   };
+  const inputMismatches: OMInputMismatch[] = [];
   const liveCalls: OMLiveCall[] = [];
+  const readInlineFile = options.readInlineFile ?? createInlineFileReader();
   let failedClosed: MastraOMDivergenceError | undefined;
   let next = 0;
+  let served = 0;
   let incomplete = false;
 
   function failCapture(): void {
@@ -451,6 +496,7 @@ export function createOMResultTape(
     callLive: () => Promise<unknown>,
   ): unknown {
     if (malformed) failClosed("malformed recorded tape");
+    const replayCall = served++;
     const calls = recordedCalls.get(`${phase}:${method}`) ?? [];
     const buffered = options.isBuffered?.(phase) ?? false;
     const live = options.missingResults === "live" && !buffered;
@@ -461,7 +507,12 @@ export function createOMResultTape(
       if (live) return callLive();
       failClosed(`no recorded ${phase} result`);
     }
-    const fingerprint = getOMInputFingerprint(input, options.mapString);
+    const fingerprint = getOMInputFingerprint(
+      input,
+      options.mapString,
+      undefined,
+      readInlineFile,
+    );
     const matching = calls.find(
       (candidate) => !candidate.used && candidate.fingerprint === fingerprint,
     );
@@ -473,6 +524,12 @@ export function createOMResultTape(
       failClosed(`no recorded ${phase} result left for a blocking call`);
     }
     divergence.inputMismatches++;
+    inputMismatches.push({
+      phase,
+      method,
+      recordedOrdinal: unused.ordinal,
+      replayCall,
+    });
     return use(unused, method);
   }
 
@@ -724,6 +781,7 @@ export function createOMResultTape(
       return {
         entries: [...recorded],
         divergence: { ...divergence },
+        inputMismatches: [...inputMismatches],
         liveCalls: [...liveCalls],
       };
     }
@@ -747,6 +805,7 @@ export function createOMResultTape(
           (reference) => {
             if (isCapturedFile && !isCapturedFile(reference)) uncaptured = true;
           },
+          readInlineFile,
         ),
       }),
     );
@@ -762,6 +821,7 @@ export function createOMResultTape(
     return {
       entries: fingerprinted,
       divergence: { ...divergence },
+      inputMismatches: [],
       liveCalls: [],
     };
   }

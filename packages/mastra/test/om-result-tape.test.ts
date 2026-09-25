@@ -58,12 +58,22 @@ it("reuses recorded OM output without calling the live model", async () => {
     await collect((await native.doStream({ prompt: "before" })).stream),
   );
   expect(live.doStream).not.toHaveBeenCalled();
-  expect((await replay.finish()).divergence).toEqual({
+  const result = await replay.finish();
+  expect(result.divergence).toEqual({
     inputMismatches: 1,
     surplusCalls: 0,
     unusedResults: 0,
     liveCalls: 0,
   });
+  // The report names the call that mismatched and the result it took.
+  expect(result.inputMismatches).toEqual([
+    {
+      phase: "observer",
+      method: "doStream",
+      recordedOrdinal: 0,
+      replayCall: 0,
+    },
+  ]);
 });
 
 it("serializes an instrumented OM model as its configured value", () => {
@@ -577,6 +587,30 @@ it("fingerprints an attachment as the reference replay history holds", () => {
       mapString,
     ),
   ).not.toBe(replay);
+});
+
+it("fingerprints inline attachment content as its reference in every form", () => {
+  const bytes = new Uint8Array(3000).map((_, index) => index % 256);
+  const base64 = Buffer.from(bytes).toString("base64");
+  const reference = fileReference({ bytes, mediaType: "application/pdf" });
+  const call = (data: unknown) => ({
+    prompt: [
+      {
+        role: "user",
+        content: [{ type: "file", data, mediaType: "application/pdf" }],
+      },
+    ],
+  });
+  const expected = getOMInputFingerprint(call(bytes));
+  // A stored message can hold the same file as base64 text or a data URL,
+  // and replay history names it by its captured reference.
+  for (const data of [
+    base64,
+    `data:application/pdf;base64,${base64}`,
+    new URL(reference),
+  ])
+    expect(getOMInputFingerprint(call(data))).toBe(expected);
+  expect(getOMInputFingerprint(call(base64.slice(4)))).not.toBe(expected);
 });
 
 it("lets Mastra hand a replayed OM model its file URLs unread", async () => {

@@ -36,7 +36,7 @@ function setup(options: {
   observation: Observation;
   observe: (call: number) => Promise<void> | void;
   toolSteps: () => number;
-  evidenceRepeats?: number;
+  evidenceRepeats?: number | (() => number);
   missingObservationalMemoryResults?: "fail" | "live";
 }) {
   const store = new InMemoryStore();
@@ -141,7 +141,9 @@ function setup(options: {
           inputSchema: z.object({}),
           execute: async () =>
             `EVIDENCE_${++evidence}_MARK ${"The user now prefers replay-green. ".repeat(
-              options.evidenceRepeats ?? 30,
+              typeof options.evidenceRepeats === "function"
+                ? options.evidenceRepeats()
+                : (options.evidenceRepeats ?? 30),
             )}`,
         }),
       },
@@ -314,6 +316,49 @@ it("fails a replay closed when a blocking observation has no recorded result lef
     },
   });
   expect(fixture.runtime.observer.calls).toHaveLength(recorded);
+  await fixture.runtime.store.close();
+});
+
+it("names the OM calls whose replay input matched no recorded call", async () => {
+  let repeats = 400;
+  const fixture = setup({
+    observation: { messageTokens: 600, bufferTokens: false },
+    observe: () => {},
+    toolSteps: () => 1,
+    evidenceRepeats: () => repeats,
+  });
+  const baseline = await recordBaseline(fixture);
+  expect(baseline?.metadata).toMatchObject({ mastra_replay_state: "eligible" });
+  expect(fixture.runtime.observer.calls).toHaveLength(1);
+  // The replayed tool returns different evidence, so the blocking observer
+  // sees a different input and takes the recorded result anyway.
+  repeats = 401;
+  const calls = await replay(fixture, baseline?.inputs);
+  expect(patches(calls)[0]?.body).toMatchObject({
+    status: "completed",
+    metadata: { mastra_om_divergence: { input_mismatches: 1 } },
+  });
+  const mismatch = calls
+    .filter((call) => call.method === "POST" && call.path.endsWith("/nodes"))
+    .flatMap(
+      (call) =>
+        (call.body?.nodes ?? []) as Array<{
+          name: string;
+          attributes: Record<string, unknown>;
+        }>,
+    )
+    .find((node) => node.name === "om_input_mismatch");
+  expect(mismatch?.attributes).toEqual({
+    count: 1,
+    calls: [
+      {
+        phase: "observer",
+        method: "doStream",
+        recorded_ordinal: 0,
+        replay_call: 0,
+      },
+    ],
+  });
   await fixture.runtime.store.close();
 });
 

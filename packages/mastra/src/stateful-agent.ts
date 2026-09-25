@@ -881,6 +881,7 @@ export function createMemoryReplayAgent(
           return replayFiles.resolveFile(reference);
         },
         mapString: (value) => sanitizer.replace(value),
+        readInlineFile,
         isCapturedFile: baselineFiles
           ? (reference) => baselineFiles?.hasFile(reference) ?? false
           : undefined,
@@ -1463,7 +1464,15 @@ export function createMemoryReplayAgent(
                 status: "completed",
                 inputs: null,
                 outputs: null,
-                attributes: { count: divergence.inputMismatches },
+                attributes: {
+                  count: divergence.inputMismatches,
+                  calls: (tape?.inputMismatches ?? []).map((call) => ({
+                    phase: call.phase,
+                    method: call.method,
+                    recorded_ordinal: call.recordedOrdinal,
+                    replay_call: call.replayCall,
+                  })),
+                },
               });
             for (const [index, call] of (tape?.liveCalls ?? []).entries())
               await writeNode(
