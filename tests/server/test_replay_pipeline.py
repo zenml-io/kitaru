@@ -69,7 +69,7 @@ from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort_version import CohortVersion, CohortVersionIdNotFound
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.replay import DuplicateReplayForBaseline
-from kitaru.server.domain.replay_config import ReplayOverride
+from kitaru.server.domain.replay_config import ReplayConfig, ReplayOverride
 from kitaru.server.domain.session import (
     Session,
     SessionNotEvaluatable,
@@ -244,13 +244,18 @@ async def test_mastra_baseline_in_an_outdated_v3_format_is_refused(
     assert not replays
 
 
-@pytest.mark.parametrize("blob", ["kept", "deleted"])
+@pytest.mark.parametrize("blob", ["kept", "deleted", "deleted_after_first_check"])
 async def test_mastra_baseline_whose_file_blob_was_deleted_is_refused(
     services: ReplayServices,
     complete_mastra_memory_replay_inputs: dict[str, Any],
     blob: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Refuse a baseline at replay creation once a recorded file's blob is gone."""
+    """Refuse a baseline at replay creation once a recorded file's blob is gone.
+
+    ``deleted_after_first_check`` removes the blob after the early readiness
+    check passes, so only the final check before the writes sees the refusal.
+    """
     version = await _agent_version_with_run_spec(services)
     inputs = deepcopy(complete_mastra_memory_replay_inputs)
     file = inputs["mastra_memory_replay"]["files"][0]
@@ -272,6 +277,16 @@ async def test_mastra_baseline_whose_file_blob_was_deleted_is_refused(
     )
     if blob == "deleted":
         await services.blobs.delete(stored.id)
+    elif blob == "deleted_after_first_check":
+        create_replay_config = services.experiments.create_replay_config
+
+        async def delete_blob_then_create(config: ReplayConfig) -> ReplayConfig:
+            await services.blobs.delete(stored.id)
+            return await create_replay_config(config)
+
+        monkeypatch.setattr(
+            services.experiments, "create_replay_config", delete_blob_then_create
+        )
     create = ReplayCreate(
         baseline_session_id=baseline.id,
         evaluators=[],

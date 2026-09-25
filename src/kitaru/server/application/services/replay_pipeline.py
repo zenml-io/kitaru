@@ -177,6 +177,8 @@ async def create_replay_pipelines(
     task_repository: TaskRepository,
     evaluation_repository: EvaluationRepository,
     payload_store: PayloadStore,
+    *,
+    raise_refusals: bool = False,
 ) -> list[Replay]:
     """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
 
@@ -187,7 +189,8 @@ async def create_replay_pipelines(
     session, evaluator version, params) to adopt instead, linking the
     baseline's replay to every one of them. A baseline whose Mastra memory
     recording cannot be replayed gets a replay that is already failed with
-    the refusal as its error, and no job or tasks.
+    the refusal as its error, and no job or tasks, unless ``raise_refusals``
+    is set.
 
     Args:
         baselines: Sessions being replayed.
@@ -203,10 +206,14 @@ async def create_replay_pipelines(
         evaluation_repository: Evaluation repository, for the ``IF_MISSING``
             adoption lookup and links.
         payload_store: Payload store, for the baseline sessions' inputs.
+        raise_refusals: Raise the first refusal before any write instead of
+            storing failed replays.
 
     Raises:
         SessionNotEvaluatable: ``baseline_evaluation_mode`` is not ``NONE``
             and a baseline session is in progress.
+        SessionReplayNotReady: ``raise_refusals`` is set and a baseline
+            cannot be replayed.
 
     Returns:
         Created replays, in baseline order.
@@ -217,6 +224,8 @@ async def create_replay_pipelines(
     # is still in progress, is reported per baseline instead of failing the
     # evaluability check for every baseline.
     ready, refusals = await split_replay_baselines(baselines, payload_store)
+    if raise_refusals and refusals:
+        raise refusals[0]
     evaluate_baselines = baseline_evaluation_mode is not BaselineEvaluationMode.NONE
     if evaluate_baselines:
         for baseline in ready:

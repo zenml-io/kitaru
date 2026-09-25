@@ -173,6 +173,8 @@ class ReplayService:
             AgentVersionNotFound: No agent version has the resolved id.
             SessionNotEvaluatable: ``baseline_evaluation_mode`` is not
                 ``NONE`` and the baseline session is in progress.
+            SessionReplayNotReady: The baseline session's Mastra memory
+                recording cannot be replayed.
             PluginNotFound: An evaluator config names an unknown evaluator.
             PluginVersionNotFound: An evaluator config names an unknown
                 version.
@@ -225,6 +227,10 @@ class ReplayService:
             task_repository=self._tasks,
             evaluation_repository=self._evaluations,
             payload_store=self._payload_store,
+            # A file blob can be deleted after the early readiness check, and a
+            # standalone replay reports that as a refusal instead of storing a
+            # failed replay.
+            raise_refusals=True,
         )
         if self._analytics is not None:
             self._analytics.track(
