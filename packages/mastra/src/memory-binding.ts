@@ -37,6 +37,12 @@ export interface MastraMemoryLeaseOptions {
   signal?: AbortSignal;
   /** An advisory notification; verifyEligibility is the authoritative check. */
   onConflict?: () => void;
+  /**
+   * The caller is a Kitaru turn, or a write it registers, that gives up its
+   * own replay eligibility while it overlaps a finalizing holder. Such an
+   * overlap leaves that holder eligible.
+   */
+  cooperative?: boolean;
 }
 
 /** A callable release keeps existing direct lease users source compatible. */
@@ -44,6 +50,17 @@ export interface MastraMemoryLease {
   (): Promise<void>;
   /** Read the shared coordination state, including conflict and lease loss. */
   verifyEligibility(): Promise<boolean>;
+  /**
+   * Record that the holder's native answer has finished and only its
+   * background memory work remains. Optional: without it, every overlap
+   * invalidates the holder.
+   */
+  markFinalizing?(): Promise<void>;
+  /**
+   * True when a cooperative acquisition overlapped a finalizing holder. The
+   * lease is then not eligible, and it did not invalidate that holder.
+   */
+  readonly overlapsFinalizingTurn?: boolean;
 }
 
 /**
@@ -58,6 +75,20 @@ export interface MastraMemoryLease {
  * finalization deadline, and until the final eligibility check has passed.
  * A write Kitaru makes outside that lease registers through
  * `acquire(selector, { waitMs: 0 })` and releases immediately afterwards.
+ *
+ * One overlap does not invalidate the holder. Once the holder's native answer
+ * has finished, Kitaru calls `markFinalizing()`: from then on only the
+ * holder's own background memory work (buffered observation or reflection)
+ * writes under that lease, and its recorded evidence does not depend on later
+ * turns. A Kitaru turn that starts in that window, such as a quick reply,
+ * acquires with `cooperative: true`. When every holder still in the way is
+ * either finalizing or already ineligible, and at least one eligible holder
+ * is finalizing, the implementation must not invalidate them. It returns a
+ * lease that is not eligible, has `overlapsFinalizingTurn` set, and occupies
+ * both selectors until it is released. Writes that turn registers use
+ * `cooperative: true` as well. Any other overlap, including a non-cooperative
+ * acquisition while a holder is finalizing, invalidates every holder as above.
+ * An implementation without `markFinalizing` keeps the stricter behavior.
  *
  * Kitaru never renews a lease. A shared implementation must still end a lease
  * whose holder process died without releasing it, through a time-to-live
@@ -95,7 +126,11 @@ export interface MastraExclusiveMemoryAccess {
  * and shares this instance; distributed writers require a distributed lease.
  */
 export function createProcessLocalMemoryAccess(): MastraExclusiveMemoryAccess {
-  type Turn = { onConflict?: () => void; invalidated: boolean };
+  type Turn = {
+    onConflict?: () => void;
+    invalidated: boolean;
+    finalizing: boolean;
+  };
   type ScopeState = {
     turns: Set<Turn>;
     poisoned: boolean;
@@ -170,12 +205,19 @@ export function createProcessLocalMemoryAccess(): MastraExclusiveMemoryAccess {
         throw new Error("Exclusive source-thread ownership was cancelled.");
       const states = scopeKeys.map(getState);
       const occupied = states.filter((state) => state.turns.size > 0);
-      if (occupied.length > 0) poison(occupied, false);
-      const owner = {
+      const holders = new Set(occupied.flatMap((state) => [...state.turns]));
+      const followsFinalizing =
+        options.cooperative === true &&
+        [...holders].every((turn) => turn.finalizing || turn.invalidated) &&
+        [...holders].some((turn) => turn.finalizing && !turn.invalidated);
+      if (occupied.length > 0 && !followsFinalizing) poison(occupied, false);
+      const owner: Turn = {
         onConflict: options.onConflict,
         invalidated:
+          followsFinalizing ||
           states.some((state) => state.poisoned || state.persistentLoss) ||
           unknownWriterPoisoned,
+        finalizing: false,
       };
       for (const state of states) state.turns.add(owner);
       let released = false;
@@ -198,6 +240,10 @@ export function createProcessLocalMemoryAccess(): MastraExclusiveMemoryAccess {
             !unknownWriterPoisoned
           );
         },
+        async markFinalizing() {
+          owner.finalizing = true;
+        },
+        overlapsFinalizingTurn: followsFinalizing,
       });
     },
     async markUnsafeWrite(selector) {
@@ -293,6 +339,12 @@ export interface MastraMemoryCaptureBinding {
   settle(memory: MastraSettlingMemory, waitMs?: number): Promise<boolean>;
   /** Check shared ownership immediately before persisting eligible inputs. */
   verifyEligibility(): Promise<void>;
+  /**
+   * Tell the lease that the native answer has finished, so a cooperative
+   * later turn can overlap the remaining memory work without invalidating
+   * this invocation. Coordination failures are ignored.
+   */
+  beginFinalization(): Promise<void>;
   /**
    * Release ownership once storage writes have settled. Evidence uploads can
    * still be running; `drain()` before reading `incompleteReasons`.
@@ -396,6 +448,7 @@ function createWriteRegistrar(
   getSelector: () => MastraMemorySelector | undefined,
   waitMs: number,
   onFailure: (reason: string) => void,
+  cooperative = false,
 ): () => Promise<MastraMemoryLease | undefined> {
   let markedUnsafe = false;
   return async () => {
@@ -406,7 +459,7 @@ function createWriteRegistrar(
         return await acquireWithin(
           access,
           selector,
-          { waitMs: 0 },
+          { waitMs: 0, cooperative },
           waitMs,
           () => onFailure("Late source-thread lease release failed."),
         );
@@ -710,11 +763,14 @@ export function createMemoryCaptureBinding(
   let joinAbandoned = false;
   const markLeaseUnavailable = (message: string) =>
     markIncomplete(message, "memory_lease_unavailable");
+  // This invocation's own writes may follow a finalizing earlier turn
+  // without invalidating it; this invocation is then ineligible itself.
   const registerWrite = createWriteRegistrar(
     options.exclusiveAccess,
     () => selector,
     waitMs,
     markLeaseUnavailable,
+    true,
   );
 
   function markIncomplete(
@@ -1032,6 +1088,7 @@ export function createMemoryCaptureBinding(
               // the overlap before this invocation stops waiting for it.
               waitMs: Math.max(0, waitMs - ACQUIRE_RESPONSE_MARGIN_MS),
               signal: options.leaseSignal,
+              cooperative: true,
               onConflict: () =>
                 markIncomplete(
                   "Exclusive source-thread ownership was invalidated by an overlapping invocation.",
@@ -1042,6 +1099,13 @@ export function createMemoryCaptureBinding(
             () =>
               markLeaseUnavailable("Late source-thread lease release failed."),
           );
+          if (lease.overlapsFinalizingTurn) {
+            markIncomplete(
+              "Observational-memory work from an earlier turn was still running.",
+              "om_work_unjoined",
+            );
+            return undefined;
+          }
           await verifyEligibility();
           if (reasons.length) return undefined;
         } catch {
@@ -1148,6 +1212,15 @@ export function createMemoryCaptureBinding(
       }
     },
     verifyEligibility,
+    async beginFinalization() {
+      if (released || !lease?.markFinalizing) return;
+      try {
+        await boundedCoordination(lease.markFinalizing(), waitMs);
+      } catch {
+        // Without the mark, a later turn's overlap invalidates this one,
+        // which is the stricter outcome.
+      }
+    },
     async release() {
       if (released) return;
       await settleMutations();

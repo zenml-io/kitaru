@@ -27,7 +27,12 @@ import {
   THREAD,
   textStream,
 } from "./helpers/memory-agent.js";
-import { AGENT_ID, installTestApi, type TestApi } from "./helpers.js";
+import {
+  AGENT_ID,
+  installTestApi,
+  REPLAY_ID,
+  type TestApi,
+} from "./helpers.js";
 
 const roots: string[] = [];
 const stores: InMemoryStore[] = [];
@@ -226,8 +231,21 @@ async function setup(
       ...(requestContext ? { requestContext } : {}),
     });
     await output.consumeStream();
+    // A turn without memory selectors fails natively, so it has no text.
+    return await output.text.catch(() => undefined);
   }
-  return { api, memory, domain, turn };
+  /** Replay a recorded baseline from its final session inputs. */
+  async function replay(inputs: unknown) {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(inputs));
+    try {
+      const output = await adapter.stream("ignored");
+      await output.consumeStream();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+  return { api, memory, domain, turn, replay };
 }
 
 /** The final replay state of every session, in creation order. */
@@ -482,6 +500,174 @@ it.each(LEASES)(
     );
   },
 );
+
+const SELECTOR = { threadId: "quick-reply-thread", resourceId: RESOURCE };
+
+it.each(LEASES)(
+  "lets a cooperative turn follow a finalizing holder without invalidating it (%s lease)",
+  async (_kind, createAccess) => {
+    const access = await createAccess();
+    const holder = await access.acquire(SELECTOR);
+    await holder.markFinalizing?.();
+    const successor = await access.acquire(SELECTOR, { cooperative: true });
+    expect(successor.overlapsFinalizingTurn).toBe(true);
+    expect(await successor.verifyEligibility()).toBe(false);
+    expect(await holder.verifyEligibility()).toBe(true);
+    // A write the successor registers follows the holder too.
+    const write = await access.acquire(SELECTOR, {
+      waitMs: 0,
+      cooperative: true,
+    });
+    await write();
+    expect(await holder.verifyEligibility()).toBe(true);
+    await holder();
+    // The successor still holds both selectors after the holder is gone.
+    const later = await access.acquire(SELECTOR, { waitMs: 0 });
+    expect(await later.verifyEligibility()).toBe(false);
+    await later();
+    await successor();
+    const next = await access.acquire(SELECTOR);
+    expect(await next.verifyEligibility()).toBe(true);
+    await next();
+  },
+);
+
+it.each(LEASES)(
+  "still invalidates a holder for a non-cooperative overlap or before it finalizes (%s lease)",
+  async (_kind, createAccess) => {
+    const access = await createAccess();
+    const running = await access.acquire(SELECTOR);
+    const early = await access.acquire(SELECTOR, { cooperative: true });
+    expect(early.overlapsFinalizingTurn).toBeFalsy();
+    expect(await running.verifyEligibility()).toBe(false);
+    await early();
+    await running();
+    const holder = await access.acquire(SELECTOR);
+    await holder.markFinalizing?.();
+    const foreign = await access.acquire(SELECTOR, { waitMs: 0 });
+    expect(await holder.verifyEligibility()).toBe(false);
+    await foreign();
+    await holder();
+  },
+);
+
+/** The final session inputs of the first recorded turn. */
+function finalInputs(api: TestApi, sessionId: string): unknown {
+  return api.calls.find(
+    (call) =>
+      call.method === "PATCH" &&
+      call.path.endsWith(sessionId) &&
+      call.body?.status === "completed",
+  )?.body?.inputs;
+}
+
+it.each(LEASES)(
+  "keeps a turn eligible when a quick reply starts during its buffered observation (%s lease)",
+  async (_kind, createAccess) => {
+    const observation = gate();
+    let observerCalls = 0;
+    const thread = `quick-reply-${_kind.replace(" ", "-")}`;
+    const { api, turn, replay } = await setup(await createAccess(), {
+      thread,
+      backgroundObservation: true,
+      observerWait: async () => {
+        observerCalls += 1;
+        await observation.opened;
+      },
+    });
+    expect(await turn(LONG_MESSAGE)).toBe("done");
+    await vi.waitFor(() => expect(observerCalls).toBe(1));
+    await pause(1_000);
+    const started = Date.now();
+    expect(await turn("Quick reply.")).toBe("done");
+    expect(Date.now() - started).toBeLessThan(1_000);
+    observation.open();
+    await vi.waitFor(
+      () =>
+        expect(outcomes(api)).toEqual([
+          "completed/eligible",
+          "completed/ineligible/om_work_unjoined",
+        ]),
+      { timeout: 5000 },
+    );
+    const [first] = api.sessionIds;
+    expect(memoryMethods(api, String(first))).toContain(
+      "updateBufferedObservations",
+    );
+    const inputs = finalInputs(api, String(first));
+    expect(JSON.stringify(inputs)).toContain('"phase":"observer"');
+    const recordedObserverCalls = observerCalls;
+    await clearBuffering(thread);
+    const before = api.calls.length;
+    await replay(inputs);
+    await vi.waitFor(() =>
+      expect(
+        api.calls
+          .slice(before)
+          .some(
+            (call) =>
+              call.method === "PATCH" && call.body?.status !== undefined,
+          ),
+      ).toBe(true),
+    );
+    const closed = api.calls
+      .slice(before)
+      .filter((call) => call.method === "PATCH" && call.body?.status)
+      .at(-1);
+    expect(closed?.body).toMatchObject({ status: "completed" });
+    expect(
+      (closed?.body?.metadata as Record<string, unknown> | undefined)
+        ?.mastra_om_divergence,
+    ).toBeUndefined();
+    // Replay reused the recorded observation instead of calling the observer.
+    expect(observerCalls).toBe(recordedObserverCalls);
+  },
+  15_000,
+);
+
+it.each(LEASES)(
+  "still invalidates a finalizing turn when a foreign writer overlaps it (%s lease)",
+  async (_kind, createAccess) => {
+    const observation = gate();
+    let observerStarted = false;
+    const access = await createAccess();
+    const thread = `foreign-writer-${_kind.replace(" ", "-")}`;
+    const { api, turn } = await setup(access, {
+      thread,
+      backgroundObservation: true,
+      observerWait: async () => {
+        observerStarted = true;
+        await observation.opened;
+      },
+    });
+    expect(await turn(LONG_MESSAGE)).toBe("done");
+    await vi.waitFor(() => expect(observerStarted).toBe(true));
+    const foreign = await access.acquire(
+      { threadId: thread, resourceId: RESOURCE },
+      { waitMs: 0 },
+    );
+    await foreign();
+    observation.open();
+    await vi.waitFor(
+      () =>
+        expect(outcomes(api)).toEqual([
+          "completed/ineligible/memory_lease_conflict",
+        ]),
+      { timeout: 5000 },
+    );
+  },
+);
+
+/** Clear Mastra's process-wide buffering state, as a replay worker starts. */
+async function clearBuffering(thread: string): Promise<void> {
+  const scratch = new Memory({
+    storage: new InMemoryStore(),
+    options: {
+      observationalMemory: { model: "fixture/observer", scope: "thread" },
+    },
+  });
+  await (await scratch.omEngine)?.clear(thread, RESOURCE);
+}
 
 it("releases the lease and closes the session when OM work misses the finalization deadline", async () => {
   const access = createProcessLocalMemoryAccess();

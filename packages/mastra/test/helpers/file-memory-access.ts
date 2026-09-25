@@ -127,6 +127,7 @@ export function createFileMemoryAccess(
     selector: MastraMemorySelector,
     token: string,
     owns: boolean,
+    overlapsFinalizingTurn = false,
   ): Promise<MastraMemoryLease> {
     let released = false;
     const release = async () => {
@@ -137,8 +138,10 @@ export function createFileMemoryAccess(
             const current = await readFile(join(dir, "owner"), "utf8").catch(
               () => undefined,
             );
-            if (current === token)
+            if (current === token) {
               await rm(join(dir, "owner"), { force: true });
+              await rm(join(dir, "finalizing"), { force: true });
+            }
           } else {
             await rm(join(dir, `turn-${token}`), { force: true });
           }
@@ -165,7 +168,33 @@ export function createFileMemoryAccess(
           return true;
         });
       },
+      async markFinalizing() {
+        if (released || !owns) return;
+        await withScopes(selector, async (dirs) => {
+          for (const dir of dirs)
+            if ((await readFile(join(dir, "owner"), "utf8")) === token)
+              await writeFile(join(dir, "finalizing"), token);
+        });
+      },
+      overlapsFinalizingTurn,
     });
+  }
+
+  /** Whether an eligible owner is finalizing and no eligible owner is not. */
+  async function followsFinalizingOwner(dirs: string[]): Promise<boolean> {
+    let finalizing = false;
+    for (const dir of dirs) {
+      const owner = await readFile(join(dir, "owner"), "utf8").catch(
+        () => undefined,
+      );
+      if (owner === undefined) continue;
+      const marked = await readFile(join(dir, "finalizing"), "utf8").catch(
+        () => undefined,
+      );
+      if (marked !== owner) return false;
+      finalizing = true;
+    }
+    return finalizing;
   }
 
   return {
@@ -187,12 +216,14 @@ export function createFileMemoryAccess(
               await writeFile(join(dir, `turn-${token}`), "");
             return "denied";
           }
-          if (
-            (
-              await Promise.all(dirs.map((dir) => exists(join(dir, "owner"))))
-            ).some(Boolean)
-          )
-            return "busy";
+          // Turns overlapping a finalizing owner hold the selectors without
+          // poison, so they keep a later turn out as well.
+          for (const dir of dirs)
+            if (
+              (await exists(join(dir, "owner"))) ||
+              (await activeTurns(dir)).length > 0
+            )
+              return "busy";
           for (const dir of dirs)
             await writeFile(join(dir, "owner"), token, { flag: "wx" });
           return "owned";
@@ -200,13 +231,25 @@ export function createFileMemoryAccess(
         if (status === "owned") return makeLease(selector, token, true);
         if (status === "denied") return makeLease(selector, token, false);
         if (Date.now() >= deadline) {
-          await withScopes(selector, async (dirs) => {
+          const follows = await withScopes(selector, async (dirs) => {
+            // Poison exists only after an invalidating overlap, so without it
+            // every non-owner turn already follows a finalizing owner.
+            const follows =
+              options.cooperative === true &&
+              !(await exists(globalPoison)) &&
+              !(
+                await Promise.all(
+                  dirs.map((dir) => exists(join(dir, "poison"))),
+                )
+              ).some(Boolean) &&
+              (await followsFinalizingOwner(dirs));
             for (const dir of dirs) {
-              await poison(dir, false);
+              if (!follows) await poison(dir, false);
               await writeFile(join(dir, `turn-${token}`), "");
             }
+            return follows;
           });
-          return makeLease(selector, token, false);
+          return makeLease(selector, token, false, follows);
         }
         await pause(Math.min(5, deadline - Date.now()));
       }

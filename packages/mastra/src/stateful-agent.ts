@@ -852,8 +852,10 @@ export function createMemoryReplayAgent(
       });
       let tracked = false;
       const trackSourceWork = () => {
-        if (tracked || !sourceEngine) return;
+        if (tracked) return;
         tracked = true;
+        void binding.beginFinalization();
+        if (!sourceEngine) return;
         void sourceEngine
           .trackBackgroundWork(binding.settle(memory, finalizationWaitMs))
           .catch(() => undefined);
