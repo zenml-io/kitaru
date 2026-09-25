@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  mkdir,
-  open,
-  readdir,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+  closeSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type {
   MastraExclusiveMemoryAccess,
@@ -18,6 +19,10 @@ import type {
 const pause = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+const sleeper = new Int32Array(new SharedArrayBuffer(4));
+/** Block the thread, so no timer of this process runs in between. */
+const pauseSync = (ms: number) => Atomics.wait(sleeper, 0, 0, ms);
+
 function isExists(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -27,7 +32,15 @@ function isExists(error: unknown): boolean {
   );
 }
 
-/** Test-only shared lease: atomic thread/resource coordination and poison. */
+/**
+ * Test-only shared lease: atomic thread/resource coordination and poison.
+ *
+ * Every critical section runs synchronously, so a lease call answers before
+ * any timer of this process fires. Kitaru bounds each lease call by a
+ * wall-clock deadline and treats a late answer as a coordination failure;
+ * asynchronous file I/O under CPU load would sometimes miss it and make the
+ * lease semantics these tests assert depend on machine speed.
+ */
 export function createFileMemoryAccess(
   root: string,
 ): MastraExclusiveMemoryAccess & {
@@ -41,47 +54,44 @@ export function createFileMemoryAccess(
   }
   const globalPoison = join(root, "unknown-writer-poison");
 
-  async function withMutexes<T>(
-    mutexes: string[],
-    run: () => Promise<T>,
-  ): Promise<T> {
+  function withMutexes<T>(mutexes: string[], run: () => T): T {
     const held: string[] = [];
     const deadline = Date.now() + 1000;
     try {
       for (const mutex of mutexes) {
         while (true) {
           try {
-            await mkdir(mutex);
+            mkdirSync(mutex);
             held.push(mutex);
             break;
           } catch (error) {
             if (!isExists(error) || Date.now() >= deadline) throw error;
-            await pause(2);
+            pauseSync(2);
           }
         }
       }
-      return await run();
+      return run();
     } finally {
       for (const mutex of held.reverse())
-        await rm(mutex, { recursive: true, force: true });
+        rmSync(mutex, { recursive: true, force: true });
     }
   }
 
-  async function withGlobalMutex<T>(run: () => Promise<T>): Promise<T> {
-    await mkdir(root, { recursive: true });
+  function withGlobalMutex<T>(run: () => T): T {
+    mkdirSync(root, { recursive: true });
     return withMutexes([join(root, "coordination-mutex")], run);
   }
 
-  async function withScopes<T>(
+  function withScopes<T>(
     selector: MastraMemorySelector,
-    run: (dirs: string[]) => Promise<T>,
-  ): Promise<T> {
-    return withGlobalMutex(async () => {
+    run: (dirs: string[]) => T,
+  ): T {
+    return withGlobalMutex(() => {
       const dirs = [
         directory("thread", selector.threadId),
         directory("resource", selector.resourceId),
       ].sort();
-      for (const dir of dirs) await mkdir(dir, { recursive: true });
+      for (const dir of dirs) mkdirSync(dir, { recursive: true });
       // All processes acquire both scope locks in the same order. The global
       // mutex also makes unknown-selector poison and reset atomic with them.
       return withMutexes(
@@ -91,9 +101,9 @@ export function createFileMemoryAccess(
     });
   }
 
-  async function exists(path: string): Promise<boolean> {
+  function exists(path: string): boolean {
     try {
-      await readFile(path);
+      readFileSync(path);
       return true;
     } catch (error) {
       if (
@@ -107,50 +117,50 @@ export function createFileMemoryAccess(
     }
   }
 
-  async function poison(dir: string, persistent: boolean): Promise<void> {
+  function poison(dir: string, persistent: boolean): void {
     const marker = join(dir, persistent ? "persistent-loss" : "poison");
     try {
-      const file = await open(marker, "wx");
-      await file.close();
+      closeSync(openSync(marker, "wx"));
     } catch (error) {
       if (!isExists(error)) throw error;
     }
-    if (persistent) await poison(dir, false);
+    if (persistent) poison(dir, false);
   }
 
-  async function activeTurns(dir: string): Promise<string[]> {
-    const names = await readdir(dir);
+  function readOptional(path: string): string | undefined {
+    return exists(path) ? readFileSync(path, "utf8") : undefined;
+  }
+
+  function activeTurns(dir: string): string[] {
+    const names = readdirSync(dir);
     return names.filter((name) => name.startsWith("turn-"));
   }
 
-  async function makeLease(
+  function makeLease(
     selector: MastraMemorySelector,
     token: string,
     owns: boolean,
     overlapsFinalizingTurn = false,
-  ): Promise<MastraMemoryLease> {
+  ): MastraMemoryLease {
     let released = false;
     const release = async () => {
       if (released) return;
-      await withScopes(selector, async (dirs) => {
+      withScopes(selector, (dirs) => {
         for (const dir of dirs) {
           if (owns) {
-            const current = await readFile(join(dir, "owner"), "utf8").catch(
-              () => undefined,
-            );
-            if (current === token) {
-              await rm(join(dir, "owner"), { force: true });
-              await rm(join(dir, "finalizing"), { force: true });
+            if (readOptional(join(dir, "owner")) === token) {
+              rmSync(join(dir, "owner"), { force: true });
+              rmSync(join(dir, "finalizing"), { force: true });
             }
           } else {
-            await rm(join(dir, `turn-${token}`), { force: true });
+            rmSync(join(dir, `turn-${token}`), { force: true });
           }
           if (
-            !(await exists(join(dir, "owner"))) &&
-            (await activeTurns(dir)).length === 0 &&
-            !(await exists(join(dir, "persistent-loss")))
+            !exists(join(dir, "owner")) &&
+            activeTurns(dir).length === 0 &&
+            !exists(join(dir, "persistent-loss"))
           )
-            await rm(join(dir, "poison"), { force: true });
+            rmSync(join(dir, "poison"), { force: true });
         }
       });
       released = true;
@@ -158,11 +168,11 @@ export function createFileMemoryAccess(
     return Object.assign(release, {
       async verifyEligibility() {
         if (released || !owns) return false;
-        return withScopes(selector, async (dirs) => {
-          if (await exists(globalPoison)) return false;
+        return withScopes(selector, (dirs) => {
+          if (exists(globalPoison)) return false;
           for (const dir of dirs) {
-            if (await exists(join(dir, "poison"))) return false;
-            if ((await readFile(join(dir, "owner"), "utf8")) !== token)
+            if (exists(join(dir, "poison"))) return false;
+            if (readFileSync(join(dir, "owner"), "utf8") !== token)
               return false;
           }
           return true;
@@ -172,10 +182,10 @@ export function createFileMemoryAccess(
         // A turn that does not own the selectors is already ineligible, so a
         // later cooperative turn follows it whether or not it is finalizing.
         if (released || !owns) return;
-        await withScopes(selector, async (dirs) => {
+        withScopes(selector, (dirs) => {
           for (const dir of dirs)
-            if ((await readFile(join(dir, "owner"), "utf8")) === token)
-              await writeFile(join(dir, "finalizing"), token);
+            if (readFileSync(join(dir, "owner"), "utf8") === token)
+              writeFileSync(join(dir, "finalizing"), token);
         });
       },
       overlapsFinalizingTurn,
@@ -186,18 +196,19 @@ export function createFileMemoryAccess(
    * Whether no eligible owner is still answering. Turns that do not own a
    * selector are never eligible.
    */
-  async function followsFinalizingHolder(dirs: string[]): Promise<boolean> {
+  function followsFinalizingHolder(dirs: string[]): boolean {
     for (const dir of dirs) {
-      const owner = await readFile(join(dir, "owner"), "utf8").catch(
-        () => undefined,
-      );
+      const owner = readOptional(join(dir, "owner"));
       if (owner === undefined) continue;
-      const marked = await readFile(join(dir, "finalizing"), "utf8").catch(
-        () => undefined,
-      );
-      if (marked !== owner) return false;
+      if (readOptional(join(dir, "finalizing")) !== owner) return false;
     }
     return true;
+  }
+
+  function isPoisoned(dirs: string[]): boolean {
+    return (
+      exists(globalPoison) || dirs.some((dir) => exists(join(dir, "poison")))
+    );
   }
 
   return {
@@ -208,47 +219,34 @@ export function createFileMemoryAccess(
       while (true) {
         if (options.signal?.aborted)
           throw new Error("Source-thread lease wait cancelled.");
-        const status = await withScopes(selector, async (dirs) => {
-          if (
-            (await exists(globalPoison)) ||
-            (
-              await Promise.all(dirs.map((dir) => exists(join(dir, "poison"))))
-            ).some(Boolean)
-          ) {
+        const status = withScopes(selector, (dirs) => {
+          if (isPoisoned(dirs)) {
             for (const dir of dirs)
-              await writeFile(join(dir, `turn-${token}`), "");
+              writeFileSync(join(dir, `turn-${token}`), "");
             return "denied";
           }
           // Turns overlapping a finalizing owner hold the selectors without
           // poison, so they keep a later turn out as well.
           for (const dir of dirs)
-            if (
-              (await exists(join(dir, "owner"))) ||
-              (await activeTurns(dir)).length > 0
-            )
+            if (exists(join(dir, "owner")) || activeTurns(dir).length > 0)
               return "busy";
           for (const dir of dirs)
-            await writeFile(join(dir, "owner"), token, { flag: "wx" });
+            writeFileSync(join(dir, "owner"), token, { flag: "wx" });
           return "owned";
         });
         if (status === "owned") return makeLease(selector, token, true);
         if (status === "denied") return makeLease(selector, token, false);
         if (Date.now() >= deadline) {
-          const follows = await withScopes(selector, async (dirs) => {
+          const follows = withScopes(selector, (dirs) => {
             // Poison exists only after an invalidating overlap, so without it
             // every non-owner turn already follows a finalizing holder.
             const follows =
               options.cooperative === true &&
-              !(await exists(globalPoison)) &&
-              !(
-                await Promise.all(
-                  dirs.map((dir) => exists(join(dir, "poison"))),
-                )
-              ).some(Boolean) &&
-              (await followsFinalizingHolder(dirs));
+              !isPoisoned(dirs) &&
+              followsFinalizingHolder(dirs);
             for (const dir of dirs) {
-              if (!follows) await poison(dir, false);
-              await writeFile(join(dir, `turn-${token}`), "");
+              if (!follows) poison(dir, false);
+              writeFileSync(join(dir, `turn-${token}`), "");
             }
             return follows;
           });
@@ -259,49 +257,43 @@ export function createFileMemoryAccess(
     },
     async markUnsafeWrite(selector) {
       if (!selector) {
-        await withGlobalMutex(() => writeFile(globalPoison, "unsafe write"));
+        withGlobalMutex(() => writeFileSync(globalPoison, "unsafe write"));
         return;
       }
-      await withScopes(selector, async (dirs) => {
-        for (const dir of dirs) await poison(dir, true);
+      withScopes(selector, (dirs) => {
+        for (const dir of dirs) poison(dir, true);
       });
     },
     async resetAfterQuiescence(selector) {
       if (!selector) {
-        await withGlobalMutex(async () => {
-          for (const name of await readdir(root)) {
+        withGlobalMutex(() => {
+          for (const name of readdirSync(root)) {
             if (!name.startsWith("thread-") && !name.startsWith("resource-"))
               continue;
             const dir = join(root, name);
-            if (
-              (await exists(join(dir, "owner"))) ||
-              (await activeTurns(dir)).length > 0
-            )
+            if (exists(join(dir, "owner")) || activeTurns(dir).length > 0)
               throw new Error("Source-thread writers are still active.");
           }
-          await rm(globalPoison, { force: true });
+          rmSync(globalPoison, { force: true });
         });
         return;
       }
-      await withScopes(selector, async (dirs) => {
+      withScopes(selector, (dirs) => {
         for (const dir of dirs) {
-          if (
-            (await exists(join(dir, "owner"))) ||
-            (await activeTurns(dir)).length > 0
-          )
+          if (exists(join(dir, "owner")) || activeTurns(dir).length > 0)
             throw new Error("Source-thread writers are still active.");
         }
         for (const dir of dirs) {
-          await rm(join(dir, "persistent-loss"), { force: true });
-          await rm(join(dir, "poison"), { force: true });
+          rmSync(join(dir, "persistent-loss"), { force: true });
+          rmSync(join(dir, "poison"), { force: true });
         }
       });
     },
     async simulateLeaseLoss(selector) {
-      await withScopes(selector, async (dirs) => {
+      withScopes(selector, (dirs) => {
         for (const dir of dirs) {
-          await poison(dir, true);
-          await rm(join(dir, "owner"), { force: true });
+          poison(dir, true);
+          rmSync(join(dir, "owner"), { force: true });
         }
       });
     },

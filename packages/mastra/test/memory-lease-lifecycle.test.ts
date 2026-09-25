@@ -648,7 +648,8 @@ it.each(LEASES)(
     const observation = gate();
     let observerCalls = 0;
     const thread = `quick-reply-${_kind.replace(" ", "-")}`;
-    const { api, turn, replay } = await setup(await createAccess(), {
+    const { access, marks } = countFinalizingMarks(await createAccess());
+    const { api, turn, replay } = await setup(access, {
       thread,
       backgroundObservation: true,
       observerWait: async () => {
@@ -658,7 +659,9 @@ it.each(LEASES)(
     });
     expect(await turn(LONG_MESSAGE)).toBe("done");
     await vi.waitFor(() => expect(observerCalls).toBe(1));
-    await pause(1_000);
+    // Kitaru stores the finalizing mark without waiting for it, and the reply
+    // must arrive after it lands, as it does at chat pacing.
+    await vi.waitFor(() => expect(marks()).toBe(1), { timeout: 5000 });
     const started = Date.now();
     expect(await turn("Quick reply.")).toBe("done");
     expect(Date.now() - started).toBeLessThan(1_000);
