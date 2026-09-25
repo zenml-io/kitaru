@@ -22,7 +22,7 @@ export interface OMResultEntry {
   failed?: true;
 }
 
-/** How a replay's OM calls departed from the recorded calls without a live call. */
+/** How a replay's OM calls departed from the recorded calls. */
 export interface OMReplayDivergence {
   /** Blocking calls whose input matched no unused recorded call and took the next one. */
   inputMismatches: number;
@@ -30,12 +30,39 @@ export interface OMReplayDivergence {
   surplusCalls: number;
   /** Recorded results that the replay never requested. */
   unusedResults: number;
+  /** Blocking calls with no recorded result that the live OM model answered. */
+  liveCalls: number;
+}
+
+/** A replay OM call that the live model answered because nothing was recorded for it. */
+export interface OMLiveCall {
+  phase: OMPhase;
+  method: OMMethod;
+  /** The configured model value, such as a model id string. */
+  model: unknown;
+  /** The call's prompt, with captured files still held as references. */
+  prompt: unknown;
+  /** The encoded result, or null when the call failed or its capture did. */
+  output: JsonValue;
+  failed: boolean;
+  /** Whether `output` holds the whole result the model returned. */
+  captured: boolean;
+  startedAt: string;
+  endedAt: string;
 }
 
 export interface OMTapeResult {
   entries: OMResultEntry[];
   divergence: OMReplayDivergence;
+  liveCalls: OMLiveCall[];
 }
+
+/**
+ * What a replay does with a blocking OM call that has no recorded result.
+ *
+ * `fail` ends the replay as diverged. `live` calls the configured OM model.
+ */
+export type MissingOMResults = "fail" | "live";
 
 export class MastraOMDivergenceError extends Error {
   readonly code = "mastra_om_diverged";
@@ -78,6 +105,15 @@ export interface OMResultTapeOptions {
    * rather than blocking the actor.
    */
   isBuffered?: (phase: OMPhase) => boolean;
+  /** Defaults to `fail`. Only a tape with recorded results reads it. */
+  missingResults?: MissingOMResults;
+  /**
+   * Return the captured bytes for a `kitaru-file://` reference, which a live
+   * OM call must send as content because no provider can fetch it.
+   */
+  resolveFileReference?: (
+    reference: string,
+  ) => Promise<{ bytes: Uint8Array; mediaType: string }>;
 }
 
 const VOLATILE_KEYS = new Set(["createdAt", "updatedAt", "abortSignal"]);
@@ -281,7 +317,9 @@ async function withFileReferenceUrls(
  *   none left, replay fails, because an empty observation would drop the
  *   observed messages from the actor's context.
  *
- * A phase with no recorded result at all also fails replay.
+ * A phase with no recorded result at all also fails replay. With
+ * `missingResults: "live"`, a blocking call that would fail for either reason
+ * calls the live OM model instead, and `finish()` returns what it answered.
  */
 export function createOMResultTape(
   recorded: readonly OMResultEntry[] | undefined,
@@ -298,7 +336,9 @@ export function createOMResultTape(
     inputMismatches: 0,
     surplusCalls: 0,
     unusedResults: 0,
+    liveCalls: 0,
   };
+  const liveCalls: OMLiveCall[] = [];
   let failedClosed: MastraOMDivergenceError | undefined;
   let next = 0;
   let incomplete = false;
@@ -357,17 +397,27 @@ export function createOMResultTape(
     return play(call.result, method);
   }
 
-  function serve(phase: OMPhase, method: OMMethod, input: unknown): unknown {
+  function serve(
+    phase: OMPhase,
+    method: OMMethod,
+    input: unknown,
+    callLive: () => Promise<unknown>,
+  ): unknown {
     if (malformed) failClosed("malformed recorded tape");
     const calls = recordedCalls.get(`${phase}:${method}`) ?? [];
-    if (calls.length === 0) failClosed(`no recorded ${phase} result`);
+    const buffered = options.isBuffered?.(phase) ?? false;
+    const live = options.missingResults === "live" && !buffered;
+    if (calls.length === 0) {
+      if (live) return callLive();
+      failClosed(`no recorded ${phase} result`);
+    }
     const fingerprint = getOMInputFingerprint(input, options.mapString);
     const matching = calls.find(
       (candidate) => !candidate.used && candidate.fingerprint === fingerprint,
     );
     if (matching) return use(matching, method);
     const unused = calls.find((candidate) => !candidate.used);
-    if (options.isBuffered?.(phase)) {
+    if (buffered) {
       // A later buffered call usually covers the window production recorded,
       // so only a call with nothing left to match is a departure.
       if (!unused) divergence.surplusCalls++;
@@ -377,8 +427,10 @@ export function createOMResultTape(
       if (!template) throw new MastraOMRecordedFailureError();
       return play(template, method, true);
     }
-    if (!unused)
+    if (!unused) {
+      if (live) return callLive();
       failClosed(`no recorded ${phase} result left for a blocking call`);
+    }
     divergence.inputMismatches++;
     return use(unused, method);
   }
@@ -404,6 +456,177 @@ export function createOMResultTape(
   }
 
   /**
+   * Run a provider call and hand its encoded result to `save`.
+   *
+   * `save` receives undefined when the provider call or its stream failed.
+   * When the result cannot be captured, `onCaptureFailed` runs instead and
+   * the caller still gets the native result unchanged.
+   */
+  async function callAndCapture(
+    invoke: () => Promise<unknown>,
+    method: OMMethod,
+    save: (output: JsonValue | undefined) => void,
+    onCaptureFailed: () => void,
+  ): Promise<unknown> {
+    // Track the call from its start: finish() must wait for a call that is
+    // still waiting on the provider, not report its result as missing.
+    let settleCall!: () => void;
+    const call = new Promise<void>((resolve) => {
+      settleCall = resolve;
+    });
+    pending.add(call);
+    void call.finally(() => pending.delete(call));
+    let result: unknown;
+    try {
+      result = await invoke();
+    } catch (error) {
+      // Mastra retries transient provider errors. Keeping the failed
+      // attempt lets replay pair it with the retry that succeeded.
+      save(undefined);
+      settleCall();
+      throw error;
+    }
+    if (method === "doGenerate") {
+      let encoded: JsonValue | undefined;
+      try {
+        encoded = encodeMemoryValue(result);
+      } catch {
+        onCaptureFailed();
+      }
+      if (encoded !== undefined) save(encoded);
+      settleCall();
+      return result;
+    }
+    const stream = (result as { stream?: ReadableStream<unknown> })?.stream;
+    if (!(stream instanceof ReadableStream)) {
+      onCaptureFailed();
+      settleCall();
+      return result;
+    }
+    const [native, capture] = stream.tee();
+    const work = (async () => {
+      const reader = capture.getReader();
+      try {
+        const chunks: JsonValue[] = [];
+        let capturedBytes = 2; // JSON array brackets.
+        let capturedItems = 1; // JSON array itself.
+        while (true) {
+          let item: ReadableStreamReadResult<unknown>;
+          try {
+            item = await reader.read();
+          } catch {
+            // The provider stream failed and Mastra sees the same error.
+            save(undefined);
+            return;
+          }
+          if (item.done) break;
+          const encoded = encodeMemoryValue(item.value);
+          capturedItems += countJsonItems(
+            encoded,
+            MAX_MASTRA_REPLAY_ITEMS - capturedItems,
+          );
+          capturedBytes +=
+            Buffer.byteLength(JSON.stringify(encoded), "utf8") +
+            (chunks.length > 0 ? 1 : 0);
+          if (capturedBytes > MAX_MASTRA_REPLAY_JSON_BYTES)
+            throw new Error("OM stream byte limit exceeded");
+          chunks.push(encoded);
+        }
+        save(chunks);
+      } catch {
+        onCaptureFailed();
+        // Tee cancellation may wait for the native branch to finish.
+        void reader.cancel().catch(() => {});
+      } finally {
+        reader.releaseLock();
+      }
+    })();
+    void work.finally(settleCall);
+    return { ...(result as object), stream: native };
+  }
+
+  /**
+   * Replace captured file references in a live call's prompt with their bytes.
+   *
+   * A replay's history holds `kitaru-file://` references, which no provider
+   * can fetch, and any other file URL in it is a redacted history URL that
+   * the baseline never resolved.
+   */
+  async function withFileContent(input: unknown): Promise<unknown> {
+    const call = input as { prompt?: unknown };
+    if (
+      typeof call !== "object" ||
+      call === null ||
+      !Array.isArray(call.prompt)
+    )
+      return input;
+    const prompt = await Promise.all(
+      call.prompt.map(async (message: unknown) => {
+        const content = (message as { content?: unknown })?.content;
+        if (!Array.isArray(content)) return message;
+        return {
+          ...(message as object),
+          content: await Promise.all(
+            content.map(async (part: unknown) => {
+              const file = part as { type?: unknown; data?: unknown };
+              if (file?.type !== "file") return part;
+              const url =
+                file.data instanceof URL
+                  ? file.data.href
+                  : typeof file.data === "string" &&
+                      /^[a-z][a-z0-9+.-]*:\/\//i.test(file.data)
+                    ? file.data
+                    : undefined;
+              if (url === undefined) return part;
+              if (
+                !FILE_REFERENCE_URL.test(url) ||
+                !options.resolveFileReference
+              )
+                failClosed(
+                  "a live observational-memory call would send a file URL",
+                );
+              const resolved = await options.resolveFileReference(url);
+              return { ...file, data: resolved.bytes };
+            }),
+          ),
+        };
+      }),
+    );
+    return { ...call, prompt };
+  }
+
+  /** Answer a replay call that has no recorded result from the live model. */
+  async function callLive(
+    phase: OMPhase,
+    method: OMMethod,
+    model: unknown,
+    input: unknown,
+    invoke: (input: unknown) => Promise<unknown>,
+  ): Promise<unknown> {
+    const liveInput = await withFileContent(input);
+    const startedAt = new Date().toISOString();
+    divergence.liveCalls++;
+    const save = (output: JsonValue | undefined, captured: boolean) =>
+      liveCalls.push({
+        phase,
+        method,
+        model,
+        prompt: (input as { prompt?: unknown })?.prompt ?? null,
+        output: output ?? null,
+        failed: captured && output === undefined,
+        captured,
+        startedAt,
+        endedAt: new Date().toISOString(),
+      });
+    return callAndCapture(
+      () => invoke(liveInput),
+      method,
+      (output) => save(output, true),
+      () => save(undefined, false),
+    );
+  }
+
+  /**
    * Wrap an OM model so its calls go through the tape.
    *
    * `native` is the value from the source memory configuration, such as a
@@ -426,98 +649,28 @@ export function createOMResultTape(
         if (key !== "doGenerate" && key !== "doStream")
           return typeof value === "function" ? value.bind(target) : value;
         const method = key as OMMethod;
+        const invoke = (input: unknown) =>
+          Reflect.apply(value as (input: unknown) => Promise<unknown>, target, [
+            input,
+          ]) as Promise<unknown>;
         if (recorded)
-          return async (input: unknown) => serve(phase, method, input);
+          return async (input: unknown) =>
+            serve(phase, method, input, () =>
+              callLive(phase, method, native, input, invoke),
+            );
         return async (input: unknown) => {
           const ordinal = next++;
           const inputFingerprint = getOMInputFingerprint(
             input,
             options.mapString,
           );
-          // Track the call from its start: finish() must wait for a call that
-          // is still waiting on the provider, not report its slot as missing.
-          let settleCall!: () => void;
-          const call = new Promise<void>((resolve) => {
-            settleCall = resolve;
-          });
-          pending.add(call);
-          void call.finally(() => pending.delete(call));
-          let result: unknown;
-          try {
-            result = await Reflect.apply(
-              value as (input: unknown) => Promise<unknown>,
-              target,
-              [input],
-            );
-          } catch (error) {
-            // Mastra retries transient provider errors. Keeping the failed
-            // attempt lets replay pair it with the retry that succeeded.
-            record(ordinal, phase, method, inputFingerprint, undefined);
-            settleCall();
-            throw error;
-          }
-          if (method === "doGenerate") {
-            try {
-              record(
-                ordinal,
-                phase,
-                method,
-                inputFingerprint,
-                encodeMemoryValue(result),
-              );
-            } catch {
-              failCapture();
-            }
-            settleCall();
-            return result;
-          }
-          const stream = (result as { stream?: ReadableStream<unknown> })
-            ?.stream;
-          if (!(stream instanceof ReadableStream)) {
-            failCapture();
-            settleCall();
-            return result;
-          }
-          const [native, capture] = stream.tee();
-          const work = (async () => {
-            const reader = capture.getReader();
-            try {
-              const chunks: JsonValue[] = [];
-              let capturedBytes = 2; // JSON array brackets.
-              let capturedItems = 1; // JSON array itself.
-              while (true) {
-                let item: ReadableStreamReadResult<unknown>;
-                try {
-                  item = await reader.read();
-                } catch {
-                  // The provider stream failed and Mastra sees the same error.
-                  record(ordinal, phase, method, inputFingerprint, undefined);
-                  return;
-                }
-                if (item.done) break;
-                const encoded = encodeMemoryValue(item.value);
-                capturedItems += countJsonItems(
-                  encoded,
-                  MAX_MASTRA_REPLAY_ITEMS - capturedItems,
-                );
-                capturedBytes +=
-                  Buffer.byteLength(JSON.stringify(encoded), "utf8") +
-                  (chunks.length > 0 ? 1 : 0);
-                if (capturedBytes > MAX_MASTRA_REPLAY_JSON_BYTES)
-                  throw new Error("OM stream byte limit exceeded");
-                chunks.push(encoded);
-              }
-              record(ordinal, phase, method, inputFingerprint, chunks);
-            } catch {
-              failCapture();
-              // Tee cancellation may wait for the native branch to finish.
-              void reader.cancel().catch(() => {});
-            } finally {
-              reader.releaseLock();
-            }
-          })();
-          void work.finally(settleCall);
-          return { ...(result as object), stream: native };
+          return callAndCapture(
+            () => invoke(input),
+            method,
+            (output) =>
+              record(ordinal, phase, method, inputFingerprint, output),
+            failCapture,
+          );
         };
       },
     });
@@ -539,7 +692,11 @@ export function createOMResultTape(
       divergence.unusedResults = [...recordedCalls.values()]
         .flat()
         .filter((call) => !call.used).length;
-      return { entries: [...recorded], divergence: { ...divergence } };
+      return {
+        entries: [...recorded],
+        divergence: { ...divergence },
+        liveCalls: [...liveCalls],
+      };
     }
     const recordedEntries = Array.from(
       { length: next },
@@ -553,6 +710,7 @@ export function createOMResultTape(
     return {
       entries: recordedEntries as OMResultEntry[],
       divergence: { ...divergence },
+      liveCalls: [],
     };
   }
 

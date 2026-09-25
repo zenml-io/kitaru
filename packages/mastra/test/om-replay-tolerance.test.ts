@@ -37,6 +37,7 @@ function setup(options: {
   observe: (call: number) => Promise<void> | void;
   toolSteps: () => number;
   evidenceRepeats?: number;
+  missingObservationalMemoryResults?: "fail" | "live";
 }) {
   const store = new InMemoryStore();
   const domain = store.stores.memory;
@@ -136,6 +137,8 @@ function setup(options: {
       agentId: AGENT_ID,
       apiUrl: "https://kitaru.invalid",
       requestedModelId: "fixture/actor",
+      missingObservationalMemoryResults:
+        options.missingObservationalMemoryResults,
       sourceMemory: () => ({
         settled: () => memory.settled(),
         domain,
@@ -298,6 +301,80 @@ it("fails a replay closed when a blocking observation has no recorded result lef
     },
   });
   expect(fixture.runtime.observer.calls).toHaveLength(recorded);
+  await fixture.runtime.store.close();
+});
+
+it("answers a missing blocking observation live when the replay opts in", async () => {
+  let toolSteps = 1;
+  const fixture = setup({
+    observation: { messageTokens: 600, bufferTokens: false },
+    observe: () => {},
+    toolSteps: () => toolSteps,
+    evidenceRepeats: 400,
+    missingObservationalMemoryResults: "live",
+  });
+  const baseline = await recordBaseline(fixture);
+  expect(baseline?.metadata).toMatchObject({ mastra_replay_state: "eligible" });
+  const recorded = fixture.runtime.observer.calls.length;
+  expect(recorded).toBe(1);
+  // The replayed actor reads evidence the baseline never read, so OM needs a
+  // blocking observation production never made.
+  toolSteps = 2;
+  const calls = await replay(fixture, baseline?.inputs);
+  const [closed] = patches(calls);
+  expect(closed?.body).toMatchObject({
+    status: "completed",
+    metadata: {
+      mastra_om_live_calls: 1,
+      mastra_om_divergence: { live_calls: 1 },
+    },
+  });
+  // The recorded observation still answers the call it was recorded for.
+  expect(fixture.runtime.observer.calls).toHaveLength(recorded + 1);
+  const liveNodes = calls
+    .filter((call) => call.method === "POST" && call.path.endsWith("/nodes"))
+    .flatMap(
+      (call) =>
+        (call.body?.nodes ?? []) as Array<{
+          name: string;
+          node_type: string;
+          model: string | null;
+          attributes: Record<string, unknown>;
+        }>,
+    )
+    .filter((node) => node.attributes?.om_live === true);
+  expect(liveNodes).toMatchObject([
+    {
+      name: "om_observer_live_call",
+      node_type: "llm_call",
+      model: "fixture/observer",
+      attributes: { om_phase: "observer", evidence_complete: true },
+    },
+  ]);
+  expect(nodeNames(calls)).toContain("om_call_divergence");
+  await fixture.runtime.store.close();
+});
+
+it("makes no live OM call when an opted-in replay has every result", async () => {
+  const fixture = setup({
+    observation: { messageTokens: 600, bufferTokens: false },
+    observe: () => {},
+    toolSteps: () => 1,
+    evidenceRepeats: 400,
+    missingObservationalMemoryResults: "live",
+  });
+  const baseline = await recordBaseline(fixture);
+  expect(baseline?.metadata).toMatchObject({ mastra_replay_state: "eligible" });
+  const recorded = fixture.runtime.observer.calls.length;
+  expect(recorded).toBe(1);
+  const calls = await replay(fixture, baseline?.inputs);
+  const [closed] = patches(calls);
+  expect(closed?.body?.status).toBe("completed");
+  expect(closed?.body?.metadata ?? {}).not.toHaveProperty(
+    "mastra_om_live_calls",
+  );
+  expect(fixture.runtime.observer.calls).toHaveLength(recorded);
+  expect(nodeNames(calls)).not.toContain("om_observer_live_call");
   await fixture.runtime.store.close();
 });
 

@@ -62,6 +62,7 @@ it("reuses recorded OM output without calling the live model", async () => {
     inputMismatches: 1,
     surplusCalls: 0,
     unusedResults: 0,
+    liveCalls: 0,
   });
 });
 
@@ -280,6 +281,7 @@ it("leaves buffered calls outside the recorded windows unobserved", async () => 
     inputMismatches: 0,
     surplusCalls: 1,
     unusedResults: 0,
+    liveCalls: 0,
   });
 });
 
@@ -297,6 +299,56 @@ it("fails a blocking call closed once its phase's recorded results are used", as
   );
   expect(live.doStream).not.toHaveBeenCalled();
   await expect(replay.finish()).rejects.toBeInstanceOf(MastraOMDivergenceError);
+});
+
+it("calls the live model only for a blocking call with no recorded result", async () => {
+  const entries = await recordCalls([{ phase: "observer", prompt: "first" }]);
+  const bytes = new TextEncoder().encode("attached");
+  const reference = fileReference({ bytes, mediaType: "text/plain" });
+  const received: unknown[] = [];
+  const live = answering((input) => {
+    received.push(input.prompt);
+    return "observed live";
+  });
+  const replay = createOMResultTape(entries, () => {}, {
+    missingResults: "live",
+    resolveFileReference: async () => ({ bytes, mediaType: "text/plain" }),
+  });
+  const observer = replay.instrument(live, "observer", "fixture/observer");
+  expect(await text(await observer.doStream({ prompt: "first" }))).toBe(
+    "observed first",
+  );
+  const prompt = [
+    {
+      role: "user",
+      content: [
+        { type: "file", data: new URL(reference), mediaType: "text/plain" },
+      ],
+    },
+  ];
+  expect(await text(await observer.doStream({ prompt }))).toBe("observed live");
+  expect(live.doStream).toHaveBeenCalledTimes(1);
+  // No provider can fetch a captured reference, so the live model gets bytes.
+  expect(received).toEqual([
+    [
+      {
+        role: "user",
+        content: [{ type: "file", data: bytes, mediaType: "text/plain" }],
+      },
+    ],
+  ]);
+  const result = await replay.finish();
+  expect(result.divergence.liveCalls).toBe(1);
+  expect(result.liveCalls).toMatchObject([
+    {
+      phase: "observer",
+      model: "fixture/observer",
+      prompt,
+      failed: false,
+      captured: true,
+      output: expect.any(Array),
+    },
+  ]);
 });
 
 it("matches recorded OM results by input rather than call order", async () => {
@@ -324,6 +376,7 @@ it("matches recorded OM results by input rather than call order", async () => {
     inputMismatches: 0,
     surplusCalls: 0,
     unusedResults: 0,
+    liveCalls: 0,
   });
   const fewer = createOMResultTape(entries, () => {});
   await collect(
@@ -409,6 +462,7 @@ it("records failed OM attempts so a baseline with a successful retry replays", a
     inputMismatches: 0,
     surplusCalls: 0,
     unusedResults: 0,
+    liveCalls: 0,
   });
   const failedOnly = createOMResultTape(entries.slice(0, 1), () => {});
   await expect(

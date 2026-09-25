@@ -21,6 +21,7 @@ import {
   type AdapterRunState,
   normalizeRecordingLimits,
   parseModelSettings,
+  type RecordingLimits,
   ROOT_NODE_EXTERNAL_ID,
   resolveReplayContext,
 } from "@zenml-io/kitaru/adapter";
@@ -51,6 +52,7 @@ import {
   captureMemoryReplayEnvelope,
   createIncompleteMemoryReplayEnvelope,
   decodeMemoryValue,
+  encodeMemoryEvidence,
   encodeMemoryValue,
   finalizeMemoryReplayEnvelope,
   type MastraMemorySnapshot,
@@ -60,7 +62,12 @@ import {
   validateMemoryReplayContext,
   validateMemoryReplaySelectors,
 } from "./memory-snapshot.js";
-import { createOMResultTape, type OMResultEntry } from "./om-result-tape.js";
+import {
+  createOMResultTape,
+  type MissingOMResults,
+  type OMLiveCall,
+  type OMResultEntry,
+} from "./om-result-tape.js";
 import { describeProviderError } from "./provider-errors.js";
 import { createRecordedClock } from "./replay-clock.js";
 import { assertStableToolName } from "./replay-guards.js";
@@ -185,6 +192,19 @@ export interface MemoryReplayAgentOptions extends KitaruAgentOptions {
    * is not replayable. Defaults to 10 seconds.
    */
   fileCaptureWaitMs?: number;
+  /**
+   * What a replay does when observational memory needs a blocking observer or
+   * reflector result that the baseline never recorded, such as after the
+   * replayed actor takes a step production never took.
+   *
+   * `fail` (the default) ends the replay as diverged with
+   * `mastra_om_call_order`. `live` calls the observer or reflector model,
+   * resolved with `resolveModel` from its recorded identity, for those calls
+   * only. Recorded results still answer every other OM call. Each live call is
+   * recorded as an `llm_call` node, and the replay session reports
+   * `mastra_om_live_calls` in its metadata.
+   */
+  missingObservationalMemoryResults?: MissingOMResults;
 }
 
 /** The call a per-call `files` function declares file URLs for. */
@@ -432,6 +452,62 @@ class MemoryReplayRequestContext extends RequestContext {
   override setRaw(key: string, value: unknown): void {
     this.set(key, value);
   }
+}
+
+/**
+ * Build the `llm_call` node for an OM call that a replay answered live.
+ *
+ * The prompt keeps captured files as their references, so the node does not
+ * repeat file bytes the replay input already names.
+ */
+function liveOMCallNode(
+  invocationId: string,
+  index: number,
+  call: OMLiveCall,
+  sanitize: (value: unknown) => unknown,
+  limits: RecordingLimits | undefined,
+): SessionNodeCreateRequest {
+  const lossReasons: string[] = [];
+  const encode = (value: unknown, label: string): JsonValue => {
+    try {
+      const evidence = encodeMemoryEvidence(sanitize(value), label, limits);
+      if (evidence.lossReason) lossReasons.push(evidence.lossReason);
+      return evidence.value;
+    } catch {
+      lossReasons.push(`${label} could not be recorded.`);
+      return null;
+    }
+  };
+  let model: string | null = null;
+  try {
+    model = getMemoryModelId(call.model);
+  } catch {
+    // The node still shows the call; only its model name is unknown.
+  }
+  return {
+    external_id: `${invocationId}:om-live-call:${index}`,
+    parent_external_id: ROOT_NODE_EXTERNAL_ID,
+    node_type: "llm_call",
+    name: `om_${call.phase}_live_call`,
+    status: call.failed ? "failed" : "completed",
+    ...(call.failed ? { error: "Observational-memory model call failed" } : {}),
+    inputs: encode(
+      { prompt: call.prompt },
+      "Live observational-memory request",
+    ),
+    outputs: encode(call.output, "Live observational-memory result"),
+    model,
+    started_at: call.startedAt,
+    ended_at: call.endedAt,
+    attributes: {
+      invocation_id: invocationId,
+      om_phase: call.phase,
+      om_method: call.method,
+      om_live: true,
+      evidence_complete: call.captured && lossReasons.length === 0,
+      evidence_loss_reasons: lossReasons,
+    },
+  };
 }
 
 /** Construct each streamed invocation with historical configuration and isolated replay memory. */
@@ -765,10 +841,16 @@ export function createMemoryReplayAgent(
       throw new Error("Controlled evidence sanitizer was not initialized.");
     const omCaptureErrors: string[] = [];
     let omEngine: Awaited<Memory["omEngine"]> = null;
+    let replayFiles: ReturnType<typeof restoreCapturedFiles> | undefined;
     const omTape = createOMResultTape(
       historical?.omTape as OMResultEntry[] | undefined,
       (reason) => omCaptureErrors.push(reason),
       {
+        missingResults: supplied.missingObservationalMemoryResults ?? "fail",
+        resolveFileReference: async (reference) => {
+          if (!replayFiles) throw new Error("Recorded files were not loaded.");
+          return replayFiles.resolveFile(reference);
+        },
         mapString: (value) => sanitizer.replace(value),
         isBuffered: (phase) =>
           omEngine !== null &&
@@ -902,11 +984,12 @@ export function createMemoryReplayAgent(
       );
     if (unsupportedEvidence) markUnsupportedOnBinding();
     try {
-      const files = historical
+      replayFiles = historical
         ? restoreCapturedFiles(
             await loadRecordedFiles(historical.files, client.blobs),
           )
-        : baselineFiles;
+        : undefined;
+      const files = replayFiles ?? baselineFiles;
       if (!files)
         throw new Error("Controlled file capture was not initialized.");
       const evidenceClient = recordingClient(client, sanitizer.replace, () =>
@@ -1341,7 +1424,21 @@ export function createMemoryReplayAgent(
                 outputs: null,
                 attributes: { count: divergence.inputMismatches },
               });
-            if (divergence?.surplusCalls || divergence?.unusedResults)
+            for (const [index, call] of (tape?.liveCalls ?? []).entries())
+              await writeNode(
+                liveOMCallNode(
+                  invocationId,
+                  index,
+                  call,
+                  sanitizer.replace,
+                  toolRecordingLimits,
+                ),
+              );
+            if (
+              divergence?.surplusCalls ||
+              divergence?.unusedResults ||
+              divergence?.liveCalls
+            )
               await writeNode({
                 external_id: `${invocationId}:om-call-divergence`,
                 parent_external_id: ROOT_NODE_EXTERNAL_ID,
@@ -1353,6 +1450,7 @@ export function createMemoryReplayAgent(
                 attributes: {
                   surplus_calls: divergence.surplusCalls,
                   unused_results: divergence.unusedResults,
+                  live_calls: divergence.liveCalls,
                 },
               });
             if (divergence && Object.values(divergence).some(Boolean))
@@ -1361,7 +1459,13 @@ export function createMemoryReplayAgent(
                   input_mismatches: divergence.inputMismatches,
                   surplus_calls: divergence.surplusCalls,
                   unused_results: divergence.unusedResults,
+                  live_calls: divergence.liveCalls,
                 },
+                // A replay whose observer or reflector ran live no longer
+                // reuses only what production observed.
+                ...(divergence.liveCalls
+                  ? { mastra_om_live_calls: divergence.liveCalls }
+                  : {}),
               };
             for (const pending of capture.flushUnfinished())
               await writeAttempt(
