@@ -66,3 +66,17 @@ def test_fenced_code_comments_do_not_split_sections() -> None:
         sections = build_mcp_docs_index._get_sections(markdown)
         assert [heading for heading, _ in sections] == ["Page", "Setup", "Next step"]
         assert "# install the agent" in sections[1][1]
+
+
+def test_clean_markdown_preserves_literal_angle_brackets() -> None:
+    """Compatibility ranges and command placeholders survive HTML cleanup."""
+    markdown = (
+        "Node `>=22.22.0 <23 || >=26 <27`; "
+        "run `kitaru login <server-url>` then `kitaru job watch <job-id>`. "
+        '<a href="/docs">Read <strong>more</strong></a>.'
+    )
+    assert build_mcp_docs_index._clean_markdown(markdown) == (
+        "Node >=22.22.0 <23 || >=26 <27 ; "
+        "run kitaru login <server-url> then kitaru job watch <job-id> . "
+        "Read more ."
+    )

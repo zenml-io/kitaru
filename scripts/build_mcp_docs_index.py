@@ -17,6 +17,11 @@ TOC_LINK = re.compile(r"^\s*- \[([^]]+)\]\(([^)]+\.md)\)$", re.MULTILINE)
 HEADING = re.compile(r"^(#{1,4})\s+(.+)$", re.MULTILINE)
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 FENCE_CLOSE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
+HTML_TAG = re.compile(
+    r"</?(?:a|figcaption|figure|img|strong|table|tbody|td|th|thead|tr)"
+    r"(?:\s[^>]*|/?)>",
+    re.IGNORECASE,
+)
 
 
 def _get_pages() -> list[tuple[str, str, Path, str]]:
@@ -59,10 +64,11 @@ def _get_revision(pages: list[tuple[str, str, Path, str]]) -> str:
 def _clean_markdown(value: str) -> str:
     """Remove GitBook and Markdown presentation syntax from a short excerpt."""
     value = re.sub(r"\{%[^%]*%\}", " ", value)
-    value = re.sub(r"<[^>]+>", " ", value)
+    value = HTML_TAG.sub(" ", value)
     value = re.sub(r"!\[[^]]*\]\([^)]+\)", " ", value)
     value = re.sub(r"\[([^]]+)\]\([^)]+\)", r"\1", value)
-    value = re.sub(r"[`*#|]", " ", value)
+    value = re.sub(r"(?<!\|)\|(?!\|)", " ", value)
+    value = re.sub(r"[`*#]", " ", value)
     return " ".join(value.split())
 
 
