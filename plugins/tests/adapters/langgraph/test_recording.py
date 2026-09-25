@@ -3,7 +3,10 @@
 import uuid
 from typing import Any
 
-from langchain_core.messages import ToolMessage
+from langchain.agents import create_agent
+from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import LLMResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.tools import tool
@@ -13,6 +16,51 @@ from kitaru_langgraph import KitaruGraphRunner
 from kitaru_langgraph.callbacks import AsyncKitaruCallback
 from kitaru_langgraph.capture import CapturePolicy
 from kitaru_langgraph.recording import ROOT_EXTERNAL_ID, InvocationRecorder
+
+
+class ToolCallingFakeModel(FakeMessagesListChatModel):
+    """Allow the agent factory to bind tools to a deterministic fake model."""
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+        return self
+
+
+def _make_agent_runner() -> KitaruGraphRunner:
+    model = ToolCallingFakeModel(responses=[AIMessage(content="done")])
+    return KitaruGraphRunner.from_agent_factory(
+        create_agent,
+        factory_kwargs={
+            "model": model,
+            "tools": [],
+            "middleware": [ModelCallLimitMiddleware(run_limit=10)],
+        },
+    )
+
+
+def _assert_recorded_chain_names(fake_client: Any) -> None:
+    client = fake_client.instances[0]
+    nodes = [node for _, batch in client.sessions.node_batches for node in batch.nodes]
+    span_names = {node.name for node in nodes if node.node_type is NodeType.SPAN}
+    assert "ModelCallLimitMiddleware.before_model" in span_names
+    assert "model" in span_names
+    assert "ModelCallLimitMiddleware.after_model" in span_names
+    assert "graph" not in span_names
+
+
+def test_agent_factory_records_chain_names(fake_client: Any) -> None:
+    runner = _make_agent_runner()
+
+    runner.invoke({"messages": [{"role": "user", "content": "hi"}]})
+
+    _assert_recorded_chain_names(fake_client)
+
+
+async def test_agent_factory_records_chain_names_async(fake_client: Any) -> None:
+    runner = _make_agent_runner()
+
+    await runner.ainvoke({"messages": [{"role": "user", "content": "hi"}]})
+
+    _assert_recorded_chain_names(fake_client)
 
 
 async def test_key_loss_in_recorded_copy_preserves_native_tool_result(
