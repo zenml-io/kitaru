@@ -205,6 +205,30 @@ def test_unlocated_evaluation_summary_is_bounded() -> None:
     assert len(summary.unlocated_evaluations) == 10
 
 
+def test_completed_children_count_before_their_failed_parent_span() -> None:
+    session = _session("failed")
+    nodes = [
+        _node(session, "root", "span", "invoke", at=0),
+        _node(
+            session, "post", "span", "postprocess", parent="root", status="failed", at=1
+        ),
+        _node(session, "search", "tool_call", "search", parent="post", at=2),
+    ]
+
+    [outcome] = analyze_group(
+        _records({session.id: nodes}, [session]), build_labeler("node", None), None
+    )
+
+    assert outcome.failure_transition == ("search", "postprocess")
+
+
+def test_state_map_rejects_oversized_patterns() -> None:
+    with pytest.raises(ValidationError):
+        FailureMatrixRequest(state_map={f"p{i}": "g" for i in range(51)})
+    with pytest.raises(ValidationError):
+        FailureMatrixRequest(state_map={"x" * 201: "g"})
+
+
 def test_span_states_skip_ancestors_of_the_failing_node() -> None:
     session = _session("failed")
     nodes = _langgraph_failure(session)
@@ -375,10 +399,23 @@ def test_excluded_non_state_failure_does_not_hide_a_selected_rate() -> None:
     assert (cell.count, cell.attempts) == (1, 2)
 
 
-@pytest.mark.parametrize("name", ["", "  ", START, "(other)"])
-def test_state_map_rejects_blank_and_reserved_group_names(name: str) -> None:
+@pytest.mark.parametrize("name", ["", "  "])
+def test_state_map_rejects_blank_group_names(name: str) -> None:
     with pytest.raises(ValidationError):
         FailureMatrixRequest(state_map={"*": name})
+
+
+def test_state_map_groups_named_like_matrix_rows_are_escaped() -> None:
+    session = _session("failed")
+    nodes = [_node(session, "a", "tool_call", "search", status="failed")]
+
+    [outcome] = analyze_group(
+        _records({session.id: nodes}, [session]),
+        build_labeler("tool", {"*": START}),
+        None,
+    )
+
+    assert outcome.failure_transition == (START, f"{START} (recorded)")
 
 
 def test_comparison_text_lists_the_largest_changes_first() -> None:

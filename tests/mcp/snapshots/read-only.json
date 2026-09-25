@@ -7785,7 +7785,13 @@
               "anyOf": [
                 {
                   "additionalProperties": {
+                    "maxLength": 80,
+                    "pattern": "\\S",
                     "type": "string"
+                  },
+                  "maxProperties": 50,
+                  "propertyNames": {
+                    "maxLength": 200
                   },
                   "type": "object"
                 },
@@ -8443,7 +8449,13 @@
               "anyOf": [
                 {
                   "additionalProperties": {
+                    "maxLength": 80,
+                    "pattern": "\\S",
                     "type": "string"
+                  },
+                  "maxProperties": 50,
+                  "propertyNames": {
+                    "maxLength": 200
                   },
                   "type": "object"
                 },

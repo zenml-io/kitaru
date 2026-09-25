@@ -84,15 +84,16 @@ def build_labeler(state_by: StateBy, state_map: Mapping[str, str] | None) -> Lab
 def _display_state(name: str, patterns: Sequence[tuple[str, str]]) -> str:
     # Redact and bound here rather than on output: the view sends labels back to
     # the drill-down tool, which must compare them with the same string it shows.
-    return _bounded(redact(map_state(name, patterns)))
+    return _bounded(redact(_escape_reserved(map_state(name, patterns))))
 
 
 def _bounded(label: str) -> str:
     if len(label) <= MAX_LABEL:
         return label
-    # A digest keeps two long names that share a prefix apart.
-    digest = hashlib.sha256(label.encode()).hexdigest()[:8]
-    return f"{label[: MAX_LABEL - 10]}…{digest}"
+    # The shortened label is also the grouping key, so the digest must be long
+    # enough that two long names sharing a prefix never collide.
+    digest = hashlib.sha256(label.encode()).hexdigest()[:24]
+    return f"{label[: MAX_LABEL - 26]}…{digest}"
 
 
 def map_state(name: str, patterns: Sequence[tuple[str, str]]) -> str:
@@ -113,12 +114,18 @@ def _raw_state(node: SessionNodeResponse, state_by: StateBy) -> str | None:
     return None
 
 
+def _escape_reserved(name: str) -> str:
+    # A real or mapped state named like the matrix's own rows would silently merge
+    # its counts with them.
+    return f"{name} (recorded)" if name in (START, OTHER) else name
+
+
 def _node_name(node: SessionNodeResponse, preferred: str | None = None) -> str:
     # Recorded names can be blank, which cannot be drilled into, or equal to the
     # matrix's own labels, whose counts they would silently merge with.
     for name in (preferred, node.name):
         if name and name.strip():
-            return f"{name} (recorded)" if name in (START, OTHER) else name
+            return _escape_reserved(name)
     return f"unnamed {node.node_type}"
 
 
@@ -215,11 +222,15 @@ def analyze_session(
             session, failed, None, path, _pairs(path), tuple(failed_evaluations)
         )
     ancestors = _ancestors(nodes, point.node)
+    # A span that fails after its own children finish starts before them, so its
+    # completed children also count as steps that went right before the failure.
+    inside = _descendants(nodes, point.node)
     index = next(i for i, node in enumerate(nodes) if node.id == point.node.id)
     before = tuple(
         state
-        for node in nodes[:index]
-        if node.status == NodeStatus.COMPLETED
+        for i, node in enumerate(nodes)
+        if (i < index or node.external_id in inside)
+        and node.status == NodeStatus.COMPLETED
         and node.external_id not in ancestors
         and (state := labeler(node)) is not None
     )
@@ -242,6 +253,22 @@ def analyze_session(
 
 def _pairs(path: Sequence[str]) -> tuple[Transition, ...]:
     return tuple(zip((START, *path), path, strict=False))
+
+
+def _descendants(
+    nodes: Sequence[SessionNodeResponse], node: SessionNodeResponse
+) -> set[str]:
+    children: defaultdict[str | None, list[str]] = defaultdict(list)
+    for item in nodes:
+        children[item.parent_external_id].append(item.external_id)
+    found: set[str] = set()
+    pending = [node.external_id]
+    while pending:
+        for child in children.get(pending.pop(), ()):
+            if child not in found:
+                found.add(child)
+                pending.append(child)
+    return found
 
 
 def _ancestors(

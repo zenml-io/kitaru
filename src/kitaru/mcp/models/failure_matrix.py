@@ -5,9 +5,9 @@
 
 import uuid
 from dataclasses import dataclass
-from typing import Literal, get_args
+from typing import Annotated, Literal, get_args
 
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from kitaru.api_models.v1.annotation import AnnotationResponse
 from kitaru.api_models.v1.evaluation import EvaluationResponse
@@ -21,6 +21,9 @@ FailureSource = Literal["error", "annotation"]
 MatrixSide = Literal["base", "compare"]
 START = "(start)"
 OTHER = "(other)"
+StatePattern = Annotated[str, Field(max_length=200)]
+# A group name needs a visible character so its cell can be shown and drilled into.
+GroupName = Annotated[str, Field(max_length=80, pattern=r"\S")]
 
 
 class FailureMatrixRequest(MCPModel):
@@ -55,29 +58,12 @@ class FailureMatrixRequest(MCPModel):
         description="Which nodes count as states: tool and subagent calls, "
         "non-root spans, or both plus LLM calls.",
     )
-    state_map: dict[str, str] | None = Field(
+    state_map: dict[StatePattern, GroupName] | None = Field(
         default=None,
+        max_length=50,
         description="Merge states: glob pattern of a state name -> group name, "
         "e.g. {'sql_*': 'SQL'}. The first matching pattern wins.",
     )
-
-    @field_validator("state_map")
-    @classmethod
-    def _check_group_names(
-        cls, state_map: dict[str, str] | None
-    ) -> dict[str, str] | None:
-        """Reject group names the matrix cannot show or confuses with its own rows.
-
-        Raises:
-            ValueError: A group name is blank or reserved.
-        """
-        for name in (state_map or {}).values():
-            if not name.strip() or name in (START, OTHER):
-                raise ValueError(
-                    f"state_map group names must be non-blank and not {START!r} "
-                    f"or {OTHER!r}, got {name!r}"
-                )
-        return state_map
 
     sources: list[FailureSource] = Field(
         default_factory=lambda: list(get_args(FailureSource)),
