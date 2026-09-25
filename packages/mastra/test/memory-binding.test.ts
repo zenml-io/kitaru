@@ -655,7 +655,7 @@ it("records a saved message once and keeps a 1,400-row tool result complete", as
               toolInvocation: {
                 state: "result",
                 toolCallId: "search",
-                toolName: "searchHotels",
+                toolName: "searchRecords",
                 args: {},
                 result: rows,
               },

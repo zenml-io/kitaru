@@ -276,8 +276,8 @@ it.each([50, 830])(
           metadata:
             index === 0
               ? {
-                  hotels: Array.from({ length: 1_500 }, (_, hotel) => ({
-                    id: hotel,
+                  items: Array.from({ length: 1_500 }, (_, item) => ({
+                    id: item,
                     details: Object.fromEntries(
                       Array.from({ length: 10 }, (_, field) => [
                         `field${field}`,

@@ -33,13 +33,13 @@ afterEach(async () => {
   for (const runtime of runtimes.splice(0)) await runtime.store.close();
 });
 
-/** A hotel search result: 1,400 rows of 10 fields, about 14,000 JSON values. */
-function hotelRows() {
+/** A search result: 1,400 rows of 10 fields, about 14,000 JSON values. */
+function recordRows() {
   return Array.from({ length: 1_400 }, (_, row) =>
     Object.fromEntries(
       Array.from({ length: 10 }, (_, field) => [
         `field${field}`,
-        `hotel-${row}-${field}`,
+        `record-${row}-${field}`,
       ]),
     ),
   );
@@ -58,11 +58,11 @@ async function seedLongThread(runtime: MemoryRuntime): Promise<void> {
         ...(index === 0
           ? {
               metadata: {
-                hotels: Array.from({ length: 1_500 }, (_, hotel) =>
+                items: Array.from({ length: 1_500 }, (_, item) =>
                   Object.fromEntries(
                     Array.from({ length: 10 }, (_, field) => [
                       `field${field}`,
-                      hotel * field,
+                      item * field,
                     ]),
                   ),
                 ),
@@ -100,7 +100,7 @@ async function setup(
           {
             type: "tool-call",
             toolCallId: `search-${actorCalls}`,
-            toolName: "searchHotels",
+            toolName: "searchRecords",
             input: "{}",
           },
         ],
@@ -111,19 +111,19 @@ async function setup(
   const exclusiveAccess = createProcessLocalMemoryAccess();
   const adapter = createMemoryReplayAgent(
     ({ memory }) => ({
-      id: "hotel-search",
-      name: "Hotel search",
+      id: "record-search",
+      name: "Record search",
       instructions: "Answer",
       memory,
       model: actor,
       tools: {
-        searchHotels: createTool({
-          id: "searchHotels",
-          description: "Search hotels",
+        searchRecords: createTool({
+          id: "searchRecords",
+          description: "Search records",
           inputSchema: z.object({}),
           execute: async () => {
             executions += 1;
-            return hotelRows();
+            return recordRows();
           },
         }),
       },
@@ -189,7 +189,7 @@ function nodes(api: TestApi, sessionId: string, name: string) {
 
 it("keeps 1,400-row tool turns on an 830-message thread eligible and stores saved messages once", async () => {
   const { api, turn } = await setup();
-  for (const message of ["Find hotels.", "Find more.", "And again."])
+  for (const message of ["Find records.", "Find more.", "And again."])
     await turn(message);
   await vi.waitFor(
     () =>
@@ -216,8 +216,8 @@ it("keeps 1,400-row tool turns on an 830-message thread eligible and stores save
       evidence_truncated: false,
     });
     // The tool result is stored with the saved arguments, not again as the result.
-    expect(JSON.stringify(save.inputs)).toContain("hotel-1399-9");
-    expect(JSON.stringify(save.outputs)).not.toContain("hotel-1399-9");
+    expect(JSON.stringify(save.inputs)).toContain("record-1399-9");
+    expect(JSON.stringify(save.outputs)).not.toContain("record-1399-9");
     const saved = (save.outputs as { messages: unknown[] }).messages;
     expect(saved.length).toBeGreaterThan(0);
     for (const message of saved)
@@ -239,7 +239,7 @@ it("applies application recordingLimits to request evidence without making the t
   const { api, turn } = await setup({
     recordingLimits: { maxStringChars: 20 },
   });
-  await turn("Find hotels with a long enough question.");
+  await turn("Find records with a long enough question.");
   await vi.waitFor(
     () => expect(outcomes(api)).toEqual(["completed/eligible"]),
     { timeout: 5_000 },
@@ -276,7 +276,7 @@ it("records a 1,400-row tool result whole so replay serves it from history", asy
       lookup: () => ({ match: { result: history, status: "completed" } }),
     },
   });
-  await turn("Find hotels.");
+  await turn("Find records.");
   await vi.waitFor(
     () => expect(outcomes(api)).toEqual(["completed/eligible"]),
     { timeout: 5_000 },
@@ -285,7 +285,7 @@ it("records a 1,400-row tool result whole so replay serves it from history", asy
   const [recorded] = nodes(api, String(baselineId), "tool_call");
   // The server serves a history lookup only from a result recorded whole.
   expect(recorded?.attributes).not.toHaveProperty("outputs_bounded");
-  expect(recorded?.outputs).toEqual(hotelRows());
+  expect(recorded?.outputs).toEqual(recordRows());
   history = recorded?.outputs;
   const baseline = api.calls.findLast(
     (call) =>
@@ -308,7 +308,7 @@ it("records a 1,400-row tool result whole so replay serves it from history", asy
     );
     expect(executions()).toBe(1);
     const [served] = nodes(api, String(api.sessionIds[1]), "tool_call");
-    expect(served?.outputs).toEqual(hotelRows());
+    expect(served?.outputs).toEqual(recordRows());
   } finally {
     vi.unstubAllEnvs();
   }

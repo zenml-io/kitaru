@@ -160,8 +160,8 @@ await memory.updateWorkingMemory({
   resourceId: resource,
   workingMemory: JSON.stringify(currentProduction),
 });
-const nestedHotels = Array.from({ length: 1500 }, (_, hotel) => ({
-  id: hotel,
+const nestedItems = Array.from({ length: 1500 }, (_, item) => ({
+  id: item,
   details: Object.fromEntries(
     Array.from({ length: 10 }, (_, field) => [`field${field}`, field]),
   ),
@@ -178,7 +178,7 @@ await domain.saveMessages({
           text: index === 0 ? "HISTORICAL_MESSAGE: " + "x".repeat(1_100_000) : `history ${index}`,
         },
       ],
-      ...(index === 0 ? { metadata: { hotels: nestedHotels } } : {}),
+      ...(index === 0 ? { metadata: { items: nestedItems } } : {}),
     },
     createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)),
     threadId: thread,

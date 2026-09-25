@@ -482,9 +482,9 @@ async def check(output: Path) -> None:
                 for message in envelope["initialSnapshot"]["messages"]
                 if message["id"] == "historical-0"
             )
-            hotels = first_message["content"]["metadata"]["hotels"]
-            assert len(hotels) == 1500
-            assert all(len(hotel["details"]) == 10 for hotel in hotels)
+            items = first_message["content"]["metadata"]["items"]
+            assert len(items) == 1500
+            assert all(len(item["details"]) == 10 for item in items)
             assert len(json.dumps(baseline.inputs).encode()) > 1_048_576
             assert "historical-secret" not in json.dumps(baseline.inputs)
             # Recorded files live in blobs, outside the replay input.
