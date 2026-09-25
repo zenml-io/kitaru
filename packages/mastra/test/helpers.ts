@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { ToolHooks } from "@mastra/core/tools";
 import { vi } from "vitest";
 
@@ -20,7 +21,19 @@ export interface TestApiOptions {
   replaySpec?: Record<string, unknown>;
 }
 
+export interface TestBlob {
+  bytes: Uint8Array;
+  id: string;
+  media_type: string;
+  sha256: string;
+  size: number;
+}
+
 export interface TestApi {
+  /** Stored blobs by id, deduplicated by content and media type as the server does. */
+  blobs: Map<string, TestBlob>;
+  /** How many blob uploads the API received. */
+  blobUploads(): number;
   calls: ApiCall[];
   nodeBatches(sessionId?: string): Record<string, unknown>[][];
   sessionIds: string[];
@@ -41,17 +54,61 @@ function nodeId(index: number): string {
   return `018f0000-0000-7000-8001-${String(index + 300).padStart(12, "0")}`;
 }
 
+function blobId(index: number): string {
+  return `018f0000-0000-7000-8002-${String(index + 400).padStart(12, "0")}`;
+}
+
+function blobMetadata(blob: TestBlob) {
+  const { bytes: _bytes, ...metadata } = blob;
+  return { ...metadata, created: "2026-01-01T00:00:00Z" };
+}
+
 export function installTestApi(options: TestApiOptions = {}): TestApi {
   const calls: ApiCall[] = [];
   const sessionIds: string[] = [];
+  const blobs = new Map<string, TestBlob>();
   let nextNode = 0;
   const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
+    if (init?.body instanceof FormData) {
+      calls.push({ body: undefined, method, path: url.pathname });
+      if (method !== "POST" || url.pathname !== "/api/v1/blobs")
+        throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+      const file = init.body.get("file") as Blob;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      const existing = [...blobs.values()].find(
+        (blob) => blob.sha256 === sha256 && blob.media_type === file.type,
+      );
+      if (existing) return jsonResponse(blobMetadata(existing));
+      const blob = {
+        bytes,
+        id: blobId(blobs.size),
+        media_type: file.type,
+        sha256,
+        size: bytes.byteLength,
+      };
+      blobs.set(blob.id, blob);
+      return jsonResponse(blobMetadata(blob), 201);
+    }
     const body = init?.body
       ? (JSON.parse(String(init.body)) as Record<string, unknown>)
       : undefined;
     calls.push({ body, method, path: url.pathname });
+
+    const blobPath = /^\/api\/v1\/blobs\/([^/]+)(\/content)?$/.exec(
+      url.pathname,
+    );
+    if (method === "GET" && blobPath) {
+      const blob = blobs.get(decodeURIComponent(blobPath[1] ?? ""));
+      if (!blob) return jsonResponse({ detail: "Blob not found" }, 404);
+      return blobPath[2]
+        ? new Response(new Uint8Array(blob.bytes), {
+            headers: { "Content-Type": blob.media_type },
+          })
+        : jsonResponse(blobMetadata(blob));
+    }
 
     if (method === "POST" && url.pathname === "/api/v1/sessions") {
       const id = sessionId(sessionIds.length);
@@ -99,6 +156,11 @@ export function installTestApi(options: TestApiOptions = {}): TestApi {
   vi.stubGlobal("fetch", fetch);
 
   return {
+    blobs,
+    blobUploads: () =>
+      calls.filter(
+        (call) => call.method === "POST" && call.path === "/api/v1/blobs",
+      ).length,
     calls,
     nodeBatches(selectedSessionId) {
       return calls

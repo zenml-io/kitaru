@@ -59,7 +59,7 @@ from kitaru.server.domain.agent_version import (
     AgentVersionAgentMismatch,
     AgentVersionNotFound,
 )
-from kitaru.server.domain.blob import BlobStorageBackend
+from kitaru.server.domain.blob import Blob, BlobStorageBackend
 from kitaru.server.domain.imports import Import, ImportNotFound
 from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.replay import Replay
@@ -485,7 +485,7 @@ async def test_finalize_pending_mastra_replay_inputs_atomically(
     assert stored.metadata["mastra_replay_state"] == "eligible"
 
 
-@pytest.mark.parametrize("invalid_field", ["raw_input", "file_hash"])
+@pytest.mark.parametrize("invalid_field", ["raw_input", "file_hash", "unstored_file"])
 async def test_mastra_finalization_rejects_invalid_replay_prerequisite(
     service: SessionService,
     complete_mastra_memory_replay_inputs: dict[str, Any],
@@ -505,6 +505,8 @@ async def test_mastra_finalization_rejects_invalid_replay_prerequisite(
     invalid = deepcopy(complete_mastra_memory_replay_inputs)
     if invalid_field == "raw_input":
         del invalid["mastra_memory_replay"]["rawInput"]
+    elif invalid_field == "unstored_file":
+        del invalid["mastra_memory_replay"]["files"][0]["base64"]
     else:
         invalid["mastra_memory_replay"]["files"][0]["sha256"] = "0" * 64
     with pytest.raises(SessionReplayFinalizationInvalid):
@@ -520,6 +522,73 @@ async def test_mastra_finalization_rejects_invalid_replay_prerequisite(
     stored = await service.get_session(created.id, actor=ACTOR)
     assert stored.status == SessionStatus.IN_PROGRESS
     assert stored.metadata["mastra_replay_state"] == "pending"
+
+
+def _stored_file_inputs(inputs: dict[str, Any], blob_id: uuid.UUID) -> dict[str, Any]:
+    """Move the fixture's recorded file content from inline base64 to a blob."""
+    stored = deepcopy(inputs)
+    file = stored["mastra_memory_replay"]["files"][0]
+    del file["base64"]
+    file["blobId"] = str(blob_id)
+    return stored
+
+
+@pytest.mark.parametrize("blob", ["matching", "missing", "different"])
+async def test_mastra_finalization_checks_files_stored_as_blobs(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    blob: str,
+) -> None:
+    """An eligible input may name blobs only when they hold its recorded files."""
+    fakes = build_payload_store()
+    service = SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+        replay_repository=FakeReplayRepository(),
+        import_repository=FakeImportRepository(),
+        payload_store=fakes.store,
+    )
+    file = complete_mastra_memory_replay_inputs["mastra_memory_replay"]["files"][0]
+    stored, _ = await fakes.blob_repository.create(
+        Blob(
+            owner_id=ACTOR.account.id,
+            sha256=file["sha256"] if blob != "different" else "0" * 64,
+            size=file["length"],
+            media_type=file["mediaType"],
+            stored_in=BlobStorageBackend.DATABASE,
+        )
+    )
+    final_inputs = _stored_file_inputs(
+        complete_mastra_memory_replay_inputs,
+        stored.id if blob != "missing" else uuid.uuid4(),
+    )
+    created = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(),
+            origin=SessionOrigin.RECORDED,
+            framework="mastra",
+            inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+            metadata={"mastra_replay_state": "pending"},
+        ),
+        actor=ACTOR,
+    )
+    update = SessionUpdate(
+        status=SessionStatus.COMPLETED,
+        inputs=final_inputs,
+        metadata={"mastra_replay_state": "eligible"},
+    )
+    if blob == "matching":
+        await service.update_session(created.id, update, actor=ACTOR)
+        finalized = await service.get_session(created.id, actor=ACTOR)
+        assert finalized.metadata["mastra_replay_state"] == "eligible"
+        return
+    with pytest.raises(SessionReplayFinalizationInvalid):
+        await service.update_session(created.id, update, actor=ACTOR)
+    unchanged = await service.get_session(created.id, actor=ACTOR)
+    assert unchanged.metadata["mastra_replay_state"] == "pending"
 
 
 async def test_unrelated_session_cannot_replace_inputs(

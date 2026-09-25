@@ -14,6 +14,7 @@
 """Session use cases."""
 
 import uuid
+from typing import Any
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.agent_version_repository import (
@@ -49,8 +50,10 @@ from kitaru.server.domain.session import (
     SessionAgentRequired,
     SessionAgentVersionMismatch,
     SessionBaselineNotFound,
+    SessionReplayFinalizationInvalid,
     SessionStatus,
     SessionStatusCannotBeCleared,
+    mastra_replay_stored_files,
 )
 from kitaru.server.domain.task import (
     AgentTask,
@@ -448,6 +451,11 @@ class SessionService:
                     AnalyticsEvent.SESSION_COMPLETED,
                     analytics_events.build_session_completed_properties(session),
                 )
+        if (
+            next_metadata.get("mastra_replay_state") == "eligible"
+            and "inputs" in fields
+        ):
+            await self._check_mastra_stored_files(session.id, command.inputs)
         if "inputs" in fields:
             session.inputs = Payload.from_json(command.inputs)
             await self._payload_store.offload([session.inputs], session.owner_id)
@@ -458,6 +466,30 @@ class SessionService:
         if "inputs" in fields:
             return await self._repository.finalize_replay_inputs(session)
         return await self._repository.update(session)
+
+    async def _check_mastra_stored_files(
+        self, session_id: uuid.UUID, inputs: Any
+    ) -> None:
+        """Require every blob a Mastra replay input names to hold its file.
+
+        Args:
+            session_id: Id of the session being finalized.
+            inputs: Replacement inputs carrying the replay input.
+
+        Raises:
+            SessionReplayFinalizationInvalid: A named blob does not exist or
+                does not hold the recorded content.
+        """
+        files = mastra_replay_stored_files(inputs)
+        if not files:
+            return
+        blobs = await self._payload_store.get_blobs(
+            list({file.blob_id for file in files})
+        )
+        for file in files:
+            blob = blobs.get(file.blob_id)
+            if blob is None or blob.sha256 != file.sha256 or blob.size != file.length:
+                raise SessionReplayFinalizationInvalid(session_id)
 
     async def delete_session(self, session_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a session.

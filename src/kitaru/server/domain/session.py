@@ -289,8 +289,79 @@ def mastra_replay_v3_complete(envelope: dict[str, Any]) -> bool:
     )
 
 
+_MASTRA_FILE_REFERENCE = re.compile(r"kitaru-file://sha256/[a-f0-9]{64}")
+_SHA256 = re.compile(r"[a-f0-9]{64}")
+_MASTRA_MAX_FILE_BYTES = 16 * 1_048_576
+_MASTRA_MAX_INLINE_FILE_BYTES = 8 * 1_048_576
+
+
+class MastraStoredFile(FrozenModel):
+    """A recorded Mastra file whose content is stored as a blob."""
+
+    blob_id: uuid.UUID
+    sha256: str
+    length: int
+
+
+def _read_mastra_stored_file(file: dict[str, Any]) -> MastraStoredFile | None:
+    """Read a file entry that names the blob holding its content.
+
+    Args:
+        file: Recorded file entry.
+
+    Returns:
+        The blob reference, or None when the entry is malformed.
+    """
+    blob_id = file.get("blobId")
+    if not isinstance(blob_id, str):
+        return None
+    try:
+        parsed = uuid.UUID(blob_id)
+    except ValueError:
+        return None
+    if str(parsed) != blob_id:
+        return None
+    return MastraStoredFile(
+        blob_id=parsed, sha256=file["sha256"], length=file["length"]
+    )
+
+
+def _mastra_inline_file_complete(file: dict[str, Any], url: str) -> bool:
+    """Check a file entry that holds its content inline as base64.
+
+    Args:
+        file: Recorded file entry.
+        url: The entry's content reference.
+
+    Returns:
+        Whether the content matches its length, hash, and reference.
+    """
+    encoded = file["base64"]
+    if not isinstance(encoded, str) or file["length"] > _MASTRA_MAX_INLINE_FILE_BYTES:
+        return False
+    try:
+        content = base64.b64decode(encoded, validate=True)
+        reference = (
+            "kitaru-file://sha256/"
+            + hashlib.sha256(file["mediaType"].encode() + b"\0" + content).hexdigest()
+        )
+    except (binascii.Error, ValueError, UnicodeEncodeError):
+        return False
+    return (
+        base64.b64encode(content).decode("ascii") == encoded
+        and len(content) == file["length"]
+        and hashlib.sha256(content).hexdigest() == file["sha256"]
+        and url == reference
+    )
+
+
 def _mastra_replay_files_complete(files: list[Any]) -> bool:
-    """Validate bounded file references before publishing replay eligibility."""
+    """Validate bounded file references before publishing replay eligibility.
+
+    A file names the blob that stores its content, or holds the content
+    inline as base64. Blob entries are checked against the stored blobs
+    separately, because that needs the blob registry.
+    """
     if len(files) > 64:
         return False
     seen: set[str] = set()
@@ -300,43 +371,63 @@ def _mastra_replay_files_complete(files: list[Any]) -> bool:
             return False
         url = file.get("url")
         media_type = file.get("mediaType")
-        encoded = file.get("base64")
         length = file.get("length")
         digest = file.get("sha256")
         if (
             not isinstance(url, str)
             or url in seen
+            or _MASTRA_FILE_REFERENCE.fullmatch(url) is None
             or not isinstance(media_type, str)
             or not media_type
-            or not isinstance(encoded, str)
             or not isinstance(length, int)
             or isinstance(length, bool)
             or length < 0
-            or length > 8 * 1_048_576
+            or length > _MASTRA_MAX_FILE_BYTES
             or not isinstance(digest, str)
-            or re.fullmatch(r"[a-f0-9]{64}", digest) is None
+            or _SHA256.fullmatch(digest) is None
         ):
             return False
-        try:
-            content = base64.b64decode(encoded, validate=True)
-            reference = (
-                "kitaru-file://sha256/"
-                + hashlib.sha256(media_type.encode() + b"\0" + content).hexdigest()
-            )
-        except (binascii.Error, ValueError, UnicodeEncodeError):
-            return False
-        if (
-            base64.b64encode(content).decode("ascii") != encoded
-            or len(content) != length
-            or hashlib.sha256(content).hexdigest() != digest
-            or url != reference
-        ):
+        if "base64" in file:
+            if "blobId" in file or not _mastra_inline_file_complete(file, url):
+                return False
+        elif _read_mastra_stored_file(file) is None:
             return False
         total_bytes += length
-        if total_bytes > 16 * 1_048_576:
+        if total_bytes > _MASTRA_MAX_FILE_BYTES:
             return False
         seen.add(url)
     return True
+
+
+def mastra_replay_stored_files(inputs: Any) -> list[MastraStoredFile]:
+    """Return the blob-stored files a Mastra replay input records.
+
+    Entries that are malformed or hold their content inline are skipped.
+
+    Args:
+        inputs: Session or task inputs, of any shape.
+
+    Returns:
+        The recorded files stored as blobs.
+    """
+    envelope = inputs.get("mastra_memory_replay") if isinstance(inputs, dict) else None
+    files = envelope.get("files") if isinstance(envelope, dict) else None
+    if not isinstance(files, list):
+        return []
+    stored: list[MastraStoredFile] = []
+    for file in files:
+        if (
+            not isinstance(file, dict)
+            or "base64" in file
+            or not isinstance(file.get("sha256"), str)
+            or not isinstance(file.get("length"), int)
+            or isinstance(file.get("length"), bool)
+        ):
+            continue
+        entry = _read_mastra_stored_file(file)
+        if entry is not None:
+            stored.append(entry)
+    return stored
 
 
 class SessionRollups(FrozenModel):

@@ -32,10 +32,11 @@ import {
   type MastraReplayReason,
   unsupportedMemoryReplay,
 } from "./replay-reasons.js";
-import { fileReference } from "./stateful-files.js";
+import { fileReference, MAX_CAPTURED_FILE_BYTES } from "./stateful-files.js";
 
 export const MEMORY_REPLAY_KEY = "mastra_memory_replay";
 const CODEC_KEY = "$mastra";
+const FILE_REFERENCE = /^kitaru-file:\/\/sha256\/[a-f0-9]{64}$/;
 
 export interface MastraMemorySnapshot {
   threadId: string;
@@ -50,13 +51,34 @@ export interface MastraRecordedFile {
   url: string;
   mediaType: string;
   bytes: Uint8Array;
+  /** The Kitaru blob that stores `bytes`, once one does. */
+  blobId?: string;
 }
 
+/** A recorded file whose content is stored as a Kitaru blob. */
+export interface MastraStoredFile {
+  url: string;
+  mediaType: string;
+  blobId: string;
+  length: number;
+  sha256: string;
+}
+
+/** A recorded file with its content, or with the blob that stores it. */
+export type MastraRecordedFileSource = MastraRecordedFile | MastraStoredFile;
+
+/**
+ * A recorded file in the envelope.
+ *
+ * An entry names the blob that stores the file's content. An entry without a
+ * blob id belongs to a turn that has not stored its files yet and cannot be
+ * replayed. Envelopes recorded before blob storage hold the content inline as
+ * `base64`.
+ */
 export interface MastraFileManifestEntry {
   [key: string]: JsonValue;
   url: string;
   mediaType: string;
-  base64: string;
   length: number;
   sha256: string;
 }
@@ -68,7 +90,7 @@ export interface MastraMemoryReplayInput {
   /** Materialized options only. Models and schemas need explicit JSON representations. */
   configuration: Record<string, unknown>;
   requestContext: Record<string, unknown>;
-  files: MastraRecordedFile[];
+  files: MastraRecordedFileSource[];
   omTape?: JsonValue[];
   /**
    * When the recorded turn started; replay evaluates memory time checks at
@@ -184,6 +206,82 @@ function readBinary(value: Record<string, unknown>): Uint8Array {
     "Corrupt binary content hash, length, or encoding.",
   );
   return bytes;
+}
+
+const BLOB_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
+
+function encodeFileEntry(
+  file: MastraRecordedFileSource,
+): MastraFileManifestEntry {
+  const stored =
+    "bytes" in file
+      ? {
+          blobId: file.blobId,
+          length: file.bytes.byteLength,
+          sha256: hash(file.bytes),
+        }
+      : file;
+  requireValue(
+    stored.length <= MAX_CAPTURED_FILE_BYTES,
+    `Recorded file exceeds maximum file bytes ${MAX_CAPTURED_FILE_BYTES}.`,
+    "replay_input_too_large",
+  );
+  return {
+    url: file.url,
+    mediaType: file.mediaType,
+    ...(stored.blobId === undefined ? {} : { blobId: stored.blobId }),
+    length: stored.length,
+    sha256: stored.sha256,
+  };
+}
+
+/**
+ * Read a recorded file entry, or return undefined for an entry whose content
+ * was not stored yet when `allowUnstored` is set.
+ */
+function readFileEntry(
+  file: Record<string, unknown> & { url: string; mediaType: string },
+  version: 2 | 3,
+  allowUnstored: boolean,
+): MastraRecordedFileSource | undefined {
+  if (Object.hasOwn(file, "base64")) {
+    const bytes = readBinary(file);
+    if (version === 3)
+      requireValue(
+        FILE_REFERENCE.test(file.url) &&
+          file.url === fileReference({ mediaType: file.mediaType, bytes }),
+        "Recorded file must use its captured content reference.",
+      );
+    return { url: file.url, mediaType: file.mediaType, bytes };
+  }
+  requireValue(
+    version === 3 &&
+      FILE_REFERENCE.test(file.url) &&
+      typeof file.length === "number" &&
+      Number.isSafeInteger(file.length) &&
+      file.length >= 0 &&
+      file.length <= MAX_CAPTURED_FILE_BYTES &&
+      typeof file.sha256 === "string" &&
+      SHA256.test(file.sha256),
+    "Malformed recorded file.",
+  );
+  if (!Object.hasOwn(file, "blobId")) {
+    requireValue(allowUnstored, "Recorded file content was not stored.");
+    return undefined;
+  }
+  requireValue(
+    typeof file.blobId === "string" && BLOB_ID.test(file.blobId),
+    "Malformed recorded file blob id.",
+  );
+  return {
+    url: file.url,
+    mediaType: file.mediaType,
+    blobId: file.blobId,
+    length: file.length,
+    sha256: file.sha256,
+  };
 }
 
 function validateUrl(value: string): URL {
@@ -906,11 +1004,7 @@ export function captureMemoryReplayEnvelope(
         input.requestContext,
         "Request context",
       ),
-      files: input.files.map((file) => ({
-        url: file.url,
-        mediaType: file.mediaType,
-        ...binary(file.bytes),
-      })),
+      files: input.files.map(encodeFileEntry),
       omTape: input.omTape === undefined ? [] : input.omTape,
       turnStartedAt: turnStartedAt.toISOString(),
     };
@@ -920,7 +1014,8 @@ export function captureMemoryReplayEnvelope(
         strictMastraReplayValue(envelope, "Mastra memory replay envelope"),
       ),
     );
-    decodeConvertedMemoryReplayEnvelope(converted);
+    // Files are stored as blobs once the turn has finished.
+    decodeConvertedMemoryReplayEnvelope(converted, true);
     return { envelope: converted };
   } catch (error) {
     return {
@@ -945,6 +1040,7 @@ export function finalizeMemoryReplayEnvelope(
   omTape: JsonValue[],
   sanitize: MemoryReplayEnvelopeSanitizer = (value) => value,
   attachmentTokens: AttachmentTokenCounts = {},
+  allowUnstoredFiles = false,
 ): MastraMemoryReplayEnvelope {
   const final = withKeyOrder(
     sanitize(
@@ -960,7 +1056,7 @@ export function finalizeMemoryReplayEnvelope(
       ),
     ),
   );
-  decodeConvertedMemoryReplayEnvelope(final);
+  decodeConvertedMemoryReplayEnvelope(final, allowUnstoredFiles);
   return final;
 }
 
@@ -971,9 +1067,15 @@ export function decodeMemoryReplayEnvelope(
   return decodeConvertedMemoryReplayEnvelope(value);
 }
 
-/** Validate a value already copied through the strict replay codec. */
+/**
+ * Validate a value already copied through the strict replay codec.
+ *
+ * With `allowUnstoredFiles`, file entries without stored content pass
+ * validation and are left out of the result.
+ */
 function decodeConvertedMemoryReplayEnvelope(
   stored: JsonValue,
+  allowUnstoredFiles = false,
 ): MastraMemoryReplayInput {
   requireValue(
     isRecord(stored) && (stored.version === 2 || stored.version === 3),
@@ -1044,7 +1146,8 @@ function decodeConvertedMemoryReplayEnvelope(
     );
   }
   const urls = new Set<string>();
-  const files = value.files.map((file) => {
+  const files: MastraRecordedFileSource[] = [];
+  for (const file of value.files) {
     requireValue(
       isRecord(file) &&
         typeof file.url === "string" &&
@@ -1054,20 +1157,14 @@ function decodeConvertedMemoryReplayEnvelope(
       "Malformed or duplicate recorded file.",
     );
     validateUrl(file.url);
-    const bytes = readBinary(file);
-    if (value.version === 3)
-      requireValue(
-        /^kitaru-file:\/\/sha256\/[a-f0-9]{64}$/.test(file.url) &&
-          file.url === fileReference({ mediaType: file.mediaType, bytes }),
-        "Recorded file must use its captured content reference.",
-      );
     urls.add(file.url);
-    return {
-      url: file.url,
-      mediaType: file.mediaType,
-      bytes,
-    };
-  });
+    const entry = readFileEntry(
+      file as Record<string, unknown> & { url: string; mediaType: string },
+      value.version,
+      allowUnstoredFiles,
+    );
+    if (entry) files.push(entry);
+  }
   const rawInput = decodeMemoryValue(value.rawInput as JsonValue);
   ordered?.verify();
   return {

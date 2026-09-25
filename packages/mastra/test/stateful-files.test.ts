@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import {
   decodeMemoryValue,
@@ -5,8 +6,12 @@ import {
 } from "../src/memory-snapshot.js";
 import {
   createCapturedFiles,
+  createFileBlobStore,
+  type FileBlobClient,
   fileReference,
+  loadRecordedFiles,
   restoreCapturedFiles,
+  type StoredBlob,
 } from "../src/stateful-files.js";
 
 it("captures signed URLs under secret-free references and replays immutable bytes", async () => {
@@ -206,14 +211,20 @@ it("rejects cyclic or accessor-backed replay input without reading the accessor"
   expect(getter).not.toHaveBeenCalled();
 });
 
-it("rejects a file over 8 MiB before copying it", async () => {
-  const bytes = new Uint8Array(8 * 1024 * 1024 + 1);
+it("accepts one file up to the 16 MiB turn limit and rejects a larger one", async () => {
+  const fits = new Uint8Array(16 * 1024 * 1024);
+  const captured = await createCapturedFiles(
+    ["https://files.invalid/fits"],
+    async () => ({ bytes: fits, mediaType: "application/pdf" }),
+  );
+  expect(captured.files[0]?.bytes.byteLength).toBe(fits.byteLength);
+  const bytes = new Uint8Array(16 * 1024 * 1024 + 1);
   await expect(
     createCapturedFiles(["https://files.invalid/large"], async () => ({
       bytes,
       mediaType: "application/pdf",
     })),
-  ).rejects.toThrow(/8 MiB/);
+  ).rejects.toThrow(/16 MiB/);
   expect(() =>
     restoreCapturedFiles([
       {
@@ -222,7 +233,7 @@ it("rejects a file over 8 MiB before copying it", async () => {
         mediaType: "application/pdf",
       },
     ]),
-  ).toThrow(/invalid recorded file/);
+  ).toThrow(/file capture limit exceeded/);
 });
 
 it("rejects more than 16 MiB or 64 declared files before retaining them", async () => {
@@ -250,4 +261,107 @@ it("rejects more than 16 MiB or 64 declared files before retaining them", async 
     ),
   ).rejects.toThrow(/count limit/);
   expect(resolveFile).not.toHaveBeenCalled();
+});
+
+/** An in-memory blob API that keeps one blob per content, as the server does. */
+function createBlobApi() {
+  const blobs = new Map<string, StoredBlob & { bytes: Uint8Array }>();
+  const client = {
+    upload: vi.fn(async (content: Uint8Array) => {
+      const sha256 = createHash("sha256").update(content).digest("hex");
+      const existing = [...blobs.values()].find(
+        (blob) => blob.sha256 === sha256,
+      );
+      if (existing) return existing;
+      const blob = {
+        id: `018f0000-0000-7000-8002-${String(blobs.size).padStart(12, "0")}`,
+        sha256,
+        size: content.byteLength,
+        bytes: new Uint8Array(content),
+      };
+      blobs.set(blob.id, blob);
+      return blob;
+    }),
+    get: vi.fn(async (blobId: string) => {
+      const blob = blobs.get(blobId);
+      if (!blob) throw new Error("Blob not found");
+      return blob;
+    }),
+    download: vi.fn(async (blobId: string) => {
+      const blob = blobs.get(blobId);
+      if (!blob) throw new Error("Blob not found");
+      return new Uint8Array(blob.bytes);
+    }),
+  } satisfies FileBlobClient;
+  return { blobs, client };
+}
+
+function recordedFile(bytes: Uint8Array) {
+  return {
+    url: fileReference({ bytes, mediaType: "image/png" }),
+    mediaType: "image/png",
+    bytes,
+  };
+}
+
+it("uploads a captured file once across turns and again after its blob is deleted", async () => {
+  const { blobs, client } = createBlobApi();
+  const store = createFileBlobStore(client);
+  const file = recordedFile(new Uint8Array([1, 2, 3]));
+  const [first] = await store.store([file]);
+  const [second] = await store.store([recordedFile(new Uint8Array([1, 2, 3]))]);
+  expect(second?.blobId).toBe(first?.blobId);
+  expect(client.upload).toHaveBeenCalledOnce();
+
+  blobs.clear();
+  const [third] = await store.store([file]);
+  expect(client.upload).toHaveBeenCalledTimes(2);
+  expect(blobs.has(String(third?.blobId))).toBe(true);
+});
+
+it("refuses a stored blob that does not hold the captured bytes", async () => {
+  const { client } = createBlobApi();
+  client.upload.mockResolvedValueOnce({
+    id: "018f0000-0000-7000-8002-000000000999",
+    sha256: "0".repeat(64),
+    size: 3,
+    bytes: new Uint8Array(3),
+  });
+  await expect(
+    createFileBlobStore(client).store([
+      recordedFile(new Uint8Array([1, 2, 3])),
+    ]),
+  ).rejects.toMatchObject({ reason: "file_store_failed" });
+});
+
+it("loads stored files and refuses blobs whose content changed", async () => {
+  const { blobs, client } = createBlobApi();
+  const bytes = new Uint8Array([4, 5, 6]);
+  const [stored] = await createFileBlobStore(client).store([
+    recordedFile(bytes),
+  ]);
+  if (!stored?.blobId) throw new Error("Missing stored file");
+  const source = {
+    url: stored.url,
+    mediaType: stored.mediaType,
+    blobId: stored.blobId,
+    length: bytes.byteLength,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+  expect(await loadRecordedFiles([source], client)).toEqual([
+    { ...recordedFile(bytes), blobId: stored.blobId },
+  ]);
+  const blob = blobs.get(stored.blobId);
+  if (!blob) throw new Error("Missing blob");
+  blob.bytes = new Uint8Array([4, 5, 7]);
+  await expect(loadRecordedFiles([source], client)).rejects.toThrow(
+    /does not match its reference/,
+  );
+  blobs.clear();
+  await expect(loadRecordedFiles([source], client)).rejects.toThrow(
+    /could not be downloaded/,
+  );
+  await expect(
+    loadRecordedFiles([{ ...source, length: 16 * 1024 * 1024 + 1 }], client),
+  ).rejects.toThrow(/capture limit/);
 });

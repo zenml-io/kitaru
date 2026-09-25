@@ -13,6 +13,7 @@ import { createProcessLocalMemoryAccess } from "../src/memory-binding.js";
 import {
   createMemoryReplayEnvelope,
   decodeMemoryReplayEnvelope,
+  finalizeMemoryReplayEnvelope,
   type MastraMemoryReplayInput,
 } from "../src/memory-snapshot.js";
 import {
@@ -61,10 +62,37 @@ it("stores captured file references and redacts signed source URLs", () => {
   const ref = `kitaru-file://sha256/${digest}`;
   const safe = input();
   safe.rawInput = { file: new URL(ref) };
-  safe.files = [{ url: ref, mediaType: "image/png", bytes }];
+  const blobId = "018f0000-0000-7000-8000-000000000900";
+  safe.files = [{ url: ref, mediaType: "image/png", bytes, blobId }];
   const envelope = createMemoryReplayEnvelope(safe);
   expect(envelope.complete, envelope.reasons.join("; ")).toBe(true);
-  expect(decodeMemoryReplayEnvelope(envelope).files[0]?.bytes).toEqual(bytes);
+  expect(JSON.stringify(envelope)).not.toContain(
+    Buffer.from(bytes).toString("base64"),
+  );
+  expect(decodeMemoryReplayEnvelope(envelope).files).toEqual([
+    {
+      url: ref,
+      mediaType: "image/png",
+      blobId,
+      length: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    },
+  ]);
+  // A turn that has not stored its files yet cannot be replayed.
+  const unstored = createMemoryReplayEnvelope({
+    ...safe,
+    files: [{ url: ref, mediaType: "image/png", bytes }],
+  });
+  expect(unstored.complete).toBe(true);
+  expect(() => decodeMemoryReplayEnvelope(unstored)).toThrow(/not stored/);
+  expect(() => finalizeMemoryReplayEnvelope(unstored, [])).toThrow(
+    /not stored/,
+  );
+  // A replay of an envelope recorded with inline bytes finalizes its own
+  // input without storing those files.
+  expect(
+    finalizeMemoryReplayEnvelope(unstored, [], undefined, {}, true).complete,
+  ).toBe(true);
 
   const plain = createMemoryReplayEnvelope({
     ...safe,
@@ -86,11 +114,18 @@ it("stores captured file references and redacts signed source URLs", () => {
     file: "https://files.invalid/image.png?X-Amz-Signature=REDACTED",
   });
 
-  const captured = envelope.files[0];
-  if (!captured) throw new Error("Missing captured file");
+  // Envelopes recorded before blob storage hold file bytes inline.
   const altered = {
     ...envelope,
-    files: [{ ...captured, url: `kitaru-file://sha256/${"0".repeat(64)}` }],
+    files: [
+      {
+        url: `kitaru-file://sha256/${"0".repeat(64)}`,
+        mediaType: "image/png",
+        base64: Buffer.from(bytes).toString("base64"),
+        length: bytes.byteLength,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      },
+    ],
   };
   expect(() => decodeMemoryReplayEnvelope(altered)).toThrow(
     /captured content reference/,

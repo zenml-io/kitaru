@@ -786,7 +786,7 @@ it("answers natively when a resolved history attachment exceeds the capture limi
     doStream: async () => textStream("All three photos show the lake."),
   });
   const fetchAttachment = vi.fn(async (url: string) => ({
-    bytes: new Uint8Array(url === HISTORY_URLS[1] ? 9 * 1024 * 1024 : 4),
+    bytes: new Uint8Array(url === HISTORY_URLS[1] ? 17 * 1024 * 1024 : 4),
     mediaType: "image/png",
   }));
   const adapter = createMemoryReplayAgent(

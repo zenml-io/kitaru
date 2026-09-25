@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { redactUrlCredentials } from "@zenml-io/kitaru/adapter";
-import type { MastraRecordedFile } from "./memory-snapshot.js";
+import type {
+  MastraRecordedFile,
+  MastraRecordedFileSource,
+} from "./memory-snapshot.js";
 import { MastraReplayReasonError } from "./replay-reasons.js";
 
 export interface ResolvedMemoryFile {
@@ -15,8 +18,8 @@ export interface RecordedEvidenceSanitizer {
 }
 
 const FILE_REFERENCE = /^kitaru-file:\/\/sha256\/[a-f0-9]{64}$/;
-const MAX_FILE_BYTES = 8 * 1024 * 1024;
-const MAX_TOTAL_FILE_BYTES = 16 * 1024 * 1024;
+/** The most file bytes one turn captures, for one file or all of them together. */
+export const MAX_CAPTURED_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_RECORDED_FILES = 64;
 const ABSOLUTE_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
 
@@ -53,7 +56,7 @@ function copiedFile(file: MastraRecordedFile): MastraRecordedFile {
   if (
     !FILE_REFERENCE.test(file.url) ||
     !(file.bytes instanceof Uint8Array) ||
-    file.bytes.byteLength > MAX_FILE_BYTES ||
+    file.bytes.byteLength > MAX_CAPTURED_FILE_BYTES ||
     typeof file.mediaType !== "string" ||
     !file.mediaType ||
     fileReference(file) !== file.url
@@ -70,7 +73,7 @@ export function restoreCapturedFiles(recorded: readonly MastraRecordedFile[]) {
       (size, file) =>
         size + (file.bytes instanceof Uint8Array ? file.bytes.byteLength : 0),
       0,
-    ) > MAX_TOTAL_FILE_BYTES
+    ) > MAX_CAPTURED_FILE_BYTES
   )
     throw new Error(
       "Unsupported Mastra memory replay: file capture limit exceeded.",
@@ -92,6 +95,142 @@ export function restoreCapturedFiles(recorded: readonly MastraRecordedFile[]) {
       return { bytes: new Uint8Array(file.bytes), mediaType: file.mediaType };
     },
   };
+}
+
+/** Kitaru blob metadata, as the blob API returns it. */
+export interface StoredBlob {
+  id: string;
+  sha256: string;
+  size: number;
+}
+
+/** The Kitaru blob API calls that store and read captured files. */
+export interface FileBlobClient {
+  upload(
+    content: Uint8Array,
+    options: { filename?: string; mediaType?: string },
+  ): Promise<StoredBlob>;
+  get(blobId: string): Promise<StoredBlob>;
+  download(blobId: string): Promise<Uint8Array>;
+}
+
+const MAX_REMEMBERED_BLOBS = 1024;
+
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * Store captured files as Kitaru blobs, uploading each file's content once.
+ *
+ * The server keeps one blob per content and media type. This store also
+ * remembers the blob id of every file it stored, so a later turn that captures
+ * the same file checks that the blob still exists instead of sending its bytes
+ * again.
+ */
+export function createFileBlobStore(blobs: FileBlobClient) {
+  const remembered = new Map<string, string>();
+  function remember(reference: string, blobId: string): void {
+    remembered.delete(reference);
+    remembered.set(reference, blobId);
+    if (remembered.size > MAX_REMEMBERED_BLOBS)
+      remembered.delete(remembered.keys().next().value as string);
+  }
+  async function storeFile(file: MastraRecordedFile): Promise<string> {
+    const digest = sha256Hex(file.bytes);
+    const matches = (blob: StoredBlob) =>
+      blob.sha256 === digest && blob.size === file.bytes.byteLength;
+    const known = remembered.get(file.url);
+    if (known !== undefined) {
+      // A deleted blob is uploaded again instead of being referenced.
+      const blob = await blobs.get(known).catch(() => undefined);
+      if (blob && matches(blob)) return known;
+      remembered.delete(file.url);
+    }
+    const blob = await blobs.upload(file.bytes, {
+      filename: "mastra-file",
+      mediaType: file.mediaType,
+    });
+    if (!matches(blob))
+      throw new Error("The stored blob does not match the captured file.");
+    remember(file.url, blob.id);
+    return blob.id;
+  }
+  return {
+    /**
+     * Return `files` with the blob id each one is stored under, uploading
+     * files that no blob holds yet.
+     */
+    async store(
+      files: readonly MastraRecordedFile[],
+    ): Promise<MastraRecordedFile[]> {
+      try {
+        return await Promise.all(
+          files.map(async (file) =>
+            file.blobId === undefined
+              ? { ...file, blobId: await storeFile(file) }
+              : file,
+          ),
+        );
+      } catch {
+        throw new MastraReplayReasonError(
+          "Captured files could not be stored on the Kitaru server.",
+          "file_store_failed",
+        );
+      }
+    },
+  };
+}
+
+/**
+ * Read the content of recorded files, downloading the ones stored as blobs.
+ *
+ * Every downloaded file must match its recorded length, SHA-256 and content
+ * reference; otherwise replay fails instead of using different content.
+ */
+export async function loadRecordedFiles(
+  sources: readonly MastraRecordedFileSource[],
+  blobs: Pick<FileBlobClient, "download">,
+): Promise<MastraRecordedFile[]> {
+  const declaredBytes = sources.reduce(
+    (size, file) =>
+      size + ("bytes" in file ? file.bytes.byteLength : file.length),
+    0,
+  );
+  if (
+    sources.length > MAX_RECORDED_FILES ||
+    declaredBytes > MAX_CAPTURED_FILE_BYTES
+  )
+    throw new Error(
+      "Unsupported Mastra memory replay: file capture limit exceeded.",
+    );
+  return Promise.all(
+    sources.map(async (file): Promise<MastraRecordedFile> => {
+      if ("bytes" in file) return file;
+      let bytes: Uint8Array;
+      try {
+        bytes = await blobs.download(file.blobId);
+      } catch {
+        throw new Error(
+          "Unsupported Mastra memory replay: recorded file content could not be downloaded.",
+        );
+      }
+      if (
+        bytes.byteLength !== file.length ||
+        sha256Hex(bytes) !== file.sha256 ||
+        fileReference({ bytes, mediaType: file.mediaType }) !== file.url
+      )
+        throw new Error(
+          "Unsupported Mastra memory replay: recorded file content does not match its reference.",
+        );
+      return {
+        url: file.url,
+        mediaType: file.mediaType,
+        bytes,
+        blobId: file.blobId,
+      };
+    }),
+  );
 }
 
 /**
@@ -337,9 +476,7 @@ export async function createCapturedFiles(
       !resolved.mediaType
     )
       throw new TypeError("File resolver must return bytes and mediaType");
-    if (resolved.bytes.byteLength > MAX_FILE_BYTES)
-      throw new Error("Unsupported Mastra memory replay: file exceeds 8 MiB.");
-    if (bytesBefore + resolved.bytes.byteLength > MAX_TOTAL_FILE_BYTES)
+    if (bytesBefore + resolved.bytes.byteLength > MAX_CAPTURED_FILE_BYTES)
       throw new Error("Unsupported Mastra memory replay: files exceed 16 MiB.");
     return {
       url: fileReference(resolved),

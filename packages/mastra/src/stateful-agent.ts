@@ -54,6 +54,7 @@ import {
   encodeMemoryValue,
   finalizeMemoryReplayEnvelope,
   type MastraMemorySnapshot,
+  type MastraRecordedFile,
   MEMORY_REPLAY_KEY,
   restoreMemoryReplayEnvelope,
   validateMemoryReplayContext,
@@ -78,9 +79,11 @@ import {
 import {
   containsModelFileUrl,
   createCapturedFiles,
+  createFileBlobStore,
   createFileDownloads,
   createRecordedEvidenceSanitizer,
   FileCaptureTimeoutError,
+  loadRecordedFiles,
   restoreCapturedFiles,
 } from "./stateful-files.js";
 import {
@@ -447,6 +450,8 @@ export function createMemoryReplayAgent(
     apiUrl: options.apiUrl,
     timeoutMs: options.timeoutMs,
   });
+  // Shared by every turn so a file already stored is not uploaded again.
+  const fileBlobs = createFileBlobStore(client.blobs);
   async function runNativeBaseline(
     rawInput: unknown,
     callerOptions: RuntimeStreamOptions,
@@ -896,7 +901,9 @@ export function createMemoryReplayAgent(
     if (unsupportedEvidence) markUnsupportedOnBinding();
     try {
       const files = historical
-        ? restoreCapturedFiles(historical.files)
+        ? restoreCapturedFiles(
+            await loadRecordedFiles(historical.files, client.blobs),
+          )
         : baselineFiles;
       if (!files)
         throw new Error("Controlled file capture was not initialized.");
@@ -1065,7 +1072,10 @@ export function createMemoryReplayAgent(
           runtime.memory,
           createRecordedClock(historical.turnStartedAt),
         );
-      const captureEnvelope = (initialSnapshot: MastraMemorySnapshot) =>
+      const captureEnvelope = (
+        initialSnapshot: MastraMemorySnapshot,
+        recordedFiles: MastraRecordedFile[] = files.files,
+      ) =>
         captureMemoryReplayEnvelope(
           {
             invocationId,
@@ -1073,7 +1083,7 @@ export function createMemoryReplayAgent(
             initialSnapshot,
             configuration,
             requestContext: effectiveContext,
-            files: files.files,
+            files: recordedFiles,
             turnStartedAt,
           },
           // Uploads pass through this sanitizer too; applying it first
@@ -1367,13 +1377,20 @@ export function createMemoryReplayAgent(
                 captured.reason ?? "capture_prerequisite_failed",
               );
             // History files the turn resolved were captured after the
-            // envelope was built, so it is built again with their references.
+            // envelope was built, and every captured file is stored as a
+            // blob only now, so the envelope is built again with their
+            // references and blob ids.
+            const storedFiles = historical
+              ? undefined
+              : await fileBlobs.store(files.files);
             const resanitized = historical
               ? undefined
               : runtime.binding.sanitizeInitialAgain();
-            const recaptured = resanitized
-              ? captureEnvelope(resanitized)
-              : captured;
+            const initialSnapshot = resanitized ?? runtime.initialSnapshot;
+            const recaptured =
+              initialSnapshot && (resanitized || storedFiles?.length)
+                ? captureEnvelope(initialSnapshot, storedFiles)
+                : captured;
             if (!recaptured.envelope.complete)
               throw new MastraReplayReasonError(
                 recaptured.envelope.reasons.join(" "),
@@ -1392,6 +1409,9 @@ export function createMemoryReplayAgent(
                 })),
                 sanitizer.replace,
                 attachmentTokens?.counts(),
+                // A replay's own input keeps files recorded inline before
+                // blob storage unstored; no replay starts from it.
+                Boolean(historical),
               ),
             };
           },

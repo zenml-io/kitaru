@@ -20,6 +20,20 @@ import {
 } from "./helpers/memory-agent.js";
 
 const FILE_REF = `kitaru-file://sha256/${createHash("sha256").update("application/pdf\0").update(FILE_BYTES).digest("hex")}`;
+const FILE_BLOB_ID = "018f0000-0000-7000-8002-000000000400";
+const FILE_SHA256 = createHash("sha256").update(FILE_BYTES).digest("hex");
+
+/** A file entry recorded before blob storage, with its bytes inline. */
+function inlineFileEntry(patch: Record<string, unknown> = {}) {
+  return {
+    url: FILE_REF,
+    mediaType: "application/pdf",
+    base64: Buffer.from(FILE_BYTES).toString("base64"),
+    length: FILE_BYTES.byteLength,
+    sha256: FILE_SHA256,
+    ...patch,
+  };
+}
 
 function required<T>(value: T | undefined | null): T {
   if (value === undefined || value === null)
@@ -50,7 +64,15 @@ async function fixture() {
       },
     },
     requestContext: { locale: "en" },
-    files: [{ url: FILE_REF, mediaType: "application/pdf", bytes: FILE_BYTES }],
+    files: [
+      {
+        url: FILE_REF,
+        mediaType: "application/pdf",
+        blobId: FILE_BLOB_ID,
+        length: FILE_BYTES.byteLength,
+        sha256: FILE_SHA256,
+      },
+    ],
     omTape: [],
     turnStartedAt: new Date("2026-09-01T09:00:00.000Z"),
   };
@@ -183,9 +205,54 @@ it("counts aggregate envelope items, depth, and binary expansion against the sha
     null,
   );
   expect(() => encodeMemoryValue(deep)).toThrow(/depth/);
-  const withFile = await fixture();
-  required(withFile.files[0]).bytes = new Uint8Array(13_000_000);
-  expect(createMemoryReplayEnvelope(withFile).complete).toBe(false);
+  const oversized = await fixture();
+  required(oversized.files[0]).length = 16 * 1_048_576 + 1;
+  expect(createMemoryReplayEnvelope(oversized).complete).toBe(false);
+});
+
+it("keeps stored file bytes out of the envelope and its JSON budget", async () => {
+  const input = await fixture();
+  input.initialSnapshot.messages = [
+    {
+      ...required(input.initialSnapshot.messages[0]),
+      content: {
+        format: 2,
+        parts: [{ type: "text", text: "x".repeat(10 * 1_048_576) }],
+      },
+    },
+  ];
+  const bytes = new Uint8Array(9 * 1_048_576).fill(7);
+  const url = `kitaru-file://sha256/${createHash("sha256").update("application/pdf\0").update(bytes).digest("hex")}`;
+  const envelope = createMemoryReplayEnvelope({
+    ...input,
+    files: [{ url, mediaType: "application/pdf", bytes, blobId: FILE_BLOB_ID }],
+  });
+  expect(envelope.complete, envelope.reasons.join("; ")).toBe(true);
+  expect(envelope.files).toEqual([
+    {
+      url,
+      mediaType: "application/pdf",
+      blobId: FILE_BLOB_ID,
+      length: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    },
+  ]);
+  expect(JSON.stringify(envelope).length).toBeLessThan(11 * 1_048_576);
+});
+
+it("reads envelopes recorded with inline file bytes", async () => {
+  const input = await fixture();
+  const envelope = finalizeMemoryReplayEnvelope(
+    createMemoryReplayEnvelope(input),
+    [],
+    (value) => ({
+      ...(value as Record<string, unknown>),
+      files: [inlineFileEntry()],
+    }),
+  );
+  expect(decodeMemoryReplayEnvelope(envelope).files).toEqual([
+    { url: FILE_REF, mediaType: "application/pdf", bytes: FILE_BYTES },
+  ]);
 });
 
 it.each([50, 830])(
@@ -312,7 +379,12 @@ it("normalizes implicit thread OM and rejects old OM envelopes without a tape", 
   const workingOnly = await fixture();
   delete (workingOnly.configuration.memory as { observationalMemory?: unknown })
     .observationalMemory;
-  const oldWorking = { ...createMemoryReplayEnvelope(workingOnly), version: 2 };
+  // Version-2 envelopes hold file bytes inline.
+  const oldWorking = {
+    ...createMemoryReplayEnvelope(workingOnly),
+    version: 2,
+    files: [inlineFileEntry()],
+  };
   delete (oldWorking as { omTape?: unknown }).omTape;
   expect(decodeMemoryReplayEnvelope(oldWorking).omTape).toBeUndefined();
 });
@@ -376,7 +448,7 @@ it("rejects changed file lengths, noncanonical base64, and malformed date tags",
   const input = await fixture();
   for (const patch of [{ length: 100 }, { base64: "???" }]) {
     const envelope = createMemoryReplayEnvelope(input);
-    Object.assign(required(envelope.files[0]), patch);
+    envelope.files = [inlineFileEntry(patch)];
     expect(() => decodeMemoryReplayEnvelope(envelope)).toThrow(/binary/);
   }
   expect(() =>

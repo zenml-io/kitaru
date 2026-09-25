@@ -487,6 +487,10 @@ async def check(output: Path) -> None:
             assert all(len(hotel["details"]) == 10 for hotel in hotels)
             assert len(json.dumps(baseline.inputs).encode()) > 1_048_576
             assert "historical-secret" not in json.dumps(baseline.inputs)
+            # Recorded files live in blobs, outside the replay input.
+            assert envelope["files"]
+            assert all("base64" not in file for file in envelope["files"])
+            file_blob_ids = [file["blobId"] for file in envelope["files"]]
             connection = await asyncpg.connect(
                 host=DB_HOST,
                 port=DB_PORT,
@@ -616,6 +620,17 @@ async def check(output: Path) -> None:
                     f'"GET /api/v1/tasks/{report["task_id"]}/spec HTTP/1.1" 200 OK'
                 )
                 assert report["task_spec_requests"] == expected, report
+            # Each replay task read the recorded files with its own task token.
+            replays = sum(1 for report in good if report["replay_id"])
+            file_blob_downloads = {
+                blob_id: server_log.count(
+                    f'"GET /api/v1/blobs/{blob_id}/content HTTP/1.1" 200 OK'
+                )
+                for blob_id in file_blob_ids
+            }
+            assert all(count == replays for count in file_blob_downloads.values()), (
+                file_blob_downloads
+            )
             connection = await asyncpg.connect(
                 host=DB_HOST,
                 port=DB_PORT,
@@ -638,6 +653,7 @@ async def check(output: Path) -> None:
                 "baseline_session_id": str(baseline.id),
                 "offloaded_input_blob_id": str(offloaded),
                 "offloaded_request_nodes": offloaded_requests,
+                "recorded_file_blob_downloads": file_blob_downloads,
                 "sdk": sdk,
                 "cli": cli,
                 "mcp": mcp_result,

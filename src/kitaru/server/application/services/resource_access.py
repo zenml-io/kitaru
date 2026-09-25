@@ -25,8 +25,13 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.base import ForbiddenError
 from kitaru.server.domain.blob import BlobAccessDenied
-from kitaru.server.domain.session import Session, SessionAccessDenied
+from kitaru.server.domain.session import (
+    Session,
+    SessionAccessDenied,
+    mastra_replay_stored_files,
+)
 from kitaru.server.domain.task import (
+    AgentTaskDetails,
     AnalysisTaskDetails,
     BlobImportSourceSpec,
     EvaluationTaskDetails,
@@ -86,6 +91,13 @@ def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
         details.source, BlobImportSourceSpec
     ):
         blobs.add(details.source.blob_id)
+    # A replayed Mastra turn reads its recorded files from blobs. The account
+    # that created the job can read any blob already, so naming blobs in the
+    # task inputs reaches nothing that account could not.
+    if isinstance(details, AgentTaskDetails):
+        blobs.update(
+            file.blob_id for file in mastra_replay_stored_files(details.inputs)
+        )
     grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
     if sessions:
         grants[GrantKind.SESSION] = frozenset(sessions)
