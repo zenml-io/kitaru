@@ -709,3 +709,89 @@ def test_lazy_entry_point_reports_missing_cli_extra(monkeypatch, capsys) -> None
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "kitaru[cli]" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["logout", "--all", "https://api.example.com"], "cannot be used with --all"),
+        (["logout", "--all", "--volumes"], "--all and --volumes cannot be combined"),
+        (
+            [
+                "logout",
+                "https://one.example.com",
+                "--server",
+                "https://two.example.com",
+            ],
+            "identify different servers",
+        ),
+    ],
+)
+def test_logout_rejects_conflicting_targets(
+    argv: list[str], message: str, monkeypatch, capsys
+) -> None:
+    """Ambiguous logout targets fail before any credential is removed."""
+
+    async def fail_logout(**options: Any) -> CommandResult:
+        raise AssertionError("logout ran with conflicting targets")
+
+    monkeypatch.setattr(app_module.auth_commands, "logout", fail_logout)
+
+    assert app_module.main([*argv, "--output", "json"]) == 2
+
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["kind"] == "invalid_arguments"
+    assert message in error["message"]
+
+
+def test_followed_local_logs_reject_single_document_json(monkeypatch, capsys) -> None:
+    """An endless log stream cannot be returned as one JSON document."""
+
+    async def fail_logs(**options: Any) -> list[str]:
+        raise AssertionError("logs were read")
+
+    monkeypatch.setattr(app_module.local_runtime, "get_local_logs", fail_logs)
+
+    assert app_module.main(["local", "logs", "--follow", "--output", "json"]) == 2
+
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["kind"] == "invalid_arguments"
+    assert "--output jsonl" in error["hint"]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["agent", "register", "demo", "--spec", "agent.yaml", "--command", "run"],
+        ["agent", "version", "register", "demo", "--spec", "v.yaml", "--tool", "x"],
+    ],
+)
+def test_agent_spec_conflicts_with_direct_options(argv: list[str], capsys) -> None:
+    """A spec file is the whole definition, so direct options cannot mix in."""
+    assert app_module.main([*argv, "--output", "json"]) == 2
+
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["kind"] == "invalid_arguments"
+    assert error["message"] == "--spec conflicts with direct agent options."
+
+
+@pytest.mark.parametrize(
+    ("exception", "kind", "retryable"),
+    [
+        (APIError(401, "expired token"), "authentication_failed", False),
+        (APIError(409, "name already exists"), "conflict", False),
+        (APIError(503, "upstream unavailable"), "network_error", True),
+        (APIError(418, "teapot"), "internal_error", False),
+        (ValueError("size must be positive"), "invalid_arguments", False),
+        (RuntimeError(), "internal_error", False),
+    ],
+)
+def test_convert_error_maps_failures_to_stable_kinds(
+    exception: BaseException, kind: str, retryable: bool
+) -> None:
+    """Scripts can branch on the error kind and retry only transient failures."""
+    error = app_module._convert_error(exception)
+
+    assert error.kind == kind
+    assert error.retryable is retryable
+    assert error.message
