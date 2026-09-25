@@ -27,6 +27,8 @@ export type MastraReplayReason =
   | "memory_store_shape_unsupported"
   /** Observational-memory work from an earlier turn was still running, or stored records show work that never cleared. */
   | "om_work_unjoined"
+  /** The turn started while an earlier recorded turn on the same thread or resource was finishing its memory work. */
+  | "earlier_turn_finalizing"
   /** Reading the initial memory state from storage failed. */
   | "memory_read_failed"
   /** Reading the initial memory state did not finish in time. */

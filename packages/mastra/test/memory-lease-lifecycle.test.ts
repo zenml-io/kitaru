@@ -586,7 +586,7 @@ it.each(LEASES)(
       () =>
         expect(outcomes(api)).toEqual([
           "completed/eligible",
-          "completed/ineligible/om_work_unjoined",
+          "completed/ineligible/earlier_turn_finalizing",
         ]),
       { timeout: 5000 },
     );

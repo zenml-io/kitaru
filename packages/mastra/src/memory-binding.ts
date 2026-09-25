@@ -448,7 +448,7 @@ function createWriteRegistrar(
   getSelector: () => MastraMemorySelector | undefined,
   waitMs: number,
   onFailure: (reason: string) => void,
-  cooperative = false,
+  isCooperative: () => boolean = () => false,
 ): () => Promise<MastraMemoryLease | undefined> {
   let markedUnsafe = false;
   return async () => {
@@ -459,7 +459,7 @@ function createWriteRegistrar(
         return await acquireWithin(
           access,
           selector,
-          { waitMs: 0, cooperative },
+          { waitMs: 0, cooperative: isCooperative() },
           waitMs,
           () => onFailure("Late source-thread lease release failed."),
         );
@@ -763,14 +763,15 @@ export function createMemoryCaptureBinding(
   let joinAbandoned = false;
   const markLeaseUnavailable = (message: string) =>
     markIncomplete(message, "memory_lease_unavailable");
-  // This invocation's own writes may follow a finalizing earlier turn
-  // without invalidating it; this invocation is then ineligible itself.
+  // Only writes made under a lease that followed a finalizing earlier turn
+  // may leave that turn eligible; this invocation is ineligible itself then.
+  // A write after release belongs to no lease and invalidates every holder.
   const registerWrite = createWriteRegistrar(
     options.exclusiveAccess,
     () => selector,
     waitMs,
     markLeaseUnavailable,
-    true,
+    () => !released && lease?.overlapsFinalizingTurn === true,
   );
 
   function markIncomplete(
@@ -1100,9 +1101,11 @@ export function createMemoryCaptureBinding(
               markLeaseUnavailable("Late source-thread lease release failed."),
           );
           if (lease.overlapsFinalizingTurn) {
+            // The overlap may be on the resource alone, or with a turn that
+            // has no observational memory, so the reason names neither.
             markIncomplete(
-              "Observational-memory work from an earlier turn was still running.",
-              "om_work_unjoined",
+              "An earlier turn on this thread or resource was still finishing its memory work.",
+              "earlier_turn_finalizing",
             );
             return undefined;
           }

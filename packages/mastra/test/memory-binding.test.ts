@@ -734,3 +734,43 @@ it("truncates over-budget mutation evidence with its bound and keeps the turn el
   });
   await binding.release();
 });
+
+it("lets a late write from a released turn invalidate a finalizing later turn", async () => {
+  const access = createProcessLocalMemoryAccess();
+  const earlier = await fixture("earlier", access);
+  await earlier.binding.captureInitial(earlier.runtime.memory);
+  // The earlier turn gave up on its OM work and released its lease.
+  await earlier.binding.release();
+  const later = await access.acquire({ threadId: THREAD, resourceId: RESOURCE });
+  await later.markFinalizing?.();
+  expect(await later.verifyEligibility()).toBe(true);
+  // The abandoned OM work of the earlier turn writes under the later turn.
+  await earlier.binding.domain.updateThread({
+    id: THREAD,
+    metadata: { workingMemory: "late" },
+  });
+  await earlier.binding.drain();
+  expect(await later.verifyEligibility()).toBe(false);
+  await later();
+});
+
+it("names a quick reply that follows a finalizing turn on another thread neutrally", async () => {
+  const access = createProcessLocalMemoryAccess();
+  const holder = await access.acquire({
+    threadId: "other-thread",
+    resourceId: RESOURCE,
+  });
+  await holder.markFinalizing?.();
+  const { runtime, binding } = await fixture("reply", access);
+  expect(await binding.captureInitial(runtime.memory)).toBeUndefined();
+  expect(binding.incompleteReason).toBe("earlier_turn_finalizing");
+  // The reply's own writes still follow the finalizing holder.
+  await binding.domain.updateThread({
+    id: THREAD,
+    metadata: { workingMemory: "reply" },
+  });
+  await binding.drain();
+  expect(await holder.verifyEligibility()).toBe(true);
+  await binding.release();
+  await holder();
+});
