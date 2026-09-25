@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 
 from conftest import (
+    RECORDED_OM_TAPE,
     ReplayServices,
     build_replay_services,
     build_task_actor,
@@ -206,6 +207,42 @@ async def test_malformed_eligible_mastra_baseline_creates_no_replay(
             ),
             actor=ACTOR,
         )
+    replays, _ = await services.replays.query(ReplayFilter())
+    assert not replays
+
+
+@pytest.mark.parametrize("tape", [RECORDED_OM_TAPE, [*RECORDED_OM_TAPE, {}]])
+async def test_mastra_baseline_om_tape_entries_are_checked_before_replay(
+    services: ReplayServices,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    tape: list[Any],
+) -> None:
+    """Refuse a stored OM tape the adapter would reject after the job exists."""
+    version = await _agent_version_with_run_spec(services)
+    inputs = deepcopy(complete_mastra_memory_replay_inputs)
+    inputs["mastra_memory_replay"]["omTape"] = deepcopy(tape)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        framework="mastra",
+        inputs=inputs,
+        metadata={"mastra_replay_state": "eligible"},
+    )
+    create = ReplayCreate(
+        baseline_session_id=baseline.id,
+        evaluators=[],
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+    )
+    if tape is RECORDED_OM_TAPE:
+        bundle = await services.replay_service.create_replay(create, actor=ACTOR)
+        assert bundle.replay.baseline_session_id == baseline.id
+        return
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_incomplete"):
+        await services.replay_service.create_replay(create, actor=ACTOR)
     replays, _ = await services.replays.query(ReplayFilter())
     assert not replays
 

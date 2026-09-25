@@ -15,6 +15,7 @@
 
 import base64
 import uuid
+from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -22,6 +23,7 @@ from typing import Any
 import pytest
 
 from conftest import (
+    RECORDED_OM_TAPE,
     FakeAgentRepository,
     FakeAgentVersionRepository,
     FakeBlobDataStore,
@@ -484,6 +486,74 @@ async def test_finalize_pending_mastra_replay_inputs_atomically(
     assert stored.status == SessionStatus.COMPLETED
     assert stored.inputs is not None and stored.inputs.value == final_inputs
     assert stored.metadata["mastra_replay_state"] == "eligible"
+
+
+@pytest.mark.parametrize(
+    ("change", "accepted"),
+    [
+        (lambda tape: None, True),
+        (lambda tape: tape.append({}), False),
+        (lambda tape: tape.append("entry"), False),
+        (lambda tape: tape[0].update(phase="actor"), False),
+        (lambda tape: tape[0].update(method="generate"), False),
+        (lambda tape: tape[0].update(ordinal="0"), False),
+        (lambda tape: tape[0].update(ordinal=True), False),
+        (lambda tape: tape[0].pop("inputFingerprint"), False),
+        (lambda tape: tape[0].pop("output"), False),
+        (lambda tape: tape[0].update(output={"chunks": []}), False),
+        (lambda tape: tape[0].update(failed=False), False),
+        (lambda tape: tape[1].update(failed=None), False),
+    ],
+    ids=[
+        "recorded",
+        "empty-entry",
+        "non-object",
+        "phase",
+        "method",
+        "string-ordinal",
+        "boolean-ordinal",
+        "no-fingerprint",
+        "no-output",
+        "stream-output",
+        "failed-false",
+        "failed-null",
+    ],
+)
+async def test_mastra_finalization_checks_om_tape_entries(
+    service: SessionService,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    change: Callable[[list[Any]], object],
+    accepted: bool,
+) -> None:
+    """Refuse an eligible marker whose OM tape the adapter would reject."""
+    created = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(),
+            origin=SessionOrigin.RECORDED,
+            framework="mastra",
+            inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+            metadata={"mastra_replay_state": "pending"},
+        ),
+        actor=ACTOR,
+    )
+    inputs = deepcopy(complete_mastra_memory_replay_inputs)
+    tape = deepcopy(RECORDED_OM_TAPE)
+    change(tape)
+    inputs["mastra_memory_replay"]["omTape"] = tape
+    update = SessionUpdate(
+        status=SessionStatus.COMPLETED,
+        inputs=inputs,
+        metadata={"mastra_replay_state": "eligible"},
+    )
+    if accepted:
+        await service.update_session(created.id, update, actor=ACTOR)
+        stored = await service.get_session(created.id, actor=ACTOR)
+        assert stored.metadata["mastra_replay_state"] == "eligible"
+        return
+    with pytest.raises(SessionReplayFinalizationInvalid):
+        await service.update_session(created.id, update, actor=ACTOR)
+    stored = await service.get_session(created.id, actor=ACTOR)
+    assert stored.metadata["mastra_replay_state"] == "pending"
 
 
 @pytest.mark.parametrize("invalid_field", ["raw_input", "file_hash", "unstored_file"])

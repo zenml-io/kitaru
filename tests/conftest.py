@@ -374,6 +374,51 @@ def imported_session(
     )
 
 
+# Output of the Mastra adapter's `createOMResultTape` for a streamed observer
+# call and a generated reflector call whose first attempt failed.
+_OBSERVER_FINGERPRINT = (
+    "732acbb3e402e912437dbe53442ca54368b45e73c284acbf4c0530fac53cca74"
+)
+_REFLECTOR_FINGERPRINT = (
+    "8e71c43ded330b0fc5a427dccc809d279ff89ac2ee06037497b8a1c4918ac306"
+)
+RECORDED_OM_TAPE: list[dict[str, Any]] = [
+    {
+        "phase": "observer",
+        "ordinal": 0,
+        "method": "doStream",
+        "output": [
+            {
+                "type": "text-delta",
+                "textDelta": "x",
+                "at": {"$mastra": "date", "value": "1970-01-01T00:00:00.000Z"},
+            },
+            {"type": "finish", "finishReason": "stop"},
+        ],
+        "inputFingerprint": _OBSERVER_FINGERPRINT,
+    },
+    {
+        "phase": "reflector",
+        "ordinal": 1,
+        "method": "doGenerate",
+        "output": None,
+        "failed": True,
+        "inputFingerprint": _REFLECTOR_FINGERPRINT,
+    },
+    {
+        "phase": "reflector",
+        "ordinal": 2,
+        "method": "doGenerate",
+        "output": {
+            "content": [{"type": "text", "text": "r"}],
+            "finishReason": "stop",
+            "usage": {"inputTokens": 1},
+        },
+        "inputFingerprint": _REFLECTOR_FINGERPRINT,
+    },
+]
+
+
 @pytest.fixture
 def complete_mastra_memory_replay_inputs() -> dict[str, Any]:
     """Build a structurally complete v3 input for server finalization tests."""

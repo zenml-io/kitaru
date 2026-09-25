@@ -328,6 +328,38 @@ def _mastra_key_order_well_formed(key_order: Any) -> bool:
     return True
 
 
+def _mastra_om_tape_entry_well_formed(entry: Any) -> bool:
+    """Check that a recorded OM result is one the adapter's result tape serves.
+
+    The adapter refuses a whole tape that holds an entry without a known
+    phase and method, a numeric ordinal, a string input fingerprint, and a
+    failure marker that is absent or true. It also needs the recorded output,
+    which a successful stream call holds as its list of chunks.
+
+    Args:
+        entry: One item of the input's `omTape` list.
+
+    Returns:
+        Whether the adapter can serve the entry.
+    """
+    if not isinstance(entry, dict):
+        return False
+    ordinal = entry.get("ordinal")
+    failed = "failed" in entry
+    return (
+        entry.get("phase") in {"observer", "reflector"}
+        and entry.get("method") in {"doGenerate", "doStream"}
+        and isinstance(ordinal, int | float)
+        and not isinstance(ordinal, bool)
+        and isinstance(entry.get("inputFingerprint"), str)
+        and (not failed or entry["failed"] is True)
+        and "output" in entry
+        and (
+            failed or entry["method"] != "doStream" or isinstance(entry["output"], list)
+        )
+    )
+
+
 def mastra_replay_v3_complete(envelope: dict[str, Any]) -> bool:
     """Check the required shape of a finalized Mastra replay input."""
     snapshot = envelope.get("initialSnapshot")
@@ -351,6 +383,7 @@ def mastra_replay_v3_complete(envelope: dict[str, Any]) -> bool:
         and isinstance(files, list)
         and _mastra_replay_files_complete(files)
         and isinstance(envelope.get("omTape"), list)
+        and all(map(_mastra_om_tape_entry_well_formed, envelope["omTape"]))
         and mastra_replay_v3_current(envelope)
         and _mastra_key_order_well_formed(envelope["keyOrder"])
     )
