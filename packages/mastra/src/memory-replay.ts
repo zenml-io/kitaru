@@ -409,6 +409,10 @@ export async function createIsolatedMemoryReplay(
       resourceId: snapshot.resourceId,
       domain,
       exclusiveAccess: createProcessLocalMemoryAccess(),
+      // History files the baseline never resolved keep their redacted URLs.
+      // Replay resolves only recorded files, and a URL that reaches the
+      // model fails the replay before anything fetches it.
+      acceptHistoryFileUrls: () => undefined,
       recordMutation: options.recordMutation,
       getRequestId: options.getRequestId,
       onIncomplete: options.onIncomplete,

@@ -180,21 +180,16 @@ function isFilePart(value: Record<string, unknown>): boolean {
 }
 
 /**
- * The network URLs held by file or image parts in `value`, or by message
- * attachments, in the order they appear. Only captured files become recorded
- * references, so replay would have to fetch any other such URL.
+ * The URLs matching `pattern` held by file or image parts in `value`, or by
+ * message attachments, in the order they appear.
  */
-export function collectFileNetworkUrls(value: unknown): string[] {
+function collectFileUrls(value: unknown, pattern: RegExp): string[] {
   const urls: string[] = [];
   const active = new Set<object>();
   function visit(current: unknown, filePart: boolean): void {
-    if (typeof current === "string") {
-      if (filePart && NETWORK_URL.test(current)) urls.push(current);
-      return;
-    }
-    if (current instanceof URL) {
-      if (filePart && /^https?:$/i.test(current.protocol))
-        urls.push(current.href);
+    if (typeof current === "string" || current instanceof URL) {
+      const url = typeof current === "string" ? current : current.href;
+      if (filePart && pattern.test(url)) urls.push(url);
       return;
     }
     if (
@@ -220,6 +215,29 @@ export function collectFileNetworkUrls(value: unknown): string[] {
   }
   visit(value, false);
   return urls;
+}
+
+/**
+ * The network URLs held by file or image parts in `value`, or by message
+ * attachments. Only captured files become recorded references, so replay
+ * would have to fetch any other such URL.
+ */
+export function collectFileNetworkUrls(value: unknown): string[] {
+  return collectFileUrls(value, NETWORK_URL);
+}
+
+const MODEL_FILE_URL = /^(?:https?|kitaru-file):\/\//i;
+
+/**
+ * Whether a file or image part in `value`, or a message attachment, holds a
+ * network URL or a captured file reference instead of the file's content.
+ *
+ * Mastra hands such a URL to the model provider, or downloads it itself,
+ * without the application's `resolveFile`. A replay's messages hold the
+ * captured reference there, which neither the provider nor Mastra can fetch.
+ */
+export function containsModelFileUrl(value: unknown): boolean {
+  return collectFileUrls(value, MODEL_FILE_URL).length > 0;
 }
 
 /** Declared files did not finish downloading within the capture wait. */
@@ -278,89 +296,77 @@ export async function createCapturedFiles(
   // Keyed by WHATWG form so a file part holding `new URL(declared)` matches.
   const declaredToReference = new Map<string, string>();
   const filesByReference = new Map<string, MastraRecordedFile>();
+  const uniqueUrls = new Map<string, string>();
+  for (const url of urls) {
+    const normalized = normalizeFileUrl(url);
+    if (!uniqueUrls.has(normalized)) uniqueUrls.set(normalized, url);
+  }
+  if (uniqueUrls.size > MAX_RECORDED_FILES)
+    throw new Error(
+      "Unsupported Mastra memory replay: file count limit exceeded.",
+    );
+  const downloads = [...uniqueUrls].map(([normalized, url]) => {
+    const pending = Promise.resolve().then(() => download(url));
+    pending.catch(() => undefined);
+    return [normalized, pending] as const;
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline =
+    waitMs === undefined || downloads.length === 0
+      ? undefined
+      : new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new FileCaptureTimeoutError()),
+            waitMs,
+          );
+        });
+  deadline?.catch(() => undefined);
+  const historyUrls = new Set<string>();
   let totalBytes = 0;
   /**
-   * Download the URLs not captured yet and declare them together, or throw
-   * and declare none of them.
+   * Check a downloaded file against the capture limits and return its record.
+   * `totalBytes` is only updated by the caller once the whole batch fits.
    */
-  async function captureUrls(
-    urls: readonly string[],
-    waitMs?: number,
-  ): Promise<void> {
-    const uniqueUrls = new Map<string, string>();
-    for (const url of urls) {
-      const normalized = normalizeFileUrl(url);
-      if (!declaredToReference.has(normalized) && !uniqueUrls.has(normalized))
-        uniqueUrls.set(normalized, url);
-    }
-    if (declaredToReference.size + uniqueUrls.size > MAX_RECORDED_FILES)
-      throw new Error(
-        "Unsupported Mastra memory replay: file count limit exceeded.",
-      );
-    const downloads = [...uniqueUrls].map(([normalized, url]) => {
-      const pending = Promise.resolve().then(() => download(url));
-      pending.catch(() => undefined);
-      return [normalized, pending] as const;
-    });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline =
-      waitMs === undefined || downloads.length === 0
-        ? undefined
-        : new Promise<never>((_resolve, reject) => {
-            timer = setTimeout(
-              () => reject(new FileCaptureTimeoutError()),
-              waitMs,
-            );
-          });
-    deadline?.catch(() => undefined);
-    const captured: [string, MastraRecordedFile][] = [];
-    let bytes = totalBytes;
-    try {
-      for (const [normalized, pending] of downloads) {
-        let resolved: ResolvedMemoryFile;
-        try {
-          resolved = await (deadline
-            ? Promise.race([pending, deadline])
-            : pending);
-        } catch (error) {
-          if (error instanceof FileCaptureTimeoutError) throw error;
-          // Resolver errors can contain a signed URL. Keep them out of diagnostics.
-          throw new Error("Controlled file capture failed.");
-        }
-        if (
-          !(resolved.bytes instanceof Uint8Array) ||
-          typeof resolved.mediaType !== "string" ||
-          !resolved.mediaType
-        )
-          throw new TypeError("File resolver must return bytes and mediaType");
-        if (resolved.bytes.byteLength > MAX_FILE_BYTES)
-          throw new Error(
-            "Unsupported Mastra memory replay: file exceeds 8 MiB.",
-          );
-        bytes += resolved.bytes.byteLength;
-        if (bytes > MAX_TOTAL_FILE_BYTES)
-          throw new Error(
-            "Unsupported Mastra memory replay: files exceed 16 MiB.",
-          );
-        captured.push([
-          normalized,
-          {
-            url: fileReference(resolved),
-            bytes: new Uint8Array(resolved.bytes),
-            mediaType: resolved.mediaType,
-          },
-        ]);
+  function checkedFile(
+    resolved: ResolvedMemoryFile,
+    bytesBefore: number,
+  ): MastraRecordedFile {
+    if (
+      !(resolved.bytes instanceof Uint8Array) ||
+      typeof resolved.mediaType !== "string" ||
+      !resolved.mediaType
+    )
+      throw new TypeError("File resolver must return bytes and mediaType");
+    if (resolved.bytes.byteLength > MAX_FILE_BYTES)
+      throw new Error("Unsupported Mastra memory replay: file exceeds 8 MiB.");
+    if (bytesBefore + resolved.bytes.byteLength > MAX_TOTAL_FILE_BYTES)
+      throw new Error("Unsupported Mastra memory replay: files exceed 16 MiB.");
+    return {
+      url: fileReference(resolved),
+      bytes: new Uint8Array(resolved.bytes),
+      mediaType: resolved.mediaType,
+    };
+  }
+  try {
+    for (const [normalized, pending] of downloads) {
+      let resolved: ResolvedMemoryFile;
+      try {
+        resolved = await (deadline
+          ? Promise.race([pending, deadline])
+          : pending);
+      } catch (error) {
+        if (error instanceof FileCaptureTimeoutError) throw error;
+        // Resolver errors can contain a signed URL. Keep them out of diagnostics.
+        throw new Error("Controlled file capture failed.");
       }
-    } finally {
-      clearTimeout(timer);
-    }
-    totalBytes = bytes;
-    for (const [normalized, file] of captured) {
+      const file = checkedFile(resolved, totalBytes);
+      totalBytes += file.bytes.byteLength;
       declaredToReference.set(normalized, file.url);
       filesByReference.set(file.url, file);
     }
+  } finally {
+    clearTimeout(timer);
   }
-  await captureUrls(urls, waitMs);
   const lookup = createFileUrlLookup(declaredToReference);
   function referenceFor(url: string): string {
     const reference = lookup(url);
@@ -457,32 +463,47 @@ export async function createCapturedFiles(
       return restoreCapturedFiles([...filesByReference.values()]).files;
     },
     /**
-     * Declare the network URLs in file and image parts of thread history,
-     * downloading each one not declared yet.
+     * Allow the turn to capture the network URLs held by file parts in its
+     * thread history once it resolves them.
      *
      * History URLs are part of the recorded conversation, so capturing them
-     * lets replay serve their bytes without fetching them. Rejects with
-     * `FileCaptureTimeoutError` like capture, or with reason
-     * `file_capture_failed` when a download fails or the files exceed the
-     * capture limits; the URLs stay undeclared either way.
+     * adds no way for replay to fetch an arbitrary URL.
      */
-    async captureHistoryFiles(
-      history: unknown,
-      waitMs?: number,
-    ): Promise<void> {
+    acceptHistoryUrls(urls: readonly string[]): void {
+      for (const url of urls) {
+        const normalized = normalizeFileUrl(url);
+        if (!declaredToReference.has(normalized)) historyUrls.add(normalized);
+      }
+    },
+    /** Whether `url` is an accepted history URL not captured yet. */
+    isHistoryUrl: (url: string): boolean =>
+      historyUrls.has(normalizeFileUrl(url)) && lookup(url) === undefined,
+    /**
+     * Declare the history URL `url` with the file the turn resolved for it.
+     * Throws with reason `file_capture_failed`, and declares nothing, when the
+     * file breaks the capture limits.
+     */
+    recordHistoryFile(url: string, resolved: ResolvedMemoryFile): void {
+      const normalized = normalizeFileUrl(url);
+      if (declaredToReference.has(normalized)) return;
+      let file: MastraRecordedFile;
       try {
-        await captureUrls(collectFileNetworkUrls(history), waitMs);
+        if (declaredToReference.size >= MAX_RECORDED_FILES)
+          throw new Error(
+            "Unsupported Mastra memory replay: file count limit exceeded.",
+          );
+        file = checkedFile(resolved, totalBytes);
       } catch (error) {
-        if (error instanceof FileCaptureTimeoutError) throw error;
         throw new MastraReplayReasonError(
-          `Thread history files could not be captured: ${
-            error instanceof Error
-              ? error.message
-              : "Controlled file capture failed."
+          `A thread history file could not be captured: ${
+            error instanceof Error ? error.message : "invalid file."
           }`,
           "file_capture_failed",
         );
       }
+      totalBytes += file.bytes.byteLength;
+      declaredToReference.set(normalized, file.url);
+      filesByReference.set(file.url, file);
     },
     /** Whether `url` is one of the declared file URLs. */
     isDeclared: (url: string): boolean => lookup(url) !== undefined,

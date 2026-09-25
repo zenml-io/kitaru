@@ -267,9 +267,18 @@ it("keeps recorded attachment token counts and refuses malformed ones", async ()
       [reference]: { sync: -1 },
     }),
   ).toThrow(/attachment token counts/);
+  // A history file the turn never resolved keeps its redacted URL as key.
+  const redacted = {
+    "https://files.invalid/a.pdf?alt=media&token=REDACTED": { sync: 1 },
+  };
+  expect(
+    decodeMemoryReplayEnvelope(
+      finalizeMemoryReplayEnvelope(provisional, [], undefined, redacted),
+    ).attachmentTokens,
+  ).toEqual(redacted);
   expect(() =>
     finalizeMemoryReplayEnvelope(provisional, [], undefined, {
-      "https://files.invalid/a.pdf": { sync: 1 },
+      "files.invalid/a.pdf": { sync: 1 },
     }),
   ).toThrow(/attachment token counts/);
 });

@@ -9,7 +9,10 @@ export interface AttachmentTokenCount {
   async?: number;
 }
 
-/** Recorded attachment token counts, keyed by captured file reference. */
+/**
+ * Recorded attachment token counts, keyed by captured file reference, or by
+ * the credential-redacted URL of a history file the turn never resolved.
+ */
 export type AttachmentTokenCounts = Record<string, AttachmentTokenCount>;
 
 type OMEngine = NonNullable<Awaited<Memory["omEngine"]>>;
@@ -20,6 +23,7 @@ interface AttachmentCounter {
 }
 
 const FILE_REFERENCE = /^kitaru-file:\/\/sha256\/[a-f0-9]{64}$/;
+const NETWORK_URL = /^https?:\/\//i;
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -51,26 +55,37 @@ function isCount(value: unknown): value is number {
 }
 
 /**
- * Record the tokens Mastra's observational memory counts for each declared
- * attachment during a baseline turn, without changing any count.
+ * Record the tokens Mastra's observational memory counts for each attachment
+ * URL during a baseline turn, without changing any count.
  *
  * Mastra counts an attachment from its URL: the file name in the URL, or the
  * provider's own count of the file behind it. A replay's history holds the
- * captured reference instead, which counts very differently, so replay reuses
- * these counts. `referenceFor` returns a declared URL's captured reference.
+ * captured reference or a redacted URL instead, which count differently, so
+ * replay reuses these counts. `counts()` keys each count by what
+ * `recordedFormOf` returns for its URL then, so a file captured after Mastra
+ * counted it is still keyed by its reference; a URL it returns undefined for
+ * is left out.
  */
 export function recordAttachmentTokens(
   engine: OMEngine,
-  referenceFor: (value: string) => string | undefined,
+  recordedFormOf: (value: string) => string | undefined,
 ): { counts(): AttachmentTokenCounts } {
-  const counts: AttachmentTokenCounts = {};
+  const seen = new Map<string, AttachmentTokenCount>();
+  const counts = (): AttachmentTokenCounts => {
+    const result: AttachmentTokenCounts = {};
+    for (const [url, count] of seen) {
+      const key = recordedFormOf(url);
+      if (key) result[key] = { ...count, ...result[key] };
+    }
+    return result;
+  };
   const counter = getAttachmentCounter(engine);
-  if (!counter) return { counts: () => counts };
+  if (!counter) return { counts };
   const keep = (part: unknown, kind: "sync" | "async", tokens: unknown) => {
     const data = getAttachmentData(part);
-    const reference = typeof data === "string" ? referenceFor(data) : undefined;
-    if (!reference || !isCount(tokens)) return;
-    counts[reference] = { [kind]: tokens, ...counts[reference] };
+    if (typeof data !== "string" || !NETWORK_URL.test(data) || !isCount(tokens))
+      return;
+    seen.set(data, { [kind]: tokens, ...seen.get(data) });
   };
   const countSync = counter.countAttachmentPartSync.bind(counter);
   const countAsync = counter.countAttachmentPartAsync.bind(counter);
@@ -86,11 +101,11 @@ export function recordAttachmentTokens(
     keep(part, "async", tokens);
     return tokens;
   };
-  return { counts: () => counts };
+  return { counts };
 }
 
 /**
- * Count each captured attachment in a replay as its recorded turn did.
+ * Count each recorded attachment in a replay as its recorded turn did.
  *
  * An attachment without a recorded asynchronous count takes its synchronous
  * one, because Mastra's asynchronous count would ask the provider live.
@@ -105,9 +120,9 @@ export function replayAttachmentTokens(
   const countAsync = counter.countAttachmentPartAsync.bind(counter);
   const recorded = (part: unknown): AttachmentTokenCount | undefined => {
     const data = getAttachmentData(part);
-    return typeof data === "string" && FILE_REFERENCE.test(data)
-      ? (counts[data] ?? {})
-      : undefined;
+    if (typeof data !== "string") return undefined;
+    if (Object.hasOwn(counts, data)) return counts[data];
+    return FILE_REFERENCE.test(data) ? {} : undefined;
   };
   counter.countAttachmentPartSync = (part) => {
     const count = recorded(part);
@@ -128,7 +143,11 @@ export function readAttachmentTokenCounts(
   if (!record(value)) return undefined;
   const counts: AttachmentTokenCounts = {};
   for (const [reference, entry] of Object.entries(value)) {
-    if (!FILE_REFERENCE.test(reference) || !record(entry)) return undefined;
+    if (
+      !(FILE_REFERENCE.test(reference) || NETWORK_URL.test(reference)) ||
+      !record(entry)
+    )
+      return undefined;
     const count: AttachmentTokenCount = {};
     for (const kind of ["sync", "async"] as const) {
       const tokens = entry[kind];

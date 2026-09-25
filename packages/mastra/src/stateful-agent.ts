@@ -65,6 +65,7 @@ import { createRecordedClock } from "./replay-clock.js";
 import { assertStableToolName } from "./replay-guards.js";
 import {
   createIneligibleMetadata,
+  describeReplayFailure,
   getReplayReason,
   type MastraReplayReason,
   MastraReplayReasonError,
@@ -75,6 +76,7 @@ import {
   requestEvidenceAttributes,
 } from "./request-capture.js";
 import {
+  containsModelFileUrl,
   createCapturedFiles,
   createFileDownloads,
   createRecordedEvidenceSanitizer,
@@ -201,8 +203,12 @@ export interface MemoryReplayAgentBindings {
 type FileDownloads = ReturnType<typeof createFileDownloads>;
 
 /**
- * Serve declared URLs from captured bytes and fetch any other URL as a native
- * turn would, making the turn ineligible because replay could not fetch it.
+ * Serve declared URLs from captured bytes, and fetch any other URL as a native
+ * turn would.
+ *
+ * A URL from thread history is captured as it is fetched, so replay serves its
+ * bytes. Any other URL makes the turn ineligible, because replay could not
+ * fetch it.
  */
 function resolveBaselineFile(
   captured: Awaited<ReturnType<typeof createCapturedFiles>>,
@@ -211,6 +217,27 @@ function resolveBaselineFile(
 ): MemoryReplayAgentBindings["resolveFile"] {
   return async (url) => {
     if (captured.isDeclared(url)) return captured.resolveFile(url);
+    if (captured.isHistoryUrl(url)) {
+      let file: Awaited<ReturnType<MemoryReplayAgentBindings["resolveFile"]>>;
+      try {
+        file = await downloads.resolveNative(url);
+      } catch (error) {
+        markIncomplete(
+          "A thread history file failed to download.",
+          "file_capture_failed",
+        );
+        throw error;
+      }
+      try {
+        captured.recordHistoryFile(url, file);
+      } catch (error) {
+        markIncomplete(
+          describeReplayFailure(error, "A thread history file was invalid."),
+          getReplayReason(error, "file_capture_failed"),
+        );
+      }
+      return file;
+    }
     markIncomplete(
       "The agent resolved a file URL that was not declared in files.",
       "file_url_undeclared",
@@ -771,30 +798,16 @@ export function createMemoryReplayAgent(
     } else {
       const source = await options.sourceMemory();
       memoryStore = await getMemoryStoreSemantics(source.domain);
-      // Without the application's resolver, history files cannot be
-      // captured, so their URLs stay undeclared.
-      const historyFiles = options.resolveFile ? baselineFiles : undefined;
       const binding = createMemoryCaptureBinding({
         invocationId,
         ...selector,
         domain: source.domain,
         exclusiveAccess: source.exclusiveAccess,
         sanitizeEvidence: sanitizer.replace,
-        captureHistoryFiles: historyFiles
-          ? async (messages) => {
-              try {
-                await historyFiles.captureHistoryFiles(
-                  messages,
-                  supplied.fileCaptureWaitMs ?? DEFAULT_FILE_CAPTURE_WAIT_MS,
-                );
-              } catch (error) {
-                if (!(error instanceof FileCaptureTimeoutError)) throw error;
-                throw new MastraReplayReasonError(
-                  "Thread history files did not download within fileCaptureWaitMs.",
-                  "file_capture_timeout",
-                );
-              }
-            }
+        // Without the application's resolver, no history file can be
+        // captured, so history URLs stay undeclared.
+        acceptHistoryFileUrls: options.resolveFile
+          ? (urls) => baselineFiles?.acceptHistoryUrls(urls)
           : undefined,
         recordMutation,
         onIncomplete,
@@ -866,10 +879,11 @@ export function createMemoryReplayAgent(
     const attachmentTokens =
       omEngine && !historical
         ? recordAttachmentTokens(omEngine, (value) => {
-            const reference = sanitizer.replace(value);
-            return reference.startsWith("kitaru-file://")
-              ? reference
-              : undefined;
+            // A history URL the turn never resolved stays in the recorded
+            // history with its credentials redacted, so its count is kept
+            // under that form.
+            const key = sanitizer.replace(value);
+            return /^(?:kitaru-file|https?):\/\//i.test(key) ? key : undefined;
           })
         : undefined;
     if (omEngine && historical)
@@ -1051,23 +1065,25 @@ export function createMemoryReplayAgent(
           runtime.memory,
           createRecordedClock(historical.turnStartedAt),
         );
+      const captureEnvelope = (initialSnapshot: MastraMemorySnapshot) =>
+        captureMemoryReplayEnvelope(
+          {
+            invocationId,
+            rawInput: recordedRawInput,
+            initialSnapshot,
+            configuration,
+            requestContext: effectiveContext,
+            files: files.files,
+            turnStartedAt,
+          },
+          // Uploads pass through this sanitizer too; applying it first
+          // keeps the recorded hash valid for the stored envelope.
+          sanitizer.replace,
+        );
       // A failed capture already recorded why; the envelope repeats it
       // instead of reporting a missing snapshot.
       const captured = runtime.initialSnapshot
-        ? captureMemoryReplayEnvelope(
-            {
-              invocationId,
-              rawInput: recordedRawInput,
-              initialSnapshot: runtime.initialSnapshot,
-              configuration,
-              requestContext: effectiveContext,
-              files: files.files,
-              turnStartedAt,
-            },
-            // Uploads pass through this sanitizer too; applying it first
-            // keeps the recorded hash valid for the stored envelope.
-            sanitizer.replace,
-          )
+        ? captureEnvelope(runtime.initialSnapshot)
         : {
             envelope: createIncompleteMemoryReplayEnvelope(
               runtime.binding.incompleteReasons.join(" ") ||
@@ -1155,6 +1171,18 @@ export function createMemoryReplayAgent(
             if (historical)
               throw new Error(
                 "Unsupported Mastra memory replay: request context changed after capture.",
+              );
+          }
+          if (containsModelFileUrl(args.messageList.get.all.db())) {
+            const message =
+              "A file part reached the model as a URL instead of its content. A processor must replace it with the bytes from resolveFile.";
+            runtime.binding.markIncomplete(message, "file_url_sent_to_model");
+            // Mastra or the provider would fetch the URL, or fail on a
+            // captured file reference, outside the recorded files.
+            if (historical)
+              throw new MastraReplayReasonError(
+                `Unsupported Mastra memory replay: ${message}`,
+                "file_url_sent_to_model",
               );
           }
           capture.beginStep({
@@ -1338,9 +1366,22 @@ export function createMemoryReplayAgent(
                 envelope.reasons.join(" "),
                 captured.reason ?? "capture_prerequisite_failed",
               );
+            // History files the turn resolved were captured after the
+            // envelope was built, so it is built again with their references.
+            const resanitized = historical
+              ? undefined
+              : runtime.binding.sanitizeInitialAgain();
+            const recaptured = resanitized
+              ? captureEnvelope(resanitized)
+              : captured;
+            if (!recaptured.envelope.complete)
+              throw new MastraReplayReasonError(
+                recaptured.envelope.reasons.join(" "),
+                recaptured.reason ?? "capture_prerequisite_failed",
+              );
             return {
               [MEMORY_REPLAY_KEY]: finalizeMemoryReplayEnvelope(
-                envelope,
+                recaptured.envelope,
                 omResults.map((entry) => ({
                   phase: entry.phase,
                   ordinal: entry.ordinal,

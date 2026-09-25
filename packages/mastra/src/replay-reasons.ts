@@ -51,12 +51,14 @@ export type MastraReplayReason =
   | "context_unsupported"
   /** The installed Mastra packages are not the versions memory replay supports. */
   | "version_mismatch"
-  /** Declared files or thread history files did not download before the capture wait ended. */
+  /** Declared files did not download before the setup wait ended. */
   | "file_capture_timeout"
-  /** A file in thread history failed to download, or the turn's files exceed the capture limits. */
+  /** A thread history file the turn resolved failed to download, or the turn's files exceed the capture limits. */
   | "file_capture_failed"
-  /** A file or image part holds a network URL Kitaru could not capture, or a processor resolved an undeclared URL. */
+  /** A file or image part in the input or thread history holds a network URL that `files` did not declare and no `resolveFile` could capture, or a processor resolved a URL from outside the input and thread history. */
   | "file_url_undeclared"
+  /** A file or image part reached the model as a URL or captured file reference instead of its content. */
+  | "file_url_sent_to_model"
   /** Replay setup failed for a reason no other code describes. */
   | "capture_setup_failed"
   /** The replay input could not be assembled for a reason no other code describes. */

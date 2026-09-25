@@ -253,11 +253,12 @@ export interface MastraMemoryCaptureOptions extends MastraMemorySelector {
    */
   sanitizeEvidence?: <T>(value: T) => T;
   /**
-   * Capture the files that thread history refers to, so `sanitizeEvidence`
-   * turns their URLs into captured references. Its wait is separate from
-   * `captureWaitMs`.
+   * Accept the file URLs that `sanitizeEvidence` leaves in thread history
+   * instead of making the turn ineligible. With `sanitizeEvidence`, the
+   * binding then keeps an unsanitized copy of the snapshot for
+   * `sanitizeInitialAgain`.
    */
-  captureHistoryFiles?: (messages: unknown) => Promise<void>;
+  acceptHistoryFileUrls?: (urls: readonly string[]) => void;
   leaseWaitMs?: number;
   leaseSignal?: AbortSignal;
   /** Bound pre-turn storage reads so capture cannot stall a native answer. */
@@ -274,6 +275,11 @@ export interface MastraMemoryCaptureBinding {
   captureInitial(memory: {
     settled(): Promise<void>;
   }): Promise<MastraMemorySnapshot | undefined>;
+  /**
+   * Sanitize the initial snapshot again with the files captured since, or
+   * return undefined when the snapshot held no accepted history file URL.
+   */
+  sanitizeInitialAgain(): MastraMemorySnapshot | undefined;
   /** Record why the invocation's evidence is incomplete; the first reason code wins. */
   markIncomplete(message: string, reason?: MastraReplayReason): void;
   /** Wait for every storage write and its evidence upload to finish. */
@@ -979,10 +985,26 @@ export function createMemoryCaptureBinding(
     return { thread, resource, messages, records };
   }
 
+  let unsanitizedSnapshot: unknown;
+  /** Copy a snapshot so no storage-owned objects or Dates escape the explicit codec. */
+  function copySnapshot(snapshot: unknown): MastraMemorySnapshot {
+    const copy = normalizeStoredMemoryDates(
+      decodeMemoryValue(encodeMemoryValue(snapshot, "Initial memory snapshot")),
+    );
+    validateMemorySnapshot(copy);
+    return copy;
+  }
+
   return {
     domain,
     get revision() {
       return revision;
+    },
+    sanitizeInitialAgain() {
+      if (!unsanitizedSnapshot) return undefined;
+      return copySnapshot(
+        options.sanitizeEvidence?.(unsanitizedSnapshot) ?? unsanitizedSnapshot,
+      );
     },
     get incompleteReasons() {
       return [...reasons];
@@ -1028,13 +1050,10 @@ export function createMemoryCaptureBinding(
           );
           return undefined;
         }
-        // The read guard stays up until the snapshot is sanitized and copied,
-        // so no write can land between the read and the history file capture.
-        let captureEnded = false;
         const capture = (async () => {
           await memory.settled();
           await mutations;
-          readingSnapshot = !captureEnded;
+          readingSnapshot = true;
           try {
             // Storage errors can quote stored data, so none of their text is kept.
             const { thread, resource, messages, records } =
@@ -1044,7 +1063,7 @@ export function createMemoryCaptureBinding(
                   "memory_read_failed",
                 );
               });
-            return {
+            const snapshot = {
               threadId: options.threadId,
               resourceId: options.resourceId,
               thread,
@@ -1052,38 +1071,43 @@ export function createMemoryCaptureBinding(
               messages,
               records: projectOMRecords(records),
             };
+            // Declared file URLs in history become captured references here,
+            // so a replayed processor resolves recorded bytes without a token.
+            const sanitized = options.sanitizeEvidence?.(snapshot) ?? snapshot;
+            if (collectFileNetworkUrls(sanitized.messages).length > 0) {
+              if (!options.acceptHistoryFileUrls)
+                throw new MastraReplayReasonError(
+                  "Thread history holds a file URL that was not declared in files.",
+                  "file_url_undeclared",
+                );
+              // Files the turn resolves later are captured then, so the
+              // snapshot is sanitized again once the turn has finished.
+              options.acceptHistoryFileUrls(
+                collectFileNetworkUrls(snapshot.messages),
+              );
+              // The replay codec redacts URL credentials, which would stop
+              // the captured URLs from matching, so this copy bypasses it.
+              if (options.sanitizeEvidence)
+                try {
+                  unsanitizedSnapshot = structuredClone(snapshot);
+                } catch {
+                  throw new MastraReplayReasonError(
+                    "Thread history holding file URLs could not be copied.",
+                    "recorded_evidence_unsupported",
+                  );
+                }
+            }
+            return copySnapshot(sanitized);
           } finally {
-            if (captureEnded) readingSnapshot = false;
+            readingSnapshot = false;
           }
         })();
-        let copy: unknown;
-        try {
-          const snapshot = await boundedCoordination(
-            capture,
-            options.captureWaitMs ?? 5_000,
-            "Initial memory capture timed out.",
-            "memory_capture_timeout",
-          );
-          await options.captureHistoryFiles?.(snapshot.messages);
-          // Captured file URLs in history become references here, so a
-          // replayed processor resolves recorded bytes without a token.
-          const sanitized = options.sanitizeEvidence?.(snapshot) ?? snapshot;
-          if (collectFileNetworkUrls(sanitized.messages).length > 0)
-            throw new MastraReplayReasonError(
-              "Thread history holds a file URL that was not declared in files.",
-              "file_url_undeclared",
-            );
-          // No storage-owned objects or Dates escape the explicit codec.
-          copy = normalizeStoredMemoryDates(
-            decodeMemoryValue(
-              encodeMemoryValue(sanitized, "Initial memory snapshot"),
-            ),
-          );
-        } finally {
-          captureEnded = true;
-          readingSnapshot = false;
-        }
-        validateMemorySnapshot(copy);
+        const copy = await boundedCoordination(
+          capture,
+          options.captureWaitMs ?? 5_000,
+          "Initial memory capture timed out.",
+          "memory_capture_timeout",
+        );
         await verifyEligibility();
         return reasons.length === 0 ? copy : undefined;
       } catch (error) {
