@@ -178,12 +178,11 @@ it("rejects altered file bytes and hides resolver errors containing URL secrets"
     bytes: new Uint8Array([1]),
     mediaType: "image/png",
   }));
-  const file = captured.files[0];
+  const files = captured.files;
+  const file = files[0];
   if (!file) throw new Error("Missing captured file");
   file.bytes[0] = 2;
-  expect(() => restoreCapturedFiles(captured.files)).toThrow(
-    /invalid recorded file/,
-  );
+  expect(() => restoreCapturedFiles(files)).toThrow(/invalid recorded file/);
   await expect(
     createCapturedFiles([url], async () => {
       throw new Error(`Failed to fetch ${url}`);

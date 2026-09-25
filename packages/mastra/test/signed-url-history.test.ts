@@ -315,12 +315,17 @@ it.each([
   [
     "a file part",
     true,
+    { mastra_replay_state: "eligible" },
     (resolveFile: MemoryReplayAgentBindings["resolveFile"]) =>
       createAttachmentProcessor(resolveFile),
   ],
   [
     "prompt text",
     false,
+    {
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "file_url_undeclared",
+    },
     (resolveFile: MemoryReplayAgentBindings["resolveFile"]) =>
       createUrlResolvingProcessor(resolveFile, (part) =>
         part.type === "text"
@@ -331,14 +336,15 @@ it.each([
   [
     "a URL object",
     true,
+    { mastra_replay_state: "eligible" },
     (resolveFile: MemoryReplayAgentBindings["resolveFile"]) =>
       createUrlResolvingProcessor(resolveFile, (part) =>
         part.type === "file" ? new URL(String(part.data)) : undefined,
       ),
   ],
 ])(
-  "answers natively when a processor resolves an undeclared URL from %s",
-  async (_, withFilePart, createProcessor) => {
+  "answers natively when a processor resolves a history URL from %s",
+  async (_, withFilePart, metadata, createProcessor) => {
     const nativeFetch = globalThis.fetch;
     const api = installTestApi();
     const apiFetch = globalThis.fetch;
@@ -390,7 +396,8 @@ it.each([
         memory: { thread: THREAD, resource: RESOURCE },
       });
       expect(await output.text).toBe("The quote covers two nights.");
-      // The application's resolver gets the URL the processor passed, once.
+      // The application's resolver gets the URL once: a file part's URL is
+      // captured from history, and text holds no file to capture.
       expect(fetchAttachment).toHaveBeenCalledTimes(1);
       expect(String(fetchAttachment.mock.calls[0]?.[0])).toBe(ATTACHMENT_URL);
       await vi.waitFor(() =>
@@ -399,10 +406,7 @@ it.each([
             (call) =>
               call.method === "PATCH" && call.body?.status === "completed",
           )?.body?.metadata,
-        ).toMatchObject({
-          mastra_replay_state: "ineligible",
-          mastra_replay_reason: "file_url_undeclared",
-        }),
+        ).toMatchObject(metadata),
       );
       expect(JSON.stringify(api.calls)).not.toContain(DOWNLOAD_TOKEN);
     } finally {
@@ -593,6 +597,226 @@ it("counts a declared attachment's tokens in replay as its baseline did", async 
     ).toEqual([expect.stringMatching(/^kitaru-file:\/\/sha256\//)]);
     expect(run.replay).toMatchObject({ status: "completed" });
     expect(run.replayObserverCalls).toBe(0);
+  } finally {
+    await store.close();
+  }
+});
+
+const HISTORY_TOKENS = [
+  "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+  "1c2d3e4f-5a6b-4c7d-9e8f-a0b1c2d3e4f5",
+  "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b",
+];
+const HISTORY_URLS = HISTORY_TOKENS.map(
+  (token, index) =>
+    `https://firebasestorage.googleapis.com/v0/b/app-bucket/o/uploads%2Fphoto-${index}.png?alt=media&token=${token}`,
+);
+
+/** A thread whose history holds three attachments as signed URLs. */
+async function seedHistoryAttachments() {
+  const store = new InMemoryStore();
+  const domain = store.stores.memory;
+  if (!domain) throw new Error("Missing native memory domain");
+  await domain.saveThread({
+    thread: {
+      id: THREAD,
+      resourceId: RESOURCE,
+      title: "Photos",
+      createdAt: new Date(1_000),
+      updatedAt: new Date(1_000),
+      metadata: {},
+    },
+  });
+  await domain.saveMessages({
+    messages: HISTORY_URLS.map((url, index) => ({
+      id: `photo-message-${index}`,
+      threadId: THREAD,
+      resourceId: RESOURCE,
+      role: "user" as const,
+      createdAt: new Date(2_000 + index),
+      content: {
+        format: 2 as const,
+        parts: [
+          { type: "text" as const, text: `Photo ${index}` },
+          { type: "file" as const, data: url, mimeType: "image/png" },
+        ],
+      },
+    })),
+  });
+  return { store, domain };
+}
+
+it("captures attachment URLs from history without declaring them in files", async () => {
+  const nativeFetch = globalThis.fetch;
+  const api = installTestApi();
+  const apiFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", ((
+    input: Parameters<typeof fetch>[0],
+    init: Parameters<typeof fetch>[1],
+  ) =>
+    String(input).startsWith("data:")
+      ? nativeFetch(input, init)
+      : apiFetch(input, init)) as typeof fetch);
+  const { store, domain } = await seedHistoryAttachments();
+  const prompts: string[] = [];
+  const model = new MastraLanguageModelV2Mock({
+    provider: "fixture",
+    modelId: "actor",
+    doStream: async ({ prompt }) => {
+      prompts.push(JSON.stringify(prompt));
+      return textStream("All three photos show the lake.");
+    },
+  });
+  const photoBytes = (url: string) =>
+    new Uint8Array([137, 80, 78, 71, HISTORY_URLS.indexOf(url)]);
+  const fetchAttachment = vi.fn(async (url: string) => ({
+    bytes: photoBytes(url),
+    mediaType: "image/png",
+  }));
+  const adapter = createMemoryReplayAgent(
+    ({ memory, resolveFile }) => ({
+      id: "history-attachments",
+      name: "History attachments",
+      instructions: "Answer about the photos.",
+      memory,
+      model,
+      inputProcessors: [createAttachmentProcessor(resolveFile)],
+    }),
+    {
+      agentId: AGENT_ID,
+      apiUrl: "https://kitaru.invalid",
+      apiKey: "fixture",
+      requestedModelId: "fixture/actor",
+      onRecordingError: () => undefined,
+      sourceMemory: () => ({
+        settled: async () => {},
+        domain,
+        configuration: { lastMessages: 40, semanticRecall: false },
+        exclusiveAccess: createProcessLocalMemoryAccess(),
+      }),
+      resolveModel: () => model,
+      files: [],
+      resolveFile: fetchAttachment,
+    },
+  );
+  const final = (sessionId: string | undefined) =>
+    api.calls
+      .filter(
+        (call) =>
+          call.method === "PATCH" &&
+          call.path.endsWith(`/${sessionId}`) &&
+          call.body?.status !== "in_progress",
+      )
+      .at(-1)?.body;
+  const encodedPhotos = HISTORY_URLS.map((url) =>
+    Buffer.from(photoBytes(url)).toString("base64"),
+  );
+  try {
+    const turns = ["Where is this?", "Which season?", "Who took them?", "Why?"];
+    for (const [index, text] of turns.entries()) {
+      fetchAttachment.mockClear();
+      const output = await adapter.stream(text, {
+        memory: { thread: THREAD, resource: RESOURCE },
+      });
+      await output.consumeStream();
+      await vi.waitFor(() =>
+        expect(final(api.sessionIds[index])?.status).toBe("completed"),
+      );
+      expect(final(api.sessionIds[index])?.metadata).toMatchObject({
+        mastra_replay_state: "eligible",
+      });
+      // Capture's download serves the processor, so each URL is fetched once.
+      expect(fetchAttachment.mock.calls.map(([url]) => url).sort()).toEqual(
+        [...HISTORY_URLS].sort(),
+      );
+      for (const photo of encodedPhotos)
+        expect(prompts.at(-1)).toContain(photo);
+    }
+
+    const baselineInput = final(api.sessionIds[3])?.inputs;
+    expect(
+      (
+        baselineInput as {
+          mastra_memory_replay?: { files?: unknown[] };
+        }
+      )?.mastra_memory_replay?.files,
+    ).toHaveLength(3);
+    fetchAttachment.mockClear();
+    fetchAttachment.mockRejectedValue(new Error("Signed URL was fetched"));
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(baselineInput));
+    const replay = await adapter.stream("ignored");
+    await replay.consumeStream();
+    await vi.waitFor(() =>
+      expect(final(api.sessionIds[4])?.status).toBe("completed"),
+    );
+    expect(fetchAttachment).not.toHaveBeenCalled();
+    for (const photo of encodedPhotos) expect(prompts.at(-1)).toContain(photo);
+    const recorded = JSON.stringify(api.calls);
+    for (const token of HISTORY_TOKENS) expect(recorded).not.toContain(token);
+  } finally {
+    await store.close();
+  }
+});
+
+it("answers natively when a history attachment exceeds the capture limit", async () => {
+  const api = installTestApi();
+  const { store, domain } = await seedHistoryAttachments();
+  const model = new MastraLanguageModelV2Mock({
+    provider: "fixture",
+    modelId: "actor",
+    doStream: async () => textStream("All three photos show the lake."),
+  });
+  // The provider reads the URLs itself, so only capture downloads them.
+  Object.assign(model, { supportedUrls: { "*/*": [/^https:\/\//] } });
+  const fetchAttachment = vi.fn(async (url: string) => ({
+    bytes: new Uint8Array(url === HISTORY_URLS[1] ? 9 * 1024 * 1024 : 4),
+    mediaType: "image/png",
+  }));
+  const adapter = createMemoryReplayAgent(
+    ({ memory }) => ({
+      id: "oversized-history",
+      name: "Oversized history",
+      instructions: "Answer about the photos.",
+      memory,
+      model,
+    }),
+    {
+      agentId: AGENT_ID,
+      apiUrl: "https://kitaru.invalid",
+      apiKey: "fixture",
+      requestedModelId: "fixture/actor",
+      onRecordingError: () => undefined,
+      sourceMemory: () => ({
+        settled: async () => {},
+        domain,
+        configuration: { lastMessages: 40, semanticRecall: false },
+        exclusiveAccess: createProcessLocalMemoryAccess(),
+      }),
+      resolveModel: () => model,
+      files: [],
+      resolveFile: fetchAttachment,
+    },
+  );
+  try {
+    const output = await adapter.stream("Where is this?", {
+      memory: { thread: THREAD, resource: RESOURCE },
+    });
+    expect(await output.text).toBe("All three photos show the lake.");
+    await vi.waitFor(() =>
+      expect(
+        api.calls.find(
+          (call) =>
+            call.method === "PATCH" && call.body?.status === "completed",
+        )?.body?.metadata,
+      ).toMatchObject({
+        mastra_replay_state: "ineligible",
+        mastra_replay_reason: "file_capture_failed",
+      }),
+    );
+    expect(fetchAttachment).toHaveBeenCalledTimes(3);
+    const recorded = JSON.stringify(api.calls);
+    for (const token of HISTORY_TOKENS) expect(recorded).not.toContain(token);
   } finally {
     await store.close();
   }

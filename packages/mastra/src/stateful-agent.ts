@@ -771,12 +771,31 @@ export function createMemoryReplayAgent(
     } else {
       const source = await options.sourceMemory();
       memoryStore = await getMemoryStoreSemantics(source.domain);
+      // Without the application's resolver, history files cannot be
+      // captured, so their URLs stay undeclared.
+      const historyFiles = options.resolveFile ? baselineFiles : undefined;
       const binding = createMemoryCaptureBinding({
         invocationId,
         ...selector,
         domain: source.domain,
         exclusiveAccess: source.exclusiveAccess,
         sanitizeEvidence: sanitizer.replace,
+        captureHistoryFiles: historyFiles
+          ? async (messages) => {
+              try {
+                await historyFiles.captureHistoryFiles(
+                  messages,
+                  supplied.fileCaptureWaitMs ?? DEFAULT_FILE_CAPTURE_WAIT_MS,
+                );
+              } catch (error) {
+                if (!(error instanceof FileCaptureTimeoutError)) throw error;
+                throw new MastraReplayReasonError(
+                  "Thread history files did not download within fileCaptureWaitMs.",
+                  "file_capture_timeout",
+                );
+              }
+            }
+          : undefined,
         recordMutation,
         onIncomplete,
         getRequestId: () => requestCapture?.currentRequestId,

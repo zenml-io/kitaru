@@ -20,7 +20,7 @@ import {
   type MastraReplayReason,
   MastraReplayReasonError,
 } from "./replay-reasons.js";
-import { containsFileNetworkUrl } from "./stateful-files.js";
+import { collectFileNetworkUrls } from "./stateful-files.js";
 
 export interface MastraMemorySelector {
   threadId: string;
@@ -252,6 +252,12 @@ export interface MastraMemoryCaptureOptions extends MastraMemorySelector {
    * the initial snapshot, without changing native reads or writes.
    */
   sanitizeEvidence?: <T>(value: T) => T;
+  /**
+   * Capture the files that thread history refers to, so `sanitizeEvidence`
+   * turns their URLs into captured references. Its wait is separate from
+   * `captureWaitMs`.
+   */
+  captureHistoryFiles?: (messages: unknown) => Promise<void>;
   leaseWaitMs?: number;
   leaseSignal?: AbortSignal;
   /** Bound pre-turn storage reads so capture cannot stall a native answer. */
@@ -1022,10 +1028,13 @@ export function createMemoryCaptureBinding(
           );
           return undefined;
         }
+        // The read guard stays up until the snapshot is sanitized and copied,
+        // so no write can land between the read and the history file capture.
+        let captureEnded = false;
         const capture = (async () => {
           await memory.settled();
           await mutations;
-          readingSnapshot = true;
+          readingSnapshot = !captureEnded;
           try {
             // Storage errors can quote stored data, so none of their text is kept.
             const { thread, resource, messages, records } =
@@ -1035,7 +1044,7 @@ export function createMemoryCaptureBinding(
                   "memory_read_failed",
                 );
               });
-            const snapshot = {
+            return {
               threadId: options.threadId,
               resourceId: options.resourceId,
               thread,
@@ -1043,32 +1052,38 @@ export function createMemoryCaptureBinding(
               messages,
               records: projectOMRecords(records),
             };
-            // Declared file URLs in history become captured references here,
-            // so a replayed processor resolves recorded bytes without a token.
-            const sanitized = options.sanitizeEvidence?.(snapshot) ?? snapshot;
-            if (containsFileNetworkUrl(sanitized.messages))
-              throw new MastraReplayReasonError(
-                "Thread history holds a file URL that was not declared in files.",
-                "file_url_undeclared",
-              );
-            // No storage-owned objects or Dates escape the explicit codec.
-            const copy = normalizeStoredMemoryDates(
-              decodeMemoryValue(
-                encodeMemoryValue(sanitized, "Initial memory snapshot"),
-              ),
-            );
-            validateMemorySnapshot(copy);
-            return copy;
           } finally {
-            readingSnapshot = false;
+            if (captureEnded) readingSnapshot = false;
           }
         })();
-        const copy = await boundedCoordination(
-          capture,
-          options.captureWaitMs ?? 5_000,
-          "Initial memory capture timed out.",
-          "memory_capture_timeout",
-        );
+        let copy: unknown;
+        try {
+          const snapshot = await boundedCoordination(
+            capture,
+            options.captureWaitMs ?? 5_000,
+            "Initial memory capture timed out.",
+            "memory_capture_timeout",
+          );
+          await options.captureHistoryFiles?.(snapshot.messages);
+          // Captured file URLs in history become references here, so a
+          // replayed processor resolves recorded bytes without a token.
+          const sanitized = options.sanitizeEvidence?.(snapshot) ?? snapshot;
+          if (collectFileNetworkUrls(sanitized.messages).length > 0)
+            throw new MastraReplayReasonError(
+              "Thread history holds a file URL that was not declared in files.",
+              "file_url_undeclared",
+            );
+          // No storage-owned objects or Dates escape the explicit codec.
+          copy = normalizeStoredMemoryDates(
+            decodeMemoryValue(
+              encodeMemoryValue(sanitized, "Initial memory snapshot"),
+            ),
+          );
+        } finally {
+          captureEnded = true;
+          readingSnapshot = false;
+        }
+        validateMemorySnapshot(copy);
         await verifyEligibility();
         return reasons.length === 0 ? copy : undefined;
       } catch (error) {
