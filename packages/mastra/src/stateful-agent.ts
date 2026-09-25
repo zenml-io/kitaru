@@ -200,6 +200,25 @@ export interface MemoryReplayAgentBindings {
 
 type FileDownloads = ReturnType<typeof createFileDownloads>;
 
+/**
+ * Serve declared URLs from captured bytes and fetch any other URL as a native
+ * turn would, making the turn ineligible because replay could not fetch it.
+ */
+function resolveBaselineFile(
+  captured: Awaited<ReturnType<typeof createCapturedFiles>>,
+  downloads: FileDownloads,
+  markIncomplete: (message: string, reason: MastraReplayReason) => void,
+): MemoryReplayAgentBindings["resolveFile"] {
+  return async (url) => {
+    if (captured.isDeclared(url)) return captured.resolveFile(url);
+    markIncomplete(
+      "The agent resolved a file URL that was not declared in files.",
+      "file_url_undeclared",
+    );
+    return downloads.resolveNative(url);
+  };
+}
+
 export type MemoryReplayAgentFactory = (
   bindings: MemoryReplayAgentBindings,
 ) => AgentConfig | Promise<AgentConfig>;
@@ -868,7 +887,12 @@ export function createMemoryReplayAgent(
       );
       const config = await factory({
         memory: owned.memory,
-        resolveFile: files.resolveFile,
+        resolveFile:
+          historical || !baselineFiles
+            ? files.resolveFile
+            : resolveBaselineFile(baselineFiles, downloads, (message, reason) =>
+                runtime.binding.markIncomplete(message, reason),
+              ),
         workspace: workspace?.workspace,
       });
       if (config.memory !== undefined && config.memory !== owned.memory)

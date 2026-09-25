@@ -53,7 +53,7 @@ export type MastraReplayReason =
   | "version_mismatch"
   /** Declared files did not download before the setup wait ended. */
   | "file_capture_timeout"
-  /** A file or image part in the input or thread history holds a network URL that `files` did not declare. */
+  /** A file or image part in the input or thread history holds a network URL that `files` did not declare, or a processor resolved such a URL. */
   | "file_url_undeclared"
   /** Replay setup failed for a reason no other code describes. */
   | "capture_setup_failed"

@@ -60,7 +60,7 @@ function createAttachmentProcessor(
 }
 
 /** A thread whose history holds the attachment's signed URL, not its bytes. */
-async function seedAttachmentHistory(padding = "") {
+async function seedAttachmentHistory(padding = "", withFilePart = true) {
   const store = new InMemoryStore();
   const domain = store.stores.memory;
   if (!domain) throw new Error("Missing native memory domain");
@@ -89,7 +89,15 @@ async function seedAttachmentHistory(padding = "") {
               type: "text",
               text: `Here is my quote: ${ATTACHMENT_URL}${padding}`,
             },
-            { type: "file", data: ATTACHMENT_URL, mimeType: "application/pdf" },
+            ...(withFilePart
+              ? [
+                  {
+                    type: "file" as const,
+                    data: ATTACHMENT_URL,
+                    mimeType: "application/pdf",
+                  },
+                ]
+              : []),
           ],
         },
       },
@@ -264,6 +272,144 @@ it("records a turn as ineligible when history holds an undeclared attachment URL
     await store.close();
   }
 });
+
+/**
+ * Resolve the attachment URL `select` reads from a message part, and send a
+ * file part's bytes instead of its URL.
+ */
+function createUrlResolvingProcessor(
+  resolveFile: MemoryReplayAgentBindings["resolveFile"],
+  select: (part: { type: string; text?: string; data?: unknown }) => unknown,
+): InputProcessor {
+  return {
+    id: "url-attachments",
+    async processInputStep({ messages }) {
+      return {
+        messages: await Promise.all(
+          messages.map(async (message) => ({
+            ...message,
+            content: {
+              ...message.content,
+              parts: await Promise.all(
+                message.content.parts.map(async (part) => {
+                  const url = select(part);
+                  if (url === undefined) return part;
+                  const file = await resolveFile(url as string);
+                  return part.type === "file"
+                    ? {
+                        ...part,
+                        data: Buffer.from(file.bytes).toString("base64"),
+                      }
+                    : part;
+                }),
+              ),
+            },
+          })),
+        ),
+      };
+    },
+  };
+}
+
+it.each([
+  [
+    "a file part",
+    true,
+    (resolveFile: MemoryReplayAgentBindings["resolveFile"]) =>
+      createAttachmentProcessor(resolveFile),
+  ],
+  [
+    "prompt text",
+    false,
+    (resolveFile: MemoryReplayAgentBindings["resolveFile"]) =>
+      createUrlResolvingProcessor(resolveFile, (part) =>
+        part.type === "text"
+          ? part.text?.match(/https:\/\/\S+/)?.[0]
+          : undefined,
+      ),
+  ],
+  [
+    "a URL object",
+    true,
+    (resolveFile: MemoryReplayAgentBindings["resolveFile"]) =>
+      createUrlResolvingProcessor(resolveFile, (part) =>
+        part.type === "file" ? new URL(String(part.data)) : undefined,
+      ),
+  ],
+])(
+  "answers natively when a processor resolves an undeclared URL from %s",
+  async (_, withFilePart, createProcessor) => {
+    const nativeFetch = globalThis.fetch;
+    const api = installTestApi();
+    const apiFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", ((
+      input: Parameters<typeof fetch>[0],
+      init: Parameters<typeof fetch>[1],
+    ) =>
+      String(input).startsWith("data:")
+        ? nativeFetch(input, init)
+        : apiFetch(input, init)) as typeof fetch);
+    const { store, domain } = await seedAttachmentHistory("", withFilePart);
+    const model = new MastraLanguageModelV2Mock({
+      provider: "fixture",
+      modelId: "actor",
+      doStream: async () => textStream("The quote covers two nights."),
+    });
+    const fetchAttachment = vi.fn(async (_url: string) => ({
+      bytes: ATTACHMENT_BYTES,
+      mediaType: "application/pdf",
+    }));
+    const adapter = createMemoryReplayAgent(
+      ({ memory, resolveFile }) => ({
+        id: "undeclared-processor",
+        name: "Undeclared processor",
+        instructions: "Answer about the attachment.",
+        memory,
+        model,
+        inputProcessors: [createProcessor(resolveFile)],
+      }),
+      {
+        agentId: AGENT_ID,
+        apiUrl: "https://kitaru.invalid",
+        apiKey: "fixture",
+        requestedModelId: "fixture/actor",
+        onRecordingError: () => undefined,
+        sourceMemory: () => ({
+          settled: async () => {},
+          domain,
+          configuration: { lastMessages: 20, semanticRecall: false },
+          exclusiveAccess: createProcessLocalMemoryAccess(),
+        }),
+        resolveModel: () => model,
+        files: [],
+        resolveFile: fetchAttachment,
+      },
+    );
+    try {
+      const output = await adapter.stream("What does it cost?", {
+        memory: { thread: THREAD, resource: RESOURCE },
+      });
+      expect(await output.text).toBe("The quote covers two nights.");
+      // The application's resolver gets the URL the processor passed, once.
+      expect(fetchAttachment).toHaveBeenCalledTimes(1);
+      expect(String(fetchAttachment.mock.calls[0]?.[0])).toBe(ATTACHMENT_URL);
+      await vi.waitFor(() =>
+        expect(
+          api.calls.find(
+            (call) =>
+              call.method === "PATCH" && call.body?.status === "completed",
+          )?.body?.metadata,
+        ).toMatchObject({
+          mastra_replay_state: "ineligible",
+          mastra_replay_reason: "file_url_undeclared",
+        }),
+      );
+      expect(JSON.stringify(api.calls)).not.toContain(DOWNLOAD_TOKEN);
+    } finally {
+      await store.close();
+    }
+  },
+);
 
 /**
  * An observational-memory agent whose declared attachment sits in history.

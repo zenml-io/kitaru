@@ -429,6 +429,8 @@ export async function createCapturedFiles(
   }
   return {
     files: captured.files,
+    /** Whether `url` is one of the declared file URLs. */
+    isDeclared: (url: string): boolean => lookup(url) !== undefined,
     referenceFor,
     evidenceSanitizer: (onUnsupportedEvidence: () => void) =>
       createRecordedEvidenceSanitizer(
