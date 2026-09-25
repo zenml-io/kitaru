@@ -85,6 +85,7 @@ import {
   requestEvidenceAttributes,
 } from "./request-capture.js";
 import {
+  collectFileNetworkUrls,
   containsModelFileUrl,
   createCapturedContentReferencer,
   createCapturedFiles,
@@ -97,6 +98,7 @@ import {
   FileCaptureTimeoutError,
   loadRecordedFiles,
   referenceInlineFiles,
+  referenceInputFilesAsUrls,
   restoreCapturedFiles,
 } from "./stateful-files.js";
 import {
@@ -235,9 +237,9 @@ type FileDownloads = ReturnType<typeof createFileDownloads>;
  * Serve declared URLs from captured bytes, and fetch any other URL as a native
  * turn would.
  *
- * A URL from thread history is captured as it is fetched, so replay serves its
- * bytes. Any other URL makes the turn ineligible, because replay could not
- * fetch it.
+ * A URL from the turn's input or thread history is captured as it is fetched,
+ * so replay serves its bytes. Any other URL makes the turn ineligible, because
+ * replay could not fetch it.
  */
 function resolveBaselineFile(
   captured: Awaited<ReturnType<typeof createCapturedFiles>>,
@@ -246,22 +248,25 @@ function resolveBaselineFile(
 ): MemoryReplayAgentBindings["resolveFile"] {
   return async (url) => {
     if (captured.isDeclared(url)) return captured.resolveFile(url);
-    if (captured.isHistoryUrl(url)) {
+    if (captured.isConversationUrl(url)) {
       let file: Awaited<ReturnType<MemoryReplayAgentBindings["resolveFile"]>>;
       try {
         file = await downloads.resolveNative(url);
       } catch (error) {
         markIncomplete(
-          "A thread history file failed to download.",
+          "An input or thread history file failed to download.",
           "file_capture_failed",
         );
         throw error;
       }
       try {
-        captured.recordHistoryFile(url, file);
+        captured.recordConversationFile(url, file);
       } catch (error) {
         markIncomplete(
-          describeReplayFailure(error, "A thread history file was invalid."),
+          describeReplayFailure(
+            error,
+            "An input or thread history file was invalid.",
+          ),
           getReplayReason(error, "file_capture_failed"),
         );
       }
@@ -743,6 +748,10 @@ export function createMemoryReplayAgent(
           downloads.capture,
           supplied.fileCaptureWaitMs ?? DEFAULT_FILE_CAPTURE_WAIT_MS,
         );
+        // Input files are captured when a processor resolves them, like
+        // history files; without the application's resolver none can be.
+        if (options.resolveFile)
+          baselineFiles.acceptConversationUrls(collectFileNetworkUrls(input));
         return encodeMemoryValue(baselineFiles.replaceDeclaredFileUrls(input));
       },
       requestedModelId: options.requestedModelId,
@@ -938,7 +947,7 @@ export function createMemoryReplayAgent(
         // Without the application's resolver, no history file can be
         // captured, so history URLs stay undeclared.
         acceptHistoryFileUrls: options.resolveFile
-          ? (urls) => baselineFiles?.acceptHistoryUrls(urls)
+          ? (urls) => baselineFiles?.acceptConversationUrls(urls)
           : undefined,
         recordMutation,
         onIncomplete,
@@ -1389,7 +1398,9 @@ export function createMemoryReplayAgent(
         agent: agent as unknown as Parameters<
           typeof streamWithRecording
         >[0]["agent"],
-        callerMessages: invocationInput,
+        callerMessages: historical
+          ? referenceInputFilesAsUrls(invocationInput)
+          : invocationInput,
         callerOptions: runtimeOptions,
         client: evidenceClient,
         options,
@@ -1563,8 +1574,8 @@ export function createMemoryReplayAgent(
                 envelope.reasons.join(" "),
                 captured.reason ?? "capture_prerequisite_failed",
               );
-            // History files the turn resolved were captured after the
-            // envelope was built, and every captured file is stored as a
+            // Input and history files the turn resolved were captured after
+            // the envelope was built, and every captured file is stored as a
             // blob only now, so the envelope is built again with their
             // references and blob ids.
             const initialSnapshot = historical
@@ -1573,6 +1584,11 @@ export function createMemoryReplayAgent(
                 runtime.initialSnapshot);
             let recaptured = captured;
             if (initialSnapshot) {
+              // Input files the turn resolved were captured after the input
+              // was projected, so it is projected again with their references.
+              if (baselineFiles)
+                recordedRawInput =
+                  baselineFiles.replaceDeclaredFileUrls(invocationInput);
               const turnFiles = files.files;
               const referenced = referenceSnapshot(initialSnapshot, turnFiles);
               const storedFiles = await fileBlobs.store([

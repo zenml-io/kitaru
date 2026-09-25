@@ -1209,3 +1209,137 @@ it("records a turn as ineligible when observational memory downloads an unresolv
     await store.close();
   }
 });
+
+it("captures attachment URLs sent in each turn's input without declaring them in files", async () => {
+  const nativeFetch = globalThis.fetch;
+  const api = installTestApi();
+  const apiFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", ((
+    input: Parameters<typeof fetch>[0],
+    init: Parameters<typeof fetch>[1],
+  ) =>
+    String(input).startsWith("data:")
+      ? nativeFetch(input, init)
+      : apiFetch(input, init)) as typeof fetch);
+  const store = new InMemoryStore();
+  const domain = store.stores.memory;
+  if (!domain) throw new Error("Missing native memory domain");
+  const tokens = [0, 1, 2].map(
+    (index) => `9c1d2e3f-4a5b-4c6d-8e7f-00000000000${index}`,
+  );
+  const urls = tokens.map(
+    (token, index) =>
+      `https://firebasestorage.googleapis.com/v0/b/app-bucket/o/uploads%2Fturn-${index}.pdf?alt=media&token=${token}`,
+  );
+  const fileBytes = (url: string) =>
+    new Uint8Array([37, 80, 68, 70, urls.indexOf(url)]);
+  const prompts: string[] = [];
+  const model = new MastraLanguageModelV2Mock({
+    provider: "fixture",
+    modelId: "actor",
+    doStream: async ({ prompt }) => {
+      prompts.push(JSON.stringify(prompt));
+      return textStream("The quote covers two nights.");
+    },
+  });
+  const fetchAttachment = vi.fn(async (url: string) => ({
+    bytes: fileBytes(url),
+    mediaType: "application/pdf",
+  }));
+  const adapter = createMemoryReplayAgent(
+    ({ memory, resolveFile }) => ({
+      id: "input-attachments",
+      name: "Input attachments",
+      instructions: "Answer about the attachments.",
+      memory,
+      model,
+      inputProcessors: [createAttachmentProcessor(resolveFile)],
+    }),
+    {
+      agentId: AGENT_ID,
+      apiUrl: "https://kitaru.invalid",
+      apiKey: "fixture",
+      requestedModelId: "fixture/actor",
+      onRecordingError: () => undefined,
+      sourceMemory: () => ({
+        settled: async () => {},
+        domain,
+        configuration: { lastMessages: 20, semanticRecall: false },
+        exclusiveAccess: createProcessLocalMemoryAccess(),
+      }),
+      resolveModel: () => model,
+      files: [],
+      resolveFile: fetchAttachment,
+    },
+  );
+  const final = (sessionId: string | undefined) =>
+    api.calls
+      .filter(
+        (call) =>
+          call.method === "PATCH" &&
+          call.path.endsWith(`/${sessionId}`) &&
+          call.body?.status !== "in_progress",
+      )
+      .at(-1)?.body;
+  const encoded = urls.map((url) =>
+    Buffer.from(fileBytes(url)).toString("base64"),
+  );
+  const turnInput = (index: number) => [
+    {
+      role: "user" as const,
+      content: [
+        { type: "text" as const, text: `Here is file ${index}.` },
+        {
+          type: "file" as const,
+          data: urls[index] as string,
+          mediaType: "application/pdf",
+        },
+      ],
+    },
+  ];
+  try {
+    const baselineInputs: unknown[] = [];
+    for (const index of [0, 1, 2]) {
+      fetchAttachment.mockClear();
+      const output = await adapter.stream(turnInput(index), {
+        memory: { thread: THREAD, resource: RESOURCE },
+      });
+      await output.consumeStream();
+      await vi.waitFor(() =>
+        expect(final(api.sessionIds[index])?.status).toBe("completed"),
+      );
+      expect(final(api.sessionIds[index])?.metadata).toMatchObject({
+        mastra_replay_state: "eligible",
+      });
+      // Mastra stores the bytes the processor sent, so only the new input
+      // file is fetched, once.
+      expect(fetchAttachment.mock.calls.map(([url]) => url)).toEqual([
+        urls[index],
+      ]);
+      for (const bytes of encoded.slice(0, index + 1))
+        expect(prompts.at(-1)).toContain(bytes);
+      baselineInputs.push(final(api.sessionIds[index])?.inputs);
+    }
+    const recorded = JSON.stringify(api.calls);
+    for (const token of tokens) expect(recorded).not.toContain(token);
+
+    fetchAttachment.mockClear();
+    fetchAttachment.mockRejectedValue(new Error("Signed URL was fetched"));
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    for (const [index, baselineInput] of baselineInputs.entries()) {
+      vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(baselineInput));
+      const replay = await adapter.stream("ignored");
+      await replay.consumeStream();
+      await vi.waitFor(() =>
+        expect(final(api.sessionIds[3 + index])?.status).toBe("completed"),
+      );
+      for (const bytes of encoded.slice(0, index + 1))
+        expect(prompts.at(-1)).toContain(bytes);
+    }
+    expect(fetchAttachment).not.toHaveBeenCalled();
+    const replayed = JSON.stringify(api.calls);
+    for (const token of tokens) expect(replayed).not.toContain(token);
+  } finally {
+    await store.close();
+  }
+});

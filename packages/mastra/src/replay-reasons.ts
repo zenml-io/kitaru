@@ -55,7 +55,7 @@ export type MastraReplayReason =
   | "version_mismatch"
   /** Declared files did not download before the setup wait ended. */
   | "file_capture_timeout"
-  /** A thread history file the turn resolved failed to download, or the turn's files exceed the capture limits. */
+  /** An input or thread history file the turn resolved failed to download, or the turn's files exceed the capture limits. */
   | "file_capture_failed"
   /** The turn's captured files could not be stored as Kitaru blobs. */
   | "file_store_failed"

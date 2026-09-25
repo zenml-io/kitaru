@@ -825,6 +825,38 @@ export function containsModelFileUrl(value: unknown): boolean {
   return collectFileUrls(value, MODEL_FILE_URL, true).length > 0;
 }
 
+/**
+ * Copy invocation input with each captured file reference held as the `data`
+ * or `image` of a file or image part turned into a `URL`.
+ *
+ * Mastra reads such a string as base64 content unless it starts with `http`,
+ * `data:` or `file-`, so a reference string would reach processors as a
+ * `data:` URL. As a `URL`, Mastra keeps it as the reference string, the way
+ * it kept the network URL the baseline sent.
+ */
+export function referenceInputFilesAsUrls<T>(value: T): T {
+  function visit(current: unknown): unknown {
+    if (Array.isArray(current)) return current.map(visit);
+    if (
+      current === null ||
+      typeof current !== "object" ||
+      Object.getPrototypeOf(current) !== Object.prototype
+    )
+      return current;
+    const entries = Object.entries(current).map(([key, item]) => [
+      key,
+      isFilePart(current as Record<string, unknown>) &&
+      (key === "data" || key === "image") &&
+      typeof item === "string" &&
+      FILE_REFERENCE.test(item)
+        ? new URL(item)
+        : visit(item),
+    ]);
+    return Object.fromEntries(entries);
+  }
+  return visit(value) as T;
+}
+
 /** Declared files did not finish downloading within the capture wait. */
 export class FileCaptureTimeoutError extends Error {
   constructor() {
@@ -906,7 +938,7 @@ export async function createCapturedFiles(
           );
         });
   deadline?.catch(() => undefined);
-  const historyUrls = new Set<string>();
+  const conversationUrls = new Set<string>();
   let totalBytes = 0;
   /**
    * Check a downloaded file against the capture limits and return its record.
@@ -962,7 +994,8 @@ export async function createCapturedFiles(
    *
    * Only a whole value that is a declared URL is swapped, so prompt text,
    * working memory and neighboring URLs keep what the model saw; their URL
-   * credentials are redacted instead. An undeclared network URL inside a
+   * credentials are redacted instead. An accepted conversation URL not
+   * captured yet keeps its redacted form. Any other network URL inside a
    * file or image part throws, because replay would have to fetch it.
    */
   function replaceDeclaredFileUrls<T>(value: T): T {
@@ -971,7 +1004,11 @@ export async function createCapturedFiles(
       if (typeof current === "string") {
         const reference = lookup(current);
         if (reference) return reference;
-        if (filePart && NETWORK_URL.test(current))
+        if (
+          filePart &&
+          NETWORK_URL.test(current) &&
+          !conversationUrls.has(normalizeFileUrl(current))
+        )
           throw new MastraReplayReasonError(
             "Unsupported Mastra memory replay: undeclared file URL.",
             "file_url_undeclared",
@@ -981,7 +1018,11 @@ export async function createCapturedFiles(
       if (current instanceof URL) {
         const reference = lookup(current.href);
         if (reference) return new URL(reference);
-        if (filePart && /^https?:$/i.test(current.protocol))
+        if (
+          filePart &&
+          /^https?:$/i.test(current.protocol) &&
+          !conversationUrls.has(normalizeFileUrl(current.href))
+        )
           throw new MastraReplayReasonError(
             "Unsupported Mastra memory replay: undeclared file URL.",
             "file_url_undeclared",
@@ -1049,26 +1090,27 @@ export async function createCapturedFiles(
     hasFile: (reference: string): boolean => filesByReference.has(reference),
     /**
      * Allow the turn to capture the network URLs held by file parts in its
-     * thread history once it resolves them.
+     * input or thread history once it resolves them.
      *
-     * History URLs are part of the recorded conversation, so capturing them
-     * adds no way for replay to fetch an arbitrary URL.
+     * These URLs are part of the recorded invocation, so capturing them adds
+     * no way for replay to fetch an arbitrary URL.
      */
-    acceptHistoryUrls(urls: readonly string[]): void {
+    acceptConversationUrls(urls: readonly string[]): void {
       for (const url of urls) {
         const normalized = normalizeFileUrl(url);
-        if (!declaredToReference.has(normalized)) historyUrls.add(normalized);
+        if (!declaredToReference.has(normalized))
+          conversationUrls.add(normalized);
       }
     },
-    /** Whether `url` is an accepted history URL not captured yet. */
-    isHistoryUrl: (url: string): boolean =>
-      historyUrls.has(normalizeFileUrl(url)) && lookup(url) === undefined,
+    /** Whether `url` is an accepted conversation URL not captured yet. */
+    isConversationUrl: (url: string): boolean =>
+      conversationUrls.has(normalizeFileUrl(url)) && lookup(url) === undefined,
     /**
-     * Declare the history URL `url` with the file the turn resolved for it.
-     * Throws with reason `file_capture_failed`, and declares nothing, when the
-     * file breaks the capture limits.
+     * Declare the conversation URL `url` with the file the turn resolved for
+     * it. Throws with reason `file_capture_failed`, and declares nothing, when
+     * the file breaks the capture limits.
      */
-    recordHistoryFile(url: string, resolved: ResolvedMemoryFile): void {
+    recordConversationFile(url: string, resolved: ResolvedMemoryFile): void {
       const normalized = normalizeFileUrl(url);
       if (declaredToReference.has(normalized)) return;
       let file: MastraRecordedFile;
@@ -1080,7 +1122,7 @@ export async function createCapturedFiles(
         file = checkedFile(resolved, totalBytes);
       } catch (error) {
         throw new MastraReplayReasonError(
-          `A thread history file could not be captured: ${
+          `A conversation file could not be captured: ${
             error instanceof Error ? error.message : "invalid file."
           }`,
           "file_capture_failed",
