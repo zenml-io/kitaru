@@ -8018,6 +8018,11 @@
               "title": "Located Count",
               "type": "integer"
             },
+            "records_capped": {
+              "description": "A per-session read limit on nodes, annotations, or evaluations was reached, so some sessions were analyzed partially.",
+              "title": "Records Capped",
+              "type": "boolean"
+            },
             "session_count": {
               "title": "Session Count",
               "type": "integer"
@@ -8053,7 +8058,8 @@
             "shown_count",
             "unlocated_count",
             "unlocated_evaluations",
-            "truncated"
+            "truncated",
+            "records_capped"
           ],
           "title": "GroupSummary",
           "type": "object"

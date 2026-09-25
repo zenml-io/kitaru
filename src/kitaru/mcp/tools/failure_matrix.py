@@ -47,6 +47,8 @@ from kitaru.mcp.tools.transitions import (
 IDS_PER_FILTER = 100
 PAGE_SIZE = 500
 TOP_CELLS_IN_TEXT = 5
+MAX_NODES_PER_SESSION = 2000
+MAX_RECORDS_PER_BATCH = 2000
 
 ItemT = TypeVar("ItemT", bound=ResponseModel)
 ParamsT = TypeVar("ParamsT", bound=FilterableListParams)
@@ -72,12 +74,14 @@ async def handle_failure_matrix(
             base.outcomes,
             request.sources,
             base.truncated,
+            base.records_capped,
         ),
         compare=summarize_group(
             request.compare_label or "Comparison",
             compare.outcomes,
             request.sources,
             compare.truncated,
+            compare.records_capped,
         )
         if compare is not None
         else None,
@@ -110,6 +114,7 @@ async def handle_failure_cell(
 class _AnalyzedGroup:
     outcomes: list[SessionOutcome]
     truncated: bool
+    records_capped: bool
 
 
 async def _analyze(
@@ -130,7 +135,7 @@ async def _analyze(
         request.sources,
     )
     return [
-        _AnalyzedGroup(outcomes, group.truncated)
+        _AnalyzedGroup(outcomes, group.truncated, group.records_capped)
         for outcomes, group in zip(folded, records, strict=True)
     ]
 
@@ -181,44 +186,67 @@ async def fetch_group(
     ids = [session.id for session in sessions]
     limiter = asyncio.Semaphore(concurrency)
 
-    async def nodes_of(session_id: uuid.UUID) -> tuple[SessionNodeResponse, ...]:
+    async def nodes_of(session_id: uuid.UUID) -> tuple[list[SessionNodeResponse], bool]:
         async with limiter:
             iterator = client.sessions.iter_nodes(
                 session_id, SessionNodeListParams(size=PAGE_SIZE)
             )
-            return tuple([node async for node in iterator])
+            return await _read_up_to(iterator, MAX_NODES_PER_SESSION)
 
-    node_lists, annotations, evaluations = await asyncio.gather(
+    (
+        node_reads,
+        (annotations, annotations_capped),
+        (evaluations, evaluations_capped),
+    ) = await asyncio.gather(
         asyncio.gather(*(nodes_of(session_id) for session_id in ids)),
         _collect_by_session(client.annotations.iter, AnnotationListParams, ids),
         _collect_by_session(client.evaluations.iter, EvaluationListParams, ids),
     )
     return GroupRecords(
         sessions=tuple(sessions),
-        nodes=dict(zip(ids, node_lists, strict=True)),
+        nodes={
+            session_id: tuple(nodes)
+            for session_id, (nodes, _) in zip(ids, node_reads, strict=True)
+        },
         annotations=tuple(annotations),
         evaluations=tuple(evaluations),
         truncated=truncated,
+        records_capped=annotations_capped
+        or evaluations_capped
+        or any(capped for _, capped in node_reads),
     )
+
+
+async def _read_up_to(
+    iterator: AsyncIterator[ItemT], limit: int
+) -> tuple[list[ItemT], bool]:
+    items: list[ItemT] = []
+    async for item in iterator:
+        if len(items) == limit:
+            return items, True
+        items.append(item)
+    return items, False
 
 
 async def _collect_by_session(
     iterate: Callable[[ParamsT], AsyncIterator[ItemT]],
     params_type: type[ParamsT],
     session_ids: Sequence[uuid.UUID],
-) -> list[ItemT]:
-    async def chunk_items(start: int) -> list[ItemT]:
+) -> tuple[list[ItemT], bool]:
+    async def chunk_items(start: int) -> tuple[list[ItemT], bool]:
         chunk = [str(i) for i in session_ids[start : start + IDS_PER_FILTER]]
         params = params_type(
             filter=FilterCondition(field="session_id", op=FilterOp.IN, value=chunk),
             size=PAGE_SIZE,
         )
-        return [item async for item in iterate(params)]
+        return await _read_up_to(iterate(params), MAX_RECORDS_PER_BATCH)
 
     chunks = await asyncio.gather(
         *(chunk_items(start) for start in range(0, len(session_ids), IDS_PER_FILTER))
     )
-    return [item for chunk in chunks for item in chunk]
+    return [item for items, _ in chunks for item in items], any(
+        capped for _, capped in chunks
+    )
 
 
 def describe_matrix(data: FailureMatrixData) -> str:
@@ -273,6 +301,8 @@ def _describe_group(group: GroupSummary) -> str:
         )
     if group.truncated:
         text += "; only the newest sessions were read (raise max_sessions for more)"
+    if group.records_capped:
+        text += "; some very large sessions were only partly read"
     return text + "."
 
 

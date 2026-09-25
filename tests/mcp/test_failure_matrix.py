@@ -29,6 +29,7 @@ from kitaru.mcp.models.failure_matrix import (
 )
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import MCPSettings
+from kitaru.mcp.tools import failure_matrix
 from kitaru.mcp.tools.failure_matrix import describe_matrix
 from kitaru.mcp.tools.transitions import (
     START,
@@ -122,6 +123,7 @@ def _records(
         annotations=tuple(annotations),
         evaluations=tuple(evaluations),
         truncated=False,
+        records_capped=False,
     )
 
 
@@ -195,7 +197,9 @@ def test_unlocated_evaluation_summary_is_bounded() -> None:
         build_labeler("tool", None),
         None,
     )
-    summary = summarize_group("group", outcomes, ["error"], truncated=False)
+    summary = summarize_group(
+        "group", outcomes, ["error"], truncated=False, records_capped=False
+    )
 
     assert len(summary.unlocated_evaluations) == 10
 
@@ -399,6 +403,7 @@ def test_comparison_text_lists_the_largest_changes_first() -> None:
         unlocated_count=0,
         unlocated_evaluations=[],
         truncated=False,
+        records_capped=False,
     )
     data = FailureMatrixData(
         state_by="tool",
@@ -537,6 +542,25 @@ def test_recorded_names_never_merge_with_the_start_row() -> None:
     )
 
     assert outcome.failure_transition == (START, f"{START} (recorded)")
+
+
+async def test_large_sessions_are_read_up_to_a_cap_and_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(failure_matrix, "MAX_NODES_PER_SESSION", 2)
+    session = _session("failed")
+    nodes = [_node(session, f"n{i}", "tool_call", f"step_{i}", at=i) for i in range(4)]
+    client = _FakeClient(_records({session.id: nodes}, [session]))
+
+    records = await failure_matrix.fetch_group(
+        cast(Any, client), None, max_sessions=10, concurrency=2
+    )
+    server, context = build_server_context(client)
+    result = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+
+    assert len(records.nodes[session.id]) == 2 and records.records_capped
+    text = cast(CallToolResult, result).content[0]
+    assert isinstance(text, TextContent) and "partly read" in text.text
 
 
 async def test_cell_tool_reuses_cached_group_and_lists_sessions() -> None:

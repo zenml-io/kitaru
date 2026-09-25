@@ -400,6 +400,7 @@ def summarize_group(
     outcomes: Sequence[SessionOutcome],
     sources: Sequence[FailureSource],
     truncated: bool,
+    records_capped: bool,
 ) -> GroupSummary:
     """Headline numbers and the evaluations behind unlocated failures."""
     unlocated = [o for o in outcomes if o.failed and o.point is None]
@@ -417,6 +418,7 @@ def summarize_group(
             ).most_common(MAX_UNLOCATED_EVALUATIONS)
         ],
         truncated=truncated,
+        records_capped=records_capped,
     )
 
 

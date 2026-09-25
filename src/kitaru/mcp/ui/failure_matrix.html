@@ -320,9 +320,10 @@ function render() {
   const cells = new Map(d.cells.map((c) => [key(c.from_state, c.to_state), c]));
   const b = d.base, c = d.compare;
   const change = (x, y) => (x === y ? String(y) : `${x} → ${y}`);
+  const partial = [b, c].some((g) => g?.records_capped) ? " · some large sessions only partly read" : "";
   $("#summary").textContent = compare
-    ? `${b.label} vs ${c.label} · failed sessions ${change(b.failed_count, c.failed_count)}${b.truncated || c.truncated ? " (newest only)" : ""}`
-    : `${b.label} · ${b.failed_count} of ${b.session_count} sessions failed${b.truncated ? " (newest only)" : ""}`;
+    ? `${b.label} vs ${c.label} · failed sessions ${change(b.failed_count, c.failed_count)}${b.truncated || c.truncated ? " (newest only)" : ""}${partial}`
+    : `${b.label} · ${b.failed_count} of ${b.session_count} sessions failed${b.truncated ? " (newest only)" : ""}${partial}`;
   $("#measure-ctl").hidden = compare;
   renderHeadline(d, measure);
   renderMatrix(d, cells, measure);

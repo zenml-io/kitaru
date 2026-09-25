@@ -136,6 +136,10 @@ class GroupSummary(MCPModel):
         description="Most common failed evaluations among unlocated sessions."
     )
     truncated: bool = Field(description="More sessions matched than max_sessions.")
+    records_capped: bool = Field(
+        description="A per-session read limit on nodes, annotations, or "
+        "evaluations was reached, so some sessions were analyzed partially."
+    )
 
 
 class FailureMatrixData(MCPModel):
@@ -199,3 +203,4 @@ class GroupRecords:
     annotations: tuple[AnnotationResponse, ...]
     evaluations: tuple[EvaluationResponse, ...]
     truncated: bool
+    records_capped: bool
