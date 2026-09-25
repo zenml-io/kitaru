@@ -15,8 +15,6 @@
 
 import uuid
 
-import pytest
-
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import TaskKind
@@ -31,7 +29,6 @@ from kitaru.server.application.services.resource_access import (
     scope_task_session_filter,
 )
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.base import ForbiddenError
 from kitaru.server.domain.task import (
     AgentTaskDetails,
     AnalysisTaskDetails,
@@ -44,7 +41,7 @@ from kitaru.server.domain.task import (
     TaskRunSpec,
     TaskSpec,
 )
-from kitaru.server.filtering import AndExpression, FilterCondition
+from kitaru.server.filtering import AndExpression, FilterCondition, OrExpression
 
 
 def _script_plugin(blob_id: uuid.UUID) -> ScriptPluginSpec:
@@ -215,28 +212,33 @@ def test_scope_task_session_filter_passes_an_account_filter_through() -> None:
     assert scoped == session_filter
 
 
-def test_scope_task_session_filter_restricts_a_task_to_its_imports() -> None:
-    """AND the granted imports onto whatever filter a task principal sent."""
+def test_scope_task_session_filter_restricts_a_task_to_its_own_and_imports() -> None:
+    """AND the task's own and granted-import sessions onto a task's filter."""
     import_id = uuid.uuid4()
     actor = _task_actor({GrantKind.IMPORT: frozenset({import_id})})
+    assert isinstance(actor.principal, TaskPrincipal)
+    scope = OrExpression(
+        operands=(
+            FilterCondition(
+                field="task_id", op=FilterOp.EQ, value=actor.principal.task_id
+            ),
+            FilterCondition(field="import_id", op=FilterOp.IN, value=[import_id]),
+        )
+    )
     status = FilterCondition(field="status", op=FilterOp.NE, value="in_progress")
 
     scoped = scope_task_session_filter(SessionFilter(expression=status), actor)
-    assert scoped.expression == AndExpression(
-        operands=(
-            FilterCondition(field="import_id", op=FilterOp.IN, value=[import_id]),
-            status,
-        )
-    )
+    assert scoped.expression == AndExpression(operands=(scope, status))
 
     scoped = scope_task_session_filter(SessionFilter(), actor)
-    assert scoped.expression == FilterCondition(
-        field="import_id", op=FilterOp.IN, value=[import_id]
-    )
+    assert scoped.expression == scope
 
 
-def test_scope_task_session_filter_rejects_a_task_without_an_import_grant() -> None:
-    """Refuse a listing to a task principal holding no import grant."""
+def test_scope_task_session_filter_limits_a_task_without_imports_to_its_own() -> None:
+    """Restrict a task principal holding no import grant to its own sessions."""
     actor = _task_actor({GrantKind.SESSION: frozenset({uuid.uuid4()})})
-    with pytest.raises(ForbiddenError):
-        scope_task_session_filter(SessionFilter(), actor)
+    assert isinstance(actor.principal, TaskPrincipal)
+    scoped = scope_task_session_filter(SessionFilter(), actor)
+    assert scoped.expression == FilterCondition(
+        field="task_id", op=FilterOp.EQ, value=actor.principal.task_id
+    )

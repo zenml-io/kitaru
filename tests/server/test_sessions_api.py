@@ -1020,12 +1020,12 @@ async def test_list_sessions_filter_nested_too_deep(client: httpx.AsyncClient) -
     assert response.status_code == 422
 
 
-async def test_list_sessions_rejects_worker_and_task_credentials(
+async def test_list_sessions_rejects_a_worker_credential(
     session_repository: FakeSessionRepository,
     account: Account,
     auth_service: AuthService,
 ) -> None:
-    """Observe HTTP 403 for a worker credential or an import-less task credential."""
+    """Observe HTTP 403 for a worker credential."""
     app = create_app(local_settings())
     app.dependency_overrides[get_session_service] = lambda: SessionService(
         repository=session_repository,
@@ -1044,21 +1044,6 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
         ).token
         response = await client.get(
             "/api/v1/sessions", headers={"Authorization": f"Bearer {worker_token}"}
-        )
-        assert response.status_code == 403
-
-        task_token = auth_service.issue_task_token(
-            TaskSubject(
-                task_id=uuid.uuid4(),
-                attempt=1,
-                worker_id=uuid.uuid4(),
-                account_id=account.id,
-                job_id=uuid.uuid4(),
-            ),
-            timeout_seconds=3600,
-        ).token
-        response = await client.get(
-            "/api/v1/sessions", headers={"Authorization": f"Bearer {task_token}"}
         )
         assert response.status_code == 403
 
@@ -1182,6 +1167,55 @@ async def test_list_sessions_scopes_a_task_token_to_its_granted_import(
         )
         assert response.status_code == 200
         assert response.json()["items"] == []
+
+
+async def test_list_sessions_shows_a_task_token_its_own_result_session(
+    session_repository: FakeSessionRepository,
+    node_repository: FakeSessionNodeRepository,
+    evaluation_repository: FakeEvaluationRepository,
+    task_repository: FakeTaskRepository,
+    account: Account,
+    auth_service: AuthService,
+) -> None:
+    """List a failed result session, with its error, to the task that produced it."""
+    task_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    own = await create_session(
+        session_repository,
+        account.id,
+        agent_id=agent_id,
+        task_id=task_id,
+        status=SessionStatus.FAILED,
+        error="No history result for tool lookup",
+    )
+    await create_session(
+        session_repository, account.id, agent_id=agent_id, task_id=uuid.uuid4()
+    )
+    await create_session(session_repository, account.id, agent_id=agent_id)
+    client = _build_task_scoped_app(
+        session_repository,
+        node_repository,
+        task_repository,
+        evaluation_repository,
+        auth_service,
+    )
+    async with client:
+        token = _task_token(auth_service, account, task_id=task_id)
+        headers = {"Authorization": f"Bearer {token}"}
+        own_filter = {"field": "task_id", "op": "eq", "value": str(task_id)}
+        response = await client.get(
+            "/api/v1/sessions",
+            params={"filter": json.dumps(own_filter)},
+            headers=headers,
+        )
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert [item["id"] for item in items] == [str(own.id)]
+        assert items[0]["error"] == "No history result for tool lookup"
+
+        response = await client.get("/api/v1/sessions", headers=headers)
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()["items"]] == [str(own.id)]
 
 
 async def test_get_session_allows_a_task_token_granted_its_import(

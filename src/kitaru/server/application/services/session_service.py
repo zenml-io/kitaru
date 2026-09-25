@@ -343,17 +343,14 @@ class SessionService:
     ) -> tuple[list[Session], str | None]:
         """List sessions matching a filter.
 
-        A task principal's listing is restricted to the imports its token is
-        granted.
+        A task principal's listing is restricted to the sessions it produced
+        and those of the imports its token is granted.
 
         Args:
             session_filter: Filter and pagination parameters.
             include_payloads: Whether to read and resolve the inputs and
                 outputs.
             actor: Caller context.
-
-        Raises:
-            ForbiddenError: A task principal holds no import grant.
 
         Returns:
             Page of matching sessions and the next cursor.
