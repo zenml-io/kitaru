@@ -200,6 +200,20 @@ function patches(calls: ApiCall[]) {
   return calls.filter((call) => call.method === "PATCH" && call.body?.status);
 }
 
+/** The attributes of the recorded node named `name`. */
+function nodeAttributes(calls: ApiCall[], name: string): unknown {
+  return calls
+    .filter((call) => call.method === "POST" && call.path.endsWith("/nodes"))
+    .flatMap(
+      (call) =>
+        (call.body?.nodes ?? []) as Array<{
+          name: string;
+          attributes: unknown;
+        }>,
+    )
+    .find((node) => node.name === name)?.attributes;
+}
+
 function nodeNames(calls: ApiCall[]): string[] {
   return calls
     .filter((call) => call.method === "POST" && call.path.endsWith("/nodes"))
@@ -249,6 +263,9 @@ async function replay(
   vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(inputs));
   const output = await fixture.adapter.stream("ignored");
   await output.consumeStream();
+  // A replay process may exit as soon as its stream has been read, so the
+  // session must already be closed by then.
+  expect(patches(fixture.api.calls.slice(start))).toHaveLength(1);
   await vi.waitFor(
     () => expect(patches(fixture.api.calls.slice(start))).toHaveLength(1),
     { timeout: 10_000 },
@@ -314,6 +331,12 @@ it("fails a replay closed when a blocking observation has no recorded result lef
       mastra_replay_state: "diverged",
       mastra_replay_reason: "mastra_om_call_order",
     },
+  });
+  expect(nodeAttributes(calls, "om_unanswered_call")).toEqual({
+    phase: "observer",
+    method: "doStream",
+    replay_call: 1,
+    cause: "recorded_results_used_up",
   });
   expect(fixture.runtime.observer.calls).toHaveLength(recorded);
   await fixture.runtime.store.close();
@@ -508,6 +531,12 @@ it("closes a replay as diverged when a blocking OM call has no recorded result",
       mastra_replay_state: "diverged",
       mastra_replay_reason: "mastra_om_call_order",
     },
+  });
+  expect(nodeAttributes(calls, "om_unanswered_call")).toEqual({
+    phase: "observer",
+    method: "doStream",
+    replay_call: 0,
+    cause: "no_recorded_result",
   });
   expect(fixture.runtime.observer.calls).toHaveLength(0);
   await fixture.runtime.store.close();

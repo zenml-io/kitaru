@@ -64,6 +64,7 @@ import {
 } from "./memory-snapshot.js";
 import {
   createOMResultTape,
+  MastraOMDivergenceError,
   type MissingOMResults,
   type OMLiveCall,
   type OMResultEntry,
@@ -831,7 +832,7 @@ export function createMemoryReplayAgent(
         },
       });
     let replayMetadata: Record<string, JsonValue> | undefined;
-    let tripwireListener: ((reason: string) => void) | undefined;
+    let tripwireListener: ((reason: string) => Promise<void>) | undefined;
     let runtime: {
       memory: Memory;
       binding: MastraMemoryCaptureBinding;
@@ -1450,7 +1451,30 @@ export function createMemoryReplayAgent(
             await runtime.binding.drain();
             // An OM call past the deadline may never return; the turn is
             // already ineligible, so do not wait for its tape entry.
-            const tape = settled ? await omTape.finish() : undefined;
+            const tape = settled
+              ? await omTape.finish().catch(async (error: unknown) => {
+                  // The session error is a fixed code, so this node is
+                  // where the failed replay names the call that diverged.
+                  if (error instanceof MastraOMDivergenceError && error.call)
+                    await writeNode({
+                      external_id: `${invocationId}:om-unanswered-call`,
+                      parent_external_id: ROOT_NODE_EXTERNAL_ID,
+                      node_type: "span",
+                      name: "om_unanswered_call",
+                      status: "failed",
+                      inputs: null,
+                      outputs: null,
+                      error: error.message,
+                      attributes: {
+                        phase: error.call.phase,
+                        method: error.call.method,
+                        replay_call: error.call.replayCall,
+                        cause: error.call.cause,
+                      },
+                    });
+                  throw error;
+                })
+              : undefined;
             const omResults = tape?.entries ?? [];
             for (const reason of omCaptureErrors)
               runtime.binding.markIncomplete(reason, "om_tape_incomplete");

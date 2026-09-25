@@ -53,11 +53,12 @@ const TRIPWIRE_METHODS = new Set<PropertyKey>([
  *
  * A processor tripwire, for example an `abort()` or a failed blocking
  * observation, ends Mastra's run without calling `onFinish`, `onError` or
- * `onAbort`. The tripwire still propagates to Mastra unchanged.
+ * `onAbort`. The tripwire still propagates to Mastra unchanged, once the
+ * promise `onTripwire` returns has settled.
  */
 export function reportProcessorTripwires<T>(
   processor: T,
-  onTripwire: (reason: string) => void,
+  onTripwire: (reason: string) => Promise<void> | void,
 ): T {
   if (!record(processor)) return processor;
   return new Proxy(processor, {
@@ -71,7 +72,10 @@ export function reportProcessorTripwires<T>(
         } catch (error) {
           if (error instanceof TripWire) {
             try {
-              onTripwire(error.message);
+              // Mastra ends the stream once the tripwire propagates, so a
+              // replay closes its session first; a caller may exit as soon
+              // as it has read the stream.
+              await onTripwire(error.message);
             } catch {
               // Recording diagnostics never replace Mastra's tripwire.
             }
@@ -86,7 +90,7 @@ export function reportProcessorTripwires<T>(
 /** Report a tripwire raised by one of the Memory's own input processors. */
 export function reportMemoryProcessorTripwires(
   memory: Memory,
-  onTripwire: (reason: string) => void,
+  onTripwire: (reason: string) => Promise<void> | void,
 ): Memory {
   const wrapped = new WeakMap<object, unknown>();
   const watch = (processor: unknown): unknown => {

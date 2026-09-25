@@ -80,10 +80,26 @@ export interface OMTapeResult {
  */
 export type MissingOMResults = "fail" | "live";
 
+/** A blocking replay OM call that had no recorded result to use. */
+export interface OMUnansweredCall {
+  phase: OMPhase;
+  method: OMMethod;
+  /** The call's position among the replay's OM calls, from 0. */
+  replayCall: number;
+  /**
+   * `no_recorded_result`: production made no call of this phase and method.
+   * `recorded_results_used_up`: earlier replay calls used every recorded one.
+   */
+  cause: "no_recorded_result" | "recorded_results_used_up";
+}
+
 export class MastraOMDivergenceError extends Error {
   readonly code = "mastra_om_diverged";
 
-  constructor(reason: string) {
+  constructor(
+    reason: string,
+    readonly call?: OMUnansweredCall,
+  ) {
     super(`Recorded Mastra observational memory diverged: ${reason}`);
   }
 }
@@ -418,8 +434,8 @@ export function createOMResultTape(
     }
   }
 
-  function failClosed(reason: string): never {
-    failedClosed ??= new MastraOMDivergenceError(reason);
+  function failClosed(reason: string, call?: OMUnansweredCall): never {
+    failedClosed ??= new MastraOMDivergenceError(reason, call);
     throw failedClosed;
   }
 
@@ -505,7 +521,12 @@ export function createOMResultTape(
       // when production made no call of its phase at all.
       if (buffered) return skipBuffered(phase, method, calls, false);
       if (live) return callLive();
-      failClosed(`no recorded ${phase} result`);
+      failClosed(`no recorded ${phase} result`, {
+        phase,
+        method,
+        replayCall,
+        cause: "no_recorded_result",
+      });
     }
     const fingerprint = getOMInputFingerprint(
       input,
@@ -521,7 +542,12 @@ export function createOMResultTape(
     if (buffered) return skipBuffered(phase, method, calls, Boolean(unused));
     if (!unused) {
       if (live) return callLive();
-      failClosed(`no recorded ${phase} result left for a blocking call`);
+      failClosed(`no recorded ${phase} result left for a blocking call`, {
+        phase,
+        method,
+        replayCall,
+        cause: "recorded_results_used_up",
+      });
     }
     divergence.inputMismatches++;
     inputMismatches.push({

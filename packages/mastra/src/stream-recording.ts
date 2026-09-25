@@ -80,9 +80,11 @@ export interface StatefulStreamRecording {
   beginFinalization?(): void;
   /**
    * Receive a native tripwire that ends the run without Mastra calling
-   * `onFinish` or `onError`, so the session can still be closed.
+   * `onFinish` or `onError`, so the session can still be closed. The
+   * listener settles once a replay session is closed; a baseline session
+   * closes in the background.
    */
-  setTripwireListener?(listener: (reason: string) => void): void;
+  setTripwireListener?(listener: (reason: string) => Promise<void>): void;
   finish(): Promise<JsonValue>;
   /** Session metadata for a completed replay, read after `finish()`. */
   getReplayMetadata?(): Record<string, JsonValue> | undefined;
@@ -860,7 +862,7 @@ async function recordedStreamWithRecording({
       active.markNativeFailed();
       const error = new Error(reason);
       const safe = getSafeStreamError(error);
-      void active
+      return active
         .fail(safe.message === OM_DIVERGED ? safe : error)
         .catch(() => undefined);
     });
