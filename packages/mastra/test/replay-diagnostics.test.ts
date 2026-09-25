@@ -289,6 +289,42 @@ it("refuses a compound credential key nested in the captured request context", a
   expect(JSON.stringify(api.calls)).not.toContain("PRIVATE_NESTED_VALUE");
 });
 
+it.each(["pageToken", "max_tokens", "keyboardLayout"])(
+  "records a request context key that only resembles a credential: %s",
+  async (key) => {
+    const { api, turn } = await setup({
+      adapter: { captureRequestContext: () => ({ [key]: "value" }) },
+    });
+
+    expect(await turn()).toBe("done");
+
+    expect(await closingUpdate(api)).toMatchObject({
+      status: "completed",
+      metadata: { mastra_replay_state: "eligible" },
+    });
+  },
+);
+
+it.each(["accessToken", "api_key"])(
+  "refuses a credential request context key: %s",
+  async (key) => {
+    const { api, turn } = await setup({
+      adapter: { captureRequestContext: () => ({ [key]: "PRIVATE" }) },
+    });
+
+    expect(await turn()).toBe("done");
+
+    expect(await closingUpdate(api)).toMatchObject({
+      status: "completed",
+      metadata: {
+        mastra_replay_state: "ineligible",
+        mastra_replay_reason: "credential_key_unsupported",
+      },
+    });
+    expect(JSON.stringify(api.calls)).not.toContain("PRIVATE");
+  },
+);
+
 it("closes a setup failure's session as failed when the native turn fails", async () => {
   const actor = new MastraLanguageModelV2Mock({
     modelId: "actor",

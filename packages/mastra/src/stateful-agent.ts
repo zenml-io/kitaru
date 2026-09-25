@@ -1135,15 +1135,6 @@ export function createMemoryReplayAgent(
         );
       }
       if (
-        Object.keys(effectiveContext).some((key) =>
-          /auth|credential|jwt|key|password|secret|token/i.test(key),
-        )
-      )
-        throw new MemoryReplayContextError(
-          "Unsupported replay request context credential key.",
-          "credential_key_unsupported",
-        );
-      if (
         !historical &&
         !options.captureRequestContext &&
         [...requestContext.entries()].length > 0
