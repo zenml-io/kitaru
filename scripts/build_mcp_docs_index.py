@@ -75,6 +75,7 @@ def _clean_markdown(value: str) -> str:
 def _get_sections(markdown: str) -> list[tuple[str, str]]:
     """Split a page into sections headed by H1-H4."""
     markdown = re.sub(r"\A---\n.*?\n---\n", "", markdown, flags=re.DOTALL)
+    markdown = re.sub(r"<!--.*?-->", " ", markdown, flags=re.DOTALL)
     headings: list[tuple[int, int, str]] = []
     fence = ""
     offset = 0

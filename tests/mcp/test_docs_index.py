@@ -35,6 +35,10 @@ def test_index_covers_toc_with_published_urls() -> None:
         "on_miss" in entry["excerpt"] and entry["source"] == "guides/tool-policies.md"
         for entry in index["entries"]
     )
+    assert all(
+        "<!--" not in entry["excerpt"] and "TODO(v2-launch)" not in entry["excerpt"]
+        for entry in index["entries"]
+    )
 
 
 def test_source_change_invalidates_index(monkeypatch) -> None:
@@ -80,3 +84,21 @@ def test_clean_markdown_preserves_literal_angle_brackets() -> None:
         "run kitaru login <server-url> then kitaru job watch <job-id> . "
         "Read more ."
     )
+
+
+def test_multiline_html_comment_does_not_enter_sections() -> None:
+    """Hidden maintainer notes do not become headings or excerpts."""
+    markdown = (
+        "# Page\n"
+        "## Visible\n"
+        "Published guidance.\n"
+        "<!-- TODO(v2-launch): internal note\n"
+        "## Hidden heading\n"
+        "Do not show this. -->\n"
+        "## Next\n"
+        "More published guidance.\n"
+    )
+    sections = build_mcp_docs_index._get_sections(markdown)
+    assert [heading for heading, _ in sections] == ["Page", "Visible", "Next"]
+    assert "TODO" not in sections[1][1]
+    assert "Do not show this" not in sections[1][1]
