@@ -8,6 +8,7 @@ import {
   containsModelFileUrl,
   createCapturedFiles,
   createFileBlobStore,
+  createInlineContentReferencer,
   createInlineFileReader,
   type FileBlobClient,
   fileReference,
@@ -408,6 +409,46 @@ it("records known inline history files by reference and writes them back exactly
   expect(() => restoreInlineFiles(decoded, () => undefined)).toThrow(
     /inline file content was not recorded/,
   );
+});
+
+it("accounts for inline content referenced earlier and writes it back past the limits", () => {
+  const bytes = new Uint8Array([37, 80, 68, 70, 1]);
+  const reference = fileReference({ bytes, mediaType: "application/pdf" });
+  const base64 = Buffer.from(bytes).toString("base64");
+  const snapshot = {
+    messages: [
+      {
+        id: "m",
+        content: {
+          format: 2,
+          parts: [{ type: "file", data: base64, mimeType: "application/pdf" }],
+        },
+      },
+    ],
+  };
+  const read = createInlineFileReader();
+  const isKnown = (value: string) => value === reference;
+  const early = createInlineContentReferencer(read, isKnown)(snapshot);
+  expect(JSON.stringify(encodeMemoryValue(early))).not.toContain(base64);
+  const referenced = referenceInlineFiles(early, { read, isKnown, files: [] });
+  expect(referenced.files.map((file) => file.url)).toEqual([reference]);
+  const restored = restoreInlineFiles(
+    referenced.snapshot,
+    restoreCapturedFiles(referenced.files).readFile,
+  );
+  expect(restored).toEqual(snapshot);
+  // With the file limit already used up, the content goes back inline.
+  const full = Array.from({ length: 64 }, (_, index) => ({
+    url: fileReference({
+      bytes: new Uint8Array([index]),
+      mediaType: "text/plain",
+    }),
+    mediaType: "text/plain",
+    bytes: new Uint8Array([index]),
+  }));
+  const past = referenceInlineFiles(early, { read, isKnown, files: full });
+  expect(past.files).toEqual([]);
+  expect(past.snapshot).toEqual(snapshot);
 });
 
 it("flags a message attachment URL only when Mastra would send it to the model", () => {

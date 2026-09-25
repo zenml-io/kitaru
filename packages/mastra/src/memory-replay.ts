@@ -368,6 +368,7 @@ export interface IsolatedMemoryReplayOptions {
   /** Return the recorded file that inline content in the snapshot names. */
   readFile?: (reference: string) => ResolvedMemoryFile | undefined;
   referenceFileContent?: MastraMemoryCaptureOptions["referenceFileContent"];
+  referenceInitialContent?: MastraMemoryCaptureOptions["referenceInitialContent"];
 }
 
 /** Restore historical state into a fresh store; no production store is accepted. */
@@ -425,6 +426,7 @@ export async function createIsolatedMemoryReplay(
       acceptHistoryFileUrls: () => undefined,
       recordMutation: options.recordMutation,
       referenceFileContent: options.referenceFileContent,
+      referenceInitialContent: options.referenceInitialContent,
       getRequestId: options.getRequestId,
       onIncomplete: options.onIncomplete,
     });

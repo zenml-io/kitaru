@@ -310,6 +310,12 @@ export interface MastraMemoryCaptureOptions extends MastraMemorySelector {
    */
   referenceFileContent?: <T>(value: T) => T;
   /**
+   * Replace inline file content that matches a captured file with
+   * `InlineFileContent` in the initial snapshot, before `sanitizeEvidence`
+   * runs and before the snapshot's size is checked.
+   */
+  referenceInitialContent?: <T>(value: T) => T;
+  /**
    * Accept the file URLs that `sanitizeEvidence` leaves in thread history
    * instead of making the turn ineligible. With `sanitizeEvidence`, the
    * binding then keeps an unsanitized copy of the snapshot for
@@ -1059,6 +1065,8 @@ export function createMemoryCaptureBinding(
     return { thread, resource, messages, records };
   }
 
+  const referenceInitialContent =
+    options.referenceInitialContent ?? (<T>(value: T): T => value);
   let unsanitizedSnapshot: unknown;
   /** Copy a snapshot so no storage-owned objects or Dates escape the explicit codec. */
   function copySnapshot(snapshot: unknown): MastraMemorySnapshot {
@@ -1076,9 +1084,8 @@ export function createMemoryCaptureBinding(
     },
     sanitizeInitialAgain() {
       if (!unsanitizedSnapshot) return undefined;
-      return copySnapshot(
-        options.sanitizeEvidence?.(unsanitizedSnapshot) ?? unsanitizedSnapshot,
-      );
+      const referenced = referenceInitialContent(unsanitizedSnapshot);
+      return copySnapshot(options.sanitizeEvidence?.(referenced) ?? referenced);
     },
     get incompleteReasons() {
       return [...reasons];
@@ -1157,7 +1164,11 @@ export function createMemoryCaptureBinding(
             };
             // Declared file URLs in history become captured references here,
             // so a replayed processor resolves recorded bytes without a token.
-            const sanitized = options.sanitizeEvidence?.(snapshot) ?? snapshot;
+            // Referencing captured inline content first keeps a large inline
+            // attachment out of every later copy and size check.
+            const referenced = referenceInitialContent(snapshot);
+            const sanitized =
+              options.sanitizeEvidence?.(referenced) ?? referenced;
             if (collectFileNetworkUrls(sanitized.messages).length > 0) {
               if (!options.acceptHistoryFileUrls)
                 throw new MastraReplayReasonError(

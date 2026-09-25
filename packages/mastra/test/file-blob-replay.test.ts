@@ -328,3 +328,63 @@ it("records a turn as ineligible when its files cannot be stored", async () => {
     await store.close();
   }
 }, 60_000);
+
+it("keeps a turn eligible when history holds a captured file inline beyond the replay input budget as base64", async () => {
+  const { store, domain } = await seedThread(0, 0);
+  const url = attachmentUrl(0);
+  // 13 MiB of bytes is over 16 MiB as base64 but within the file limit.
+  const bytes = new Uint8Array(13 * 1024 * 1024).fill(7);
+  const inline = Buffer.from(bytes).toString("base64");
+  await domain.saveMessages({
+    messages: [
+      {
+        id: "inline-scan",
+        threadId: THREAD,
+        resourceId: RESOURCE,
+        role: "user",
+        createdAt: new Date(4_000),
+        content: {
+          format: 2,
+          parts: [
+            { type: "text", text: "The scan, inline." },
+            { type: "file", data: inline, mimeType: "image/png" },
+          ],
+        },
+      },
+    ],
+  });
+  const { adapter, api, fetchAttachment, final, prompts } = fixture(
+    domain,
+    () => bytes,
+    [url],
+  );
+  try {
+    const output = await adapter.stream("What is in the scan?", {
+      memory: { thread: THREAD, resource: RESOURCE },
+    });
+    await output.consumeStream();
+    await vi.waitFor(
+      () => expect(final(api.sessionIds[0])?.status).toBe("completed"),
+      { timeout: 20_000 },
+    );
+    expect(final(api.sessionIds[0])?.metadata).toMatchObject({
+      mastra_replay_state: "eligible",
+    });
+    const baselineInput = final(api.sessionIds[0])?.inputs;
+    expect(JSON.stringify(baselineInput).length).toBeLessThan(100_000);
+    fetchAttachment.mockClear();
+    fetchAttachment.mockRejectedValue(new Error("Signed URL was fetched"));
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(baselineInput));
+    const replay = await adapter.stream("ignored");
+    await replay.consumeStream();
+    await vi.waitFor(
+      () => expect(final(api.sessionIds[1])?.status).toBe("completed"),
+      { timeout: 20_000 },
+    );
+    expect(fetchAttachment).not.toHaveBeenCalled();
+    expect(prompts.at(-1)).toContain(inline);
+  } finally {
+    await store.close();
+  }
+}, 60_000);

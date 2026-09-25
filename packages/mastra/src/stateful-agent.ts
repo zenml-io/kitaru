@@ -90,6 +90,7 @@ import {
   createCapturedFiles,
   createFileBlobStore,
   createFileDownloads,
+  createInlineContentReferencer,
   createInlineFileReader,
   createRecordedEvidenceSanitizer,
   createThreadFileRegistry,
@@ -872,6 +873,10 @@ export function createMemoryReplayAgent(
       isKnownFile,
       readInlineFile,
     );
+    const referenceInitialContent = createInlineContentReferencer(
+      readInlineFile,
+      isKnownFile,
+    );
     const omTape = createOMResultTape(
       historical?.omTape as OMResultEntry[] | undefined,
       (reason) => omCaptureErrors.push(reason),
@@ -917,6 +922,7 @@ export function createMemoryReplayAgent(
         finalizationWaitMs,
         readFile: replayFiles?.readFile,
         referenceFileContent: referenceKnownContent,
+        referenceInitialContent,
       });
     } else {
       const source = await options.sourceMemory();
@@ -928,6 +934,7 @@ export function createMemoryReplayAgent(
         exclusiveAccess: source.exclusiveAccess,
         sanitizeEvidence: sanitizer.replace,
         referenceFileContent: referenceKnownContent,
+        referenceInitialContent,
         // Without the application's resolver, no history file can be
         // captured, so history URLs stay undeclared.
         acceptHistoryFileUrls: options.resolveFile

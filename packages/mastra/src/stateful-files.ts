@@ -168,11 +168,15 @@ export function getInlineFileReference(
  * a turn that meets the same large attachment in its history, its evidence
  * and its observational-memory inputs hashes it only once.
  */
-export function createInlineFileReader(): (
+export function createInlineFileReader(): ((
   part: Record<string, unknown>,
-) => InlineFile | undefined {
+) => InlineFile | undefined) & {
+  /** The file read with this content reference, if any. */
+  byReference(reference: string): InlineFile | undefined;
+} {
   const cache = new Map<string, Map<unknown, InlineFile | null>>();
-  return (part) => {
+  const references = new Map<string, InlineFile>();
+  const read = (part: Record<string, unknown>): InlineFile | undefined => {
     const data = getInlineData(part);
     const mediaType = getPartMediaType(part);
     let byData = cache.get(mediaType);
@@ -192,8 +196,12 @@ export function createInlineFileReader(): (
         }
       : null;
     byData.set(data, file);
+    if (file) references.set(file.reference, file);
     return file ?? undefined;
   };
+  return Object.assign(read, {
+    byReference: (reference: string) => references.get(reference),
+  });
 }
 
 export type InlineFileReader = ReturnType<typeof createInlineFileReader>;
@@ -224,15 +232,28 @@ export function referenceInlineFiles<T extends { messages: unknown[] }>(
   const added: MastraRecordedFile[] = [];
   function toReference(
     part: Record<string, unknown>,
-  ): InlineFileContent | undefined {
-    const file = options.read(part);
-    if (!file?.form || !options.isKnown(file.reference)) return undefined;
+  ): InlineFileContent | string | Uint8Array | undefined {
+    const data = getInlineData(part);
+    // Content an earlier pass already referenced, before the limits below.
+    const referenced = data instanceof InlineFileContent ? data : undefined;
+    const file = referenced
+      ? options.read.byReference(referenced.reference)
+      : options.read(part);
+    const form = referenced?.form ?? file?.form;
+    if (!file || !form || !options.isKnown(file.reference)) {
+      if (referenced)
+        throw new MastraReplayReasonError(
+          "Referenced inline file content was not read in this turn.",
+          "memory_store_shape_unsupported",
+        );
+      return undefined;
+    }
     if (!recorded.has(file.reference)) {
       if (
         recorded.size >= MAX_RECORDED_FILES ||
         totalBytes + file.bytes.byteLength > MAX_CAPTURED_FILE_BYTES
       )
-        return undefined;
+        return referenced ? encodeInlineData(file.bytes, form) : undefined;
       recorded.add(file.reference);
       totalBytes += file.bytes.byteLength;
       added.push({
@@ -241,7 +262,7 @@ export function referenceInlineFiles<T extends { messages: unknown[] }>(
         bytes: file.bytes,
       });
     }
-    return new InlineFileContent(file.reference, file.form);
+    return referenced ?? new InlineFileContent(file.reference, form);
   }
   const visit = createFilePartVisitor((part) => {
     const content = toReference(part);
@@ -255,6 +276,33 @@ export function referenceInlineFiles<T extends { messages: unknown[] }>(
       messages === snapshot.messages ? snapshot : { ...snapshot, messages },
     files: added,
   };
+}
+
+/**
+ * Build a function that replaces the inline content of each file or image
+ * part holding a known file with `InlineFileContent`, leaving `value` itself
+ * unchanged.
+ *
+ * It keeps content that could not be written back exactly inline, as
+ * `referenceInlineFiles` does, and leaves the capture limits to that later
+ * pass, so later copies and checks of a large history skip its bytes.
+ */
+export function createInlineContentReferencer(
+  read: InlineFileReader,
+  isKnown: (reference: string) => boolean,
+): <T>(value: T) => T {
+  const visit = createFilePartVisitor((part) => {
+    const file = read(part);
+    if (!file?.form || !isKnown(file.reference)) return part;
+    return {
+      ...part,
+      [part.type === "image" ? "image" : "data"]: new InlineFileContent(
+        file.reference,
+        file.form,
+      ),
+    };
+  });
+  return <T>(value: T) => visit(value) as T;
 }
 
 /**
@@ -618,7 +666,12 @@ export function createRecordedEvidenceSanitizer(
     function visit(current: unknown): unknown {
       if (typeof current === "string") return replaceString(current);
       if (current instanceof URL) return replaceString(current.href);
-      if (current instanceof Date || current instanceof Uint8Array)
+      // A content reference holds no URL or credential.
+      if (
+        current instanceof Date ||
+        current instanceof Uint8Array ||
+        current instanceof InlineFileContent
+      )
         return current;
       if (
         current instanceof ArrayBuffer ||
