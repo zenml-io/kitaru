@@ -32,7 +32,12 @@ import {
   type MastraReplayReason,
   unsupportedMemoryReplay,
 } from "./replay-reasons.js";
-import { fileReference, MAX_CAPTURED_FILE_BYTES } from "./stateful-files.js";
+import {
+  collectInlineFileReferences,
+  fileReference,
+  InlineFileContent,
+  MAX_CAPTURED_FILE_BYTES,
+} from "./stateful-files.js";
 
 export const MEMORY_REPLAY_KEY = "mastra_memory_replay";
 const CODEC_KEY = "$mastra";
@@ -351,6 +356,15 @@ export function encodeMemoryValue(value: unknown, path?: string): JsonValue {
     }
     if (current instanceof Uint8Array)
       return { [CODEC_KEY]: "bytes", ...binary(current) };
+    if (current instanceof InlineFileContent)
+      return {
+        [CODEC_KEY]: "file",
+        url: current.reference,
+        encoding: current.form.encoding,
+        ...(current.form.encoding === "data-url"
+          ? { prefix: current.form.prefix }
+          : {}),
+      };
     requireValue(!active.has(current), "Circular memory value.");
     active.add(current);
     try {
@@ -411,6 +425,32 @@ export function encodeMemoryEvidence(
     : boundMastraReplayEvidence(encoded, path, limits);
 }
 
+const DATA_URL_PREFIX = /^data:[^,]{0,256};base64,$/;
+
+function readInlineFileContent(
+  value: Record<string, JsonValue>,
+): InlineFileContent {
+  const { url, encoding, prefix } = value;
+  requireValue(
+    typeof url === "string" &&
+      FILE_REFERENCE.test(url) &&
+      Object.keys(value).length === (encoding === "data-url" ? 4 : 3),
+    "Malformed inline file reference.",
+  );
+  if (encoding === "data-url") {
+    requireValue(
+      typeof prefix === "string" && DATA_URL_PREFIX.test(prefix),
+      "Malformed inline file reference.",
+    );
+    return new InlineFileContent(url, { encoding, prefix });
+  }
+  requireValue(
+    encoding === "base64" || encoding === "bytes",
+    "Malformed inline file reference.",
+  );
+  return new InlineFileContent(url, { encoding });
+}
+
 /** Decode an already bounded value, rejecting ambiguous or damaged codec records. */
 export function decodeMemoryValue(value: JsonValue): unknown {
   const converted = strictMastraReplayValue(value);
@@ -433,6 +473,7 @@ export function decodeMemoryValue(value: JsonValue): unknown {
       }
       if (kind === "bytes" && Object.keys(current).length === 4)
         return readBinary(current);
+      if (kind === "file") return readInlineFileContent(current);
       throw unsupportedMemoryReplay("Malformed memory codec tag.");
     }
     return Object.fromEntries(
@@ -1165,6 +1206,12 @@ function decodeConvertedMemoryReplayEnvelope(
     );
     if (entry) files.push(entry);
   }
+  requireValue(
+    collectInlineFileReferences(initialSnapshot).every((reference) =>
+      urls.has(reference),
+    ),
+    "Recorded history names an inline file that was not recorded.",
+  );
   const rawInput = decodeMemoryValue(value.rawInput as JsonValue);
   ordered?.verify();
   return {

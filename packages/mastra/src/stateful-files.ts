@@ -20,7 +20,8 @@ export interface RecordedEvidenceSanitizer {
 const FILE_REFERENCE = /^kitaru-file:\/\/sha256\/[a-f0-9]{64}$/;
 /** The most file bytes one turn captures, for one file or all of them together. */
 export const MAX_CAPTURED_FILE_BYTES = 16 * 1024 * 1024;
-const MAX_RECORDED_FILES = 64;
+/** The most distinct files one turn captures. */
+export const MAX_RECORDED_FILES = 64;
 const ABSOLUTE_URL = /^[a-z][a-z0-9+.-]*:\/\//i;
 
 /** Return the WHATWG form of an absolute URL, or `value` when it is not one. */
@@ -52,6 +53,89 @@ export function fileReference(file: ResolvedMemoryFile): string {
   return `kitaru-file://sha256/${digest}`;
 }
 
+/** How a file or image part held its inline content, so it can be written back exactly. */
+export type InlineFileForm =
+  | { encoding: "base64" }
+  | { encoding: "bytes" }
+  | { encoding: "data-url"; prefix: string };
+
+/**
+ * A file's content held inline by a stored message, recorded as the captured
+ * file's reference and the form the message held it in.
+ *
+ * Replay writes the file's bytes back in that form before it restores the
+ * message, so the replayed history is identical to the recorded one.
+ */
+export class InlineFileContent {
+  constructor(
+    readonly reference: string,
+    readonly form: InlineFileForm,
+  ) {}
+}
+
+/** Content a file or image part holds inline, with its captured reference. */
+export interface InlineFile {
+  reference: string;
+  mediaType: string;
+  bytes: Uint8Array;
+  /** The form to write `bytes` back in, when that reproduces the part exactly. */
+  form?: InlineFileForm;
+}
+
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+function getInlineData(part: Record<string, unknown>): unknown {
+  return part.type === "image" ? part.image : part.data;
+}
+
+function getPartMediaType(part: Record<string, unknown>): string {
+  const mediaType = [part.mediaType, part.mimeType].find(
+    (value) => typeof value === "string",
+  );
+  return typeof mediaType === "string" ? mediaType : "";
+}
+
+/** Decode inline data, or return undefined for data that is a URL. */
+function decodeInlineData(
+  data: unknown,
+): { bytes: Uint8Array; form?: InlineFileForm } | undefined {
+  if (data instanceof Uint8Array)
+    return { bytes: data, form: { encoding: "bytes" } };
+  if (typeof data !== "string") return undefined;
+  if (data.startsWith("data:")) {
+    const comma = data.indexOf(",");
+    const prefix = data.slice(0, comma + 1);
+    const body = data.slice(comma + 1);
+    const bytes = Buffer.from(body, "base64");
+    return {
+      bytes,
+      form:
+        comma > 0 &&
+        prefix.endsWith(";base64,") &&
+        bytes.toString("base64") === body
+          ? { encoding: "data-url", prefix }
+          : undefined,
+    };
+  }
+  if (URL_SCHEME.test(data)) return undefined;
+  const bytes = Buffer.from(data, "base64");
+  return {
+    bytes,
+    form:
+      bytes.toString("base64") === data ? { encoding: "base64" } : undefined,
+  };
+}
+
+/** Write `bytes` in the inline form a part held them in. */
+function encodeInlineData(
+  bytes: Uint8Array,
+  form: InlineFileForm,
+): string | Uint8Array {
+  if (form.encoding === "bytes") return new Uint8Array(bytes);
+  const base64 = Buffer.from(bytes).toString("base64");
+  return form.encoding === "data-url" ? `${form.prefix}${base64}` : base64;
+}
+
 /**
  * Return the content reference of an attachment a file or image part holds
  * inline, as bytes, base64 text, or a data URL, and undefined for one it
@@ -64,25 +148,203 @@ export function getInlineFileReference(
   part: Record<string, unknown>,
   cache: Map<unknown, string>,
 ): string | undefined {
-  const data = part.type === "image" ? part.image : part.data;
+  const data = getInlineData(part);
   const cached = cache.get(data);
   if (cached) return cached;
-  let bytes: Uint8Array;
-  if (data instanceof Uint8Array) bytes = data;
-  else if (typeof data === "string" && data.startsWith("data:"))
-    bytes = Buffer.from(data.slice(data.indexOf(",") + 1), "base64");
-  else if (typeof data === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(data))
-    bytes = Buffer.from(data, "base64");
-  else return undefined;
-  const mediaType = [part.mediaType, part.mimeType].find(
-    (value) => typeof value === "string",
-  );
+  const decoded = decodeInlineData(data);
+  if (!decoded) return undefined;
   const reference = fileReference({
-    bytes,
-    mediaType: typeof mediaType === "string" ? mediaType : "",
+    bytes: decoded.bytes,
+    mediaType: getPartMediaType(part),
   });
   cache.set(data, reference);
   return reference;
+}
+
+/**
+ * Create a reader of the inline content of file and image parts.
+ *
+ * The reader decodes and hashes each distinct value once per media type, so
+ * a turn that meets the same large attachment in its history, its evidence
+ * and its observational-memory inputs hashes it only once.
+ */
+export function createInlineFileReader(): (
+  part: Record<string, unknown>,
+) => InlineFile | undefined {
+  const cache = new Map<string, Map<unknown, InlineFile | null>>();
+  return (part) => {
+    const data = getInlineData(part);
+    const mediaType = getPartMediaType(part);
+    let byData = cache.get(mediaType);
+    if (!byData) {
+      byData = new Map();
+      cache.set(mediaType, byData);
+    }
+    const cached = byData.get(data);
+    if (cached !== undefined) return cached ?? undefined;
+    const decoded = decodeInlineData(data);
+    const file = decoded
+      ? {
+          reference: fileReference({ bytes: decoded.bytes, mediaType }),
+          mediaType,
+          bytes: decoded.bytes,
+          ...(decoded.form ? { form: decoded.form } : {}),
+        }
+      : null;
+    byData.set(data, file);
+    return file ?? undefined;
+  };
+}
+
+export type InlineFileReader = ReturnType<typeof createInlineFileReader>;
+
+/**
+ * Replace inline file content in thread history with `InlineFileContent`
+ * wherever it matches a known file, leaving `snapshot` itself unchanged.
+ *
+ * `files` are the files the replay input already records. A known file not
+ * among them joins the returned `files` while the capture limits allow it;
+ * past them, and wherever the recorded form could not be written back
+ * exactly, the content stays inline.
+ */
+export function referenceInlineFiles<T extends { messages: unknown[] }>(
+  snapshot: T,
+  options: {
+    read: InlineFileReader;
+    isKnown: (reference: string) => boolean;
+    files: readonly MastraRecordedFileSource[];
+  },
+): { snapshot: T; files: MastraRecordedFile[] } {
+  const recorded = new Set(options.files.map((file) => file.url));
+  let totalBytes = options.files.reduce(
+    (size, file) =>
+      size + ("bytes" in file ? file.bytes.byteLength : file.length),
+    0,
+  );
+  const added: MastraRecordedFile[] = [];
+  function toReference(
+    part: Record<string, unknown>,
+  ): InlineFileContent | undefined {
+    const file = options.read(part);
+    if (!file?.form || !options.isKnown(file.reference)) return undefined;
+    if (!recorded.has(file.reference)) {
+      if (
+        recorded.size >= MAX_RECORDED_FILES ||
+        totalBytes + file.bytes.byteLength > MAX_CAPTURED_FILE_BYTES
+      )
+        return undefined;
+      recorded.add(file.reference);
+      totalBytes += file.bytes.byteLength;
+      added.push({
+        url: file.reference,
+        mediaType: file.mediaType,
+        bytes: file.bytes,
+      });
+    }
+    return new InlineFileContent(file.reference, file.form);
+  }
+  const visit = createFilePartVisitor((part) => {
+    const content = toReference(part);
+    return content === undefined
+      ? part
+      : { ...part, [part.type === "image" ? "image" : "data"]: content };
+  });
+  const messages = visit(snapshot.messages) as unknown[];
+  return {
+    snapshot:
+      messages === snapshot.messages ? snapshot : { ...snapshot, messages },
+    files: added,
+  };
+}
+
+/**
+ * Write each `InlineFileContent` in `value` back as the content it replaced.
+ *
+ * Throws when a referenced file was not recorded, so replay never restores a
+ * message with content that differs from the recorded one.
+ */
+export function restoreInlineFiles<T>(
+  value: T,
+  readFile: (reference: string) => ResolvedMemoryFile | undefined,
+): T {
+  function visit(current: unknown): unknown {
+    if (current instanceof InlineFileContent) {
+      const file = readFile(current.reference);
+      if (!file)
+        throw new MastraReplayReasonError(
+          "Unsupported Mastra memory replay: inline file content was not recorded.",
+          "memory_store_shape_unsupported",
+        );
+      return encodeInlineData(file.bytes, current.form);
+    }
+    if (Array.isArray(current)) {
+      const items = current.map(visit);
+      return items.some((item, index) => item !== current[index])
+        ? items
+        : current;
+    }
+    if (!isPlainRecord(current)) return current;
+    let changed = false;
+    const entries = Object.entries(current).map(([key, item]) => {
+      const next = visit(item);
+      if (next !== item) changed = true;
+      return [key, next] as const;
+    });
+    return changed ? Object.fromEntries(entries) : current;
+  }
+  return visit(value) as T;
+}
+
+/** The references of every `InlineFileContent` in `value`. */
+export function collectInlineFileReferences(value: unknown): string[] {
+  const references: string[] = [];
+  function visit(current: unknown): void {
+    if (current instanceof InlineFileContent) {
+      references.push(current.reference);
+      return;
+    }
+    if (Array.isArray(current)) for (const item of current) visit(item);
+    else if (isPlainRecord(current))
+      for (const item of Object.values(current)) visit(item);
+  }
+  visit(value);
+  return references;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (Object.getPrototypeOf(value) === Object.prototype ||
+      Object.getPrototypeOf(value) === null)
+  );
+}
+
+/**
+ * Build a copy-on-write walk over arrays and plain objects that hands each
+ * file or image part to `replacePart` and does not descend into it.
+ */
+function createFilePartVisitor(
+  replacePart: (part: Record<string, unknown>) => Record<string, unknown>,
+): (value: unknown) => unknown {
+  function visit(current: unknown): unknown {
+    if (Array.isArray(current)) {
+      const items = current.map(visit);
+      return items.some((item, index) => item !== current[index])
+        ? items
+        : current;
+    }
+    if (!isPlainRecord(current)) return current;
+    if (isFilePart(current)) return replacePart(current);
+    let changed = false;
+    const entries = Object.entries(current).map(([key, item]) => {
+      const next = visit(item);
+      if (next !== item) changed = true;
+      return [key, next] as const;
+    });
+    return changed ? Object.fromEntries(entries) : current;
+  }
+  return visit;
 }
 
 /**
@@ -95,38 +357,13 @@ export function getInlineFileReference(
  */
 export function createCapturedContentReferencer(
   isCaptured: (reference: string) => boolean,
+  read: InlineFileReader = createInlineFileReader(),
 ): <T>(value: T) => T {
-  const cache = new Map<unknown, string>();
-  function visit(current: unknown): unknown {
-    if (Array.isArray(current)) {
-      const items = current.map(visit);
-      return items.some((item, index) => item !== current[index])
-        ? items
-        : current;
-    }
-    if (
-      current === null ||
-      typeof current !== "object" ||
-      Object.getPrototypeOf(current) !== Object.prototype
-    )
-      return current;
-    const record = current as Record<string, unknown>;
-    if (isFilePart(record)) {
-      const reference = getInlineFileReference(record, cache);
-      if (!reference || !isCaptured(reference)) return current;
-      return {
-        ...record,
-        [record.type === "image" ? "image" : "data"]: reference,
-      };
-    }
-    let changed = false;
-    const entries = Object.entries(record).map(([key, item]) => {
-      const next = visit(item);
-      if (next !== item) changed = true;
-      return [key, next] as const;
-    });
-    return changed ? Object.fromEntries(entries) : current;
-  }
+  const visit = createFilePartVisitor((part) => {
+    const reference = read(part)?.reference;
+    if (!reference || !isCaptured(reference)) return part;
+    return { ...part, [part.type === "image" ? "image" : "data"]: reference };
+  });
   return <T>(value: T) => visit(value) as T;
 }
 
@@ -166,6 +403,13 @@ export function restoreCapturedFiles(recorded: readonly MastraRecordedFile[]) {
     files,
     /** Whether a file with this content reference was recorded. */
     hasFile: (reference: string): boolean => lookup.has(reference),
+    /** Return a copy of the recorded file with this reference, if any. */
+    readFile: (reference: string): ResolvedMemoryFile | undefined => {
+      const file = lookup.get(reference);
+      return file
+        ? { bytes: new Uint8Array(file.bytes), mediaType: file.mediaType }
+        : undefined;
+    },
     resolveFile: async (reference: string): Promise<ResolvedMemoryFile> => {
       const file = lookup.get(reference);
       if (!file)
@@ -173,6 +417,48 @@ export function restoreCapturedFiles(recorded: readonly MastraRecordedFile[]) {
           "Unsupported Mastra memory replay: file reference was not recorded.",
         );
       return { bytes: new Uint8Array(file.bytes), mediaType: file.mediaType };
+    },
+  };
+}
+
+const MAX_REMEMBERED_THREADS = 1024;
+
+/**
+ * Remember which files each thread's turns captured and stored, so a later
+ * turn in this process recognizes their content when a stored message holds
+ * it inline.
+ *
+ * Only the most recent threads, and each thread's most recent files up to
+ * the per-turn file limit, are kept.
+ */
+export function createThreadFileRegistry() {
+  const threads = new Map<string, Set<string>>();
+  const key = (selector: { threadId: string; resourceId: string }) =>
+    JSON.stringify([selector.resourceId, selector.threadId]);
+  return {
+    /** Whether a turn of this thread stored the file with `reference`. */
+    has(
+      selector: { threadId: string; resourceId: string },
+      reference: string,
+    ): boolean {
+      return threads.get(key(selector))?.has(reference) ?? false;
+    },
+    remember(
+      selector: { threadId: string; resourceId: string },
+      references: readonly string[],
+    ): void {
+      const id = key(selector);
+      const known = threads.get(id) ?? new Set<string>();
+      threads.delete(id);
+      threads.set(id, known);
+      for (const reference of references) {
+        known.delete(reference);
+        known.add(reference);
+      }
+      while (known.size > MAX_RECORDED_FILES)
+        known.delete(known.values().next().value as string);
+      if (threads.size > MAX_REMEMBERED_THREADS)
+        threads.delete(threads.keys().next().value as string);
     },
   };
 }

@@ -20,6 +20,10 @@ import {
   type MastraReplayReason,
   unsupportedMemoryReplay,
 } from "./replay-reasons.js";
+import {
+  type ResolvedMemoryFile,
+  restoreInlineFiles,
+} from "./stateful-files.js";
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -361,6 +365,9 @@ export interface IsolatedMemoryReplayOptions {
   omTape?: ReturnType<typeof createOMResultTape>;
   /** Fail the replay when its memory work has not settled after this long. */
   finalizationWaitMs: number;
+  /** Return the recorded file that inline content in the snapshot names. */
+  readFile?: (reference: string) => ResolvedMemoryFile | undefined;
+  referenceFileContent?: MastraMemoryCaptureOptions["referenceFileContent"];
 }
 
 /** Restore historical state into a fresh store; no production store is accepted. */
@@ -369,9 +376,12 @@ export async function createIsolatedMemoryReplay(
 ) {
   assertMemoryReplayVersions();
   validateMemorySnapshot(options.initialSnapshot);
-  const snapshot = decodeMemoryValue(
-    encodeMemoryValue(options.initialSnapshot),
-  ) as MastraMemorySnapshot;
+  const snapshot = restoreInlineFiles(
+    decodeMemoryValue(
+      encodeMemoryValue(options.initialSnapshot),
+    ) as MastraMemorySnapshot,
+    options.readFile ?? (() => undefined),
+  );
   let configuration = await restoreMemoryConfiguration(
     options.configuration,
     options.resolveModel,
@@ -414,6 +424,7 @@ export async function createIsolatedMemoryReplay(
       // model fails the replay before anything fetches it.
       acceptHistoryFileUrls: () => undefined,
       recordMutation: options.recordMutation,
+      referenceFileContent: options.referenceFileContent,
       getRequestId: options.getRequestId,
       onIncomplete: options.onIncomplete,
     });

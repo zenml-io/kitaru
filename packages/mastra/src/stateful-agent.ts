@@ -89,9 +89,12 @@ import {
   createCapturedFiles,
   createFileBlobStore,
   createFileDownloads,
+  createInlineFileReader,
   createRecordedEvidenceSanitizer,
+  createThreadFileRegistry,
   FileCaptureTimeoutError,
   loadRecordedFiles,
+  referenceInlineFiles,
   restoreCapturedFiles,
 } from "./stateful-files.js";
 import {
@@ -537,6 +540,7 @@ export function createMemoryReplayAgent(
   });
   // Shared by every turn so a file already stored is not uploaded again.
   const fileBlobs = createFileBlobStore(client.blobs);
+  const threadFiles = createThreadFileRegistry();
   async function runNativeBaseline(
     rawInput: unknown,
     callerOptions: RuntimeStreamOptions,
@@ -850,7 +854,23 @@ export function createMemoryReplayAgent(
       throw new Error("Controlled evidence sanitizer was not initialized.");
     const omCaptureErrors: string[] = [];
     let omEngine: Awaited<Memory["omEngine"]> = null;
-    let replayFiles: ReturnType<typeof restoreCapturedFiles> | undefined;
+    const replayFiles = historical
+      ? restoreCapturedFiles(
+          await loadRecordedFiles(historical.files, client.blobs),
+        )
+      : undefined;
+    const files = replayFiles ?? baselineFiles;
+    if (!files) throw new Error("Controlled file capture was not initialized.");
+    const readInlineFile = createInlineFileReader();
+    // A stored message can hold a file captured on an earlier turn of this
+    // thread inline, where the application's processor wrote its bytes.
+    const isKnownFile = (reference: string): boolean =>
+      files.hasFile(reference) ||
+      (!historical && threadFiles.has(selector, reference));
+    const referenceKnownContent = createCapturedContentReferencer(
+      isKnownFile,
+      readInlineFile,
+    );
     const omTape = createOMResultTape(
       historical?.omTape as OMResultEntry[] | undefined,
       (reason) => omCaptureErrors.push(reason),
@@ -893,6 +913,8 @@ export function createMemoryReplayAgent(
         getRequestId: () => requestCapture?.currentRequestId,
         omTape,
         finalizationWaitMs,
+        readFile: replayFiles?.readFile,
+        referenceFileContent: referenceKnownContent,
       });
     } else {
       const source = await options.sourceMemory();
@@ -903,6 +925,7 @@ export function createMemoryReplayAgent(
         domain: source.domain,
         exclusiveAccess: source.exclusiveAccess,
         sanitizeEvidence: sanitizer.replace,
+        referenceFileContent: referenceKnownContent,
         // Without the application's resolver, no history file can be
         // captured, so history URLs stay undeclared.
         acceptHistoryFileUrls: options.resolveFile
@@ -996,14 +1019,6 @@ export function createMemoryReplayAgent(
       );
     if (unsupportedEvidence) markUnsupportedOnBinding();
     try {
-      replayFiles = historical
-        ? restoreCapturedFiles(
-            await loadRecordedFiles(historical.files, client.blobs),
-          )
-        : undefined;
-      const files = replayFiles ?? baselineFiles;
-      if (!files)
-        throw new Error("Controlled file capture was not initialized.");
       const evidenceClient = recordingClient(client, sanitizer.replace, () =>
         unsupportedEvidence ? "recorded_evidence_unsupported" : undefined,
       );
@@ -1169,9 +1184,18 @@ export function createMemoryReplayAgent(
           runtime.memory,
           createRecordedClock(historical.turnStartedAt),
         );
+      const referenceSnapshot = (
+        initialSnapshot: MastraMemorySnapshot,
+        recordedFiles: readonly MastraRecordedFile[],
+      ) =>
+        referenceInlineFiles(initialSnapshot, {
+          read: readInlineFile,
+          isKnown: isKnownFile,
+          files: recordedFiles,
+        });
       const captureEnvelope = (
         initialSnapshot: MastraMemorySnapshot,
-        recordedFiles: MastraRecordedFile[] = files.files,
+        recordedFiles: MastraRecordedFile[],
       ) =>
         captureMemoryReplayEnvelope(
           {
@@ -1189,8 +1213,12 @@ export function createMemoryReplayAgent(
         );
       // A failed capture already recorded why; the envelope repeats it
       // instead of reporting a missing snapshot.
-      const captured = runtime.initialSnapshot
-        ? captureEnvelope(runtime.initialSnapshot)
+      const initialFiles = files.files;
+      const initial = runtime.initialSnapshot
+        ? referenceSnapshot(runtime.initialSnapshot, initialFiles)
+        : undefined;
+      const captured = initial
+        ? captureEnvelope(initial.snapshot, [...initialFiles, ...initial.files])
         : {
             envelope: createIncompleteMemoryReplayEnvelope(
               runtime.binding.incompleteReasons.join(" ") ||
@@ -1217,9 +1245,6 @@ export function createMemoryReplayAgent(
           ended_at: new Date().toISOString(),
           attributes: requestEvidenceAttributes(evidence),
         });
-      const referenceCapturedContent = createCapturedContentReferencer(
-        files.hasFile,
-      );
       const capture = createRequestCapture({
         invocationId,
         // Only limits the application chose bound request evidence; the
@@ -1229,7 +1254,7 @@ export function createMemoryReplayAgent(
             ? undefined
             : options.recordingLimits,
         sanitizeEvidence: (value) =>
-          sanitizer.replace(referenceCapturedContent(value)),
+          sanitizer.replace(referenceKnownContent(value)),
         getMemoryRevision: () => runtime.binding.revision,
         onFailedAttempt: writeAttempt,
         onCaptureError: () =>
@@ -1502,17 +1527,24 @@ export function createMemoryReplayAgent(
             // envelope was built, and every captured file is stored as a
             // blob only now, so the envelope is built again with their
             // references and blob ids.
-            const storedFiles = historical
+            const initialSnapshot = historical
               ? undefined
-              : await fileBlobs.store(files.files);
-            const resanitized = historical
-              ? undefined
-              : runtime.binding.sanitizeInitialAgain();
-            const initialSnapshot = resanitized ?? runtime.initialSnapshot;
-            const recaptured =
-              initialSnapshot && (resanitized || storedFiles?.length)
-                ? captureEnvelope(initialSnapshot, storedFiles)
-                : captured;
+              : (runtime.binding.sanitizeInitialAgain() ??
+                runtime.initialSnapshot);
+            let recaptured = captured;
+            if (initialSnapshot) {
+              const turnFiles = files.files;
+              const referenced = referenceSnapshot(initialSnapshot, turnFiles);
+              const storedFiles = await fileBlobs.store([
+                ...turnFiles,
+                ...referenced.files,
+              ]);
+              threadFiles.remember(
+                selector,
+                storedFiles.map((file) => file.url),
+              );
+              recaptured = captureEnvelope(referenced.snapshot, storedFiles);
+            }
             if (!recaptured.envelope.complete)
               throw new MastraReplayReasonError(
                 recaptured.envelope.reasons.join(" "),

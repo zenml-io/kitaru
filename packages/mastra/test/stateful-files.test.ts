@@ -7,10 +7,13 @@ import {
 import {
   createCapturedFiles,
   createFileBlobStore,
+  createInlineFileReader,
   type FileBlobClient,
   fileReference,
   loadRecordedFiles,
+  referenceInlineFiles,
   restoreCapturedFiles,
+  restoreInlineFiles,
   type StoredBlob,
 } from "../src/stateful-files.js";
 
@@ -364,4 +367,44 @@ it("loads stored files and refuses blobs whose content changed", async () => {
   await expect(
     loadRecordedFiles([{ ...source, length: 16 * 1024 * 1024 + 1 }], client),
   ).rejects.toThrow(/capture limit/);
+});
+
+it("records known inline history files by reference and writes them back exactly", () => {
+  const bytes = new Uint8Array([37, 80, 68, 70, 0, 255, 7]);
+  const reference = fileReference({ bytes, mediaType: "application/pdf" });
+  const base64 = Buffer.from(bytes).toString("base64");
+  const unknown = Buffer.from([1, 2, 3]).toString("base64");
+  const parts = [
+    { type: "file", data: base64, mimeType: "application/pdf" },
+    {
+      type: "file",
+      data: `data:application/pdf;base64,${base64}`,
+      mediaType: "application/pdf",
+    },
+    { type: "file", data: new Uint8Array(bytes), mediaType: "application/pdf" },
+    // Base64 that re-encodes differently stays as the application wrote it.
+    { type: "file", data: `${base64}\n`, mimeType: "application/pdf" },
+    { type: "file", data: unknown, mimeType: "application/pdf" },
+  ];
+  const snapshot = {
+    messages: [{ id: "m", content: { format: 2, parts } }],
+  };
+  const referenced = referenceInlineFiles(snapshot, {
+    read: createInlineFileReader(),
+    isKnown: (value) => value === reference,
+    files: [],
+  });
+  // A file from an earlier turn joins the recorded files once.
+  expect(referenced.files.map((file) => file.url)).toEqual([reference]);
+  const encoded = JSON.stringify(encodeMemoryValue(referenced.snapshot));
+  // Only the non-canonical copy still holds the bytes.
+  expect(encoded.split(base64)).toHaveLength(2);
+  expect(encoded).toContain(JSON.stringify(`${base64}\n`));
+  expect(encoded).toContain(unknown);
+  const decoded = decodeMemoryValue(JSON.parse(encoded));
+  const files = restoreCapturedFiles(referenced.files);
+  expect(restoreInlineFiles(decoded, files.readFile)).toEqual(snapshot);
+  expect(() => restoreInlineFiles(decoded, () => undefined)).toThrow(
+    /inline file content was not recorded/,
+  );
 });

@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InputProcessor } from "@mastra/core/processors";
+import { RequestContext } from "@mastra/core/request-context";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
 import { afterEach, expect, it, vi } from "vitest";
@@ -653,4 +654,179 @@ it("keeps policies separate when processor tools share the same executor", async
   ]);
   expect(execute).not.toHaveBeenCalled();
   await runtime.store.close();
+});
+
+it("names inline history bytes of captured files by reference and replays them exactly", async () => {
+  const runtime = createMemoryRuntime({ messageTokens: 100000 });
+  await seedMemory(runtime);
+  const nativeFetch = globalThis.fetch;
+  const api = installTestApi();
+  const apiFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", ((
+    input: Parameters<typeof fetch>[0],
+    init: Parameters<typeof fetch>[1],
+  ) =>
+    String(input).startsWith("data:")
+      ? nativeFetch(input, init)
+      : apiFetch(input, init)) as typeof fetch);
+  const bytes = new Uint8Array(40000).map((_, index) => (index * 7) % 251);
+  const base64 = Buffer.from(bytes).toString("base64");
+  const reference = fileReference({ bytes, mediaType: "application/pdf" });
+  const fetchFile = vi.fn(async () => ({
+    bytes,
+    mediaType: "application/pdf",
+  }));
+  const requests: Array<{ prompt: unknown }> = [];
+  const model = new MastraLanguageModelV2Mock({
+    modelId: "actor",
+    provider: "fixture",
+    doStream: async (args) => {
+      requests.push(args);
+      return textStream("done");
+    },
+  });
+  // The processor writes the file's bytes into the message, and Mastra
+  // saves the message with them into thread history.
+  const inlineFiles: InputProcessor = {
+    id: "inline-files",
+    async processInput({ messages }) {
+      return Promise.all(
+        messages.map(async (message) => ({
+          ...message,
+          content: {
+            ...message.content,
+            parts: await Promise.all(
+              message.content.parts.map(async (part) =>
+                part.type === "file" && String(part.data).startsWith("https:")
+                  ? {
+                      ...part,
+                      data: Buffer.from(
+                        (await resolveFileRef.current(String(part.data))).bytes,
+                      ).toString("base64"),
+                    }
+                  : part,
+              ),
+            ),
+          },
+        })),
+      );
+    },
+  };
+  const resolveFileRef: {
+    current: (url: string) => Promise<{ bytes: Uint8Array }>;
+  } = { current: async () => ({ bytes: new Uint8Array() }) };
+  const adapter = createMemoryReplayAgent(
+    ({ memory, resolveFile }) => {
+      resolveFileRef.current = resolveFile;
+      return {
+        id: "inline-history",
+        name: "Inline history",
+        instructions: "Answer",
+        model,
+        memory,
+        inputProcessors: [inlineFiles],
+      };
+    },
+    {
+      agentId: AGENT_ID,
+      apiUrl: "https://kitaru.invalid",
+      requestedModelId: "fixture/actor",
+      sourceMemory: () => ({
+        settled: () => runtime.memory.settled(),
+        domain: runtime.domain,
+        configuration: runtime.memory.getMergedThreadConfig(),
+        exclusiveAccess: createProcessLocalMemoryAccess(),
+      }),
+      resolveModel: async (id) =>
+        id.includes("observer")
+          ? runtime.observer.model
+          : id.includes("reflector")
+            ? runtime.reflector.model
+            : model,
+      files: ({ input }) =>
+        JSON.stringify(input).includes(FILE_URL) ? [FILE_URL] : [],
+      resolveFile: fetchFile,
+    },
+  );
+  const final = (sessionId: string | undefined) =>
+    api.calls
+      .filter(
+        (call) =>
+          call.method === "PATCH" &&
+          call.path.endsWith(`/${sessionId}`) &&
+          call.body?.status !== "in_progress",
+      )
+      .at(-1)?.body;
+  const turn = async (input: unknown, context?: RequestContext) => {
+    const output = await adapter.stream(input as string, {
+      memory: { thread: THREAD, resource: RESOURCE },
+      ...(context ? { requestContext: context } : {}),
+    });
+    await output.consumeStream();
+    const sessionId = api.sessionIds.at(-1);
+    await vi.waitFor(() => expect(final(sessionId)?.status).toBe("completed"));
+    await settleBuffering();
+    return final(sessionId);
+  };
+  try {
+    await turn([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Please read" },
+          { type: "file", data: FILE_URL, mimeType: "application/pdf" },
+        ],
+      },
+    ]);
+    const { messages } = await runtime.domain.listMessages({
+      threadId: THREAD,
+      perPage: false,
+    });
+    // Native Mastra keeps the processor's bytes in the saved message.
+    expect(JSON.stringify(messages)).toContain(base64);
+    const later = await turn("What did it say?");
+    expect(later?.metadata).toMatchObject({ mastra_replay_state: "eligible" });
+    const envelope = (
+      later?.inputs as Record<string, Record<string, unknown>> | undefined
+    )?.[MEMORY_REPLAY_KEY];
+    expect(JSON.stringify(envelope?.initialSnapshot)).toContain(
+      `{"$mastra":"file","url":"${reference}","encoding":"base64"}`,
+    );
+    expect(envelope?.files).toEqual([
+      expect.objectContaining({ url: reference, blobId: expect.any(String) }),
+    ]);
+    const context = new RequestContext();
+    context.set("uncaptured", "value");
+    expect((await turn("And now?", context))?.metadata).toMatchObject({
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "context_unsupported",
+    });
+    // Neither the snapshots, the memory changes, the request evidence of the
+    // eligible and ineligible turns, nor the session inputs repeat the bytes.
+    const mutations = api
+      .nodeBatches()
+      .flat()
+      .filter((node) => node.name === "memory_mutation");
+    expect(JSON.stringify(mutations)).toContain(reference);
+    expect(JSON.stringify(api.calls)).not.toContain(base64);
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(later?.inputs));
+    const replay = await adapter.stream("ignored");
+    await replay.consumeStream();
+    await vi.waitFor(() =>
+      expect(final(api.sessionIds.at(-1))?.status).toBe("completed"),
+    );
+    expect(fetchFile).toHaveBeenCalledTimes(1);
+    // The replayed history holds the bytes in the form production saved;
+    // only the new message's creation time differs.
+    const prompt = (request: { prompt: unknown } | undefined) =>
+      JSON.stringify(request?.prompt, (key, value) =>
+        key === "createdAt" ? undefined : value,
+      );
+    expect(prompt(requests.at(-1))).toBe(prompt(requests[1]));
+    expect(prompt(requests.at(-1))).toContain(base64);
+    expect(JSON.stringify(api.calls)).not.toContain(base64);
+  } finally {
+    await runtime.store.close();
+  }
 });

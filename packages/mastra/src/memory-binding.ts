@@ -299,6 +299,11 @@ export interface MastraMemoryCaptureOptions extends MastraMemorySelector {
    */
   sanitizeEvidence?: <T>(value: T) => T;
   /**
+   * Replace inline file content that matches a captured file with its
+   * reference in mutation evidence, before `sanitizeEvidence` runs.
+   */
+  referenceFileContent?: <T>(value: T) => T;
+  /**
    * Accept the file URLs that `sanitizeEvidence` leaves in thread history
    * instead of making the turn ineligible. With `sanitizeEvidence`, the
    * binding then keeps an unsanitized copy of the snapshot for
@@ -751,6 +756,8 @@ export function createMemoryCaptureBinding(
   let evidence = Promise.resolve();
   const reasons: string[] = [];
   let firstReason: MastraReplayReason | undefined;
+  const referenceFileContent =
+    options.referenceFileContent ?? (<T>(value: T): T => value);
   const methods = new Map<PropertyKey, unknown>();
   const waitMs = options.leaseWaitMs ?? 100;
   const selector = {
@@ -832,7 +839,9 @@ export function createMemoryCaptureBinding(
           return evidence.value;
         };
         try {
-          const evidence = mutationEvidenceValue(property, args);
+          const evidence = referenceFileContent(
+            mutationEvidenceValue(property, args),
+          );
           encodedArguments = keep(
             encodeMemoryEvidence(
               options.sanitizeEvidence?.(evidence) ?? evidence,
@@ -890,7 +899,9 @@ export function createMemoryCaptureBinding(
           revision += 1;
           let encodedResult: JsonValue = null;
           try {
-            const evidence = mutationEvidenceValue(property, output);
+            const evidence = referenceFileContent(
+              mutationEvidenceValue(property, output),
+            );
             encodedResult = keep(
               encodeMemoryEvidence(
                 options.sanitizeEvidence?.(evidence) ?? evidence,
