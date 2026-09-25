@@ -14,6 +14,11 @@ from kitaru.api_models.v1.replay import ReplayListParams
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.session_node import SessionNodeListParams
 from kitaru.mcp.lifecycle import MCPServerState
+from kitaru.mcp.links import (
+    get_dashboard_info,
+    get_experiment_run_url,
+    get_session_url,
+)
 from kitaru.mcp.models.activity import (
     ActivityChildrenRequest,
     ActivityGetRequest,
@@ -21,7 +26,7 @@ from kitaru.mcp.models.activity import (
     ActivityReadRequest,
     SessionNodesRequest,
 )
-from kitaru.mcp.models.common import ActivityItem, PageData
+from kitaru.mcp.models.common import ActivityItem, PageData, ToolSuccessPayload
 from kitaru.mcp.tools.params import build_list_params
 from kitaru.mcp.tools.registry import build_page_data
 
@@ -33,7 +38,19 @@ async def handle_activity_read(
     client = state.client
     if isinstance(request, ActivityGetRequest):
         if request.kind == "session":
-            return await client.sessions.get(request.id)
+            session = await client.sessions.get(request.id)
+            _, base, warnings = await get_dashboard_info(
+                state,
+                warning=(
+                    "Could not resolve a dashboard inspection link because the "
+                    "server info request failed. The session read succeeded."
+                ),
+            )
+            return ToolSuccessPayload(
+                data=session,
+                links={"inspect": get_session_url(base, session.id)} if base else {},
+                warnings=warnings,
+            )
         if request.kind == "replay":
             return await client.replays.get(request.id)
         if request.kind == "import":
@@ -41,7 +58,25 @@ async def handle_activity_read(
         if request.kind == "evaluation":
             return await client.evaluations.get(request.id)
         if request.kind == "experiment_run":
-            return await client.experiment_runs.get(request.id)
+            run = await client.experiment_runs.get(request.id)
+            _, base, warnings = await get_dashboard_info(
+                state,
+                warning=(
+                    "Could not resolve a dashboard inspection link because the "
+                    "server info request failed. The experiment run read succeeded."
+                ),
+            )
+            return ToolSuccessPayload(
+                data=run,
+                links={
+                    "inspect": get_experiment_run_url(
+                        base, run.experiment_id, run.number
+                    )
+                }
+                if base
+                else {},
+                warnings=warnings,
+            )
         return await client.jobs.get(request.id)
     if isinstance(request, ActivityListRequest):
         if request.kind == "session":

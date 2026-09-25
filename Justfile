@@ -30,6 +30,8 @@ check:
     @just actions-lint
     @printf '\n─── Links ──────────────────────────────────────\n'
     @just links
+    @printf '\n─── MCP Docs Index ─────────────────────────────\n'
+    @just mcp-docs-index-check
     @printf '\n─────────────────────────────────────────────────\n'
     @printf 'All checks passed!\n'
 
@@ -158,6 +160,10 @@ plugin-artifact-smoke:
 # Verify the measured MCP schemas and committed snapshots
 mcp-schema-check:
     uv run --extra mcp python scripts/report_mcp_schema.py --check
+
+# Verify that the bundled MCP docs search index matches the GitBook sources.
+mcp-docs-index-check:
+    uv run --no-sync python scripts/build_mcp_docs_index.py --check
 
 # Verify clean base and MCP installations from the single wheel under dist/
 mcp-wheel-smoke:

@@ -60,6 +60,7 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_activity_read` | read-only | Read sessions, replays, evaluations, runs, jobs, and their children |
 | `kitaru_review_read` | read-only | Read [investigations and annotations](../concepts/investigations.md) |
 | `kitaru_connection_read` | read-only | Read [provider connections](../guides/provider-connections.md) without their secret values |
+| `kitaru_docs_search` | read-only | Search bundled Kitaru guides and return short excerpts with links to the published pages |
 | `kitaru_cohorts_manage` | standard | Create or update cohorts and cohort versions |
 | `kitaru_experiments_manage` | standard | Create or update experiments |
 | `kitaru_session_import` | standard | Import sessions from an already-uploaded blob |
@@ -71,6 +72,8 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_delete` | destructive | Delete a cohort, experiment, investigation, annotation, evaluator, version, connection, run, or tag; unlink an exact tag-resource tuple |
 
 Start assistants in `read-only`, move to `standard` when you want them building cohorts and starting runs, and reserve `destructive` for sessions where you are watching closely.
+
+Use `kitaru_docs_search` when the assistant needs to check how a Kitaru feature works. It searches the guides bundled with the installed Kitaru version and returns matching sections with published documentation URLs. Open the linked page when current behavior matters, since the live docs may have changed since the package was released. Exact session and experiment-run reads also return an `inspect` dashboard link, and exact investigation reads return a `review` link when the selected server reports a dashboard. These links point to the same record the tool returned and still require normal dashboard access.
 
 Tag operations follow the same split. In `read-only`, `kitaru_registry_read` can list tags and filter them by name. Existing filtered registry or activity reads can then find sessions, agent versions, cohort versions, cohorts, experiments, and experiment runs carrying that tag. The MCP server cannot enumerate a tag's links directly. In `standard`, `kitaru_review_manage` supports `create_tag`, `update_tag`, and `link_tag`. In `destructive`, `kitaru_delete` can unlink one exact `(tag, resource type, resource id)` tuple or delete the tag. Deleting a tag also deletes every link that points from it.
 

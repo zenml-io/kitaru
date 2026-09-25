@@ -1,0 +1,1 @@
+"""Packaged MCP reference data."""

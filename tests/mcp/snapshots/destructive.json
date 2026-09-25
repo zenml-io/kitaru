@@ -6015,6 +6015,16 @@
           ],
           "default": null
         },
+        "links": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "const": "inspect"
+          },
+          "title": "Links",
+          "type": "object"
+        },
         "ok": {
           "title": "Ok",
           "type": "boolean"
@@ -7247,6 +7257,16 @@
           ],
           "default": null
         },
+        "links": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "const": "review"
+          },
+          "title": "Links",
+          "type": "object"
+        },
         "ok": {
           "title": "Ok",
           "type": "boolean"
@@ -7622,6 +7642,209 @@
         "ok"
       ],
       "title": "ConnectionReadResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Search bundled Kitaru guides; return short excerpts and published source URLs.",
+    "inputSchema": {
+      "$defs": {
+        "DocsSearchRequest": {
+          "additionalProperties": false,
+          "description": "Search the hand-written Kitaru documentation bundled with this release.",
+          "properties": {
+            "limit": {
+              "default": 5,
+              "maximum": 8,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "query": {
+              "maxLength": 240,
+              "minLength": 2,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "title": "DocsSearchRequest",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/DocsSearchRequest"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "docs_search_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_docs_search",
+    "outputSchema": {
+      "$defs": {
+        "DocsSearchData": {
+          "additionalProperties": false,
+          "description": "Ranked search results and the bundled source revision.",
+          "properties": {
+            "matches": {
+              "items": {
+                "$ref": "#/$defs/DocsSearchMatch"
+              },
+              "title": "Matches",
+              "type": "array"
+            },
+            "source_revision": {
+              "title": "Source Revision",
+              "type": "string"
+            }
+          },
+          "required": [
+            "matches",
+            "source_revision"
+          ],
+          "title": "DocsSearchData",
+          "type": "object"
+        },
+        "DocsSearchMatch": {
+          "additionalProperties": false,
+          "description": "One source-attributed documentation section.",
+          "properties": {
+            "excerpt": {
+              "title": "Excerpt",
+              "type": "string"
+            },
+            "heading": {
+              "title": "Heading",
+              "type": "string"
+            },
+            "title": {
+              "title": "Title",
+              "type": "string"
+            },
+            "url": {
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "heading",
+            "excerpt",
+            "url"
+          ],
+          "title": "DocsSearchMatch",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Typed documentation search result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DocsSearchData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "DocsSearchResult",
       "type": "object"
     }
   },
