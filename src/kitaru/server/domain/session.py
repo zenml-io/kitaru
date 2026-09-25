@@ -263,6 +263,48 @@ def mastra_replay_v3_current(envelope: dict[str, Any]) -> bool:
     return True
 
 
+# Nine digits exceed any object count the replay input budget allows, and keep
+# every number far below Python's integer string conversion limit.
+_MASTRA_KEY_ORDER_NUMBER = r"[0-9]{1,9}"
+_MASTRA_KEY_ORDER_ENTRY = (
+    rf"{_MASTRA_KEY_ORDER_NUMBER}:{_MASTRA_KEY_ORDER_NUMBER}"
+    rf"(?:,{_MASTRA_KEY_ORDER_NUMBER})*"
+)
+_MASTRA_KEY_ORDER = re.compile(
+    rf"(?:{_MASTRA_KEY_ORDER_ENTRY}(?:;{_MASTRA_KEY_ORDER_ENTRY})*)?"
+)
+
+
+def _mastra_key_order_well_formed(key_order: Any) -> bool:
+    """Check that a recorded key order is one the adapter can apply.
+
+    Each entry must name a new object position and hold a permutation of its
+    key ranks. This does not match entries to the stored objects or check the
+    digest, which both need the JavaScript walk and serialization they were
+    computed from.
+
+    Args:
+        key_order: The input's `keyOrder` value.
+
+    Returns:
+        Whether the permutations follow the adapter's grammar.
+    """
+    permutations = (
+        key_order.get("permutations") if isinstance(key_order, dict) else None
+    )
+    if (
+        not isinstance(permutations, str)
+        or _MASTRA_KEY_ORDER.fullmatch(permutations) is None
+    ):
+        return False
+    for index, entry in enumerate(permutations.split(";") if permutations else []):
+        gap, order = entry.split(":")
+        ranks = [int(rank) for rank in order.split(",")]
+        if (index > 0 and int(gap) == 0) or sorted(ranks) != list(range(len(ranks))):
+            return False
+    return True
+
+
 def mastra_replay_v3_complete(envelope: dict[str, Any]) -> bool:
     """Check the required shape of a finalized Mastra replay input."""
     snapshot = envelope.get("initialSnapshot")
@@ -287,6 +329,7 @@ def mastra_replay_v3_complete(envelope: dict[str, Any]) -> bool:
         and _mastra_replay_files_complete(files)
         and isinstance(envelope.get("omTape"), list)
         and mastra_replay_v3_current(envelope)
+        and _mastra_key_order_well_formed(envelope["keyOrder"])
     )
 
 

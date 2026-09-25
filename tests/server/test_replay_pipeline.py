@@ -159,7 +159,19 @@ async def test_pending_mastra_baseline_creates_no_replay(
     assert not replays
 
 
-@pytest.mark.parametrize("invalid_field", ["raw_input", "file_hash"])
+@pytest.mark.parametrize(
+    "invalid_field",
+    [
+        "raw_input",
+        "file_hash",
+        "x",
+        "0:0,0",
+        "0:1",
+        "0:1,0;0:1,0",
+        "0:",
+        pytest.param("0:" + "9" * 5000, id="oversized-rank"),
+    ],
+)
 async def test_malformed_eligible_mastra_baseline_creates_no_replay(
     services: ReplayServices,
     complete_mastra_memory_replay_inputs: dict[str, Any],
@@ -170,8 +182,10 @@ async def test_malformed_eligible_mastra_baseline_creates_no_replay(
     invalid = deepcopy(complete_mastra_memory_replay_inputs)
     if invalid_field == "raw_input":
         del invalid["mastra_memory_replay"]["rawInput"]
-    else:
+    elif invalid_field == "file_hash":
         invalid["mastra_memory_replay"]["files"][0]["sha256"] = "0" * 64
+    else:
+        invalid["mastra_memory_replay"]["keyOrder"]["permutations"] = invalid_field
     baseline = await create_session(
         services.sessions,
         ACTOR.account.id,
