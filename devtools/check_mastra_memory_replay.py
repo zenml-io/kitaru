@@ -1,7 +1,11 @@
 """Prove SDK, CLI and MCP memory replay on an authenticated disposable stack.
 
-Run ``pnpm run build:packages`` first, then
-``uv run python devtools/check_mastra_memory_replay.py``.
+Run ``uv sync --extra server --extra worker --extra cli --extra mcp`` and
+``pnpm run build:packages`` first, then
+``uv run python devtools/check_mastra_memory_replay.py``. The server extra
+provides ``asyncpg``, the mcp extra the MCP client and ``kitaru-mcp``, and the
+cli extra the ``kitaru`` command the check shells out to. Docker must be
+running for the disposable Postgres database.
 No model provider is called. Only this invocation's server and database are removed.
 """
 
