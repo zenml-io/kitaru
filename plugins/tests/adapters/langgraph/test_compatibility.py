@@ -332,7 +332,10 @@ def test_real_langchain_factory_is_supported() -> None:
     assert main.supports(CapabilityOperation.OVERRIDE_MODEL)
 
 
-def test_real_deep_agent_factory_runs_through_runner(fake_client: Any) -> None:
+@pytest.mark.parametrize("async_run", [False, True])
+def test_real_deep_agent_factory_runs_through_runner(
+    fake_client: Any, async_run: bool
+) -> None:
     from deepagents import create_deep_agent
     from langchain.agents import create_agent
     from langchain_core.language_models.fake_chat_models import (
@@ -372,7 +375,8 @@ def test_real_deep_agent_factory_runs_through_runner(fake_client: Any) -> None:
     )
 
     assert runner.capabilities.get_target("adder") is not None
-    result = runner.invoke({"messages": [{"role": "user", "content": "17 + 25?"}]})
+    inputs = {"messages": [{"role": "user", "content": "17 + 25?"}]}
+    result = asyncio.run(runner.ainvoke(inputs)) if async_run else runner.invoke(inputs)
 
     assert result["messages"][-1].content == "42"
     batches = fake_client.instances[0].sessions.node_batches
@@ -387,6 +391,17 @@ def test_real_deep_agent_factory_runs_through_runner(fake_client: Any) -> None:
         (NodeType.TOOL_CALL, "add"),
         (NodeType.LLM_CALL, "ToolCallingFakeModel"),
     ]
+    nodes = [node for _, batch in batches for node in batch.nodes]
+    middleware_spans = [
+        node for node in nodes if node.name == "PatchToolCallsMiddleware.before_agent"
+    ]
+    assert middleware_spans
+    assert all(node.inputs == {} for node in middleware_spans)
+    assert all(
+        node.inputs not in (None, {})
+        for node in nodes
+        if node.node_type in (NodeType.LLM_CALL, NodeType.TOOL_CALL)
+    )
 
 
 async def test_concurrent_async_calls_are_isolated(fake_client: Any) -> None:

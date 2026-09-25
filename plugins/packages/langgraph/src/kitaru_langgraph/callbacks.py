@@ -41,13 +41,14 @@ class SyncKitaruCallback(BaseCallbackHandler):
         *,
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None = None,
+        name: str | None = None,
         **_: Any,
     ) -> None:
         self._bridge.run(
             self._recorder.start_chain(
                 run_id=run_id,
                 parent_run_id=parent_run_id,
-                name=_name(serialized, "graph"),
+                name=name or _name(serialized, "graph"),
                 inputs=inputs,
             )
         )
@@ -180,12 +181,13 @@ class AsyncKitaruCallback(AsyncCallbackHandler):
         *,
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None = None,
+        name: str | None = None,
         **_: Any,
     ) -> None:
         await self._recorder.start_chain(
             run_id=run_id,
             parent_run_id=parent_run_id,
-            name=_name(serialized, "graph"),
+            name=name or _name(serialized, "graph"),
             inputs=inputs,
         )
 

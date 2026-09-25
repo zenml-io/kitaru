@@ -10,6 +10,7 @@ on:
       - .github/workflows/docs.yml
       - docs/**
       - scripts/generate_*.py
+      - tests/scripts/test_generate_sdk_docs.py
       - src/kitaru/**
       - CHANGELOG.md
       - pyproject.toml
@@ -49,6 +50,9 @@ jobs:
       - name: Lint docs app
         run: pnpm run lint
         working-directory: docs
+      - name: Test SDK reference converter
+        run: pnpm run test:convert
+        working-directory: docs
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
         with:
           enable-cache: false
@@ -69,6 +73,9 @@ jobs:
       - name: Install SDK docs generator bridge
         if: steps.sdk_generator.outputs.available == 'true'
         run: uv pip install ./docs/node_modules/fumadocs-python
+      - name: Test SDK reference generator
+        if: steps.sdk_generator.outputs.available == 'true'
+        run: uv run --frozen --extra cli --extra server pytest -q tests/scripts/test_generate_sdk_docs.py
       - name: Generate SDK reference data
         if: steps.sdk_generator.outputs.available == 'true'
         run: uv run python scripts/generate_sdk_docs.py
