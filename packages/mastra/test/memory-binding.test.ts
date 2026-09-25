@@ -1,3 +1,4 @@
+import type { MemoryStorage } from "@mastra/core/storage";
 import { Extractor } from "@mastra/memory";
 import { expect, it, vi } from "vitest";
 import {
@@ -530,7 +531,7 @@ it("records first-turn OM initialization by model and built-in extractor identit
   const observer = runtime.observer.model;
   const reflector = runtime.reflector.model;
   const original = {
-    threadId: "first-turn-thread",
+    threadId: THREAD,
     resourceId: RESOURCE,
     scope: "thread" as const,
     config: {
@@ -613,6 +614,51 @@ it("marks credential-altered mutation evidence incomplete but keeps native argum
     "private-value",
   );
   expect(recordMutation.mock.calls[0]?.[0]).toMatchObject({ complete: false });
+  await binding.release();
+});
+
+it.each([
+  {
+    name: "a thread on another resource",
+    write: (domain: MemoryStorage) =>
+      domain.saveThread({
+        thread: {
+          id: "other-thread",
+          resourceId: "other-resource",
+          title: "Other",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      }),
+  },
+  {
+    name: "another resource",
+    write: (domain: MemoryStorage) =>
+      domain.saveResource({
+        resource: {
+          id: "other-resource",
+          workingMemory: "private notes",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      }),
+  },
+  {
+    name: "a clone into another resource",
+    write: (domain: MemoryStorage) =>
+      domain.cloneThread({
+        sourceThreadId: THREAD,
+        resourceId: "other-resource",
+      }),
+  },
+])("keeps a native write to $name but refuses replay", async ({ write }) => {
+  const { runtime, binding } = await fixture();
+  await binding.captureInitial(runtime.memory);
+  await write(binding.domain);
+  await binding.drain();
+  expect(binding.incompleteReasons).toEqual([
+    "Memory mutation targets a thread or resource outside the captured scope.",
+  ]);
   await binding.release();
 });
 

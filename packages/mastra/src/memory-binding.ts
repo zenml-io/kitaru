@@ -591,6 +591,88 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Collect the thread and resource IDs a mutation names in its arguments.
+ *
+ * Mutations that address rows only by message or record ID name no selector
+ * here. A thread ID of `null` marks a resource-scoped OM record.
+ */
+function getMutationTargets(
+  method: PropertyKey,
+  args: readonly unknown[],
+): { threads: unknown[]; resources: unknown[] } {
+  const [input, second] = args;
+  const one = record(input) ? input : {};
+  switch (method) {
+    case "saveThread": {
+      const thread = record(one.thread) ? one.thread : {};
+      return { threads: [thread.id], resources: [thread.resourceId] };
+    }
+    case "updateThread":
+    case "patchThread":
+      return { threads: [one.id], resources: [] };
+    case "deleteThread":
+      return { threads: [one.threadId], resources: [] };
+    case "updateThreadResourceId":
+      return { threads: [one.threadId], resources: [one.resourceId] };
+    case "copyThread":
+    case "cloneThread":
+      // A caller-chosen new thread ID can name a thread outside the snapshot
+      // that exists in the source store, so only a generated ID stays in scope.
+      return {
+        threads: [
+          one.sourceThreadId,
+          ...(one.newThreadId === undefined ? [] : [one.newThreadId]),
+        ],
+        resources: [one.resourceId],
+      };
+    case "saveResource":
+      return {
+        threads: [],
+        resources: [record(one.resource) ? one.resource.id : undefined],
+      };
+    case "updateResource":
+    case "initializeObservationalMemory":
+    case "insertObservationalMemoryRecord":
+      return {
+        threads: "threadId" in one ? [one.threadId] : [],
+        resources: [one.resourceId],
+      };
+    case "clearObservationalMemory":
+      return { threads: [input], resources: [second] };
+    case "saveMessages":
+    case "updateMessages": {
+      const messages = Array.isArray(one.messages)
+        ? one.messages.filter(record)
+        : [];
+      return {
+        threads: messages.map((message) => message.threadId),
+        resources: messages.map((message) => message.resourceId),
+      };
+    }
+    default:
+      return { threads: [], resources: [] };
+  }
+}
+
+/** Tell whether a mutation names a thread or resource other than `selector`. */
+function targetsOutsideSelector(
+  method: PropertyKey,
+  args: readonly unknown[],
+  selector: MastraMemorySelector,
+): boolean {
+  const { threads, resources } = getMutationTargets(method, args);
+  // Replay restores only the captured thread and resource, so a write
+  // elsewhere changes source state the replay can neither read nor repeat.
+  // An omitted ID names no new owner: Mastra keeps the row's current one or,
+  // for a clone, the source thread's resource.
+  return (
+    threads.some(
+      (id) => id !== undefined && id !== null && id !== selector.threadId,
+    ) || resources.some((id) => id !== undefined && id !== selector.resourceId)
+  );
+}
+
 function modelIdentity(model: unknown): string {
   if (typeof model === "string" && model) return model;
   if (
@@ -888,6 +970,10 @@ export function createMemoryCaptureBinding(
         if (property === "dangerouslyClearAll" || property === "prune")
           markIncomplete(
             "Storage-wide mutation is outside the captured thread scope.",
+          );
+        else if (targetsOutsideSelector(property, callerArgs, selector))
+          markIncomplete(
+            "Memory mutation targets a thread or resource outside the captured scope.",
           );
         const duringCapture = capturing;
         const result = mutations.then(async () => {
