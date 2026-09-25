@@ -734,6 +734,31 @@ type ServerAccess = {
   useServer: (index: number) => void;
 };
 
+/** Count the finalizing marks each lease from `access` has stored. */
+function countFinalizingMarks(access: MastraExclusiveMemoryAccess): {
+  access: MastraExclusiveMemoryAccess;
+  marks: () => number;
+} {
+  let marks = 0;
+  return {
+    access: {
+      ...access,
+      acquire: async (selector, options) => {
+        const lease = await access.acquire(selector, options);
+        const markFinalizing = lease.markFinalizing;
+        if (markFinalizing) {
+          lease.markFinalizing = async () => {
+            await markFinalizing.call(lease);
+            marks += 1;
+          };
+        }
+        return lease;
+      },
+    },
+    marks: () => marks,
+  };
+}
+
 const QUICK_REPLY_LEASES: Array<[string, () => Promise<ServerAccess>]> = [
   ...LEASES.map(
     ([kind, createAccess]): [string, () => Promise<ServerAccess>] => [
@@ -756,7 +781,9 @@ it.each(QUICK_REPLY_LEASES)(
     const secondAnswer = gate();
     let observerCalls = 0;
     let actorCalls = 0;
-    const { access, useServer } = await createAccess();
+    const server = await createAccess();
+    const { useServer } = server;
+    const { access, marks } = countFinalizingMarks(server.access);
     const thread = `quick-reply-chain-${kind.replaceAll(" ", "-")}`;
     const { api, turn } = await setup(access, {
       thread,
@@ -776,6 +803,9 @@ it.each(QUICK_REPLY_LEASES)(
     useServer(0);
     expect(await turn(LONG_MESSAGE)).toBe("done");
     await vi.waitFor(() => expect(observerCalls).toBe(1));
+    // Kitaru stores the finalizing mark without waiting for it, and the reply
+    // must arrive after it lands, as it does at chat pacing.
+    await vi.waitFor(() => expect(marks()).toBe(1), { timeout: 5000 });
     useServer(1);
     const reply = turn(LONG_MESSAGE);
     await vi.waitFor(() => expect(actorCalls).toBe(2));
