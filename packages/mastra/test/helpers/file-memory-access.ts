@@ -144,6 +144,7 @@ export function createFileMemoryAccess(
             }
           } else {
             await rm(join(dir, `turn-${token}`), { force: true });
+            await rm(join(dir, `finalizing-${token}`), { force: true });
           }
           if (
             !(await exists(join(dir, "owner"))) &&
@@ -169,24 +170,33 @@ export function createFileMemoryAccess(
         });
       },
       async markFinalizing() {
-        if (released || !owns) return;
+        if (released) return;
         await withScopes(selector, async (dirs) => {
-          for (const dir of dirs)
-            if ((await readFile(join(dir, "owner"), "utf8")) === token)
+          for (const dir of dirs) {
+            if (!owns) {
+              if (await exists(join(dir, `turn-${token}`)))
+                await writeFile(join(dir, `finalizing-${token}`), "");
+            } else if ((await readFile(join(dir, "owner"), "utf8")) === token)
               await writeFile(join(dir, "finalizing"), token);
+          }
         });
       },
       overlapsFinalizingTurn,
     });
   }
 
-  /** Whether an eligible owner is finalizing and no eligible owner is not. */
-  async function followsFinalizingOwner(dirs: string[]): Promise<boolean> {
+  /**
+   * Whether some holder is finalizing and no eligible owner is not. Turns
+   * that do not own a selector are never eligible.
+   */
+  async function followsFinalizingHolder(dirs: string[]): Promise<boolean> {
     let finalizing = false;
     for (const dir of dirs) {
       const owner = await readFile(join(dir, "owner"), "utf8").catch(
         () => undefined,
       );
+      if ((await readdir(dir)).some((name) => name.startsWith("finalizing-")))
+        finalizing = true;
       if (owner === undefined) continue;
       const marked = await readFile(join(dir, "finalizing"), "utf8").catch(
         () => undefined,
@@ -233,7 +243,7 @@ export function createFileMemoryAccess(
         if (Date.now() >= deadline) {
           const follows = await withScopes(selector, async (dirs) => {
             // Poison exists only after an invalidating overlap, so without it
-            // every non-owner turn already follows a finalizing owner.
+            // every non-owner turn already follows a finalizing holder.
             const follows =
               options.cooperative === true &&
               !(await exists(globalPoison)) &&
@@ -242,7 +252,7 @@ export function createFileMemoryAccess(
                   dirs.map((dir) => exists(join(dir, "poison"))),
                 )
               ).some(Boolean) &&
-              (await followsFinalizingOwner(dirs));
+              (await followsFinalizingHolder(dirs));
             for (const dir of dirs) {
               if (!follows) await poison(dir, false);
               await writeFile(join(dir, `turn-${token}`), "");

@@ -533,6 +533,43 @@ it.each(LEASES)(
 );
 
 it.each(LEASES)(
+  "lets a quick reply follow an earlier reply that is finishing its own memory work (%s lease)",
+  async (_kind, createAccess) => {
+    const access = await createAccess();
+    const holder = await access.acquire(SELECTOR);
+    await holder.markFinalizing?.();
+    const reply = await access.acquire(SELECTOR, { cooperative: true });
+    expect(reply.overlapsFinalizingTurn).toBe(true);
+    await reply.markFinalizing?.();
+    await holder();
+    // Only the ineligible, finalizing reply is still in the way.
+    const next = await access.acquire(SELECTOR, { cooperative: true });
+    expect(next.overlapsFinalizingTurn).toBe(true);
+    await reply();
+    await next();
+    // Following never poisoned the selectors.
+    const later = await access.acquire(SELECTOR);
+    expect(await later.verifyEligibility()).toBe(true);
+    await later();
+  },
+);
+
+it.each(LEASES)(
+  "does not let a quick reply follow a reply that is still answering (%s lease)",
+  async (_kind, createAccess) => {
+    const access = await createAccess();
+    const holder = await access.acquire(SELECTOR);
+    await holder.markFinalizing?.();
+    const reply = await access.acquire(SELECTOR, { cooperative: true });
+    await holder();
+    const next = await access.acquire(SELECTOR, { cooperative: true });
+    expect(next.overlapsFinalizingTurn).toBeFalsy();
+    await reply();
+    await next();
+  },
+);
+
+it.each(LEASES)(
   "still invalidates a holder for a non-cooperative overlap or before it finalizes (%s lease)",
   async (_kind, createAccess) => {
     const access = await createAccess();

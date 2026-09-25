@@ -82,8 +82,10 @@ export interface MastraMemoryLease {
  * writes under that lease, and its recorded evidence does not depend on later
  * turns. A Kitaru turn that starts in that window, such as a quick reply,
  * acquires with `cooperative: true`. When every holder still in the way is
- * either finalizing or already ineligible, and at least one eligible holder
- * is finalizing, the implementation must not invalidate them. It returns a
+ * either finalizing or already ineligible, and at least one holder is
+ * finalizing, the implementation must not invalidate them. That holder may
+ * itself be an ineligible reply finishing its own memory work, so a string
+ * of quick replies each costs only the reply. It returns a
  * lease that is not eligible, has `overlapsFinalizingTurn` set, and occupies
  * both selectors until it is released. Writes that turn registers use
  * `cooperative: true` as well. Any other overlap, including a non-cooperative
@@ -206,10 +208,14 @@ export function createProcessLocalMemoryAccess(): MastraExclusiveMemoryAccess {
       const states = scopeKeys.map(getState);
       const occupied = states.filter((state) => state.turns.size > 0);
       const holders = new Set(occupied.flatMap((state) => [...state.turns]));
+      // Without poison, an ineligible holder is itself a turn that followed
+      // a finalizing one; poison means a real conflict, which still counts.
       const followsFinalizing =
         options.cooperative === true &&
+        !unknownWriterPoisoned &&
+        occupied.every((state) => !state.poisoned && !state.persistentLoss) &&
         [...holders].every((turn) => turn.finalizing || turn.invalidated) &&
-        [...holders].some((turn) => turn.finalizing && !turn.invalidated);
+        [...holders].some((turn) => turn.finalizing);
       if (occupied.length > 0 && !followsFinalizing) poison(occupied, false);
       const owner: Turn = {
         onConflict: options.onConflict,
