@@ -79,8 +79,17 @@ def error_result(result_type: type[ToolResult], error: BaseException) -> ToolRes
     )
 
 
-def protocol_result(envelope: ToolResult) -> CallToolResult:
-    """Render identical redacted canonical JSON as structured and text content."""
+def protocol_result(envelope: ToolResult, text: str | None = None) -> CallToolResult:
+    """Render redacted canonical JSON as structured content and as text.
+
+    Args:
+        envelope: The result envelope.
+        text: Summary to send as the text content of a successful result in
+            place of the JSON, for tools whose view renders the structured data.
+
+    Returns:
+        The protocol result.
+    """
     structured = redact_data(envelope)
     if not isinstance(structured, dict):
         # Whole-model normalization can fail before yielding any safe fields.
@@ -97,7 +106,10 @@ def protocol_result(envelope: ToolResult) -> CallToolResult:
                 "recovery": None,
             },
         }
-    text = json.dumps(structured, sort_keys=True, separators=(",", ":"))
+    if text is None or not structured["ok"]:
+        text = json.dumps(structured, sort_keys=True, separators=(",", ":"))
+    else:
+        text = redact(text)
     return CallToolResult(
         content=[TextContent(type="text", text=text)],
         structured_content=structured,

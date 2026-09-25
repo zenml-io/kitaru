@@ -7624,5 +7624,1161 @@
       "title": "ConnectionReadResult",
       "type": "object"
     }
+  },
+  {
+    "_meta": {
+      "ui": {
+        "resourceUri": "ui://kitaru/failure-matrix.html"
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Show where sessions first go wrong as an interactive transition matrix.\n\nRows are the last step that went right and columns the first step that went\nwrong, counted over the sessions `filter` selects (for example an agent_id or\ncohort_version_id). Pass `compare_filter`, such as a replay's\nexperiment_run_id, to compare two groups. A reviewer places a failure that\nraised no error by annotating the failing node with the value\n`{\"first_failure\": true, \"note\": \"...\"}`.\n",
+    "inputSchema": {
+      "$defs": {
+        "AndFilter": {
+          "additionalProperties": false,
+          "description": "And filter.",
+          "properties": {
+            "and": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "And",
+              "type": "array"
+            }
+          },
+          "required": [
+            "and"
+          ],
+          "title": "AndFilter",
+          "type": "object"
+        },
+        "FailureMatrixRequest": {
+          "additionalProperties": false,
+          "description": "Build a transition failure matrix over a group of sessions.\n\nA failed session contributes one count to the cell (last step that went right,\nfirst step that went wrong). A failed session is one whose status is failed,\nthat failed an evaluation, or that carries a first-failure annotation. The\nfailing step is the node a reviewer marked with a manual annotation whose\nvalue is `{\"first_failure\": true, \"note\": \"...\"}` and whose selector names\nthe node, otherwise the deepest failed node.",
+          "properties": {
+            "compare_filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Second session group to compare against, e.g. a replay's experiment_run_id.",
+              "title": "Compare Filter"
+            },
+            "compare_label": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Display name for the second group.",
+              "title": "Compare Label"
+            },
+            "filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session filter selecting the group, e.g. agent_id, cohort_version_id, experiment_run_id, or a started_at range.",
+              "title": "Filter"
+            },
+            "label": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Display name for the group.",
+              "title": "Label"
+            },
+            "max_sessions": {
+              "default": 200,
+              "description": "Most recent sessions per group.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Max Sessions",
+              "type": "integer"
+            },
+            "sources": {
+              "description": "Failure kinds to count.",
+              "items": {
+                "enum": [
+                  "error",
+                  "annotation"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Sources",
+              "type": "array"
+            },
+            "state_by": {
+              "default": "tool",
+              "description": "Which nodes count as states: tool and subagent calls, non-root spans, or both plus LLM calls.",
+              "enum": [
+                "tool",
+                "span",
+                "node"
+              ],
+              "title": "State By",
+              "type": "string"
+            },
+            "state_map": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Merge states: glob pattern of a state name -> group name, e.g. {'sql_*': 'SQL'}. The first matching pattern wins.",
+              "title": "State Map"
+            }
+          },
+          "title": "FailureMatrixRequest",
+          "type": "object"
+        },
+        "FilterCondition": {
+          "additionalProperties": false,
+          "description": "Filter condition.",
+          "properties": {
+            "field": {
+              "description": "Field to filter on.",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "title": "Field",
+              "type": "string"
+            },
+            "op": {
+              "$ref": "#/$defs/FilterOp",
+              "description": "Comparison operator."
+            },
+            "value": {
+              "default": null,
+              "description": "Comparison value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "field",
+            "op"
+          ],
+          "title": "FilterCondition",
+          "type": "object"
+        },
+        "FilterOp": {
+          "description": "Filter condition operator.",
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "in",
+            "is_null",
+            "startswith",
+            "endswith",
+            "contains"
+          ],
+          "title": "FilterOp",
+          "type": "string"
+        },
+        "NotFilter": {
+          "additionalProperties": false,
+          "description": "Not filter.",
+          "properties": {
+            "not": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                }
+              ],
+              "description": "Operand.",
+              "title": "Not"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "title": "NotFilter",
+          "type": "object"
+        },
+        "OrFilter": {
+          "additionalProperties": false,
+          "description": "Or filter.",
+          "properties": {
+            "or": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "Or",
+              "type": "array"
+            }
+          },
+          "required": [
+            "or"
+          ],
+          "title": "OrFilter",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/FailureMatrixRequest"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "failure_matrix_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_failure_matrix",
+    "outputSchema": {
+      "$defs": {
+        "FailureMatrixData": {
+          "additionalProperties": false,
+          "description": "Transition failure matrix over one group, optionally compared to a second.",
+          "properties": {
+            "base": {
+              "$ref": "#/$defs/GroupSummary"
+            },
+            "cells": {
+              "items": {
+                "$ref": "#/$defs/MatrixCell"
+              },
+              "title": "Cells",
+              "type": "array"
+            },
+            "cols": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Cols",
+              "type": "array"
+            },
+            "compare": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GroupSummary"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "rows": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Rows",
+              "type": "array"
+            },
+            "state_by": {
+              "enum": [
+                "tool",
+                "span",
+                "node"
+              ],
+              "title": "State By",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state_by",
+            "rows",
+            "cols",
+            "cells",
+            "base"
+          ],
+          "title": "FailureMatrixData",
+          "type": "object"
+        },
+        "GroupSummary": {
+          "additionalProperties": false,
+          "description": "Headline numbers for one session group.",
+          "properties": {
+            "failed_count": {
+              "title": "Failed Count",
+              "type": "integer"
+            },
+            "label": {
+              "title": "Label",
+              "type": "string"
+            },
+            "located_count": {
+              "title": "Located Count",
+              "type": "integer"
+            },
+            "session_count": {
+              "title": "Session Count",
+              "type": "integer"
+            },
+            "shown_count": {
+              "description": "Located failures matching the sources.",
+              "title": "Shown Count",
+              "type": "integer"
+            },
+            "truncated": {
+              "description": "More sessions matched than max_sessions.",
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "unlocated_count": {
+              "title": "Unlocated Count",
+              "type": "integer"
+            },
+            "unlocated_evaluations": {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "title": "Unlocated Evaluations",
+              "type": "object"
+            }
+          },
+          "required": [
+            "label",
+            "session_count",
+            "failed_count",
+            "located_count",
+            "shown_count",
+            "unlocated_count",
+            "unlocated_evaluations",
+            "truncated"
+          ],
+          "title": "GroupSummary",
+          "type": "object"
+        },
+        "MatrixCell": {
+          "additionalProperties": false,
+          "description": "Failures and attempts for one transition.",
+          "properties": {
+            "annotation_count": {
+              "title": "Annotation Count",
+              "type": "integer"
+            },
+            "attempts": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Times the transition happened; null when the failing step is not itself a state (for example an LLM call).",
+              "title": "Attempts"
+            },
+            "compare_attempts": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Compare Attempts"
+            },
+            "compare_count": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Compare Count"
+            },
+            "count": {
+              "title": "Count",
+              "type": "integer"
+            },
+            "error_count": {
+              "title": "Error Count",
+              "type": "integer"
+            },
+            "from_state": {
+              "title": "From State",
+              "type": "string"
+            },
+            "to_state": {
+              "title": "To State",
+              "type": "string"
+            }
+          },
+          "required": [
+            "from_state",
+            "to_state",
+            "count",
+            "attempts",
+            "error_count",
+            "annotation_count"
+          ],
+          "title": "MatrixCell",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Transition failure matrix envelope.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureMatrixData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "FailureMatrixResult",
+      "type": "object"
+    }
+  },
+  {
+    "_meta": {
+      "ui": {
+        "resourceUri": "ui://kitaru/failure-matrix.html",
+        "visibility": [
+          "app"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "List the sessions and repeated notes behind one transition matrix cell.",
+    "inputSchema": {
+      "$defs": {
+        "AndFilter": {
+          "additionalProperties": false,
+          "description": "And filter.",
+          "properties": {
+            "and": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "And",
+              "type": "array"
+            }
+          },
+          "required": [
+            "and"
+          ],
+          "title": "AndFilter",
+          "type": "object"
+        },
+        "FailureCellRequest": {
+          "additionalProperties": false,
+          "description": "List the sessions behind one transition failure matrix cell.",
+          "properties": {
+            "compare_filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Second session group to compare against, e.g. a replay's experiment_run_id.",
+              "title": "Compare Filter"
+            },
+            "compare_label": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Display name for the second group.",
+              "title": "Compare Label"
+            },
+            "filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session filter selecting the group, e.g. agent_id, cohort_version_id, experiment_run_id, or a started_at range.",
+              "title": "Filter"
+            },
+            "from_state": {
+              "description": "Last step that went right.",
+              "minLength": 1,
+              "title": "From State",
+              "type": "string"
+            },
+            "label": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Display name for the group.",
+              "title": "Label"
+            },
+            "limit": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "max_sessions": {
+              "default": 200,
+              "description": "Most recent sessions per group.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Max Sessions",
+              "type": "integer"
+            },
+            "side": {
+              "default": "base",
+              "description": "Which session group.",
+              "enum": [
+                "base",
+                "compare"
+              ],
+              "title": "Side",
+              "type": "string"
+            },
+            "sources": {
+              "description": "Failure kinds to count.",
+              "items": {
+                "enum": [
+                  "error",
+                  "annotation"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Sources",
+              "type": "array"
+            },
+            "state_by": {
+              "default": "tool",
+              "description": "Which nodes count as states: tool and subagent calls, non-root spans, or both plus LLM calls.",
+              "enum": [
+                "tool",
+                "span",
+                "node"
+              ],
+              "title": "State By",
+              "type": "string"
+            },
+            "state_map": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Merge states: glob pattern of a state name -> group name, e.g. {'sql_*': 'SQL'}. The first matching pattern wins.",
+              "title": "State Map"
+            },
+            "to_state": {
+              "description": "First step that went wrong.",
+              "minLength": 1,
+              "title": "To State",
+              "type": "string"
+            }
+          },
+          "required": [
+            "from_state",
+            "to_state"
+          ],
+          "title": "FailureCellRequest",
+          "type": "object"
+        },
+        "FilterCondition": {
+          "additionalProperties": false,
+          "description": "Filter condition.",
+          "properties": {
+            "field": {
+              "description": "Field to filter on.",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "title": "Field",
+              "type": "string"
+            },
+            "op": {
+              "$ref": "#/$defs/FilterOp",
+              "description": "Comparison operator."
+            },
+            "value": {
+              "default": null,
+              "description": "Comparison value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "field",
+            "op"
+          ],
+          "title": "FilterCondition",
+          "type": "object"
+        },
+        "FilterOp": {
+          "description": "Filter condition operator.",
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "in",
+            "is_null",
+            "startswith",
+            "endswith",
+            "contains"
+          ],
+          "title": "FilterOp",
+          "type": "string"
+        },
+        "NotFilter": {
+          "additionalProperties": false,
+          "description": "Not filter.",
+          "properties": {
+            "not": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                }
+              ],
+              "description": "Operand.",
+              "title": "Not"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "title": "NotFilter",
+          "type": "object"
+        },
+        "OrFilter": {
+          "additionalProperties": false,
+          "description": "Or filter.",
+          "properties": {
+            "or": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "Or",
+              "type": "array"
+            }
+          },
+          "required": [
+            "or"
+          ],
+          "title": "OrFilter",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/FailureCellRequest"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "failure_cell_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_failure_matrix_cell",
+    "outputSchema": {
+      "$defs": {
+        "CellPattern": {
+          "additionalProperties": false,
+          "description": "A repeated failure note and how often it appears.",
+          "properties": {
+            "count": {
+              "title": "Count",
+              "type": "integer"
+            },
+            "note": {
+              "title": "Note",
+              "type": "string"
+            }
+          },
+          "required": [
+            "note",
+            "count"
+          ],
+          "title": "CellPattern",
+          "type": "object"
+        },
+        "CellSession": {
+          "additionalProperties": false,
+          "description": "One session that failed at the requested transition.",
+          "properties": {
+            "failing_node": {
+              "title": "Failing Node",
+              "type": "string"
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Note"
+            },
+            "number": {
+              "title": "Number",
+              "type": "integer"
+            },
+            "path": {
+              "description": "States up to and including the failure.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Path",
+              "type": "array"
+            },
+            "path_truncated": {
+              "title": "Path Truncated",
+              "type": "boolean"
+            },
+            "session_id": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "source": {
+              "enum": [
+                "error",
+                "annotation"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "number",
+            "name",
+            "source",
+            "failing_node",
+            "note",
+            "path",
+            "path_truncated"
+          ],
+          "title": "CellSession",
+          "type": "object"
+        },
+        "FailureCellData": {
+          "additionalProperties": false,
+          "description": "Sessions and repeated notes behind one matrix cell.",
+          "properties": {
+            "attempts": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Attempts"
+            },
+            "patterns": {
+              "items": {
+                "$ref": "#/$defs/CellPattern"
+              },
+              "title": "Patterns",
+              "type": "array"
+            },
+            "sessions": {
+              "items": {
+                "$ref": "#/$defs/CellSession"
+              },
+              "title": "Sessions",
+              "type": "array"
+            },
+            "total": {
+              "title": "Total",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "total",
+            "attempts",
+            "patterns",
+            "sessions"
+          ],
+          "title": "FailureCellData",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Matrix cell drill-down envelope.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureCellData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "FailureCellResult",
+      "type": "object"
+    }
   }
 ]

@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Transition Failure Matrix</title>
+<style>
+/* Chrome tokens read the host's MCP Apps variables first and fall back to Kitaru's
+   palette. Heat tokens stay Kitaru orange in every host. */
+:root {
+  --k-card: #ffffff; --k-subtle: #fafaf8; --k-ink: #1a1714; --k-ink-2: #6b6560; --k-ink-3: #a39e98;
+  --k-border: #e5e2dc; --k-muted: #f0ede8; --k-accent: #f5ede4;
+  --card: var(--color-background-primary, var(--k-card));
+  --subtle: var(--color-background-secondary, var(--k-subtle));
+  --ink: var(--color-text-primary, var(--k-ink));
+  --ink-2: var(--color-text-secondary, var(--k-ink-2));
+  --ink-3: var(--color-text-tertiary, var(--k-ink-3));
+  --border: var(--color-border-primary, var(--k-border));
+  --muted: var(--k-muted);
+  --accent: var(--k-accent);
+  --sans: var(--font-sans, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif);
+  --mono: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  --brand: #f17829; --brand-ink: #b8520f;
+  --heat-lo: #fcebdc; --heat-mid: #f17829; --heat-hi: #8a360a;
+  --on-heat-lo: #1a1714; --on-heat-hi: #ffffff;
+  --div-mid: #f0efec; --div-less: #2a78d6; --div-more: #d4393a;
+  --good: #1f7a36; --bad: #b42330; --ring: #1a1714;
+  --shadow: 0 1px 2px rgba(26,23,20,.05), 0 8px 24px rgba(26,23,20,.08);
+  --heat-flip: .70;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --k-card: #1c1a17; --k-subtle: #181614; --k-ink: #f3efe9; --k-ink-2: #b3aca4; --k-ink-3: #7d766f;
+    --k-border: #34302b; --k-muted: #26231f; --k-accent: #2d231b; --brand-ink: #f59a5c;
+    --heat-lo: #33241a; --heat-mid: #e2722b; --heat-hi: #ffc9a1; --on-heat-lo: #f3efe9; --on-heat-hi: #1a1714;
+    --div-mid: #383835; --div-less: #3987e5; --div-more: #e85b5a; --good: #5cc27a; --bad: #ff7b7b; --ring: #f3efe9;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35); --heat-flip: .45;
+  }
+}
+:root[data-theme="dark"] {
+  --k-card: #1c1a17; --k-subtle: #181614; --k-ink: #f3efe9; --k-ink-2: #b3aca4; --k-ink-3: #7d766f;
+  --k-border: #34302b; --k-muted: #26231f; --k-accent: #2d231b; --brand-ink: #f59a5c;
+  --heat-lo: #33241a; --heat-mid: #e2722b; --heat-hi: #ffc9a1; --on-heat-lo: #f3efe9; --on-heat-hi: #1a1714;
+  --div-mid: #383835; --div-less: #3987e5; --div-more: #e85b5a; --good: #5cc27a; --bad: #ff7b7b; --ring: #f3efe9;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35); --heat-flip: .45;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: transparent; }
+body { color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; }
+code, .mono { font-family: var(--mono); font-size: .92em; }
+.app { padding: 16px; max-width: 1100px; margin: 0 auto; }
+
+header.top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.title h1 { font-size: 16px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin-top: 2px; }
+.brand { display: flex; align-items: center; gap: 8px; }
+.brand img { height: 12px; opacity: .8; }
+:root[data-theme="dark"] .brand img { filter: invert(1); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .brand img { filter: invert(1); } }
+.icon-btn { border: 1px solid var(--border); background: transparent; border-radius: 8px; padding: 3px 7px; cursor: pointer; color: var(--ink-2); line-height: 1.2; font-size: 13px; }
+.icon-btn:hover { background: var(--muted); color: var(--ink); }
+
+.headline { margin-top: 14px; background: var(--accent); border-radius: 10px; padding: 9px 12px; margin-bottom: 14px; font-size: 13.5px; }
+.headline b { font-weight: 650; }
+.headline .arrow { color: var(--brand-ink); font-weight: 700; }
+
+.matrix-wrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px 4px; }
+table.matrix { border-collapse: separate; border-spacing: 3px; margin: 0 auto; }
+.matrix th { font-weight: 500; font-size: 11.5px; color: var(--ink-2); }
+.matrix thead th.col { font-family: var(--mono); font-size: 10px; line-height: 1.25; vertical-align: bottom; padding: 0 1px 4px; width: 70px; min-width: 70px; }
+.matrix th.axis-top { text-align: center; font-size: 11.5px; font-weight: 600; color: var(--ink); padding-bottom: 6px; }
+.matrix th.corner { text-align: left; vertical-align: bottom; font-size: 11px; font-weight: 600; color: var(--ink); padding: 0 8px 4px 0; white-space: nowrap; }
+.matrix tbody th { font-family: var(--mono); font-size: 10px; text-align: right; padding-right: 8px; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.matrix th.hl { color: var(--brand-ink); font-weight: 600; }
+.matrix td { padding: 0; }
+.cell { width: 100%; min-width: 56px; height: 42px; border: 0; border-radius: 6px; cursor: pointer; display: grid; place-items: center; font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; position: relative; transition: transform .08s ease, box-shadow .12s ease; }
+.cell:hover, .cell:focus-visible { transform: translateY(-1px); box-shadow: 0 0 0 2px var(--card), 0 0 0 3.5px color-mix(in oklch, var(--ink) 55%, transparent); outline: none; }
+.cell[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--ring); }
+.cell.zero { background: transparent; color: var(--ink-3); font-weight: 500; box-shadow: inset 0 0 0 1px var(--border); }
+.cell.never { background: color-mix(in oklch, var(--muted) 55%, transparent); color: transparent; cursor: default; box-shadow: none; }
+.cell.never:hover { transform: none; }
+.cell .subv { display: block; font-size: 9.5px; font-weight: 500; opacity: .8; margin-top: -2px; }
+.cell .dagger { position: absolute; top: 2px; right: 5px; font-size: 10px; font-weight: 600; opacity: .75; }
+.cell.smalln { outline: 1.5px dashed color-mix(in oklch, var(--ink) 35%, transparent); outline-offset: -3px; }
+
+.legend-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-top: 10px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; font-size: 11.5px; color: var(--ink-2); }
+.scale { display: inline-flex; align-items: center; gap: 6px; }
+.scale .bar { width: 120px; height: 8px; border-radius: 4px; }
+.keys { display: inline-flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.key { display: inline-flex; gap: 5px; align-items: center; }
+.key i { width: 14px; height: 12px; border-radius: 3px; display: inline-block; }
+.key i.k-zero { box-shadow: inset 0 0 0 1px var(--border); }
+.key i.k-never { background: color-mix(in oklch, var(--muted) 55%, transparent); }
+.key i.k-small { outline: 1.5px dashed color-mix(in oklch, var(--ink) 35%, transparent); outline-offset: -2px; background: var(--heat-lo); }
+.ctl { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 4px 10px; cursor: pointer; font-size: 12.5px; color: var(--ink-2); }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--card); }
+.hint { font-size: 12px; color: var(--ink-3); margin: 12px 2px 0; }
+.hint q { color: var(--ink-2); }
+
+.tray { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; gap: 6px 12px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); }
+.link { border: 0; background: none; padding: 0; color: var(--brand-ink); font-weight: 600; font-size: 12.5px; cursor: pointer; }
+.link:hover { text-decoration: underline; }
+
+.drill { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; }
+.drill-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.drill-head h2 { font-size: 14.5px; margin: 0; font-weight: 650; font-family: var(--mono); }
+.drill-head h2 .arrow { color: var(--brand-ink); padding: 0 4px; }
+.drill-head .meta { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
+.drill h3 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); margin: 14px 0 6px; font-weight: 600; }
+.pattern { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.pattern:last-child { border-bottom: 0; }
+.pattern .n { font-weight: 650; font-variant-numeric: tabular-nums; min-width: 26px; color: var(--brand-ink); }
+.sessions { display: grid; gap: 8px; }
+.sess { border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; background: var(--subtle); }
+.sess-top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); }
+.sess-top .id { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+.badge { display: inline-flex; gap: 4px; align-items: center; border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; font-size: 11px; line-height: 18px; color: var(--ink-2); background: var(--card); }
+.trail { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; font-family: var(--mono); font-size: 10.5px; margin-top: 6px; }
+.step { padding: 1px 6px; border-radius: 5px; background: var(--muted); color: var(--ink-2); }
+.step.ok::before { content: "✓ "; color: var(--good); }
+.step.fail { background: color-mix(in oklch, var(--heat-mid) 22%, var(--card)); color: var(--ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--heat-mid); }
+.step.fail::before { content: "✗ "; color: var(--brand-ink); }
+.trail .sep { color: var(--ink-3); }
+.note { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; overflow-wrap: anywhere; }
+.note b { color: var(--ink); font-weight: 600; }
+.more { font-size: 12.5px; color: var(--ink-2); text-align: center; padding: 4px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.btn { border: 1px solid var(--border); background: var(--card); color: var(--ink); border-radius: 8px; padding: 6px 12px; font-size: 13px; font-weight: 550; cursor: pointer; }
+.btn:hover { background: var(--muted); }
+.btn.primary { background: var(--ink); color: var(--card); border-color: var(--ink); }
+.btn.brand { background: var(--brand); color: #1a1714; border-color: var(--brand); }
+.status { padding: 28px 8px; text-align: center; color: var(--ink-2); font-size: 13px; }
+.status.error { color: var(--bad); }
+pre.fallback { white-space: pre-wrap; font-family: var(--mono); font-size: 12px; color: var(--ink); }
+
+.tip { position: fixed; pointer-events: none; z-index: 20; background: var(--card); color: var(--ink); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 8px 10px; font-size: 12px; max-width: 260px; opacity: 0; transition: opacity .1s ease; }
+.tip.show { opacity: 1; }
+.tip .tv { font-size: 15px; font-weight: 700; }
+.tip .tt { font-family: var(--mono); font-size: 11px; color: var(--ink-2); margin-bottom: 3px; }
+.tip .tr { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<main class="app" aria-labelledby="app-title">
+  <header class="top">
+    <div class="title">
+      <h1 id="app-title">Transition failure matrix</h1>
+      <div class="sub" id="summary"></div>
+    </div>
+    <div class="brand">
+      <img src="{{KITARU_LOGO}}" alt="Kitaru">
+      <button class="icon-btn" id="fullscreen" title="Fullscreen" aria-label="Toggle fullscreen" hidden>⤢</button>
+    </div>
+  </header>
+  <div id="status" class="status" aria-live="polite">Reading sessions…</div>
+  <div id="content" hidden>
+    <div class="headline" id="headline" aria-live="polite"></div>
+    <div class="matrix-wrap"><table class="matrix" id="matrix"></table></div>
+    <div class="legend-row">
+      <div class="legend" id="legend"></div>
+      <span class="ctl" id="measure-ctl">Color by
+        <span class="seg" id="ctl-measure"><button data-v="count" aria-pressed="true">Count</button><button data-v="rate" aria-pressed="false">Failure rate</button></span>
+      </span>
+    </div>
+    <p class="hint" id="hint"></p>
+    <div class="tray" id="tray" hidden></div>
+    <section class="drill" id="drill" hidden aria-live="polite"></section>
+  </div>
+</main>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script>
+"use strict";
+const START = "(start)";
+const S = { args: {}, data: null, measure: "count", sel: null, toolName: "kitaru_failure_matrix", hostContext: {} };
+const $ = (sel) => document.querySelector(sel);
+const el = (tag, props = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") n.className = v; else if (k === "text") n.textContent = v; else if (k === "style") n.style.cssText = v;
+    else if (k.startsWith("data-") || k.startsWith("aria-")) n.setAttribute(k, v); else n[k] = v;
+  }
+  for (const c of kids) if (c != null) n.append(c);
+  return n;
+};
+const pct = (x) => `${Math.round(x * 100)}%`;
+const key = (a, b) => `${a}\u0000${b}`;
+const pairText = (a, b) => `${a} → ${b}`;
+
+// ---------- JSON-RPC over postMessage (MCP Apps 2026-01-26) ----------
+let nextId = 1;
+const pending = new Map();
+function request(method, params, timeoutMs = 120000) {
+  const id = nextId++;
+  window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    setTimeout(() => { if (pending.delete(id)) reject(new Error(`${method} timed out`)); }, timeoutMs);
+  });
+}
+function notify(method, params) { window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*"); }
+// Reported after every render as well as on resize: hosts that keep the frame
+// off-screen do not paint it, so a ResizeObserver alone never fires there.
+let reportedHeight = 0;
+function reportSize() {
+  const height = Math.ceil(document.documentElement.getBoundingClientRect().height);
+  if (height !== reportedHeight) { reportedHeight = height; notify("ui/notifications/size-changed", { height }); }
+}
+window.addEventListener("message", (event) => {
+  if (event.source !== window.parent) return;
+  const m = event.data;
+  if (!m || m.jsonrpc !== "2.0") return;
+  if (m.id != null && !m.method) {
+    const p = pending.get(m.id);
+    if (p) { pending.delete(m.id); m.error ? p.reject(new Error(m.error.message || "Request failed")) : p.resolve(m.result); }
+    return;
+  }
+  if (m.id != null) {
+    const known = m.method === "ui/resource-teardown" || m.method === "ping";
+    window.parent.postMessage(known ? { jsonrpc: "2.0", id: m.id, result: {} } : { jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "Method not found" } }, "*");
+    return;
+  }
+  const params = m.params || {};
+  if (m.method === "ui/notifications/tool-input") S.args = params.arguments || {};
+  else if (m.method === "ui/notifications/tool-result") onToolResult(params);
+  else if (m.method === "ui/notifications/tool-cancelled") showStatus("The matrix request was cancelled.");
+  else if (m.method === "ui/notifications/host-context-changed") applyHostContext(params);
+});
+
+function applyHostContext(ctx) {
+  S.hostContext = { ...S.hostContext, ...ctx };
+  const root = document.documentElement;
+  if (ctx.theme) root.setAttribute("data-theme", ctx.theme);
+  for (const [name, value] of Object.entries(ctx.styles?.variables || {})) if (value) root.style.setProperty(name, value);
+  const fonts = ctx.styles?.css?.fonts;
+  if (fonts && !document.getElementById("host-fonts")) document.head.append(el("style", { id: "host-fonts", text: fonts }));
+  const name = ctx.toolInfo?.tool?.name;
+  if (name) S.toolName = name;
+  const modes = S.hostContext.availableDisplayModes || [];
+  $("#fullscreen").hidden = !modes.includes("fullscreen");
+  if (S.data) render();
+}
+
+async function start() {
+  try {
+    const result = await request("ui/initialize", {
+      protocolVersion: "2026-01-26",
+      appInfo: { name: "kitaru-failure-matrix", version: "1.0.0" },
+      appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
+    }, 15000);
+    applyHostContext(result?.hostContext || {});
+  } catch (error) {
+    showStatus("This view needs a host that supports MCP Apps.");
+  }
+  notify("ui/notifications/initialized", {});
+  new ResizeObserver(reportSize).observe(document.body);
+  reportSize();
+}
+
+function envelopeOf(result) {
+  if (result?.structuredContent) return result.structuredContent;
+  try { return JSON.parse(result?.content?.[0]?.text ?? ""); } catch { return null; }
+}
+
+async function onToolResult(result) {
+  let envelope = envelopeOf(result);
+  // Some hosts forward only the text content to the view; the tool is read-only,
+  // so asking the server again for the full result is safe.
+  if (!envelope && !result?.isError) {
+    try { envelope = envelopeOf(await request("tools/call", { name: S.toolName, arguments: S.args })); } catch { envelope = null; }
+  }
+  if (!envelope) {
+    const text = result?.content?.find((c) => c.type === "text")?.text;
+    showStatus(text ? "" : "No matrix data arrived.");
+    if (text) $("#status").replaceChildren(el("pre", { class: "fallback", text }));
+    return;
+  }
+  if (!envelope.ok) { showStatus(envelope.error?.message || "The matrix could not be built.", true); return; }
+  S.data = envelope.data;
+  S.sel = null;
+  $("#status").hidden = true;
+  $("#content").hidden = false;
+  render();
+}
+
+function showStatus(text, isError = false) {
+  const status = $("#status");
+  status.hidden = false;
+  status.className = `status${isError ? " error" : ""}`;
+  status.textContent = text;
+  $("#content").hidden = true;
+  reportSize();
+}
+
+// ---------- Rendering ----------
+const compareMode = () => S.data?.compare != null;
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+function heat(t) {
+  if (t < .5) return `color-mix(in oklch, var(--heat-mid) ${(t * 200).toFixed(1)}%, var(--heat-lo))`;
+  return `color-mix(in oklch, var(--heat-hi) ${((t - .5) * 200).toFixed(1)}%, var(--heat-mid))`;
+}
+function diverge(d, maxAbs) {
+  const p = 25 + 75 * Math.min(1, Math.abs(d) / maxAbs);
+  return { bg: `color-mix(in oklch, var(${d < 0 ? "--div-less" : "--div-more"}) ${p.toFixed(1)}%, var(--div-mid))`, strong: p > 68 };
+}
+
+function render() {
+  const d = S.data;
+  const compare = compareMode();
+  const measure = compare ? "count" : S.measure;
+  const cells = new Map(d.cells.map((c) => [key(c.from_state, c.to_state), c]));
+  const b = d.base, c = d.compare;
+  const change = (x, y) => (x === y ? String(y) : `${x} → ${y}`);
+  $("#summary").textContent = compare
+    ? `${b.label} vs ${c.label} · failed sessions ${change(b.failed_count, c.failed_count)}`
+    : `${b.label} · ${b.failed_count} of ${b.session_count} sessions failed${b.truncated ? " (newest only)" : ""}`;
+  $("#measure-ctl").hidden = compare;
+  renderHeadline(d, measure);
+  renderMatrix(d, cells, measure);
+  renderTray(compare ? c : b);
+  $("#hint").replaceChildren("Click a cell to read its sessions. For another angle, ask Claude: ",
+    el("q", { text: "group these by span" }), ", ", el("q", { text: "only count errors" }), " or ",
+    el("q", { text: compare ? "which fixes held up?" : "compare with the latest replay" }), ".");
+  reportSize();
+}
+
+function renderHeadline(d, measure) {
+  const h = $("#headline");
+  const strongPair = (cell) => [el("b", { class: "mono", text: cell.from_state }), el("span", { class: "arrow", text: " → " }), el("b", { class: "mono", text: cell.to_state })];
+  if (compareMode()) {
+    const deltas = d.cells.map((cell) => ({ cell, delta: (cell.compare_count ?? 0) - cell.count })).filter((x) => x.delta !== 0);
+    if (!deltas.length) { h.replaceChildren("No transition changed between the two groups."); return; }
+    const win = [...deltas].sort((x, y) => x.delta - y.delta)[0], loss = [...deltas].sort((x, y) => y.delta - x.delta)[0];
+    const parts = [];
+    if (win.delta < 0) parts.push("Biggest drop: ", ...strongPair(win.cell), ` (${win.delta}). `);
+    if (loss.delta > 0) parts.push("Biggest rise: ", ...strongPair(loss.cell), ` (+${loss.delta}).`);
+    h.replaceChildren(...parts);
+    return;
+  }
+  const shown = d.cells.reduce((n, cell) => n + cell.count, 0);
+  const candidates = d.cells.filter((cell) => cell.count > 0 && (measure !== "rate" || (cell.attempts ?? 0) >= 10));
+  if (!candidates.length) { h.replaceChildren(shown ? "No transition has 10 or more tries yet, so rates would be noise." : "No located failures in these sessions."); return; }
+  if (measure === "rate") {
+    const top = candidates.sort((x, y) => y.count / y.attempts - x.count / x.attempts)[0];
+    h.replaceChildren("Least reliable step: ", ...strongPair(top), " fails ", el("b", { text: `${top.count} of ${top.attempts} tries (${pct(top.count / top.attempts)})` }), ".");
+  } else {
+    const top = candidates.sort((x, y) => y.count - x.count)[0];
+    h.replaceChildren("Most failures start at ", ...strongPair(top), ": ", el("b", { text: `${top.count} of ${shown}` }), ` located failures (${pct(top.count / shown)}).`);
+  }
+}
+
+function renderMatrix(d, cells, measure) {
+  const compare = compareMode();
+  let max = 0, maxRate = 0, maxAbs = 1;
+  for (const cell of d.cells) {
+    max = Math.max(max, cell.count, cell.compare_count ?? 0);
+    if ((cell.attempts ?? 0) >= 10) maxRate = Math.max(maxRate, cell.count / cell.attempts);
+    maxAbs = Math.max(maxAbs, Math.abs((cell.compare_count ?? 0) - cell.count));
+  }
+  const flip = parseFloat(cssVar("--heat-flip")) || .7;
+  const [selFrom, selTo] = S.sel ?? [];
+  const head1 = el("tr", {}, el("th", {}), el("th", { class: "axis-top", colSpan: d.cols.length, text: "First failing step →" }));
+  const head2 = el("tr", {}, el("th", { class: "corner", text: "Last good step ↓" }),
+    ...d.cols.map((col) => el("th", { class: `col${col === selTo ? " hl" : ""}`, scope: "col", title: col, text: col.replaceAll("_", "_​") })));
+  const body = d.rows.map((row) => el("tr", {}, el("th", { scope: "row", class: row === selFrom ? "hl" : "", title: row, text: row }),
+    ...d.cols.map((col) => el("td", {}, cellButton(cells.get(key(row, col)), row, col, { compare, measure, max, maxRate, maxAbs, flip })))));
+  $("#matrix").replaceChildren(el("thead", {}, head1, head2), el("tbody", {}, ...body));
+
+  const scale = compare
+    ? el("span", { class: "scale" }, "fewer failures", el("span", { class: "bar", style: "background: linear-gradient(90deg, var(--div-less), var(--div-mid), var(--div-more))" }), "more failures")
+    : el("span", { class: "scale" }, measure === "rate" ? "0%" : "1", el("span", { class: "bar", style: `background: linear-gradient(90deg, ${heat(.14)}, ${heat(.57)}, ${heat(1)})` }), measure === "rate" ? pct(maxRate) : String(max));
+  $("#legend").replaceChildren(scale, el("span", { class: "keys" },
+    el("span", { class: "key" }, el("i", { class: "k-zero" }), compare ? "· none in either" : "0 = tried, never failed here"),
+    el("span", { class: "key" }, el("i", { class: "k-never" }), "never happened"),
+    measure === "rate" && !compare ? el("span", { class: "key" }, el("i", { class: "k-small" }), "† under 10 tries: noisy") : null));
+}
+
+function cellButton(cell, row, col, o) {
+  const btn = el("button", { class: "cell", "data-from": row, "data-to": col });
+  btn.setAttribute("aria-pressed", String(S.sel?.[0] === row && S.sel?.[1] === col));
+  const count = cell?.count ?? 0, after = cell?.compare_count ?? 0;
+  const tried = cell && ((cell.attempts ?? 0) > 0 || count > 0 || (o.compare && ((cell.compare_attempts ?? 0) > 0 || after > 0)));
+  if (!tried) {
+    btn.classList.add("never"); btn.tabIndex = -1;
+    btn.setAttribute("aria-label", `${pairText(row, col)}: never happened`);
+    return btn;
+  }
+  btn.setAttribute("aria-label", tipLines(cell, o.compare).join(". "));
+  if (o.compare) {
+    if (count === 0 && after === 0) { btn.classList.add("zero"); btn.textContent = "·"; return btn; }
+    const delta = after - count;
+    if (delta === 0) { btn.style.background = "var(--div-mid)"; btn.style.color = "var(--ink)"; }
+    else { const { bg, strong } = diverge(delta, o.maxAbs); btn.style.background = bg; btn.style.color = strong ? "#fff" : "var(--ink)"; }
+    btn.append(`${count}→${after}`);
+    if (delta !== 0) btn.append(el("span", { class: "subv", text: `${delta > 0 ? "+" : "−"}${Math.abs(delta)}` }));
+    return btn;
+  }
+  if (count === 0) { btn.classList.add("zero"); btn.textContent = "0"; return btn; }
+  const rate = o.measure === "rate";
+  if (rate && !cell.attempts) { btn.classList.add("zero"); btn.textContent = "—"; return btn; }
+  const t = rate ? Math.min(1, (count / cell.attempts) / (o.maxRate || 1)) : count / o.max;
+  const tt = .14 + .86 * t;
+  btn.style.background = heat(tt);
+  btn.style.color = tt > o.flip ? "var(--on-heat-hi)" : "var(--on-heat-lo)";
+  btn.textContent = rate ? pct(count / cell.attempts) : String(count);
+  if (rate && cell.attempts < 10) { btn.classList.add("smalln"); btn.append(el("span", { class: "dagger", text: "†" })); }
+  return btn;
+}
+
+function tipLines(cell, compare) {
+  const pair = pairText(cell.from_state, cell.to_state);
+  const tries = (n, a) => (a ? `${n} of ${a} tries` : `${n} failures (the failing step is not a state, so no rate)`);
+  if (compare) return [pair, `${cell.count} → ${cell.compare_count ?? 0} failures`, `before: ${tries(cell.count, cell.attempts)} · after: ${tries(cell.compare_count ?? 0, cell.compare_attempts)}`];
+  const sources = [cell.error_count ? `${cell.error_count} errors` : null, cell.annotation_count ? `${cell.annotation_count} reviewer marks` : null].filter(Boolean).join(", ");
+  return [pair, `${cell.count} failure${cell.count === 1 ? "" : "s"}`, [cell.attempts ? `${tries(cell.count, cell.attempts)} (${pct(cell.count / cell.attempts)})` : "", sources].filter(Boolean).join(" · ")];
+}
+
+function renderTray(group) {
+  const tray = $("#tray");
+  if (!group.unlocated_count) { tray.hidden = true; return; }
+  tray.hidden = false;
+  const evals = Object.entries(group.unlocated_evaluations).map(([name, n]) => `${name} ×${n}`).join(", ");
+  const link = el("button", { class: "link", text: "Mark them →" });
+  link.onclick = () => sendMessage(`Review the ${group.unlocated_count} failed sessions in "${group.label}" that have no located failure step. For each one, find the node where things first went wrong and add an annotation on that node with value {"first_failure": true, "note": "<what went wrong>"}, then rebuild the transition failure matrix.`);
+  tray.replaceChildren(el("span", { title: evals, text: `${group.unlocated_count} more failed${evals ? " an evaluation" : ""}, but nobody has marked where they went wrong, so they aren't shown.` }), link);
+}
+
+// ---------- Drill-down ----------
+async function openCell(from, to) {
+  S.sel = [from, to];
+  render();
+  const drill = $("#drill");
+  drill.hidden = false;
+  drill.replaceChildren(el("div", { class: "status", text: "Loading sessions…" }));
+  reportSize();
+  request("ui/update-model-context", { content: [{ type: "text", text: `The user is looking at the transition ${pairText(from, to)} in the transition failure matrix for "${S.data.base.label}".` }] }).catch(() => {});
+  const sides = compareMode() ? ["compare", "base"] : ["base"];
+  try {
+    const results = await Promise.all(sides.map((side) => request("tools/call", {
+      name: cellToolName(),
+      arguments: { request: { ...(S.args.request || {}), from_state: from, to_state: to, side, limit: 10 } },
+    })));
+    if (S.sel?.[0] !== from || S.sel?.[1] !== to) return;
+    const payloads = results.map(envelopeOf);
+    const failed = payloads.find((p) => !p?.ok);
+    if (failed) { drill.replaceChildren(el("div", { class: "status error", text: failed?.error?.message || "Could not load sessions." })); return; }
+    renderDrill(from, to, sides, payloads.map((p) => p.data));
+  } catch (error) {
+    drill.replaceChildren(el("div", { class: "status error", text: `Could not load sessions: ${error.message}` }));
+  }
+}
+
+function cellToolName() {
+  const i = S.toolName.lastIndexOf("kitaru_failure_matrix");
+  return `${i > 0 ? S.toolName.slice(0, i) : ""}kitaru_failure_matrix_cell`;
+}
+
+function renderDrill(from, to, sides, cellData) {
+  const compare = compareMode();
+  const labelOf = (side) => (side === "compare" ? S.data.compare.label : S.data.base.label);
+  const first = cellData[0];
+  const meta = compare
+    ? `${cellData[1].total} in ${labelOf("base")} → ${cellData[0].total} in ${labelOf("compare")}`
+    : `${first.total} session${first.total === 1 ? "" : "s"}${first.attempts ? ` · ${first.total} of ${first.attempts} tries failed here (${pct(first.total / first.attempts)})` : ""}`;
+  const total = cellData.reduce((n, x) => n + x.total, 0);
+  const scope = compare ? `"${labelOf("base")}" and "${labelOf("compare")}"` : `"${labelOf("base")}"`;
+  const close = el("button", { class: "icon-btn", text: "✕", title: "Close", "aria-label": "Close" });
+  close.onclick = () => { S.sel = null; $("#drill").hidden = true; render(); };
+  const ask = el("button", { class: "btn primary", text: `Ask Claude about these ${total}` });
+  ask.onclick = () => sendMessage(`Look at the ${total} sessions that failed at ${pairText(from, to)} in the transition failure matrix for ${scope}. What do they have in common, and what change would fix most of them?`);
+  const replay = el("button", { class: "btn brand", text: "Replay with a fix…" });
+  replay.onclick = () => sendMessage(`Set up a replay experiment for the sessions failing at ${pairText(from, to)} in ${scope}: I want to try a change and compare the transition failure matrix before and after.`);
+  const sections = sides.map((side, i) => {
+    const data = cellData[i];
+    const heading = compare ? el("h3", { text: `${labelOf(side)} (${data.total})` }) : el("h3", { text: "Sessions" });
+    const cards = data.sessions.map(sessionCard);
+    const more = data.total > data.sessions.length ? el("div", { class: "more", text: `+ ${data.total - data.sessions.length} more` }) : null;
+    return [heading, el("div", { class: "sessions" }, ...cards, more)];
+  }).flat();
+  const counts = new Map();
+  for (const p of cellData.flatMap((x) => x.patterns)) counts.set(p.note, (counts.get(p.note) ?? 0) + p.count);
+  const patterns = [...counts].map(([note, count]) => ({ note, count })).sort((x, y) => y.count - x.count);
+  $("#drill").replaceChildren(
+    el("div", { class: "drill-head" }, el("div", {}, el("h2", {}, from, el("span", { class: "arrow", text: "→" }), to), el("div", { class: "meta", text: meta })), close),
+    patterns.length ? el("h3", { text: "What went wrong, most common first" }) : null,
+    ...patterns.slice(0, 5).map((p) => el("div", { class: "pattern" }, el("span", { class: "n", text: `×${p.count}` }), el("span", { text: p.note }))),
+    el("div", { class: "actions" }, ask, replay),
+    ...sections);
+  reportSize();
+}
+
+function sessionCard(s) {
+  const trail = el("div", { class: "trail" });
+  if (s.path_truncated) trail.append(el("span", { class: "sep", text: "…" }));
+  s.path.forEach((state, i) => {
+    if (i > 0) trail.append(el("span", { class: "sep", text: "›" }));
+    trail.append(el("span", { class: `step ${i === s.path.length - 1 ? "fail" : "ok"}`, text: state }));
+  });
+  return el("div", { class: "sess" },
+    el("div", { class: "sess-top" }, el("span", { class: "id", text: `#${s.number}` }),
+      el("span", { class: "badge", text: s.source === "error" ? "⚡ error" : "✎ reviewer mark" }),
+      s.name ? el("span", { text: s.name }) : null, el("span", { class: "mono", text: s.failing_node })),
+    trail,
+    s.note ? el("div", { class: "note" }, el("b", { text: s.source === "error" ? "Error: " : "Note: " }), s.note) : null);
+}
+
+function sendMessage(text) {
+  request("ui/message", { role: "user", content: [{ type: "text", text }] }).catch(() => {});
+}
+
+// ---------- Interaction ----------
+const tip = $("#tip");
+function showTip(btn, x, y) {
+  const from = btn.dataset.from, to = btn.dataset.to;
+  const cell = S.data.cells.find((c) => c.from_state === from && c.to_state === to);
+  const lines = btn.classList.contains("never") || !cell ? [pairText(from, to), "", "No session made this transition."] : tipLines(cell, compareMode());
+  tip.replaceChildren(el("div", { class: "tt", text: lines[0] }), lines[1] ? el("div", { class: "tv", text: lines[1] }) : null, el("div", { class: "tr", text: lines[2] }));
+  tip.classList.add("show");
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, x + 14))}px`;
+  tip.style.top = `${y - h - 12 < 8 ? y + 18 : y - h - 12}px`;
+}
+const hideTip = () => tip.classList.remove("show");
+const matrix = $("#matrix");
+matrix.addEventListener("pointermove", (e) => { const b = e.target.closest(".cell"); b ? showTip(b, e.clientX, e.clientY) : hideTip(); });
+matrix.addEventListener("pointerleave", hideTip);
+matrix.addEventListener("focusin", (e) => { const b = e.target.closest(".cell"); if (b) { const r = b.getBoundingClientRect(); showTip(b, r.right - 10, r.top); } });
+matrix.addEventListener("focusout", hideTip);
+matrix.addEventListener("click", (e) => {
+  const b = e.target.closest(".cell");
+  if (!b || b.classList.contains("never")) return;
+  if (S.sel?.[0] === b.dataset.from && S.sel?.[1] === b.dataset.to) { S.sel = null; $("#drill").hidden = true; render(); return; }
+  openCell(b.dataset.from, b.dataset.to);
+});
+$("#ctl-measure").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  $("#ctl-measure").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  S.measure = b.dataset.v;
+  render();
+});
+$("#fullscreen").addEventListener("click", async () => {
+  const next = S.hostContext.displayMode === "fullscreen" ? "inline" : "fullscreen";
+  try { const r = await request("ui/request-display-mode", { mode: next }); S.hostContext.displayMode = r?.mode ?? next; } catch {}
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => S.data && render());
+
+start();
+</script>
+</body>
+</html>
