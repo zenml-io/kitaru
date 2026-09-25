@@ -6,8 +6,11 @@ from typing import Any, cast
 
 import pytest
 
+from kitaru.mcp.connection import MCPConnection
 from kitaru.mcp.lifecycle import MCPServerState
+from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import MCPSettings
+from mcp import Client
 
 
 class FakeClient:
@@ -25,6 +28,29 @@ def _get_state(client: FakeClient, **settings: Any) -> MCPServerState:
         settings=MCPSettings(**settings),
         client=cast(Any, client),
     )
+
+
+async def test_server_session_opens_and_closes_one_client() -> None:
+    client = FakeClient()
+    opened: list[FakeClient] = []
+
+    def open_client() -> Any:
+        opened.append(client)
+        return client
+
+    connection = MCPConnection("https://example.test", "none", None, None)
+    server = create_server(MCPSettings(), connection, client_factory=open_client)
+    async with Client(server) as session:
+        await session.list_tools()
+        assert opened == [client]
+        assert client.close_count == 0
+    assert client.close_count == 1
+
+
+async def test_server_session_refuses_to_start_without_a_connection() -> None:
+    with pytest.raises(RuntimeError, match="resolved connection is required"):
+        async with Client(create_server(MCPSettings())):
+            pass
 
 
 async def test_close_is_exactly_once() -> None:

@@ -26,15 +26,21 @@ from kitaru.cli.registration import (
     ScriptSource,
     get_agent_version,
     get_plugin_version,
+    list_params,
+    load_agent_register_spec,
     normalize_agent_source,
     page_result,
+    parse_version_reference,
     plugin_parent_request,
     prepare_plugin_source,
     register_agent,
     register_plugin,
     register_plugin_version,
+    resolve_analyzer_configs,
     resolve_asset,
+    resolve_evaluator_configs,
     validate_package_source,
+    version_list_params,
 )
 from kitaru.client.resources.agents import AgentsResource
 from kitaru.client.resources.evaluators import EvaluatorsResource
@@ -536,3 +542,258 @@ def test_page_result_preserves_server_order_and_cursor() -> None:
     result = page_result(Page[Any](items=[first, second], next_cursor="next"), size=2)
     assert [item["name"] for item in result.items or []] == ["first", "second"]
     assert result.page == {"limit": 2, "next_cursor": "next", "truncated": True}
+
+
+@pytest.mark.parametrize(
+    ("reference", "fragment"),
+    [
+        ("agent", "must be PARENT@VERSION"),
+        ("agent@", "must be PARENT@VERSION"),
+        ("agent@two", "positive integer or 'latest'"),
+        ("agent@0", "canonical positive integer"),
+        ("agent@01", "canonical positive integer"),
+    ],
+)
+def test_version_references_reject_malformed_versions(
+    reference: str, fragment: str
+) -> None:
+    """Only PARENT@N with a canonical positive N or @latest selects a version."""
+    with pytest.raises(CLIError) as raised:
+        parse_version_reference(reference, "Agent")
+
+    assert raised.value.kind == "invalid_arguments"
+    assert fragment in raised.value.message
+
+
+async def test_agent_version_lookup_reports_missing_and_duplicate_versions() -> None:
+    """A version number that matches zero or several records is never guessed."""
+    parent = StubModel("asset", latest_version=2)
+    client = StubClient()
+    client.agents.items = [parent]
+    client.agents.versions = [StubModel("v1", version=1)]
+
+    with pytest.raises(CLIError) as missing:
+        await get_agent_version(client, "asset@2")
+    assert missing.value.kind == "not_found"
+    assert "has no version 2" in missing.value.message
+
+    duplicates = [StubModel("a", version=1), StubModel("b", version=1)]
+    client.agents.versions = duplicates
+    with pytest.raises(CLIError) as conflict:
+        await get_agent_version(client, "asset@1")
+    assert conflict.value.kind == "conflict"
+    assert conflict.value.details == {"ids": [str(item.id) for item in duplicates]}
+
+
+@pytest.mark.parametrize(
+    ("args", "fragment"),
+    [
+        (["--env", "MODE=a", "--env", "MODE=b"], "'MODE' was repeated"),
+        (["--env", "1BAD=x"], "use KEY=VALUE"),
+        (["--env", "NOVALUE"], "use KEY=VALUE"),
+    ],
+)
+def test_cli_agent_register_rejects_invalid_env_before_api_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    args: list[str],
+    fragment: str,
+) -> None:
+    """Bad --env values exit 2 with a structured error and create nothing."""
+    client = StubClient()
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield client
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+
+    exit_code = app_module.main(
+        ["agent", "register", "demo", "--command", "run", *args]
+    )
+
+    assert exit_code == 2
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["kind"] == "invalid_arguments"
+    assert fragment in error["message"]
+    assert client.agents.created_requests == []
+
+
+@pytest.mark.parametrize(
+    ("script_body", "package", "entrypoint", "fragment"),
+    [
+        (b"def parse(): pass\n", "example==1.0", "parse", "Exactly one of"),
+        (None, None, "parse", "Exactly one of"),
+        (b"def parse(): pass\n", None, " ", "--entrypoint is required"),
+        (b"def parse(): pass\n", None, "pkg.parse", "one top-level attribute"),
+        (b"def parse(:\n", None, "parse", "Invalid script"),
+        (b"\xff\xfe", None, "parse", "Invalid script"),
+        (None, "example==1.0", "example", "expected MODULE:ATTRIBUTE"),
+        (None, "example==1.0", "1bad:parse", "expected MODULE:ATTRIBUTE"),
+        (None, "not a requirement!", "example:parse", "Invalid package requirement"),
+        (None, "example==1.0; python_version>'3'", "example:parse", "exact =="),
+    ],
+)
+def test_plugin_source_preflight_rejects_unusable_sources(
+    tmp_path: Path,
+    script_body: bytes | None,
+    package: str | None,
+    entrypoint: str,
+    fragment: str,
+) -> None:
+    """Plugin sources are validated locally before any upload or API call."""
+    script = None
+    if script_body is not None:
+        script = tmp_path / "plugin.py"
+        script.write_bytes(script_body)
+
+    with pytest.raises(CLIError) as raised:
+        prepare_plugin_source(script=script, package=package, entrypoint=entrypoint)
+
+    assert raised.value.kind == "invalid_arguments"
+    assert fragment in raised.value.message
+
+
+def test_script_source_must_be_a_regular_file(tmp_path: Path) -> None:
+    """A missing or directory script path is rejected by name."""
+    with pytest.raises(CLIError, match="is not a regular file"):
+        prepare_plugin_source(script=tmp_path, package=None, entrypoint="parse")
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "fragment"),
+    [
+        ({"metadata": "{not json"}, "--metadata is not valid JSON"),
+        ({"metadata": "[1, 2]"}, "--metadata must contain a JSON object"),
+        ({"agent_id": uuid.uuid4()}, "--agent-id is only valid for evaluators"),
+    ],
+)
+def test_importer_parent_request_rejects_invalid_options(
+    kwargs: dict[str, Any], fragment: str
+) -> None:
+    """Invalid metadata JSON or evaluator-only options fail as invalid arguments."""
+    options: dict[str, Any] = {
+        "description": None,
+        "provider": None,
+        "metadata": None,
+        "agent_id": None,
+        **kwargs,
+    }
+
+    with pytest.raises(CLIError) as raised:
+        plugin_parent_request("importer", "demo", **options)
+
+    assert raised.value.kind == "invalid_arguments"
+    assert fragment in raised.value.message
+
+
+@pytest.mark.parametrize(
+    ("content", "fragment"),
+    [
+        (None, "is not a regular file"),
+        ("version: [unclosed\n", "Could not read Spec"),
+        ("- just\n- a list\n", "must contain one mapping document"),
+        ("version:\n  run_spec:\n    command: '  '\n", "nonblank version.run_spec"),
+    ],
+)
+def test_agent_spec_loading_rejects_unusable_documents(
+    tmp_path: Path, content: str | None, fragment: str
+) -> None:
+    """Spec files must be readable mappings whose version has a run command."""
+    path = tmp_path / "agent.yaml"
+    if content is not None:
+        path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(CLIError) as raised:
+        load_agent_register_spec("demo", path)
+
+    assert raised.value.kind == "invalid_arguments"
+    assert fragment in raised.value.message
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "fragment"),
+    [
+        ({"sort": "name:asc"}, "--sort must be created:asc or created:desc."),
+        ({"size": 0}, "--size must be between 1 and 1000."),
+        ({"filter": "not json"}, "--filter must be a valid JSON filter expression."),
+    ],
+)
+def test_list_params_name_the_offending_option(
+    kwargs: dict[str, Any], fragment: str
+) -> None:
+    """Invalid list options produce one concise error naming the CLI flag."""
+    options: dict[str, Any] = {
+        "size": 20,
+        "cursor": None,
+        "sort": "created:desc",
+        "filter": None,
+        **kwargs,
+    }
+
+    with pytest.raises(CLIError) as raised:
+        list_params("agent", **options)
+
+    assert raised.value.kind == "invalid_arguments"
+    assert raised.value.message == fragment
+
+
+def test_version_list_params_reject_out_of_range_size() -> None:
+    """Version listing enforces the same page-size bound as parent listing."""
+    with pytest.raises(CLIError, match="--size must be between 1 and 1000"):
+        version_list_params(size=5000, cursor=None, sort="created:asc")
+
+
+@pytest.mark.parametrize(
+    ("tokens", "params", "connections", "fragment"),
+    [
+        ([], [], [], "Provide at least one --{kind}."),
+        (["x@1", "x@1"], [], [], "Each --{kind} token must be unique."),
+        (["x@1"], ["x@1"], [], "--{kind}-params must be"),
+        (["x@1"], ["y@1={}"], [], "token 'y@1' is not a selected {kind}"),
+        (["x@1"], ["x@1={}", "x@1={}"], [], "provided more than once"),
+        (["x@1"], [], ["x@1="], "--{kind}-connection must be"),
+        (["x@1"], [], ["y@1=conn"], "token 'y@1' is not a selected {kind}"),
+        (["x@1"], [], ["x@1=a", "x@1=b"], "provided more than once"),
+    ],
+)
+@pytest.mark.parametrize("kind", ["evaluator", "analyzer"])
+async def test_plugin_config_resolution_rejects_malformed_selections(
+    kind: str,
+    tokens: list[str],
+    params: list[str],
+    connections: list[str],
+    fragment: str,
+) -> None:
+    """Evaluator and analyzer selections fail before any server lookup."""
+    resolve = (
+        resolve_evaluator_configs if kind == "evaluator" else resolve_analyzer_configs
+    )
+    client = SimpleNamespace(
+        evaluators=None, analyzers=None, connections=StubResource([StubModel("a")])
+    )
+
+    with pytest.raises(CLIError) as raised:
+        await resolve(client, tokens, params, connections)
+
+    assert raised.value.kind == "invalid_arguments"
+    assert fragment.format(kind=kind) in raised.value.message
+
+
+@pytest.mark.parametrize("kind", ["evaluator", "analyzer"])
+async def test_plugin_config_resolution_rejects_tokens_for_the_same_version(
+    kind: str,
+) -> None:
+    """NAME@1 and NAME@latest cannot both select the same stored version."""
+    resolve = (
+        resolve_evaluator_configs if kind == "evaluator" else resolve_analyzer_configs
+    )
+    resource = StubResource([StubModel("judge", latest_version=1)])
+    resource.versions = [StubModel("judge-v1", version=1)]
+    client = SimpleNamespace(evaluators=resource, analyzers=resource)
+
+    with pytest.raises(CLIError) as raised:
+        await resolve(client, ["judge@1", "judge@latest"], [])
+
+    assert raised.value.kind == "invalid_arguments"
+    assert f"resolved to the same {kind} version" in raised.value.message
