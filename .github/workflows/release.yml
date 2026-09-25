@@ -111,6 +111,8 @@ jobs:
         run: |
           sample_data=src/kitaru/server/application/services/sample_data.json
           gzip -9 -n -c "$sample_data" > "$sample_data.gz"
+      - name: Verify bundled MCP docs index
+        run: uv run --no-project python scripts/build_mcp_docs_index.py --check
       - name: Build Kitaru Python distribution
         run: |
           uv build --out-dir package-dist

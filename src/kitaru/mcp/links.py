@@ -11,7 +11,7 @@ import httpx
 
 from kitaru.api_models.v1.info import ServerInfoResponse
 from kitaru.client.dashboard_urls import get_dashboard_base_url
-from kitaru.client.exceptions import APIError
+from kitaru.client.exceptions import APIError, InvalidServerResponseError
 from kitaru.mcp.lifecycle import MCPServerState
 
 _INFO_LOOKUP_MAX_SECONDS = 5.0
@@ -49,7 +49,13 @@ async def get_dashboard_info(
         ):
             raise ValueError("invalid dashboard URL")
         return info, base, []
-    except (APIError, httpx.HTTPError, TimeoutError, ValueError):
+    except (
+        APIError,
+        InvalidServerResponseError,
+        httpx.HTTPError,
+        TimeoutError,
+        ValueError,
+    ):
         return None, None, [warning]
 
 

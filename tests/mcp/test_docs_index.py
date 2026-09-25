@@ -48,3 +48,21 @@ def test_source_change_invalidates_index(monkeypatch) -> None:
 
     monkeypatch.setattr(Path, "read_bytes", changed_read_bytes)
     assert build_mcp_docs_index.build_index() != original
+
+
+def test_fenced_code_comments_do_not_split_sections() -> None:
+    """Shell comments inside fenced examples remain in their parent section."""
+    for fence in ("```", "~~~"):
+        markdown = (
+            "# Page\n"
+            "## Setup\n"
+            f"{fence}bash\n"
+            "# install the agent\n"
+            "kitaru agent register\n"
+            f"{fence}\n"
+            "## Next step\n"
+            "Continue here.\n"
+        )
+        sections = build_mcp_docs_index._get_sections(markdown)
+        assert [heading for heading, _ in sections] == ["Page", "Setup", "Next step"]
+        assert "# install the agent" in sections[1][1]

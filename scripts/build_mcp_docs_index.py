@@ -15,6 +15,8 @@ URL_MAP = ROOT / "scripts/mcp_docs_urls.json"
 OUTPUT = ROOT / "src/kitaru/mcp/data/docs_index.json"
 TOC_LINK = re.compile(r"^\s*- \[([^]]+)\]\(([^)]+\.md)\)$", re.MULTILINE)
 HEADING = re.compile(r"^(#{1,4})\s+(.+)$", re.MULTILINE)
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+FENCE_CLOSE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
 
 
 def _get_pages() -> list[tuple[str, str, Path, str]]:
@@ -67,17 +69,33 @@ def _clean_markdown(value: str) -> str:
 def _get_sections(markdown: str) -> list[tuple[str, str]]:
     """Split a page into sections headed by H1-H4."""
     markdown = re.sub(r"\A---\n.*?\n---\n", "", markdown, flags=re.DOTALL)
-    headings = list(HEADING.finditer(markdown))
+    headings: list[tuple[int, int, str]] = []
+    fence = ""
+    offset = 0
+    for line in markdown.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        marker = FENCE.match(content)
+        if fence:
+            closing = FENCE_CLOSE.match(content)
+            if (
+                closing
+                and closing.group(1)[0] == fence[0]
+                and len(closing.group(1)) >= len(fence)
+            ):
+                fence = ""
+        elif marker:
+            fence = marker.group(1)
+        else:
+            heading = HEADING.match(content)
+            if heading:
+                headings.append((offset, offset + heading.end(), heading.group(2)))
+        offset += len(line)
     sections = []
-    for position, heading in enumerate(headings):
-        end = (
-            headings[position + 1].start()
-            if position + 1 < len(headings)
-            else len(markdown)
-        )
-        sections.append(
-            (_clean_markdown(heading.group(2)), markdown[heading.end() : end])
-        )
+    for position, (_, body_start, title) in enumerate(headings):
+        end = len(markdown)
+        if position + 1 < len(headings):
+            end = headings[position + 1][0]
+        sections.append((_clean_markdown(title), markdown[body_start:end]))
     return sections
 
 

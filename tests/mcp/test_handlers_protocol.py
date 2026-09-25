@@ -36,6 +36,7 @@ from kitaru.api_models.v1.worker import (
     WorkerRuntime,
     WorkerScope,
 )
+from kitaru.client.exceptions import InvalidServerResponseError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.activity import ActivityGetRequest, ActivityListRequest
 from kitaru.mcp.models.common import PageData, ToolSuccessPayload
@@ -638,6 +639,26 @@ async def test_session_get_survives_dashboard_info_timeout() -> None:
     assert cast(Any, result.data).id == session_id
     assert result.links == {}
     assert len(result.warnings) == 1
+
+
+async def test_session_get_survives_invalid_dashboard_info_response() -> None:
+    client = FakeClient()
+
+    async def get_info() -> ServerInfoResponse:
+        raise InvalidServerResponseError("The server returned HTML")
+
+    client.info.get = get_info
+    session_id = uuid.uuid4()
+    result = await handle_activity_read(
+        _get_state(client),
+        ActivityGetRequest(operation="get", kind="session", id=session_id),
+    )
+
+    assert isinstance(result, ToolSuccessPayload)
+    assert cast(Any, result.data).id == session_id
+    assert result.links == {}
+    assert len(result.warnings) == 1
+    assert "HTML" not in result.warnings[0]
 
 
 async def test_session_get_preserves_read_near_handler_deadline() -> None:
