@@ -18,8 +18,8 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(vitest@4.1.11)
       ai:
-        specifier: 7.0.107
-        version: 7.0.107(zod@4.4.3)
+        specifier: 7.0.109
+        version: 7.0.109(zod@4.4.3)
       openapi-typescript:
         specifier: 7.13.0
         version: 7.13.0(typescript@5.9.3)
@@ -33,11 +33,11 @@ importers:
   examples/typescript/mastra_adaptive_conversation:
     dependencies:
       '@ai-sdk/openai':
-        specifier: 4.0.71
-        version: 4.0.71(zod@4.4.3)
+        specifier: 4.0.72
+        version: 4.0.72(zod@4.4.3)
       '@mastra/core':
         specifier: 1.64.0
-        version: 1.64.0(ai@7.0.107(zod@4.4.3))(express@5.2.1)(zod@4.4.3)
+        version: 1.64.0(ai@7.0.109(zod@4.4.3))(express@5.2.1)(zod@4.4.3)
       '@zenml-io/kitaru':
         specifier: workspace:*
         version: link:../../../packages/core
@@ -48,11 +48,11 @@ importers:
   examples/typescript/mastra_support_triage:
     dependencies:
       '@ai-sdk/openai':
-        specifier: 4.0.71
-        version: 4.0.71(zod@3.25.76)
+        specifier: 4.0.72
+        version: 4.0.72(zod@3.25.76)
       '@mastra/core':
         specifier: 1.67.0
-        version: 1.67.0(ai@7.0.107(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.67.0(ai@7.0.109(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
       '@zenml-io/kitaru':
         specifier: workspace:*
         version: link:../../../packages/core
@@ -66,8 +66,8 @@ importers:
   examples/typescript/vercel_ai_support_triage:
     dependencies:
       '@ai-sdk/openai':
-        specifier: 4.0.71
-        version: 4.0.71(zod@4.4.3)
+        specifier: 4.0.72
+        version: 4.0.72(zod@4.4.3)
       '@zenml-io/kitaru':
         specifier: workspace:*
         version: link:../../../packages/core
@@ -75,14 +75,14 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/vercel-ai
       ai:
-        specifier: 7.0.107
-        version: 7.0.107(zod@4.4.3)
+        specifier: 7.0.109
+        version: 7.0.109(zod@4.4.3)
 
   examples/typescript/vercel_ai_ticket_resolver:
     dependencies:
       '@ai-sdk/openai':
-        specifier: 4.0.71
-        version: 4.0.71(zod@4.4.3)
+        specifier: 4.0.72
+        version: 4.0.72(zod@4.4.3)
       '@zenml-io/kitaru':
         specifier: workspace:*
         version: link:../../../packages/core
@@ -90,8 +90,8 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/vercel-ai
       ai:
-        specifier: 7.0.107
-        version: 7.0.107(zod@4.4.3)
+        specifier: 7.0.109
+        version: 7.0.109(zod@4.4.3)
 
   packages/core: {}
 
@@ -103,7 +103,7 @@ importers:
     devDependencies:
       '@mastra/core':
         specifier: 1.67.0
-        version: 1.67.0(ai@7.0.107(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.67.0(ai@7.0.109(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
       zod:
         specifier: 3.25.76
         version: 3.25.76
@@ -115,8 +115,8 @@ importers:
         version: link:../core
     devDependencies:
       ai:
-        specifier: 7.0.107
-        version: 7.0.107(zod@4.4.3)
+        specifier: 7.0.109
+        version: 7.0.109(zod@4.4.3)
 
 packages:
 
@@ -150,14 +150,14 @@ packages:
       express:
         optional: true
 
-  '@ai-sdk/gateway@4.0.87':
-    resolution: {integrity: sha512-6wJmX/D5OO7tvDJbtFdXdBuRt8AkCnW+FLK+W35UHe/tHgolAa4hclXtJcMSYnlTDy/t5DNRgdesVaoMXtwzow==}
+  '@ai-sdk/gateway@4.0.88':
+    resolution: {integrity: sha512-hpEdOAqrp3FOShSytk6n8BZVZ/xrCV7L9hqYA6Q55h7sQknvh99QfC0uQAIbQWjh+66tmo1Fo6ndQla8uCJGyA==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/openai@4.0.71':
-    resolution: {integrity: sha512-w8FuHr1bD/bP/8SIgcaJKUyePE4ke9s7+Ew2ed/9i5mDoFXEfyVUyFX8R0wQ3YfcdMKmTs8ct/f6XJsXsnPVsQ==}
+  '@ai-sdk/openai@4.0.72':
+    resolution: {integrity: sha512-X5dowqxAXPhu72FpspKX7P5nDycvl/Nt0Qi9A5VjdotV1SrJdhH4vOeWVdBootwEC6uY2hYN0SHAuL1fd4cV8Q==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -566,8 +566,8 @@ packages:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
 
-  ai@7.0.107:
-    resolution: {integrity: sha512-PVYQ3W9kR8oYiGQxbg4aFIlhQzKskZm8UV+4E0zB2uKOzFr8ju3bXQncOOZtLsOgJY8vdpgyu3cXtomsfcdQYg==}
+  ai@7.0.109:
+    resolution: {integrity: sha512-hTnm8K4GIT0R6gHrnDJHr1KRnGVAtFa26mLtjqn/TGy+ufD5Y5XXerTEabLXVgmb9iunWxSFRCPOZUZ/VeXYLQ==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -1663,7 +1663,7 @@ snapshots:
     optionalDependencies:
       express: 5.2.1
 
-  '@ai-sdk/gateway@4.0.87(zod@3.25.76)':
+  '@ai-sdk/gateway@4.0.88(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 4.0.17
       '@ai-sdk/provider-utils': 5.0.45(zod@3.25.76)
@@ -1671,20 +1671,20 @@ snapshots:
       zod: 3.25.76
     optional: true
 
-  '@ai-sdk/gateway@4.0.87(zod@4.4.3)':
+  '@ai-sdk/gateway@4.0.88(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.17
       '@ai-sdk/provider-utils': 5.0.45(zod@4.4.3)
       '@vercel/oidc': 3.2.0
       zod: 4.4.3
 
-  '@ai-sdk/openai@4.0.71(zod@3.25.76)':
+  '@ai-sdk/openai@4.0.72(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 4.0.17
       '@ai-sdk/provider-utils': 5.0.45(zod@3.25.76)
       zod: 3.25.76
 
-  '@ai-sdk/openai@4.0.71(zod@4.4.3)':
+  '@ai-sdk/openai@4.0.72(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.17
       '@ai-sdk/provider-utils': 5.0.45(zod@4.4.3)
@@ -1843,7 +1843,7 @@ snapshots:
     dependencies:
       '@lukeed/csprng': 1.1.0
 
-  '@mastra/core@1.64.0(ai@7.0.107(zod@4.4.3))(express@5.2.1)(zod@4.4.3)':
+  '@mastra/core@1.64.0(ai@7.0.109(zod@4.4.3))(express@5.2.1)(zod@4.4.3)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
@@ -1859,7 +1859,7 @@ snapshots:
       '@sindresorhus/slugify': 2.2.1
       '@standard-schema/spec': 1.1.0
       ajv: 8.20.0
-      chat: 4.34.0(ai@7.0.107(zod@4.4.3))(zod@4.4.3)
+      chat: 4.34.0(ai@7.0.109(zod@4.4.3))(zod@4.4.3)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
@@ -1887,7 +1887,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@mastra/core@1.67.0(ai@7.0.107(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.67.0(ai@7.0.109(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
@@ -1903,7 +1903,7 @@ snapshots:
       '@sindresorhus/slugify': 2.2.1
       '@standard-schema/spec': 1.1.0
       ajv: 8.20.0
-      chat: 4.34.0(ai@7.0.107(zod@3.25.76))(zod@3.25.76)
+      chat: 4.34.0(ai@7.0.109(zod@3.25.76))(zod@3.25.76)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
@@ -2155,17 +2155,17 @@ snapshots:
 
   agent-base@7.1.4: {}
 
-  ai@7.0.107(zod@3.25.76):
+  ai@7.0.109(zod@3.25.76):
     dependencies:
-      '@ai-sdk/gateway': 4.0.87(zod@3.25.76)
+      '@ai-sdk/gateway': 4.0.88(zod@3.25.76)
       '@ai-sdk/provider': 4.0.17
       '@ai-sdk/provider-utils': 5.0.45(zod@3.25.76)
       zod: 3.25.76
     optional: true
 
-  ai@7.0.107(zod@4.4.3):
+  ai@7.0.109(zod@4.4.3):
     dependencies:
-      '@ai-sdk/gateway': 4.0.87(zod@4.4.3)
+      '@ai-sdk/gateway': 4.0.88(zod@4.4.3)
       '@ai-sdk/provider': 4.0.17
       '@ai-sdk/provider-utils': 5.0.45(zod@4.4.3)
       zod: 4.4.3
@@ -2239,7 +2239,7 @@ snapshots:
 
   character-entities@2.0.2: {}
 
-  chat@4.34.0(ai@7.0.107(zod@3.25.76))(zod@3.25.76):
+  chat@4.34.0(ai@7.0.109(zod@3.25.76))(zod@3.25.76):
     dependencies:
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
@@ -2249,12 +2249,12 @@ snapshots:
       remend: 1.3.0
       unified: 11.0.5
     optionalDependencies:
-      ai: 7.0.107(zod@3.25.76)
+      ai: 7.0.109(zod@3.25.76)
       zod: 3.25.76
     transitivePeerDependencies:
       - supports-color
 
-  chat@4.34.0(ai@7.0.107(zod@4.4.3))(zod@4.4.3):
+  chat@4.34.0(ai@7.0.109(zod@4.4.3))(zod@4.4.3):
     dependencies:
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
@@ -2264,7 +2264,7 @@ snapshots:
       remend: 1.3.0
       unified: 11.0.5
     optionalDependencies:
-      ai: 7.0.107(zod@4.4.3)
+      ai: 7.0.109(zod@4.4.3)
       zod: 4.4.3
     transitivePeerDependencies:
       - supports-color
