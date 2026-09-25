@@ -15,12 +15,16 @@ from kitaru.api_models.v1.session_node import NodeType
 from .recording import InvocationRecorder, SyncBridge
 
 
-def _name(serialized: dict[str, Any] | None, fallback: str) -> str:
-    if not serialized:
-        return fallback
-    name = serialized.get("name")
+def _name(
+    serialized: dict[str, Any] | None, fallback: str, name: str | None = None
+) -> str:
     if isinstance(name, str) and name:
         return name
+    if not serialized:
+        return fallback
+    serialized_name = serialized.get("name")
+    if isinstance(serialized_name, str) and serialized_name:
+        return serialized_name
     identifier = serialized.get("id")
     if isinstance(identifier, list) and identifier:
         return str(identifier[-1])
@@ -36,7 +40,7 @@ class SyncKitaruCallback(BaseCallbackHandler):
 
     def on_chain_start(
         self,
-        serialized: dict[str, Any],
+        serialized: dict[str, Any] | None,
         inputs: dict[str, Any],
         *,
         run_id: uuid.UUID,
@@ -48,7 +52,7 @@ class SyncKitaruCallback(BaseCallbackHandler):
             self._recorder.start_chain(
                 run_id=run_id,
                 parent_run_id=parent_run_id,
-                name=name or _name(serialized, "graph"),
+                name=_name(serialized, "graph", name),
                 inputs=inputs,
             )
         )
@@ -176,7 +180,7 @@ class AsyncKitaruCallback(AsyncCallbackHandler):
 
     async def on_chain_start(
         self,
-        serialized: dict[str, Any],
+        serialized: dict[str, Any] | None,
         inputs: dict[str, Any],
         *,
         run_id: uuid.UUID,
@@ -187,7 +191,7 @@ class AsyncKitaruCallback(AsyncCallbackHandler):
         await self._recorder.start_chain(
             run_id=run_id,
             parent_run_id=parent_run_id,
-            name=name or _name(serialized, "graph"),
+            name=_name(serialized, "graph", name),
             inputs=inputs,
         )
 
