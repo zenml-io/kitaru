@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=22.22.0 <23 || >=26 <27"
+    "node": ">=22.22.0 <23 || >=24 <25 || >=26 <27"
   },
   "scripts": {
     "baseline": "node dist/baseline.js",
@@ -19,9 +19,9 @@
     "workflow": "node dist/workflow.js"
   },
   "dependencies": {
-    "@ai-sdk/openai": "4.0.71",
+    "@ai-sdk/openai": "4.0.72",
     "@zenml-io/kitaru": "workspace:*",
     "@zenml-io/kitaru-vercel-ai": "workspace:*",
-    "ai": "7.0.107"
+    "ai": "7.0.109"
   }
 }

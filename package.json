@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=22.22.0 <23 || >=26 <27"
+    "node": ">=22.22.0 <23 || >=24 <25 || >=26 <27"
   },
   "scripts": {
     "build": "pnpm run build:packages && pnpm --filter @zenml-io/kitaru-example-mastra-support-triage build && pnpm --filter @zenml-io/kitaru-example-vercel-ai-support-triage build && pnpm --filter @zenml-io/kitaru-example-mastra-adaptive-conversation build",
@@ -22,7 +22,8 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
     "@types/node": "22.20.4",
-    "ai": "7.0.107",
+    "@vitest/coverage-v8": "4.1.11",
+    "ai": "7.0.109",
     "openapi-typescript": "7.13.0",
     "typescript": "5.9.3",
     "vitest": "4.1.11"

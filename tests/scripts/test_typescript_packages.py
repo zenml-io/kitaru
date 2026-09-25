@@ -148,6 +148,19 @@ def test_typescript_release_metadata_rejects_node_engine_drift(
     assert f"{label} engines.node must match the root package" in result.stderr
 
 
+def test_typescript_package_metadata_supports_node_24() -> None:
+    expected = ">=22.22.0 <23 || >=24 <25 || >=26 <27"
+
+    for manifest_path in TYPESCRIPT_MANIFEST_PATHS:
+        relative_path = (
+            manifest_path
+            if manifest_path == "package.json"
+            else f"{manifest_path}/package.json"
+        )
+        manifest = json.loads((REPO_ROOT / relative_path).read_text())
+        assert manifest["engines"]["node"] == expected, relative_path
+
+
 def test_typescript_release_metadata_classifies_stable_versions(
     typescript_repo: Path,
 ) -> None:
@@ -220,7 +233,7 @@ def test_typescript_release_workflow_contract() -> None:
 def test_typescript_ci_owns_cross_language_tests() -> None:
     workflow_source = CI_WORKFLOW_PATH.read_text()
     typescript_job = workflow_source.split("\n  typescript:\n", maxsplit=1)[1].split(
-        "\n  typescript-node-26:\n", maxsplit=1
+        "\n  typescript-node-24:\n", maxsplit=1
     )[0]
     base_matrix = workflow_source.split("\n          - name: py311-base\n", maxsplit=1)[
         1
@@ -241,7 +254,7 @@ def test_typescript_ci_owns_cross_language_tests() -> None:
 def test_typescript_ci_validates_the_ticket_resolver() -> None:
     workflow_source = CI_WORKFLOW_PATH.read_text()
     job = workflow_source.split("\n  typescript:\n", maxsplit=1)[1].split(
-        "\n  typescript-node-26:\n", maxsplit=1
+        "\n  typescript-node-24:\n", maxsplit=1
     )[0]
 
     assert "image: postgres:16-alpine" in job
@@ -272,6 +285,38 @@ def test_typescript_ci_validates_node_26_floor_and_current_without_services() ->
     assert "node-version: [26.0.0, 26.x]" in job
     assert "node-version: ${{ matrix.node-version }}" in job
     assert "name: TypeScript (Node ${{ matrix.node-version }})" not in job
+    assert "run: pnpm install --frozen-lockfile" in job
+    for command in (
+        "pnpm run generate:check",
+        "pnpm run lint",
+        "pnpm run typecheck",
+        "pnpm run test:built",
+        "pnpm run pack:check:built",
+    ):
+        assert command in job
+    for excluded in (
+        "services:",
+        "postgres",
+        "setup-uv",
+        "uv sync",
+        "pytest",
+        "test:e2e",
+    ):
+        assert excluded not in job
+
+
+def test_typescript_ci_validates_node_24_floor_and_current_without_services() -> None:
+    workflow_source = CI_WORKFLOW_PATH.read_text()
+    job = workflow_source.split("\n  typescript-node-24:\n", maxsplit=1)[1].split(
+        "\n  typescript-node-26:\n", maxsplit=1
+    )[0]
+
+    assert (
+        "if: ${{ github.event_name != 'pull_request' || "
+        "github.event.pull_request.draft == false }}" in job
+    )
+    assert "node-version: [24.0.0, 24.x]" in job
+    assert "node-version: ${{ matrix.node-version }}" in job
     assert "run: pnpm install --frozen-lockfile" in job
     for command in (
         "pnpm run generate:check",

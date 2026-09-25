@@ -14,7 +14,7 @@ cd examples/typescript/vercel_ai_ticket_resolver
 
 ## 1. Install and start Kitaru
 
-Use Node 22 or Node 26, Python 3.11 or newer, pnpm, uv, jq, Docker, and a source checkout of this repository. Python and uv are still required because Kitaru's current evaluator and worker ABI is Python, even though the agent itself is TypeScript.
+Use Node 22, Node 24, or Node 26, Python 3.11 or newer, pnpm, uv, jq, Docker, and a source checkout of this repository. Python and uv are still required because Kitaru's current evaluator and worker ABI is Python, even though the agent itself is TypeScript.
 
 This example is a member of the repository's pnpm workspace. Install the workspace from the repository root, build the local TypeScript packages the example depends on, then verify the example:
 

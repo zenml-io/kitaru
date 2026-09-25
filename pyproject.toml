@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.27.1"
+version = "0.27.1+dev"
 description = "Record, replay, and improve AI agents in production."
 readme = "README.md"
 license = "Apache-2.0"
@@ -60,7 +60,7 @@ examples = [
 ]
 server = [
     "fastapi>=0.139",
-    "sqlalchemy[asyncio]>=2.0.51",
+    "sqlalchemy[asyncio]>=2.0.51,<2.1",
     "alembic>=1.18",
     "uvicorn>=0.51",
     "pydantic-settings>=2.14",
@@ -133,6 +133,10 @@ dev = [
     "hypothesis>=6.165",
     "hypothesis-jsonschema>=0.23",
     "pyyaml>=6.0",
+    "coverage>=7.10",
+    "moto[s3]>=5.2.3",
+    "flask>=3.1",
+    "flask-cors>=6.0",
 ]
 fuzz = [
     "schemathesis>=4.25,<5",
@@ -210,6 +214,17 @@ pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = ["mcp_fuzz: generated-input MCP property tests"]
+
+[tool.coverage.run]
+source = ["src/kitaru"]
+branch = true
+relative_files = true
+# Measure Python child processes too; modules such as
+# kitaru.cli.plugin_test_runner only ever run in a subprocess.
+patch = ["subprocess"]
+
+[tool.coverage.report]
+precision = 1
 
 [tool.importlinter]
 root_packages = ["kitaru"]

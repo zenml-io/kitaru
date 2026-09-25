@@ -23,7 +23,6 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
-import httpx
 import pytest
 
 import kitaru_logfire_importer.adapter as adapter_module
@@ -35,7 +34,6 @@ BatchRowsBuilder = Callable[[list[str]], list[dict[str, Any]]]
 PROJECT_ID = "project-1"
 READ_TOKEN = "test-read-token"
 
-_BASE_URL = "https://logfire-api.test"
 _POLL_COLUMNS = ("span_id", "parent_span_id", "end_timestamp")
 _POLL_SQL_PATTERN = re.compile(
     r"SELECT span_id, parent_span_id, end_timestamp FROM records"
@@ -172,6 +170,7 @@ class _FakeQueryClient:
     def __init__(self, fake: "FakeLogfire", read_token: str) -> None:
         assert read_token == READ_TOKEN
         self._fake = fake
+        self.client = _FakeAsyncClient(fake)
 
     async def __aenter__(self) -> "_FakeQueryClient":
         return self
@@ -212,8 +211,7 @@ class _FakeResponse:
 class _FakeAsyncClient:
     """HTTP client fake routing NDJSON posts to the scripted rows."""
 
-    def __init__(self, fake: "FakeLogfire", base_url: str) -> None:
-        assert base_url == _BASE_URL
+    def __init__(self, fake: "FakeLogfire") -> None:
         self._fake = fake
 
     async def __aenter__(self) -> "_FakeAsyncClient":
@@ -320,10 +318,6 @@ class FakeLogfire:
     def force_flush(self) -> None:
         self.events.append("flush")
 
-    def get_base_url_from_token(self, token: str) -> str:
-        assert token == READ_TOKEN
-        return _BASE_URL
-
 
 @pytest.fixture(autouse=True)
 def _fast_polling(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -341,17 +335,5 @@ def fake_logfire(monkeypatch: pytest.MonkeyPatch) -> FakeLogfire:
         api_module,
         "AsyncLogfireQueryClient",
         lambda read_token: _FakeQueryClient(fake, read_token),
-    )
-    monkeypatch.setattr(
-        api_module, "get_base_url_from_token", fake.get_base_url_from_token
-    )
-    monkeypatch.setattr(
-        api_module,
-        "httpx",
-        SimpleNamespace(
-            AsyncClient=lambda *, base_url: _FakeAsyncClient(fake, base_url),
-            HTTPStatusError=httpx.HTTPStatusError,
-            Response=httpx.Response,
-        ),
     )
     return fake

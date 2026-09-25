@@ -1,6 +1,6 @@
 # Kitaru plugins
 
-Each adapter, importer, and analyzer under `packages/` is an independently versioned Python distribution. The built-in evaluators share the `kitaru-evaluator` distribution and are released together.
+Each adapter, importer, analyzer, and separately packaged evaluator under `packages/` is an independently versioned Python distribution. The built-in evaluators share the `kitaru-evaluator` distribution and are released together.
 
 Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At startup, the server records each exact distribution requirement and `module:callable` entrypoint without installing or importing the plugin package.
 
@@ -16,17 +16,18 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 | `langgraph` | `kitaru-langgraph` | LangGraph recording and replay adapter |
 | `langsmith-importer` | `kitaru-langsmith-importer` | LangSmith importer and importer-backed adapter |
 | `logfire-importer` | `kitaru-logfire-importer` | Logfire importer and importer-backed adapter |
-| `mastra-importer` | `kitaru-mastra-importer` | Mastra trace importer (unpublished, non-default) |
+| `mastra-importer` | `kitaru-mastra-importer` | Mastra trace importer (non-default) |
 | `openai-agents` | `kitaru-openai-agents` | OpenAI Agents SDK recording adapter |
 | `phoenix-importer` | `kitaru-phoenix-importer` | Arize Phoenix importer and importer-backed adapter |
 | `post-import-insights` | `kitaru-post-import-insights` | Post-import profiling and insight generation |
 | `pydantic-ai` | `kitaru-pydantic-ai` | PydanticAI recording and replay adapter |
+| `typesafe-evaluator` | `kitaru-typesafe-evaluator` | TypeSafe evaluator (non-default) |
 
 ## Development and releases
 
 Read [DEVELOPMENT.md](DEVELOPMENT.md) before you change, test, or publish a plugin package. It contains the local artifact test, candidate-image Compose rehearsal, manual registration example, clean worker setup, version bump procedure, dry-run workflow, and PyPI publishing procedure.
 
-Manual workflow dispatches build and test without publishing. A package tag publishes only when the tagged commit is contained in `main`.
+Manual workflow dispatches build and test without publishing. A package tag publishes only when its commit is reachable from `develop` or the unit's matching maintenance branch.
 
 `candidate.Dockerfile` and `docker-compose.candidate.yml` are tracked development infrastructure. Files generated under `candidate-wheels/` are local artifacts and must not be committed. Production release Dockerfiles install Kitaru from PyPI and do not install plugin distributions.
 

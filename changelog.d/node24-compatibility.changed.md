@@ -1,0 +1,1 @@
+- Add Node 24 support to the TypeScript packages and examples.

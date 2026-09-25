@@ -13,7 +13,7 @@ Every LLM node records `openai/gpt-5-nano` as the requested model and the model 
 
 ## Run
 
-Use Node 22 or Node 26 and a Kitaru server backed by PostgreSQL. Log in once with the Python CLI, then install, build, and run the TypeScript driver:
+Use Node 22, Node 24, or Node 26 and a Kitaru server backed by PostgreSQL. Log in once with the Python CLI, then install, build, and run the TypeScript driver:
 
 ```bash
 kitaru login https://your-kitaru-server.example.com

@@ -263,6 +263,75 @@ describe("foundation resources", () => {
     ]);
   });
 
+  it("lists sessions with optional payloads and iterates session and node pages", async () => {
+    const SECOND_ID = "018f0000-0000-7000-8000-000000000003";
+    const node = { id: ID, node_type: "llm_call", status: "completed" };
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ items: [session], next_cursor: null }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ items: [session], next_cursor: null }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ items: [session], next_cursor: "s2" }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [{ ...session, id: SECOND_ID }],
+          next_cursor: null,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ items: [node], next_cursor: "n2" }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [{ ...node, id: SECOND_ID }],
+          next_cursor: null,
+        }),
+      );
+    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
+
+    await client.sessions.list();
+    await client.sessions.list({ includePayloads: true, size: 5 });
+    const sessionIds: string[] = [];
+    for await (const item of client.sessions.iter()) {
+      sessionIds.push(item.id);
+    }
+    const nodeIds: string[] = [];
+    for await (const item of client.sessions.iterNodes(ID, { size: 1 })) {
+      nodeIds.push(item.id);
+    }
+
+    expect(sessionIds).toEqual([ID, SECOND_ID]);
+    expect(nodeIds).toEqual([ID, SECOND_ID]);
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.example/api/v1/sessions",
+      "https://api.example/api/v1/sessions?size=5&include_payloads=true",
+      "https://api.example/api/v1/sessions",
+      "https://api.example/api/v1/sessions?cursor=s2",
+      `https://api.example/api/v1/sessions/${ID}/nodes?size=1`,
+      `https://api.example/api/v1/sessions/${ID}/nodes?cursor=n2&size=1`,
+    ]);
+  });
+
+  it.each([false, true])(
+    "rejects a session page with an unknown status when includePayloads is %s",
+    async (includePayloads) => {
+      const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+        jsonResponse({
+          items: [{ ...session, status: "exploded" }],
+          next_cursor: null,
+        }),
+      );
+      const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
+
+      await expect(client.sessions.list({ includePayloads })).rejects.toThrow(
+        "status",
+      );
+    },
+  );
+
   it.each<{ filter?: Filter | null }>([
     {},
     { filter: null },

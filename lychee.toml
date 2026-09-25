@@ -3,6 +3,10 @@
 # Maximum number of retries before a link is declared dead
 max_retries = 3
 
+# Seconds to wait between retries. The 1 second default lets every retry
+# land inside one brief upstream outage, such as a GitHub 503.
+retry_wait_time = 10
+
 # Maximum number of concurrent link checks
 max_concurrency = 14
 

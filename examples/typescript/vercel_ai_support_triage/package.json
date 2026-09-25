@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.22.0 <23 || >=26 <27"
+    "node": ">=22.22.0 <23 || >=24 <25 || >=26 <27"
   },
   "dependencies": {
-    "@ai-sdk/openai": "4.0.71",
+    "@ai-sdk/openai": "4.0.72",
     "@zenml-io/kitaru": "workspace:*",
     "@zenml-io/kitaru-vercel-ai": "workspace:*",
-    "ai": "7.0.107"
+    "ai": "7.0.109"
   },
   "scripts": {
     "build": "node ../../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.json",

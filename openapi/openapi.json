@@ -7984,6 +7984,19 @@
             "description": "Server ID.",
             "title": "Id"
           },
+          "max_blob_size_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum accepted blob size in bytes.",
+            "title": "Max Blob Size Bytes"
+          },
           "server_url": {
             "anyOf": [
               {
@@ -11362,7 +11375,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.27.1"
+    "version": "0.27.1+dev"
   },
   "openapi": "3.1.0",
   "paths": {

@@ -8,6 +8,9 @@
 {{- if and .Values.server.ingress.tls.enabled (eq .Values.server.ingress.className "nginx") }}
   {{- $_ := set .Values.server.ingress.annotations "nginx.ingress.kubernetes.io/ssl-redirect" "true"}}
 {{- end }}
+{{- if and (eq .Values.server.ingress.className "nginx") (not (hasKey .Values.server.ingress.annotations "nginx.ingress.kubernetes.io/proxy-body-size")) }}
+  {{- $_ := set .Values.server.ingress.annotations "nginx.ingress.kubernetes.io/proxy-body-size" "101m"}}
+{{- end }}
 
 {{- if semverCompare ">=1.19-0" .Capabilities.KubeVersion.GitVersion -}}
 apiVersion: networking.k8s.io/v1

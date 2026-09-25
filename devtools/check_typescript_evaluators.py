@@ -118,7 +118,7 @@ async def check(live_judge: bool) -> None:
         raise RuntimeError("OPENAI_API_KEY is required for --live-judge")
     node = shutil.which("node")
     if node is None:
-        raise RuntimeError("Node 22 must be available on PATH")
+        raise RuntimeError("Node must be available on PATH")
     db_name = f"kitaru_ts_evaluator_{uuid.uuid4().hex[:10]}"
     await ensure_postgres()
     await create_database(db_name)

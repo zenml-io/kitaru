@@ -15,14 +15,13 @@
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator
-from contextlib import aclosing
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing, asynccontextmanager
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
-from logfire._internal.config import get_base_url_from_token
 from logfire.query_client import AsyncLogfireQueryClient
 from pydantic import ConfigDict
 
@@ -89,6 +88,23 @@ def _get_query_client() -> AsyncLogfireQueryClient:
         Query API client.
     """
     return AsyncLogfireQueryClient(get_required_env("LOGFIRE_READ_TOKEN"))
+
+
+@asynccontextmanager
+async def _open_http_client(read_token: str) -> AsyncIterator[httpx.AsyncClient]:
+    """Open an HTTP client for the Query API region of a read token.
+
+    Args:
+        read_token: Logfire read token.
+
+    Yields:
+        HTTP client with the region base URL and the Logfire query timeout.
+    """
+    # Post raw requests through the query client's own HTTP client because
+    # its query methods only return decoded results, not the NDJSON stream
+    # the importer parser expects.
+    async with AsyncLogfireQueryClient(read_token) as query_client:
+        yield query_client.client
 
 
 def _roots_have_ended(rows: list[dict[str, Any]]) -> bool:
@@ -182,11 +198,7 @@ async def fetch_trace(
     }
     if client is not None:
         return await _post_query(client, read_token, body)
-    # Request the NDJSON stream the importer parser expects directly
-    # because the query client only returns decoded results.
-    async with httpx.AsyncClient(
-        base_url=get_base_url_from_token(read_token)
-    ) as new_client:
+    async with _open_http_client(read_token) as new_client:
         return await _post_query(new_client, read_token, body)
 
 
@@ -408,9 +420,7 @@ async def fetch(query: dict[str, Any]) -> AsyncGenerator[bytes, None]:
     """
     parsed = LogfireImportQuery.model_validate(query)
     read_token = get_required_env("LOGFIRE_READ_TOKEN")
-    async with httpx.AsyncClient(
-        base_url=get_base_url_from_token(read_token)
-    ) as client:
+    async with _open_http_client(read_token) as client:
         if parsed.trace_ids is not None:
             # The adapter approximates min_timestamp with the trace's own
             # start time. Arbitrary trace ids carry no such reference

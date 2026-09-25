@@ -78,11 +78,11 @@ describe("canonical workflow preflight", () => {
     "not-a-version",
   ])("rejects unsupported Node %s", (version) => {
     expect(() => assertSupportedNodeVersion(version)).toThrow(
-      "Node >=22.22.0 <23 or >=26.0.0 <27",
+      "Node >=22.22.0 <23, >=24.0.0 <25, or >=26.0.0 <27",
     );
   });
 
-  it.each(["22.22.0", "22.22.3", "26.0.0", "26.8.1"])(
+  it.each(["22.22.0", "22.22.3", "24.0.0", "24.18.0", "26.0.0", "26.8.1"])(
     "accepts supported Node %s",
     (version) => {
       expect(() => assertSupportedNodeVersion(version)).not.toThrow();
