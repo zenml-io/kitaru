@@ -114,6 +114,11 @@ export interface OMResultTapeOptions {
   resolveFileReference?: (
     reference: string,
   ) => Promise<{ bytes: Uint8Array; mediaType: string }>;
+  /**
+   * Return the `kitaru-file://` references of the files the turn captured.
+   * A recording tape reads them once the turn has finished.
+   */
+  getCapturedFiles?: () => ReadonlySet<string>;
 }
 
 const VOLATILE_KEYS = new Set(["createdAt", "updatedAt", "abortSignal"]);
@@ -161,6 +166,7 @@ function normalizeText(text: string): string {
 export function getOMInputFingerprint(
   input: unknown,
   mapString: (value: string) => string = (value) => value,
+  onFileContent?: (reference: string) => void,
 ): string {
   try {
     const text = JSON.stringify(
@@ -177,8 +183,14 @@ export function getOMInputFingerprint(
         if (
           bytes instanceof Uint8Array &&
           typeof holder?.mediaType === "string"
-        )
-          return fileReference({ bytes, mediaType: holder.mediaType });
+        ) {
+          const reference = fileReference({
+            bytes,
+            mediaType: holder.mediaType,
+          });
+          onFileContent?.(reference);
+          return reference;
+        }
         return value;
       },
     );
@@ -287,8 +299,12 @@ function isTextPart(value: unknown): boolean {
 
 // A replay's file parts hold captured references that only the tape reads.
 const FILE_REFERENCE_URL = /^kitaru-file:\/\//i;
+// A replay's history can also hold a redacted history URL that the baseline
+// never resolved. Mastra must not download it, because the tape answers
+// without the file and a live call refuses to send it.
+const REPLAY_FILE_URL = /^(?:https?|kitaru-file):\/\//i;
 
-async function withFileReferenceUrls(
+async function withReplayFileUrls(
   supported: unknown,
 ): Promise<Record<string, RegExp[]>> {
   const urls = await supported;
@@ -296,7 +312,7 @@ async function withFileReferenceUrls(
     typeof urls === "object" && urls !== null
       ? (urls as Record<string, RegExp[]>)
       : {};
-  return { ...record, "*/*": [...(record["*/*"] ?? []), FILE_REFERENCE_URL] };
+  return { ...record, "*/*": [...(record["*/*"] ?? []), REPLAY_FILE_URL] };
 }
 
 /**
@@ -326,7 +342,11 @@ export function createOMResultTape(
   onIncomplete: (reason: string) => void,
   options: OMResultTapeOptions = {},
 ) {
-  const entries: Array<OMResultEntry | undefined> = [];
+  const entries: Array<Omit<OMResultEntry, "inputFingerprint"> | undefined> =
+    [];
+  // A turn can capture a history file after an OM call has seen its URL, so
+  // a recording fingerprints each input only once the turn has finished.
+  const inputs: unknown[] = [];
   const pending = new Set<Promise<void>>();
   const malformed = recorded?.some((entry) => !isRecordedEntry(entry)) ?? false;
   const recordedCalls = groupRecordedCalls(
@@ -439,20 +459,12 @@ export function createOMResultTape(
     ordinal: number,
     phase: OMPhase,
     method: OMMethod,
-    inputFingerprint: string,
     output: JsonValue | undefined,
   ): void {
     entries[ordinal] =
       output === undefined
-        ? {
-            phase,
-            ordinal,
-            method,
-            inputFingerprint,
-            output: null,
-            failed: true,
-          }
-        : { phase, ordinal, method, inputFingerprint, output };
+        ? { phase, ordinal, method, output: null, failed: true }
+        : { phase, ordinal, method, output };
   }
 
   /**
@@ -645,7 +657,7 @@ export function createOMResultTape(
         // Mastra would otherwise download a captured reference before the
         // call, and the tape answers without reading the file.
         if (recorded && key === "supportedUrls")
-          return withFileReferenceUrls(value);
+          return withReplayFileUrls(value);
         if (key !== "doGenerate" && key !== "doStream")
           return typeof value === "function" ? value.bind(target) : value;
         const method = key as OMMethod;
@@ -660,15 +672,11 @@ export function createOMResultTape(
             );
         return async (input: unknown) => {
           const ordinal = next++;
-          const inputFingerprint = getOMInputFingerprint(
-            input,
-            options.mapString,
-          );
+          inputs[ordinal] = input;
           return callAndCapture(
             () => invoke(input),
             method,
-            (output) =>
-              record(ordinal, phase, method, inputFingerprint, output),
+            (output) => record(ordinal, phase, method, output),
             failCapture,
           );
         };
@@ -701,14 +709,37 @@ export function createOMResultTape(
     const recordedEntries = Array.from(
       { length: next },
       (_, ordinal) => entries[ordinal],
-    );
-    if (incomplete || recordedEntries.some((entry) => !entry))
+    ).filter((entry) => entry !== undefined);
+    if (incomplete || recordedEntries.length < next)
       throw new MastraReplayReasonError(
         "Observational-memory result tape is incomplete.",
         "om_tape_incomplete",
       );
+    const captured = options.getCapturedFiles?.();
+    let uncaptured = false;
+    const fingerprinted = recordedEntries.map(
+      (entry): OMResultEntry => ({
+        ...entry,
+        inputFingerprint: getOMInputFingerprint(
+          inputs[entry.ordinal],
+          options.mapString,
+          (reference) => {
+            if (captured && !captured.has(reference)) uncaptured = true;
+          },
+        ),
+      }),
+    );
+    inputs.length = 0;
+    // Mastra downloads a file URL the OM model cannot read before the call.
+    // Content no resolveFile call captured came from such a download, which
+    // a replay cannot repeat without fetching the URL.
+    if (uncaptured)
+      throw new MastraReplayReasonError(
+        "Observational memory read a thread history file that no resolveFile call captured.",
+        "file_url_undeclared",
+      );
     return {
-      entries: recordedEntries as OMResultEntry[],
+      entries: fingerprinted,
       divergence: { ...divergence },
       liveCalls: [],
     };

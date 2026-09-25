@@ -425,6 +425,7 @@ async function observedAttachmentAgent(
   supportedUrls: Record<string, RegExp[]>,
   padding: string,
   files: string[] = [ATTACHMENT_URL],
+  processFiles: "resolve" | "drop" = "resolve",
 ) {
   const nativeFetch = globalThis.fetch;
   const api = installTestApi();
@@ -491,13 +492,18 @@ async function observedAttachmentAgent(
       instructions: "Answer about the attachment.",
       memory: owned,
       model,
-      inputProcessors: [createAttachmentProcessor(resolveFile)],
+      inputProcessors: [
+        processFiles === "resolve"
+          ? createAttachmentProcessor(resolveFile)
+          : dropFileParts,
+      ],
     }),
     {
       agentId: AGENT_ID,
       apiUrl: "https://kitaru.invalid",
       apiKey: "fixture",
       requestedModelId: "fixture/actor",
+      onRecordingError: () => undefined,
       sourceMemory: () => ({
         settled: () => memory.settled(),
         domain,
@@ -524,17 +530,21 @@ async function observedAttachmentAgent(
           call.body?.status !== "in_progress",
       )
       .at(-1)?.body;
-  /** Record a baseline turn, then replay it, and return both sessions. */
-  async function recordAndReplay() {
+  /** Record a baseline turn and return its closed session. */
+  async function record() {
     const output = await adapter.stream("What does it cost?", {
       memory: { thread: THREAD, resource: RESOURCE },
     });
     await output.consumeStream();
-    await vi.waitFor(() =>
-      expect(closed(0)?.metadata).toMatchObject({
-        mastra_replay_state: "eligible",
-      }),
-    );
+    await vi.waitFor(() => expect(closed(0)?.metadata).toBeDefined());
+    return { baseline: closed(0), text: await output.text, downloads };
+  }
+  /** Record a baseline turn, then replay it, and return both sessions. */
+  async function recordAndReplay() {
+    await record();
+    expect(closed(0)?.metadata).toMatchObject({
+      mastra_replay_state: "eligible",
+    });
     const baselineObserverCalls = observerCalls;
     downloads.length = 0;
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
@@ -550,20 +560,56 @@ async function observedAttachmentAgent(
       replayObserverCalls: observerCalls - baselineObserverCalls,
     };
   }
-  return { recordAndReplay, store };
+  return { record, recordAndReplay, store };
 }
 
+/** Leave file parts out of the model request instead of resolving them. */
+const dropFileParts: InputProcessor = {
+  id: "drop-files",
+  async processInputStep({ messages }) {
+    return {
+      messages: messages.map((message) => ({
+        ...message,
+        content: {
+          ...message.content,
+          parts: message.content.parts.filter((part) => part.type !== "file"),
+        },
+      })),
+    };
+  },
+};
+
 it.each([
-  ["reads attachment URLs itself", { "application/pdf": [/^https:\/\//] }],
-  ["needs the attachment's bytes", {}],
+  [
+    "a declared attachment",
+    "reads attachment URLs itself",
+    { "application/pdf": [/^https:\/\//] },
+    [ATTACHMENT_URL],
+  ],
+  [
+    "a declared attachment",
+    "needs the attachment's bytes",
+    {},
+    [ATTACHMENT_URL],
+  ],
+  // The processor captures the history URL only after Mastra ran the
+  // observation, so the baseline must fingerprint the observation's input
+  // with the reference its replay history holds.
+  [
+    "a history attachment",
+    "reads attachment URLs itself",
+    { "application/pdf": [/^https:\/\//] },
+    [],
+  ],
 ])(
-  "replays a blocking observation over a declared attachment when the observer %s",
-  async (_, supportedUrls) => {
+  "replays a blocking observation over %s when the observer %s",
+  async (_, __, supportedUrls, files) => {
     // Enough history that Mastra observes it, attachment included, before the
     // actor's first call.
     const { recordAndReplay, store } = await observedAttachmentAgent(
       supportedUrls,
       " The quote covers two nights at the lake house.".repeat(80),
+      files,
     );
     try {
       const run = await recordAndReplay();
@@ -1055,3 +1101,26 @@ it.each([
     }
   },
 );
+
+it("records a turn as ineligible when observational memory downloads an unresolved history file", async () => {
+  // No processor resolves the attachment, so only Mastra's own download
+  // gives the observer its bytes; a replay could repeat that only online.
+  const { record, store } = await observedAttachmentAgent(
+    {},
+    " The quote covers two nights at the lake house.".repeat(80),
+    [],
+    "drop",
+  );
+  try {
+    const run = await record();
+    expect(run.text).toBe("The quote covers two nights.");
+    expect(run.downloads).toEqual([ATTACHMENT_URL]);
+    expect(run.baseline?.metadata).toMatchObject({
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "file_url_undeclared",
+    });
+    expect(JSON.stringify(run.baseline)).not.toContain(DOWNLOAD_TOKEN);
+  } finally {
+    await store.close();
+  }
+});

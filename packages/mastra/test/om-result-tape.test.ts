@@ -544,7 +544,7 @@ it("fingerprints an attachment as the reference replay history holds", () => {
   ).not.toBe(replay);
 });
 
-it("lets Mastra hand a replayed OM model captured references unread", async () => {
+it("lets Mastra hand a replayed OM model its file URLs unread", async () => {
   const replay = createOMResultTape([], () => {});
   const observer = replay.instrument(
     { ...model(), supportedUrls: { "image/*": [/^https:\/\//] } },
@@ -552,11 +552,63 @@ it("lets Mastra hand a replayed OM model captured references unread", async () =
   ) as unknown as { supportedUrls: Promise<Record<string, RegExp[]>> };
   const supported = await observer.supportedUrls;
   expect(supported["image/*"]).toEqual([/^https:\/\//]);
-  expect(
-    supported["*/*"]?.some((pattern) =>
-      pattern.test(`kitaru-file://sha256/${"0".repeat(64)}`),
-    ),
-  ).toBe(true);
+  // A redacted history URL the baseline never resolved must not be
+  // downloaded either: the tape answers without it.
+  for (const url of [
+    `kitaru-file://sha256/${"0".repeat(64)}`,
+    "https://files.example.com/o/quote.pdf?alt=media&token=REDACTED",
+  ])
+    expect(supported["*/*"]?.some((pattern) => pattern.test(url))).toBe(true);
+});
+
+it("fingerprints a recorded OM input once the turn has captured its files", async () => {
+  const bytes = new Uint8Array([37, 80, 68, 70]);
+  const reference = fileReference({ bytes, mediaType: "application/pdf" });
+  const url = "https://files.example.com/o/quote.pdf?alt=media&token=fixture";
+  const captured = new Map<string, string>();
+  const tape = createOMResultTape(undefined, () => {}, {
+    mapString: (value) => captured.get(value) ?? value,
+    getCapturedFiles: () => new Set(captured.values()),
+  });
+  const call = (data: unknown) => ({
+    prompt: [
+      {
+        role: "user",
+        content: [{ type: "file", data, mediaType: "application/pdf" }],
+      },
+    ],
+  });
+  const observer = tape.instrument(model(), "observer");
+  await collect((await observer.doStream(call(new URL(url)))).stream);
+  // The turn's processor resolves the history URL after the observation.
+  captured.set(url, reference);
+  const { entries } = await tape.finish();
+  expect(entries[0]?.inputFingerprint).toBe(
+    getOMInputFingerprint(call(new URL(reference))),
+  );
+});
+
+it("refuses a recording whose OM call read file content the turn never captured", async () => {
+  const tape = createOMResultTape(undefined, () => {}, {
+    getCapturedFiles: () => new Set(),
+  });
+  const observer = tape.instrument(model(), "observer");
+  const prompt = [
+    {
+      role: "user",
+      content: [
+        {
+          type: "file",
+          data: new Uint8Array([37, 80, 68, 70]),
+          mediaType: "application/pdf",
+        },
+      ],
+    },
+  ];
+  await collect((await observer.doStream({ prompt })).stream);
+  await expect(tape.finish()).rejects.toMatchObject({
+    reason: "file_url_undeclared",
+  });
 });
 
 it("waits for an OM call that is still in flight when the tape finishes", async () => {

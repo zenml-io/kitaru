@@ -852,6 +852,9 @@ export function createMemoryReplayAgent(
           return replayFiles.resolveFile(reference);
         },
         mapString: (value) => sanitizer.replace(value),
+        getCapturedFiles: baselineFiles
+          ? () => new Set(baselineFiles?.files.map((file) => file.url))
+          : undefined,
         isBuffered: (phase) =>
           omEngine !== null &&
           isAsyncBufferingRunning(

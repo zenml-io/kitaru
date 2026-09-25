@@ -59,7 +59,7 @@ export type MastraReplayReason =
   | "file_capture_failed"
   /** The turn's captured files could not be stored as Kitaru blobs. */
   | "file_store_failed"
-  /** A file or image part in the input or thread history holds a network URL that `files` did not declare and no `resolveFile` could capture, or a processor resolved a URL from outside the input and thread history. */
+  /** A file or image part in the input or thread history holds a network URL that `files` did not declare and no `resolveFile` could capture, a processor resolved a URL from outside the input and thread history, or observational memory read a history file that no `resolveFile` call captured. */
   | "file_url_undeclared"
   /** A file or image part reached the model as a URL or captured file reference instead of its content. */
   | "file_url_sent_to_model"
