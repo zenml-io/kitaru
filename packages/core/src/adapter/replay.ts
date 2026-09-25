@@ -242,20 +242,21 @@ export async function resolveReplayContext(options: {
           "KITARU_OVERRIDE",
         )
       : undefined;
-  const effective = resolveEffectiveInputs(workerInput, override);
-  const recordedInput =
-    !spec && options.recordedInputProjector
-      ? await options.recordedInputProjector(effective.recorded)
-      : effective.recorded;
   const replacementModelId = modelReplacement(
     override,
     options.requestedModelId,
   );
   if (replacementModelId !== undefined) {
     // A replay override that swaps the model decides what every session in a
-    // batch spends, so the allowlist is checked before anything is recorded.
+    // batch spends, so the allowlist is checked before anything is recorded
+    // and before the input projector can download files.
     assertAllowedReplayModel(replacementModelId, options.allowedReplayModels);
   }
+  const effective = resolveEffectiveInputs(workerInput, override);
+  const recordedInput =
+    !spec && options.recordedInputProjector
+      ? await options.recordedInputProjector(effective.recorded)
+      : effective.recorded;
 
   return {
     effectiveInput:

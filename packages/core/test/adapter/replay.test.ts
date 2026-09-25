@@ -275,6 +275,28 @@ describe("adapter replay preparation", () => {
     expect(client.created).toHaveLength(0);
   });
 
+  it("rejects a disallowed replacement model before projecting input", async () => {
+    let projected = false;
+    await expect(
+      resolveReplayContext({
+        allowedReplayModels: ["allowed"],
+        callerInput: "caller",
+        client: fakeClient(),
+        environment: {
+          KITARU_OVERRIDE: JSON.stringify({ model: "disallowed" }),
+        },
+        recordedInputProjector: () => {
+          projected = true;
+          throw new Error("file resolver reached");
+        },
+        requestedModelId: "requested",
+      }),
+    ).rejects.toThrow(
+      "Replacement model 'disallowed' is not in allowedReplayModels",
+    );
+    expect(projected).toBe(false);
+  });
+
   it("rejects malformed override fields", async () => {
     const client = fakeClient();
     await expect(
