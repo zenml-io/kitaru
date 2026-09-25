@@ -47,6 +47,7 @@ from kitaru.server.domain.replay_config import ReplayConfig
 from kitaru.server.domain.session import (
     Session,
     SessionReplayNotReady,
+    mastra_replay_stored_files,
     mastra_replay_uses_observational_memory,
     mastra_replay_v3_complete,
     mastra_replay_v3_current,
@@ -134,16 +135,34 @@ async def split_replay_baselines(
     await payload_store.resolve(
         [baseline.inputs for baseline in baselines if baseline.inputs is not None]
     )
-    ready: list[Session] = []
-    refusals: list[SessionReplayNotReady] = []
+    checked: list[Session] = []
+    refusals: dict[uuid.UUID, SessionReplayNotReady] = {}
     for baseline in baselines:
         try:
             _check_mastra_replay_ready(baseline)
         except SessionReplayNotReady as refusal:
-            refusals.append(refusal)
+            refusals[baseline.id] = refusal
         else:
-            ready.append(baseline)
-    return ready, refusals
+            checked.append(baseline)
+    # A replay file's blob has no foreign key from the session, so it can be
+    # deleted after finalization accepted it; refuse such a baseline here
+    # instead of failing its replay task on the download.
+    stored_files = {
+        baseline.id: mastra_replay_stored_files(baseline.inputs.value)
+        for baseline in checked
+        if baseline.framework == "mastra" and baseline.inputs is not None
+    }
+    blob_ids = list({file.blob_id for files in stored_files.values() for file in files})
+    blobs = await payload_store.get_blobs(blob_ids) if blob_ids else {}
+    for baseline_id, files in stored_files.items():
+        if not all(file.is_held_by(blobs.get(file.blob_id)) for file in files):
+            refusals[baseline_id] = SessionReplayNotReady(
+                baseline_id, "mastra_replay_file_missing"
+            )
+    ready = [baseline for baseline in checked if baseline.id not in refusals]
+    return ready, [
+        refusals[baseline.id] for baseline in baselines if baseline.id in refusals
+    ]
 
 
 async def create_replay_pipelines(

@@ -34,6 +34,7 @@ from kitaru.server.domain.base import (
     NotFoundError,
     ValidationError,
 )
+from kitaru.server.domain.blob import Blob
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.payload import Payload
 
@@ -301,6 +302,19 @@ class MastraStoredFile(FrozenModel):
     blob_id: uuid.UUID
     sha256: str
     length: int
+
+    def is_held_by(self, blob: Blob | None) -> bool:
+        """Return whether the blob exists and holds this file's content.
+
+        Args:
+            blob: The stored blob this file names, or None when it is missing.
+
+        Returns:
+            Whether the blob's hash and size match the recorded file.
+        """
+        return (
+            blob is not None and blob.sha256 == self.sha256 and blob.size == self.length
+        )
 
 
 def _read_mastra_stored_file(file: dict[str, Any]) -> MastraStoredFile | None:

@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end tests for the replay pipeline and experiment run fan-out."""
 
+import base64
 import uuid
 from collections.abc import Sequence
 from copy import deepcopy
@@ -225,6 +226,49 @@ async def test_mastra_baseline_in_an_outdated_v3_format_is_refused(
             ),
             actor=ACTOR,
         )
+    replays, _ = await services.replays.query(ReplayFilter())
+    assert not replays
+
+
+@pytest.mark.parametrize("blob", ["kept", "deleted"])
+async def test_mastra_baseline_whose_file_blob_was_deleted_is_refused(
+    services: ReplayServices,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    blob: str,
+) -> None:
+    """Refuse a baseline at replay creation once a recorded file's blob is gone."""
+    version = await _agent_version_with_run_spec(services)
+    inputs = deepcopy(complete_mastra_memory_replay_inputs)
+    file = inputs["mastra_memory_replay"]["files"][0]
+    content = base64.b64decode(file.pop("base64"))
+    stored = await create_blob(
+        services.blobs, ACTOR.account.id, content=content, media_type=file["mediaType"]
+    )
+    file["blobId"] = str(stored.id)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        framework="mastra",
+        inputs=inputs,
+        metadata={"mastra_replay_state": "eligible"},
+    )
+    if blob == "deleted":
+        await services.blobs.delete(stored.id)
+    create = ReplayCreate(
+        baseline_session_id=baseline.id,
+        evaluators=[],
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+    )
+    if blob == "kept":
+        bundle = await services.replay_service.create_replay(create, actor=ACTOR)
+        assert bundle.replay.baseline_session_id == baseline.id
+        return
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_file_missing"):
+        await services.replay_service.create_replay(create, actor=ACTOR)
     replays, _ = await services.replays.query(ReplayFilter())
     assert not replays
 

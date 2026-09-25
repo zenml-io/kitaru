@@ -483,10 +483,8 @@ class SessionService:
         blobs = await self._payload_store.get_blobs(
             list({file.blob_id for file in files})
         )
-        for file in files:
-            blob = blobs.get(file.blob_id)
-            if blob is None or blob.sha256 != file.sha256 or blob.size != file.length:
-                raise SessionReplayFinalizationInvalid(session_id)
+        if not all(file.is_held_by(blobs.get(file.blob_id)) for file in files):
+            raise SessionReplayFinalizationInvalid(session_id)
 
     async def delete_session(self, session_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a session.

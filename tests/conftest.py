@@ -4582,16 +4582,19 @@ class PayloadStoreFakes(NamedTuple):
 
 def build_payload_store(
     threshold_bytes: int = DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
+    blob_repository: FakeBlobRepository | None = None,
 ) -> PayloadStoreFakes:
-    """Build a payload store backed by fresh fake blob storage.
+    """Build a payload store backed by fake blob storage.
 
     Args:
         threshold_bytes: Serialized size above which a payload is offloaded.
+        blob_repository: Blob registry to share, or None for a fresh one.
 
     Returns:
-        Payload store bound to fresh fakes, and the fakes themselves.
+        Payload store bound to the fakes, and the fakes themselves.
     """
-    blob_repository = FakeBlobRepository()
+    if blob_repository is None:
+        blob_repository = FakeBlobRepository()
     blob_data_store = FakeBlobDataStore()
     store = PayloadStore(
         repository=blob_repository,
@@ -7490,7 +7493,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         transitions=transitions,
         policy=task_policy,
     )
-    payload_store = build_payload_store().store
+    payload_store = build_payload_store(blob_repository=blobs).store
     experiment_service = ExperimentService(
         repository=experiments,
         plugin_repository=plugins,
