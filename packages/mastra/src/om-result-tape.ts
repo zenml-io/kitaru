@@ -115,10 +115,10 @@ export interface OMResultTapeOptions {
     reference: string,
   ) => Promise<{ bytes: Uint8Array; mediaType: string }>;
   /**
-   * Return the `kitaru-file://` references of the files the turn captured.
-   * A recording tape reads them once the turn has finished.
+   * Whether the turn captured the file with this `kitaru-file://` reference.
+   * A recording tape asks only once the turn has finished.
    */
-  getCapturedFiles?: () => ReadonlySet<string>;
+  isCapturedFile?: (reference: string) => boolean;
 }
 
 const VOLATILE_KEYS = new Set(["createdAt", "updatedAt", "abortSignal"]);
@@ -736,7 +736,7 @@ export function createOMResultTape(
         "Observational-memory result tape is incomplete.",
         "om_tape_incomplete",
       );
-    const captured = options.getCapturedFiles?.();
+    const { isCapturedFile } = options;
     let uncaptured = false;
     const fingerprinted = recordedEntries.map(
       (entry): OMResultEntry => ({
@@ -745,7 +745,7 @@ export function createOMResultTape(
           inputs[entry.ordinal],
           options.mapString,
           (reference) => {
-            if (captured && !captured.has(reference)) uncaptured = true;
+            if (isCapturedFile && !isCapturedFile(reference)) uncaptured = true;
           },
         ),
       }),

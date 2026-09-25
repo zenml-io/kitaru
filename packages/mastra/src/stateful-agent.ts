@@ -85,6 +85,7 @@ import {
 } from "./request-capture.js";
 import {
   containsModelFileUrl,
+  createCapturedContentReferencer,
   createCapturedFiles,
   createFileBlobStore,
   createFileDownloads,
@@ -860,8 +861,8 @@ export function createMemoryReplayAgent(
           return replayFiles.resolveFile(reference);
         },
         mapString: (value) => sanitizer.replace(value),
-        getCapturedFiles: baselineFiles
-          ? () => new Set(baselineFiles?.files.map((file) => file.url))
+        isCapturedFile: baselineFiles
+          ? (reference) => baselineFiles?.hasFile(reference) ?? false
           : undefined,
         isBuffered: (phase) =>
           omEngine !== null &&
@@ -1216,6 +1217,9 @@ export function createMemoryReplayAgent(
           ended_at: new Date().toISOString(),
           attributes: requestEvidenceAttributes(evidence),
         });
+      const referenceCapturedContent = createCapturedContentReferencer(
+        files.hasFile,
+      );
       const capture = createRequestCapture({
         invocationId,
         // Only limits the application chose bound request evidence; the
@@ -1224,7 +1228,8 @@ export function createMemoryReplayAgent(
           supplied.recordingLimits === undefined
             ? undefined
             : options.recordingLimits,
-        sanitizeEvidence: sanitizer.replace,
+        sanitizeEvidence: (value) =>
+          sanitizer.replace(referenceCapturedContent(value)),
         getMemoryRevision: () => runtime.binding.revision,
         onFailedAttempt: writeAttempt,
         onCaptureError: () =>

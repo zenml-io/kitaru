@@ -52,6 +52,84 @@ export function fileReference(file: ResolvedMemoryFile): string {
   return `kitaru-file://sha256/${digest}`;
 }
 
+/**
+ * Return the content reference of an attachment a file or image part holds
+ * inline, as bytes, base64 text, or a data URL, and undefined for one it
+ * holds as a URL.
+ *
+ * `cache` keeps each inline value's reference, because Mastra hands the same
+ * parts over on every step and hashing a large file each time is slow.
+ */
+export function getInlineFileReference(
+  part: Record<string, unknown>,
+  cache: Map<unknown, string>,
+): string | undefined {
+  const data = part.type === "image" ? part.image : part.data;
+  const cached = cache.get(data);
+  if (cached) return cached;
+  let bytes: Uint8Array;
+  if (data instanceof Uint8Array) bytes = data;
+  else if (typeof data === "string" && data.startsWith("data:"))
+    bytes = Buffer.from(data.slice(data.indexOf(",") + 1), "base64");
+  else if (typeof data === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(data))
+    bytes = Buffer.from(data, "base64");
+  else return undefined;
+  const mediaType = [part.mediaType, part.mimeType].find(
+    (value) => typeof value === "string",
+  );
+  const reference = fileReference({
+    bytes,
+    mediaType: typeof mediaType === "string" ? mediaType : "",
+  });
+  cache.set(data, reference);
+  return reference;
+}
+
+/**
+ * Build a function that replaces the inline content of each file or image
+ * part holding a captured file with that file's reference, leaving `value`
+ * itself unchanged.
+ *
+ * The recorded file already holds the bytes, so evidence that repeats them
+ * on every model step only grows the recording.
+ */
+export function createCapturedContentReferencer(
+  isCaptured: (reference: string) => boolean,
+): <T>(value: T) => T {
+  const cache = new Map<unknown, string>();
+  function visit(current: unknown): unknown {
+    if (Array.isArray(current)) {
+      const items = current.map(visit);
+      return items.some((item, index) => item !== current[index])
+        ? items
+        : current;
+    }
+    if (
+      current === null ||
+      typeof current !== "object" ||
+      Object.getPrototypeOf(current) !== Object.prototype
+    )
+      return current;
+    const record = current as Record<string, unknown>;
+    if (isFilePart(record)) {
+      const reference = getInlineFileReference(record, cache);
+      if (!reference || !isCaptured(reference)) return current;
+      return {
+        ...record,
+        [record.type === "image" ? "image" : "data"]: reference,
+      };
+    }
+    let changed = false;
+    const entries = Object.entries(record).map(([key, item]) => {
+      const next = visit(item);
+      if (next !== item) changed = true;
+      return [key, next] as const;
+    });
+    return changed ? Object.fromEntries(entries) : current;
+  }
+  return <T>(value: T) => visit(value) as T;
+}
+
 function copiedFile(file: MastraRecordedFile): MastraRecordedFile {
   if (
     !FILE_REFERENCE.test(file.url) ||
@@ -86,6 +164,8 @@ export function restoreCapturedFiles(recorded: readonly MastraRecordedFile[]) {
     );
   return {
     files,
+    /** Whether a file with this content reference was recorded. */
+    hasFile: (reference: string): boolean => lookup.has(reference),
     resolveFile: async (reference: string): Promise<ResolvedMemoryFile> => {
       const file = lookup.get(reference);
       if (!file)
@@ -599,6 +679,8 @@ export async function createCapturedFiles(
     get files(): MastraRecordedFile[] {
       return restoreCapturedFiles([...filesByReference.values()]).files;
     },
+    /** Whether the turn captured a file with this content reference. */
+    hasFile: (reference: string): boolean => filesByReference.has(reference),
     /**
      * Allow the turn to capture the network URLs held by file parts in its
      * thread history once it resolves them.

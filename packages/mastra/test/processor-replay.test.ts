@@ -11,6 +11,7 @@ import {
   createProcessLocalMemoryAccess,
   MEMORY_REPLAY_KEY,
 } from "../src/memory.js";
+import { fileReference } from "../src/stateful-files.js";
 import {
   createMemoryRuntime,
   FILE_URL,
@@ -35,7 +36,7 @@ afterEach(async () => {
   await settleBuffering();
 });
 
-it("runs the native file processor with historical bytes, skills and complete large request evidence", async () => {
+it("runs the native file processor with historical bytes, skills and complete request evidence", async () => {
   const signedFileUrl = `${FILE_URL}?token=HISTORICAL_SECRET`;
   const directory = await mkdtemp(join(tmpdir(), "kitaru-stateful-files-"));
   await mkdir(join(directory, "triage"));
@@ -206,7 +207,14 @@ it("runs the native file processor with historical bytes, skills and complete la
           true,
       ),
     ).toBe(true);
-    expect(JSON.stringify(modelNodes[1]?.inputs).length).toBeGreaterThan(40000);
+    // Both requests held the captured file inline; their evidence names it
+    // by reference instead of storing its bytes again on every step.
+    const reference = fileReference({ bytes, mediaType: "application/pdf" });
+    for (const node of modelNodes) {
+      const recorded = JSON.stringify(node.inputs);
+      expect(recorded).toContain(reference);
+      expect(recorded).not.toContain(Buffer.from(bytes).toString("base64"));
+    }
     expect(JSON.stringify(api.calls)).not.toContain("HISTORICAL_SECRET");
   } finally {
     await runtime.store.close();

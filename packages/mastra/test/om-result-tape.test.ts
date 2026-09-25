@@ -603,7 +603,7 @@ it("fingerprints a recorded OM input once the turn has captured its files", asyn
   const captured = new Map<string, string>();
   const tape = createOMResultTape(undefined, () => {}, {
     mapString: (value) => captured.get(value) ?? value,
-    getCapturedFiles: () => new Set(captured.values()),
+    isCapturedFile: (reference) => [...captured.values()].includes(reference),
   });
   const call = (data: unknown) => ({
     prompt: [
@@ -625,7 +625,7 @@ it("fingerprints a recorded OM input once the turn has captured its files", asyn
 
 it("refuses a recording whose OM call read file content the turn never captured", async () => {
   const tape = createOMResultTape(undefined, () => {}, {
-    getCapturedFiles: () => new Set(),
+    isCapturedFile: () => false,
   });
   const observer = tape.instrument(model(), "observer");
   const prompt = [
