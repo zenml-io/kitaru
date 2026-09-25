@@ -21,6 +21,7 @@ import {
   type AdapterRunState,
   normalizeRecordingLimits,
   parseModelSettings,
+  RecordedSensitiveKeyError,
   type RecordingLimits,
   ROOT_NODE_EXTERNAL_ID,
   resolveReplayContext,
@@ -1118,7 +1119,14 @@ export function createMemoryReplayAgent(
           "request context",
         );
         validateMemoryReplayContext(selector, effectiveContext);
-      } catch {
+      } catch (error) {
+        // Encoding refuses a credential-named key at any depth; name it as
+        // the credential it is rather than as unsupported context.
+        if (error instanceof RecordedSensitiveKeyError)
+          throw new MemoryReplayContextError(
+            "Unsupported replay request context credential key.",
+            "credential_key_unsupported",
+          );
         throw new MemoryReplayContextError(
           "Request context cannot be captured for memory replay.",
         );

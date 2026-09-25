@@ -661,7 +661,7 @@ it("runs natively when request context cannot be captured safely", async () => {
       )?.body?.metadata,
     ).toMatchObject({
       mastra_replay_state: "ineligible",
-      mastra_replay_reason: "context_unsupported",
+      mastra_replay_reason: "credential_key_unsupported",
     }),
   );
   expect(JSON.stringify(api.calls)).not.toContain("secret");

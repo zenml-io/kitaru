@@ -116,6 +116,50 @@ function isCredentialName(name: string): boolean {
   return qualifier === undefined || !NON_CREDENTIAL_QUALIFIERS.has(qualifier);
 }
 
+// Object keys hold structured data, so a bare "key", "auth" or "signature"
+// field stays readable; only these final words, or "key" after a credential
+// qualifier, mark a compound key such as `access_token` or `x-api-key`.
+const CREDENTIAL_KEY_WORDS: ReadonlySet<string> = new Set([
+  "apikey",
+  "authorization",
+  "cookie",
+  "credential",
+  "credentials",
+  "passwd",
+  "password",
+  "secret",
+  "token",
+]);
+const CREDENTIAL_KEY_QUALIFIERS: ReadonlySet<string> = new Set([
+  "access",
+  "api",
+  "auth",
+  "client",
+  "encryption",
+  "master",
+  "private",
+  "secret",
+  "service",
+  "signing",
+  "subscription",
+]);
+
+/** Whether an object key names a credential, such as `accessToken` or `client_secret`. */
+export function isCredentialKeyName(name: string): boolean {
+  const words = getNameWords(name);
+  const last = words.at(-1);
+  const qualifier = words.at(-2);
+  if (last === undefined) return false;
+  if (qualifier !== undefined && NON_CREDENTIAL_QUALIFIERS.has(qualifier))
+    return false;
+  if (CREDENTIAL_KEY_WORDS.has(last)) return true;
+  return (
+    last === "key" &&
+    qualifier !== undefined &&
+    CREDENTIAL_KEY_QUALIFIERS.has(qualifier)
+  );
+}
+
 function redactNestedValue(value: string): string {
   let decoded = value;
   let encodings = 0;

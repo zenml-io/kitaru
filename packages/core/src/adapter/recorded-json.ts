@@ -1,6 +1,9 @@
 import { isPlainObject } from "../json.js";
 import type { JsonValue } from "../types.js";
-import { containsUrlCredentials } from "./url-credentials.js";
+import {
+  containsUrlCredentials,
+  isCredentialKeyName,
+} from "./url-credentials.js";
 
 export const MAX_RECORDED_STRING_CHARS = 4_096;
 const MAX_RECORDED_ITEMS = 100;
@@ -23,7 +26,10 @@ const UNSUPPORTED_MARKER = "[unsupported]";
 
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-/** Keys whose value is a credential rather than part of the payload's meaning. */
+/**
+ * Keys whose value is a credential rather than part of the payload's meaning.
+ * Compound names such as `access_token` match through `isCredentialKeyName`.
+ */
 const SECRET_KEYS: ReadonlySet<string> = new Set([
   "api_key",
   "apikey",
@@ -302,7 +308,7 @@ function cloneRecord(
     spendBudget(options, key.length);
     if (
       options.sensitiveKeyMode !== "allow" &&
-      options.sensitiveKeys.has(key.toLowerCase())
+      (options.sensitiveKeys.has(key.toLowerCase()) || isCredentialKeyName(key))
     ) {
       if (options.sensitiveKeyMode === "reject") {
         throw new RecordedSensitiveKeyError(
