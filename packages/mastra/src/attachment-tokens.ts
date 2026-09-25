@@ -1,5 +1,6 @@
 import type { Memory } from "@mastra/memory";
 import type { JsonValue } from "@zenml-io/kitaru";
+import { fileReference } from "./stateful-files.js";
 
 /** The tokens a recorded turn counted for one captured attachment. */
 export interface AttachmentTokenCount {
@@ -10,8 +11,9 @@ export interface AttachmentTokenCount {
 }
 
 /**
- * Recorded attachment token counts, keyed by captured file reference, or by
- * the credential-redacted URL of a history file the turn never resolved.
+ * Recorded attachment token counts, keyed by captured file reference, by the
+ * content reference of an attachment a processor held inline, or by the
+ * credential-redacted URL of a history file the turn never resolved.
  */
 export type AttachmentTokenCounts = Record<string, AttachmentTokenCount>;
 
@@ -50,6 +52,39 @@ function getAttachmentData(part: unknown): unknown {
   return data instanceof URL ? data.href : data;
 }
 
+/**
+ * Return a content reference for an attachment a part holds inline, as bytes,
+ * base64 text, or a data URL, and undefined for one held as a URL.
+ *
+ * `cache` keeps each inline value's reference for the turn, because Mastra
+ * counts the same parts on every step.
+ */
+function getInlineAttachmentReference(
+  part: unknown,
+  cache: Map<unknown, string>,
+): string | undefined {
+  const data = getAttachmentData(part);
+  if (!record(part)) return undefined;
+  const cached = cache.get(data);
+  if (cached) return cached;
+  let bytes: Uint8Array;
+  if (data instanceof Uint8Array) bytes = data;
+  else if (typeof data === "string" && data.startsWith("data:"))
+    bytes = Buffer.from(data.slice(data.indexOf(",") + 1), "base64");
+  else if (typeof data === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(data))
+    bytes = Buffer.from(data, "base64");
+  else return undefined;
+  const mediaType = [part.mediaType, part.mimeType].find(
+    (value) => typeof value === "string",
+  );
+  const reference = fileReference({
+    bytes,
+    mediaType: typeof mediaType === "string" ? mediaType : "",
+  });
+  cache.set(data, reference);
+  return reference;
+}
+
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
@@ -81,11 +116,17 @@ export function recordAttachmentTokens(
   };
   const counter = getAttachmentCounter(engine);
   if (!counter) return { counts };
+  const inline = new Map<unknown, string>();
   const keep = (part: unknown, kind: "sync" | "async", tokens: unknown) => {
+    if (!isCount(tokens)) return;
     const data = getAttachmentData(part);
-    if (typeof data !== "string" || !NETWORK_URL.test(data) || !isCount(tokens))
-      return;
-    seen.set(data, { [kind]: tokens, ...seen.get(data) });
+    // A processor that swaps a URL for the file's bytes gets those bytes
+    // from the recorded file in replay, so its count is keyed by content.
+    const key =
+      typeof data === "string" && NETWORK_URL.test(data)
+        ? data
+        : getInlineAttachmentReference(part, inline);
+    if (key) seen.set(key, { [kind]: tokens, ...seen.get(key) });
   };
   const countSync = counter.countAttachmentPartSync.bind(counter);
   const countAsync = counter.countAttachmentPartAsync.bind(counter);
@@ -108,7 +149,8 @@ export function recordAttachmentTokens(
  * Count each recorded attachment in a replay as its recorded turn did.
  *
  * An attachment without a recorded asynchronous count takes its synchronous
- * one, because Mastra's asynchronous count would ask the provider live.
+ * one, because Mastra's asynchronous count would ask the provider live. So
+ * does a captured reference or an inline attachment with no recorded count.
  */
 export function replayAttachmentTokens(
   engine: OMEngine,
@@ -118,11 +160,15 @@ export function replayAttachmentTokens(
   if (!counter) return;
   const countSync = counter.countAttachmentPartSync.bind(counter);
   const countAsync = counter.countAttachmentPartAsync.bind(counter);
+  const inline = new Map<unknown, string>();
   const recorded = (part: unknown): AttachmentTokenCount | undefined => {
     const data = getAttachmentData(part);
-    if (typeof data !== "string") return undefined;
-    if (Object.hasOwn(counts, data)) return counts[data];
-    return FILE_REFERENCE.test(data) ? {} : undefined;
+    if (typeof data === "string" && Object.hasOwn(counts, data))
+      return counts[data];
+    if (typeof data === "string" && FILE_REFERENCE.test(data)) return {};
+    const reference = getInlineAttachmentReference(part, inline);
+    if (!reference) return undefined;
+    return Object.hasOwn(counts, reference) ? counts[reference] : {};
   };
   counter.countAttachmentPartSync = (part) => {
     const count = recorded(part);

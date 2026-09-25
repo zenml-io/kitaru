@@ -741,7 +741,10 @@ it("lets a late write from a released turn invalidate a finalizing later turn", 
   await earlier.binding.captureInitial(earlier.runtime.memory);
   // The earlier turn gave up on its OM work and released its lease.
   await earlier.binding.release();
-  const later = await access.acquire({ threadId: THREAD, resourceId: RESOURCE });
+  const later = await access.acquire({
+    threadId: THREAD,
+    resourceId: RESOURCE,
+  });
   await later.markFinalizing?.();
   expect(await later.verifyEligibility()).toBe(true);
   // The abandoned OM work of the earlier turn writes under the later turn.
