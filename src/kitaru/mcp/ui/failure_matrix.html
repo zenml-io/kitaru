@@ -429,12 +429,16 @@ function tipLines(cell, compare) {
 
 function renderTray(groups) {
   const tray = $("#tray");
+  // A new mark is an annotation failure; if annotations are filtered out it would
+  // not appear in this matrix, so the action is only offered when it would.
+  const sources = S.args.request?.sources;
+  const marksCount = !sources || sources.includes("annotation");
   const rows = groups.filter((group) => group.unlocated_count).map((group) => {
     const evals = group.unlocated_evaluations.map((item) => `${item.name} ×${item.count}`).join(", ");
-    const link = el("button", { class: "link", text: "Mark them →" });
-    link.onclick = () => sendMessage(`Review the ${group.unlocated_count} failed sessions in "${group.label}" that have no located failure step. For each one, find the node where things first went wrong and add an annotation on that node with value {"first_failure": true, "note": "<what went wrong>"}, then rebuild the transition failure matrix.`);
+    const link = marksCount ? el("button", { class: "link", text: "Mark them →" }) : null;
+    if (link) link.onclick = () => sendMessage(`Review the ${group.unlocated_count} failed sessions in "${group.label}" that have no located failure step. For each one, find the node where things first went wrong and add an annotation on that node with value {"first_failure": true, "note": "<what went wrong>"}, then rebuild the transition failure matrix.`);
     const prefix = groups.length > 1 ? `${group.label}: ` : "";
-    return el("div", { class: "tray-row" }, el("span", { title: evals, text: `${prefix}${group.unlocated_count} more failed${evals ? " an evaluation" : ""}, but nobody has marked where they went wrong, so they aren't shown.` }), link);
+    return el("div", { class: "tray-row" }, el("span", { title: evals, text: `${prefix}${group.unlocated_count} more failed${evals ? " an evaluation" : ""}, but nobody has marked where they went wrong, so they aren't shown.${marksCount ? "" : " Reviewer marks are excluded from this view."}` }), link);
   });
   tray.hidden = !rows.length;
   tray.replaceChildren(...rows);

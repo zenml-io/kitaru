@@ -36,6 +36,7 @@ from kitaru.mcp.tools.transitions import (
     analyze_group,
     build_cells,
     build_labeler,
+    cell_details,
     fold_rare_states,
     locate_failure,
     summarize_group,
@@ -566,6 +567,42 @@ async def test_large_sessions_are_read_up_to_a_cap_and_reported(
 
 def _structured(result: object) -> dict[str, Any]:
     return cast(dict[str, Any], cast(CallToolResult, result).structured_content)
+
+
+async def test_group_node_budget_is_shared_across_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(failure_matrix, "MAX_NODES_PER_GROUP", 4)
+    sessions = [_session("failed") for _ in range(4)]
+    nodes = {
+        s.id: [_node(s, f"n{i}", "tool_call", f"step_{i}", at=i) for i in range(3)]
+        for s in sessions
+    }
+
+    records = await failure_matrix.fetch_group(
+        cast(Any, _FakeClient(_records(nodes, sessions))),
+        None,
+        max_sessions=10,
+        concurrency=2,
+    )
+
+    assert sum(len(n) for n in records.nodes.values()) == 4
+    assert records.records_capped
+
+
+def test_cell_sessions_clip_long_session_names() -> None:
+    session = SessionResponse.model_construct(
+        id=uuid.uuid4(), number=1, name="n" * 5000, status="failed"
+    )
+    nodes = [_node(session, "a", "tool_call", "search", status="failed")]
+    outcomes = analyze_group(
+        _records({session.id: nodes}, [session]), build_labeler("tool", None), None
+    )
+
+    data = cell_details(outcomes, (START, "search"), ["error"], limit=5)
+
+    name = data.sessions[0].name
+    assert name is not None and len(name) <= 300
 
 
 async def test_cell_tool_drills_into_the_matrix_snapshot() -> None:

@@ -450,7 +450,7 @@ def cell_details(
         CellSession(
             session_id=o.session.id,
             number=o.session.number,
-            name=o.session.name,
+            name=_clip(o.session.name),
             source=o.point.source,
             failing_node=_bounded(o.point.node.name),
             note=o.point.note,

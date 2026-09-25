@@ -47,6 +47,7 @@ IDS_PER_FILTER = 100
 PAGE_SIZE = 500
 TOP_CELLS_IN_TEXT = 5
 MAX_NODES_PER_SESSION = 2000
+MAX_NODES_PER_GROUP = 100_000
 MAX_RECORDS_PER_BATCH = 2000
 
 ItemT = TypeVar("ItemT", bound=ResponseModel)
@@ -191,13 +192,16 @@ async def fetch_group(
     sessions = sessions[:max_sessions]
     ids = [session.id for session in sessions]
     limiter = asyncio.Semaphore(concurrency)
+    # Split one group-wide budget evenly so snapshot memory stays bounded however
+    # many sessions are read, without sessions racing for a shared counter.
+    node_limit = min(MAX_NODES_PER_SESSION, MAX_NODES_PER_GROUP // max(len(ids), 1))
 
     async def nodes_of(session_id: uuid.UUID) -> tuple[list[SessionNodeResponse], bool]:
         async with limiter:
             iterator = client.sessions.iter_nodes(
                 session_id, SessionNodeListParams(size=PAGE_SIZE)
             )
-            return await _read_up_to(iterator, MAX_NODES_PER_SESSION)
+            return await _read_up_to(iterator, node_limit)
 
     (
         node_reads,
