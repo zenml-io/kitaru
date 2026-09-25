@@ -22,6 +22,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
     "@types/node": "22.20.4",
+    "@vitest/coverage-v8": "4.1.11",
     "ai": "7.0.107",
     "openapi-typescript": "7.13.0",
     "typescript": "5.9.3",
