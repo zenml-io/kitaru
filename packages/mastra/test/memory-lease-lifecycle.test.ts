@@ -93,6 +93,10 @@ async function setup(
   options: {
     observerWait?: () => Promise<void>;
     reflectorWait?: () => Promise<void>;
+    /** Delay the actor's answer; receives the 1-based actor call number. */
+    actorWait?: (call: number) => Promise<void>;
+    /** Answer this 1-based actor call with an evidence tool call. */
+    callsTool?: (call: number) => boolean;
     observe?: boolean;
     /** Observe in the background: buffer without reaching the threshold. */
     backgroundObservation?: boolean;
@@ -165,7 +169,11 @@ async function setup(
     provider: "fixture",
     doStream: async () => {
       actorCalls += 1;
-      if (!options.observe || actorCalls % 2 === 0) return textStream("done");
+      await options.actorWait?.(actorCalls);
+      const callsTool =
+        options.callsTool?.(actorCalls) ??
+        (options.observe === true && actorCalls % 2 === 1);
+      if (!callsTool) return textStream("done");
       return streamParts(
         [
           {
@@ -555,15 +563,51 @@ it.each(LEASES)(
 );
 
 it.each(LEASES)(
-  "does not let a quick reply follow a reply that is still answering (%s lease)",
+  "lets a quick reply's own writes follow once the earlier turn has released (%s lease)",
+  async (_kind, createAccess) => {
+    const access = await createAccess();
+    const holder = await access.acquire(SELECTOR);
+    await holder.markFinalizing?.();
+    const reply = await access.acquire(SELECTOR, { cooperative: true });
+    expect(reply.overlapsFinalizingTurn).toBe(true);
+    // The earlier turn's memory work settles while the reply still answers.
+    await holder();
+    // Only the reply's own lease is in the way of the write it registers.
+    const write = await access.acquire(SELECTOR, {
+      waitMs: 0,
+      cooperative: true,
+    });
+    expect(write.overlapsFinalizingTurn).toBe(true);
+    await write();
+    await reply.markFinalizing?.();
+    const next = await access.acquire(SELECTOR, { cooperative: true });
+    expect(next.overlapsFinalizingTurn).toBe(true);
+    await reply();
+    await next();
+    // Following never poisoned the selectors.
+    const later = await access.acquire(SELECTOR);
+    expect(await later.verifyEligibility()).toBe(true);
+    await later();
+  },
+);
+
+it.each(LEASES)(
+  "lets a quick reply follow an earlier reply that is still answering (%s lease)",
   async (_kind, createAccess) => {
     const access = await createAccess();
     const holder = await access.acquire(SELECTOR);
     await holder.markFinalizing?.();
     const reply = await access.acquire(SELECTOR, { cooperative: true });
     await holder();
+    // Both replies are ineligible already; no eligible turn is in the way.
     const next = await access.acquire(SELECTOR, { cooperative: true });
-    expect(next.overlapsFinalizingTurn).toBeFalsy();
+    expect(next.overlapsFinalizingTurn).toBe(true);
+    // A foreign writer still makes it a conflict for every later turn.
+    const foreign = await access.acquire(SELECTOR, { waitMs: 0 });
+    await foreign();
+    const after = await access.acquire(SELECTOR, { cooperative: true });
+    expect(after.overlapsFinalizingTurn).toBeFalsy();
+    await after();
     await reply();
     await next();
   },
@@ -658,6 +702,113 @@ it.each(LEASES)(
     ).toBeUndefined();
     // Replay reused the recorded observation instead of calling the observer.
     expect(observerCalls).toBe(recordedObserverCalls);
+  },
+  15_000,
+);
+
+/**
+ * Two shared file leases on one directory, one per simulated server. The test
+ * picks which server runs each turn, as a load balancer would.
+ */
+async function createTwoServerAccess(): Promise<ServerAccess> {
+  const root = await mkdtemp(join(tmpdir(), "kitaru-lease-two-servers-"));
+  roots.push(root);
+  const first = createFileMemoryAccess(root);
+  const servers = [first, createFileMemoryAccess(root)];
+  let current = first;
+  const access: MastraExclusiveMemoryAccess = {
+    acquire: (selector, options) => current.acquire(selector, options),
+    markUnsafeWrite: (selector) => current.markUnsafeWrite(selector),
+    resetAfterQuiescence: (selector) => current.resetAfterQuiescence(selector),
+  };
+  return {
+    access,
+    useServer: (index) => {
+      current = servers[index] ?? current;
+    },
+  };
+}
+
+type ServerAccess = {
+  access: MastraExclusiveMemoryAccess;
+  useServer: (index: number) => void;
+};
+
+const QUICK_REPLY_LEASES: Array<[string, () => Promise<ServerAccess>]> = [
+  ...LEASES.map(
+    ([kind, createAccess]): [string, () => Promise<ServerAccess>] => [
+      kind,
+      async () => ({ access: await createAccess(), useServer: () => {} }),
+    ],
+  ),
+  ["two-server shared file", createTwoServerAccess],
+];
+
+it.each(QUICK_REPLY_LEASES)(
+  "keeps a string of quick replies to their own turns once earlier memory work settles mid-reply (%s lease)",
+  async (kind, createAccess) => {
+    // Chat pacing: each reply arrives a few seconds after the previous answer,
+    // while that turn's buffered observation still runs, and the earlier
+    // observation finishes while the reply is still answering.
+    const firstObservation = gate();
+    const replyObservation = gate();
+    const observations = [firstObservation, replyObservation];
+    const secondAnswer = gate();
+    let observerCalls = 0;
+    let actorCalls = 0;
+    const { access, useServer } = await createAccess();
+    const thread = `quick-reply-chain-${kind.replaceAll(" ", "-")}`;
+    const { api, turn } = await setup(access, {
+      thread,
+      backgroundObservation: true,
+      observerWait: async () => {
+        observerCalls += 1;
+        await observations[observerCalls - 1]?.opened;
+      },
+      actorWait: async (call) => {
+        actorCalls = call;
+        if (call === 2) await secondAnswer.opened;
+      },
+      // The reply reads evidence, so its next step starts its own buffered
+      // observation after the first turn's observation has finished.
+      callsTool: (call) => call === 2,
+    });
+    useServer(0);
+    expect(await turn(LONG_MESSAGE)).toBe("done");
+    await vi.waitFor(() => expect(observerCalls).toBe(1));
+    useServer(1);
+    const reply = turn(LONG_MESSAGE);
+    await vi.waitFor(() => expect(actorCalls).toBe(2));
+    // The first turn's observation settles and it releases the selectors.
+    firstObservation.open();
+    await vi.waitFor(
+      () => expect(outcomes(api)[0]).toBe("completed/eligible"),
+      { timeout: 5000 },
+    );
+    // The reply then writes memory and starts its own observation.
+    secondAnswer.open();
+    expect(await reply).toBe("done");
+    await vi.waitFor(() => expect(observerCalls).toBe(2));
+    useServer(0);
+    expect(await turn("Second quick reply.")).toBe("done");
+    replyObservation.open();
+    await vi.waitFor(
+      () =>
+        expect(outcomes(api)).toEqual([
+          "completed/eligible",
+          "completed/ineligible/earlier_turn_finalizing",
+          "completed/ineligible/earlier_turn_finalizing",
+        ]),
+      { timeout: 5000 },
+    );
+    // A turn that starts after every earlier memory write has settled is
+    // eligible again.
+    useServer(1);
+    expect(await turn("After a pause.")).toBe("done");
+    await vi.waitFor(
+      () => expect(outcomes(api).at(-1)).toBe("completed/eligible"),
+      { timeout: 5000 },
+    );
   },
   15_000,
 );

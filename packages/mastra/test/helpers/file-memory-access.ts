@@ -144,7 +144,6 @@ export function createFileMemoryAccess(
             }
           } else {
             await rm(join(dir, `turn-${token}`), { force: true });
-            await rm(join(dir, `finalizing-${token}`), { force: true });
           }
           if (
             !(await exists(join(dir, "owner"))) &&
@@ -170,15 +169,13 @@ export function createFileMemoryAccess(
         });
       },
       async markFinalizing() {
-        if (released) return;
+        // A turn that does not own the selectors is already ineligible, so a
+        // later cooperative turn follows it whether or not it is finalizing.
+        if (released || !owns) return;
         await withScopes(selector, async (dirs) => {
-          for (const dir of dirs) {
-            if (!owns) {
-              if (await exists(join(dir, `turn-${token}`)))
-                await writeFile(join(dir, `finalizing-${token}`), "");
-            } else if ((await readFile(join(dir, "owner"), "utf8")) === token)
+          for (const dir of dirs)
+            if ((await readFile(join(dir, "owner"), "utf8")) === token)
               await writeFile(join(dir, "finalizing"), token);
-          }
         });
       },
       overlapsFinalizingTurn,
@@ -186,25 +183,21 @@ export function createFileMemoryAccess(
   }
 
   /**
-   * Whether some holder is finalizing and no eligible owner is not. Turns
-   * that do not own a selector are never eligible.
+   * Whether no eligible owner is still answering. Turns that do not own a
+   * selector are never eligible.
    */
   async function followsFinalizingHolder(dirs: string[]): Promise<boolean> {
-    let finalizing = false;
     for (const dir of dirs) {
       const owner = await readFile(join(dir, "owner"), "utf8").catch(
         () => undefined,
       );
-      if ((await readdir(dir)).some((name) => name.startsWith("finalizing-")))
-        finalizing = true;
       if (owner === undefined) continue;
       const marked = await readFile(join(dir, "finalizing"), "utf8").catch(
         () => undefined,
       );
       if (marked !== owner) return false;
-      finalizing = true;
     }
-    return finalizing;
+    return true;
   }
 
   return {

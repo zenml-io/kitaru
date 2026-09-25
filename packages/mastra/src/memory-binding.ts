@@ -57,8 +57,9 @@ export interface MastraMemoryLease {
    */
   markFinalizing?(): Promise<void>;
   /**
-   * True when a cooperative acquisition overlapped a finalizing holder. The
-   * lease is then not eligible, and it did not invalidate that holder.
+   * True when a cooperative acquisition overlapped only finalizing holders
+   * and replies that followed one. The lease is then not eligible, and it
+   * did not invalidate any holder.
    */
   readonly overlapsFinalizingTurn?: boolean;
 }
@@ -82,10 +83,12 @@ export interface MastraMemoryLease {
  * writes under that lease, and its recorded evidence does not depend on later
  * turns. A Kitaru turn that starts in that window, such as a quick reply,
  * acquires with `cooperative: true`. When every holder still in the way is
- * either finalizing or already ineligible, and at least one holder is
- * finalizing, the implementation must not invalidate them. That holder may
- * itself be an ineligible reply finishing its own memory work, so a string
- * of quick replies each costs only the reply. It returns a
+ * either finalizing or already ineligible, and no earlier overlap invalidated
+ * a holder of these selectors, the implementation must not invalidate them.
+ * An ineligible holder is then an earlier reply that followed a finalizing
+ * turn, still answering or finishing its own memory work, or the reply's own
+ * turn when the reply registers a write. So a string of quick replies each
+ * costs only the reply. It returns a
  * lease that is not eligible, has `overlapsFinalizingTurn` set, and occupies
  * both selectors until it is released. Writes that turn registers use
  * `cooperative: true` as well. Any other overlap, including a non-cooperative
@@ -209,13 +212,14 @@ export function createProcessLocalMemoryAccess(): MastraExclusiveMemoryAccess {
       const occupied = states.filter((state) => state.turns.size > 0);
       const holders = new Set(occupied.flatMap((state) => [...state.turns]));
       // Without poison, an ineligible holder is itself a turn that followed
-      // a finalizing one; poison means a real conflict, which still counts.
+      // a finalizing one, possibly the caller's own turn registering a write
+      // after that earlier turn released; poison means a real conflict.
       const followsFinalizing =
         options.cooperative === true &&
+        occupied.length > 0 &&
         !unknownWriterPoisoned &&
         occupied.every((state) => !state.poisoned && !state.persistentLoss) &&
-        [...holders].every((turn) => turn.finalizing || turn.invalidated) &&
-        [...holders].some((turn) => turn.finalizing);
+        [...holders].every((turn) => turn.finalizing || turn.invalidated);
       if (occupied.length > 0 && !followsFinalizing) poison(occupied, false);
       const owner: Turn = {
         onConflict: options.onConflict,
