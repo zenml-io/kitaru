@@ -57,6 +57,7 @@ The image is the published `zenmldocker/kitaru-server`, tagged to match the char
 - **Migrations** run as a Helm hook Job before the server pods roll, so an upgrade that needs a schema change can't race its own pods. If the migration fails, the release fails and the previous version keeps running.
 - **Scaling**: the server is stateless between requests; enable the HPA block or set replicas directly. All state is in Postgres.
 - **Routing**: classic Ingress (nginx by default) and Gateway API HTTPRoute are both supported; enable exactly one.
+- **Uploads**: the server accepts blobs up to 100 MiB by default, and the nginx ingress allows 101 MiB to leave room for multipart form overhead. If you change `KITARU_SERVER_MAX_BLOB_SIZE_BYTES` through `server.environment`, raise `server.ingress.annotations[nginx.ingress.kubernetes.io/proxy-body-size]` to fit the blob plus request overhead. Other ingress controllers and gateways need their own request-size limit configured to fit both.
 
 After install, point your team at it:
 

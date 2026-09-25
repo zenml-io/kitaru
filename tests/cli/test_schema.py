@@ -166,6 +166,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     }
     assert "--analyzer-connection" in session_import_names
     assert "--evaluator-connection" in session_import_names
+    assert "--max-upload-mib" in session_import_names
 
     [version] = describe_schema(("version",))
     assert version["offline"] is True
