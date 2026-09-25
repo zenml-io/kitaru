@@ -662,6 +662,150 @@ it.each([
   await binding.release();
 });
 
+async function seedOtherThread(domain: MemoryStorage) {
+  await domain.saveThread({
+    thread: {
+      id: "other-thread",
+      resourceId: RESOURCE,
+      title: "Other",
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    },
+  });
+  await domain.saveMessages({
+    messages: [
+      {
+        id: "other-message",
+        role: "user",
+        content: { format: 2, parts: [{ type: "text", text: "other" }] },
+        createdAt: new Date(0),
+        threadId: "other-thread",
+        resourceId: RESOURCE,
+      },
+    ],
+  });
+  return domain.initializeObservationalMemory({
+    threadId: "other-thread",
+    resourceId: RESOURCE,
+    scope: "thread",
+    config: {},
+  });
+}
+
+it.each([
+  {
+    name: "deletes another thread's message",
+    method: "deleteMessages" as const,
+    write: (domain: MemoryStorage) => domain.deleteMessages(["other-message"]),
+  },
+  {
+    name: "updates another thread's message by ID",
+    method: "updateMessages" as const,
+    write: (domain: MemoryStorage) =>
+      domain.updateMessages({
+        messages: [
+          {
+            id: "other-message",
+            content: { format: 2, parts: [{ type: "text", text: "changed" }] },
+          },
+        ],
+      }),
+  },
+  {
+    name: "sets another thread's pending OM tokens",
+    method: "setPendingMessageTokens" as const,
+    write: (domain: MemoryStorage, recordId: string) =>
+      domain.setPendingMessageTokens(recordId, 7),
+  },
+  {
+    name: "updates another thread's active observations",
+    method: "updateActiveObservations" as const,
+    write: (domain: MemoryStorage, recordId: string) =>
+      domain.updateActiveObservations({
+        id: recordId,
+        observations: "changed",
+        tokenCount: 1,
+        lastObservedAt: new Date(1),
+      }),
+  },
+  {
+    name: "sets another thread's OM flag",
+    method: "setObservingFlag" as const,
+    write: (domain: MemoryStorage, recordId: string) =>
+      domain.setObservingFlag(recordId, true),
+  },
+  {
+    name: "changes another thread's OM config",
+    method: "updateObservationalMemoryConfig" as const,
+    write: (domain: MemoryStorage, recordId: string) =>
+      domain.updateObservationalMemoryConfig({ id: recordId, config: {} }),
+  },
+])(
+  "keeps a native write that $name by ID but refuses replay",
+  async ({ method, write }) => {
+    const { runtime, binding } = await fixture();
+    const other = await seedOtherThread(runtime.domain);
+    await binding.captureInitial(runtime.memory);
+    const native = vi.spyOn(runtime.domain, method);
+    await write(binding.domain, other.id);
+    await binding.drain();
+    expect(binding.incompleteReason).toBe("memory_evidence_incomplete");
+    expect(binding.incompleteReasons).toEqual([
+      "Memory mutation names a message or observational-memory record outside the captured scope.",
+    ]);
+    expect(native).toHaveBeenCalledOnce();
+    await binding.release();
+  },
+);
+
+it("keeps a turn eligible when it changes rows it holds or created", async () => {
+  const { runtime, binding } = await fixture();
+  await seedOtherThread(runtime.domain);
+  await binding.captureInitial(runtime.memory);
+  const current = required(
+    await binding.domain.getObservationalMemory(THREAD, RESOURCE),
+  );
+  await binding.domain.saveMessages({
+    messages: [
+      {
+        id: "turn-message",
+        role: "assistant",
+        content: { format: 2, parts: [{ type: "text", text: "reply" }] },
+        createdAt: new Date(1),
+        threadId: THREAD,
+        resourceId: RESOURCE,
+      },
+    ],
+  });
+  await binding.domain.updateMessages({
+    messages: [
+      {
+        id: "turn-message",
+        content: { format: 2, parts: [{ type: "text", text: "edited" }] },
+      },
+    ],
+  });
+  await binding.domain.updateMessages({
+    messages: [
+      {
+        id: "historical-message",
+        content: { format: 2, parts: [{ type: "text", text: "edited" }] },
+      },
+    ],
+  });
+  await binding.domain.setPendingMessageTokens(current.id, 3);
+  const next = await binding.domain.createReflectionGeneration({
+    currentRecord: current,
+    reflection: "reflected",
+    tokenCount: 1,
+  });
+  await binding.domain.setReflectingFlag(next.id, false);
+  await binding.domain.deleteMessages(["turn-message"]);
+  await binding.drain();
+  expect(binding.incompleteReasons).toEqual([]);
+  await binding.release();
+});
+
 it("rejects same-invocation writes that interleave with initial snapshot reads", async () => {
   const { runtime, binding } = await fixture();
   const native = runtime.domain.getThreadById.bind(runtime.domain);

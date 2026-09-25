@@ -699,6 +699,92 @@ function targetsOutsideSelector(
   );
 }
 
+/** Message and OM record IDs, split by the table each names a row in. */
+interface MemoryRowIds {
+  messages: unknown[];
+  records: unknown[];
+}
+
+/**
+ * Collect the message and OM record IDs a mutation names in its arguments.
+ *
+ * `updateMessages` names each row by ID even when it also names a thread,
+ * since a thread ID there moves the row rather than locating it.
+ */
+function getAddressedRows(
+  method: PropertyKey,
+  args: readonly unknown[],
+): MemoryRowIds {
+  const [input] = args;
+  const one = record(input) ? input : {};
+  switch (method) {
+    case "deleteMessages":
+      return { messages: Array.isArray(input) ? input : [input], records: [] };
+    case "updateMessages":
+      return {
+        messages: Array.isArray(one.messages)
+          ? one.messages.map((message) =>
+              record(message) ? message.id : undefined,
+            )
+          : [undefined],
+        records: [],
+      };
+    case "updateActiveObservations":
+    case "updateBufferedObservations":
+    case "swapBufferedToActive":
+    case "updateBufferedReflection":
+    case "updateObservationalMemoryConfig":
+      return { messages: [], records: [one.id] };
+    case "createReflectionGeneration":
+    case "swapBufferedReflectionToActive":
+      return {
+        messages: [],
+        records: [record(one.currentRecord) ? one.currentRecord.id : undefined],
+      };
+    case "setReflectingFlag":
+    case "setObservingFlag":
+    case "setBufferingObservationFlag":
+    case "setBufferingReflectionFlag":
+    case "setPendingMessageTokens":
+      return { messages: [], records: [input] };
+    default:
+      return { messages: [], records: [] };
+  }
+}
+
+/** Collect the message and OM record IDs a mutation's arguments or result create. */
+function getCreatedRows(
+  method: PropertyKey,
+  args: readonly unknown[],
+  output: unknown,
+): MemoryRowIds {
+  const [input] = args;
+  switch (method) {
+    case "saveMessages": {
+      const saved = [input, output].flatMap((value) =>
+        record(value) && Array.isArray(value.messages) ? value.messages : [],
+      );
+      return {
+        messages: saved.map((message) =>
+          record(message) ? message.id : undefined,
+        ),
+        records: [],
+      };
+    }
+    case "insertObservationalMemoryRecord":
+      return { messages: [], records: [record(input) ? input.id : undefined] };
+    case "initializeObservationalMemory":
+    case "createReflectionGeneration":
+    case "swapBufferedReflectionToActive":
+      return {
+        messages: [],
+        records: [record(output) ? output.id : undefined],
+      };
+    default:
+      return { messages: [], records: [] };
+  }
+}
+
 function modelIdentity(model: unknown): string {
   if (typeof model === "string" && model) return model;
   if (
@@ -889,6 +975,23 @@ export function createMemoryCaptureBinding(
     resourceId: options.resourceId,
   };
   let settling: Promise<void> | undefined;
+  // Rows the initial snapshot holds or this invocation created. A mutation
+  // that names a row only by ID is in scope only when the ID is one of these.
+  const knownRows = { messages: new Set<string>(), records: new Set<string>() };
+  function addKnownRows(rows: MemoryRowIds): void {
+    for (const id of rows.messages)
+      if (typeof id === "string") knownRows.messages.add(id);
+    for (const id of rows.records)
+      if (typeof id === "string") knownRows.records.add(id);
+  }
+  function namesUnknownRow(rows: MemoryRowIds): boolean {
+    const unknown = (known: Set<string>) => (id: unknown) =>
+      typeof id !== "string" || !known.has(id);
+    return (
+      rows.messages.some(unknown(knownRows.messages)) ||
+      rows.records.some(unknown(knownRows.records))
+    );
+  }
   // A hung buffering operation stays in Mastra's process-wide map; stop
   // polling it once a bounded caller has given up on this invocation.
   let joinAbandoned = false;
@@ -983,6 +1086,8 @@ export function createMemoryCaptureBinding(
             getReplayReason(error, "recorded_evidence_unsupported"),
           );
         }
+        // A caller may address rows it is saving before the save resolves.
+        addKnownRows(getCreatedRows(property, callerArgs, undefined));
         if (!started || released)
           markIncomplete(
             "Memory mutation occurred outside the owned invocation lifecycle.",
@@ -1000,6 +1105,15 @@ export function createMemoryCaptureBinding(
         else if (targetsOutsideSelector(property, callerArgs, selector))
           markIncomplete(
             "Memory mutation targets a thread or resource outside the captured scope.",
+          );
+        // Joined work from an earlier turn settles before the snapshot is
+        // read, so the rows it names are the snapshot's own.
+        else if (
+          !capturing &&
+          namesUnknownRow(getAddressedRows(property, callerArgs))
+        )
+          markIncomplete(
+            "Memory mutation names a message or observational-memory record outside the captured scope.",
           );
         const duringCapture = capturing;
         const result = mutations.then(async () => {
@@ -1022,6 +1136,7 @@ export function createMemoryCaptureBinding(
               markLeaseUnavailable,
             );
           }
+          addKnownRows(getCreatedRows(property, callerArgs, output));
           // Joined work from a previous turn belongs to the initial snapshot.
           if (duringCapture) return output;
           revision += 1;
@@ -1270,6 +1385,10 @@ export function createMemoryCaptureBinding(
                   "memory_read_failed",
                 );
               });
+            addKnownRows({
+              messages: messages.map((message) => message.id),
+              records: records.map((row) => row.id),
+            });
             const snapshot = {
               threadId: options.threadId,
               resourceId: options.resourceId,
