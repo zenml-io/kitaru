@@ -36,6 +36,8 @@ Wrap an existing compiled graph directly with `KitaruGraphRunner(graph)` when yo
 
 Replay support depends on how the graph was constructed. See the [LangGraph adapter guide and capability matrix](https://docs.zenml.io/kitaru/adapters/langgraph) for supported invocation methods, overrides, tool policies, interrupts, and failure behavior.
 
+LangGraph trace policies can omit middleware span inputs before callbacks receive them. With Deep Agents 0.7.9 and later, some built-in middleware spans therefore record `inputs: {}`; this does not prove that the hook received empty state. Model and tool call inputs remain recorded. See the [adapter guide](https://docs.zenml.io/kitaru/adapters/langgraph) for details.
+
 ## Links
 
 - [Kitaru documentation](https://docs.zenml.io/kitaru)
