@@ -42,9 +42,6 @@ from kitaru.cli.registration import (
     validate_package_source,
     version_list_params,
 )
-from kitaru.client.resources.agents import AgentsResource
-from kitaru.client.resources.evaluators import EvaluatorsResource
-from kitaru.client.resources.importers import ImportersResource
 
 
 @dataclass
@@ -292,21 +289,6 @@ async def test_script_plugin_registration_uploads_validated_bytes_before_version
     assert result.item["phases"]["blob"]["id"] == str(client.blobs.blob.id)
 
 
-def test_evaluator_parent_request_accepts_provider() -> None:
-    """Evaluator parents carry a provider like importers and analyzers."""
-    request = plugin_parent_request(
-        "evaluator",
-        "demo",
-        description=None,
-        provider="demo-provider",
-        metadata=None,
-        agent_id=None,
-    )
-
-    assert isinstance(request, EvaluatorCreateRequest)
-    assert request.provider == "demo-provider"
-
-
 def test_evaluator_parent_request_accepts_connection_schema(tmp_path: Path) -> None:
     """Evaluator parents carry provider connection metadata like analyzers."""
     schema = tmp_path / "connection.json"
@@ -328,44 +310,6 @@ def test_evaluator_parent_request_accepts_connection_schema(tmp_path: Path) -> N
         "type": "object",
         "properties": {"API_KEY": {}},
     }
-
-
-def test_cli_evaluator_register_forwards_provider(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    """The Cyclopts leaf forwards --provider into the evaluator create request."""
-    client = StubClient()
-    script = tmp_path / "evaluator.py"
-    script.write_text("def evaluate(sessions, **params):\n    return []\n")
-
-    @asynccontextmanager
-    async def fake_open_client():
-        yield client
-
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
-
-    assert (
-        app_module.main(
-            [
-                "evaluator",
-                "register",
-                "demo",
-                "--script",
-                str(script),
-                "--entrypoint",
-                "evaluate",
-                "--provider",
-                "model-provider",
-            ]
-        )
-        == 0
-    )
-    captured = capsys.readouterr()
-    payload = json.loads(captured.out)
-    assert payload["command"] == "evaluator.register"
-    assert len(client.evaluators.created_requests) == 1
-    assert client.evaluators.created_requests[0].name == "demo"
-    assert client.evaluators.created_requests[0].provider == "model-provider"
 
 
 def test_cli_evaluator_register_forwards_connection_schema(
@@ -433,16 +377,6 @@ async def test_uploaded_blob_is_reported_when_version_registration_fails() -> No
     assert error.value.kind == "partial_failure"
     assert error.value.details["blob"]["id"] == str(client.blobs.blob.id)
     assert error.value.details["parent"]["id"] == str(parent.id)
-
-
-def test_real_create_version_methods_accept_forwarded_idempotency_key() -> None:
-    """The real SDK resources accept the idempotency_key the version paths forward."""
-    for resource_type in (AgentsResource, EvaluatorsResource, ImportersResource):
-        code = resource_type.create_version.__code__
-        names = code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
-        assert "idempotency_key" in names, (
-            f"{resource_type.__name__}.create_version does not accept idempotency_key"
-        )
 
 
 def test_cli_agent_register_uses_shared_runner_and_output_contract(

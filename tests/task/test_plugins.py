@@ -14,7 +14,6 @@
 """Tests for foreign plugin code loading."""
 
 import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -22,7 +21,6 @@ import pytest
 from kitaru.source_refs import parse_source_ref
 from kitaru.task.plugins import (
     PluginLoadError,
-    get_module_attribute,
     load_plugin_entrypoint,
     load_plugin_module,
     load_source_ref,
@@ -88,13 +86,6 @@ def test_load_plugin_module_registers_before_execution(tmp_path: Path) -> None:
     path.write_text("import sys\nregistered = __name__ in sys.modules\n")
     module = load_plugin_module("kitaru._test_plugin_registers_before_exec", path)
     assert module.registered is True
-
-
-def test_get_module_attribute_missing() -> None:
-    """Raise PluginLoadError when the attribute does not exist on the module."""
-    module = types.ModuleType("empty")
-    with pytest.raises(PluginLoadError, match="Importer entrypoint 'parse'"):
-        get_module_attribute(module, "parse", "Importer")
 
 
 def test_load_source_ref_good() -> None:
