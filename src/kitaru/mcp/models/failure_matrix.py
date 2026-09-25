@@ -114,6 +114,13 @@ class MatrixCell(MCPModel):
     compare_attempts: int | None = None
 
 
+class EvaluationCount(MCPModel):
+    """A failed evaluation and how many sessions failed it."""
+
+    name: str
+    count: int
+
+
 class GroupSummary(MCPModel):
     """Headline numbers for one session group."""
 
@@ -123,7 +130,9 @@ class GroupSummary(MCPModel):
     located_count: int
     shown_count: int = Field(description="Located failures matching the sources.")
     unlocated_count: int
-    unlocated_evaluations: dict[str, int] = Field(
+    # Names are values, not keys: redaction masks the value under any key that
+    # looks sensitive, which would turn an evaluation named `api_key` into "***".
+    unlocated_evaluations: list[EvaluationCount] = Field(
         description="Most common failed evaluations among unlocated sessions."
     )
     truncated: bool = Field(description="More sessions matched than max_sessions.")

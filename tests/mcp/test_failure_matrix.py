@@ -323,7 +323,7 @@ def test_comparison_text_lists_the_largest_changes_first() -> None:
         located_count=0,
         shown_count=0,
         unlocated_count=0,
-        unlocated_evaluations={},
+        unlocated_evaluations=[],
         truncated=False,
     )
     data = FailureMatrixData(
@@ -423,6 +423,35 @@ async def test_matrix_tool_returns_summary_text_and_structured_matrix() -> None:
     assert data["base"]["failed_count"] == 3
     cell = next(c for c in data["cells"] if c["to_state"] == "issue_refund")
     assert (cell["count"], cell["error_count"], cell["attempts"]) == (3, 3, 3)
+
+
+async def test_sensitive_looking_evaluation_names_survive_redaction() -> None:
+    session = _session("completed")
+    records = _records(
+        {session.id: [_node(session, "a", "tool_call", "lookup_order")]},
+        [session],
+        evaluations=[_evaluation(session, "api_key")],
+    )
+    server, context = build_server_context(_FakeClient(records))
+
+    result = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+
+    structured = cast(dict[str, Any], cast(CallToolResult, result).structured_content)
+    assert structured["ok"] is True
+    assert structured["data"]["base"]["unlocated_evaluations"] == [
+        {"name": "api_key", "count": 1}
+    ]
+
+
+def test_blank_node_names_get_a_drillable_label() -> None:
+    session = _session("failed")
+    node = _node(session, "a", "tool_call", "  ", status="failed")
+
+    [outcome] = analyze_group(
+        _records({session.id: [node]}, [session]), build_labeler("tool", None), None
+    )
+
+    assert outcome.failure_transition == (START, "unnamed tool_call")
 
 
 async def test_cell_tool_reuses_cached_group_and_lists_sessions() -> None:

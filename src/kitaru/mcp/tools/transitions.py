@@ -19,6 +19,7 @@ from kitaru.mcp.models.failure_matrix import (
     START,
     CellPattern,
     CellSession,
+    EvaluationCount,
     FailureCellData,
     FailureSource,
     GroupRecords,
@@ -84,15 +85,23 @@ def map_state(name: str, patterns: Sequence[tuple[str, str]]) -> str:
 
 def _raw_state(node: SessionNodeResponse, state_by: StateBy) -> str | None:
     if node.node_type == NodeType.TOOL_CALL and state_by != "span":
-        return node.tool_name or node.name
+        return _node_name(node, node.tool_name)
     if node.node_type == NodeType.SUBAGENT_CALL and state_by != "span":
-        return node.subagent_id or node.name
+        return _node_name(node, node.subagent_id)
     # A root span wraps the whole run, so it never marks a step inside it.
     if node.node_type == NodeType.SPAN and state_by != "tool":
-        return node.name if node.parent_external_id is not None else None
+        return _node_name(node) if node.parent_external_id is not None else None
     if node.node_type == NodeType.LLM_CALL and state_by == "node":
         return "llm"
     return None
+
+
+def _node_name(node: SessionNodeResponse, preferred: str | None = None) -> str:
+    # Recorded names can be blank, and a blank state cannot be drilled into.
+    for name in (preferred, node.name):
+        if name and name.strip():
+            return name
+    return f"unnamed {node.node_type}"
 
 
 def first_failure_marks(
@@ -189,7 +198,7 @@ def analyze_session(
         and (state := labeler(node)) is not None
     )
     own_state = labeler(point.node)
-    fallback = _raw_state(point.node, "node") or point.node.name
+    fallback = _raw_state(point.node, "node") or _node_name(point.node)
     path = (*before, own_state or map_state(fallback, state_map))
     # A failing step that is not itself a state never counts as a tried transition,
     # so its cell reports failures without a failure rate.
@@ -382,11 +391,12 @@ def summarize_group(
         located_count=sum(o.point is not None for o in outcomes),
         shown_count=sum(is_counted(o, sources) for o in outcomes),
         unlocated_count=len(unlocated),
-        unlocated_evaluations=dict(
-            Counter(
+        unlocated_evaluations=[
+            EvaluationCount(name=name, count=count)
+            for name, count in Counter(
                 name for o in unlocated for name in set(o.failed_evaluations)
             ).most_common(MAX_UNLOCATED_EVALUATIONS)
-        ),
+        ],
         truncated=truncated,
     )
 

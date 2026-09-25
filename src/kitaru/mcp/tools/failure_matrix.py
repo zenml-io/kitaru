@@ -263,7 +263,7 @@ def _describe_group(group: GroupSummary) -> str:
     )
     if group.unlocated_count:
         evaluations = ", ".join(
-            f"{name} x{count}" for name, count in group.unlocated_evaluations.items()
+            f"{item.name} x{item.count}" for item in group.unlocated_evaluations
         )
         text += (
             f"; {group.unlocated_count} failed without a located step"

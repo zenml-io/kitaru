@@ -7923,6 +7923,26 @@
     "name": "kitaru_failure_matrix",
     "outputSchema": {
       "$defs": {
+        "EvaluationCount": {
+          "additionalProperties": false,
+          "description": "A failed evaluation and how many sessions failed it.",
+          "properties": {
+            "count": {
+              "title": "Count",
+              "type": "integer"
+            },
+            "name": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "count"
+          ],
+          "title": "EvaluationCount",
+          "type": "object"
+        },
         "FailureMatrixData": {
           "additionalProperties": false,
           "description": "Transition failure matrix over one group, optionally compared to a second.",
@@ -8017,12 +8037,12 @@
               "type": "integer"
             },
             "unlocated_evaluations": {
-              "additionalProperties": {
-                "type": "integer"
-              },
               "description": "Most common failed evaluations among unlocated sessions.",
+              "items": {
+                "$ref": "#/$defs/EvaluationCount"
+              },
               "title": "Unlocated Evaluations",
-              "type": "object"
+              "type": "array"
             }
           },
           "required": [

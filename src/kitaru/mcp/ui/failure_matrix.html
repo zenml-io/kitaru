@@ -417,7 +417,7 @@ function cellButton(cell, row, col, o) {
 
 function tipLines(cell, compare) {
   const pair = pairText(cell.from_state, cell.to_state);
-  const tries = (n, a) => (a ? `${n} of ${a} tries` : `${n} failures (the failing step is not a state, so no rate)`);
+  const tries = (n, a) => (a ? `${n} of ${a} tries` : n ? `${n} failures (the failing step is not a state, so no rate)` : "no tries");
   if (compare) return [pair, `${cell.count} → ${cell.compare_count ?? 0} failures`, `before: ${tries(cell.count, cell.attempts)} · after: ${tries(cell.compare_count ?? 0, cell.compare_attempts)}`];
   const sources = [cell.error_count ? `${cell.error_count} errors` : null, cell.annotation_count ? `${cell.annotation_count} reviewer marks` : null].filter(Boolean).join(", ");
   return [pair, `${cell.count} failure${cell.count === 1 ? "" : "s"}`, [cell.attempts ? `${tries(cell.count, cell.attempts)} (${pct(cell.count / cell.attempts)})` : "", sources].filter(Boolean).join(" · ")];
@@ -426,7 +426,7 @@ function tipLines(cell, compare) {
 function renderTray(groups) {
   const tray = $("#tray");
   const rows = groups.filter((group) => group.unlocated_count).map((group) => {
-    const evals = Object.entries(group.unlocated_evaluations).map(([name, n]) => `${name} ×${n}`).join(", ");
+    const evals = group.unlocated_evaluations.map((item) => `${item.name} ×${item.count}`).join(", ");
     const link = el("button", { class: "link", text: "Mark them →" });
     link.onclick = () => sendMessage(`Review the ${group.unlocated_count} failed sessions in "${group.label}" that have no located failure step. For each one, find the node where things first went wrong and add an annotation on that node with value {"first_failure": true, "note": "<what went wrong>"}, then rebuild the transition failure matrix.`);
     const prefix = groups.length > 1 ? `${group.label}: ` : "";
