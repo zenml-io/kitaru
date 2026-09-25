@@ -266,7 +266,7 @@ Recording-only problems do not replace the baseline's native answer. When the na
 | Reason | What happened |
 |---|---|
 | `replay_input_too_large` | The thread's memory, or another part of the replay input, is over the replay size budget (16 MiB, 200,000 JSON values, or depth 64). |
-| `credential_key_unsupported` | Memory, request context, or evidence has a credential-named key at any depth, such as `token`, `password`, `headers`, or a compound name like `access_token`, `clientSecret`, or `x-api-key`. |
+| `credential_key_unsupported` | Memory, request context, or evidence has a credential-named key at any depth, such as `token`, `password`, `headers`, or a compound name like `access_token`, `clientSecret`, or `x-api-key`, including one with a format suffix such as `secret_value` or `privateKeyPem`. |
 | `om_config_unsupported` | Observational memory uses `extract` extractors or a model without a static identity, such as a function. |
 | `memory_config_unsupported` | The memory configuration uses options outside isolated replay, such as semantic recall or resource scope. |
 | `agent_config_unsupported` | The agent or its run options use features outside isolated replay. |

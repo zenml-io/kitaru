@@ -144,9 +144,32 @@ const CREDENTIAL_KEY_QUALIFIERS: ReadonlySet<string> = new Set([
   "subscription",
 ]);
 
+// A trailing word that names how a value is written, such as `secret_value`
+// or `privateKeyPem`, does not stop the words before it naming a credential.
+const REPRESENTATION_WORDS: ReadonlySet<string> = new Set([
+  "b64",
+  "base64",
+  "bytes",
+  "data",
+  "der",
+  "encoded",
+  "hex",
+  "json",
+  "pem",
+  "plain",
+  "plaintext",
+  "raw",
+  "str",
+  "string",
+  "text",
+  "value",
+]);
+
 /** Whether an object key names a credential, such as `accessToken` or `client_secret`. */
 export function isCredentialKeyName(name: string): boolean {
   const words = getNameWords(name);
+  while (words.length > 1 && REPRESENTATION_WORDS.has(words.at(-1) ?? ""))
+    words.pop();
   const last = words.at(-1);
   const qualifier = words.at(-2);
   if (last === undefined) return false;
