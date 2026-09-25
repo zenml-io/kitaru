@@ -39,6 +39,10 @@ def test_index_covers_toc_with_published_urls() -> None:
         "<!--" not in entry["excerpt"] and "TODO(v2-launch)" not in entry["excerpt"]
         for entry in index["entries"]
     )
+    assert all("x26;" not in entry["excerpt"] for entry in index["entries"])
+    assert any("Agents & Sessions" in entry["excerpt"] for entry in index["entries"])
+    for identifier in ("KITARU_SERVER_LOG_LEVEL", "exact_set"):
+        assert any(identifier in entry["excerpt"] for entry in index["entries"])
 
 
 def test_source_change_invalidates_index(monkeypatch) -> None:
@@ -102,3 +106,19 @@ def test_multiline_html_comment_does_not_enter_sections() -> None:
     assert [heading for heading, _ in sections] == ["Page", "Visible", "Next"]
     assert "TODO" not in sections[1][1]
     assert "Do not show this" not in sections[1][1]
+
+
+def test_long_excerpt_keeps_identifiers_together() -> None:
+    """A long paragraph splits before configuration terms, not inside them."""
+    body = "word " * 178 + "KITARU_SERVER_LOG_LEVEL exact_set"
+    excerpts = build_mcp_docs_index._get_excerpts(body)
+    assert len(excerpts) == 2
+    assert all(0 < len(excerpt) <= 900 for excerpt in excerpts)
+    assert "KITARU_SERVER_LOG_LEVEL exact_set" in excerpts[1]
+
+
+def test_clean_markdown_decodes_html_entities() -> None:
+    """GitBook card labels keep their visible ampersands."""
+    assert build_mcp_docs_index._clean_markdown("Agents &#x26; Sessions") == (
+        "Agents & Sessions"
+    )

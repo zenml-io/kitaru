@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import re
+from html import unescape
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -63,6 +64,7 @@ def _get_revision(pages: list[tuple[str, str, Path, str]]) -> str:
 
 def _clean_markdown(value: str) -> str:
     """Remove GitBook and Markdown presentation syntax from a short excerpt."""
+    value = unescape(value)
     value = re.sub(r"\{%[^%]*%\}", " ", value)
     value = HTML_TAG.sub(" ", value)
     value = re.sub(r"!\[[^]]*\]\([^)]+\)", " ", value)
@@ -117,9 +119,12 @@ def _get_excerpts(body: str) -> list[str]:
             if current:
                 excerpts.append(current)
                 current = ""
-            excerpts.append(paragraph[:900].rstrip())
-            paragraph = paragraph[900:].lstrip()
-        if len(current) + len(paragraph) + 1 > 900:
+            split_at = paragraph.rfind(" ", 0, 901)
+            if split_at < 1:
+                split_at = 900
+            excerpts.append(paragraph[:split_at].rstrip())
+            paragraph = paragraph[split_at:].lstrip()
+        if current and len(current) + len(paragraph) + 1 > 900:
             excerpts.append(current)
             current = ""
         current = f"{current} {paragraph}".strip()
