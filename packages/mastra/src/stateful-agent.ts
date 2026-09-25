@@ -478,6 +478,14 @@ function liveOMCallNode(
       return null;
     }
   };
+  // The tape keeps the result in codec form; encoding that form again would
+  // reject its own reserved keys.
+  let output: unknown = null;
+  try {
+    output = decodeMemoryValue(call.output);
+  } catch {
+    lossReasons.push("Live observational-memory result could not be recorded.");
+  }
   let model: string | null = null;
   try {
     model = getMemoryModelId(call.model);
@@ -495,7 +503,7 @@ function liveOMCallNode(
       { prompt: call.prompt },
       "Live observational-memory request",
     ),
-    outputs: encode(call.output, "Live observational-memory result"),
+    outputs: encode(output, "Live observational-memory result"),
     model,
     started_at: call.startedAt,
     ended_at: call.endedAt,

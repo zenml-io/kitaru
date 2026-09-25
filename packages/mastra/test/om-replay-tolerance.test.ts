@@ -55,9 +55,22 @@ function setup(options: {
         observerCalls.push(call);
         await options.observe(++observed);
         const seen = markers(JSON.stringify(call.prompt), "EVIDENCE");
-        return textStream(
-          `<observations>\nOBSERVED: ${seen.map((n) => `OBSERVED_${n}_MARK`).join(" ")} ${"The user changed the preference to replay-green. ".repeat(15)}\n</observations>\n<current-task>Continue.</current-task>`,
-        );
+        // Providers stamp their response metadata with a Date.
+        return streamParts([
+          {
+            type: "response-metadata",
+            id: `observation-${observed}`,
+            timestamp: new Date(0),
+            modelId: "observer",
+          },
+          { type: "text-start", id: "text" },
+          {
+            type: "text-delta",
+            id: "text",
+            delta: `<observations>\nOBSERVED: ${seen.map((n) => `OBSERVED_${n}_MARK`).join(" ")} ${"The user changed the preference to replay-green. ".repeat(15)}\n</observations>\n<current-task>Continue.</current-task>`,
+          },
+          { type: "text-end", id: "text" },
+        ]);
       },
     }),
   };
@@ -339,6 +352,7 @@ it("answers a missing blocking observation live when the replay opts in", async 
           name: string;
           node_type: string;
           model: string | null;
+          outputs: unknown;
           attributes: Record<string, unknown>;
         }>,
     )
@@ -348,9 +362,18 @@ it("answers a missing blocking observation live when the replay opts in", async 
       name: "om_observer_live_call",
       node_type: "llm_call",
       model: "fixture/observer",
-      attributes: { om_phase: "observer", evidence_complete: true },
+      attributes: {
+        om_phase: "observer",
+        evidence_complete: true,
+        evidence_loss_reasons: [],
+      },
     },
   ]);
+  // The live result is kept, Date included, as the reviewer saw it.
+  expect(JSON.stringify(liveNodes[0]?.outputs)).toContain("OBSERVED:");
+  expect(JSON.stringify(liveNodes[0]?.outputs)).toContain(
+    '{"$mastra":"date","value":"1970-01-01T00:00:00.000Z"}',
+  );
   expect(nodeNames(calls)).toContain("om_call_divergence");
   await fixture.runtime.store.close();
 });
