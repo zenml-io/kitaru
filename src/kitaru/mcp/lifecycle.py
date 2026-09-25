@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from typing import TypeVar
 
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.mcp.cache import TTLCache
+from kitaru.mcp.models.failure_matrix import GroupRecords
 from kitaru.mcp.settings import MCPSettings
 
 ResultT = TypeVar("ResultT")
@@ -21,6 +23,11 @@ class MCPServerState:
     settings: MCPSettings
     client: KitaruAPIClient
     semaphore: asyncio.Semaphore = field(init=False)
+    # Cell drill-downs must read the records the visible matrix was built from,
+    # so each matrix keeps its records briefly under a snapshot id.
+    matrix_snapshots: TTLCache[tuple[GroupRecords, ...]] = field(
+        default_factory=lambda: TTLCache(max_entries=4, ttl_seconds=300), init=False
+    )
     _closed: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:

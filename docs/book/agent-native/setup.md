@@ -60,6 +60,8 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_activity_read` | read-only | Read sessions, replays, evaluations, runs, jobs, and their children |
 | `kitaru_review_read` | read-only | Read [investigations and annotations](../concepts/investigations.md) |
 | `kitaru_connection_read` | read-only | Read [provider connections](../guides/provider-connections.md) without their secret values |
+| `kitaru_failure_matrix` | read-only | Show where a group of sessions first goes wrong, as an interactive [transition failure matrix](#transition-failure-matrix) |
+| `kitaru_failure_matrix_cell` | read-only | List the sessions behind one matrix cell; the matrix view calls it, and hosts that support MCP Apps hide it from the assistant |
 | `kitaru_cohorts_manage` | standard | Create or update cohorts and cohort versions |
 | `kitaru_experiments_manage` | standard | Create or update experiments |
 | `kitaru_session_import` | standard | Import sessions from an already-uploaded blob |
@@ -71,6 +73,16 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_delete` | destructive | Delete a cohort, experiment, investigation, annotation, evaluator, version, connection, run, or tag; unlink an exact tag-resource tuple |
 
 Start assistants in `read-only`, move to `standard` when you want them building cohorts and starting runs, and reserve `destructive` for sessions where you are watching closely.
+
+### Transition failure matrix
+
+Ask your assistant something like "where do the failed sessions of my support agent go wrong?" and it calls `kitaru_failure_matrix`. Each failed session adds one count to a grid: the row is the last step that went right, the column is the first step that went wrong. The busiest cells show where to look first.
+
+In hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview), such as Claude Desktop, ChatGPT, Codex, and VS Code, the result appears as an interactive heatmap. Click a cell to read its sessions and their most common failure notes, switch between failure counts and failure rates, or send a follow-up to the assistant from the view. Other hosts get the same numbers as a text summary.
+
+- **Choosing sessions.** `filter` selects the group, for example by `agent_id`, `cohort_version_id`, or a `started_at` range. Pass `compare_filter`, such as a replay's `experiment_run_id`, to see which cells a change emptied and which it filled.
+- **Choosing states.** `state_by` sets which nodes count as steps: tool and subagent calls (`tool`), spans such as LangGraph graph nodes (`span`), or both plus LLM calls (`node`). `state_map` merges steps with glob patterns, for example `{"sql_*": "SQL"}`.
+- **Locating failures.** A session counts as failed when its status is failed, an evaluation failed, or a reviewer marked a step. A failure that raised an error is placed at the deepest failed node, not the enclosing span that inherited the failed status. A failure that raised no error, such as a wrong answer, needs a reviewer: add an annotation on the failing node with the value `{"first_failure": true, "note": "what went wrong"}`. Failed sessions without a located step are counted separately rather than guessed.
 
 Tag operations follow the same split. In `read-only`, `kitaru_registry_read` can list tags and filter them by name. Existing filtered registry or activity reads can then find sessions, agent versions, cohort versions, cohorts, experiments, and experiment runs carrying that tag. The MCP server cannot enumerate a tag's links directly. In `standard`, `kitaru_review_manage` supports `create_tag`, `update_tag`, and `link_tag`. In `destructive`, `kitaru_delete` can unlink one exact `(tag, resource type, resource id)` tuple or delete the tag. Deleting a tag also deletes every link that points from it.
 

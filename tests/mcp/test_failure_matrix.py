@@ -1,0 +1,716 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+"""Transition failure matrix analysis, handlers, and MCP Apps wiring."""
+
+import uuid
+from collections.abc import AsyncIterator, Sequence
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
+
+import pytest
+from mcp.server.lowlevel.helper_types import ReadResourceContents
+from mcp.types import CallToolResult, TextContent
+from mcp_fakes import build_server_context
+from pydantic import ValidationError
+
+from kitaru.api_models.v1.annotation import AnnotationResponse, AnnotationSelector
+from kitaru.api_models.v1.base import JsonValue, Page
+from kitaru.api_models.v1.evaluation import EvaluationResponse
+from kitaru.api_models.v1.session import SessionResponse
+from kitaru.api_models.v1.session_node import SessionNodeResponse
+from kitaru.mcp.apps import FAILURE_MATRIX_URI
+from kitaru.mcp.models.failure_matrix import (
+    FailureMatrixData,
+    FailureMatrixRequest,
+    GroupRecords,
+    GroupSummary,
+    MatrixCell,
+)
+from kitaru.mcp.server import create_server
+from kitaru.mcp.settings import MCPSettings
+from kitaru.mcp.tools import failure_matrix
+from kitaru.mcp.tools.failure_matrix import describe_matrix
+from kitaru.mcp.tools.transitions import (
+    START,
+    analyze_group,
+    build_cells,
+    build_labeler,
+    cell_details,
+    fold_rare_states,
+    locate_failure,
+    summarize_group,
+)
+
+T0 = datetime(2026, 9, 1, tzinfo=UTC)
+
+
+def _session(status: str = "completed") -> SessionResponse:
+    return SessionResponse.model_construct(
+        id=uuid.uuid4(), number=1, name=None, status=status, agent_id=uuid.uuid4()
+    )
+
+
+def _node(
+    session: SessionResponse,
+    external_id: str,
+    kind: str,
+    name: str,
+    *,
+    parent: str | None = None,
+    status: str = "completed",
+    error: str | None = None,
+    at: int = 0,
+) -> SessionNodeResponse:
+    return SessionNodeResponse(
+        id=uuid.uuid4(),
+        session_id=session.id,
+        external_id=external_id,
+        parent_external_id=parent,
+        links=[],
+        node_type=kind,
+        name=name,
+        tool_name=name if kind == "tool_call" else None,
+        status=status,
+        error=error,
+        started_at=T0 + timedelta(seconds=at),
+        metadata={},
+    )
+
+
+def _annotation(node: SessionNodeResponse, value: JsonValue) -> AnnotationResponse:
+    return AnnotationResponse.model_construct(
+        session_id=node.session_id,
+        selector=AnnotationSelector(node_id=node.id),
+        value=value,
+        question_key=None,
+    )
+
+
+def _evaluation(session: SessionResponse, name: str) -> EvaluationResponse:
+    return EvaluationResponse.model_construct(
+        session_id=session.id, name=name, passed=False
+    )
+
+
+def _langgraph_failure(session: SessionResponse) -> list[SessionNodeResponse]:
+    """Root span and graph node both inherit the failed status of the tool."""
+    return [
+        _node(session, "root", "span", "invoke", status="failed", at=0),
+        _node(session, "look", "tool_call", "lookup_order", parent="root", at=1),
+        _node(session, "agent", "span", "agent", parent="root", status="failed", at=2),
+        _node(
+            session,
+            "refund",
+            "tool_call",
+            "issue_refund",
+            parent="agent",
+            status="failed",
+            error="TimeoutError: payments API",
+            at=3,
+        ),
+    ]
+
+
+def _records(
+    nodes: dict[uuid.UUID, list[SessionNodeResponse]],
+    sessions: Sequence[SessionResponse],
+    annotations: Sequence[AnnotationResponse] = (),
+    evaluations: Sequence[EvaluationResponse] = (),
+) -> GroupRecords:
+    return GroupRecords(
+        sessions=tuple(sessions),
+        nodes={key: tuple(value) for key, value in nodes.items()},
+        annotations=tuple(annotations),
+        evaluations=tuple(evaluations),
+        truncated=False,
+        records_capped=False,
+    )
+
+
+def test_error_is_placed_at_deepest_failed_node_not_inherited_span() -> None:
+    session = _session("failed")
+    nodes = _langgraph_failure(session)
+
+    point = locate_failure(nodes, {})
+    [outcome] = analyze_group(
+        _records({session.id: nodes}, [session]), build_labeler("tool", None), None
+    )
+
+    assert point is not None and point.node.name == "issue_refund"
+    assert outcome.failure_transition == ("lookup_order", "issue_refund")
+    assert (
+        outcome.point is not None and outcome.point.note == "TimeoutError: payments API"
+    )
+
+
+def test_failure_below_a_completed_span_is_still_the_deepest() -> None:
+    session = _session("failed")
+    nodes = [
+        _node(session, "outer", "span", "outer", status="failed", at=0),
+        _node(session, "middle", "span", "middle", parent="outer", at=1),
+        _node(
+            session,
+            "tool",
+            "tool_call",
+            "charge",
+            parent="middle",
+            status="failed",
+            at=2,
+        ),
+    ]
+
+    point = locate_failure(nodes, {})
+
+    assert point is not None and point.node.name == "charge"
+
+
+def test_folding_keeps_rows_for_the_requested_sources_only() -> None:
+    marked = _session("failed")
+    marked_nodes = [_node(marked, "a", "tool_call", "rare_step")]
+    crashed = [_session("failed") for _ in range(3)]
+    nodes = {marked.id: marked_nodes}
+    for index, session in enumerate(crashed):
+        nodes[session.id] = [
+            _node(session, "a", "tool_call", f"crash_{index}", status="failed")
+        ]
+    outcomes = analyze_group(
+        _records(
+            nodes,
+            [*crashed, marked],
+            [_annotation(marked_nodes[0], {"first_failure": True})],
+        ),
+        build_labeler("tool", None),
+        None,
+    )
+
+    [folded] = fold_rare_states([outcomes], ["annotation"], limit=2)
+
+    assert folded[-1].failure_transition == (START, "rare_step")
+
+
+def test_unlocated_evaluation_summary_is_bounded() -> None:
+    session = _session("completed")
+    evaluations = [_evaluation(session, f"check_{i}") for i in range(25)]
+
+    outcomes = analyze_group(
+        _records({session.id: []}, [session], evaluations=evaluations),
+        build_labeler("tool", None),
+        None,
+    )
+    summary = summarize_group(
+        "group", outcomes, ["error"], truncated=False, records_capped=False
+    )
+
+    assert len(summary.unlocated_evaluations) == 10
+
+
+def test_completed_children_count_before_their_failed_parent_span() -> None:
+    session = _session("failed")
+    nodes = [
+        _node(session, "root", "span", "invoke", at=0),
+        _node(
+            session, "post", "span", "postprocess", parent="root", status="failed", at=1
+        ),
+        _node(session, "search", "tool_call", "search", parent="post", at=2),
+    ]
+
+    [outcome] = analyze_group(
+        _records({session.id: nodes}, [session]), build_labeler("node", None), None
+    )
+
+    assert outcome.failure_transition == ("search", "postprocess")
+
+
+def test_state_map_rejects_oversized_patterns() -> None:
+    with pytest.raises(ValidationError):
+        FailureMatrixRequest(state_map={f"p{i}": "g" for i in range(51)})
+    with pytest.raises(ValidationError):
+        FailureMatrixRequest(state_map={"x" * 201: "g"})
+
+
+def test_span_states_skip_ancestors_of_the_failing_node() -> None:
+    session = _session("failed")
+    nodes = _langgraph_failure(session)
+
+    [outcome] = analyze_group(
+        _records({session.id: nodes}, [session]), build_labeler("span", None), None
+    )
+
+    # `agent` is the failing tool's parent and `invoke` is the root, so no
+    # completed span came before the failure.
+    assert outcome.failure_transition == (START, "issue_refund")
+
+
+def test_reviewer_mark_wins_over_recorded_error_and_carries_note() -> None:
+    session = _session("failed")
+    nodes = _langgraph_failure(session)
+    mark = _annotation(nodes[1], {"first_failure": True, "note": "Wrong order ID"})
+
+    [outcome] = analyze_group(
+        _records({session.id: nodes}, [session], [mark]),
+        build_labeler("tool", None),
+        None,
+    )
+
+    assert outcome.point is not None
+    assert (outcome.point.source, outcome.point.note) == (
+        "annotation",
+        "Wrong order ID",
+    )
+    assert outcome.failure_transition == (START, "lookup_order")
+
+
+@pytest.mark.parametrize("answer", [False, None, "", {"first_failure": False}])
+def test_negative_first_failure_answers_are_not_marks(answer: JsonValue) -> None:
+    session = _session("completed")
+    nodes = [_node(session, "a", "tool_call", "lookup_order")]
+    mark = AnnotationResponse.model_construct(
+        session_id=session.id,
+        selector=AnnotationSelector(node_id=nodes[0].id),
+        value=answer,
+        question_key="first_failure",
+    )
+
+    [outcome] = analyze_group(
+        _records({session.id: nodes}, [session], [mark]),
+        build_labeler("tool", None),
+        None,
+    )
+
+    assert not outcome.failed and outcome.point is None
+
+
+async def test_redacted_state_labels_stay_drillable() -> None:
+    session = _session("failed")
+    secret_named = "KITKEY_example"
+    records = _records(
+        {session.id: [_node(session, "a", "tool_call", secret_named, status="failed")]},
+        [session],
+    )
+    server, context = build_server_context(_FakeClient(records))
+
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    [shown] = cast(dict[str, Any], cast(CallToolResult, matrix).structured_content)[
+        "data"
+    ]["cols"]
+    cell = await server.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {"from_state": START, "to_state": shown}},
+        context,
+    )
+
+    assert shown != secret_named
+    data = cast(dict[str, Any], cast(CallToolResult, cell).structured_content)["data"]
+    assert data["total"] == 1
+
+
+def test_evaluation_failure_without_location_is_unlocated_not_guessed() -> None:
+    session = _session("completed")
+    nodes = [_node(session, "a", "tool_call", "lookup_order")]
+
+    outcomes = analyze_group(
+        _records(
+            {session.id: nodes},
+            [session],
+            evaluations=[_evaluation(session, "grounded")],
+        ),
+        build_labeler("tool", None),
+        None,
+    )
+    _rows, _cols, cells = build_cells(outcomes, None, ["error", "annotation"])
+
+    assert outcomes[0].failed and outcomes[0].point is None
+    assert all(cell.count == 0 for cell in cells)
+
+
+def test_failing_llm_call_has_failures_but_no_rate() -> None:
+    passing, failing = _session(), _session("failed")
+    nodes = {
+        passing.id: [_node(passing, "a", "tool_call", "search")],
+        failing.id: [
+            _node(failing, "a", "tool_call", "search", at=0),
+            _node(failing, "b", "llm_call", "chat", status="failed", error="429", at=1),
+        ],
+    }
+
+    outcomes = analyze_group(
+        _records(nodes, [passing, failing]), build_labeler("tool", None), None
+    )
+    _rows, _cols, cells = build_cells(outcomes, None, ["error"])
+    by_pair = {(c.from_state, c.to_state): c for c in cells}
+
+    assert by_pair[("search", "llm")].count == 1
+    assert by_pair[("search", "llm")].attempts is None
+    assert by_pair[(START, "search")].attempts == 2
+
+
+def test_non_state_failure_does_not_borrow_a_real_states_rate() -> None:
+    labeled, failing = _session(), _session("failed")
+    nodes = {
+        # With state_by="node" every LLM call is the state "llm"; with "tool" a
+        # failing LLM call only falls back to that name.
+        labeled.id: [
+            _node(labeled, "a", "tool_call", "search", at=0),
+            _node(labeled, "b", "tool_call", "llm", at=1),
+        ],
+        failing.id: [
+            _node(failing, "a", "tool_call", "search", at=0),
+            _node(failing, "b", "llm_call", "chat", status="failed", at=1),
+        ],
+    }
+
+    outcomes = analyze_group(
+        _records(nodes, [labeled, failing]), build_labeler("tool", None), None
+    )
+    _rows, _cols, cells = build_cells(outcomes, None, ["error"])
+    cell = next(c for c in cells if (c.from_state, c.to_state) == ("search", "llm"))
+
+    assert (cell.count, cell.attempts) == (1, None)
+
+
+def test_excluded_non_state_failure_does_not_hide_a_selected_rate() -> None:
+    marked, crashed, passing = _session("failed"), _session("failed"), _session()
+    marked_nodes = [
+        _node(marked, "a", "tool_call", "search", at=0),
+        _node(marked, "b", "tool_call", "llm", at=1),
+    ]
+    nodes = {
+        marked.id: marked_nodes,
+        crashed.id: [
+            _node(crashed, "a", "tool_call", "search", at=0),
+            _node(crashed, "b", "llm_call", "chat", status="failed", at=1),
+        ],
+        passing.id: [
+            _node(passing, "a", "tool_call", "search", at=0),
+            _node(passing, "b", "tool_call", "llm", at=1),
+        ],
+    }
+    mark = _annotation(marked_nodes[1], {"first_failure": True})
+
+    outcomes = analyze_group(
+        _records(nodes, [marked, crashed, passing], [mark]),
+        build_labeler("tool", None),
+        None,
+    )
+    _rows, _cols, cells = build_cells(outcomes, None, ["annotation"])
+    cell = next(c for c in cells if (c.from_state, c.to_state) == ("search", "llm"))
+
+    assert (cell.count, cell.attempts) == (1, 2)
+
+
+@pytest.mark.parametrize("name", ["", "  "])
+def test_state_map_rejects_blank_group_names(name: str) -> None:
+    with pytest.raises(ValidationError):
+        FailureMatrixRequest(state_map={"*": name})
+
+
+def test_state_map_groups_named_like_matrix_rows_are_escaped() -> None:
+    session = _session("failed")
+    nodes = [_node(session, "a", "tool_call", "search", status="failed")]
+
+    [outcome] = analyze_group(
+        _records({session.id: nodes}, [session]),
+        build_labeler("tool", {"*": START}),
+        None,
+    )
+
+    assert outcome.failure_transition == (START, f"{START} (recorded)")
+
+
+def test_comparison_text_lists_the_largest_changes_first() -> None:
+    cells = [
+        MatrixCell(
+            from_state=START,
+            to_state=f"step_{i}",
+            count=10,
+            attempts=10,
+            error_count=10,
+            annotation_count=0,
+            compare_count=10 + delta,
+            compare_attempts=10,
+        )
+        for i, delta in enumerate([-1, -2, 8, -3])
+    ]
+    summary = GroupSummary(
+        label="g",
+        session_count=1,
+        failed_count=0,
+        located_count=0,
+        shown_count=0,
+        unlocated_count=0,
+        unlocated_evaluations=[],
+        truncated=False,
+        records_capped=False,
+    )
+    data = FailureMatrixData(
+        snapshot_id="s",
+        state_by="tool",
+        rows=[START],
+        cols=[],
+        cells=cells,
+        base=summary,
+        compare=summary,
+    )
+
+    changes = describe_matrix(data).split("Changed transitions")[1].splitlines()[1:3]
+
+    assert "step_2: 10 -> 18" in changes[0] and "step_3" in changes[1]
+
+
+def test_state_map_merges_states_and_compare_counts_both_groups() -> None:
+    before, after = _session("failed"), _session("completed")
+    nodes = {
+        before.id: [
+            _node(before, "a", "tool_call", "sql_generate", at=0),
+            _node(before, "b", "tool_call", "sql_execute", status="failed", at=1),
+        ],
+        after.id: [
+            _node(after, "a", "tool_call", "sql_generate", at=0),
+            _node(after, "b", "tool_call", "sql_execute", at=1),
+        ],
+    }
+    labeler = build_labeler("tool", {"sql_*": "SQL"})
+
+    base = analyze_group(_records(nodes, [before]), labeler, None)
+    compare = analyze_group(_records(nodes, [after]), labeler, None)
+    rows, cols, cells = build_cells(base, compare, ["error"])
+    cell = next(c for c in cells if (c.from_state, c.to_state) == ("SQL", "SQL"))
+
+    assert rows == [START, "SQL"] and cols == ["SQL"]
+    assert (cell.count, cell.compare_count) == (1, 0)
+    assert (cell.attempts, cell.compare_attempts) == (1, 1)
+
+
+class _FakeSessions:
+    def __init__(
+        self,
+        sessions: list[SessionResponse],
+        nodes: dict[uuid.UUID, list[SessionNodeResponse]],
+    ) -> None:
+        self.sessions, self.nodes, self.list_calls = sessions, nodes, 0
+
+    async def list(self, _params: object) -> Page[SessionResponse]:
+        self.list_calls += 1
+        return Page(items=self.sessions, next_cursor=None)
+
+    async def iter_nodes(
+        self, session_id: uuid.UUID, _params: object
+    ) -> AsyncIterator[SessionNodeResponse]:
+        for node in self.nodes[session_id]:
+            yield node
+
+
+class _FakeIterable:
+    def __init__(self, items: Sequence[object]) -> None:
+        self.items = items
+
+    async def iter(self, _params: object) -> AsyncIterator[object]:
+        for item in self.items:
+            yield item
+
+
+class _FakeClient:
+    def __init__(self, records: GroupRecords) -> None:
+        self.sessions = _FakeSessions(
+            list(records.sessions), {k: list(v) for k, v in records.nodes.items()}
+        )
+        self.annotations = _FakeIterable(records.annotations)
+        self.evaluations = _FakeIterable(records.evaluations)
+
+
+def _failing_group() -> GroupRecords:
+    sessions = [_session("failed") for _ in range(3)] + [_session()]
+    nodes = {s.id: _langgraph_failure(s) for s in sessions[:3]}
+    nodes[sessions[3].id] = [_node(sessions[3], "look", "tool_call", "lookup_order")]
+    return _records(nodes, sessions)
+
+
+async def test_matrix_tool_returns_summary_text_and_structured_matrix() -> None:
+    client = _FakeClient(_failing_group())
+    server, context = build_server_context(client)
+
+    result = await server.call_tool(
+        "kitaru_failure_matrix", {"request": {"label": "returns"}}, context
+    )
+
+    assert isinstance(result, CallToolResult) and not result.is_error
+    assert isinstance(result.content[0], TextContent)
+    assert "lookup_order -> issue_refund: 3" in result.content[0].text
+    data = cast(dict[str, Any], result.structured_content)["data"]
+    assert data["base"]["failed_count"] == 3
+    cell = next(c for c in data["cells"] if c["to_state"] == "issue_refund")
+    assert (cell["count"], cell["error_count"], cell["attempts"]) == (3, 3, 3)
+
+
+async def test_sensitive_looking_evaluation_names_survive_redaction() -> None:
+    session = _session("completed")
+    records = _records(
+        {session.id: [_node(session, "a", "tool_call", "lookup_order")]},
+        [session],
+        evaluations=[_evaluation(session, "api_key")],
+    )
+    server, context = build_server_context(_FakeClient(records))
+
+    result = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+
+    structured = cast(dict[str, Any], cast(CallToolResult, result).structured_content)
+    assert structured["ok"] is True
+    assert structured["data"]["base"]["unlocated_evaluations"] == [
+        {"name": "api_key", "count": 1}
+    ]
+
+
+def test_blank_node_names_get_a_drillable_label() -> None:
+    session = _session("failed")
+    node = _node(session, "a", "tool_call", "  ", status="failed")
+
+    [outcome] = analyze_group(
+        _records({session.id: [node]}, [session]), build_labeler("tool", None), None
+    )
+
+    assert outcome.failure_transition == (START, "unnamed tool_call")
+
+
+def test_recorded_names_never_merge_with_the_start_row() -> None:
+    session = _session("failed")
+    node = _node(session, "a", "tool_call", START, status="failed")
+
+    [outcome] = analyze_group(
+        _records({session.id: [node]}, [session]), build_labeler("tool", None), None
+    )
+
+    assert outcome.failure_transition == (START, f"{START} (recorded)")
+
+
+async def test_large_sessions_are_read_up_to_a_cap_and_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(failure_matrix, "MAX_NODES_PER_SESSION", 2)
+    session = _session("failed")
+    nodes = [_node(session, f"n{i}", "tool_call", f"step_{i}", at=i) for i in range(4)]
+    client = _FakeClient(_records({session.id: nodes}, [session]))
+
+    records = await failure_matrix.fetch_group(
+        cast(Any, client), None, max_sessions=10, concurrency=2
+    )
+    server, context = build_server_context(client)
+    result = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+
+    assert len(records.nodes[session.id]) == 2 and records.records_capped
+    text = cast(CallToolResult, result).content[0]
+    assert isinstance(text, TextContent) and "partly read" in text.text
+
+
+def _structured(result: object) -> dict[str, Any]:
+    return cast(dict[str, Any], cast(CallToolResult, result).structured_content)
+
+
+async def test_group_node_budget_is_shared_across_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(failure_matrix, "MAX_NODES_PER_GROUP", 4)
+    sessions = [_session("failed") for _ in range(4)]
+    nodes = {
+        s.id: [_node(s, f"n{i}", "tool_call", f"step_{i}", at=i) for i in range(3)]
+        for s in sessions
+    }
+
+    records = await failure_matrix.fetch_group(
+        cast(Any, _FakeClient(_records(nodes, sessions))),
+        None,
+        max_sessions=10,
+        concurrency=2,
+    )
+
+    assert sum(len(n) for n in records.nodes.values()) == 4
+    assert records.records_capped
+
+
+def test_cell_sessions_clip_long_session_names() -> None:
+    session = SessionResponse.model_construct(
+        id=uuid.uuid4(), number=1, name="n" * 5000, status="failed"
+    )
+    nodes = [_node(session, "a", "tool_call", "search", status="failed")]
+    outcomes = analyze_group(
+        _records({session.id: nodes}, [session]), build_labeler("tool", None), None
+    )
+
+    data = cell_details(outcomes, (START, "search"), ["error"], limit=5)
+
+    name = data.sessions[0].name
+    assert name is not None and len(name) <= 300
+
+
+async def test_cell_tool_drills_into_the_matrix_snapshot() -> None:
+    client = _FakeClient(_failing_group())
+    server, context = build_server_context(client)
+
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    snapshot_id = _structured(matrix)["data"]["snapshot_id"]
+    # Sessions recorded after the matrix was built must not leak into its cells.
+    client.sessions.sessions = []
+    cell = await server.call_tool(
+        "kitaru_failure_matrix_cell",
+        {
+            "request": {
+                "snapshot_id": snapshot_id,
+                "from_state": "lookup_order",
+                "to_state": "issue_refund",
+            }
+        },
+        context,
+    )
+
+    data = _structured(cell)["data"]
+    assert client.sessions.list_calls == 1
+    assert data["total"] == 3
+    assert data["patterns"] == [{"note": "TimeoutError: payments API", "count": 3}]
+    assert data["sessions"][0]["path"] == ["lookup_order", "issue_refund"]
+
+
+async def test_unknown_snapshot_asks_for_a_rebuild_instead_of_refetching() -> None:
+    client = _FakeClient(_failing_group())
+    server, context = build_server_context(client)
+    request = {"snapshot_id": "gone", "from_state": START, "to_state": "x"}
+
+    result = await server.call_tool(
+        "kitaru_failure_matrix_cell", {"request": request}, context
+    )
+
+    assert _structured(result)["error"]["code"] == "snapshot_expired"
+    assert client.sessions.list_calls == 0
+
+
+def test_long_names_get_bounded_distinct_labels() -> None:
+    sessions = [_session("failed"), _session("failed")]
+    long_names = ["x" * 200 + "_alpha", "x" * 200 + "_beta"]
+    nodes = {
+        s.id: [_node(s, "a", "tool_call", name, status="failed")]
+        for s, name in zip(sessions, long_names, strict=True)
+    }
+
+    outcomes = analyze_group(
+        _records(nodes, sessions), build_labeler("tool", None), None
+    )
+    labels = [outcome.path[-1] for outcome in outcomes]
+
+    assert all(len(label) <= 80 for label in labels)
+    assert labels[0] != labels[1]
+
+
+async def test_tools_link_the_view_and_hide_the_cell_tool_from_the_model() -> None:
+    server = create_server(MCPSettings())
+
+    tools = {tool.name: tool for tool in await server.list_tools()}
+    [content] = list(await server.read_resource(FAILURE_MATRIX_URI))
+    assert isinstance(content, ReadResourceContents)
+
+    assert tools["kitaru_failure_matrix"].meta == {
+        "ui": {"resourceUri": FAILURE_MATRIX_URI}
+    }
+    assert tools["kitaru_failure_matrix_cell"].meta == {
+        "ui": {"resourceUri": FAILURE_MATRIX_URI, "visibility": ["app"]}
+    }
+    assert content.mime_type == "text/html;profile=mcp-app"
+    assert "{{KITARU_LOGO}}" not in str(content.content)

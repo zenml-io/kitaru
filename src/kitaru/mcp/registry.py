@@ -3,6 +3,7 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Capability-filtered public MCP tool registry."""
 
+import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast
@@ -12,6 +13,7 @@ from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import BaseModel, ValidationError
 
+from kitaru.mcp.apps import FAILURE_MATRIX_URI, ui_meta
 from kitaru.mcp.errors import (
     MCPOutputValidationError,
     error_result,
@@ -44,6 +46,12 @@ from kitaru.mcp.models.connections import (
     ConnectionsManageRequest,
 )
 from kitaru.mcp.models.evaluators import EvaluatorsManageRequest
+from kitaru.mcp.models.failure_matrix import (
+    FailureCellRequest,
+    FailureCellResult,
+    FailureMatrixRequest,
+    FailureMatrixResult,
+)
 from kitaru.mcp.models.management import CohortsManageRequest, ExperimentsManageRequest
 from kitaru.mcp.models.registry import RegistryReadRequest
 from kitaru.mcp.models.review import ReviewManageRequest, ReviewReadRequest
@@ -65,6 +73,7 @@ from kitaru.mcp.tools.connections import (
 from kitaru.mcp.tools.destructive import handle_delete, handle_workflow_cancel
 from kitaru.mcp.tools.evaluators import handle_evaluators_manage
 from kitaru.mcp.tools.experiments import handle_experiments_manage
+from kitaru.mcp.tools.failure_matrix import handle_failure_cell, handle_failure_matrix
 from kitaru.mcp.tools.registry import handle_registry_read
 from kitaru.mcp.tools.review import handle_review_manage, handle_review_read
 from kitaru.mcp.tools.workflow_start import handle_workflow_start
@@ -82,6 +91,13 @@ class ToolSpec:
     description: str
     annotations: ToolAnnotations
     handler: Callable[..., Awaitable[BaseModel]]
+    meta: dict[str, Any] | None = None
+
+
+def _describe(tool: Callable[..., Awaitable[BaseModel]]) -> str:
+    # Python 3.13 strips docstring indentation at compile time and older versions
+    # keep it, so clean it here to publish the same description on every version.
+    return inspect.cleandoc(tool.__doc__ or "")
 
 
 def _annotations(
@@ -132,6 +148,34 @@ async def connection_read_tool(
     return cast(
         ConnectionReadResult,
         await _invoke(context, request, ConnectionReadResult, handle_connection_read),
+    )
+
+
+async def failure_matrix_tool(
+    request: FailureMatrixRequest, context: Context
+) -> FailureMatrixResult:
+    """Show where sessions first go wrong as an interactive transition matrix.
+
+    Rows are the last step that went right and columns the first step that went
+    wrong, counted over the sessions `filter` selects (for example an agent_id or
+    cohort_version_id). Pass `compare_filter`, such as a replay's
+    experiment_run_id, to compare two groups. A reviewer places a failure that
+    raised no error by annotating the failing node with the value
+    `{"first_failure": true, "note": "..."}`.
+    """
+    return cast(
+        FailureMatrixResult,
+        await _invoke(context, request, FailureMatrixResult, handle_failure_matrix),
+    )
+
+
+async def failure_cell_tool(
+    request: FailureCellRequest, context: Context
+) -> FailureCellResult:
+    """List the sessions and repeated notes behind one transition matrix cell."""
+    return cast(
+        FailureCellResult,
+        await _invoke(context, request, FailureCellResult, handle_failure_cell),
     )
 
 
@@ -245,6 +289,7 @@ async def _invoke(
     handler: ToolHandler,
 ) -> CallToolResult:
     state = cast(MCPServerState, context.request_context.lifespan_context)
+    text: str | None = None
     try:
         data = await state.execute(lambda: handler(state, request))
         if isinstance(data, ToolSuccessPayload):
@@ -255,6 +300,7 @@ async def _invoke(
                 warnings=data.warnings,
                 links=data.links,
             )
+            text = data.text
         else:
             json_data = redact_data(data)
             envelope = success_result(result_type, json_data)
@@ -265,105 +311,122 @@ async def _invoke(
         envelope = error_result(result_type, MCPOutputValidationError(error))
     except Exception as error:
         envelope = error_result(result_type, error)
-    return protocol_result(envelope)
+    return protocol_result(envelope, text)
 
 
 TOOL_SPECS = (
     ToolSpec(
         "kitaru_registry_read",
         CapabilityMode.READ_ONLY,
-        registry_read_tool.__doc__ or "",
+        _describe(registry_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         registry_read_tool,
     ),
     ToolSpec(
         "kitaru_activity_read",
         CapabilityMode.READ_ONLY,
-        activity_read_tool.__doc__ or "",
+        _describe(activity_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         activity_read_tool,
     ),
     ToolSpec(
         "kitaru_review_read",
         CapabilityMode.READ_ONLY,
-        review_read_tool.__doc__ or "",
+        _describe(review_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         review_read_tool,
     ),
     ToolSpec(
         "kitaru_connection_read",
         CapabilityMode.READ_ONLY,
-        connection_read_tool.__doc__ or "",
+        _describe(connection_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         connection_read_tool,
     ),
     ToolSpec(
+        "kitaru_failure_matrix",
+        CapabilityMode.READ_ONLY,
+        _describe(failure_matrix_tool),
+        _annotations(read_only=True, destructive=False, idempotent=True),
+        failure_matrix_tool,
+        meta=ui_meta(FAILURE_MATRIX_URI),
+    ),
+    ToolSpec(
+        "kitaru_failure_matrix_cell",
+        CapabilityMode.READ_ONLY,
+        _describe(failure_cell_tool),
+        _annotations(read_only=True, destructive=False, idempotent=True),
+        failure_cell_tool,
+        # Only the matrix view calls this; hosts keep it out of the model's tools.
+        meta=ui_meta(FAILURE_MATRIX_URI, visibility=["app"]),
+    ),
+    ToolSpec(
         "kitaru_cohorts_manage",
         CapabilityMode.STANDARD,
-        cohorts_manage_tool.__doc__ or "",
+        _describe(cohorts_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         cohorts_manage_tool,
     ),
     ToolSpec(
         "kitaru_experiments_manage",
         CapabilityMode.STANDARD,
-        experiments_manage_tool.__doc__ or "",
+        _describe(experiments_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         experiments_manage_tool,
     ),
     ToolSpec(
         "kitaru_session_import",
         CapabilityMode.STANDARD,
-        session_import_tool.__doc__ or "",
+        _describe(session_import_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         session_import_tool,
     ),
     ToolSpec(
         "kitaru_review_manage",
         CapabilityMode.STANDARD,
-        review_manage_tool.__doc__ or "",
+        _describe(review_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         review_manage_tool,
     ),
     ToolSpec(
         "kitaru_workflow_start",
         CapabilityMode.STANDARD,
-        workflow_start_tool.__doc__ or "",
+        _describe(workflow_start_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         workflow_start_tool,
     ),
     ToolSpec(
         "kitaru_evaluators_manage",
         CapabilityMode.STANDARD,
-        evaluators_manage_tool.__doc__ or "",
+        _describe(evaluators_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         evaluators_manage_tool,
     ),
     ToolSpec(
         "kitaru_analyzers_manage",
         CapabilityMode.STANDARD,
-        analyzers_manage_tool.__doc__ or "",
+        _describe(analyzers_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         analyzers_manage_tool,
     ),
     ToolSpec(
         "kitaru_connections_manage",
         CapabilityMode.STANDARD,
-        connections_manage_tool.__doc__ or "",
+        _describe(connections_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         connections_manage_tool,
     ),
     ToolSpec(
         "kitaru_workflow_cancel",
         CapabilityMode.DESTRUCTIVE,
-        workflow_cancel_tool.__doc__ or "",
+        _describe(workflow_cancel_tool),
         _annotations(read_only=False, destructive=True, idempotent=False),
         workflow_cancel_tool,
     ),
     ToolSpec(
         "kitaru_delete",
         CapabilityMode.DESTRUCTIVE,
-        delete_tool.__doc__ or "",
+        _describe(delete_tool),
         _annotations(read_only=False, destructive=True, idempotent=False),
         delete_tool,
     ),
@@ -384,4 +447,5 @@ def register_tools(server: MCPServer[Any], mode: CapabilityMode) -> None:
             description=spec.description,
             annotations=spec.annotations,
             structured_output=True,
+            meta=spec.meta,
         )
