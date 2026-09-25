@@ -78,7 +78,7 @@ Start assistants in `read-only`, move to `standard` when you want them building 
 
 Ask your assistant something like "where do the failed sessions of my support agent go wrong?" and it calls `kitaru_failure_matrix`. Each failed session adds one count to a grid: the row is the last step that went right, the column is the first step that went wrong. The busiest cells show where to look first.
 
-In hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview), such as Claude Desktop, ChatGPT, and VS Code, the result appears as an interactive heatmap. Click a cell to read its sessions and their most common failure notes, switch between failure counts and failure rates, or send a follow-up to the assistant from the view. Other hosts, including terminal clients, get the same numbers as a text summary.
+In hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview), such as Claude Desktop, ChatGPT, Codex, and VS Code, the result appears as an interactive heatmap. Click a cell to read its sessions and their most common failure notes, switch between failure counts and failure rates, or send a follow-up to the assistant from the view. Other hosts get the same numbers as a text summary.
 
 - **Choosing sessions.** `filter` selects the group, for example by `agent_id`, `cohort_version_id`, or a `started_at` range. Pass `compare_filter`, such as a replay's `experiment_run_id`, to see which cells a change emptied and which it filled.
 - **Choosing states.** `state_by` sets which nodes count as steps: tool and subagent calls (`tool`), spans such as LangGraph graph nodes (`span`), or both plus LLM calls (`node`). `state_map` merges steps with glob patterns, for example `{"sql_*": "SQL"}`.
