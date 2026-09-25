@@ -23,10 +23,14 @@ from kitaru.server.application.models.auth import (
     TaskPrincipal,
 )
 from kitaru.server.application.models.session import SessionFilter
-from kitaru.server.domain.base import ForbiddenError
 from kitaru.server.domain.blob import BlobAccessDenied
-from kitaru.server.domain.session import Session, SessionAccessDenied
+from kitaru.server.domain.session import (
+    Session,
+    SessionAccessDenied,
+    mastra_replay_stored_files,
+)
 from kitaru.server.domain.task import (
+    AgentTaskDetails,
     AnalysisTaskDetails,
     BlobImportSourceSpec,
     EvaluationTaskDetails,
@@ -34,7 +38,12 @@ from kitaru.server.domain.task import (
     ScriptPluginSpec,
     TaskSpec,
 )
-from kitaru.server.filtering import AndExpression, FilterCondition
+from kitaru.server.filtering import (
+    AndExpression,
+    FilterCondition,
+    FilterExpression,
+    OrExpression,
+)
 
 
 async def check_task_attempt(actor: AuthContext, tasks: TaskRepository) -> None:
@@ -86,6 +95,14 @@ def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
         details.source, BlobImportSourceSpec
     ):
         blobs.add(details.source.blob_id)
+    # Grant recorded-file blobs only to replay tasks, whose inputs the server
+    # copied from a recorded baseline session. An ordinary session run takes
+    # its inputs verbatim from the caller and never reads recorded files, so
+    # blob ids named there must not turn into download rights for its token.
+    if isinstance(details, AgentTaskDetails) and details.replay_id is not None:
+        blobs.update(
+            file.blob_id for file in mastra_replay_stored_files(details.inputs)
+        )
     grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
     if sessions:
         grants[GrantKind.SESSION] = frozenset(sessions)
@@ -166,28 +183,35 @@ def check_task_blob_read(blob_id: uuid.UUID, actor: AuthContext) -> None:
 def scope_task_session_filter(
     session_filter: SessionFilter, actor: AuthContext
 ) -> SessionFilter:
-    """Restrict a session listing to the imports a task principal is granted.
+    """Restrict a session listing to the sessions a task principal may read.
 
-    An account principal's filter passes through unchanged.
+    A task principal lists the sessions it produced and those created by the
+    imports it is granted. An account principal's filter passes through
+    unchanged.
 
     Args:
         session_filter: Filter the caller sent.
         actor: Caller context.
 
-    Raises:
-        ForbiddenError: A task principal holds no import grant.
-
     Returns:
-        Filter restricted to the granted imports.
+        Filter restricted to the task's own and granted-import sessions.
     """
     if not isinstance(actor.principal, TaskPrincipal):
         return session_filter
-    import_ids = actor.principal.grants.get(GrantKind.IMPORT)
-    if not import_ids:
-        raise ForbiddenError(
-            f"Task {actor.principal.task_id} is not granted a session listing"
+    principal = actor.principal
+    scope: FilterExpression = FilterCondition(
+        field="task_id", op=FilterOp.EQ, value=principal.task_id
+    )
+    import_ids = principal.grants.get(GrantKind.IMPORT)
+    if import_ids:
+        scope = OrExpression(
+            operands=(
+                scope,
+                FilterCondition(
+                    field="import_id", op=FilterOp.IN, value=sorted(import_ids)
+                ),
+            )
         )
-    scope = FilterCondition(field="import_id", op=FilterOp.IN, value=sorted(import_ids))
     expression = (
         scope
         if session_filter.expression is None

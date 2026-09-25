@@ -13,8 +13,11 @@
 #  permissions and limitations under the License.
 """Replay job and task composition, shared by standalone replays and run fan-out."""
 
+import re
 import uuid
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
@@ -41,9 +44,125 @@ from kitaru.server.application.services.plugin_resolution import get_plugin_task
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig
-from kitaru.server.domain.session import Session
+from kitaru.server.domain.session import (
+    Session,
+    SessionReplayNotReady,
+    mastra_replay_stored_files,
+    mastra_replay_uses_observational_memory,
+    mastra_replay_v3_complete,
+    mastra_replay_v3_current,
+)
 from kitaru.server.domain.task import AgentTask, EvaluationTask, Task
 from kitaru.server.utils import hash_params
+
+
+def _record(value: Any) -> dict[str, Any] | None:
+    """Return a JSON object, if this value is one."""
+    return value if isinstance(value, dict) else None
+
+
+def _check_mastra_replay_ready(baseline: Session) -> None:
+    """Reject provisional or incomplete Mastra memory input before task creation."""
+    if baseline.framework != "mastra":
+        return
+    state = baseline.metadata.get("mastra_replay_state")
+    if state == "pending":
+        started = baseline.started_at or baseline.created
+        stale = started is not None and datetime.now(UTC) - started > timedelta(
+            minutes=30
+        )
+        raise SessionReplayNotReady(
+            baseline.id, "mastra_replay_abandoned" if stale else "mastra_replay_pending"
+        )
+    if state == "ineligible":
+        reason = baseline.metadata.get("mastra_replay_reason")
+        code = (
+            reason
+            if isinstance(reason, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", reason)
+            else "capture_incomplete"
+        )
+        raise SessionReplayNotReady(baseline.id, f"mastra_replay_{code}")
+    inputs = _record(baseline.inputs.value) if baseline.inputs is not None else None
+    envelope = _record(inputs.get("mastra_memory_replay")) if inputs else None
+    if envelope is None:
+        if state == "eligible":
+            raise SessionReplayNotReady(baseline.id, "mastra_replay_incomplete")
+        return  # Existing history-only Mastra recordings have no memory envelope.
+    if baseline.status.value == "in_progress" or envelope.get("complete") is not True:
+        raise SessionReplayNotReady(baseline.id, "mastra_replay_incomplete")
+    if envelope.get("version") == 3 and not mastra_replay_v3_current(envelope):
+        raise SessionReplayNotReady(baseline.id, "mastra_replay_recording_outdated")
+    if envelope.get("version") == 3 and not mastra_replay_v3_complete(envelope):
+        raise SessionReplayNotReady(baseline.id, "mastra_replay_incomplete")
+    if mastra_replay_uses_observational_memory(envelope) and not isinstance(
+        envelope.get("omTape"), list
+    ):
+        raise SessionReplayNotReady(baseline.id, "mastra_replay_tape_missing")
+    if state == "eligible" and envelope.get("version") != 3:
+        raise SessionReplayNotReady(baseline.id, "mastra_replay_incomplete")
+
+
+async def validate_replay_baselines(
+    baselines: Sequence[Session], payload_store: PayloadStore
+) -> None:
+    """Resolve and validate memory replay inputs before replay side effects.
+
+    Args:
+        baselines: Sessions selected for replay.
+        payload_store: Store used to resolve offloaded session inputs.
+
+    Raises:
+        SessionReplayNotReady: The first baseline that cannot be replayed.
+    """
+    _, refusals = await split_replay_baselines(baselines, payload_store)
+    if refusals:
+        raise refusals[0]
+
+
+async def split_replay_baselines(
+    baselines: Sequence[Session], payload_store: PayloadStore
+) -> tuple[list[Session], list[SessionReplayNotReady]]:
+    """Resolve memory replay inputs and separate replayable baselines from refusals.
+
+    Args:
+        baselines: Sessions selected for replay.
+        payload_store: Store used to resolve offloaded session inputs.
+
+    Returns:
+        Replayable baselines and one refusal per other baseline, both in
+        baseline order.
+    """
+    await payload_store.resolve(
+        [baseline.inputs for baseline in baselines if baseline.inputs is not None]
+    )
+    checked: list[Session] = []
+    refusals: dict[uuid.UUID, SessionReplayNotReady] = {}
+    for baseline in baselines:
+        try:
+            _check_mastra_replay_ready(baseline)
+        except SessionReplayNotReady as refusal:
+            refusals[baseline.id] = refusal
+        else:
+            checked.append(baseline)
+    # A replay file's blob has no foreign key from the session, so it can be
+    # deleted after finalization accepted it; refuse such a baseline here
+    # instead of failing its replay task on the download.
+    stored_files = {
+        baseline.id: mastra_replay_stored_files(baseline.inputs.value)
+        for baseline in checked
+        if baseline.framework == "mastra" and baseline.inputs is not None
+    }
+    blob_ids = list({file.blob_id for files in stored_files.values() for file in files})
+    blobs = await payload_store.get_blobs(blob_ids) if blob_ids else {}
+    for baseline_id, files in stored_files.items():
+        if not all(file.is_held_by(blobs.get(file.blob_id)) for file in files):
+            refusals[baseline_id] = SessionReplayNotReady(
+                baseline_id, "mastra_replay_file_missing"
+            )
+    ready = [baseline for baseline in checked if baseline.id not in refusals]
+    return ready, [
+        refusals[baseline.id] for baseline in baselines if baseline.id in refusals
+    ]
 
 
 async def create_replay_pipelines(
@@ -58,6 +177,8 @@ async def create_replay_pipelines(
     task_repository: TaskRepository,
     evaluation_repository: EvaluationRepository,
     payload_store: PayloadStore,
+    *,
+    raise_refusals: bool = False,
 ) -> list[Replay]:
     """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
 
@@ -66,7 +187,10 @@ async def create_replay_pipelines(
     ``NONE``, one baseline evaluator task is appended per evaluator, unless
     ``IF_MISSING`` finds prior evaluations of the same identity (baseline
     session, evaluator version, params) to adopt instead, linking the
-    baseline's replay to every one of them.
+    baseline's replay to every one of them. A baseline whose Mastra memory
+    recording cannot be replayed gets a replay that is already failed with
+    the refusal as its error, and no job or tasks, unless ``raise_refusals``
+    is set.
 
     Args:
         baselines: Sessions being replayed.
@@ -82,24 +206,42 @@ async def create_replay_pipelines(
         evaluation_repository: Evaluation repository, for the ``IF_MISSING``
             adoption lookup and links.
         payload_store: Payload store, for the baseline sessions' inputs.
+        raise_refusals: Raise the first refusal before any write instead of
+            storing failed replays.
 
     Raises:
         SessionNotEvaluatable: ``baseline_evaluation_mode`` is not ``NONE``
             and a baseline session is in progress.
+        SessionReplayNotReady: ``raise_refusals`` is set and a baseline
+            cannot be replayed.
 
     Returns:
         Created replays, in baseline order.
     """
     if not baselines:
         return []
+    # Refusals are split off first so that a pending memory recording, which
+    # is still in progress, is reported per baseline instead of failing the
+    # evaluability check for every baseline.
+    ready, refusals = await split_replay_baselines(baselines, payload_store)
+    if raise_refusals and refusals:
+        raise refusals[0]
     evaluate_baselines = baseline_evaluation_mode is not BaselineEvaluationMode.NONE
     if evaluate_baselines:
-        for baseline in baselines:
+        for baseline in ready:
             baseline.check_evaluate()
-    await payload_store.resolve(
-        [baseline.inputs for baseline in baselines if baseline.inputs is not None]
-    )
-    jobs = [Job(owner_id=actor.account.id, kind=JobKind.REPLAY) for _ in baselines]
+    refused_replays: list[Replay] = []
+    for refusal in refusals:
+        refused = Replay(
+            owner_id=actor.account.id,
+            experiment_run_id=experiment_run_id,
+            replay_config_id=config.id,
+            baseline_session_id=refusal.session_id,
+            baseline_evaluation_mode=baseline_evaluation_mode,
+        )
+        refused.fail(str(refusal))
+        refused_replays.append(refused)
+    jobs = [Job(owner_id=actor.account.id, kind=JobKind.REPLAY) for _ in ready]
     replays = [
         Replay(
             owner_id=actor.account.id,
@@ -109,12 +251,12 @@ async def create_replay_pipelines(
             baseline_session_id=baseline.id,
             baseline_evaluation_mode=baseline_evaluation_mode,
         )
-        for job, baseline in zip(jobs, baselines, strict=True)
+        for job, baseline in zip(jobs, ready, strict=True)
     ]
     adoptable: dict[tuple[uuid.UUID, uuid.UUID, str], list[uuid.UUID]] = {}
-    if baseline_evaluation_mode is BaselineEvaluationMode.IF_MISSING:
+    if ready and baseline_evaluation_mode is BaselineEvaluationMode.IF_MISSING:
         adoptable = await evaluation_repository.get_latest_evaluation_ids_by_identity(
-            [baseline.id for baseline in baselines]
+            [baseline.id for baseline in ready]
         )
     evaluator_hashes = {
         evaluator.evaluator_version_id: hash_params(evaluator.params)
@@ -122,7 +264,7 @@ async def create_replay_pipelines(
     }
     tasks: list[Task] = []
     adopted_links: list[tuple[uuid.UUID, uuid.UUID]] = []
-    for job, baseline, replay in zip(jobs, baselines, replays, strict=True):
+    for job, baseline, replay in zip(jobs, ready, replays, strict=True):
         tasks.append(
             AgentTask(
                 job_id=job.id,
@@ -163,7 +305,14 @@ async def create_replay_pipelines(
                 )
             )
     await job_repository.create_many(jobs)
-    stored_replays = await replay_repository.create_many(replays)
+    refused_ids = {refusal.session_id for refusal in refusals}
+    ready_iter, refused_iter = iter(replays), iter(refused_replays)
+    stored_replays = await replay_repository.create_many(
+        [
+            next(refused_iter) if baseline.id in refused_ids else next(ready_iter)
+            for baseline in baselines
+        ]
+    )
     await task_repository.create_many(tasks)
     await evaluation_repository.add_replay_links(adopted_links)
     return stored_replays

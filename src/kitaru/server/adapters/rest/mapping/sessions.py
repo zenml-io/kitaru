@@ -150,6 +150,7 @@ def session_update_to_command(body: SessionUpdateRequest) -> SessionUpdate:
     values: dict[str, Any] = {}
     for field in (
         "status",
+        "inputs",
         "outputs",
         "output_text_selector",
         "error",

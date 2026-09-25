@@ -13,12 +13,16 @@
 #  permissions and limitations under the License.
 """End-to-end tests for the replay pipeline and experiment run fan-out."""
 
+import base64
 import uuid
 from collections.abc import Sequence
+from copy import deepcopy
+from typing import Any
 
 import pytest
 
 from conftest import (
+    RECORDED_OM_TAPE,
     ReplayServices,
     build_replay_services,
     build_task_actor,
@@ -51,8 +55,10 @@ from kitaru.server.application.models.experiment import ExperimentCreate
 from kitaru.server.application.models.experiment_run import ExperimentRunCreate
 from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
+from kitaru.server.application.models.session import SessionUpdate
 from kitaru.server.application.models.task import TaskFilter, TaskUpdate
 from kitaru.server.application.services.plugin_resolution import PLUGIN_PROVIDER_LABEL
+from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
     AgentVersion,
@@ -64,8 +70,12 @@ from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort_version import CohortVersion, CohortVersionIdNotFound
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.replay import DuplicateReplayForBaseline
-from kitaru.server.domain.replay_config import ReplayOverride
-from kitaru.server.domain.session import Session, SessionNotEvaluatable
+from kitaru.server.domain.replay_config import ReplayConfig, ReplayOverride
+from kitaru.server.domain.session import (
+    Session,
+    SessionNotEvaluatable,
+    SessionReplayNotReady,
+)
 from kitaru.server.domain.task import AgentTask, AgentTaskDetails, EvaluationTask
 from kitaru.server.filtering import FilterCondition
 
@@ -119,6 +129,527 @@ async def _baseline_session(
         status=SessionStatus.COMPLETED,
         inputs={"q": "hi"},
     )
+
+
+async def test_pending_mastra_baseline_creates_no_replay(
+    services: ReplayServices,
+) -> None:
+    """Refuse a pending memory recording before creating jobs or tasks."""
+    version = await _agent_version_with_run_spec(services)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.IN_PROGRESS,
+        framework="mastra",
+        inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+        metadata={"mastra_replay_state": "pending"},
+    )
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_pending"):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[],
+                baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+            ),
+            actor=ACTOR,
+        )
+    replays, _ = await services.replays.query(ReplayFilter())
+    assert not replays
+
+
+@pytest.mark.parametrize(
+    "invalid_field",
+    [
+        "raw_input",
+        "file_hash",
+        "x",
+        "0:0,0",
+        "0:1",
+        "0:1,0;0:1,0",
+        "0:",
+        pytest.param("0:" + "9" * 5000, id="oversized-rank"),
+    ],
+)
+async def test_malformed_eligible_mastra_baseline_creates_no_replay(
+    services: ReplayServices,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    invalid_field: str,
+) -> None:
+    """Refuse a stored eligible marker when replay input is malformed."""
+    version = await _agent_version_with_run_spec(services)
+    invalid = deepcopy(complete_mastra_memory_replay_inputs)
+    if invalid_field == "raw_input":
+        del invalid["mastra_memory_replay"]["rawInput"]
+    elif invalid_field == "file_hash":
+        invalid["mastra_memory_replay"]["files"][0]["sha256"] = "0" * 64
+    else:
+        invalid["mastra_memory_replay"]["keyOrder"]["permutations"] = invalid_field
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        framework="mastra",
+        inputs=invalid,
+        metadata={"mastra_replay_state": "eligible"},
+    )
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_incomplete"):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[],
+                baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+            ),
+            actor=ACTOR,
+        )
+    replays, _ = await services.replays.query(ReplayFilter())
+    assert not replays
+
+
+@pytest.mark.parametrize("tape", [RECORDED_OM_TAPE, [*RECORDED_OM_TAPE, {}]])
+async def test_mastra_baseline_om_tape_entries_are_checked_before_replay(
+    services: ReplayServices,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    tape: list[Any],
+) -> None:
+    """Refuse a stored OM tape the adapter would reject after the job exists."""
+    version = await _agent_version_with_run_spec(services)
+    inputs = deepcopy(complete_mastra_memory_replay_inputs)
+    inputs["mastra_memory_replay"]["omTape"] = deepcopy(tape)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        framework="mastra",
+        inputs=inputs,
+        metadata={"mastra_replay_state": "eligible"},
+    )
+    create = ReplayCreate(
+        baseline_session_id=baseline.id,
+        evaluators=[],
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+    )
+    if tape is RECORDED_OM_TAPE:
+        bundle = await services.replay_service.create_replay(create, actor=ACTOR)
+        assert bundle.replay.baseline_session_id == baseline.id
+        return
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_incomplete"):
+        await services.replay_service.create_replay(create, actor=ACTOR)
+    replays, _ = await services.replays.query(ReplayFilter())
+    assert not replays
+
+
+@pytest.mark.parametrize("missing_field", ["keyOrder", "turnStartedAt"])
+async def test_mastra_baseline_in_an_outdated_v3_format_is_refused(
+    services: ReplayServices,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    missing_field: str,
+) -> None:
+    """Refuse an early v3 input the adapter can no longer decode."""
+    version = await _agent_version_with_run_spec(services)
+    outdated = deepcopy(complete_mastra_memory_replay_inputs)
+    del outdated["mastra_memory_replay"][missing_field]
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        framework="mastra",
+        inputs=outdated,
+        metadata={"mastra_replay_state": "eligible"},
+    )
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_recording_outdated"):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[],
+                baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+            ),
+            actor=ACTOR,
+        )
+    replays, _ = await services.replays.query(ReplayFilter())
+    assert not replays
+
+
+@pytest.mark.parametrize(
+    ("turn_started_at", "accepted"),
+    [
+        ("1999-12-31T23:59:59.999Z", True),
+        ("2026-01-01", False),
+        ("2026-01-01T00:00:00+00:00", False),
+        ("2026-01-01T00:00:00.000+00:00", False),
+        ("2026-01-01T00:00:00Z", False),
+        ("2026-02-30T00:00:00.000Z", False),
+    ],
+)
+async def test_mastra_baseline_turn_start_must_be_a_javascript_iso_timestamp(
+    services: ReplayServices,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    turn_started_at: str,
+    accepted: bool,
+) -> None:
+    """Accept only the `Date#toISOString()` form the adapter can decode."""
+    version = await _agent_version_with_run_spec(services)
+    inputs = deepcopy(complete_mastra_memory_replay_inputs)
+    inputs["mastra_memory_replay"]["turnStartedAt"] = turn_started_at
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        framework="mastra",
+        inputs=inputs,
+        metadata={"mastra_replay_state": "eligible"},
+    )
+    create = ReplayCreate(
+        baseline_session_id=baseline.id,
+        evaluators=[],
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+    )
+    if accepted:
+        bundle = await services.replay_service.create_replay(create, actor=ACTOR)
+        assert bundle.replay.baseline_session_id == baseline.id
+        return
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_recording_outdated"):
+        await services.replay_service.create_replay(create, actor=ACTOR)
+    replays, _ = await services.replays.query(ReplayFilter())
+    assert not replays
+
+
+@pytest.mark.parametrize("blob", ["kept", "deleted", "deleted_after_first_check"])
+async def test_mastra_baseline_whose_file_blob_was_deleted_is_refused(
+    services: ReplayServices,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    blob: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refuse a baseline at replay creation once a recorded file's blob is gone.
+
+    ``deleted_after_first_check`` removes the blob after the early readiness
+    check passes, so only the final check before the writes sees the refusal.
+    """
+    version = await _agent_version_with_run_spec(services)
+    inputs = deepcopy(complete_mastra_memory_replay_inputs)
+    file = inputs["mastra_memory_replay"]["files"][0]
+    content = base64.b64decode(file.pop("base64"))
+    stored = await create_blob(
+        services.blobs, ACTOR.account.id, content=content, media_type=file["mediaType"]
+    )
+    file["blobId"] = str(stored.id)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        framework="mastra",
+        inputs=inputs,
+        metadata={"mastra_replay_state": "eligible"},
+    )
+    if blob == "deleted":
+        await services.blobs.delete(stored.id)
+    elif blob == "deleted_after_first_check":
+        create_replay_config = services.experiments.create_replay_config
+
+        async def delete_blob_then_create(config: ReplayConfig) -> ReplayConfig:
+            await services.blobs.delete(stored.id)
+            return await create_replay_config(config)
+
+        monkeypatch.setattr(
+            services.experiments, "create_replay_config", delete_blob_then_create
+        )
+    create = ReplayCreate(
+        baseline_session_id=baseline.id,
+        evaluators=[],
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+    )
+    if blob == "kept":
+        bundle = await services.replay_service.create_replay(create, actor=ACTOR)
+        assert bundle.replay.baseline_session_id == baseline.id
+        return
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_file_missing"):
+        await services.replay_service.create_replay(create, actor=ACTOR)
+    replays, _ = await services.replays.query(ReplayFilter())
+    assert not replays
+
+
+async def test_old_mastra_om_without_result_tape_is_not_replayable(
+    services: ReplayServices,
+) -> None:
+    """A completed legacy OM envelope cannot silently rerun its observer."""
+    version = await _agent_version_with_run_spec(services)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        framework="mastra",
+        inputs={
+            "mastra_memory_replay": {
+                "version": 2,
+                "complete": True,
+                "configuration": {
+                    "memoryConfig": {"observationalMemory": {"scope": "thread"}}
+                },
+            }
+        },
+    )
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_tape_missing"):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[],
+                baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_old_mastra_working_memory_remains_replayable(
+    services: ReplayServices,
+) -> None:
+    """The new tape guard does not reject completed working-memory-only v2 input."""
+    version = await _agent_version_with_run_spec(services)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        framework="mastra",
+        inputs={
+            "mastra_memory_replay": {
+                "version": 2,
+                "complete": True,
+                "configuration": {
+                    "memoryConfig": {"workingMemory": {"scope": "thread"}}
+                },
+            }
+        },
+    )
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[],
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+        ),
+        actor=ACTOR,
+    )
+    assert bundle.replay.baseline_session_id == baseline.id
+
+
+async def test_experiment_run_reports_refused_mastra_baselines_per_session(
+    services: ReplayServices,
+) -> None:
+    """Refused memory recordings fail their own replay while the rest still run."""
+    version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, version.agent_id
+    )
+    replayable = await _baseline_session(services, version)
+    pending = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        framework="mastra",
+        inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+        metadata={"mastra_replay_state": "pending"},
+    )
+    ineligible = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.FAILED,
+        framework="mastra",
+        inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+        metadata={
+            "mastra_replay_state": "ineligible",
+            "mastra_replay_reason": "native_run_failed",
+        },
+    )
+    cohort = await _cohort_version(
+        services, version.agent_id, [replayable.id, pending.id, ineligible.id]
+    )
+
+    # IF_MISSING checks baseline evaluability, which the in-progress pending
+    # recording would fail if it were not refused first.
+    run, counts = await services.experiment_service.start_run(
+        experiment_id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort.id,
+            agent_version_id=version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
+        ),
+        actor=ACTOR,
+    )
+
+    assert run.status is ExperimentRunStatus.RUNNING
+    assert (counts.total, counts.pending, counts.failed) == (3, 1, 2)
+    replays = {
+        replay.baseline_session_id: replay
+        for replay in await services.replays.list_by_experiment_run(run.id)
+    }
+    assert replays[replayable.id].status is ReplayStatus.PENDING
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=get_replay_job_id(replays[replayable.id])), actor=ACTOR
+    )
+    assert any(isinstance(task, AgentTask) for task in tasks)
+    for session, reason in [
+        (pending, "mastra_replay_pending"),
+        (ineligible, "mastra_replay_native_run_failed"),
+    ]:
+        refused = replays[session.id]
+        assert refused.status is ReplayStatus.FAILED
+        assert refused.error == f"Session {session.id}: {reason}"
+        assert refused.job_id is None
+
+
+async def test_experiment_run_of_only_refused_baselines_fails_immediately(
+    services: ReplayServices,
+) -> None:
+    """A run whose every baseline is refused cannot wait on a job that never runs."""
+    version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, version.agent_id
+    )
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        framework="mastra",
+        inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+        metadata={"mastra_replay_state": "pending"},
+    )
+    cohort = await _cohort_version(services, version.agent_id, [baseline.id])
+
+    run, counts = await services.experiment_service.start_run(
+        experiment_id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort.id,
+            agent_version_id=version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+        ),
+        actor=ACTOR,
+    )
+
+    assert run.status is ExperimentRunStatus.FAILED
+    assert (counts.total, counts.failed) == (1, 1)
+    stored = await services.experiment_runs.get(run.id)
+    assert stored.status is ExperimentRunStatus.FAILED
+    [replay] = await services.replays.list_by_experiment_run(run.id)
+    assert replay.error == f"Session {baseline.id}: mastra_replay_pending"
+    tasks, _ = await services.task_service.list_tasks(TaskFilter(), actor=ACTOR)
+    assert tasks == []
+
+
+async def test_abandoned_mastra_baseline_is_refused_with_its_reason(
+    services: ReplayServices,
+) -> None:
+    """A pending recording closed as failed is refused as abandoned."""
+    version = await _agent_version_with_run_spec(services)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        framework="mastra",
+        inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+        metadata={"mastra_replay_state": "pending"},
+    )
+    await SessionService(
+        repository=services.sessions,
+        task_repository=services.tasks,
+        agent_version_repository=services.agent_versions,
+        replay_repository=services.replays,
+        import_repository=services.imports,
+        payload_store=services.payload_store,
+    ).update_session(
+        baseline.id,
+        SessionUpdate(status=SessionStatus.FAILED, error="worker died"),
+        actor=ACTOR,
+    )
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_abandoned"):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[],
+                baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_completed_ineligible_mastra_baseline_keeps_outputs_and_reason(
+    services: ReplayServices,
+) -> None:
+    """A native answer that succeeded without a usable recording stays completed."""
+    version = await _agent_version_with_run_spec(services)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        framework="mastra",
+        inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+        metadata={"mastra_replay_state": "pending"},
+    )
+    closed = await SessionService(
+        repository=services.sessions,
+        task_repository=services.tasks,
+        agent_version_repository=services.agent_versions,
+        replay_repository=services.replays,
+        import_repository=services.imports,
+        payload_store=services.payload_store,
+    ).update_session(
+        baseline.id,
+        SessionUpdate(
+            status=SessionStatus.COMPLETED,
+            outputs={"text": "native answer"},
+            metadata={
+                "mastra_replay_state": "ineligible",
+                "mastra_replay_reason": "replay_input_too_large",
+                "mastra_native_state": "completed",
+            },
+        ),
+        actor=ACTOR,
+    )
+    assert closed.status == SessionStatus.COMPLETED
+    assert closed.error is None
+    with pytest.raises(
+        SessionReplayNotReady, match="mastra_replay_replay_input_too_large"
+    ):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[],
+                baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+            ),
+            actor=ACTOR,
+        )
 
 
 async def _cohort_version(

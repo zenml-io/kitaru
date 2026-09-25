@@ -17,6 +17,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
@@ -643,6 +644,72 @@ async def test_update_session_clears_outputs_with_explicit_null(
     assert fetched["outputs"] is None
 
 
+async def test_finalize_mastra_inputs_through_session_patch(
+    client: httpx.AsyncClient,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+) -> None:
+    """Expose the final replay input and eligibility through one REST update."""
+    created = (
+        await client.post(
+            "/api/v1/sessions",
+            json=_session_body(
+                framework="mastra",
+                inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+                metadata={"mastra_replay_state": "pending"},
+            ),
+        )
+    ).json()
+    final_inputs = complete_mastra_memory_replay_inputs
+    response = await client.patch(
+        f"/api/v1/sessions/{created['id']}",
+        json={
+            "status": "completed",
+            "inputs": final_inputs,
+            "metadata": {"mastra_replay_state": "eligible"},
+        },
+    )
+    assert response.status_code == 200
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["inputs"] == final_inputs
+    assert fetched["status"] == "completed"
+    assert fetched["metadata"]["mastra_replay_state"] == "eligible"
+    repeat = await client.patch(
+        f"/api/v1/sessions/{created['id']}", json={"inputs": final_inputs}
+    )
+    assert repeat.status_code == 409
+
+
+async def test_plain_failed_patch_closes_pending_mastra_session(
+    client: httpx.AsyncClient,
+) -> None:
+    """Close a recording whose process died before it decided replay eligibility."""
+    created = (
+        await client.post(
+            "/api/v1/sessions",
+            json=_session_body(
+                framework="mastra",
+                inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+                metadata={
+                    "mastra_replay_state": "pending",
+                    "mastra_native_state": "pending",
+                },
+            ),
+        )
+    ).json()
+    response = await client.patch(
+        f"/api/v1/sessions/{created['id']}",
+        json={"status": "failed", "error": "worker died"},
+    )
+    assert response.status_code == 200
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["status"] == "failed"
+    assert fetched["metadata"] == {
+        "mastra_replay_state": "ineligible",
+        "mastra_replay_reason": "abandoned",
+        "mastra_native_state": "pending",
+    }
+
+
 async def test_update_session_omitted_outputs_unchanged(
     client: httpx.AsyncClient,
 ) -> None:
@@ -953,12 +1020,12 @@ async def test_list_sessions_filter_nested_too_deep(client: httpx.AsyncClient) -
     assert response.status_code == 422
 
 
-async def test_list_sessions_rejects_worker_and_task_credentials(
+async def test_list_sessions_rejects_a_worker_credential(
     session_repository: FakeSessionRepository,
     account: Account,
     auth_service: AuthService,
 ) -> None:
-    """Observe HTTP 403 for a worker credential or an import-less task credential."""
+    """Observe HTTP 403 for a worker credential."""
     app = create_app(local_settings())
     app.dependency_overrides[get_session_service] = lambda: SessionService(
         repository=session_repository,
@@ -977,21 +1044,6 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
         ).token
         response = await client.get(
             "/api/v1/sessions", headers={"Authorization": f"Bearer {worker_token}"}
-        )
-        assert response.status_code == 403
-
-        task_token = auth_service.issue_task_token(
-            TaskSubject(
-                task_id=uuid.uuid4(),
-                attempt=1,
-                worker_id=uuid.uuid4(),
-                account_id=account.id,
-                job_id=uuid.uuid4(),
-            ),
-            timeout_seconds=3600,
-        ).token
-        response = await client.get(
-            "/api/v1/sessions", headers={"Authorization": f"Bearer {task_token}"}
         )
         assert response.status_code == 403
 
@@ -1115,6 +1167,55 @@ async def test_list_sessions_scopes_a_task_token_to_its_granted_import(
         )
         assert response.status_code == 200
         assert response.json()["items"] == []
+
+
+async def test_list_sessions_shows_a_task_token_its_own_result_session(
+    session_repository: FakeSessionRepository,
+    node_repository: FakeSessionNodeRepository,
+    evaluation_repository: FakeEvaluationRepository,
+    task_repository: FakeTaskRepository,
+    account: Account,
+    auth_service: AuthService,
+) -> None:
+    """List a failed result session, with its error, to the task that produced it."""
+    task_id = uuid.uuid4()
+    agent_id = uuid.uuid4()
+    own = await create_session(
+        session_repository,
+        account.id,
+        agent_id=agent_id,
+        task_id=task_id,
+        status=SessionStatus.FAILED,
+        error="No history result for tool lookup",
+    )
+    await create_session(
+        session_repository, account.id, agent_id=agent_id, task_id=uuid.uuid4()
+    )
+    await create_session(session_repository, account.id, agent_id=agent_id)
+    client = _build_task_scoped_app(
+        session_repository,
+        node_repository,
+        task_repository,
+        evaluation_repository,
+        auth_service,
+    )
+    async with client:
+        token = _task_token(auth_service, account, task_id=task_id)
+        headers = {"Authorization": f"Bearer {token}"}
+        own_filter = {"field": "task_id", "op": "eq", "value": str(task_id)}
+        response = await client.get(
+            "/api/v1/sessions",
+            params={"filter": json.dumps(own_filter)},
+            headers=headers,
+        )
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert [item["id"] for item in items] == [str(own.id)]
+        assert items[0]["error"] == "No history result for tool lookup"
+
+        response = await client.get("/api/v1/sessions", headers=headers)
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()["items"]] == [str(own.id)]
 
 
 async def test_get_session_allows_a_task_token_granted_its_import(

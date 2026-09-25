@@ -13,6 +13,10 @@
 #  permissions and limitations under the License.
 """Session entity, rollups, and errors."""
 
+import base64
+import binascii
+import hashlib
+import re
 import uuid
 from collections.abc import Iterable
 from datetime import datetime
@@ -30,6 +34,7 @@ from kitaru.server.domain.base import (
     NotFoundError,
     ValidationError,
 )
+from kitaru.server.domain.blob import Blob
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.payload import Payload
 
@@ -201,6 +206,385 @@ class SessionNotUpdatable(ConflictError):
         super().__init__(f"Session {session_id} does not accept updates")
 
 
+class SessionReplayFinalizationInvalid(ValidationError):
+    """Raised when a Mastra replay input transition is incomplete or unauthorized."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the session.
+        """
+        super().__init__(f"Session {session_id} has invalid Mastra replay finalization")
+
+
+class SessionReplayNotReady(ConflictError):
+    """Raised when a Mastra baseline cannot be replayed yet."""
+
+    def __init__(self, session_id: uuid.UUID, reason: str) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the baseline session.
+            reason: Stable replay eligibility reason code.
+        """
+        super().__init__(f"Session {session_id}: {reason}")
+        self.session_id = session_id
+        self.reason = reason
+
+
+def mastra_replay_uses_observational_memory(envelope: dict[str, Any]) -> bool:
+    """Return whether a recorded Mastra replay input enables observational memory."""
+    config = envelope.get("configuration")
+    memory = config.get("memoryConfig") if isinstance(config, dict) else None
+    om = memory.get("observationalMemory") if isinstance(memory, dict) else None
+    return om is True or (isinstance(om, dict) and om.get("enabled") is not False)
+
+
+_JS_ISO_TIMESTAMP = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z"
+)
+
+
+def _is_js_iso_timestamp(value: str) -> bool:
+    """Check that a string is exactly a JavaScript `Date#toISOString()` value.
+
+    Args:
+        value: The string to check, such as `2026-01-01T00:00:00.000Z`.
+
+    Returns:
+        Whether the string is a real UTC instant in that exact form.
+    """
+    if _JS_ISO_TIMESTAMP.fullmatch(value) is None:
+        return False
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f%z")
+    except ValueError:
+        return False
+    # Require the value to render back unchanged, as the adapter's check does.
+    rendered = parsed.isoformat(timespec="milliseconds")
+    return rendered.removesuffix("+00:00") + "Z" == value
+
+
+def mastra_replay_v3_current(envelope: dict[str, Any]) -> bool:
+    """Check that a version-3 input carries its recorded key order and turn start.
+
+    Early version-3 inputs lack both, and the adapter can no longer decode them.
+    """
+    key_order = envelope.get("keyOrder")
+    started = envelope.get("turnStartedAt")
+    if not (
+        isinstance(key_order, dict)
+        and isinstance(key_order.get("permutations"), str)
+        and isinstance(key_order.get("sha256"), str)
+        and re.fullmatch(r"[a-f0-9]{64}", key_order["sha256"]) is not None
+        and isinstance(started, str)
+    ):
+        return False
+    # The adapter decodes only the exact `Date#toISOString()` form, so a looser
+    # ISO value would pass here and fail in the worker after queuing.
+    return _is_js_iso_timestamp(started)
+
+
+# Nine digits exceed any object count the replay input budget allows, and keep
+# every number far below Python's integer string conversion limit.
+_MASTRA_KEY_ORDER_NUMBER = r"[0-9]{1,9}"
+_MASTRA_KEY_ORDER_ENTRY = (
+    rf"{_MASTRA_KEY_ORDER_NUMBER}:{_MASTRA_KEY_ORDER_NUMBER}"
+    rf"(?:,{_MASTRA_KEY_ORDER_NUMBER})*"
+)
+_MASTRA_KEY_ORDER = re.compile(
+    rf"(?:{_MASTRA_KEY_ORDER_ENTRY}(?:;{_MASTRA_KEY_ORDER_ENTRY})*)?"
+)
+
+
+def _mastra_key_order_well_formed(key_order: Any) -> bool:
+    """Check that a recorded key order is one the adapter can apply.
+
+    Each entry must name a new object position and hold a permutation of its
+    key ranks. This does not match entries to the stored objects or check the
+    digest, which both need the JavaScript walk and serialization they were
+    computed from.
+
+    Args:
+        key_order: The input's `keyOrder` value.
+
+    Returns:
+        Whether the permutations follow the adapter's grammar.
+    """
+    permutations = (
+        key_order.get("permutations") if isinstance(key_order, dict) else None
+    )
+    if (
+        not isinstance(permutations, str)
+        or _MASTRA_KEY_ORDER.fullmatch(permutations) is None
+    ):
+        return False
+    for index, entry in enumerate(permutations.split(";") if permutations else []):
+        gap, order = entry.split(":")
+        ranks = [int(rank) for rank in order.split(",")]
+        if (index > 0 and int(gap) == 0) or sorted(ranks) != list(range(len(ranks))):
+            return False
+    return True
+
+
+def _mastra_om_tape_entry_well_formed(entry: Any) -> bool:
+    """Check that a recorded OM result is one the adapter's result tape serves.
+
+    The adapter refuses a whole tape that holds an entry without a known
+    phase and method, a numeric ordinal, a string input fingerprint, and a
+    failure marker that is absent or true. It also needs the recorded output,
+    which a successful stream call holds as its list of chunks.
+
+    Args:
+        entry: One item of the input's `omTape` list.
+
+    Returns:
+        Whether the adapter can serve the entry.
+    """
+    if not isinstance(entry, dict):
+        return False
+    ordinal = entry.get("ordinal")
+    failed = "failed" in entry
+    return (
+        entry.get("phase") in {"observer", "reflector"}
+        and entry.get("method") in {"doGenerate", "doStream"}
+        and isinstance(ordinal, int | float)
+        and not isinstance(ordinal, bool)
+        and isinstance(entry.get("inputFingerprint"), str)
+        and (not failed or entry["failed"] is True)
+        and "output" in entry
+        and (
+            failed or entry["method"] != "doStream" or isinstance(entry["output"], list)
+        )
+    )
+
+
+def mastra_replay_v3_complete(envelope: dict[str, Any]) -> bool:
+    """Check the required shape of a finalized Mastra replay input."""
+    snapshot = envelope.get("initialSnapshot")
+    config = envelope.get("configuration")
+    files = envelope.get("files")
+    return (
+        envelope.get("version") == 3
+        and envelope.get("complete") is True
+        and envelope.get("reasons") == []
+        and isinstance(envelope.get("invocationId"), str)
+        and bool(envelope["invocationId"])
+        and "rawInput" in envelope
+        and isinstance(snapshot, dict)
+        and isinstance(snapshot.get("threadId"), str)
+        and isinstance(snapshot.get("resourceId"), str)
+        and isinstance(snapshot.get("messages"), list)
+        and isinstance(snapshot.get("records"), list)
+        and isinstance(config, dict)
+        and isinstance(config.get("memoryConfig"), dict)
+        and isinstance(envelope.get("requestContext"), dict)
+        and isinstance(files, list)
+        and _mastra_replay_files_complete(files)
+        and isinstance(envelope.get("omTape"), list)
+        and all(map(_mastra_om_tape_entry_well_formed, envelope["omTape"]))
+        and mastra_replay_v3_current(envelope)
+        and _mastra_key_order_well_formed(envelope["keyOrder"])
+    )
+
+
+_MASTRA_FILE_REFERENCE = re.compile(r"kitaru-file://sha256/[a-f0-9]{64}")
+_SHA256 = re.compile(r"[a-f0-9]{64}")
+_MASTRA_MAX_FILE_BYTES = 16 * 1_048_576
+_MASTRA_MAX_INLINE_FILE_BYTES = 8 * 1_048_576
+
+
+def _mastra_file_reference(media_type: str, content: bytes) -> str:
+    """Derive a recorded file's content reference from its media type and bytes.
+
+    Args:
+        media_type: The file's media type.
+        content: The file's bytes.
+
+    Returns:
+        The ``kitaru-file://`` reference the Mastra adapter records.
+    """
+    digest = hashlib.sha256(media_type.encode() + b"\0" + content).hexdigest()
+    return f"kitaru-file://sha256/{digest}"
+
+
+class MastraStoredFile(FrozenModel):
+    """A recorded Mastra file whose content is stored as a blob."""
+
+    blob_id: uuid.UUID
+    sha256: str
+    length: int
+    url: str
+    media_type: str
+
+    def matches_reference(self, content: bytes) -> bool:
+        """Return whether this file's reference was derived from this content.
+
+        Args:
+            content: The bytes the named blob holds.
+
+        Returns:
+            Whether the reference matches the content and media type.
+        """
+        try:
+            return _mastra_file_reference(self.media_type, content) == self.url
+        except UnicodeEncodeError:
+            return False
+
+    def is_held_by(self, blob: Blob | None) -> bool:
+        """Return whether the blob exists and holds this file's content.
+
+        Args:
+            blob: The stored blob this file names, or None when it is missing.
+
+        Returns:
+            Whether the blob's hash and size match the recorded file.
+        """
+        return (
+            blob is not None and blob.sha256 == self.sha256 and blob.size == self.length
+        )
+
+
+def _read_mastra_stored_file(file: dict[str, Any]) -> MastraStoredFile | None:
+    """Read a file entry that names the blob holding its content.
+
+    Args:
+        file: Recorded file entry.
+
+    Returns:
+        The blob reference, or None when the entry is malformed.
+    """
+    blob_id = file.get("blobId")
+    url = file.get("url")
+    media_type = file.get("mediaType")
+    if (
+        not isinstance(blob_id, str)
+        or not isinstance(url, str)
+        or not isinstance(media_type, str)
+    ):
+        return None
+    try:
+        parsed = uuid.UUID(blob_id)
+    except ValueError:
+        return None
+    if str(parsed) != blob_id:
+        return None
+    return MastraStoredFile(
+        blob_id=parsed,
+        sha256=file["sha256"],
+        length=file["length"],
+        url=url,
+        media_type=media_type,
+    )
+
+
+def _mastra_inline_file_complete(file: dict[str, Any], url: str) -> bool:
+    """Check a file entry that holds its content inline as base64.
+
+    Args:
+        file: Recorded file entry.
+        url: The entry's content reference.
+
+    Returns:
+        Whether the content matches its length, hash, and reference.
+    """
+    encoded = file["base64"]
+    if not isinstance(encoded, str) or file["length"] > _MASTRA_MAX_INLINE_FILE_BYTES:
+        return False
+    # Compare against the canonical encoded length before decoding, so a small
+    # declared length cannot make the server allocate an arbitrarily large
+    # decode buffer only to reject the entry afterward.
+    if len(encoded) != 4 * ((file["length"] + 2) // 3):
+        return False
+    try:
+        content = base64.b64decode(encoded, validate=True)
+        reference = _mastra_file_reference(file["mediaType"], content)
+    except (binascii.Error, ValueError, UnicodeEncodeError):
+        return False
+    return (
+        base64.b64encode(content).decode("ascii") == encoded
+        and len(content) == file["length"]
+        and hashlib.sha256(content).hexdigest() == file["sha256"]
+        and url == reference
+    )
+
+
+def _mastra_replay_files_complete(files: list[Any]) -> bool:
+    """Validate bounded file references before publishing replay eligibility.
+
+    A file names the blob that stores its content, or holds the content
+    inline as base64. Blob entries are checked against the stored blobs
+    separately, because that needs the blob registry.
+    """
+    if len(files) > 64:
+        return False
+    seen: set[str] = set()
+    total_bytes = 0
+    for file in files:
+        if not isinstance(file, dict):
+            return False
+        url = file.get("url")
+        media_type = file.get("mediaType")
+        length = file.get("length")
+        digest = file.get("sha256")
+        if (
+            not isinstance(url, str)
+            or url in seen
+            or _MASTRA_FILE_REFERENCE.fullmatch(url) is None
+            or not isinstance(media_type, str)
+            or not media_type
+            or not isinstance(length, int)
+            or isinstance(length, bool)
+            or length < 0
+            or length > _MASTRA_MAX_FILE_BYTES
+            or not isinstance(digest, str)
+            or _SHA256.fullmatch(digest) is None
+        ):
+            return False
+        if "base64" in file:
+            if "blobId" in file or not _mastra_inline_file_complete(file, url):
+                return False
+        elif _read_mastra_stored_file(file) is None:
+            return False
+        total_bytes += length
+        if total_bytes > _MASTRA_MAX_FILE_BYTES:
+            return False
+        seen.add(url)
+    return True
+
+
+def mastra_replay_stored_files(inputs: Any) -> list[MastraStoredFile]:
+    """Return the blob-stored files a Mastra replay input records.
+
+    Entries that are malformed or hold their content inline are skipped.
+
+    Args:
+        inputs: Session or task inputs, of any shape.
+
+    Returns:
+        The recorded files stored as blobs.
+    """
+    envelope = inputs.get("mastra_memory_replay") if isinstance(inputs, dict) else None
+    files = envelope.get("files") if isinstance(envelope, dict) else None
+    if not isinstance(files, list):
+        return []
+    stored: list[MastraStoredFile] = []
+    for file in files:
+        if (
+            not isinstance(file, dict)
+            or "base64" in file
+            or not isinstance(file.get("sha256"), str)
+            or not isinstance(file.get("length"), int)
+            or isinstance(file.get("length"), bool)
+        ):
+            continue
+        entry = _read_mastra_stored_file(file)
+        if entry is not None:
+            stored.append(entry)
+    return stored
+
+
 class SessionRollups(FrozenModel):
     """Session rollup deltas."""
 
@@ -330,6 +714,85 @@ class Session(DomainModel):
         """
         if self.status != SessionStatus.IN_PROGRESS:
             raise SessionNotUpdatable(self.id)
+
+    def resolve_replay_metadata(
+        self,
+        status: SessionStatus,
+        metadata: dict[str, Any],
+        inputs: Any,
+        replacing_inputs: bool,
+    ) -> dict[str, Any]:
+        """Validate a Mastra replay input transition and return the metadata to store.
+
+        A pending Mastra recording that ends without a replay decision is
+        stored as ineligible: ``abandoned`` when it failed, ``unfinalized``
+        when it completed.
+
+        Args:
+            status: Session status after the update.
+            metadata: Session metadata after the update.
+            inputs: Replacement input value, when supplied.
+            replacing_inputs: Whether the request explicitly supplied inputs.
+
+        Raises:
+            SessionReplayFinalizationInvalid: The update replaces inputs outside
+                a pending Mastra finalization, or publishes an invalid replay
+                state or input.
+
+        Returns:
+            Metadata to store with the update.
+        """
+        is_mastra_recording = (
+            self.framework == "mastra" and self.origin == SessionOrigin.RECORDED
+        )
+        if not is_mastra_recording:
+            if replacing_inputs:
+                raise SessionReplayFinalizationInvalid(self.id)
+            return metadata
+        prior = self.metadata.get("mastra_replay_state")
+        next_state = metadata.get("mastra_replay_state")
+        if prior != "pending":
+            if replacing_inputs:
+                raise SessionReplayFinalizationInvalid(self.id)
+            return metadata
+        if status == SessionStatus.IN_PROGRESS:
+            if replacing_inputs or next_state != "pending":
+                raise SessionReplayFinalizationInvalid(self.id)
+            return metadata
+        if next_state in {None, "pending"} and not replacing_inputs:
+            # Cleanup of a recorder that died mid-turn, and clients that do not
+            # send a replay decision, must still be able to close the session.
+            return {
+                **metadata,
+                "mastra_replay_state": "ineligible",
+                "mastra_replay_reason": "abandoned"
+                if status == SessionStatus.FAILED
+                else "unfinalized",
+            }
+        if next_state not in {"eligible", "ineligible"}:
+            raise SessionReplayFinalizationInvalid(self.id)
+        if replacing_inputs and (
+            not isinstance(inputs, dict)
+            or not isinstance(inputs.get("mastra_memory_replay"), dict)
+        ):
+            raise SessionReplayFinalizationInvalid(self.id)
+        if next_state == "eligible":
+            envelope = (
+                inputs.get("mastra_memory_replay")
+                if replacing_inputs and isinstance(inputs, dict)
+                else None
+            )
+            if (
+                status != SessionStatus.COMPLETED
+                or not isinstance(envelope, dict)
+                or not mastra_replay_v3_complete(envelope)
+            ):
+                raise SessionReplayFinalizationInvalid(self.id)
+            if mastra_replay_uses_observational_memory(envelope) and not isinstance(
+                envelope.get("omTape"), list
+            ):
+                raise SessionReplayFinalizationInvalid(self.id)
+        return metadata
 
     def check_evaluate(self) -> None:
         """Require the session to currently accept evaluations.

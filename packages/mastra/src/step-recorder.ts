@@ -4,13 +4,18 @@ import {
   type AdapterRunState,
   boundedRecorderConversion,
   boundedRecorderJson,
+  type NormalizedModelStep,
   type NormalizedToolCall,
   projectRecordedMetadata,
+  type RecordedConversion,
   type RecordingLimits,
   recordNormalizedStep,
   resolveCost,
 } from "@zenml-io/kitaru/adapter";
-
+import {
+  type RequestEvidence,
+  requestEvidenceAttributes,
+} from "./request-capture.js";
 import type { KitaruCostCalculator, PublicModelIdentity } from "./types.js";
 
 export type RecordedStep = LLMStepResult<unknown> & {
@@ -120,11 +125,15 @@ function usageTokens(usage: unknown): SessionNodeCreateRequest["tokens"] {
 function stepOutputs(
   step: RecordedStep,
   tools: readonly NormalizedToolCall[],
+  sanitizeEvidence?: <T>(value: T) => T,
 ): JsonValue {
   return boundedRecorderJson(
     {
       finish_reason: step.finishReason ?? null,
-      text: boundedRecorderJson(step.text, "model step text"),
+      text: boundedRecorderJson(
+        sanitizeEvidence?.(step.text) ?? step.text,
+        "model step text",
+      ),
       tool_calls: tools.map((tool) => ({
         args: tool.inputs,
         toolCallId: tool.callId,
@@ -144,7 +153,10 @@ function stepOutputs(
             ],
       ),
       tripwire: projectRecordedMetadata(step.tripwire),
-      warnings: boundedRecorderJson(step.warnings, "model warnings"),
+      warnings: boundedRecorderJson(
+        sanitizeEvidence?.(step.warnings) ?? step.warnings,
+        "model warnings",
+      ),
     },
     "model step output",
   );
@@ -169,12 +181,26 @@ function toolErrorFromContent(
   return errorMessage(resultPart.output, "Tool failed");
 }
 
-export async function recordStep(
+/**
+ * Convert a finished Mastra step into the model and tool nodes Kitaru records.
+ *
+ * `endedAt` defaults to the time of conversion; pass the step's end when the
+ * conversion runs later than the step finished.
+ */
+export async function normalizeStep(
   state: AdapterRunState,
   step: RecordedStep,
   costCalculator?: KitaruCostCalculator,
   limits?: RecordingLimits,
-): Promise<void> {
+  requestEvidence?: RequestEvidence,
+  sanitizeEvidence?: <T>(value: T) => T,
+  endedAt?: string,
+  convertToolPayload: (
+    value: unknown,
+    path: string,
+    limits?: RecordingLimits,
+  ) => RecordedConversion = boundedRecorderConversion,
+): Promise<NormalizedModelStep> {
   const calls = step.toolCalls.flatMap((item) => {
     const call = toolCallPayload(item);
     return call ? [call] : [];
@@ -187,14 +213,14 @@ export async function recordStep(
   );
   const tools: NormalizedToolCall[] = calls.map((call) => {
     const result = results.get(call.toolCallId);
-    const inputs = boundedRecorderConversion(
-      call.args,
+    const inputs = convertToolPayload(
+      sanitizeEvidence?.(call.args) ?? call.args,
       `tool '${call.toolName}' input`,
       limits,
     );
     const recordedResult = result
-      ? boundedRecorderConversion(
-          result.result,
+      ? convertToolPayload(
+          sanitizeEvidence?.(result.result) ?? result.result,
           `tool '${call.toolName}' output`,
           limits,
         )
@@ -224,33 +250,60 @@ export async function recordStep(
     };
   });
   const failed = step.finishReason === "error" || step.tripwire !== undefined;
-  const servedModelId = step.response?.modelId ?? step.model?.modelId;
+  const servedModelId =
+    step.response?.modelId ?? step.model?.modelId ?? requestEvidence?.modelId;
+  const provider = step.model?.provider ?? requestEvidence?.provider;
   const tokens = usageTokens(step.usage);
   const cost = await resolveCost(costCalculator, {
     model: servedModelId ?? "",
-    provider: step.model?.provider ?? "",
+    provider: provider ?? "",
     requestedModelId: state.requestedModelId,
     tokens,
   });
 
-  await recordNormalizedStep(state, {
+  return {
     attributes: {
       cost: cost.attribute,
+      ...(requestEvidence ? requestEvidenceAttributes(requestEvidence) : {}),
       ...(isRecord(step.providerMetadata)
         ? { provider_metadata: projectRecordedMetadata(step.providerMetadata) }
         : {}),
     },
     cost: cost.cost,
+    endedAt,
     error: failed
       ? errorMessage(step.error ?? step.tripwire?.reason, "Model step failed")
       : undefined,
-    externalId: step.response?.id,
+    externalId: requestEvidence?.externalId ?? step.response?.id,
     failed,
-    inputs: null,
+    inputs: requestEvidence?.inputs ?? null,
     model: servedModelId,
-    outputs: stepOutputs(step, tools),
-    provider: step.model?.provider,
+    modelSettings: requestEvidence?.modelSettings,
+    startedAt: requestEvidence?.startedAt,
+    outputs: stepOutputs(step, tools, sanitizeEvidence),
+    provider,
     tokens,
     tools,
-  });
+  };
+}
+
+export async function recordStep(
+  state: AdapterRunState,
+  step: RecordedStep,
+  costCalculator?: KitaruCostCalculator,
+  limits?: RecordingLimits,
+  requestEvidence?: RequestEvidence,
+  sanitizeEvidence?: <T>(value: T) => T,
+): Promise<void> {
+  await recordNormalizedStep(
+    state,
+    await normalizeStep(
+      state,
+      step,
+      costCalculator,
+      limits,
+      requestEvidence,
+      sanitizeEvidence,
+    ),
+  );
 }

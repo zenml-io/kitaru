@@ -24,6 +24,7 @@ from kitaru.api_models.v1.imports import (
     ImportResponse,
 )
 from kitaru.api_models.v1.investigation import InvestigationSessionResponse
+from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.session import SessionDetailResponse, TokenUsage
 from kitaru.api_models.v1.session_node import SessionNodeListParams, SessionNodeResponse
 from kitaru.api_models.v1.tag import TagResponse
@@ -332,6 +333,49 @@ async def test_activity_returns_exactly_one_page_and_preserves_cursor() -> None:
     assert result.page.size == 3
     assert result.page.next_cursor == "opaque"
     assert result.page.has_more is True
+
+
+@pytest.mark.parametrize("operation", ["list", "list_children"])
+async def test_activity_job_pages_accept_sdk_responses(operation: str) -> None:
+    now = datetime.now(UTC)
+    job = JobResponse(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        kind="replay",
+        status="completed",
+        created=now,
+        updated=now,
+    )
+
+    async def list_jobs(*_args: object) -> Page[JobResponse]:
+        return Page(items=[job], next_cursor="next-job")
+
+    client = SimpleNamespace(
+        jobs=SimpleNamespace(list=list_jobs),
+        experiment_runs=SimpleNamespace(list_jobs=list_jobs),
+    )
+    server, context = build_server_context(client)
+    request = {"operation": operation, "size": 1}
+    if operation == "list":
+        request["kind"] = "job"
+    else:
+        request.update(kind="experiment_run_jobs", parent_id=str(uuid.uuid4()))
+    result = await server.call_tool(
+        "kitaru_activity_read", {"request": request}, context
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.is_error is False
+    assert result.structured_content is not None
+    data = result.structured_content["data"]
+    assert data["items"][0]["id"] == str(job.id)
+    assert data["items"][0]["kind"] == "replay"
+    assert data["items"][0]["status"] == "completed"
+    assert data["page"] == {
+        "size": 1,
+        "next_cursor": "next-job",
+        "has_more": True,
+    }
 
 
 async def test_activity_import_get_and_list_use_the_imports_resource() -> None:

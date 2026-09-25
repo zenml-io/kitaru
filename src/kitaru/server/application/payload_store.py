@@ -144,6 +144,40 @@ class PayloadStore:
             assert media_type is not None
             payload.blob_id = registry[(sha256, media_type)].id
 
+    async def get_blobs(self, blob_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Blob]:
+        """Load blob registry rows by id.
+
+        Args:
+            blob_ids: Ids of the blobs to load.
+
+        Returns:
+            Stored blobs keyed by id, missing ids omitted.
+        """
+        return await self._repository.get_many(blob_ids)
+
+    async def get_blob_contents(self, blobs: Sequence[Blob]) -> dict[str, bytes]:
+        """Load blobs' content in one round trip per backend.
+
+        Args:
+            blobs: Registry rows of the blobs to load.
+
+        Raises:
+            RuntimeError: A blob's backend has no configured data store.
+
+        Returns:
+            Content bytes keyed by their sha256.
+        """
+        blobs_by_backend: dict[BlobStorageBackend, list[Blob]] = {}
+        for blob in blobs:
+            blobs_by_backend.setdefault(blob.stored_in, []).append(blob)
+        data_by_sha256: dict[str, bytes] = {}
+        for backend, backend_blobs in blobs_by_backend.items():
+            store = self._data_stores.get_store(backend)
+            data_by_sha256.update(
+                await store.get_many([blob.sha256 for blob in backend_blobs])
+            )
+        return data_by_sha256
+
     async def resolve(self, payloads: Sequence[Payload]) -> None:
         """Resolve every unresolved ref of a batch in one round trip per backend.
 
@@ -166,15 +200,9 @@ class PayloadStore:
             [blob_id for _, blob_id in candidates]
         )
 
-        blobs_by_backend: dict[BlobStorageBackend, list[Blob]] = {}
-        for _, blob_id in candidates:
-            blob = registry[blob_id]
-            blobs_by_backend.setdefault(blob.stored_in, []).append(blob)
-
-        data_by_sha256: dict[str, bytes] = {}
-        for backend, blobs in blobs_by_backend.items():
-            store = self._data_stores.get_store(backend)
-            data_by_sha256.update(await store.get_many([blob.sha256 for blob in blobs]))
+        data_by_sha256 = await self.get_blob_contents(
+            [registry[blob_id] for _, blob_id in candidates]
+        )
 
         for payload, blob_id in candidates:
             blob = registry[blob_id]

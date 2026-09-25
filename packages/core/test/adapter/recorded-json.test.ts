@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   assertSafeKeys,
   boundedRecordedText,
+  boundedRecorderConversion,
   boundRecordedSize,
   MAX_RECORDED_PAYLOAD_CHARS,
   normalizeRecordingLimits,
   projectRecordedInput,
   projectRecordedMetadata,
+  RecordedSensitiveKeyError,
+  strictMastraReplayValue,
   strictRecordedJson,
 } from "../../src/adapter/index.js";
 
@@ -196,5 +199,43 @@ describe("recording limits", () => {
     [{ maxItems: 1.5 }, "maxItems must be an integer from 1 to 9000"],
   ])("rejects %j", (limits, why) => {
     expect(() => normalizeRecordingLimits(limits)).toThrow(why);
+  });
+});
+
+describe("credential keys", () => {
+  it.each([
+    ["a snake-case token", { profile: { access_token: "test-value" } }],
+    ["a camel-case token", { accessToken: "test-value" }],
+    ["a client secret", { oauth: { clientSecret: "test-value" } }],
+    ["a header-style API key", { "x-api-key": "test-value" }],
+    ["a private key", { signing: { private_key: "test-value" } }],
+    ["a secret value", { secret_value: "test-value" }],
+    ["an API key value", { api_key_value: "test-value" }],
+    ["a PEM private key", { private_key_pem: "test-value" }],
+    ["a camel-case secret value", { secretValue: "test-value" }],
+    ["a camel-case API key value", { apiKeyValue: "test-value" }],
+    ["a camel-case PEM private key", { privateKeyPem: "test-value" }],
+    ["an encoded token", { refreshTokenBase64Encoded: "test-value" }],
+  ])(
+    "refuses %s in replay input and redacts it in evidence",
+    (_name, value) => {
+      expect(() => strictMastraReplayValue(value)).toThrow(
+        RecordedSensitiveKeyError,
+      );
+      const converted = boundedRecorderConversion(value, "tool input");
+      expect(converted.lossy).toBe(true);
+      expect(JSON.stringify(converted.value)).not.toContain("test-value");
+    },
+  );
+
+  it.each([
+    ["token counts", { usage: { max_tokens: 10, inputTokens: 4 } }],
+    ["a pagination token", { nextPageToken: "abc", page_token: "def" }],
+    ["data keys", { sortKey: "name", cacheKey: "k", tokenType: "bearer" }],
+    ["representation-only keys", { value: 1, key_value: "k", rawText: "t" }],
+    ["a suffixed pagination token", { pageTokenValue: "abc", sortKeyStr: "x" }],
+    ["a keyboard layout", { keyboardLayout: "us", keyboard_layout_str: "us" }],
+  ])("keeps %s", (_name, value) => {
+    expect(strictMastraReplayValue(value)).toEqual(value);
   });
 });

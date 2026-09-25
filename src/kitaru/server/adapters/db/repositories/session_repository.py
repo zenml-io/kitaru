@@ -38,6 +38,7 @@ from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.investigation_session import (
     INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY,
 )
+from kitaru.server.adapters.db.orm.orm_utils import split_payload
 from kitaru.server.adapters.db.orm.replay import (
     REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY,
     REPLAY_RESULT_SESSION_ID_FOREIGN_KEY,
@@ -361,6 +362,27 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         # ever reading them, so the deferred load never fires.
         row = await self._get_row(session.id, deferred_columns=PAYLOAD_COLUMNS)
         row.apply_domain(session)
+        await self._flush(
+            {
+                SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT: lambda: (
+                    self._duplicate_external_id(session)
+                )
+            }
+        )
+        return row.to_domain(exclude={column.key for column in PAYLOAD_COLUMNS})
+
+    async def finalize_replay_inputs(self, session: Session) -> Session:
+        """Persist final replay inputs with the terminal session transition.
+
+        Args:
+            session: Validated pending Mastra session.
+
+        Returns:
+            Stored session without payloads.
+        """
+        row = await self._get_row(session.id, deferred_columns=PAYLOAD_COLUMNS)
+        row.apply_domain(session)
+        row.inputs, row.inputs_blob_id = split_payload(session.inputs)
         await self._flush(
             {
                 SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT: lambda: (

@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.server.application.events import ReplaysSettled
 from kitaru.server.application.interfaces.agent_repository import AgentRepository
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
@@ -61,6 +62,9 @@ from kitaru.server.application.services.evaluator_resolution import (
     validate_evaluators,
 )
 from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
+from kitaru.server.application.services.run_finalization import (
+    finalize_runs_if_drained,
+)
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
@@ -428,7 +432,10 @@ class ExperimentService:
 
         Every replay points at the experiment's replay config and the run's
         id. The run number is server-assigned per experiment, computed under
-        a lock of the experiment row.
+        a lock of the experiment row. A session whose Mastra memory recording
+        cannot be replayed gets a failed replay that names the session and the
+        refusal reason, and the other sessions still run; a run whose every
+        replay was refused is finalized as failed right away.
 
         Args:
             experiment_id: Id of the experiment.
@@ -487,7 +494,7 @@ class ExperimentService:
         run.start(datetime.now(UTC))
         run = await self._experiment_runs.create(run)
 
-        await create_replay_pipelines(
+        replays = await create_replay_pipelines(
             baselines=sessions,
             agent_version_id=agent_version.id,
             config=config,
@@ -500,5 +507,16 @@ class ExperimentService:
             evaluation_repository=self._evaluations,
             payload_store=self._payload_store,
         )
+        refused = [replay for replay in replays if replay.settled]
+        if refused:
+            # No job settles a refused replay, so a run made only of refusals
+            # has to be finalized here.
+            await finalize_runs_if_drained(
+                ReplaysSettled(replays=refused),
+                self._replays,
+                self._experiment_runs,
+                self._analytics,
+            )
+            run = await self._experiment_runs.get(run.id)
         counts = await self._replays.count_by_status(run.id)
         return run, counts

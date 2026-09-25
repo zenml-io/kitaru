@@ -131,8 +131,9 @@ class SessionRepository(Protocol):
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
 
-        The inputs are create-only and never written back. The outputs are
-        written back only when the session's outputs were changed.
+        The inputs are not written by ordinary updates; the guarded
+        ``finalize_replay_inputs`` operation is the sole exception. Outputs
+        are written only when changed.
 
         Args:
             session: Session with modified fields.
@@ -145,6 +146,17 @@ class SessionRepository(Protocol):
         Returns:
             Stored session with the updated timestamp renewed, without
             payloads.
+        """
+        ...
+
+    async def finalize_replay_inputs(self, session: Session) -> Session:
+        """Persist guarded replay inputs and terminal session fields together.
+
+        Args:
+            session: Finalized pending Mastra session.
+
+        Returns:
+            Stored session without payloads.
         """
         ...
 

@@ -9499,6 +9499,10 @@
             "description": "New error.",
             "title": "Error"
           },
+          "inputs": {
+            "description": "Final replay inputs for a pending Mastra recording.",
+            "title": "Inputs"
+          },
           "metadata": {
             "anyOf": [
               {

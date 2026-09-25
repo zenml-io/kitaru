@@ -182,6 +182,7 @@ convention = "google"
 
 [tool.ruff.lint.isort]
 known-first-party = [
+    "fixtures",
     "kitaru",
     "kitaru_openai_agents",
     "kitaru_pydantic_ai",

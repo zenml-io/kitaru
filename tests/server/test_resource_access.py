@@ -15,8 +15,6 @@
 
 import uuid
 
-import pytest
-
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import TaskKind
@@ -31,7 +29,6 @@ from kitaru.server.application.services.resource_access import (
     scope_task_session_filter,
 )
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.base import ForbiddenError
 from kitaru.server.domain.task import (
     AgentTaskDetails,
     AnalysisTaskDetails,
@@ -44,7 +41,7 @@ from kitaru.server.domain.task import (
     TaskRunSpec,
     TaskSpec,
 )
-from kitaru.server.filtering import AndExpression, FilterCondition
+from kitaru.server.filtering import AndExpression, FilterCondition, OrExpression
 
 
 def _script_plugin(blob_id: uuid.UUID) -> ScriptPluginSpec:
@@ -59,6 +56,67 @@ def test_agent_spec_grants_nothing() -> None:
         timeout_seconds=60,
         run_spec=TaskRunSpec(command="run.sh"),
         details=AgentTaskDetails(),
+    )
+    assert build_task_grants(spec) == {}
+
+
+def test_mastra_replay_agent_spec_grants_its_recorded_file_blobs() -> None:
+    """Grant a replaying agent task the blobs holding its recorded Mastra files."""
+    blob_id = uuid.uuid4()
+
+    def file(**fields: object) -> dict[str, object]:
+        return {
+            "url": "kitaru-file://sha256/" + "a" * 64,
+            "mediaType": "image/png",
+            "length": 4,
+            "sha256": "b" * 64,
+            **fields,
+        }
+
+    spec = TaskSpec(
+        task_id=uuid.uuid4(),
+        kind=TaskKind.AGENT,
+        timeout_seconds=60,
+        run_spec=TaskRunSpec(command="run.sh"),
+        details=AgentTaskDetails(
+            inputs={
+                "mastra_memory_replay": {
+                    "files": [
+                        file(blobId=str(blob_id)),
+                        file(base64="AAAA"),
+                        file(blobId="not-a-uuid"),
+                        "malformed",
+                    ]
+                }
+            },
+            replay_id=uuid.uuid4(),
+        ),
+    )
+    assert build_task_grants(spec) == {GrantKind.BLOB: frozenset({blob_id})}
+
+
+def test_non_replay_agent_spec_grants_no_blobs_named_in_its_inputs() -> None:
+    """Grant an ordinary agent task no blob its caller-supplied inputs name."""
+    spec = TaskSpec(
+        task_id=uuid.uuid4(),
+        kind=TaskKind.AGENT,
+        timeout_seconds=60,
+        run_spec=TaskRunSpec(command="run.sh"),
+        details=AgentTaskDetails(
+            inputs={
+                "mastra_memory_replay": {
+                    "files": [
+                        {
+                            "url": "kitaru-file://sha256/" + "a" * 64,
+                            "mediaType": "image/png",
+                            "length": 4,
+                            "sha256": "b" * 64,
+                            "blobId": str(uuid.uuid4()),
+                        }
+                    ]
+                }
+            },
+        ),
     )
     assert build_task_grants(spec) == {}
 
@@ -180,28 +238,33 @@ def test_scope_task_session_filter_passes_an_account_filter_through() -> None:
     assert scoped == session_filter
 
 
-def test_scope_task_session_filter_restricts_a_task_to_its_imports() -> None:
-    """AND the granted imports onto whatever filter a task principal sent."""
+def test_scope_task_session_filter_restricts_a_task_to_its_own_and_imports() -> None:
+    """AND the task's own and granted-import sessions onto a task's filter."""
     import_id = uuid.uuid4()
     actor = _task_actor({GrantKind.IMPORT: frozenset({import_id})})
+    assert isinstance(actor.principal, TaskPrincipal)
+    scope = OrExpression(
+        operands=(
+            FilterCondition(
+                field="task_id", op=FilterOp.EQ, value=actor.principal.task_id
+            ),
+            FilterCondition(field="import_id", op=FilterOp.IN, value=[import_id]),
+        )
+    )
     status = FilterCondition(field="status", op=FilterOp.NE, value="in_progress")
 
     scoped = scope_task_session_filter(SessionFilter(expression=status), actor)
-    assert scoped.expression == AndExpression(
-        operands=(
-            FilterCondition(field="import_id", op=FilterOp.IN, value=[import_id]),
-            status,
-        )
-    )
+    assert scoped.expression == AndExpression(operands=(scope, status))
 
     scoped = scope_task_session_filter(SessionFilter(), actor)
-    assert scoped.expression == FilterCondition(
-        field="import_id", op=FilterOp.IN, value=[import_id]
-    )
+    assert scoped.expression == scope
 
 
-def test_scope_task_session_filter_rejects_a_task_without_an_import_grant() -> None:
-    """Refuse a listing to a task principal holding no import grant."""
+def test_scope_task_session_filter_limits_a_task_without_imports_to_its_own() -> None:
+    """Restrict a task principal holding no import grant to its own sessions."""
     actor = _task_actor({GrantKind.SESSION: frozenset({uuid.uuid4()})})
-    with pytest.raises(ForbiddenError):
-        scope_task_session_filter(SessionFilter(), actor)
+    assert isinstance(actor.principal, TaskPrincipal)
+    scoped = scope_task_session_filter(SessionFilter(), actor)
+    assert scoped.expression == FilterCondition(
+        field="task_id", op=FilterOp.EQ, value=actor.principal.task_id
+    )

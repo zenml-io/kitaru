@@ -14,6 +14,7 @@
 """Session use cases."""
 
 import uuid
+from typing import Any
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.agent_version_repository import (
@@ -49,8 +50,10 @@ from kitaru.server.domain.session import (
     SessionAgentRequired,
     SessionAgentVersionMismatch,
     SessionBaselineNotFound,
+    SessionReplayFinalizationInvalid,
     SessionStatus,
     SessionStatusCannotBeCleared,
+    mastra_replay_stored_files,
 )
 from kitaru.server.domain.task import (
     AgentTask,
@@ -340,17 +343,14 @@ class SessionService:
     ) -> tuple[list[Session], str | None]:
         """List sessions matching a filter.
 
-        A task principal's listing is restricted to the imports its token is
-        granted.
+        A task principal's listing is restricted to the sessions it produced
+        and those of the imports its token is granted.
 
         Args:
             session_filter: Filter and pagination parameters.
             include_payloads: Whether to read and resolve the inputs and
                 outputs.
             actor: Caller context.
-
-        Raises:
-            ForbiddenError: A task principal holds no import grant.
 
         Returns:
             Page of matching sessions and the next cursor.
@@ -393,6 +393,9 @@ class SessionService:
             SessionNotUpdatable: The session is not in progress.
             SessionStatusCannotBeCleared: The command clears the status with
                 an explicit null.
+            SessionReplayFinalizationInvalid: The command replaces inputs or
+                publishes a replay state that the Mastra finalization rules
+                do not allow.
 
         Returns:
             Updated session.
@@ -404,12 +407,20 @@ class SessionService:
         await check_task_attempt(actor, self._tasks)
         session.check_update()
         fields = command.model_fields_set
+        target_status = session.status
+        if "status" in fields:
+            if command.status is None:
+                raise SessionStatusCannotBeCleared(session_id)
+            target_status = command.status
+        next_metadata = session.resolve_replay_metadata(
+            status=target_status,
+            metadata=(command.metadata if command.metadata is not None else {})
+            if "metadata" in fields
+            else session.metadata,
+            inputs=command.inputs,
+            replacing_inputs="inputs" in fields,
+        )
         if {"status", "outputs", "output_text_selector", "error", "ended_at"} & fields:
-            target_status = session.status
-            if "status" in fields:
-                if command.status is None:
-                    raise SessionStatusCannotBeCleared(session_id)
-                target_status = command.status
             session.finish(
                 status=target_status,
                 output_text_selector=command.output_text_selector
@@ -437,13 +448,53 @@ class SessionService:
                     AnalyticsEvent.SESSION_COMPLETED,
                     analytics_events.build_session_completed_properties(session),
                 )
+        if (
+            next_metadata.get("mastra_replay_state") == "eligible"
+            and "inputs" in fields
+        ):
+            await self._check_mastra_stored_files(session.id, command.inputs)
+        if "inputs" in fields:
+            session.inputs = Payload.from_json(command.inputs)
+            await self._payload_store.offload([session.inputs], session.owner_id)
         if "name" in fields:
             session.update_name(command.name)
-        if "metadata" in fields:
-            session.update_metadata(
-                command.metadata if command.metadata is not None else {}
-            )
+        if "metadata" in fields or next_metadata != session.metadata:
+            session.update_metadata(next_metadata)
+        if "inputs" in fields:
+            return await self._repository.finalize_replay_inputs(session)
         return await self._repository.update(session)
+
+    async def _check_mastra_stored_files(
+        self, session_id: uuid.UUID, inputs: Any
+    ) -> None:
+        """Require every blob a Mastra replay input names to hold its file.
+
+        Args:
+            session_id: Id of the session being finalized.
+            inputs: Replacement inputs carrying the replay input.
+
+        Raises:
+            SessionReplayFinalizationInvalid: A named blob does not exist, does
+                not hold the recorded content, or holds content the file's
+                reference was not derived from.
+        """
+        files = mastra_replay_stored_files(inputs)
+        if not files:
+            return
+        blobs = await self._payload_store.get_blobs(
+            list({file.blob_id for file in files})
+        )
+        if not all(file.is_held_by(blobs.get(file.blob_id)) for file in files):
+            raise SessionReplayFinalizationInvalid(session_id)
+        # Check the reference against the stored bytes, because the replay
+        # worker refuses a file whose reference does not match its media type
+        # and content, and the blob's raw hash cannot show that mismatch.
+        contents = await self._payload_store.get_blob_contents(list(blobs.values()))
+        if not all(
+            file.matches_reference(contents[blobs[file.blob_id].sha256])
+            for file in files
+        ):
+            raise SessionReplayFinalizationInvalid(session_id)
 
     async def delete_session(self, session_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a session.

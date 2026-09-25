@@ -21,6 +21,10 @@ from kitaru.api_models.v1.evaluator import (
     EvaluatorResponse,
     EvaluatorVersionResponse,
 )
+from kitaru.api_models.v1.experiment_run import (
+    ExperimentRunProgress,
+    ExperimentRunResponse,
+)
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.api_models.v1.insight import InsightResponse
 from kitaru.api_models.v1.investigation import (
@@ -29,6 +33,8 @@ from kitaru.api_models.v1.investigation import (
 )
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.plugin import PackagePluginSource
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayResponse
+from kitaru.api_models.v1.session import SessionDetailResponse, SessionOrigin
 from kitaru.api_models.v1.tag import (
     TagCreateRequest,
     TagLinkCreateRequest,
@@ -1096,6 +1102,268 @@ async def test_experiment_run_start_rejects_mismatched_receipt() -> None:
     client = SimpleNamespace(experiments=SimpleNamespace(start_run=start_run))
     with pytest.raises(MCPToolError, match="different exact resources"):
         await handle_workflow_start(_get_state(client), request)
+
+
+async def test_experiment_run_and_activity_reads_link_replay_to_sessions() -> None:
+    """The existing MCP workflow exposes eligibility and result-session links."""
+    now = datetime.now(UTC)
+    experiment_id = uuid.uuid4()
+    cohort_version_id = uuid.uuid4()
+    agent_version_id = uuid.uuid4()
+    baseline_id = uuid.uuid4()
+    result_id = uuid.uuid4()
+    run = ExperimentRunResponse(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        experiment_id=experiment_id,
+        number=1,
+        status="completed",
+        cohort_version_id=cohort_version_id,
+        agent_version_id=agent_version_id,
+        evaluate_baselines=False,
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+        progress=ExperimentRunProgress(
+            pending=0, evaluating=0, completed=1, failed=0, canceled=0, total=1
+        ),
+        created=now,
+        updated=now,
+    )
+    replay = ReplayResponse(
+        id=uuid.uuid4(),
+        job_id=uuid.uuid4(),
+        experiment_run_id=run.id,
+        baseline_session_id=baseline_id,
+        result_session_id=result_id,
+        override=None,
+        tool_policy={"default": {"type": "passthrough"}, "tools": {}},
+        evaluators=[],
+        evaluate_baselines=False,
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+        status="completed",
+        created=now,
+        updated=now,
+    )
+    baseline = SessionDetailResponse(
+        id=baseline_id,
+        owner_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        number=1,
+        origin="recorded",
+        status="completed",
+        inputs={},
+        outputs={"text": "native answer"},
+        metadata={
+            "mastra_native_state": "completed",
+            "mastra_replay_state": "eligible",
+        },
+        llm_call_count=1,
+        tool_call_count=0,
+        created=now,
+        updated=now,
+    )
+    result_session = baseline.model_copy(
+        update={
+            "id": result_id,
+            "origin": SessionOrigin.REPLAY,
+            "outputs": {"text": "replayed answer"},
+            "metadata": {},
+        }
+    )
+
+    async def start_run(
+        _experiment_id: uuid.UUID, _request: object, idempotency_key: str | None = None
+    ) -> ExperimentRunResponse:
+        del idempotency_key
+        assert _experiment_id == experiment_id
+        return run
+
+    async def get_run(item_id: uuid.UUID) -> ExperimentRunResponse:
+        assert item_id == run.id
+        return run
+
+    async def get_replay(item_id: uuid.UUID) -> ReplayResponse:
+        assert item_id == replay.id
+        return replay
+
+    async def get_session(item_id: uuid.UUID) -> SessionDetailResponse:
+        return {baseline_id: baseline, result_id: result_session}[item_id]
+
+    client = SimpleNamespace(
+        experiments=SimpleNamespace(start_run=start_run),
+        experiment_runs=SimpleNamespace(get=get_run),
+        replays=SimpleNamespace(get=get_replay),
+        sessions=SimpleNamespace(get=get_session),
+    )
+    server, context = _get_context(client, CapabilityMode.STANDARD)
+    start = await server.call_tool(
+        "kitaru_workflow_start",
+        {
+            "request": {
+                "operation": "experiment_run",
+                "experiment_id": str(experiment_id),
+                "cohort_version_id": str(cohort_version_id),
+                "agent_version_id": str(agent_version_id),
+            }
+        },
+        context,
+    )
+    assert isinstance(start, CallToolResult)
+    assert start.is_error is False
+    assert start.structured_content is not None
+    assert start.structured_content["data"]["result"]["id"] == str(run.id)
+
+    async def read(kind: str, item_id: uuid.UUID) -> dict[str, Any]:
+        response = await server.call_tool(
+            "kitaru_activity_read",
+            {"request": {"operation": "get", "kind": kind, "id": str(item_id)}},
+            context,
+        )
+        assert isinstance(response, CallToolResult)
+        assert response.is_error is False
+        assert response.structured_content is not None
+        return cast(dict[str, Any], response.structured_content["data"])
+
+    assert (await read("experiment_run", run.id))["progress"]["completed"] == 1
+    replay_data = await read("replay", replay.id)
+    assert replay_data["result_session_id"] == str(result_id)
+    assert replay_data["job_id"] == str(replay.job_id)
+    assert (await read("session", baseline_id))["metadata"] == {
+        "mastra_native_state": "completed",
+        "mastra_replay_state": "eligible",
+    }
+    result_data = await read("session", result_id)
+    assert result_data["outputs"] == {"text": "replayed answer"}
+
+
+@pytest.mark.parametrize(
+    ("state", "reason"),
+    [
+        ("diverged", "mastra_om_call_order"),
+        ("failed", "replay_failed"),
+    ],
+)
+async def test_activity_result_session_exposes_durable_replay_failure_reason(
+    state: str, reason: str
+) -> None:
+    """MCP activity reads retain safe result-session diagnostics."""
+    now = datetime.now(UTC)
+    result_session = SessionDetailResponse(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        number=2,
+        origin=SessionOrigin.REPLAY,
+        status="failed",
+        inputs={},
+        outputs={},
+        metadata={"mastra_replay_state": state, "mastra_replay_reason": reason},
+        llm_call_count=0,
+        tool_call_count=0,
+        created=now,
+        updated=now,
+    )
+
+    async def get_session(item_id: uuid.UUID) -> SessionDetailResponse:
+        assert item_id == result_session.id
+        return result_session
+
+    client = SimpleNamespace(sessions=SimpleNamespace(get=get_session))
+    server, context = _get_context(client, CapabilityMode.READ_ONLY)
+    result = await server.call_tool(
+        "kitaru_activity_read",
+        {
+            "request": {
+                "operation": "get",
+                "kind": "session",
+                "id": str(result_session.id),
+            }
+        },
+        context,
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.is_error is False
+    assert result.structured_content is not None
+    assert result.structured_content["data"]["metadata"] == {
+        "mastra_replay_state": state,
+        "mastra_replay_reason": reason,
+    }
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["mastra_replay_pending", "mastra_replay_abandoned", "mastra_replay_tape_missing"],
+)
+async def test_experiment_run_start_reports_safe_mastra_replay_reason(
+    reason: str,
+) -> None:
+    """MCP keeps the refused session id and safe reason from a server conflict."""
+    baseline_session_id = uuid.uuid4()
+
+    async def start_run(
+        _experiment_id: uuid.UUID, _request: object, idempotency_key: str | None = None
+    ) -> object:
+        del idempotency_key
+        raise APIError(409, f"Session {baseline_session_id}: {reason}")
+
+    client = SimpleNamespace(experiments=SimpleNamespace(start_run=start_run))
+    server, context = _get_context(client, CapabilityMode.STANDARD)
+    result = await server.call_tool(
+        "kitaru_workflow_start",
+        {
+            "request": {
+                "operation": "experiment_run",
+                "experiment_id": str(uuid.uuid4()),
+                "cohort_version_id": str(uuid.uuid4()),
+                "agent_version_id": str(uuid.uuid4()),
+            }
+        },
+        context,
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.is_error is True
+    assert result.structured_content is not None
+    assert result.structured_content["error"]["code"] == "conflict"
+    assert result.structured_content["error"]["details"] == {
+        "session_id": str(baseline_session_id),
+        "reason": reason,
+    }
+    assert json.loads(cast(TextContent, result.content[0]).text) == (
+        result.structured_content
+    )
+
+
+async def test_experiment_run_start_does_not_echo_arbitrary_conflict_detail() -> None:
+    """An unrelated server conflict remains generic without leaking its detail."""
+
+    async def start_run(
+        _experiment_id: uuid.UUID, _request: object, idempotency_key: str | None = None
+    ) -> object:
+        del idempotency_key
+        raise APIError(409, "token=secret")
+
+    client = SimpleNamespace(experiments=SimpleNamespace(start_run=start_run))
+    server, context = _get_context(client, CapabilityMode.STANDARD)
+    result = await server.call_tool(
+        "kitaru_workflow_start",
+        {
+            "request": {
+                "operation": "experiment_run",
+                "experiment_id": str(uuid.uuid4()),
+                "cohort_version_id": str(uuid.uuid4()),
+                "agent_version_id": str(uuid.uuid4()),
+            }
+        },
+        context,
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.is_error is True
+    assert result.structured_content is not None
+    assert result.structured_content["error"]["code"] == "conflict"
+    assert result.structured_content["error"]["details"] is None
+    assert "secret" not in cast(TextContent, result.content[0]).text
 
 
 async def test_evaluator_resolution_uses_bounded_concurrency() -> None:

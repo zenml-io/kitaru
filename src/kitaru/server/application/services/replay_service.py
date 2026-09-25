@@ -53,7 +53,10 @@ from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
-from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
+from kitaru.server.application.services.replay_pipeline import (
+    create_replay_pipelines,
+    validate_replay_baselines,
+)
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.replay import (
@@ -170,6 +173,8 @@ class ReplayService:
             AgentVersionNotFound: No agent version has the resolved id.
             SessionNotEvaluatable: ``baseline_evaluation_mode`` is not
                 ``NONE`` and the baseline session is in progress.
+            SessionReplayNotReady: The baseline session's Mastra memory
+                recording cannot be replayed.
             PluginNotFound: An evaluator config names an unknown evaluator.
             PluginVersionNotFound: An evaluator config names an unknown
                 version.
@@ -180,6 +185,7 @@ class ReplayService:
         baseline = await self._sessions.get(
             command.baseline_session_id, include_payloads=True
         )
+        await validate_replay_baselines([baseline], self._payload_store)
         agent_version_id = command.agent_version_id
         if agent_version_id is None:
             if baseline.agent_version_id is None:
@@ -221,6 +227,10 @@ class ReplayService:
             task_repository=self._tasks,
             evaluation_repository=self._evaluations,
             payload_store=self._payload_store,
+            # A file blob can be deleted after the early readiness check, and a
+            # standalone replay reports that as a refusal instead of storing a
+            # failed replay.
+            raise_refusals=True,
         )
         if self._analytics is not None:
             self._analytics.track(
