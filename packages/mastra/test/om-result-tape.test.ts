@@ -1,3 +1,5 @@
+import { Agent } from "@mastra/core/agent";
+import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { expect, it, vi } from "vitest";
 import { decodeMemoryValue } from "../src/memory-snapshot.js";
 import {
@@ -10,6 +12,7 @@ import {
   type OMResultEntry,
 } from "../src/om-result-tape.js";
 import { fileReference } from "../src/stateful-files.js";
+import { textStream } from "./helpers/memory-agent.js";
 
 function model() {
   return {
@@ -359,6 +362,57 @@ it("calls the live model only for a blocking call with no recorded result", asyn
       output: expect.any(Array),
     },
   ]);
+});
+
+it("sends a live OM call the recorded bytes and media type of an image", async () => {
+  const bytes = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  ]);
+  const reference = fileReference({ bytes, mediaType: "image/png" });
+  const received: unknown[] = [];
+  const live = new MastraLanguageModelV2Mock({
+    modelId: "observer",
+    provider: "fixture",
+    doStream: async ({ prompt }) => {
+      received.push(prompt);
+      return textStream("observed live");
+    },
+  });
+  const replay = createOMResultTape([], () => {}, {
+    missingResults: "live",
+    resolveFileReference: async () => ({ bytes, mediaType: "image/png" }),
+  });
+  const agent = new Agent({
+    id: "observer",
+    name: "Observer",
+    instructions: "Observe",
+    // The tape types a model by its call methods alone, as Mastra hands it
+    // an untyped OM model.
+    model: replay.instrument(
+      live as unknown as Parameters<typeof replay.instrument>[0],
+      "observer",
+    ) as unknown as typeof live,
+  });
+  // Mastra turns an image part into a file part before the model call and,
+  // with no declared type and no download, guesses its media type.
+  const result = await agent.stream([
+    {
+      role: "user",
+      content: [{ type: "image", image: new URL(reference) }],
+    },
+  ]);
+  await result.consumeStream();
+  expect(await result.text).toBe("observed live");
+  expect(received).toMatchObject([
+    [
+      { role: "system" },
+      {
+        role: "user",
+        content: [{ type: "file", data: bytes, mediaType: "image/png" }],
+      },
+    ],
+  ]);
+  expect((await replay.finish()).divergence.liveCalls).toBe(1);
 });
 
 it("matches recorded OM results by input rather than call order", async () => {

@@ -662,7 +662,8 @@ export function createOMResultTape(
   }
 
   /**
-   * Replace captured file references in a live call's prompt with their bytes.
+   * Replace captured file references in a live call's prompt with their
+   * recorded bytes and media type.
    *
    * A replay's history holds `kitaru-file://` references, which no provider
    * can fetch, and any other file URL in it is a redacted history URL that
@@ -702,7 +703,14 @@ export function createOMResultTape(
                   "a live observational-memory call would send a file URL",
                 );
               const resolved = await options.resolveFileReference(url);
-              return { ...file, data: resolved.bytes };
+              // Mastra guesses an image's media type when it does not
+              // download the URL, and a provider can reject bytes that
+              // contradict it.
+              return {
+                ...file,
+                data: resolved.bytes,
+                mediaType: resolved.mediaType,
+              };
             }),
           ),
         };
