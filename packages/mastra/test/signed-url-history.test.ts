@@ -1343,3 +1343,93 @@ it("captures attachment URLs sent in each turn's input without declaring them in
     await store.close();
   }
 });
+
+it("records a turn as ineligible when a processor fetches an input URL itself", async () => {
+  const nativeFetch = globalThis.fetch;
+  const api = installTestApi();
+  const apiFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", ((
+    input: Parameters<typeof fetch>[0],
+    init: Parameters<typeof fetch>[1],
+  ) =>
+    String(input).startsWith("data:")
+      ? nativeFetch(input, init)
+      : apiFetch(input, init)) as typeof fetch);
+  const store = new InMemoryStore();
+  const domain = store.stores.memory;
+  if (!domain) throw new Error("Missing native memory domain");
+  const url = `https://firebasestorage.googleapis.com/v0/b/app-bucket/o/uploads%2Fquote.pdf?alt=media&token=${DOWNLOAD_TOKEN}`;
+  const model = new MastraLanguageModelV2Mock({
+    provider: "fixture",
+    modelId: "actor",
+    doStream: async () => textStream("The quote covers two nights."),
+  });
+  const factoryResolver = vi.fn(async () => ({
+    bytes: new Uint8Array([37, 80, 68, 70]),
+    mediaType: "application/pdf",
+  }));
+  // The processor downloads the file with its own client, not the factory's
+  // `resolveFile`, so the turn never captures the bytes.
+  const ownFetch = vi.fn(async () => ({
+    bytes: new Uint8Array([37, 80, 68, 70]),
+    mediaType: "application/pdf",
+  }));
+  const adapter = createMemoryReplayAgent(
+    ({ memory }) => ({
+      id: "own-fetch",
+      name: "Own fetch",
+      instructions: "Answer about the attachment.",
+      memory,
+      model,
+      inputProcessors: [createAttachmentProcessor(ownFetch)],
+    }),
+    {
+      agentId: AGENT_ID,
+      apiUrl: "https://kitaru.invalid",
+      apiKey: "fixture",
+      requestedModelId: "fixture/actor",
+      onRecordingError: () => undefined,
+      sourceMemory: () => ({
+        settled: async () => {},
+        domain,
+        configuration: { lastMessages: 20, semanticRecall: false },
+        exclusiveAccess: createProcessLocalMemoryAccess(),
+      }),
+      resolveModel: () => model,
+      files: [],
+      resolveFile: factoryResolver,
+    },
+  );
+  try {
+    const output = await adapter.stream(
+      [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "What does it cost?" },
+            { type: "file", data: url, mediaType: "application/pdf" },
+          ],
+        },
+      ],
+      { memory: { thread: THREAD, resource: RESOURCE } },
+    );
+    expect(await output.text).toBe("The quote covers two nights.");
+    expect(ownFetch).toHaveBeenCalledWith(url);
+    expect(factoryResolver).not.toHaveBeenCalled();
+    // Replay would fetch the redacted input URL over the network.
+    await vi.waitFor(() =>
+      expect(
+        api.calls.find(
+          (call) =>
+            call.method === "PATCH" && call.body?.status === "completed",
+        )?.body?.metadata,
+      ).toMatchObject({
+        mastra_replay_state: "ineligible",
+        mastra_replay_reason: "file_url_undeclared",
+      }),
+    );
+    expect(JSON.stringify(api.calls)).not.toContain(DOWNLOAD_TOKEN);
+  } finally {
+    await store.close();
+  }
+});

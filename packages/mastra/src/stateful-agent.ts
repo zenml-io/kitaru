@@ -1589,6 +1589,14 @@ export function createMemoryReplayAgent(
               if (baselineFiles)
                 recordedRawInput =
                   baselineFiles.replaceDeclaredFileUrls(invocationInput);
+              // An input URL no processor resolved through `resolveFile`, for
+              // example one a processor fetched itself, has no recorded bytes,
+              // so replay would fetch its redacted URL over the network.
+              if (collectFileNetworkUrls(recordedRawInput).length)
+                throw new MastraReplayReasonError(
+                  "Unsupported Mastra memory replay: an input file URL was not resolved through resolveFile.",
+                  "file_url_undeclared",
+                );
               const turnFiles = files.files;
               const referenced = referenceSnapshot(initialSnapshot, turnFiles);
               const storedFiles = await fileBlobs.store([
