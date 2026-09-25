@@ -477,8 +477,13 @@ function renderDrill(from, to, sides, cellData) {
   const total = cellData.reduce((n, x) => n + x.total, 0);
   const scope = compare ? `"${labelOf("base")}" and "${labelOf("compare")}"` : `"${labelOf("base")}"`;
   // The drill-down tool is hidden from the model, so hand it the session ids.
-  const ids = cellData.flatMap((x) => x.sessions.map((s) => s.session_id));
-  const idText = ids.length ? `\nSession ids${ids.length < total ? ` (first ${ids.length} of ${total})` : ""}: ${ids.join(", ")}` : "";
+  const idText = sides.map((side, i) => {
+    const { sessions, total: sideTotal } = cellData[i];
+    if (!sessions.length) return "";
+    const heading = compare ? `Session ids in "${labelOf(side)}"` : "Session ids";
+    const partial = sessions.length < sideTotal ? ` (first ${sessions.length} of ${sideTotal})` : "";
+    return `\n${heading}${partial}: ${sessions.map((s) => s.session_id).join(", ")}`;
+  }).join("");
   request("ui/update-model-context", { content: [{ type: "text", text: `The user is looking at the transition ${pairText(from, to)} in the transition failure matrix for ${scope}.${idText}` }] }).catch(() => {});
   const close = el("button", { class: "icon-btn", text: "✕", title: "Close", "aria-label": "Close" });
   close.onclick = () => { S.sel = null; $("#drill").hidden = true; render(); };

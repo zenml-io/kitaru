@@ -296,6 +296,36 @@ def test_non_state_failure_does_not_borrow_a_real_states_rate() -> None:
     assert (cell.count, cell.attempts) == (1, None)
 
 
+def test_excluded_non_state_failure_does_not_hide_a_selected_rate() -> None:
+    marked, crashed, passing = _session("failed"), _session("failed"), _session()
+    marked_nodes = [
+        _node(marked, "a", "tool_call", "search", at=0),
+        _node(marked, "b", "tool_call", "llm", at=1),
+    ]
+    nodes = {
+        marked.id: marked_nodes,
+        crashed.id: [
+            _node(crashed, "a", "tool_call", "search", at=0),
+            _node(crashed, "b", "llm_call", "chat", status="failed", at=1),
+        ],
+        passing.id: [
+            _node(passing, "a", "tool_call", "search", at=0),
+            _node(passing, "b", "tool_call", "llm", at=1),
+        ],
+    }
+    mark = _annotation(marked_nodes[1], {"first_failure": True})
+
+    outcomes = analyze_group(
+        _records(nodes, [marked, crashed, passing], [mark]),
+        build_labeler("tool", None),
+        None,
+    )
+    _rows, _cols, cells = build_cells(outcomes, None, ["annotation"])
+    cell = next(c for c in cells if (c.from_state, c.to_state) == ("search", "llm"))
+
+    assert (cell.count, cell.attempts) == (1, 2)
+
+
 @pytest.mark.parametrize("name", ["", "  ", START, "(other)"])
 def test_state_map_rejects_blank_and_reserved_group_names(name: str) -> None:
     with pytest.raises(ValidationError):

@@ -328,8 +328,8 @@ def build_cells(
     rows = [START, *sorted({a for a, _ in keys if a != START}, key=rank.__getitem__)]
     cols = sorted({b for _, b in keys}, key=rank.__getitem__)
     cells = []
-    unrated = _unrated_transitions(base)
-    compare_unrated = _unrated_transitions(compare or ())
+    unrated = _unrated_transitions(base, sources)
+    compare_unrated = _unrated_transitions(compare or (), sources)
     rank[START] = -1
     for key in sorted(keys, key=lambda k: (rank[k[0]], rank[k[1]])):
         by_source = failures.get(key, Counter())
@@ -362,13 +362,16 @@ def _failure_counts(
     return counts
 
 
-def _unrated_transitions(outcomes: Sequence[SessionOutcome]) -> set[Transition]:
+def _unrated_transitions(
+    outcomes: Sequence[SessionOutcome], sources: Sequence[FailureSource]
+) -> set[Transition]:
     # A failing step that is not a state can share its name with a real state
     # elsewhere; its cell must not borrow that state's attempts as a rate.
     return {
         pair
         for outcome in outcomes
         if not outcome.failure_is_state
+        and is_counted(outcome, sources)
         and (pair := outcome.failure_transition) is not None
     }
 
@@ -433,7 +436,7 @@ def cell_details(
     return FailureCellData(
         total=len(matching),
         attempts=None
-        if transition in _unrated_transitions(outcomes)
+        if transition in _unrated_transitions(outcomes, sources)
         else _attempt_counts(outcomes).get(transition),
         patterns=patterns,
         sessions=sessions,
