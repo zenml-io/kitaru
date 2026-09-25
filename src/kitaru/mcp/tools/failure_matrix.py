@@ -233,7 +233,7 @@ def describe_matrix(data: FailureMatrixData) -> str:
         lines.append(_describe_group(compare))
         changed = sorted(
             (c for c in data.cells if (c.compare_count or 0) != c.count),
-            key=lambda c: (c.compare_count or 0) - c.count,
+            key=lambda c: -abs((c.compare_count or 0) - c.count),
         )
         if changed:
             lines.append(f"Changed transitions ({base.label} -> {compare.label}):")

@@ -8,9 +8,11 @@ from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+import pytest
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.types import CallToolResult, TextContent
 from mcp_fakes import build_server_context
+from pydantic import ValidationError
 
 from kitaru.api_models.v1.annotation import AnnotationResponse, AnnotationSelector
 from kitaru.api_models.v1.base import JsonValue, Page
@@ -18,9 +20,16 @@ from kitaru.api_models.v1.evaluation import EvaluationResponse
 from kitaru.api_models.v1.session import SessionResponse
 from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.mcp.apps import FAILURE_MATRIX_URI
-from kitaru.mcp.models.failure_matrix import GroupRecords
+from kitaru.mcp.models.failure_matrix import (
+    FailureMatrixData,
+    FailureMatrixRequest,
+    GroupRecords,
+    GroupSummary,
+    MatrixCell,
+)
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import MCPSettings
+from kitaru.mcp.tools.failure_matrix import describe_matrix
 from kitaru.mcp.tools.transitions import (
     START,
     analyze_group,
@@ -261,6 +270,74 @@ def test_failing_llm_call_has_failures_but_no_rate() -> None:
     assert by_pair[("search", "llm")].count == 1
     assert by_pair[("search", "llm")].attempts is None
     assert by_pair[(START, "search")].attempts == 2
+
+
+def test_non_state_failure_does_not_borrow_a_real_states_rate() -> None:
+    labeled, failing = _session(), _session("failed")
+    nodes = {
+        # With state_by="node" every LLM call is the state "llm"; with "tool" a
+        # failing LLM call only falls back to that name.
+        labeled.id: [
+            _node(labeled, "a", "tool_call", "search", at=0),
+            _node(labeled, "b", "tool_call", "llm", at=1),
+        ],
+        failing.id: [
+            _node(failing, "a", "tool_call", "search", at=0),
+            _node(failing, "b", "llm_call", "chat", status="failed", at=1),
+        ],
+    }
+
+    outcomes = analyze_group(
+        _records(nodes, [labeled, failing]), build_labeler("tool", None), None
+    )
+    _rows, _cols, cells = build_cells(outcomes, None, ["error"])
+    cell = next(c for c in cells if (c.from_state, c.to_state) == ("search", "llm"))
+
+    assert (cell.count, cell.attempts) == (1, None)
+
+
+@pytest.mark.parametrize("name", ["", "  ", START, "(other)"])
+def test_state_map_rejects_blank_and_reserved_group_names(name: str) -> None:
+    with pytest.raises(ValidationError):
+        FailureMatrixRequest(state_map={"*": name})
+
+
+def test_comparison_text_lists_the_largest_changes_first() -> None:
+    cells = [
+        MatrixCell(
+            from_state=START,
+            to_state=f"step_{i}",
+            count=10,
+            attempts=10,
+            error_count=10,
+            annotation_count=0,
+            compare_count=10 + delta,
+            compare_attempts=10,
+        )
+        for i, delta in enumerate([-1, -2, 8, -3])
+    ]
+    summary = GroupSummary(
+        label="g",
+        session_count=1,
+        failed_count=0,
+        located_count=0,
+        shown_count=0,
+        unlocated_count=0,
+        unlocated_evaluations={},
+        truncated=False,
+    )
+    data = FailureMatrixData(
+        state_by="tool",
+        rows=[START],
+        cols=[],
+        cells=cells,
+        base=summary,
+        compare=summary,
+    )
+
+    changes = describe_matrix(data).split("Changed transitions")[1].splitlines()[1:3]
+
+    assert "step_2: 10 -> 18" in changes[0] and "step_3" in changes[1]
 
 
 def test_state_map_merges_states_and_compare_counts_both_groups() -> None:

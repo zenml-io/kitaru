@@ -104,7 +104,8 @@ table.matrix { border-collapse: separate; border-spacing: 3px; margin: 0 auto; }
 .hint { font-size: 12px; color: var(--ink-3); margin: 12px 2px 0; }
 .hint q { color: var(--ink-2); }
 
-.tray { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; gap: 6px 12px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); }
+.tray { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.tray-row { display: flex; gap: 6px 12px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
 .link { border: 0; background: none; padding: 0; color: var(--brand-ink); font-weight: 600; font-size: 12.5px; cursor: pointer; }
 .link:hover { text-decoration: underline; }
 
@@ -319,12 +320,12 @@ function render() {
   const b = d.base, c = d.compare;
   const change = (x, y) => (x === y ? String(y) : `${x} → ${y}`);
   $("#summary").textContent = compare
-    ? `${b.label} vs ${c.label} · failed sessions ${change(b.failed_count, c.failed_count)}`
+    ? `${b.label} vs ${c.label} · failed sessions ${change(b.failed_count, c.failed_count)}${b.truncated || c.truncated ? " (newest only)" : ""}`
     : `${b.label} · ${b.failed_count} of ${b.session_count} sessions failed${b.truncated ? " (newest only)" : ""}`;
   $("#measure-ctl").hidden = compare;
   renderHeadline(d, measure);
   renderMatrix(d, cells, measure);
-  renderTray(compare ? c : b);
+  renderTray(compare ? [b, c] : [b]);
   $("#hint").replaceChildren("Click a cell to read its sessions. For another angle, ask your assistant: ",
     el("q", { text: "group these by span" }), ", ", el("q", { text: "only count errors" }), " or ",
     el("q", { text: compare ? "which fixes held up?" : "compare with the latest replay" }), ".");
@@ -422,14 +423,17 @@ function tipLines(cell, compare) {
   return [pair, `${cell.count} failure${cell.count === 1 ? "" : "s"}`, [cell.attempts ? `${tries(cell.count, cell.attempts)} (${pct(cell.count / cell.attempts)})` : "", sources].filter(Boolean).join(" · ")];
 }
 
-function renderTray(group) {
+function renderTray(groups) {
   const tray = $("#tray");
-  if (!group.unlocated_count) { tray.hidden = true; return; }
-  tray.hidden = false;
-  const evals = Object.entries(group.unlocated_evaluations).map(([name, n]) => `${name} ×${n}`).join(", ");
-  const link = el("button", { class: "link", text: "Mark them →" });
-  link.onclick = () => sendMessage(`Review the ${group.unlocated_count} failed sessions in "${group.label}" that have no located failure step. For each one, find the node where things first went wrong and add an annotation on that node with value {"first_failure": true, "note": "<what went wrong>"}, then rebuild the transition failure matrix.`);
-  tray.replaceChildren(el("span", { title: evals, text: `${group.unlocated_count} more failed${evals ? " an evaluation" : ""}, but nobody has marked where they went wrong, so they aren't shown.` }), link);
+  const rows = groups.filter((group) => group.unlocated_count).map((group) => {
+    const evals = Object.entries(group.unlocated_evaluations).map(([name, n]) => `${name} ×${n}`).join(", ");
+    const link = el("button", { class: "link", text: "Mark them →" });
+    link.onclick = () => sendMessage(`Review the ${group.unlocated_count} failed sessions in "${group.label}" that have no located failure step. For each one, find the node where things first went wrong and add an annotation on that node with value {"first_failure": true, "note": "<what went wrong>"}, then rebuild the transition failure matrix.`);
+    const prefix = groups.length > 1 ? `${group.label}: ` : "";
+    return el("div", { class: "tray-row" }, el("span", { title: evals, text: `${prefix}${group.unlocated_count} more failed${evals ? " an evaluation" : ""}, but nobody has marked where they went wrong, so they aren't shown.` }), link);
+  });
+  tray.hidden = !rows.length;
+  tray.replaceChildren(...rows);
 }
 
 // ---------- Drill-down ----------

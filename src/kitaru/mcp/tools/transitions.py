@@ -15,6 +15,8 @@ from kitaru.api_models.v1.evaluation import EvaluationResponse
 from kitaru.api_models.v1.session import SessionResponse, SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType, SessionNodeResponse
 from kitaru.mcp.models.failure_matrix import (
+    OTHER,
+    START,
     CellPattern,
     CellSession,
     FailureCellData,
@@ -25,8 +27,6 @@ from kitaru.mcp.models.failure_matrix import (
     StateBy,
 )
 
-START = "(start)"
-OTHER = "(other)"
 FIRST_FAILURE_KEY = "first_failure"
 MAX_STATES = 16
 MAX_PATH = 8
@@ -56,6 +56,7 @@ class SessionOutcome:
     path: tuple[str, ...]
     transitions: tuple[Transition, ...]
     failed_evaluations: tuple[str, ...]
+    failure_is_state: bool = True
 
     @property
     def failure_transition(self) -> Transition | None:
@@ -194,7 +195,13 @@ def analyze_session(
     # so its cell reports failures without a failure rate.
     transitions = _pairs(path) if own_state is not None else _pairs(before)
     return SessionOutcome(
-        session, True, point, path, transitions, tuple(failed_evaluations)
+        session,
+        True,
+        point,
+        path,
+        transitions,
+        tuple(failed_evaluations),
+        failure_is_state=own_state is not None,
     )
 
 
@@ -311,6 +318,8 @@ def build_cells(
     rows = [START, *sorted({a for a, _ in keys if a != START}, key=rank.__getitem__)]
     cols = sorted({b for _, b in keys}, key=rank.__getitem__)
     cells = []
+    unrated = _unrated_transitions(base)
+    compare_unrated = _unrated_transitions(compare or ())
     rank[START] = -1
     for key in sorted(keys, key=lambda k: (rank[k[0]], rank[k[1]])):
         by_source = failures.get(key, Counter())
@@ -320,12 +329,12 @@ def build_cells(
                 from_state=key[0],
                 to_state=key[1],
                 count=by_source.total(),
-                attempts=attempts.get(key),
+                attempts=None if key in unrated else attempts.get(key),
                 error_count=by_source["error"],
                 annotation_count=by_source["annotation"],
                 compare_count=compared.total() if compare is not None else None,
                 compare_attempts=compare_attempts.get(key)
-                if compare is not None
+                if compare is not None and key not in compare_unrated
                 else None,
             )
         )
@@ -341,6 +350,17 @@ def _failure_counts(
         if pair is not None and outcome.point and is_counted(outcome, sources):
             counts[pair][outcome.point.source] += 1
     return counts
+
+
+def _unrated_transitions(outcomes: Sequence[SessionOutcome]) -> set[Transition]:
+    # A failing step that is not a state can share its name with a real state
+    # elsewhere; its cell must not borrow that state's attempts as a rate.
+    return {
+        pair
+        for outcome in outcomes
+        if not outcome.failure_is_state
+        and (pair := outcome.failure_transition) is not None
+    }
 
 
 def _attempt_counts(outcomes: Sequence[SessionOutcome]) -> Counter[Transition]:
@@ -401,7 +421,9 @@ def cell_details(
     ]
     return FailureCellData(
         total=len(matching),
-        attempts=_attempt_counts(outcomes).get(transition),
+        attempts=None
+        if transition in _unrated_transitions(outcomes)
+        else _attempt_counts(outcomes).get(transition),
         patterns=patterns,
         sessions=sessions,
     )

@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Literal, get_args
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from kitaru.api_models.v1.annotation import AnnotationResponse
 from kitaru.api_models.v1.evaluation import EvaluationResponse
@@ -19,6 +19,8 @@ from kitaru.mcp.models.common import MCPModel, ToolResult
 StateBy = Literal["tool", "span", "node"]
 FailureSource = Literal["error", "annotation"]
 MatrixSide = Literal["base", "compare"]
+START = "(start)"
+OTHER = "(other)"
 
 
 class FailureMatrixRequest(MCPModel):
@@ -58,6 +60,25 @@ class FailureMatrixRequest(MCPModel):
         description="Merge states: glob pattern of a state name -> group name, "
         "e.g. {'sql_*': 'SQL'}. The first matching pattern wins.",
     )
+
+    @field_validator("state_map")
+    @classmethod
+    def _check_group_names(
+        cls, state_map: dict[str, str] | None
+    ) -> dict[str, str] | None:
+        """Reject group names the matrix cannot show or confuses with its own rows.
+
+        Raises:
+            ValueError: A group name is blank or reserved.
+        """
+        for name in (state_map or {}).values():
+            if not name.strip() or name in (START, OTHER):
+                raise ValueError(
+                    f"state_map group names must be non-blank and not {START!r} "
+                    f"or {OTHER!r}, got {name!r}"
+                )
+        return state_map
+
     sources: list[FailureSource] = Field(
         default_factory=lambda: list(get_args(FailureSource)),
         min_length=1,
