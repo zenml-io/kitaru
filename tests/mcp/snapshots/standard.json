@@ -7637,7 +7637,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "Show where sessions first go wrong as an interactive transition matrix.\n\nRows are the last step that went right and columns the first step that went\nwrong, counted over the sessions `filter` selects (for example an agent_id or\ncohort_version_id). Pass `compare_filter`, such as a replay's\nexperiment_run_id, to compare two groups. A reviewer places a failure that\nraised no error by annotating the failing node with the value\n`{\"first_failure\": true, \"note\": \"...\"}`.\n",
+    "description": "Show where sessions first go wrong as an interactive transition matrix.\n\nRows are the last step that went right and columns the first step that went\nwrong, counted over the sessions `filter` selects (for example an agent_id or\ncohort_version_id). Pass `compare_filter`, such as a replay's\nexperiment_run_id, to compare two groups. A reviewer places a failure that\nraised no error by annotating the failing node with the value\n`{\"first_failure\": true, \"note\": \"...\"}`.",
     "inputSchema": {
       "$defs": {
         "AndFilter": {
@@ -8020,6 +8020,7 @@
               "additionalProperties": {
                 "type": "integer"
               },
+              "description": "Most common failed evaluations among unlocated sessions.",
               "title": "Unlocated Evaluations",
               "type": "object"
             }

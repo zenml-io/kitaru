@@ -26,7 +26,9 @@ from kitaru.mcp.tools.transitions import (
     analyze_group,
     build_cells,
     build_labeler,
+    fold_rare_states,
     locate_failure,
+    summarize_group,
 )
 
 T0 = datetime(2026, 9, 1, tzinfo=UTC)
@@ -128,6 +130,65 @@ def test_error_is_placed_at_deepest_failed_node_not_inherited_span() -> None:
     assert (
         outcome.point is not None and outcome.point.note == "TimeoutError: payments API"
     )
+
+
+def test_failure_below_a_completed_span_is_still_the_deepest() -> None:
+    session = _session("failed")
+    nodes = [
+        _node(session, "outer", "span", "outer", status="failed", at=0),
+        _node(session, "middle", "span", "middle", parent="outer", at=1),
+        _node(
+            session,
+            "tool",
+            "tool_call",
+            "charge",
+            parent="middle",
+            status="failed",
+            at=2,
+        ),
+    ]
+
+    point = locate_failure(nodes, {})
+
+    assert point is not None and point.node.name == "charge"
+
+
+def test_folding_keeps_rows_for_the_requested_sources_only() -> None:
+    marked = _session("failed")
+    marked_nodes = [_node(marked, "a", "tool_call", "rare_step")]
+    crashed = [_session("failed") for _ in range(3)]
+    nodes = {marked.id: marked_nodes}
+    for index, session in enumerate(crashed):
+        nodes[session.id] = [
+            _node(session, "a", "tool_call", f"crash_{index}", status="failed")
+        ]
+    outcomes = analyze_group(
+        _records(
+            nodes,
+            [*crashed, marked],
+            [_annotation(marked_nodes[0], {"first_failure": True})],
+        ),
+        build_labeler("tool", None),
+        None,
+    )
+
+    [folded] = fold_rare_states([outcomes], ["annotation"], limit=2)
+
+    assert folded[-1].failure_transition == (START, "rare_step")
+
+
+def test_unlocated_evaluation_summary_is_bounded() -> None:
+    session = _session("completed")
+    evaluations = [_evaluation(session, f"check_{i}") for i in range(25)]
+
+    outcomes = analyze_group(
+        _records({session.id: []}, [session], evaluations=evaluations),
+        build_labeler("tool", None),
+        None,
+    )
+    summary = summarize_group("group", outcomes, ["error"], truncated=False)
+
+    assert len(summary.unlocated_evaluations) == 10
 
 
 def test_span_states_skip_ancestors_of_the_failing_node() -> None:

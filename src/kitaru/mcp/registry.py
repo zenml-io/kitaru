@@ -3,6 +3,7 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Capability-filtered public MCP tool registry."""
 
+import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast
@@ -91,6 +92,12 @@ class ToolSpec:
     annotations: ToolAnnotations
     handler: Callable[..., Awaitable[BaseModel]]
     meta: dict[str, Any] | None = None
+
+
+def _describe(tool: Callable[..., Awaitable[BaseModel]]) -> str:
+    # Python 3.13 strips docstring indentation at compile time and older versions
+    # keep it, so clean it here to publish the same description on every version.
+    return inspect.cleandoc(tool.__doc__ or "")
 
 
 def _annotations(
@@ -311,35 +318,35 @@ TOOL_SPECS = (
     ToolSpec(
         "kitaru_registry_read",
         CapabilityMode.READ_ONLY,
-        registry_read_tool.__doc__ or "",
+        _describe(registry_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         registry_read_tool,
     ),
     ToolSpec(
         "kitaru_activity_read",
         CapabilityMode.READ_ONLY,
-        activity_read_tool.__doc__ or "",
+        _describe(activity_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         activity_read_tool,
     ),
     ToolSpec(
         "kitaru_review_read",
         CapabilityMode.READ_ONLY,
-        review_read_tool.__doc__ or "",
+        _describe(review_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         review_read_tool,
     ),
     ToolSpec(
         "kitaru_connection_read",
         CapabilityMode.READ_ONLY,
-        connection_read_tool.__doc__ or "",
+        _describe(connection_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         connection_read_tool,
     ),
     ToolSpec(
         "kitaru_failure_matrix",
         CapabilityMode.READ_ONLY,
-        failure_matrix_tool.__doc__ or "",
+        _describe(failure_matrix_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         failure_matrix_tool,
         meta=ui_meta(FAILURE_MATRIX_URI),
@@ -347,7 +354,7 @@ TOOL_SPECS = (
     ToolSpec(
         "kitaru_failure_matrix_cell",
         CapabilityMode.READ_ONLY,
-        failure_cell_tool.__doc__ or "",
+        _describe(failure_cell_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         failure_cell_tool,
         # Only the matrix view calls this; hosts keep it out of the model's tools.
@@ -356,70 +363,70 @@ TOOL_SPECS = (
     ToolSpec(
         "kitaru_cohorts_manage",
         CapabilityMode.STANDARD,
-        cohorts_manage_tool.__doc__ or "",
+        _describe(cohorts_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         cohorts_manage_tool,
     ),
     ToolSpec(
         "kitaru_experiments_manage",
         CapabilityMode.STANDARD,
-        experiments_manage_tool.__doc__ or "",
+        _describe(experiments_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         experiments_manage_tool,
     ),
     ToolSpec(
         "kitaru_session_import",
         CapabilityMode.STANDARD,
-        session_import_tool.__doc__ or "",
+        _describe(session_import_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         session_import_tool,
     ),
     ToolSpec(
         "kitaru_review_manage",
         CapabilityMode.STANDARD,
-        review_manage_tool.__doc__ or "",
+        _describe(review_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         review_manage_tool,
     ),
     ToolSpec(
         "kitaru_workflow_start",
         CapabilityMode.STANDARD,
-        workflow_start_tool.__doc__ or "",
+        _describe(workflow_start_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         workflow_start_tool,
     ),
     ToolSpec(
         "kitaru_evaluators_manage",
         CapabilityMode.STANDARD,
-        evaluators_manage_tool.__doc__ or "",
+        _describe(evaluators_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         evaluators_manage_tool,
     ),
     ToolSpec(
         "kitaru_analyzers_manage",
         CapabilityMode.STANDARD,
-        analyzers_manage_tool.__doc__ or "",
+        _describe(analyzers_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         analyzers_manage_tool,
     ),
     ToolSpec(
         "kitaru_connections_manage",
         CapabilityMode.STANDARD,
-        connections_manage_tool.__doc__ or "",
+        _describe(connections_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         connections_manage_tool,
     ),
     ToolSpec(
         "kitaru_workflow_cancel",
         CapabilityMode.DESTRUCTIVE,
-        workflow_cancel_tool.__doc__ or "",
+        _describe(workflow_cancel_tool),
         _annotations(read_only=False, destructive=True, idempotent=False),
         workflow_cancel_tool,
     ),
     ToolSpec(
         "kitaru_delete",
         CapabilityMode.DESTRUCTIVE,
-        delete_tool.__doc__ or "",
+        _describe(delete_tool),
         _annotations(read_only=False, destructive=True, idempotent=False),
         delete_tool,
     ),

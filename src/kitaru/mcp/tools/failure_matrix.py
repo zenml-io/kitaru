@@ -126,7 +126,8 @@ async def _analyze(
     )
     labeler = build_labeler(request.state_by, request.state_map)
     folded = fold_rare_states(
-        [analyze_group(group, labeler, request.state_map) for group in records]
+        [analyze_group(group, labeler, request.state_map) for group in records],
+        request.sources,
     )
     return [
         _AnalyzedGroup(outcomes, group.truncated)

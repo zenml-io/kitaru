@@ -102,7 +102,9 @@ class GroupSummary(MCPModel):
     located_count: int
     shown_count: int = Field(description="Located failures matching the sources.")
     unlocated_count: int
-    unlocated_evaluations: dict[str, int]
+    unlocated_evaluations: dict[str, int] = Field(
+        description="Most common failed evaluations among unlocated sessions."
+    )
     truncated: bool = Field(description="More sessions matched than max_sessions.")
 
 

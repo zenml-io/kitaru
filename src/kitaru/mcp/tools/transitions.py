@@ -31,6 +31,7 @@ FIRST_FAILURE_KEY = "first_failure"
 MAX_STATES = 16
 MAX_PATH = 8
 MAX_NOTE = 300
+MAX_UNLOCATED_EVALUATIONS = 10
 
 Labeler = Callable[[SessionNodeResponse], str | None]
 Transition = tuple[str, str]
@@ -147,9 +148,11 @@ def locate_failure(
         if node.id in marks:
             return FailurePoint(node, "annotation", marks[node.id])
     failed = [node for node in nodes if node.status == NodeStatus.FAILED]
-    failed_parents = {node.parent_external_id for node in failed}
+    # A completed node can sit between two failed ones, so look at every
+    # ancestor of each failure, not only its direct parent.
+    above_failures = set().union(*(_ancestors(nodes, node) for node in failed))
     for node in failed:
-        if node.external_id not in failed_parents:
+        if node.external_id not in above_failures:
             return FailurePoint(node, "error", _clip(node.error))
     return None
 
@@ -242,14 +245,16 @@ def _failed_evaluations(
 
 
 def fold_rare_states(
-    groups: Sequence[list[SessionOutcome]], limit: int = MAX_STATES
+    groups: Sequence[list[SessionOutcome]],
+    sources: Sequence[FailureSource],
+    limit: int = MAX_STATES,
 ) -> list[list[SessionOutcome]]:
     """Merge all but the `limit` most frequent states into one `(other)` state."""
     frequency: Counter[str] = Counter()
     for outcomes in groups:
         for outcome in outcomes:
             frequency.update(outcome.path)
-            if outcome.point is not None:
+            if is_counted(outcome, sources):
                 # Weight failing states so a rare but broken step keeps its own row.
                 frequency[outcome.path[-1]] += 1000
     if len(frequency) <= limit:
@@ -358,7 +363,9 @@ def summarize_group(
         shown_count=sum(is_counted(o, sources) for o in outcomes),
         unlocated_count=len(unlocated),
         unlocated_evaluations=dict(
-            Counter(name for o in unlocated for name in set(o.failed_evaluations))
+            Counter(
+                name for o in unlocated for name in set(o.failed_evaluations)
+            ).most_common(MAX_UNLOCATED_EVALUATIONS)
         ),
         truncated=truncated,
     )
