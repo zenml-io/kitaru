@@ -684,11 +684,32 @@ function isFilePart(value: Record<string, unknown>): boolean {
   return value.type === "file" || value.type === "image";
 }
 
+/** Whether a stored message's content holds a file part of its own. */
+function hasFilePart(content: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(content.parts) &&
+    content.parts.some(
+      (part) =>
+        typeof part === "object" &&
+        part !== null &&
+        (part as Record<string, unknown>).type === "file",
+    )
+  );
+}
+
 /**
  * The URLs matching `pattern` held by file or image parts in `value`, or by
  * message attachments, in the order they appear.
+ *
+ * With `sentAttachmentsOnly`, attachments of a message that also holds a
+ * file part are skipped: Mastra builds model parts from a stored message's
+ * `experimental_attachments` only when its parts hold no file.
  */
-function collectFileUrls(value: unknown, pattern: RegExp): string[] {
+function collectFileUrls(
+  value: unknown,
+  pattern: RegExp,
+  sentAttachmentsOnly = false,
+): string[] {
   const urls: string[] = [];
   const active = new Set<object>();
   function visit(current: unknown, filePart: boolean): void {
@@ -711,9 +732,14 @@ function collectFileUrls(value: unknown, pattern: RegExp): string[] {
         for (const item of current) visit(item, filePart);
         return;
       }
-      const part = filePart || isFilePart(current as Record<string, unknown>);
-      for (const [key, item] of Object.entries(current))
-        visit(item, part || key === "experimental_attachments");
+      const record = current as Record<string, unknown>;
+      const part = filePart || isFilePart(record);
+      const attachmentsSent = !sentAttachmentsOnly || !hasFilePart(record);
+      for (const [key, item] of Object.entries(record))
+        visit(
+          item,
+          part || (key === "experimental_attachments" && attachmentsSent),
+        );
     } finally {
       active.delete(current);
     }
@@ -734,15 +760,16 @@ export function collectFileNetworkUrls(value: unknown): string[] {
 const MODEL_FILE_URL = /^(?:https?|kitaru-file):\/\//i;
 
 /**
- * Whether a file or image part in `value`, or a message attachment, holds a
- * network URL or a captured file reference instead of the file's content.
+ * Whether a file or image part in `value`, or a message attachment that
+ * Mastra sends to the model, holds a network URL or a captured file reference
+ * instead of the file's content.
  *
  * Mastra hands such a URL to the model provider, or downloads it itself,
  * without the application's `resolveFile`. A replay's messages hold the
  * captured reference there, which neither the provider nor Mastra can fetch.
  */
 export function containsModelFileUrl(value: unknown): boolean {
-  return collectFileUrls(value, MODEL_FILE_URL).length > 0;
+  return collectFileUrls(value, MODEL_FILE_URL, true).length > 0;
 }
 
 /** Declared files did not finish downloading within the capture wait. */

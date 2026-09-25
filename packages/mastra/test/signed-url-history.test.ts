@@ -60,7 +60,11 @@ function createAttachmentProcessor(
 }
 
 /** A thread whose history holds the attachment's signed URL, not its bytes. */
-async function seedAttachmentHistory(padding = "", withFilePart = true) {
+async function seedAttachmentHistory(
+  padding = "",
+  withFilePart = true,
+  withAttachment = false,
+) {
   const store = new InMemoryStore();
   const domain = store.stores.memory;
   if (!domain) throw new Error("Missing native memory domain");
@@ -99,6 +103,14 @@ async function seedAttachmentHistory(padding = "", withFilePart = true) {
                 ]
               : []),
           ],
+          // Mastra stores a URL file part sent to `stream` here as well.
+          ...(withAttachment
+            ? {
+                experimental_attachments: [
+                  { url: ATTACHMENT_URL, contentType: "application/pdf" },
+                ],
+              }
+            : {}),
         },
       },
     ],
@@ -210,6 +222,79 @@ it("keeps a thread with a signed attachment URL in history replayable on every t
     expect(prompts.at(-1)).toContain(encodedBytes);
     expect(prompts.at(-1)).toContain("alt=media&token=REDACTED");
     expect(JSON.stringify(api.calls)).not.toContain(DOWNLOAD_TOKEN);
+  } finally {
+    await store.close();
+  }
+});
+
+it("keeps a turn eligible when a processor swaps a file part whose message also lists the URL as an attachment", async () => {
+  const nativeFetch = globalThis.fetch;
+  const api = installTestApi();
+  const apiFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", ((
+    input: Parameters<typeof fetch>[0],
+    init: Parameters<typeof fetch>[1],
+  ) =>
+    String(input).startsWith("data:")
+      ? nativeFetch(input, init)
+      : apiFetch(input, init)) as typeof fetch);
+  const { store, domain } = await seedAttachmentHistory("", true, true);
+  const prompts: string[] = [];
+  const model = new MastraLanguageModelV2Mock({
+    provider: "fixture",
+    modelId: "actor",
+    doStream: async ({ prompt }) => {
+      prompts.push(JSON.stringify(prompt));
+      return textStream("The quote covers two nights.");
+    },
+  });
+  const adapter = createMemoryReplayAgent(
+    ({ memory, resolveFile }) => ({
+      id: "attached-history",
+      name: "Attached history",
+      instructions: "Answer about the attachment.",
+      memory,
+      model,
+      inputProcessors: [createAttachmentProcessor(resolveFile)],
+    }),
+    {
+      agentId: AGENT_ID,
+      apiUrl: "https://kitaru.invalid",
+      apiKey: "fixture",
+      requestedModelId: "fixture/actor",
+      onRecordingError: () => undefined,
+      sourceMemory: () => ({
+        settled: async () => {},
+        domain,
+        configuration: { lastMessages: 20, semanticRecall: false },
+        exclusiveAccess: createProcessLocalMemoryAccess(),
+      }),
+      resolveModel: () => model,
+      files: [],
+      resolveFile: async () => ({
+        bytes: ATTACHMENT_BYTES,
+        mediaType: "application/pdf",
+      }),
+    },
+  );
+  try {
+    const output = await adapter.stream("What does it cost?", {
+      memory: { thread: THREAD, resource: RESOURCE },
+    });
+    await output.consumeStream();
+    await vi.waitFor(() =>
+      expect(
+        api.calls.find(
+          (call) =>
+            call.method === "PATCH" && call.body?.status === "completed",
+        )?.body?.metadata,
+      ).toMatchObject({ mastra_replay_state: "eligible" }),
+    );
+    // The file part holds the bytes, so Mastra never sends the attachment.
+    expect(prompts.at(-1)?.match(/"type":"file"/g)).toHaveLength(1);
+    expect(prompts.at(-1)).toContain(
+      `"data":"${Buffer.from(ATTACHMENT_BYTES).toString("base64")}"`,
+    );
   } finally {
     await store.close();
   }

@@ -5,6 +5,7 @@ import {
   encodeMemoryValue,
 } from "../src/memory-snapshot.js";
 import {
+  containsModelFileUrl,
   createCapturedFiles,
   createFileBlobStore,
   createInlineFileReader,
@@ -407,4 +408,36 @@ it("records known inline history files by reference and writes them back exactly
   expect(() => restoreInlineFiles(decoded, () => undefined)).toThrow(
     /inline file content was not recorded/,
   );
+});
+
+it("flags a message attachment URL only when Mastra would send it to the model", () => {
+  const attachment = {
+    url: "https://files.invalid/brief.pdf?token=SECRET",
+    contentType: "application/pdf",
+  };
+  const message = (parts: unknown[]) => [
+    {
+      role: "user",
+      content: { format: 2, parts, experimental_attachments: [attachment] },
+    },
+  ];
+  // Mastra builds model parts from attachments only when no file part exists.
+  expect(
+    containsModelFileUrl(
+      message([
+        { type: "text", text: "Read this." },
+        { type: "file", data: "JVBERi0=", mimeType: "application/pdf" },
+      ]),
+    ),
+  ).toBe(false);
+  expect(
+    containsModelFileUrl(message([{ type: "text", text: "Read this." }])),
+  ).toBe(true);
+  expect(
+    containsModelFileUrl(
+      message([
+        { type: "file", data: attachment.url, mimeType: "application/pdf" },
+      ]),
+    ),
+  ).toBe(true);
 });
