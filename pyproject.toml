@@ -60,7 +60,7 @@ examples = [
 ]
 server = [
     "fastapi>=0.139",
-    "sqlalchemy[asyncio]>=2.0.51",
+    "sqlalchemy[asyncio]>=2.0.51,<2.1",
     "alembic>=1.18",
     "uvicorn>=0.51",
     "pydantic-settings>=2.14",
