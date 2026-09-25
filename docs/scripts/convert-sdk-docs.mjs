@@ -30,9 +30,10 @@ const baseUrlIdx = args.indexOf("--base-url");
 const baseUrl = baseUrlIdx !== -1 ? args[baseUrlIdx + 1] : "";
 
 // Filter out --base-url and its value from positional args
-const positional = args.filter(
-  (_, i) => i !== baseUrlIdx && i !== baseUrlIdx + 1,
-);
+const positional =
+  baseUrlIdx === -1
+    ? args
+    : args.filter((_, i) => i !== baseUrlIdx && i !== baseUrlIdx + 1);
 
 const inputPath = positional[0] || resolve(docsRoot, ".generated/sdk-api.json");
 const outputDir =
@@ -60,43 +61,13 @@ if (!rootModule) {
 const normalizedBase = baseUrl.replace(/\/+$/, "");
 const apiPrefix = `${normalizedBase}/reference/python`;
 
-// fumadocs-python's convert() renders mod.description (summary) but drops
-// mod.docstring (structured sections like Google-style "Example:" blocks)
-// for modules. Functions get both. Inline any module-level docstring items
-// into description so "Example:" / "Note:" / "Warning:" sections actually
-// render on module pages.
-inlineModuleDocstrings(mod);
-
 console.log(`Converting ${rootModule} API to MDX...`);
-const files = convert(mod, { baseUrl: apiPrefix });
-console.log(`Generated ${files.length} MDX file(s)`);
-
-// fumadocs-python's convert() includes the root module name in generated
-// href values (e.g. /reference/python/kitaru/client/KitaruClient), but
-// write() strips it from file paths.  Align hrefs with file paths.
-const badPrefix = `${apiPrefix}/${rootModule}/`;
-const goodPrefix = `${apiPrefix}/`;
-let totalReplacements = 0;
-for (const file of files) {
-  const before = file.content;
-  file.content = file.content.replaceAll(badPrefix, goodPrefix);
-  if (file.content !== before) totalReplacements++;
-}
-console.log(`Normalized root-module prefix in ${totalReplacements} file(s)`);
-
-// Sanity check: no generated href should still contain the root module segment
-for (const file of files) {
-  if (file.content.includes(badPrefix)) {
-    console.error(
-      `Error: ${file.path} still contains '${badPrefix}' after normalization.`,
-    );
-    process.exit(1);
-  }
-}
-
-// Flatten singleton module directories into flat files before writing.
-// This prevents redundant sidebar nesting (e.g. "artifacts" → "artifacts").
-flattenSingletonPaths(files);
+const generatedFiles = convert(mod, { baseUrl: apiPrefix, groupBy: "none" });
+const files = deduplicateFiles(generatedFiles);
+console.log(
+  `Generated ${files.length} unique MDX file(s) from ${generatedFiles.length} page entries`,
+);
+const descriptions = collectPageDescriptions(mod, files);
 
 // Clean previous output
 if (existsSync(outputDir)) {
@@ -104,131 +75,97 @@ if (existsSync(outputDir)) {
 }
 await mkdir(outputDir, { recursive: true });
 
-await write(files, { outDir: outputDir });
+await write(files, outputDir);
+await addDescriptionFrontmatter(files, descriptions, outputDir);
 
 // Generate meta.json files for FumaDocs sidebar navigation
 await generateMetaFiles(files, outputDir);
 
 console.log(`Wrote ${files.length} MDX files + meta.json to ${outputDir}`);
 
-/**
- * Inline a module's structured docstring items (admonitions, code, text)
- * into its description field as markdown. Recurses into submodules.
- *
- * MUTATES the input: appends to `module.description` and clears
- * `module.docstring` on every module in the tree.
- *
- * Griffe emits Google-style sections like `Example:` as admonition items
- * on `mod.docstring`; fumadocs-python's module converter ignores that
- * field (only `mod.description` is rendered). Without this, any "Example:"
- * section on a module docstring silently disappears from the generated
- * page. We render admonitions as `**Title**\n\n<body>` so fenced code
- * blocks inside them stay intact.
- */
-function inlineModuleDocstrings(module) {
-  const extra = renderDocstringItems(module.docstring);
-  if (extra) {
-    module.description = module.description
-      ? `${module.description}\n\n${extra}`
-      : extra;
+function deduplicateFiles(files) {
+  const byPath = new Map();
+  for (const file of files) {
+    const existing = byPath.get(file.path);
+    if (
+      existing &&
+      (existing.title !== file.title || existing.content !== file.content)
+    ) {
+      throw new Error(`Conflicting generated pages for path ${file.path}`);
+    }
+    byPath.set(file.path, file);
   }
-  // Clear so convert() doesn't try to re-render these on the module itself
-  module.docstring = [];
-
-  for (const sub of Object.values(module.modules ?? {})) {
-    inlineModuleDocstrings(sub);
-  }
+  return [...byPath.values()];
 }
 
-// Deliberately not reusing fumadocs-python's internal convertDoc() (dist/index.js:96):
-// it's unexported, emits MDX <Callout> JSX (which wouldn't round-trip through
-// the downstream encodeText() call on description), and has a bug where `code`
-// items are console.log'd instead of emitted. Keeping this local + markdown-only.
-function renderDocstringItems(items) {
-  if (!items || items.length === 0) return "";
-  const parts = [];
-  for (const item of items) {
-    if (item.kind === "text" && item.value) {
-      parts.push(item.value);
-    } else if (item.kind === "admonition") {
-      const title = item.title || item.value?.annotation || "Note";
-      const body = item.value?.description ?? "";
-      parts.push(`**${title}**\n\n${body}`);
-    } else if (item.kind === "code" && item.value) {
-      parts.push(`\`\`\`\n${item.value}\n\`\`\``);
-    }
-  }
-  return parts.filter(Boolean).join("\n\n");
-}
+function collectPageDescriptions(root, files) {
+  const descriptions = new Map();
+  const rootPath = root.path;
+  const pagePath = (path) =>
+    path.slice(rootPath.length + 1).replaceAll(".", "/");
+  const describe = (description, sections, fallback) => {
+    const text =
+      description || sections?.find((item) => item.kind === "text")?.value;
+    return (text || fallback).replace(/\s+/g, " ").trim();
+  };
 
-/**
- * Flatten singleton module directories into flat files.
- *
- * When a module directory contains only its own index.mdx and no other
- * descendants, rewrite its path from `root/module/index.mdx` to
- * `root/module.mdx`. This prevents redundant sidebar nesting where
- * clicking "artifacts" just reveals another "artifacts" entry.
- *
- * Mutates file objects in place.
- */
-function flattenSingletonPaths(files) {
-  // Group files by their directory (after stripping the root module prefix,
-  // matching what write() does with .slice(1))
-  const dirContents = new Map();
-  for (const f of files) {
-    const parts = f.path.split("/").slice(1); // strip root module
-    const dir = parts.slice(0, -1).join("/") || ".";
-    if (!dirContents.has(dir)) {
-      dirContents.set(dir, []);
-    }
-    dirContents.get(dir).push(f);
-  }
-
-  // A directory is flattenable if:
-  // 1. It contains exactly one file (its own index.mdx)
-  // 2. No other directory is nested under it
-  const allDirs = new Set(dirContents.keys());
-
-  for (const [dir, dirFiles] of dirContents) {
-    if (dir === ".") continue;
-    if (dirFiles.length !== 1) continue;
-
-    const file = dirFiles[0];
-    const strippedPath = file.path.split("/").slice(1).join("/");
-    if (!strippedPath.endsWith("/index.mdx")) continue;
-
-    // Check no nested subdirectories exist under this dir
-    const hasNestedDirs = [...allDirs].some(
-      (d) => d !== dir && d.startsWith(`${dir}/`),
+  function visit(module) {
+    const relativePath = module.path === rootPath ? "" : pagePath(module.path);
+    const hasChildren =
+      Object.keys(module.classes ?? {}).length > 0 ||
+      Object.keys(module.modules ?? {}).length > 0;
+    const moduleFile = relativePath
+      ? hasChildren
+        ? `${relativePath}/index.mdx`
+        : `${relativePath}.mdx`
+      : "index.mdx";
+    descriptions.set(
+      moduleFile,
+      describe(module.description, module.docstring, module.name),
     );
-    if (hasNestedDirs) continue;
 
-    // Flatten: root/module/index.mdx → root/module.mdx
-    const rootPrefix = file.path.split("/")[0];
-    const moduleName = dir.split("/").pop();
-    const parentDir = dir.split("/").slice(0, -1).join("/");
-    const newPath = parentDir
-      ? `${rootPrefix}/${parentDir}/${moduleName}.mdx`
-      : `${rootPrefix}/${moduleName}.mdx`;
-    file.path = newPath;
+    for (const cls of Object.values(module.classes ?? {})) {
+      descriptions.set(
+        `${pagePath(cls.path)}.mdx`,
+        describe(cls.description, cls.docstring, cls.name),
+      );
+    }
+    for (const child of Object.values(module.modules ?? {})) visit(child);
+  }
+
+  visit(root);
+  return new Map(
+    files.map((file) => [file.path, descriptions.get(file.path) || file.title]),
+  );
+}
+
+async function addDescriptionFrontmatter(files, descriptions, outDir) {
+  for (const file of files) {
+    const path = resolve(outDir, file.path);
+    const content = await readFile(path, "utf-8");
+    const separator = content.indexOf("\n---\n");
+    if (separator < 0) throw new Error(`Missing frontmatter in ${file.path}`);
+    const frontmatter = content.slice(0, separator);
+    const body = content.slice(separator + 5);
+    await writeFile(
+      path,
+      `${frontmatter}\ndescription: ${JSON.stringify(descriptions.get(file.path))}\n---\n${body}`,
+    );
   }
 }
 
 /**
  * Generate meta.json files for the reference section sidebar.
  *
- * fumadocs-python's write() strips the root module name from file paths
- * (using .slice(1)), so we must do the same when computing directory
- * structure for meta.json files.
+ * fumadocs-python 1.x paths are already relative to the generated content
+ * directory when groupBy is "none".
  */
 async function generateMetaFiles(files, outDir) {
-  // Apply the same path stripping that write() does: remove root module prefix
-  const strippedPaths = files.map((f) => f.path.split("/").slice(1).join("/"));
-
   // Build directory tree from stripped paths
   const dirs = new Map();
 
-  for (const filePath of strippedPaths) {
+  for (const file of files) {
+    const filePath = file.path;
     const parts = filePath.split("/");
     const fileName = parts.pop().replace(/\.mdx$/, "");
     const dirPath = parts.join("/") || ".";

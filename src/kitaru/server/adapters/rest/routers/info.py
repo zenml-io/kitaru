@@ -63,4 +63,5 @@ async def get_info(
         dashboard_url=settings.DASHBOARD_URL.rstrip("/") or None,
         control_plane_api_url=control_plane_api_url,
         analytics_enabled=settings.ANALYTICS_OPT_IN,
+        max_blob_size_bytes=settings.MAX_BLOB_SIZE_BYTES,
     )

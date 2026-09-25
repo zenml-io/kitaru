@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Preserve LangGraph chain and middleware names in recorded spans.
+- Preserve LangGraph callback names on recorded chain spans and document upstream middleware input omissions.
 
 ## 0.2.0 - 2026-09-21
 

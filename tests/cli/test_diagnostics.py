@@ -28,7 +28,7 @@ from kitaru.cli.config import ResolvedCredential, ResolvedTarget
 from kitaru.cli.output import CLIError
 from kitaru.cli.skill_discovery import INSTALL_COMMAND
 from kitaru.client.credential_store import CredentialStore
-from kitaru.client.exceptions import NotFoundError
+from kitaru.client.exceptions import APIError, NotFoundError
 
 
 class FakeWorkers:
@@ -487,3 +487,182 @@ async def test_doctor_reports_detected_kitaru_skills(tmp_path, monkeypatch) -> N
         "2 Kitaru agent skills detected: kitaru-investigation, kitaru-replay-lab."
     )
     assert check["data"] == status
+
+
+class AuthRequiredClient(FakeClient):
+    """Server requiring local auth whose worker reads can be made to fail."""
+
+    def __init__(self, worker_error: Exception | None = None) -> None:
+        """Initialize a local-auth server with an optional worker-read error."""
+        super().__init__()
+        info = ServerInfoResponse(version="0.21.0", auth_scheme=AuthScheme.LOCAL)
+
+        class InfoResource:
+            async def get(self) -> ServerInfoResponse:
+                return info
+
+        class Workers(FakeWorkers):
+            async def iter(self):
+                if worker_error is not None:
+                    raise worker_error
+                yield SimpleNamespace(live=True)
+
+            async def list(self) -> list[object]:
+                if worker_error is not None:
+                    raise worker_error
+                return []
+
+        self.info = InfoResource()
+        self.workers = Workers()
+
+
+async def test_status_reports_a_rejected_credential_as_a_warning(
+    tmp_path, monkeypatch
+) -> None:
+    """A 401 on the worker read marks the credential rejected, not the command."""
+    client = AuthRequiredClient(APIError(401, "expired"))
+    monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: client)
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+    credential_store.set_api_key("https://api.example.com", "KITKEY_rejected")
+
+    result = await diagnostics.status(
+        target=ResolvedTarget("https://api.example.com", "stored"),
+        credential_store=credential_store,
+        timeout=30,
+    )
+
+    assert result.exit_code == 0
+    assert result.item["authentication"] == "rejected"
+    assert result.item["credential_status"]["kind"] == "api_key"
+    assert "KITKEY_rejected" not in json.dumps(result.item)
+    assert "credential was rejected" in result.warnings[0]
+    assert client.closed is True
+
+
+async def test_status_propagates_non_auth_server_errors(tmp_path, monkeypatch) -> None:
+    """A server failure during the worker read is not mislabeled as bad auth."""
+    client = AuthRequiredClient(APIError(500, "boom"))
+    monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: client)
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+    credential_store.set_api_key("https://api.example.com", "KITKEY_valid")
+
+    with pytest.raises(APIError) as raised:
+        await diagnostics.status(
+            target=ResolvedTarget("https://api.example.com", "stored"),
+            credential_store=credential_store,
+            timeout=30,
+        )
+
+    assert raised.value.status_code == 500
+    assert client.closed is True
+
+
+async def test_status_warns_when_auth_is_required_but_no_credential_exists(
+    tmp_path, monkeypatch
+) -> None:
+    """Status tells the user to log in instead of reporting zero workers."""
+    client = AuthRequiredClient()
+    monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: client)
+
+    result = await diagnostics.status(
+        target=ResolvedTarget("https://api.example.com", "explicit"),
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+        timeout=30,
+    )
+
+    assert result.item["authentication"] == "missing"
+    assert result.item["live_worker_count"] is None
+    assert "no credential is available" in result.warnings[0]
+
+
+async def _probe_ok(*args) -> int:
+    return 200
+
+
+@pytest.mark.parametrize(
+    ("stored_key", "worker_error", "status", "exit_code"),
+    [
+        (False, None, "fail", 3),
+        (True, None, "pass", 0),
+        (True, APIError(403, "forbidden"), "fail", 3),
+        (True, APIError(500, "boom"), "fail", 6),
+        (True, httpx.ConnectError("unreachable"), "fail", 6),
+    ],
+)
+async def test_doctor_authentication_check_maps_failures_to_exit_codes(
+    tmp_path,
+    monkeypatch,
+    stored_key: bool,
+    worker_error: Exception | None,
+    status: str,
+    exit_code: int,
+) -> None:
+    """Auth rejections exit 3 while server faults during the check exit 6."""
+    monkeypatch.setattr(diagnostics, "_probe", _probe_ok)
+    monkeypatch.setattr(
+        diagnostics, "build_api_client", lambda *args: AuthRequiredClient(worker_error)
+    )
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+    if stored_key:
+        credential_store.set_api_key("https://api.example.com", "KITKEY_test")
+
+    result = await diagnostics.doctor(
+        credential_store=credential_store,
+        explicit_server="https://api.example.com",
+        timeout=0.1,
+    )
+
+    authentication = next(
+        check for check in result.item["checks"] if check["name"] == "authentication"
+    )
+    assert authentication["status"] == status
+    assert result.exit_code == exit_code
+    assert result.item["healthy"] is (exit_code == 0)
+
+
+async def test_doctor_reports_an_unreachable_server_as_a_server_failure(
+    tmp_path, monkeypatch
+) -> None:
+    """Connection errors from health probes fail liveness and readiness with exit 6."""
+
+    async def refuse(*args) -> int:
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(diagnostics, "_probe", refuse)
+    monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: FakeClient())
+
+    result = await diagnostics.doctor(
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+        explicit_server="https://api.example.com",
+        timeout=0.1,
+    )
+
+    assert result.exit_code == 6
+    probes = [
+        c for c in result.item["checks"] if c["name"] in {"liveness", "readiness"}
+    ]
+    assert [c["status"] for c in probes] == ["fail", "fail"]
+    assert all("connection refused" in c["detail"] for c in probes)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes only")
+async def test_doctor_fails_world_readable_credentials(tmp_path, monkeypatch) -> None:
+    """A credential file other users can read is a configuration failure."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(mode=0o700)
+    config_dir.chmod(0o700)
+    credentials_path = config_dir / "credentials.json"
+    credentials_path.write_text("{}", encoding="utf-8")
+    credentials_path.chmod(0o644)
+    monkeypatch.setenv("KITARU_CONFIG_DIR", str(config_dir))
+
+    result = await diagnostics.doctor(
+        credential_store=CredentialStore(credentials_path),
+        explicit_server=None,
+        timeout=0.1,
+    )
+
+    credentials = next(c for c in result.item["checks"] if c["name"] == "credentials")
+    assert credentials["status"] == "fail"
+    assert "expected 0o600" in credentials["detail"]
+    assert result.exit_code == 2

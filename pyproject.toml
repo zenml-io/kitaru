@@ -60,7 +60,7 @@ examples = [
 ]
 server = [
     "fastapi>=0.139",
-    "sqlalchemy[asyncio]>=2.0.51",
+    "sqlalchemy[asyncio]>=2.0.51,<2.1",
     "alembic>=1.18",
     "uvicorn>=0.51",
     "pydantic-settings>=2.14",
@@ -133,6 +133,9 @@ dev = [
     "hypothesis>=6.165",
     "hypothesis-jsonschema>=0.23",
     "pyyaml>=6.0",
+    "moto[s3]>=5.2.3",
+    "flask>=3.1",
+    "flask-cors>=6.0",
 ]
 fuzz = [
     "schemathesis>=4.25,<5",

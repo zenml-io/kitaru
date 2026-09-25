@@ -23,6 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 from kitaru.api_models.v1.imports import (
@@ -155,6 +156,8 @@ class StubImportClient:
         self.lookup_calls: list[str] = []
         self.job_get_calls: list[uuid.UUID] = []
         self.create_error = create_error
+        self.upload_error: Exception | None = None
+        self.info = self._Info(self)
         self.importers = self._Importers(self)
         self.agents = self._Agents(self)
         self.evaluators = self._Evaluators(self)
@@ -163,6 +166,14 @@ class StubImportClient:
         self.connections = self._Connections(self)
         self.imports = self._Imports(self)
         self.jobs = self._Jobs(self)
+
+    class _Info:
+        def __init__(self, owner: "StubImportClient") -> None:
+            self.owner = owner
+            self.max_blob_size_bytes: int | None = None
+
+        async def get(self) -> Any:
+            return SimpleNamespace(max_blob_size_bytes=self.max_blob_size_bytes)
 
     class _Importers:
         def __init__(self, owner: "StubImportClient") -> None:
@@ -242,6 +253,8 @@ class StubImportClient:
             self, content: bytes, media_type: str, filename: str | None
         ) -> Any:
             self.owner.uploads.append((content, media_type, filename))
+            if self.owner.upload_error is not None:
+                raise self.owner.upload_error
             return self.owner.blob
 
     class _Imports:
@@ -618,6 +631,193 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
     assert str(payload) not in repr(result)
     assert "secret_value" not in repr(result)
     assert result.next_actions[-1] == "kitaru session list"
+
+
+async def test_session_import_rejects_server_oversize_before_read_or_upload(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The advertised cap is checked from file metadata before reading bytes."""
+    payload = tmp_path / "large.jsonl"
+    payload.write_bytes(b"too large")
+    client = StubImportClient()
+    client.info.max_blob_size_bytes = 3
+
+    def unexpected_read(self: Path) -> bytes:
+        raise AssertionError("oversized payload was read")
+
+    monkeypatch.setattr(Path, "read_bytes", unexpected_read)
+    with pytest.raises(CLIError, match="Split the payload"):
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@latest",
+            agent="assistant@latest",
+            params=None,
+            media_type=None,
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+    assert client.uploads == []
+
+
+def test_read_payload_rejects_growth_after_size_check(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A file growing after stat cannot bypass the read-time upload cap."""
+    payload = tmp_path / "growing.jsonl"
+    payload.write_bytes(b"ok")
+    original_open = Path.open
+
+    def grow_before_open(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == payload:
+            with original_open(self, "ab") as file:
+                file.write(b"more")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", grow_before_open)
+    with pytest.raises(CLIError, match="changed while being read"):
+        sessions._read_payload(payload, max_size_bytes=2)
+
+
+def test_read_payload_uses_bounded_reads_with_large_server_limit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A large advertised cap must not set the size of a single allocation."""
+    payload = tmp_path / "small.jsonl"
+    payload.write_bytes(b"ok")
+
+    class BoundedReader:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def __enter__(self) -> "BoundedReader":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self, size: int) -> bytes:
+            assert size <= 1024 * 1024
+            self.reads += 1
+            return b"ok" if self.reads == 1 else b""
+
+    monkeypatch.setattr(Path, "open", lambda *_args, **_kwargs: BoundedReader())
+    assert sessions._read_payload(payload, max_size_bytes=1024 * 1024 * 1024) == b"ok"
+
+
+async def test_session_import_rejects_client_oversize_before_server_lookup(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A user supplied cap rejects the file without contacting the server."""
+    payload = tmp_path / "large.jsonl"
+    with payload.open("wb") as file:
+        file.truncate(2 * 1024 * 1024)
+    client = StubImportClient()
+
+    async def unexpected_info() -> Any:
+        raise AssertionError("server info was requested")
+
+    monkeypatch.setattr(client.info, "get", unexpected_info)
+    with pytest.raises(CLIError, match="Split the payload"):
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@latest",
+            agent="assistant@latest",
+            params=None,
+            media_type=None,
+            max_upload_mib=1,
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+    assert client.uploads == []
+
+
+async def test_session_import_old_server_without_upload_cap_still_works(
+    tmp_path: Path,
+) -> None:
+    """An older server info response without the optional cap remains usable."""
+    payload = tmp_path / "payload.jsonl"
+    payload.write_bytes(b"ok")
+    client = StubImportClient()
+
+    await sessions.import_sessions(
+        client,
+        payload,
+        importer="jsonl@latest",
+        agent="assistant@latest",
+        params=None,
+        media_type=None,
+        wait=False,
+        interval=None,
+        timeout=None,
+    )
+
+    assert client.uploads == [(b"ok", "application/octet-stream", payload.name)]
+
+
+@pytest.mark.parametrize(
+    ("upload_error", "kind", "message_fragment", "hint_fragment"),
+    [
+        (
+            APIError(413, "payload exceeds configured cap"),
+            "invalid_arguments",
+            "payload exceeds configured cap",
+            "split the payload",
+        ),
+        (
+            httpx.ReadError("connection closed"),
+            "network_error",
+            "may have been rejected for size",
+            "split the payload",
+        ),
+        (
+            httpx.WriteError("connection closed during upload"),
+            "network_error",
+            "may have been rejected for size",
+            "split the payload",
+        ),
+        (
+            httpx.RemoteProtocolError("connection dropped"),
+            "network_error",
+            "may have been rejected for size",
+            "split the payload",
+        ),
+    ],
+)
+async def test_session_import_maps_blob_upload_size_failures(
+    tmp_path: Path,
+    upload_error: Exception,
+    kind: str,
+    message_fragment: str,
+    hint_fragment: str,
+) -> None:
+    """Upload rejections and dropped connections have actionable CLI errors."""
+    payload = tmp_path / "payload.jsonl"
+    payload.write_bytes(b"payload")
+    client = StubImportClient()
+    client.upload_error = upload_error
+
+    with pytest.raises(CLIError) as caught:
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@latest",
+            agent="assistant@latest",
+            params=None,
+            media_type=None,
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+
+    assert caught.value.kind == kind
+    assert message_fragment in caught.value.message
+    assert caught.value.hint is not None
+    assert hint_fragment in caught.value.hint.lower()
+    assert caught.value.retryable is (kind == "network_error")
 
 
 async def test_session_import_forwards_evaluators(tmp_path: Path) -> None:

@@ -66,6 +66,8 @@ result = runner.invoke({"request": "  Reset   my password  "})
 
 Kitaru creates the session and its root node before the graph starts. The session records bounded copies of the effective input and final output or error, plus public chain, graph, model, and tool callbacks that LangGraph exposes during the call. Ordinary Python calls and provider SDK calls that emit no public callback do not get invented child nodes.
 
+LangGraph applies a middleware's trace policy before passing inputs to callbacks. Deep Agents 0.7.9 and later omit inputs for some built-in middleware hooks, so their Kitaru span nodes can contain `inputs: {}` even when the hook received state. The callback cannot distinguish an omitted payload from a genuinely empty one. Session inputs, model and tool call inputs, and replay data remain available, but `payload_coverage` can count these empty span inputs as present. If you configure a trace policy on your own middleware, the same limit applies; Kitaru does not override that policy because doing so would also change what other callbacks receive.
+
 The wrapper returns the exact graph value or raises the exact graph exception. Caller config, callbacks, tags, metadata, configurable values, thread ID, store, and checkpointer behavior remain with LangGraph. If a Kitaru task supplies task inputs, those replace the whole graph input; a caller `Command`, including `Command(resume=...)`, always takes precedence.
 
 Run the complete provider-free example from the repository root:
