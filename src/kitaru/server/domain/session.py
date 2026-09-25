@@ -339,12 +339,42 @@ _MASTRA_MAX_FILE_BYTES = 16 * 1_048_576
 _MASTRA_MAX_INLINE_FILE_BYTES = 8 * 1_048_576
 
 
+def _mastra_file_reference(media_type: str, content: bytes) -> str:
+    """Derive a recorded file's content reference from its media type and bytes.
+
+    Args:
+        media_type: The file's media type.
+        content: The file's bytes.
+
+    Returns:
+        The ``kitaru-file://`` reference the Mastra adapter records.
+    """
+    digest = hashlib.sha256(media_type.encode() + b"\0" + content).hexdigest()
+    return f"kitaru-file://sha256/{digest}"
+
+
 class MastraStoredFile(FrozenModel):
     """A recorded Mastra file whose content is stored as a blob."""
 
     blob_id: uuid.UUID
     sha256: str
     length: int
+    url: str
+    media_type: str
+
+    def matches_reference(self, content: bytes) -> bool:
+        """Return whether this file's reference was derived from this content.
+
+        Args:
+            content: The bytes the named blob holds.
+
+        Returns:
+            Whether the reference matches the content and media type.
+        """
+        try:
+            return _mastra_file_reference(self.media_type, content) == self.url
+        except UnicodeEncodeError:
+            return False
 
     def is_held_by(self, blob: Blob | None) -> bool:
         """Return whether the blob exists and holds this file's content.
@@ -370,7 +400,13 @@ def _read_mastra_stored_file(file: dict[str, Any]) -> MastraStoredFile | None:
         The blob reference, or None when the entry is malformed.
     """
     blob_id = file.get("blobId")
-    if not isinstance(blob_id, str):
+    url = file.get("url")
+    media_type = file.get("mediaType")
+    if (
+        not isinstance(blob_id, str)
+        or not isinstance(url, str)
+        or not isinstance(media_type, str)
+    ):
         return None
     try:
         parsed = uuid.UUID(blob_id)
@@ -379,7 +415,11 @@ def _read_mastra_stored_file(file: dict[str, Any]) -> MastraStoredFile | None:
     if str(parsed) != blob_id:
         return None
     return MastraStoredFile(
-        blob_id=parsed, sha256=file["sha256"], length=file["length"]
+        blob_id=parsed,
+        sha256=file["sha256"],
+        length=file["length"],
+        url=url,
+        media_type=media_type,
     )
 
 
@@ -403,10 +443,7 @@ def _mastra_inline_file_complete(file: dict[str, Any], url: str) -> bool:
         return False
     try:
         content = base64.b64decode(encoded, validate=True)
-        reference = (
-            "kitaru-file://sha256/"
-            + hashlib.sha256(file["mediaType"].encode() + b"\0" + content).hexdigest()
-        )
+        reference = _mastra_file_reference(file["mediaType"], content)
     except (binascii.Error, ValueError, UnicodeEncodeError):
         return False
     return (

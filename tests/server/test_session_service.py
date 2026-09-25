@@ -574,7 +574,9 @@ def _stored_file_inputs(inputs: dict[str, Any], blob_id: uuid.UUID) -> dict[str,
     return stored
 
 
-@pytest.mark.parametrize("blob", ["matching", "missing", "different"])
+@pytest.mark.parametrize(
+    "blob", ["matching", "missing", "different", "other_media_type"]
+)
 async def test_mastra_finalization_checks_files_stored_as_blobs(
     repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
@@ -582,7 +584,12 @@ async def test_mastra_finalization_checks_files_stored_as_blobs(
     complete_mastra_memory_replay_inputs: dict[str, Any],
     blob: str,
 ) -> None:
-    """An eligible input may name blobs only when they hold its recorded files."""
+    """An eligible input may name blobs only when they hold its recorded files.
+
+    The ``other_media_type`` entry names a blob with the right raw hash and
+    length, but its content reference was derived from a different media type,
+    so the replay worker would refuse to load it.
+    """
     fakes = build_payload_store()
     service = SessionService(
         repository=repository,
@@ -593,6 +600,7 @@ async def test_mastra_finalization_checks_files_stored_as_blobs(
         payload_store=fakes.store,
     )
     file = complete_mastra_memory_replay_inputs["mastra_memory_replay"]["files"][0]
+    await fakes.blob_data_store.put(file["sha256"], base64.b64decode(file["base64"]))
     stored, _ = await fakes.blob_repository.create(
         Blob(
             owner_id=ACTOR.account.id,
@@ -606,6 +614,8 @@ async def test_mastra_finalization_checks_files_stored_as_blobs(
         complete_mastra_memory_replay_inputs,
         stored.id if blob != "missing" else uuid.uuid4(),
     )
+    if blob == "other_media_type":
+        final_inputs["mastra_memory_replay"]["files"][0]["mediaType"] = "text/html"
     created = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
