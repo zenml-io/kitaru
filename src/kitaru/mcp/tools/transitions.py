@@ -4,6 +4,7 @@
 """Pure transition failure analysis over recorded session nodes."""
 
 import dataclasses
+import hashlib
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -33,6 +34,7 @@ FIRST_FAILURE_KEY = "first_failure"
 MAX_STATES = 16
 MAX_PATH = 8
 MAX_NOTE = 300
+MAX_LABEL = 80
 MAX_UNLOCATED_EVALUATIONS = 10
 
 Labeler = Callable[[SessionNodeResponse], str | None]
@@ -80,9 +82,17 @@ def build_labeler(state_by: StateBy, state_map: Mapping[str, str] | None) -> Lab
 
 
 def _display_state(name: str, patterns: Sequence[tuple[str, str]]) -> str:
-    # Redact here rather than only on output: the view sends labels back to the
-    # drill-down tool, which must compare them with the same string it shows.
-    return redact(map_state(name, patterns))
+    # Redact and bound here rather than on output: the view sends labels back to
+    # the drill-down tool, which must compare them with the same string it shows.
+    return _bounded(redact(map_state(name, patterns)))
+
+
+def _bounded(label: str) -> str:
+    if len(label) <= MAX_LABEL:
+        return label
+    # A digest keeps two long names that share a prefix apart.
+    digest = hashlib.sha256(label.encode()).hexdigest()[:8]
+    return f"{label[: MAX_LABEL - 10]}…{digest}"
 
 
 def map_state(name: str, patterns: Sequence[tuple[str, str]]) -> str:
@@ -442,7 +452,7 @@ def cell_details(
             number=o.session.number,
             name=o.session.name,
             source=o.point.source,
-            failing_node=o.point.node.name,
+            failing_node=_bounded(o.point.node.name),
             note=o.point.note,
             path=list(o.path[-MAX_PATH:]),
             path_truncated=len(o.path) > MAX_PATH,

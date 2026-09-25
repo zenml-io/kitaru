@@ -7982,6 +7982,11 @@
               "title": "Rows",
               "type": "array"
             },
+            "snapshot_id": {
+              "description": "Identifies the records behind this matrix.",
+              "title": "Snapshot Id",
+              "type": "string"
+            },
             "state_by": {
               "enum": [
                 "tool",
@@ -7993,6 +7998,7 @@
             }
           },
           "required": [
+            "snapshot_id",
             "state_by",
             "rows",
             "cols",
@@ -8394,6 +8400,20 @@
               ],
               "title": "Side",
               "type": "string"
+            },
+            "snapshot_id": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "snapshot_id of the matrix being drilled into; without it the sessions are read again.",
+              "title": "Snapshot Id"
             },
             "sources": {
               "description": "Failure kinds to count.",

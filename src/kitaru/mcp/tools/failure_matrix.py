@@ -4,7 +4,6 @@
 """Transition failure matrix and matrix-cell drill-down handlers."""
 
 import asyncio
-import json
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
@@ -59,12 +58,16 @@ async def handle_failure_matrix(
 ) -> ToolSuccessPayload:
     """Build the transition failure matrix for one or two session groups."""
     # Read fresh: a reviewer who just marked a first failure expects to see it.
-    groups = await _analyze(state, request, reuse_records=False)
+    records = await _fetch_groups(state, request)
+    snapshot_id = uuid.uuid4().hex
+    state.matrix_snapshots.put(snapshot_id, records)
+    groups = _analyze(request, records)
     base, compare = groups[0], groups[1] if len(groups) > 1 else None
     rows, cols, cells = build_cells(
         base.outcomes, compare.outcomes if compare else None, request.sources
     )
     data = FailureMatrixData(
+        snapshot_id=snapshot_id,
         state_by=request.state_by,
         rows=rows,
         cols=cols,
@@ -93,8 +96,21 @@ async def handle_failure_cell(
     state: MCPServerState, request: FailureCellRequest
 ) -> FailureCellData:
     """List the sessions and repeated notes behind one matrix cell."""
-    # Cell clicks follow the matrix call within seconds, so they reuse its records.
-    groups = await _analyze(state, request, reuse_records=True)
+    if request.snapshot_id is None:
+        records = await _fetch_groups(state, request)
+    else:
+        # Drill into exactly the records the visible matrix was built from;
+        # refetching could silently return a different membership.
+        cached = state.matrix_snapshots.get(request.snapshot_id)
+        if cached is None:
+            raise MCPToolError(
+                "snapshot_expired",
+                "The matrix this cell belongs to is no longer cached.",
+                recovery="Build the transition failure matrix again, then open "
+                "the cell.",
+            )
+        records = cached
+    groups = _analyze(request, records)
     index = 1 if request.side == "compare" else 0
     if index >= len(groups):
         raise MCPToolError(
@@ -117,18 +133,30 @@ class _AnalyzedGroup:
     records_capped: bool
 
 
-async def _analyze(
-    state: MCPServerState, request: FailureMatrixRequest, *, reuse_records: bool
-) -> list[_AnalyzedGroup]:
+async def _fetch_groups(
+    state: MCPServerState, request: FailureMatrixRequest
+) -> tuple[GroupRecords, ...]:
     filters = [request.filter]
     if request.compare_filter is not None:
         filters.append(request.compare_filter)
-    records = await asyncio.gather(
-        *(
-            _load_group(state, session_filter, request.max_sessions, reuse_records)
-            for session_filter in filters
+    return tuple(
+        await asyncio.gather(
+            *(
+                fetch_group(
+                    state.client,
+                    session_filter,
+                    request.max_sessions,
+                    state.settings.pool_size,
+                )
+                for session_filter in filters
+            )
         )
     )
+
+
+def _analyze(
+    request: FailureMatrixRequest, records: Sequence[GroupRecords]
+) -> list[_AnalyzedGroup]:
     labeler = build_labeler(request.state_by, request.state_map)
     folded = fold_rare_states(
         [analyze_group(group, labeler, request.state_map) for group in records],
@@ -138,28 +166,6 @@ async def _analyze(
         _AnalyzedGroup(outcomes, group.truncated, group.records_capped)
         for outcomes, group in zip(folded, records, strict=True)
     ]
-
-
-async def _load_group(
-    state: MCPServerState,
-    session_filter: Filter | None,
-    max_sessions: int,
-    reuse: bool,
-) -> GroupRecords:
-    dumped = (
-        session_filter.model_dump(by_alias=True, mode="json")
-        if session_filter
-        else None
-    )
-    key = json.dumps({"filter": dumped, "max": max_sessions}, sort_keys=True)
-    cached = state.group_cache.get(key) if reuse else None
-    if cached is not None:
-        return cached
-    records = await fetch_group(
-        state.client, session_filter, max_sessions, state.settings.pool_size
-    )
-    state.group_cache.put(key, records)
-    return records
 
 
 async def fetch_group(

@@ -286,7 +286,9 @@ async function onToolResult(result) {
   }
   if (!envelope.ok) { showStatus(envelope.error?.message || "The matrix could not be built.", true); return; }
   S.data = envelope.data;
+  cellToken++;
   S.sel = null;
+  $("#drill").hidden = true;
   $("#status").hidden = true;
   $("#content").hidden = false;
   render();
@@ -439,7 +441,13 @@ function renderTray(groups) {
 }
 
 // ---------- Drill-down ----------
+// Each cell request gets a token; a response renders only while it is current,
+// so a slow answer for one cell never overwrites a later selection.
+let cellToken = 0;
+function closeCell() { cellToken++; S.sel = null; $("#drill").hidden = true; render(); }
+
 async function openCell(from, to) {
+  const token = ++cellToken;
   S.sel = [from, to];
   render();
   const drill = $("#drill");
@@ -451,14 +459,15 @@ async function openCell(from, to) {
   try {
     const results = await Promise.all(sides.map((side) => request("tools/call", {
       name: cellToolName(),
-      arguments: { request: { ...(S.args.request || {}), from_state: from, to_state: to, side, limit: 50 } },
+      arguments: { request: { ...(S.args.request || {}), snapshot_id: S.data.snapshot_id, from_state: from, to_state: to, side, limit: 50 } },
     })));
-    if (S.sel?.[0] !== from || S.sel?.[1] !== to) return;
+    if (token !== cellToken) return;
     const payloads = results.map(envelopeOf);
     const failed = payloads.find((p) => !p?.ok);
     if (failed) { drill.replaceChildren(el("div", { class: "status error", text: failed?.error?.message || "Could not load sessions." })); return; }
     renderDrill(from, to, sides, payloads.map((p) => p.data));
   } catch (error) {
+    if (token !== cellToken) return;
     drill.replaceChildren(el("div", { class: "status error", text: `Could not load sessions: ${error.message}` }));
   }
 }
@@ -487,7 +496,7 @@ function renderDrill(from, to, sides, cellData) {
   }).join("");
   request("ui/update-model-context", { content: [{ type: "text", text: `The user is looking at the transition ${pairText(from, to)} in the transition failure matrix for ${scope}.${idText}` }] }).catch(() => {});
   const close = el("button", { class: "icon-btn", text: "✕", title: "Close", "aria-label": "Close" });
-  close.onclick = () => { S.sel = null; $("#drill").hidden = true; render(); };
+  close.onclick = closeCell;
   const ask = el("button", { class: "btn primary", text: `Investigate these ${total}` });
   ask.onclick = () => sendMessage(`Look at the ${total} sessions that failed at ${pairText(from, to)} in the transition failure matrix for ${scope}. What do they have in common, and what change would fix most of them?${idText}`);
   const replay = el("button", { class: "btn brand", text: "Replay with a fix…" });
@@ -552,7 +561,7 @@ matrix.addEventListener("focusout", hideTip);
 matrix.addEventListener("click", (e) => {
   const b = e.target.closest(".cell");
   if (!b || b.classList.contains("never")) return;
-  if (S.sel?.[0] === b.dataset.from && S.sel?.[1] === b.dataset.to) { S.sel = null; $("#drill").hidden = true; render(); return; }
+  if (S.sel?.[0] === b.dataset.from && S.sel?.[1] === b.dataset.to) { closeCell(); return; }
   openCell(b.dataset.from, b.dataset.to);
 });
 $("#ctl-measure").addEventListener("click", (e) => {

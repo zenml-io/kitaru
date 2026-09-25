@@ -92,6 +92,12 @@ class FailureMatrixRequest(MCPModel):
 class FailureCellRequest(FailureMatrixRequest):
     """List the sessions behind one transition failure matrix cell."""
 
+    snapshot_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="snapshot_id of the matrix being drilled into; without it "
+        "the sessions are read again.",
+    )
     from_state: str = Field(min_length=1, description="Last step that went right.")
     to_state: str = Field(min_length=1, description="First step that went wrong.")
     side: MatrixSide = Field(default="base", description="Which session group.")
@@ -145,6 +151,7 @@ class GroupSummary(MCPModel):
 class FailureMatrixData(MCPModel):
     """Transition failure matrix over one group, optionally compared to a second."""
 
+    snapshot_id: str = Field(description="Identifies the records behind this matrix.")
     state_by: StateBy
     rows: list[str]
     cols: list[str]

@@ -406,6 +406,7 @@ def test_comparison_text_lists_the_largest_changes_first() -> None:
         records_capped=False,
     )
     data = FailureMatrixData(
+        snapshot_id="s",
         state_by="tool",
         rows=[START],
         cols=[],
@@ -563,19 +564,65 @@ async def test_large_sessions_are_read_up_to_a_cap_and_reported(
     assert isinstance(text, TextContent) and "partly read" in text.text
 
 
-async def test_cell_tool_reuses_cached_group_and_lists_sessions() -> None:
+def _structured(result: object) -> dict[str, Any]:
+    return cast(dict[str, Any], cast(CallToolResult, result).structured_content)
+
+
+async def test_cell_tool_drills_into_the_matrix_snapshot() -> None:
     client = _FakeClient(_failing_group())
     server, context = build_server_context(client)
-    request = {"request": {"from_state": "lookup_order", "to_state": "issue_refund"}}
 
-    await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
-    result = await server.call_tool("kitaru_failure_matrix_cell", request, context)
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    snapshot_id = _structured(matrix)["data"]["snapshot_id"]
+    # Sessions recorded after the matrix was built must not leak into its cells.
+    client.sessions.sessions = []
+    cell = await server.call_tool(
+        "kitaru_failure_matrix_cell",
+        {
+            "request": {
+                "snapshot_id": snapshot_id,
+                "from_state": "lookup_order",
+                "to_state": "issue_refund",
+            }
+        },
+        context,
+    )
 
-    data = cast(dict[str, Any], cast(CallToolResult, result).structured_content)["data"]
+    data = _structured(cell)["data"]
     assert client.sessions.list_calls == 1
     assert data["total"] == 3
     assert data["patterns"] == [{"note": "TimeoutError: payments API", "count": 3}]
     assert data["sessions"][0]["path"] == ["lookup_order", "issue_refund"]
+
+
+async def test_unknown_snapshot_asks_for_a_rebuild_instead_of_refetching() -> None:
+    client = _FakeClient(_failing_group())
+    server, context = build_server_context(client)
+    request = {"snapshot_id": "gone", "from_state": START, "to_state": "x"}
+
+    result = await server.call_tool(
+        "kitaru_failure_matrix_cell", {"request": request}, context
+    )
+
+    assert _structured(result)["error"]["code"] == "snapshot_expired"
+    assert client.sessions.list_calls == 0
+
+
+def test_long_names_get_bounded_distinct_labels() -> None:
+    sessions = [_session("failed"), _session("failed")]
+    long_names = ["x" * 200 + "_alpha", "x" * 200 + "_beta"]
+    nodes = {
+        s.id: [_node(s, "a", "tool_call", name, status="failed")]
+        for s, name in zip(sessions, long_names, strict=True)
+    }
+
+    outcomes = analyze_group(
+        _records(nodes, sessions), build_labeler("tool", None), None
+    )
+    labels = [outcome.path[-1] for outcome in outcomes]
+
+    assert all(len(label) <= 80 for label in labels)
+    assert labels[0] != labels[1]
 
 
 async def test_tools_link_the_view_and_hide_the_cell_tool_from_the_model() -> None:

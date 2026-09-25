@@ -23,9 +23,9 @@ class MCPServerState:
     settings: MCPSettings
     client: KitaruAPIClient
     semaphore: asyncio.Semaphore = field(init=False)
-    # Matrix cell clicks re-read the same session group seconds after the matrix
-    # itself, so the fetched records are kept briefly instead of refetched.
-    group_cache: TTLCache[GroupRecords] = field(
+    # Cell drill-downs must read the records the visible matrix was built from,
+    # so each matrix keeps its records briefly under a snapshot id.
+    matrix_snapshots: TTLCache[tuple[GroupRecords, ...]] = field(
         default_factory=lambda: TTLCache(max_entries=4, ttl_seconds=300), init=False
     )
     _closed: bool = field(default=False, init=False)
