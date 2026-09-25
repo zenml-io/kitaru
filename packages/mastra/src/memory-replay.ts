@@ -446,6 +446,7 @@ export async function createIsolatedMemoryReplay(
             if (!settled)
               binding.markIncomplete(
                 "Observational-memory work did not settle before the finalization deadline.",
+                "om_settle_timeout",
               );
             return settled;
           } finally {

@@ -317,6 +317,7 @@ it("fails a replay whose background observation misses the finalization deadline
     expect(runtime.binding.incompleteReasons).toContain(
       "Observational-memory work did not settle before the finalization deadline.",
     );
+    expect(runtime.binding.incompleteReason).toBe("om_settle_timeout");
   } finally {
     release();
   }
