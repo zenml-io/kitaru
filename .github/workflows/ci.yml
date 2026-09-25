@@ -448,14 +448,17 @@ jobs:
           - name: py311-base
             python-version: '3.11'
             sync-command: uv sync --frozen --extra server --extra otel --extra modal
+              --extra s3
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py312-base
             python-version: '3.12'
             sync-command: uv sync --frozen --extra server --extra otel --extra modal
+              --extra s3
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py313-base
             python-version: '3.13'
             sync-command: uv sync --frozen --extra server --extra otel --extra modal
+              --extra s3
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py314-base-1
             python-version: '3.14'
@@ -464,6 +467,7 @@ jobs:
             shard-index: '0'
             shard-count: '2'
             sync-command: uv sync --frozen --extra server --extra otel --extra modal
+              --extra s3
             pytest-command: uv run coverage run -m pytest --ignore=tests/cli --ignore=tests/mcp
               --ignore=tests/typescript --durations=20
           - name: py314-base-2
@@ -473,6 +477,7 @@ jobs:
             shard-index: '1'
             shard-count: '2'
             sync-command: uv sync --frozen --extra server --extra otel --extra modal
+              --extra s3
             pytest-command: uv run coverage run -m pytest --ignore=tests/cli --ignore=tests/mcp
               --ignore=tests/typescript --durations=20
           - name: py311-cli

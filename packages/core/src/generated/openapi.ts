@@ -8493,6 +8493,11 @@ export interface components {
              */
             id?: string | null;
             /**
+             * Max Blob Size Bytes
+             * @description Maximum accepted blob size in bytes.
+             */
+            max_blob_size_bytes?: number | null;
+            /**
              * Server Url
              * @description URL the server API is reachable at.
              */

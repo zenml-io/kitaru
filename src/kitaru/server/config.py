@@ -18,7 +18,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from kitaru.server.blob_storage_settings import BlobStorageSettings
@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     SKIP_DB_MIGRATION: bool = False
 
     WORKER_LIVENESS_TIMEOUT_SECONDS: int = 60
-    MAX_BLOB_SIZE_BYTES: int = 100 * 1024 * 1024
+    MAX_BLOB_SIZE_BYTES: int = Field(default=100 * 1024 * 1024, ge=0)
     BLOB_STORAGE: BlobStorageSettings = BlobStorageSettings()
     EPHEMERAL_WORKER: EphemeralWorkerSettings = EphemeralWorkerSettings()
     PAYLOAD_OFFLOAD_THRESHOLD_BYTES: int = 20 * 1024

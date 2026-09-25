@@ -2,6 +2,8 @@
 """Settings precedence, stable error mapping, and redaction tests."""
 
 import json
+import logging
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -252,3 +254,85 @@ def test_process_client_disables_transport_retries(
         "pool_size": 20,
         "analytics_source": AnalyticsSource.MCP,
     }
+
+
+@pytest.fixture
+def _restore_root_logging() -> Iterator[None]:
+    # `main` reconfigures the root logger with `force=True`, which would leave a
+    # handler bound to this test's captured stderr for every later test.
+    handlers, level = logging.root.handlers[:], logging.root.level
+    yield
+    logging.root.handlers[:] = handlers
+    logging.root.setLevel(level)
+
+
+@pytest.mark.usefixtures("_restore_root_logging")
+def test_main_maps_command_line_options_onto_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started: list[MCPSettings] = []
+
+    async def fake_run_stdio(settings: MCPSettings) -> None:
+        started.append(settings)
+
+    monkeypatch.setattr(mcp_server, "run_stdio", fake_run_stdio)
+    exit_code = mcp_server.main(
+        [
+            "--mode",
+            "standard",
+            "--server",
+            "https://example.test",
+            "--timeout",
+            "5",
+            "--handler-timeout",
+            "7",
+            "--pool-size",
+            "3",
+            "--max-concurrency",
+            "2",
+            "--debug",
+        ]
+    )
+    assert exit_code == 0
+    [settings] = started
+    assert settings.mode is CapabilityMode.STANDARD
+    assert settings.server_url == "https://example.test"
+    assert (settings.timeout, settings.handler_timeout) == (5, 7)
+    assert (settings.pool_size, settings.max_concurrency) == (3, 2)
+    assert settings.debug is True
+
+
+@pytest.mark.usefixtures("_restore_root_logging")
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["--mode", "admin"], "invalid choice: 'admin'"),
+        (["--server", "https://example.test", "--max-concurrency", "0"], "greater"),
+        ([], "No Kitaru server URL is configured"),
+        (["--server", "ftp://example.test"], "must be an HTTP(S) URL"),
+    ],
+)
+def test_main_startup_failures_exit_two_with_a_readable_error(
+    argv: list[str],
+    message: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("KITARU_MCP_SERVER", "KITARU_API_URL", "KITARU_MCP_MODE"):
+        monkeypatch.delenv(name, raising=False)
+    assert mcp_server.main(argv) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert message in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.usefixtures("_restore_root_logging")
+def test_main_exits_cleanly_on_keyboard_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def interrupted(settings: MCPSettings) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(mcp_server, "run_stdio", interrupted)
+    assert mcp_server.main(["--server", "https://example.test"]) == 0

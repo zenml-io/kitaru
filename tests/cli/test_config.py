@@ -146,6 +146,18 @@ def test_config_is_allowlisted_and_malformed_state_is_refused(
     assert path_result["item"] == {"path": str(config_path), "exists": True}
 
 
+def test_config_set_rejects_ambiguous_boolean(tmp_path, monkeypatch, capsys) -> None:
+    """A value that is not a recognized boolean spelling is not persisted."""
+    monkeypatch.setenv("KITARU_CONFIG_DIR", str(tmp_path))
+
+    assert main(["config", "set", "cli.machine_mode", "maybe"]) == 2
+
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["kind"] == "invalid_arguments"
+    assert "true/false" in error["message"]
+    assert not (tmp_path / "config.json").exists()
+
+
 def test_server_resolution_uses_explicit_environment_then_stored(monkeypatch) -> None:
     """An explicit URL wins, followed by the environment and stored target."""
     set_server_url("https://stored.example.com/")

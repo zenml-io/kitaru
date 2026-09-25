@@ -15,6 +15,7 @@
 
 import json
 import os
+import socket
 from pathlib import Path
 
 import pytest
@@ -1018,3 +1019,169 @@ async def test_stop_without_resources_reports_no_deployment(runtime_paths) -> No
         await local_runtime.stop_local_runtime(
             delete_volumes=True, runner=FakeDockerRunner(), paths=runtime_paths
         )
+
+
+async def test_upgrade_without_deployment_points_at_local_login(
+    runtime_paths, monkeypatch
+) -> None:
+    """An upgrade has nothing to replace before the first local login."""
+    monkeypatch.delenv(local_runtime.LOCAL_IMAGE_ENV, raising=False)
+
+    with pytest.raises(CLIError, match="no local Kitaru deployment") as raised:
+        await local_runtime.start_local_runtime(
+            package_version="0.21.0",
+            upgrade=True,
+            timeout=30,
+            runner=FakeDockerRunner(),
+            paths=runtime_paths,
+        )
+
+    assert raised.value.kind == "invalid_configuration"
+    assert "kitaru login --local" in str(raised.value.hint)
+    assert not runtime_paths.state.exists()
+
+
+def test_invalid_image_override_is_rejected(monkeypatch) -> None:
+    """A malformed developer image never reaches the container runtime."""
+    monkeypatch.setenv(local_runtime.LOCAL_IMAGE_ENV, "kitaru server; rm -rf /")
+
+    with pytest.raises(CLIError, match="is not a valid image") as raised:
+        local_runtime._get_server_image("0.21.0")
+
+    assert raised.value.kind == "invalid_configuration"
+
+
+def test_port_owned_by_another_service_is_rejected() -> None:
+    """A first login refuses a port that something else already serves."""
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+
+        with pytest.raises(CLIError, match=f"Port {port} is already in use") as raised:
+            local_runtime._reject_occupied_port(port)
+
+    assert raised.value.kind == "conflict"
+    assert "kitaru login SERVER" in str(raised.value.hint)
+
+
+@pytest.mark.parametrize(
+    ("runtime", "hint"),
+    [("docker", "Start Docker"), ("podman", "Start a Podman machine")],
+)
+async def test_stopped_container_service_names_the_engine_to_start(
+    runtime: local_runtime.ContainerRuntime, hint: str
+) -> None:
+    """An installed but stopped engine tells the user which one to start."""
+    runner = FakeDockerRunner(runtime=runtime)
+    runner.results[("info",)] = ProcessResult(1, "", "Cannot connect to the daemon")
+
+    with pytest.raises(CLIError, match="service is unavailable") as raised:
+        await local_runtime._validate_container_runtime(runner)
+
+    assert hint in str(raised.value.hint)
+    assert raised.value.details == {"docker_output": "Cannot connect to the daemon"}
+
+
+async def test_stop_without_ownership_state_reports_no_deployment(
+    runtime_paths,
+) -> None:
+    """A plain stop does not look for unowned resources to act on."""
+    runner = FakeDockerRunner()
+
+    with pytest.raises(CLIError, match="No CLI-owned local Kitaru deployment"):
+        await local_runtime.stop_local_runtime(
+            delete_volumes=False, runner=runner, paths=runtime_paths
+        )
+
+    assert runner.calls == []
+
+
+async def test_stop_without_volumes_keeps_data_and_state(runtime_paths) -> None:
+    """A plain stop keeps the database volume and the secrets that open it."""
+    local_runtime._write_runtime_files(
+        runtime_paths, image="zenmldocker/kitaru-server:0.21.0", port=8000
+    )
+    runner = FakeDockerRunner()
+
+    result = await local_runtime.stop_local_runtime(
+        delete_volumes=False, runner=runner, paths=runtime_paths
+    )
+
+    assert result == {
+        "server_url": "http://localhost:8000",
+        "deployment": "stopped",
+        "data_deleted": False,
+    }
+    assert runner.calls[-1][-1] == "down"
+    assert runtime_paths.environment.exists()
+    assert runtime_paths.state.exists()
+
+
+@pytest.mark.parametrize(
+    ("service", "tail", "message"),
+    [
+        (None, -1, "--tail cannot be negative"),
+        ("web", 10, "--service must be either"),
+    ],
+)
+async def test_logs_reject_invalid_arguments(
+    runtime_paths, service: str | None, tail: int, message: str
+) -> None:
+    """Invalid log options fail before any runtime command runs."""
+    runner = FakeDockerRunner()
+
+    with pytest.raises(CLIError, match=message) as raised:
+        await local_runtime.get_local_logs(
+            service=service, tail=tail, follow=False, runner=runner, paths=runtime_paths
+        )
+
+    assert raised.value.kind == "invalid_arguments"
+    assert runner.calls == []
+
+
+async def test_logs_without_deployment_report_missing_state(runtime_paths) -> None:
+    """Logs need an owned deployment to know which Compose project to read."""
+    with pytest.raises(CLIError, match="No CLI-owned local Kitaru deployment"):
+        await local_runtime.get_local_logs(
+            service=None,
+            tail=10,
+            follow=False,
+            runner=FakeDockerRunner(),
+            paths=runtime_paths,
+        )
+
+
+async def test_corrupt_runtime_state_is_reported_not_overwritten(
+    runtime_paths,
+) -> None:
+    """Unreadable ownership state stops the command instead of being replaced."""
+    runtime_paths.directory.mkdir(parents=True)
+    runtime_paths.state.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(CLIError, match="deployment state is invalid") as raised:
+        await local_runtime.start_local_runtime(
+            package_version="0.21.0",
+            upgrade=False,
+            timeout=30,
+            runner=FakeDockerRunner(),
+            paths=runtime_paths,
+        )
+
+    assert raised.value.kind == "invalid_configuration"
+    assert runtime_paths.state.read_text(encoding="utf-8") == "{not json"
+
+
+def test_operation_lock_held_by_live_process_is_respected(runtime_paths) -> None:
+    """A concurrent local operation blocks this one and keeps its lock."""
+    runtime_paths.directory.mkdir(parents=True)
+    runtime_paths.lock.write_text(str(os.getpid()), encoding="utf-8")
+
+    with (
+        pytest.raises(CLIError, match="Another local Kitaru operation") as raised,
+        local_runtime._operation_lock(runtime_paths),
+    ):
+        pass
+
+    assert raised.value.kind == "conflict"
+    assert runtime_paths.lock.read_text(encoding="utf-8") == str(os.getpid())
