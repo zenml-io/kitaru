@@ -27,6 +27,7 @@ from kitaru.mcp.models.failure_matrix import (
     MatrixCell,
     StateBy,
 )
+from kitaru.mcp.redaction import redact
 
 FIRST_FAILURE_KEY = "first_failure"
 MAX_STATES = 16
@@ -73,9 +74,15 @@ def build_labeler(state_by: StateBy, state_map: Mapping[str, str] | None) -> Lab
 
     def label(node: SessionNodeResponse) -> str | None:
         raw = _raw_state(node, state_by)
-        return None if raw is None else map_state(raw, patterns)
+        return None if raw is None else _display_state(raw, patterns)
 
     return label
+
+
+def _display_state(name: str, patterns: Sequence[tuple[str, str]]) -> str:
+    # Redact here rather than only on output: the view sends labels back to the
+    # drill-down tool, which must compare them with the same string it shows.
+    return redact(map_state(name, patterns))
 
 
 def map_state(name: str, patterns: Sequence[tuple[str, str]]) -> str:
@@ -115,11 +122,19 @@ def first_failure_marks(
         if node_id is None:
             continue
         value = annotation.value
-        if annotation.question_key == FIRST_FAILURE_KEY or (
-            isinstance(value, dict) and value.get(FIRST_FAILURE_KEY) is True
-        ):
+        if _affirms_first_failure(annotation.question_key, value):
             marks[node_id] = _note_of(value)
     return marks
+
+
+def _affirms_first_failure(question_key: str | None, value: object) -> bool:
+    if isinstance(value, dict) and value.get(FIRST_FAILURE_KEY) is True:
+        return True
+    # An answer to a `first_failure` question counts only when it says yes, either
+    # as `true` or as a non-blank note describing what went wrong.
+    if question_key != FIRST_FAILURE_KEY:
+        return False
+    return value is True or (isinstance(value, str) and bool(value.strip()))
 
 
 def _note_of(value: object) -> str | None:
@@ -200,7 +215,7 @@ def analyze_session(
     )
     own_state = labeler(point.node)
     fallback = _raw_state(point.node, "node") or _node_name(point.node)
-    path = (*before, own_state or map_state(fallback, state_map))
+    path = (*before, own_state or _display_state(fallback, state_map))
     # A failing step that is not itself a state never counts as a tried transition,
     # so its cell reports failures without a failure rate.
     transitions = _pairs(path) if own_state is not None else _pairs(before)

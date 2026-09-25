@@ -232,6 +232,50 @@ def test_reviewer_mark_wins_over_recorded_error_and_carries_note() -> None:
     assert outcome.failure_transition == (START, "lookup_order")
 
 
+@pytest.mark.parametrize("answer", [False, None, "", {"first_failure": False}])
+def test_negative_first_failure_answers_are_not_marks(answer: JsonValue) -> None:
+    session = _session("completed")
+    nodes = [_node(session, "a", "tool_call", "lookup_order")]
+    mark = AnnotationResponse.model_construct(
+        session_id=session.id,
+        selector=AnnotationSelector(node_id=nodes[0].id),
+        value=answer,
+        question_key="first_failure",
+    )
+
+    [outcome] = analyze_group(
+        _records({session.id: nodes}, [session], [mark]),
+        build_labeler("tool", None),
+        None,
+    )
+
+    assert not outcome.failed and outcome.point is None
+
+
+async def test_redacted_state_labels_stay_drillable() -> None:
+    session = _session("failed")
+    secret_named = "KITKEY_example"
+    records = _records(
+        {session.id: [_node(session, "a", "tool_call", secret_named, status="failed")]},
+        [session],
+    )
+    server, context = build_server_context(_FakeClient(records))
+
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    [shown] = cast(dict[str, Any], cast(CallToolResult, matrix).structured_content)[
+        "data"
+    ]["cols"]
+    cell = await server.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {"from_state": START, "to_state": shown}},
+        context,
+    )
+
+    assert shown != secret_named
+    data = cast(dict[str, Any], cast(CallToolResult, cell).structured_content)["data"]
+    assert data["total"] == 1
+
+
 def test_evaluation_failure_without_location_is_unlocated_not_guessed() -> None:
     session = _session("completed")
     nodes = [_node(session, "a", "tool_call", "lookup_order")]
