@@ -1098,7 +1098,7 @@ describe("stream recording lifecycle", () => {
     {
       errorName: "AI_APICallError",
       message: "Bearer private-token",
-      expectedError: "Mastra stream failed (AI_APICallError: Bearer REDACTED)",
+      expectedError: "Mastra stream failed (AI_APICallError)",
       scenario: "AI SDK",
     },
     {
@@ -1106,7 +1106,7 @@ describe("stream recording lifecycle", () => {
       message: "Rate limit reached for key sk-private-token-1234 (req abc)",
       statusCode: 429,
       expectedError:
-        "Mastra stream failed (AI_APICallError, HTTP 429: Rate limit reached for key REDACTED (req abc))",
+        "Mastra stream failed (AI_APICallError, HTTP 429: rate limited)",
       scenario: "rate-limited provider",
     },
     {

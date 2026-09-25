@@ -1,12 +1,15 @@
-import { redactUrlCredentials } from "@zenml-io/kitaru/adapter";
-
 const MAX_ERROR_NAME_LENGTH = 80;
-const MAX_PROVIDER_MESSAGE_LENGTH = 500;
 const ERROR_NAME = /^[A-Za-z][A-Za-z0-9_]*Error$/;
-// Providers echo the credential a request carried in some auth failures, and
-// OpenAI-style keys start with a short prefix and a dash.
-const AUTHORIZATION_VALUE = /\b(Bearer|Basic)\s+[^\s,;"'`]+/gi;
-const PREFIXED_KEY = /\b(?:sk|pk|rk)[-_][A-Za-z0-9_*-]{8,}/g;
+const STATUS_CATEGORIES: Readonly<Record<number, string>> = {
+  400: "invalid request",
+  401: "authentication failed",
+  403: "permission denied",
+  404: "not found",
+  408: "timed out",
+  413: "request too large",
+  422: "invalid request",
+  429: "rate limited",
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -46,31 +49,24 @@ function getHttpStatus(error: unknown): number | undefined {
   return undefined;
 }
 
-function redactProviderMessage(message: string): string {
-  const redacted = redactUrlCredentials(message)
-    .replace(AUTHORIZATION_VALUE, "$1 REDACTED")
-    .replace(PREFIXED_KEY, "REDACTED");
-  return redacted.length > MAX_PROVIDER_MESSAGE_LENGTH
-    ? `${redacted.slice(0, MAX_PROVIDER_MESSAGE_LENGTH)}...`
-    : redacted;
+function getStatusCategory(status: number): string {
+  return (
+    STATUS_CATEGORIES[status] ??
+    (status >= 500 ? "provider unavailable" : "request rejected")
+  );
 }
 
 /**
- * Describe a failed provider call by class, HTTP status, and message.
+ * Describe a failed provider call by class, HTTP status, and status category.
  *
- * AI SDK errors and errors carrying an HTTP status keep a bounded message
- * with credentials redacted, so a rate limit, an outage, and a bad key read
- * differently. Any other error is described by its class name alone,
- * because application errors can carry arbitrary private text.
+ * The provider's message is left out: providers echo request content and
+ * credentials in it in shapes no redaction pattern list covers, and the
+ * status category still tells a rate limit, an outage, and a bad key apart.
+ * An error without an HTTP status is described by its class name alone.
  */
 export function describeProviderError(error: unknown): string | undefined {
   const name = getErrorName(error);
   const status = getHttpStatus(error);
-  if (!(error instanceof Error) || (!name?.startsWith("AI_") && !status))
-    return name;
-  const label = [name, status === undefined ? undefined : `HTTP ${status}`]
-    .filter((part) => part !== undefined)
-    .join(", ");
-  const message = error.message ? redactProviderMessage(error.message) : "";
-  return message ? `${label}: ${message}` : label;
+  if (status === undefined) return name;
+  return `${name === undefined ? "" : `${name}, `}HTTP ${status}: ${getStatusCategory(status)}`;
 }

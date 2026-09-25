@@ -362,43 +362,79 @@ it("reports unsupported evidence values by their own reason", async () => {
   });
 });
 
-it("records one failed model call with its provider status and message", async () => {
-  const actor = new MastraLanguageModelV2Mock({
-    modelId: "actor",
-    provider: "fixture",
-    doStream: async () => {
-      throw new APICallError({
-        message: "Service Unavailable: upstream overloaded (req abc)",
-        url: "https://provider.invalid/v1/responses",
-        requestBodyValues: {},
-        statusCode: 503,
-        isRetryable: false,
+// Provider messages echo credentials and request content in many shapes.
+// The fake credentials are joined at runtime so secret scanners skip them.
+const PROVIDER_SECRETS = [
+  `api_key=${["AIza", "Test".repeat(8), "123"].join("")}`,
+  ["AK", "IA", "TEST".repeat(3), "1234"].join(""),
+  '{"client_secret": "test-json-secret-value"}',
+  ["ghp", "test".repeat(9)].join("_"),
+  ["xoxb", "test", "test", "test"].join("-"),
+  ["sk", "test", "private", "key", "1234"].join("-"),
+  [{ alg: "HS256" }, { test: "test" }, "test"]
+    .map((part) => Buffer.from(JSON.stringify(part)).toString("base64url"))
+    .join("."),
+  "echoed private prompt text",
+];
+
+it.each([
+  { statusCode: 503, error: "AI_APICallError, HTTP 503: provider unavailable" },
+  {
+    statusCode: 401,
+    error: "AI_APICallError, HTTP 401: authentication failed",
+  },
+  { statusCode: 429, error: "AI_APICallError, HTTP 429: rate limited" },
+])(
+  "records a failed model call's HTTP $statusCode status but not its message",
+  async ({ statusCode, error }) => {
+    const actor = new MastraLanguageModelV2Mock({
+      modelId: "actor",
+      provider: "fixture",
+      doStream: async () => {
+        throw new APICallError({
+          message: `Request failed: ${PROVIDER_SECRETS.join(" ")}`,
+          url: "https://provider.invalid/v1/responses",
+          requestBodyValues: {},
+          statusCode,
+          isRetryable: false,
+        });
+      },
+    });
+    const { api, turn } = await setup({ actor });
+
+    await turn().catch(() => undefined);
+
+    expect(await closingUpdate(api)).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining(error),
+    });
+    await vi.waitFor(() => {
+      const failed = api
+        .nodeBatches()
+        .flat()
+        .filter((node) => node.node_type === "llm_call");
+      const ids = new Set(failed.map((node) => node.external_id));
+      expect(ids.size).toBe(1);
+      const last = failed.at(-1);
+      expect(last).toMatchObject({
+        status: "failed",
+        error: expect.stringContaining(error),
       });
-    },
-  });
-  const { api, turn } = await setup({ actor });
-
-  await turn().catch(() => undefined);
-
-  expect(await closingUpdate(api)).toMatchObject({
-    status: "failed",
-    error: expect.stringContaining("HTTP 503"),
-  });
-  await vi.waitFor(() => {
-    const failed = api
-      .nodeBatches()
-      .flat()
-      .filter((node) => node.node_type === "llm_call");
-    const ids = new Set(failed.map((node) => node.external_id));
-    expect(ids.size).toBe(1);
-    const last = failed.at(-1);
-    expect(last).toMatchObject({ status: "failed" });
-    expect(last?.inputs).not.toBeNull();
-    expect(String(last?.error)).toMatch(
-      /HTTP 503: Service Unavailable: upstream overloaded \(req abc\)/,
+      expect(last?.inputs).not.toBeNull();
+    });
+    // Mastra saves the provider error into the thread as an assistant
+    // message, and the memory evidence records that write as it happened.
+    const stored = JSON.stringify(api.calls, (_key, value) =>
+      (value as { name?: unknown } | null)?.name === "memory_mutation"
+        ? undefined
+        : value,
     );
-  });
-});
+    expect(stored).toContain(error);
+    for (const secret of PROVIDER_SECRETS)
+      expect(stored).not.toContain(secret.replaceAll('"', '\\"'));
+    expect(stored).not.toContain("Request failed");
+  },
+);
 
 it("stores why the server refused the replay inputs", async () => {
   const { api, reported, turn } = await setup({
