@@ -241,6 +241,31 @@ def mastra_replay_uses_observational_memory(envelope: dict[str, Any]) -> bool:
     return om is True or (isinstance(om, dict) and om.get("enabled") is not False)
 
 
+_JS_ISO_TIMESTAMP = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z"
+)
+
+
+def _is_js_iso_timestamp(value: str) -> bool:
+    """Check that a string is exactly a JavaScript `Date#toISOString()` value.
+
+    Args:
+        value: The string to check, such as `2026-01-01T00:00:00.000Z`.
+
+    Returns:
+        Whether the string is a real UTC instant in that exact form.
+    """
+    if _JS_ISO_TIMESTAMP.fullmatch(value) is None:
+        return False
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f%z")
+    except ValueError:
+        return False
+    # Require the value to render back unchanged, as the adapter's check does.
+    rendered = parsed.isoformat(timespec="milliseconds")
+    return rendered.removesuffix("+00:00") + "Z" == value
+
+
 def mastra_replay_v3_current(envelope: dict[str, Any]) -> bool:
     """Check that a version-3 input carries its recorded key order and turn start.
 
@@ -256,11 +281,9 @@ def mastra_replay_v3_current(envelope: dict[str, Any]) -> bool:
         and isinstance(started, str)
     ):
         return False
-    try:
-        datetime.fromisoformat(started)
-    except ValueError:
-        return False
-    return True
+    # The adapter decodes only the exact `Date#toISOString()` form, so a looser
+    # ISO value would pass here and fail in the worker after queuing.
+    return _is_js_iso_timestamp(started)
 
 
 # Nine digits exceed any object count the replay input budget allows, and keep

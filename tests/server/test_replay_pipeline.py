@@ -244,6 +244,53 @@ async def test_mastra_baseline_in_an_outdated_v3_format_is_refused(
     assert not replays
 
 
+@pytest.mark.parametrize(
+    ("turn_started_at", "accepted"),
+    [
+        ("1999-12-31T23:59:59.999Z", True),
+        ("2026-01-01", False),
+        ("2026-01-01T00:00:00+00:00", False),
+        ("2026-01-01T00:00:00.000+00:00", False),
+        ("2026-01-01T00:00:00Z", False),
+        ("2026-02-30T00:00:00.000Z", False),
+    ],
+)
+async def test_mastra_baseline_turn_start_must_be_a_javascript_iso_timestamp(
+    services: ReplayServices,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    turn_started_at: str,
+    accepted: bool,
+) -> None:
+    """Accept only the `Date#toISOString()` form the adapter can decode."""
+    version = await _agent_version_with_run_spec(services)
+    inputs = deepcopy(complete_mastra_memory_replay_inputs)
+    inputs["mastra_memory_replay"]["turnStartedAt"] = turn_started_at
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=version.agent_id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        framework="mastra",
+        inputs=inputs,
+        metadata={"mastra_replay_state": "eligible"},
+    )
+    create = ReplayCreate(
+        baseline_session_id=baseline.id,
+        evaluators=[],
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+    )
+    if accepted:
+        bundle = await services.replay_service.create_replay(create, actor=ACTOR)
+        assert bundle.replay.baseline_session_id == baseline.id
+        return
+    with pytest.raises(SessionReplayNotReady, match="mastra_replay_recording_outdated"):
+        await services.replay_service.create_replay(create, actor=ACTOR)
+    replays, _ = await services.replays.query(ReplayFilter())
+    assert not replays
+
+
 @pytest.mark.parametrize("blob", ["kept", "deleted", "deleted_after_first_check"])
 async def test_mastra_baseline_whose_file_blob_was_deleted_is_refused(
     services: ReplayServices,
