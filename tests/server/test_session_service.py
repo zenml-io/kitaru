@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for session use cases."""
 
+import base64
 import uuid
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -522,6 +523,46 @@ async def test_mastra_finalization_rejects_invalid_replay_prerequisite(
     stored = await service.get_session(created.id, actor=ACTOR)
     assert stored.status == SessionStatus.IN_PROGRESS
     assert stored.metadata["mastra_replay_state"] == "pending"
+
+
+async def test_mastra_finalization_rejects_oversized_base64_before_decoding(
+    service: SessionService,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refuse inline content longer than its declared length without decoding it."""
+    created = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(),
+            origin=SessionOrigin.RECORDED,
+            framework="mastra",
+            inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+            metadata={"mastra_replay_state": "pending"},
+        ),
+        actor=ACTOR,
+    )
+    invalid = deepcopy(complete_mastra_memory_replay_inputs)
+    oversized = "A" * 1_048_576
+    invalid["mastra_memory_replay"]["files"][0]["base64"] = oversized
+    decode = base64.b64decode
+    decoded_lengths: list[int] = []
+
+    def recording_decode(value: str | bytes, *args: Any, **kwargs: Any) -> bytes:
+        decoded_lengths.append(len(value))
+        return decode(value, *args, **kwargs)
+
+    monkeypatch.setattr(base64, "b64decode", recording_decode)
+    with pytest.raises(SessionReplayFinalizationInvalid):
+        await service.update_session(
+            created.id,
+            SessionUpdate(
+                status=SessionStatus.COMPLETED,
+                inputs=invalid,
+                metadata={"mastra_replay_state": "eligible"},
+            ),
+            actor=ACTOR,
+        )
+    assert len(oversized) not in decoded_lengths
 
 
 def _stored_file_inputs(inputs: dict[str, Any], blob_id: uuid.UUID) -> dict[str, Any]:

@@ -396,6 +396,11 @@ def _mastra_inline_file_complete(file: dict[str, Any], url: str) -> bool:
     encoded = file["base64"]
     if not isinstance(encoded, str) or file["length"] > _MASTRA_MAX_INLINE_FILE_BYTES:
         return False
+    # Compare against the canonical encoded length before decoding, so a small
+    # declared length cannot make the server allocate an arbitrarily large
+    # decode buffer only to reject the entry afterward.
+    if len(encoded) != 4 * ((file["length"] + 2) // 3):
+        return False
     try:
         content = base64.b64decode(encoded, validate=True)
         reference = (
