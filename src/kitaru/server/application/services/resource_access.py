@@ -95,10 +95,11 @@ def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
         details.source, BlobImportSourceSpec
     ):
         blobs.add(details.source.blob_id)
-    # A replayed Mastra turn reads its recorded files from blobs. The account
-    # that created the job can read any blob already, so naming blobs in the
-    # task inputs reaches nothing that account could not.
-    if isinstance(details, AgentTaskDetails):
+    # Grant recorded-file blobs only to replay tasks, whose inputs the server
+    # copied from a recorded baseline session. An ordinary session run takes
+    # its inputs verbatim from the caller and never reads recorded files, so
+    # blob ids named there must not turn into download rights for its token.
+    if isinstance(details, AgentTaskDetails) and details.replay_id is not None:
         blobs.update(
             file.blob_id for file in mastra_replay_stored_files(details.inputs)
         )
