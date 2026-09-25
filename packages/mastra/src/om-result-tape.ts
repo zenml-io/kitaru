@@ -333,7 +333,8 @@ async function withReplayFileUrls(
  *   none left, replay fails, because an empty observation would drop the
  *   observed messages from the actor's context.
  *
- * A phase with no recorded result at all also fails replay. With
+ * A blocking call of a phase with no recorded result at all also fails
+ * replay; a buffered one is skipped as above. With
  * `missingResults: "live"`, a blocking call that would fail for either reason
  * calls the live OM model instead, and `finish()` returns what it answered.
  */
@@ -417,6 +418,32 @@ export function createOMResultTape(
     return play(call.result, method);
   }
 
+  /**
+   * End a buffered call without a result of its own.
+   *
+   * A later buffered call usually covers the window production recorded, so
+   * only a call with nothing left to match is a departure.
+   */
+  function skipBuffered(
+    phase: OMPhase,
+    method: OMMethod,
+    calls: readonly RecordedCall[],
+    matchable: boolean,
+  ): unknown {
+    if (!matchable) divergence.surplusCalls++;
+    if (phase === "reflector") throw new MastraOMSkippedCallError();
+    // Mastra stores no buffered chunk for an empty observation. Without a
+    // recorded observation, a recorded reflection of the same method has the
+    // stream shape it needs.
+    const templates =
+      calls.length > 0
+        ? calls
+        : (recordedCalls.get(`reflector:${method}`) ?? []);
+    const template = templates.find((candidate) => candidate.result)?.result;
+    if (!template) throw new MastraOMRecordedFailureError();
+    return play(template, method, true);
+  }
+
   function serve(
     phase: OMPhase,
     method: OMMethod,
@@ -428,6 +455,9 @@ export function createOMResultTape(
     const buffered = options.isBuffered?.(phase) ?? false;
     const live = options.missingResults === "live" && !buffered;
     if (calls.length === 0) {
+      // A buffered call runs beside the actor, so it can be skipped even
+      // when production made no call of its phase at all.
+      if (buffered) return skipBuffered(phase, method, calls, false);
       if (live) return callLive();
       failClosed(`no recorded ${phase} result`);
     }
@@ -437,16 +467,7 @@ export function createOMResultTape(
     );
     if (matching) return use(matching, method);
     const unused = calls.find((candidate) => !candidate.used);
-    if (buffered) {
-      // A later buffered call usually covers the window production recorded,
-      // so only a call with nothing left to match is a departure.
-      if (!unused) divergence.surplusCalls++;
-      if (phase === "reflector") throw new MastraOMSkippedCallError();
-      // Mastra stores no buffered chunk for an empty observation.
-      const template = calls.find((candidate) => candidate.result)?.result;
-      if (!template) throw new MastraOMRecordedFailureError();
-      return play(template, method, true);
-    }
+    if (buffered) return skipBuffered(phase, method, calls, Boolean(unused));
     if (!unused) {
       if (live) return callLive();
       failClosed(`no recorded ${phase} result left for a blocking call`);

@@ -411,6 +411,41 @@ it("fails replay closed when a phase has no recorded result", async () => {
   expect(live.doStream).not.toHaveBeenCalled();
 });
 
+it.each(["fail", "live"] as const)(
+  "skips a buffered call of a phase with no recorded result (%s mode)",
+  async (missingResults) => {
+    const entries = await recordCalls([{ phase: "reflector", prompt: "only" }]);
+    const live = answering(() => "live");
+    const replay = createOMResultTape(entries, () => {}, {
+      isBuffered: () => true,
+      missingResults,
+    });
+    // The replay's extra step started a buffered observation production
+    // never made; it observes nothing, as a skipped window does.
+    expect(
+      await text(
+        await replay.instrument(live, "observer").doStream({ prompt: "x" }),
+      ),
+    ).toBe("");
+    const reflectorEntries = await recordCalls([
+      { phase: "observer", prompt: "only" },
+    ]);
+    const reflectorReplay = createOMResultTape(reflectorEntries, () => {}, {
+      isBuffered: () => true,
+      missingResults,
+    });
+    await expect(
+      reflectorReplay.instrument(live, "reflector").doStream({ prompt: "x" }),
+    ).rejects.toBeInstanceOf(MastraOMSkippedCallError);
+    expect(live.doStream).not.toHaveBeenCalled();
+    expect((await replay.finish()).divergence.surplusCalls).toBe(1);
+    expect((await reflectorReplay.finish()).divergence).toMatchObject({
+      surplusCalls: 1,
+      liveCalls: 0,
+    });
+  },
+);
+
 it("records failed OM attempts so a baseline with a successful retry replays", async () => {
   const onIncomplete = vi.fn();
   const tape = createOMResultTape(undefined, onIncomplete);
