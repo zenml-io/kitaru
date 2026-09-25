@@ -180,6 +180,7 @@ pre.fallback { white-space: pre-wrap; font-family: var(--mono); font-size: 12px;
 <script>
 "use strict";
 const START = "(start)";
+const CARDS_PER_SIDE = 10;
 const S = { args: {}, data: null, measure: "count", sel: null, toolName: "kitaru_failure_matrix", hostContext: {} };
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, props = {}, ...kids) => {
@@ -449,7 +450,7 @@ async function openCell(from, to) {
   try {
     const results = await Promise.all(sides.map((side) => request("tools/call", {
       name: cellToolName(),
-      arguments: { request: { ...(S.args.request || {}), from_state: from, to_state: to, side, limit: 10 } },
+      arguments: { request: { ...(S.args.request || {}), from_state: from, to_state: to, side, limit: 50 } },
     })));
     if (S.sel?.[0] !== from || S.sel?.[1] !== to) return;
     const payloads = results.map(envelopeOf);
@@ -475,17 +476,22 @@ function renderDrill(from, to, sides, cellData) {
     : `${first.total} session${first.total === 1 ? "" : "s"}${first.attempts ? ` · ${first.total} of ${first.attempts} tries failed here (${pct(first.total / first.attempts)})` : ""}`;
   const total = cellData.reduce((n, x) => n + x.total, 0);
   const scope = compare ? `"${labelOf("base")}" and "${labelOf("compare")}"` : `"${labelOf("base")}"`;
+  // The drill-down tool is hidden from the model, so hand it the session ids.
+  const ids = cellData.flatMap((x) => x.sessions.map((s) => s.session_id));
+  const idText = ids.length ? `\nSession ids${ids.length < total ? ` (first ${ids.length} of ${total})` : ""}: ${ids.join(", ")}` : "";
+  request("ui/update-model-context", { content: [{ type: "text", text: `The user is looking at the transition ${pairText(from, to)} in the transition failure matrix for ${scope}.${idText}` }] }).catch(() => {});
   const close = el("button", { class: "icon-btn", text: "✕", title: "Close", "aria-label": "Close" });
   close.onclick = () => { S.sel = null; $("#drill").hidden = true; render(); };
   const ask = el("button", { class: "btn primary", text: `Investigate these ${total}` });
-  ask.onclick = () => sendMessage(`Look at the ${total} sessions that failed at ${pairText(from, to)} in the transition failure matrix for ${scope}. What do they have in common, and what change would fix most of them?`);
+  ask.onclick = () => sendMessage(`Look at the ${total} sessions that failed at ${pairText(from, to)} in the transition failure matrix for ${scope}. What do they have in common, and what change would fix most of them?${idText}`);
   const replay = el("button", { class: "btn brand", text: "Replay with a fix…" });
-  replay.onclick = () => sendMessage(`Set up a replay experiment for the sessions failing at ${pairText(from, to)} in ${scope}: I want to try a change and compare the transition failure matrix before and after.`);
+  replay.onclick = () => sendMessage(`Set up a replay experiment for the sessions failing at ${pairText(from, to)} in ${scope}: I want to try a change and compare the transition failure matrix before and after.${idText}`);
   const sections = sides.map((side, i) => {
     const data = cellData[i];
     const heading = compare ? el("h3", { text: `${labelOf(side)} (${data.total})` }) : el("h3", { text: "Sessions" });
-    const cards = data.sessions.map(sessionCard);
-    const more = data.total > data.sessions.length ? el("div", { class: "more", text: `+ ${data.total - data.sessions.length} more` }) : null;
+    const cards = data.sessions.slice(0, CARDS_PER_SIDE).map(sessionCard);
+    const hidden = data.total - cards.length;
+    const more = hidden > 0 ? el("div", { class: "more", text: `+ ${hidden} more` }) : null;
     return [heading, el("div", { class: "sessions" }, ...cards, more)];
   }).flat();
   const counts = new Map();

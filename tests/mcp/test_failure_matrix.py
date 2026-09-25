@@ -454,6 +454,17 @@ def test_blank_node_names_get_a_drillable_label() -> None:
     assert outcome.failure_transition == (START, "unnamed tool_call")
 
 
+def test_recorded_names_never_merge_with_the_start_row() -> None:
+    session = _session("failed")
+    node = _node(session, "a", "tool_call", START, status="failed")
+
+    [outcome] = analyze_group(
+        _records({session.id: [node]}, [session]), build_labeler("tool", None), None
+    )
+
+    assert outcome.failure_transition == (START, f"{START} (recorded)")
+
+
 async def test_cell_tool_reuses_cached_group_and_lists_sessions() -> None:
     client = _FakeClient(_failing_group())
     server, context = build_server_context(client)

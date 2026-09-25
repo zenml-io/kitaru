@@ -97,10 +97,11 @@ def _raw_state(node: SessionNodeResponse, state_by: StateBy) -> str | None:
 
 
 def _node_name(node: SessionNodeResponse, preferred: str | None = None) -> str:
-    # Recorded names can be blank, and a blank state cannot be drilled into.
+    # Recorded names can be blank, which cannot be drilled into, or equal to the
+    # matrix's own labels, whose counts they would silently merge with.
     for name in (preferred, node.name):
         if name and name.strip():
-            return name
+            return f"{name} (recorded)" if name in (START, OTHER) else name
     return f"unnamed {node.node_type}"
 
 
