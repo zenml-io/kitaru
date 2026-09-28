@@ -21,6 +21,7 @@ import os
 import platform
 import shutil
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,10 @@ from kitaru.client.config import (
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ServerCredentials
 from kitaru.client.exceptions import APIError, NotFoundError
+
+# Worker tasks install freshly released Kitaru plugins under a project's
+# exclude-newer cutoff with --exclude-newer-package, which uv added in 0.8.4.
+_MIN_UV_VERSION = Version("0.8.4")
 
 
 def package_version() -> str:
@@ -411,15 +416,7 @@ async def doctor(
     skill_check = _check("kitaru_skills", status, False, detail)
     skill_check["data"] = skill_status
     checks.append(skill_check)
-    uv_path = shutil.which("uv")
-    checks.append(
-        _check(
-            "uv",
-            "pass" if uv_path else "warn",
-            False,
-            uv_path or "uv is not installed.",
-        )
-    )
+    checks.append(_get_uv_check(shutil.which("uv")))
 
     if "server" in failure_categories:
         exit_code = 6
@@ -514,6 +511,40 @@ async def _probe(client: httpx.AsyncClient, server_url: str, path: str) -> int:
 def _check(name: str, status: str, required: bool, detail: str) -> dict[str, Any]:
     """Build one fixed-shape diagnostic result."""
     return {"name": name, "status": status, "required": required, "detail": detail}
+
+
+def _get_uv_version(uv_path: str) -> Version | None:
+    """Return the version reported by `uv --version`, or None if unknown."""
+    try:
+        result = subprocess.run(
+            [uv_path, "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        return Version(result.stdout.split()[1])
+    except (OSError, subprocess.TimeoutExpired, IndexError, InvalidVersion):
+        return None
+
+
+def _get_uv_check(uv_path: str | None) -> dict[str, Any]:
+    """Check that uv is installed and new enough to run worker tasks."""
+    version = _get_uv_version(uv_path) if uv_path else None
+    status = "warn"
+    if uv_path is None:
+        detail = "uv is not installed."
+    elif version is None:
+        detail = f"Could not read the uv version from {uv_path}."
+    elif version < _MIN_UV_VERSION:
+        detail = (
+            f"uv {version} at {uv_path} is older than {_MIN_UV_VERSION}. Worker "
+            "tasks in a project with an exclude-newer cutoff cannot install "
+            "newly released Kitaru plugins. Upgrade uv."
+        )
+    else:
+        status, detail = "pass", f"uv {version} at {uv_path}"
+    return _check("uv", status, False, detail)
 
 
 def _validate_credentials_file(path: Path) -> None:
