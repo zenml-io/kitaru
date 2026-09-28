@@ -64,7 +64,7 @@ function getMastraVersion(): string {
     metadata = createRequire(import.meta.url)("@mastra/core/package.json");
   } catch (error) {
     throw new TypeError(
-      "KitaruAgent.stream() requires a readable stable @mastra/core 1.67.x package version",
+      "KitaruAgent.stream() requires a readable stable @mastra/core 1.67.x through 1.71.x package version",
       { cause: error },
     );
   }
@@ -75,7 +75,7 @@ function getMastraVersion(): string {
 }
 
 export function isSupportedMastraStreamVersion(version: string): boolean {
-  return /^1\.67\.\d+$/.test(version);
+  return /^1\.(6[7-9]|7[01])\.\d+$/.test(version);
 }
 
 export function assertStreamSupported(
@@ -86,7 +86,7 @@ export function assertStreamSupported(
   const version = getMastraVersion();
   if (!isSupportedMastraStreamVersion(version)) {
     throw new Error(
-      `KitaruAgent.stream() requires a stable @mastra/core 1.67.x installation; found '${version}'`,
+      `KitaruAgent.stream() requires a stable @mastra/core 1.67.x through 1.71.x installation; found '${version}'`,
     );
   }
   if (typeof agent.stream !== "function") {

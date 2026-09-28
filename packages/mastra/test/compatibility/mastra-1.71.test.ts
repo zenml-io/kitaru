@@ -136,7 +136,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Mastra 1.67.0 compatibility", () => {
+describe("Mastra 1.71.0 compatibility", () => {
   it("streams typed schema output and complete tool-step data", async () => {
     let modelCall = 0;
     let executedInput: unknown;

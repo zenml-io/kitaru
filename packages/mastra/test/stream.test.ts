@@ -107,12 +107,16 @@ class FakeStreamAgent extends FakeAgent {
 }
 
 describe("KitaruAgent.stream", () => {
-  it("accepts only stable Mastra 1.67 patch releases", () => {
+  it("accepts only stable Mastra 1.67 through 1.71 patch releases", () => {
     expect(isSupportedMastraStreamVersion("1.67.0")).toBe(true);
     expect(isSupportedMastraStreamVersion("1.67.12")).toBe(true);
+    expect(isSupportedMastraStreamVersion("1.68.0")).toBe(true);
+    expect(isSupportedMastraStreamVersion("1.71.0")).toBe(true);
+    expect(isSupportedMastraStreamVersion("1.71.3")).toBe(true);
     expect(isSupportedMastraStreamVersion("1.66.9")).toBe(false);
-    expect(isSupportedMastraStreamVersion("1.68.0")).toBe(false);
+    expect(isSupportedMastraStreamVersion("1.72.0")).toBe(false);
     expect(isSupportedMastraStreamVersion("1.67.0-beta.1")).toBe(false);
+    expect(isSupportedMastraStreamVersion("1.71.0-beta.1")).toBe(false);
     expect(isSupportedMastraStreamVersion("not-a-version")).toBe(false);
   });
 

@@ -9,10 +9,11 @@ const AGENT_ID = "018f0000-0000-7000-8000-000000000100";
 
 describe("Vercel returns resolver", () => {
   it("requires every strict structured-output property", () => {
-    expect([...RESOLUTION_JSON_SCHEMA.required].sort()).toEqual(
-      Object.keys(RESOLUTION_JSON_SCHEMA.properties).sort(),
+    const properties = RESOLUTION_JSON_SCHEMA.properties ?? {};
+    expect([...(RESOLUTION_JSON_SCHEMA.required ?? [])].sort()).toEqual(
+      Object.keys(properties).sort(),
     );
-    expect(RESOLUTION_JSON_SCHEMA.properties.amount).toMatchObject({
+    expect(properties.amount).toMatchObject({
       exclusiveMinimum: 0,
       type: ["number", "null"],
     });
