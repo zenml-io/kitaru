@@ -3,6 +3,7 @@ import type { MastraModelConfig } from "@mastra/core/llm";
 import type { MemoryConfigInternal } from "@mastra/core/memory";
 import type { MemoryStorage } from "@mastra/core/storage";
 import type { Memory } from "@mastra/memory";
+import type { SecretKeyClassifier } from "@zenml-io/kitaru/adapter";
 import {
   createMemoryCaptureBinding,
   createProcessLocalMemoryAccess,
@@ -105,9 +106,14 @@ function checkConfiguration(config: Record<string, unknown>): void {
   }
 }
 
-/** Convert the supported native schema and OM models to self-contained configuration. */
+/**
+ * Convert the supported native schema and OM models to self-contained configuration.
+ *
+ * `isSecretKey` decides which keys name credentials, as for `encodeMemoryValue`.
+ */
 export function serializeMemoryConfiguration(
   config: MemoryConfigInternal,
+  isSecretKey?: SecretKeyClassifier,
 ): Record<string, unknown> {
   checkConfiguration(config);
   const copy: Record<string, unknown> = { ...config };
@@ -150,14 +156,21 @@ export function serializeMemoryConfiguration(
     }
     copy.observationalMemory = om;
   }
-  return decodeMemoryValue(encodeMemoryValue(copy)) as Record<string, unknown>;
+  return decodeMemoryValue(
+    encodeMemoryValue(copy, undefined, isSecretKey),
+    isSecretKey,
+  ) as Record<string, unknown>;
 }
 
 export async function restoreMemoryConfiguration(
   configuration: Record<string, unknown>,
   resolveModel: (id: string) => Promise<MastraModelConfig> | MastraModelConfig,
+  isSecretKey?: SecretKeyClassifier,
 ): Promise<MemoryConfigInternal> {
-  const copy = decodeMemoryValue(encodeMemoryValue(configuration));
+  const copy = decodeMemoryValue(
+    encodeMemoryValue(configuration, undefined, isSecretKey),
+    isSecretKey,
+  );
   if (!record(copy)) return unsupported("Missing native memory configuration.");
   checkConfiguration(copy);
   if (record(copy.observationalMemory)) {
@@ -369,6 +382,7 @@ export interface IsolatedMemoryReplayOptions {
   readFile?: (reference: string) => ResolvedMemoryFile | undefined;
   referenceFileContent?: MastraMemoryCaptureOptions["referenceFileContent"];
   referenceInitialContent?: MastraMemoryCaptureOptions["referenceInitialContent"];
+  isSecretKey?: SecretKeyClassifier;
 }
 
 /** Restore historical state into a fresh store; no production store is accepted. */
@@ -379,13 +393,19 @@ export async function createIsolatedMemoryReplay(
   validateMemorySnapshot(options.initialSnapshot);
   const snapshot = restoreInlineFiles(
     decodeMemoryValue(
-      encodeMemoryValue(options.initialSnapshot),
+      encodeMemoryValue(
+        options.initialSnapshot,
+        undefined,
+        options.isSecretKey,
+      ),
+      options.isSecretKey,
     ) as MastraMemorySnapshot,
     options.readFile ?? (() => undefined),
   );
   let configuration = await restoreMemoryConfiguration(
     options.configuration,
     options.resolveModel,
+    options.isSecretKey,
   );
   if (options.omTape)
     configuration = await bindOMResultModels(
@@ -429,6 +449,7 @@ export async function createIsolatedMemoryReplay(
       referenceInitialContent: options.referenceInitialContent,
       getRequestId: options.getRequestId,
       onIncomplete: options.onIncomplete,
+      isSecretKey: options.isSecretKey,
     });
     const storage = new MastraCompositeStore({
       id: `kitaru-replay-${options.invocationId}`,

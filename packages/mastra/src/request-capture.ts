@@ -3,6 +3,7 @@ import type { JsonValue } from "@zenml-io/kitaru";
 import {
   boundMastraReplayEvidence,
   type RecordingLimits,
+  type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
 import { encodeMemoryEvidence } from "./memory-snapshot.js";
 
@@ -37,6 +38,8 @@ export interface RequestCaptureOptions {
   ) => void | Promise<void>;
   onCaptureError?: (error: unknown) => void;
   sanitizeEvidence?: <T>(value: T) => T;
+  /** Which keys in request evidence name credentials, as for `encodeMemoryValue`. */
+  isSecretKey?: SecretKeyClassifier;
 }
 
 export interface RequestStepContext {
@@ -116,6 +119,7 @@ export function createRequestCapture(options: RequestCaptureOptions) {
         options.sanitizeEvidence ? options.sanitizeEvidence(value) : value,
         label,
         options.recordingLimits,
+        options.isSecretKey,
       );
       const encoded = evidence.value;
       // Provider options can contain custom transport headers whose keys are

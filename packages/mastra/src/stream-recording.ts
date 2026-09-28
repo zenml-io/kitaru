@@ -12,6 +12,7 @@ import {
   recordedToolPayloadJson,
   recordNormalizedStep,
   runResultSummary,
+  type SecretKeyClassifier,
   serializedSettings,
   stripSystemMessages,
 } from "@zenml-io/kitaru/adapter";
@@ -76,6 +77,8 @@ export interface StatefulStreamRecording {
    * otherwise share the memory replay input's budget.
    */
   recordingLimits?: RecordingLimits;
+  /** Which keys in tool payloads and the run output name credentials, which are redacted. */
+  isSecretKey?: SecretKeyClassifier;
   /** Start joining the invocation's background memory work without waiting. */
   beginFinalization?(): void;
   /**
@@ -348,7 +351,16 @@ class StreamLifecycle {
         endedAt,
         // Replay serves a memory turn's tools from history only when their
         // recorded results were kept whole.
-        this.stateful ? mastraReplayToolConversion : undefined,
+        this.stateful
+          ? (value, path, limits) =>
+              mastraReplayToolConversion(
+                value,
+                path,
+                limits,
+                this.stateful?.isSecretKey,
+              )
+          : undefined,
+        this.stateful?.isSecretKey,
       );
       this.#uploadTail = recordNormalizedStep(
         this.recorder.state,
@@ -985,13 +997,19 @@ async function recordedStreamWithRecording({
       try {
         // Structured output can repeat the same credentials in its JSON text.
         summary.text = JSON.stringify(
-          recordedToolPayloadJson(JSON.parse(summary.text), "run output text"),
+          recordedToolPayloadJson(
+            JSON.parse(summary.text),
+            "run output text",
+            stateful?.isSecretKey,
+          ),
         );
       } catch {
         // Non-JSON explanatory text retains the ordinary text recording contract.
       }
     }
-    await active.complete(recordedToolPayloadJson(summary, "run output"));
+    await active.complete(
+      recordedToolPayloadJson(summary, "run output", stateful?.isSecretKey),
+    );
   };
   effective.onError = async (event) => {
     modelError ??= event.error;

@@ -20,6 +20,7 @@ import {
   type MastraReplayEvidence,
   type RecordingLimits,
   redactUrlCredentials,
+  type SecretKeyClassifier,
   strictMastraReplayValue,
 } from "@zenml-io/kitaru/adapter";
 import {
@@ -315,9 +316,14 @@ function validateUrl(value: string): URL {
  * URL credentials in strings and URL values are redacted, so a signed link in
  * thread history or model output never reaches recorded JSON. `path` names
  * the value in a budget error; other failures keep the replay codec's own
- * reasons.
+ * reasons. `isSecretKey` decides which object keys name credentials, which
+ * the codec refuses; by default the built-in credential key names do.
  */
-export function encodeMemoryValue(value: unknown, path?: string): JsonValue {
+export function encodeMemoryValue(
+  value: unknown,
+  path?: string,
+  isSecretKey?: SecretKeyClassifier,
+): JsonValue {
   let items = 0;
   const active = new Set<object>();
   function visit(current: unknown, depth: number): JsonValue {
@@ -396,7 +402,7 @@ export function encodeMemoryValue(value: unknown, path?: string): JsonValue {
     }
   }
   const encoded = visit(value, 0);
-  return strictMastraReplayValue(encoded, path);
+  return strictMastraReplayValue(encoded, path, isSecretKey);
 }
 
 /**
@@ -411,10 +417,11 @@ export function encodeMemoryEvidence(
   value: unknown,
   path: string,
   limits?: RecordingLimits,
+  isSecretKey?: SecretKeyClassifier,
 ): MastraReplayEvidence {
   let encoded: JsonValue;
   try {
-    encoded = encodeMemoryValue(value, path);
+    encoded = encodeMemoryValue(value, path, isSecretKey);
   } catch (error) {
     if (error instanceof MastraReplayBudgetError)
       return degradedMastraReplayEvidence(path, error);
@@ -451,9 +458,16 @@ function readInlineFileContent(
   return new InlineFileContent(url, { encoding });
 }
 
-/** Decode an already bounded value, rejecting ambiguous or damaged codec records. */
-export function decodeMemoryValue(value: JsonValue): unknown {
-  const converted = strictMastraReplayValue(value);
+/**
+ * Decode an already bounded value, rejecting ambiguous or damaged codec records.
+ *
+ * `isSecretKey` decides which keys name credentials, as for `encodeMemoryValue`.
+ */
+export function decodeMemoryValue(
+  value: JsonValue,
+  isSecretKey?: SecretKeyClassifier,
+): unknown {
+  const converted = strictMastraReplayValue(value, undefined, isSecretKey);
   function visit(current: JsonValue): unknown {
     if (Array.isArray(current)) return current.map(visit);
     if (!isRecord(current)) return current;
@@ -1003,22 +1017,26 @@ export function createIncompleteMemoryReplayEnvelope(
  * Build safe diagnostic evidence even when complete replay prerequisites are unavailable.
  *
  * `sanitize` receives the encoded envelope before its key order is recorded.
+ * `isSecretKey` decides which keys name credentials, as for `encodeMemoryValue`.
  */
 export function createMemoryReplayEnvelope(
   input: MastraMemoryReplayInput,
   sanitize: MemoryReplayEnvelopeSanitizer = (value) => value,
+  isSecretKey?: SecretKeyClassifier,
 ): MastraMemoryReplayEnvelope {
-  return captureMemoryReplayEnvelope(input, sanitize).envelope;
+  return captureMemoryReplayEnvelope(input, sanitize, isSecretKey).envelope;
 }
 
 /**
  * Build a replay envelope and name the reason code when it is incomplete.
  *
  * `sanitize` receives the encoded envelope before its key order is recorded.
+ * `isSecretKey` decides which keys name credentials, as for `encodeMemoryValue`.
  */
 export function captureMemoryReplayEnvelope(
   input: MastraMemoryReplayInput,
   sanitize: MemoryReplayEnvelopeSanitizer = (value) => value,
+  isSecretKey?: SecretKeyClassifier,
 ): MemoryReplayEnvelopeCapture {
   try {
     validateMemorySnapshot(input.initialSnapshot);
@@ -1032,18 +1050,25 @@ export function captureMemoryReplayEnvelope(
       complete: true,
       reasons: [],
       invocationId: input.invocationId,
-      rawInput: encodeMemoryValue(input.rawInput, "Invocation input"),
+      rawInput: encodeMemoryValue(
+        input.rawInput,
+        "Invocation input",
+        isSecretKey,
+      ),
       initialSnapshot: encodeMemoryValue(
         input.initialSnapshot,
         "Initial memory snapshot",
+        isSecretKey,
       ),
       configuration: encodeMemoryValue(
         normalizeReplayConfiguration(input.configuration),
         "Replay configuration",
+        isSecretKey,
       ),
       requestContext: encodeMemoryValue(
         input.requestContext,
         "Request context",
+        isSecretKey,
       ),
       files: input.files.map(encodeFileEntry),
       omTape: input.omTape === undefined ? [] : input.omTape,
@@ -1052,11 +1077,15 @@ export function captureMemoryReplayEnvelope(
     // The combined envelope, including encoded bytes and metadata, shares one budget.
     const converted = withKeyOrder(
       sanitize(
-        strictMastraReplayValue(envelope, "Mastra memory replay envelope"),
+        strictMastraReplayValue(
+          envelope,
+          "Mastra memory replay envelope",
+          isSecretKey,
+        ),
       ),
     );
     // Files are stored as blobs once the turn has finished.
-    decodeConvertedMemoryReplayEnvelope(converted, true);
+    decodeConvertedMemoryReplayEnvelope(converted, true, isSecretKey);
     return { envelope: converted };
   } catch (error) {
     return {
@@ -1075,6 +1104,7 @@ export function captureMemoryReplayEnvelope(
  * Produce the immutable final envelope after recorded OM work has settled.
  *
  * `sanitize` receives the encoded envelope before its key order is recorded.
+ * `isSecretKey` decides which keys name credentials, as for `encodeMemoryValue`.
  */
 export function finalizeMemoryReplayEnvelope(
   envelope: MastraMemoryReplayEnvelope,
@@ -1082,6 +1112,7 @@ export function finalizeMemoryReplayEnvelope(
   sanitize: MemoryReplayEnvelopeSanitizer = (value) => value,
   attachmentTokens: AttachmentTokenCounts = {},
   allowUnstoredFiles = false,
+  isSecretKey?: SecretKeyClassifier,
 ): MastraMemoryReplayEnvelope {
   const final = withKeyOrder(
     sanitize(
@@ -1094,18 +1125,25 @@ export function finalizeMemoryReplayEnvelope(
             : {}),
         },
         "Mastra memory replay envelope",
+        isSecretKey,
       ),
     ),
   );
-  decodeConvertedMemoryReplayEnvelope(final, allowUnstoredFiles);
+  decodeConvertedMemoryReplayEnvelope(final, allowUnstoredFiles, isSecretKey);
   return final;
 }
 
+/** `isSecretKey` decides which keys name credentials, as for `encodeMemoryValue`. */
 export function decodeMemoryReplayEnvelope(
   input: unknown,
+  isSecretKey?: SecretKeyClassifier,
 ): MastraMemoryReplayInput {
-  const value = strictMastraReplayValue(input, "Mastra memory replay envelope");
-  return decodeConvertedMemoryReplayEnvelope(value);
+  const value = strictMastraReplayValue(
+    input,
+    "Mastra memory replay envelope",
+    isSecretKey,
+  );
+  return decodeConvertedMemoryReplayEnvelope(value, false, isSecretKey);
 }
 
 /**
@@ -1117,6 +1155,7 @@ export function decodeMemoryReplayEnvelope(
 function decodeConvertedMemoryReplayEnvelope(
   stored: JsonValue,
   allowUnstoredFiles = false,
+  isSecretKey?: SecretKeyClassifier,
 ): MastraMemoryReplayInput {
   requireValue(
     isRecord(stored) && (stored.version === 2 || stored.version === 3),
@@ -1165,15 +1204,24 @@ function decodeConvertedMemoryReplayEnvelope(
       Object.hasOwn(value, key),
       "Missing memory replay prerequisite.",
     );
-  const initialSnapshot = decodeMemoryValue(value.initialSnapshot as JsonValue);
+  const initialSnapshot = decodeMemoryValue(
+    value.initialSnapshot as JsonValue,
+    isSecretKey,
+  );
   validateMemorySnapshot(initialSnapshot);
-  const configuration = decodeMemoryValue(value.configuration as JsonValue);
+  const configuration = decodeMemoryValue(
+    value.configuration as JsonValue,
+    isSecretKey,
+  );
   validateConfiguration(configuration);
   requireValue(
     value.version !== 2 || !usesObservationalMemory(configuration),
     "mastra_om_tape_missing",
   );
-  const requestContext = decodeMemoryValue(value.requestContext as JsonValue);
+  const requestContext = decodeMemoryValue(
+    value.requestContext as JsonValue,
+    isSecretKey,
+  );
   requireValue(isRecord(requestContext), "Malformed recorded request context.");
   validateMemoryReplayContext(initialSnapshot, requestContext);
   if (isRecord(configuration.runOptions)) {
@@ -1212,7 +1260,7 @@ function decodeConvertedMemoryReplayEnvelope(
     ),
     "Recorded history names an inline file that was not recorded.",
   );
-  const rawInput = decodeMemoryValue(value.rawInput as JsonValue);
+  const rawInput = decodeMemoryValue(value.rawInput as JsonValue, isSecretKey);
   ordered?.verify();
   return {
     invocationId: value.invocationId,
@@ -1231,8 +1279,9 @@ function decodeConvertedMemoryReplayEnvelope(
 /** Return undefined for legacy inputs; a present but invalid v2 envelope always rejects. */
 export function restoreMemoryReplayEnvelope(
   input: unknown,
+  isSecretKey?: SecretKeyClassifier,
 ): MastraMemoryReplayInput | undefined {
   if (!isRecord(input) || !Object.hasOwn(input, MEMORY_REPLAY_KEY))
     return undefined;
-  return decodeMemoryReplayEnvelope(input[MEMORY_REPLAY_KEY]);
+  return decodeMemoryReplayEnvelope(input[MEMORY_REPLAY_KEY], isSecretKey);
 }

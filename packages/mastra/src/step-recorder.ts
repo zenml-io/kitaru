@@ -11,6 +11,7 @@ import {
   type RecordingLimits,
   recordNormalizedStep,
   resolveCost,
+  type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
 import {
   type RequestEvidence,
@@ -126,6 +127,7 @@ function stepOutputs(
   step: RecordedStep,
   tools: readonly NormalizedToolCall[],
   sanitizeEvidence?: <T>(value: T) => T,
+  isSecretKey?: SecretKeyClassifier,
 ): JsonValue {
   return boundedRecorderJson(
     {
@@ -159,6 +161,8 @@ function stepOutputs(
       ),
     },
     "model step output",
+    undefined,
+    isSecretKey,
   );
 }
 
@@ -185,7 +189,8 @@ function toolErrorFromContent(
  * Convert a finished Mastra step into the model and tool nodes Kitaru records.
  *
  * `endedAt` defaults to the time of conversion; pass the step's end when the
- * conversion runs later than the step finished.
+ * conversion runs later than the step finished. `isSecretKey` decides which
+ * keys in the step's outputs name credentials, which are redacted.
  */
 export async function normalizeStep(
   state: AdapterRunState,
@@ -200,6 +205,7 @@ export async function normalizeStep(
     path: string,
     limits?: RecordingLimits,
   ) => RecordedConversion = boundedRecorderConversion,
+  isSecretKey?: SecretKeyClassifier,
 ): Promise<NormalizedModelStep> {
   const calls = step.toolCalls.flatMap((item) => {
     const call = toolCallPayload(item);
@@ -280,7 +286,7 @@ export async function normalizeStep(
     model: servedModelId,
     modelSettings: requestEvidence?.modelSettings,
     startedAt: requestEvidence?.startedAt,
-    outputs: stepOutputs(step, tools, sanitizeEvidence),
+    outputs: stepOutputs(step, tools, sanitizeEvidence, isSecretKey),
     provider,
     tokens,
     tools,

@@ -4,6 +4,7 @@ import type { JsonValue } from "@zenml-io/kitaru";
 import {
   boundMastraReplayEvidence,
   type MastraReplayEvidence,
+  type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
 import {
   decodeMemoryValue,
@@ -328,6 +329,8 @@ export interface MastraMemoryCaptureOptions extends MastraMemorySelector {
   acceptHistoryFileUrls?: (urls: readonly string[]) => void;
   leaseWaitMs?: number;
   leaseSignal?: AbortSignal;
+  /** Which keys in evidence and the snapshot name credentials, as for `encodeMemoryValue`. */
+  isSecretKey?: SecretKeyClassifier;
   /** Bound pre-turn storage reads so capture cannot stall a native answer. */
   captureWaitMs?: number;
 }
@@ -1073,6 +1076,8 @@ export function createMemoryCaptureBinding(
             encodeMemoryEvidence(
               options.sanitizeEvidence?.(evidence) ?? evidence,
               "Memory mutation arguments",
+              undefined,
+              options.isSecretKey,
             ),
           );
           requestId = options.getRequestId?.();
@@ -1149,6 +1154,8 @@ export function createMemoryCaptureBinding(
               encodeMemoryEvidence(
                 options.sanitizeEvidence?.(evidence) ?? evidence,
                 "Memory mutation result",
+                undefined,
+                options.isSecretKey,
               ),
             );
             if (property === "saveMessages")
@@ -1302,7 +1309,14 @@ export function createMemoryCaptureBinding(
   /** Copy a snapshot so no storage-owned objects or Dates escape the explicit codec. */
   function copySnapshot(snapshot: unknown): MastraMemorySnapshot {
     const copy = normalizeStoredMemoryDates(
-      decodeMemoryValue(encodeMemoryValue(snapshot, "Initial memory snapshot")),
+      decodeMemoryValue(
+        encodeMemoryValue(
+          snapshot,
+          "Initial memory snapshot",
+          options.isSecretKey,
+        ),
+        options.isSecretKey,
+      ),
     );
     validateMemorySnapshot(copy);
     return copy;

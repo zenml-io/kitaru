@@ -249,6 +249,17 @@ Keep `memory.thread` and `memory.resource` consistent with reserved Mastra threa
 
 Never include authentication tokens, credentials, or signed URLs in the projection. Credential-like context keys are rejected, and transport headers in recorded configuration make the envelope incomplete. These checks cannot identify every secret hidden in an arbitrary string; choose recorded fields explicitly. Use `resolveModel` to reconstruct model instances from locally configured credentials.
 
+Kitaru treats an object key whose name looks like a credential, such as `token`, `password`, `accessToken`, or `resultToken`, as a secret wherever it appears in a memory turn's recorded data: the input, thread history and memory, tool arguments and results, the captured request context, and the configuration. The turn still answers normally, but it is not replayable, and tool-call nodes show the value as `[redacted]`. Names with a data qualifier, such as `pageToken`, `cursorToken`, or `sort_key`, already stay readable. When a field only looks like a credential, such as an opaque result handle, list it in `nonSecretKeys`:
+
+```ts
+const agent = createMemoryReplayAgent(factory, {
+  ...options,
+  nonSecretKeys: ["resultToken"],
+});
+```
+
+A listed name matches that key and any other spelling of the same words, so `resultToken` also covers `result_token` and `result-token`. To make the decision yourself, pass `isSecretKey(key)`, which replaces the built-in names: return `true` to treat the key as a credential or `false` to record its value as it is. Keys in `nonSecretKeys` never reach it. For example, `isSecretKey: (key) => key === "notes"` records every other key as it is and makes a turn that holds a `notes` key not replayable. Replay checks recorded data with the same options, so keep them the same in the command that replays the turn. Some rules hold whatever these options say: an `authorization`, `headers`, or `abortSignal` key and Mastra's authentication token in the request context still make a turn not replayable, credentials in URLs are still redacted, and a provider's error message is still never stored.
+
 Dynamic `instructions`, `model`, and `defaultOptions` resolve during baseline setup; replay uses their recorded values. `resolveModel` must resolve the recorded actor, observer, and reflector model identifiers and any allowed actor override. OM identifiers must resolve to native stream-capable model objects, whose provider methods Kitaru intercepts to reuse recorded results during replay. A `system_prompt` override replaces only application instructions and retains recorded extra system context. Model and model-setting overrides affect the actor; observation and reflection retain their recorded configuration and outputs. Raw-input `prompt` overrides are rejected; record a new baseline to change invocation input.
 
 ### Recording readiness
@@ -266,7 +277,7 @@ Recording-only problems do not replace the baseline's native answer. When the na
 | Reason | What happened |
 |---|---|
 | `replay_input_too_large` | The thread's memory, or another part of the replay input, is over the replay size budget (16 MiB, 200,000 JSON values, or depth 64). |
-| `credential_key_unsupported` | Memory, request context, or evidence has a credential-named key at any depth, such as `token`, `password`, `headers`, or a compound name like `access_token`, `clientSecret`, or `x-api-key`, including one with a format suffix such as `secret_value` or `privateKeyPem`. |
+| `credential_key_unsupported` | Memory, request context, or evidence has a credential-named key at any depth, such as `token`, `password`, `headers`, or a compound name like `access_token`, `clientSecret`, or `x-api-key`, including one with a format suffix such as `secret_value` or `privateKeyPem`. Use `nonSecretKeys` or `isSecretKey` for a field that only looks like a credential. |
 | `om_config_unsupported` | Observational memory uses `extract` extractors or a model without a static identity, such as a function. |
 | `memory_config_unsupported` | The memory configuration uses options outside isolated replay, such as semantic recall or resource scope. |
 | `agent_config_unsupported` | The agent or its run options use features outside isolated replay. |

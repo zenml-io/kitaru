@@ -4,7 +4,9 @@ import {
   boundedRecordedText,
   boundedRecorderConversion,
   boundRecordedSize,
+  createSecretKeyClassifier,
   MAX_RECORDED_PAYLOAD_CHARS,
+  mastraReplayToolConversion,
   normalizeRecordingLimits,
   projectRecordedInput,
   projectRecordedMetadata,
@@ -238,4 +240,84 @@ describe("credential keys", () => {
   ])("keeps %s", (_name, value) => {
     expect(strictMastraReplayValue(value)).toEqual(value);
   });
+});
+
+describe("application key policy", () => {
+  const value = { resultToken: "test-value", notes: "test-note" };
+
+  it("exempts listed keys in any spelling of the same words", () => {
+    const isSecretKey = createSecretKeyClassifier({
+      nonSecretKeys: ["result_token"],
+    });
+    expect(strictMastraReplayValue(value, "input", isSecretKey)).toEqual(value);
+    expect(() =>
+      strictMastraReplayValue({ accessToken: "x" }, "input", isSecretKey),
+    ).toThrow(RecordedSensitiveKeyError);
+  });
+
+  it("lets isSecretKey replace the built-in key names", () => {
+    const isSecretKey = createSecretKeyClassifier({
+      isSecretKey: (key) => key === "notes",
+    });
+    expect(() => strictMastraReplayValue(value, "input", isSecretKey)).toThrow(
+      /sensitive key 'notes'/,
+    );
+    const converted = mastraReplayToolConversion(
+      value,
+      "tool output",
+      undefined,
+      isSecretKey,
+    );
+    expect(converted.value).toEqual({
+      resultToken: "test-value",
+      notes: "[redacted]",
+    });
+  });
+
+  it("checks nonSecretKeys before isSecretKey", () => {
+    const isSecretKey = createSecretKeyClassifier({
+      nonSecretKeys: ["notes"],
+      isSecretKey: () => true,
+    });
+    expect(isSecretKey("notes")).toBe(false);
+    expect(isSecretKey("resultToken")).toBe(true);
+  });
+
+  it.each([
+    ["an authorization key", { authorization: "Bearer test-value" }],
+    ["a headers object", { headers: { "x-custom": "test-value" } }],
+  ])("still hides %s when every name is allowed", (_name, hard) => {
+    const allowAll = () => false;
+    expect(() => strictMastraReplayValue(hard, "input", allowAll)).toThrow(
+      RecordedSensitiveKeyError,
+    );
+    const converted = mastraReplayToolConversion(
+      hard,
+      "tool output",
+      undefined,
+      allowAll,
+    );
+    expect(JSON.stringify(converted.value)).not.toContain("test-value");
+  });
+
+  it("still refuses URL credentials when every name is allowed", () => {
+    expect(() =>
+      strictMastraReplayValue(
+        { link: "https://example.test/a?token=test-value" },
+        "input",
+        () => false,
+      ),
+    ).toThrow(/URL credentials/);
+  });
+
+  it.each([[[""]], [["ok", 1]], ["resultToken"]])(
+    "rejects malformed nonSecretKeys: %j",
+    (nonSecretKeys) => {
+      expect(() =>
+        createSecretKeyClassifier({
+          nonSecretKeys: nonSecretKeys as readonly string[],
+        }),
+      ).toThrow("nonSecretKeys must be a list of key names");
+    },
+  );
 });

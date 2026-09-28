@@ -4,6 +4,7 @@ import type { JsonValue, ReplayOverride, ReplaySpec } from "../types.js";
 import { isRecord, isUuid } from "../validation.js";
 import { projectMastraReplayInput } from "./recorded-json.js";
 import type { AdapterClient } from "./run-state.js";
+import type { SecretKeyClassifier } from "./url-credentials.js";
 
 function parseUuidEnvironment(
   name: string,
@@ -221,6 +222,8 @@ export async function resolveReplayContext(options: {
   callerInput: unknown;
   client: AdapterClient;
   environment?: KitaruEnvironmentVariables;
+  /** Which keys in a Mastra memory replay input name credentials. */
+  isSecretKey?: SecretKeyClassifier;
   recordedInputProjector?: (input: unknown) => Promise<unknown> | unknown;
   requestedModelId: string;
 }): Promise<ReplayContext> {
@@ -264,7 +267,7 @@ export async function resolveReplayContext(options: {
       isRecord(recordedInput) &&
       isRecord(recordedInput.mastra_memory_replay) &&
       recordedInput.mastra_memory_replay.version === 3
-        ? projectMastraReplayInput(recordedInput)
+        ? projectMastraReplayInput(recordedInput, options.isSecretKey)
         : toRecorderJson(recordedInput),
     effectiveRuntimeInput: effective.runtime,
     override,

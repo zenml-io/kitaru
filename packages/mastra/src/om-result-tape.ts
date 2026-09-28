@@ -4,6 +4,7 @@ import {
   MAX_MASTRA_REPLAY_ITEMS,
   MAX_MASTRA_REPLAY_JSON_BYTES,
   redactUrlCredentials,
+  type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
 import { decodeMemoryValue, encodeMemoryValue } from "./memory-snapshot.js";
 import { MastraReplayReasonError } from "./replay-reasons.js";
@@ -156,6 +157,8 @@ export interface OMResultTapeOptions {
    * turn so each attachment is hashed once.
    */
   readInlineFile?: InlineFileReader;
+  /** Which keys in a recorded result name credentials, as for `encodeMemoryValue`. */
+  isSecretKey?: SecretKeyClassifier;
 }
 
 const VOLATILE_KEYS = new Set(["createdAt", "updatedAt", "abortSignal"]);
@@ -444,7 +447,7 @@ export function createOMResultTape(
     method: OMMethod,
     withoutText = false,
   ): unknown {
-    const output = decodeMemoryValue(entry.output);
+    const output = decodeMemoryValue(entry.output, options.isSecretKey);
     if (method === "doGenerate") {
       if (
         !withoutText ||
@@ -605,7 +608,7 @@ export function createOMResultTape(
     if (method === "doGenerate") {
       let encoded: JsonValue | undefined;
       try {
-        encoded = encodeMemoryValue(result);
+        encoded = encodeMemoryValue(result, undefined, options.isSecretKey);
       } catch {
         onCaptureFailed();
       }
@@ -636,7 +639,11 @@ export function createOMResultTape(
             return;
           }
           if (item.done) break;
-          const encoded = encodeMemoryValue(item.value);
+          const encoded = encodeMemoryValue(
+            item.value,
+            undefined,
+            options.isSecretKey,
+          );
           capturedItems += countJsonItems(
             encoded,
             MAX_MASTRA_REPLAY_ITEMS - capturedItems,

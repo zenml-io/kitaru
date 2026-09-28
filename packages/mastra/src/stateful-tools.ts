@@ -7,6 +7,7 @@ import {
   assertSupportedToolPolicy,
   mastraReplayToolConversion,
   type RecordingLimits,
+  type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
 import { assertStableToolName } from "./replay-guards.js";
 import { createToolHooks } from "./tool-policies.js";
@@ -124,6 +125,8 @@ export function createStatefulToolProcessors(options: {
   /** Per-value bounds the application chose; the replay budget applies otherwise. */
   recordingLimits?: RecordingLimits;
   sanitizeEvidence?: <T>(value: T) => T;
+  /** Which keys in tool payloads name credentials, which are redacted. */
+  isSecretKey?: SecretKeyClassifier;
 }) {
   const trusted = new WeakSet<(...args: never[]) => unknown>();
   const wrappersByName = new Map<
@@ -180,7 +183,13 @@ export function createStatefulToolProcessors(options: {
             configuredBeforeToolCall: options.adapter.configuredBeforeToolCall,
             configuredAfterToolCall: options.adapter.configuredAfterToolCall,
             limits: options.recordingLimits,
-            convertPayload: mastraReplayToolConversion,
+            convertPayload: (value, path, limits) =>
+              mastraReplayToolConversion(
+                value,
+                path,
+                limits,
+                options.isSecretKey,
+              ),
             sanitizeEvidence: options.sanitizeEvidence,
           });
           wrapper = async (input: unknown, context: unknown) => {

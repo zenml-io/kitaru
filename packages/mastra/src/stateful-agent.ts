@@ -19,12 +19,14 @@ import {
 import {
   type AdapterClient,
   type AdapterRunState,
+  createSecretKeyClassifier,
   normalizeRecordingLimits,
   parseModelSettings,
   RecordedSensitiveKeyError,
   type RecordingLimits,
   ROOT_NODE_EXTERNAL_ID,
   resolveReplayContext,
+  type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
 import {
   recordAttachmentTokens,
@@ -215,6 +217,24 @@ export interface MemoryReplayAgentOptions extends KitaruAgentOptions {
    * `mastra_om_live_calls` in its metadata.
    */
   missingObservationalMemoryResults?: MissingOMResults;
+  /**
+   * Object keys that never count as credentials by name in recorded
+   * application data: messages, memory, tool arguments and results, captured
+   * request context, and configuration. A listed name also matches other
+   * spellings of the same words, so `resultToken` covers `result_token`.
+   * Without this, a key such as `resultToken` makes the turn not replayable.
+   */
+  nonSecretKeys?: readonly string[];
+  /**
+   * Decide which object keys in recorded application data hold credentials,
+   * in place of the built-in credential key names. Return true to treat the
+   * key as a credential, which makes the turn not replayable, or false to
+   * record its value as it is. Keys in `nonSecretKeys` never reach it.
+   * `authorization`, `headers`, and `abortSignal` keys and Mastra's
+   * authentication token still make a turn not replayable, and credentials
+   * in URLs are still redacted, whatever it returns.
+   */
+  isSecretKey?: (key: string) => boolean;
 }
 
 /** The call a per-call `files` function declares file URLs for. */
@@ -479,11 +499,17 @@ function liveOMCallNode(
   call: OMLiveCall,
   sanitize: (value: unknown) => unknown,
   limits: RecordingLimits | undefined,
+  isSecretKey: SecretKeyClassifier,
 ): SessionNodeCreateRequest {
   const lossReasons: string[] = [];
   const encode = (value: unknown, label: string): JsonValue => {
     try {
-      const evidence = encodeMemoryEvidence(sanitize(value), label, limits);
+      const evidence = encodeMemoryEvidence(
+        sanitize(value),
+        label,
+        limits,
+        isSecretKey,
+      );
       if (evidence.lossReason) lossReasons.push(evidence.lossReason);
       return evidence.value;
     } catch {
@@ -495,7 +521,7 @@ function liveOMCallNode(
   // reject its own reserved keys.
   let output: unknown = null;
   try {
-    output = decodeMemoryValue(call.output);
+    output = decodeMemoryValue(call.output, isSecretKey);
   } catch {
     lossReasons.push("Live observational-memory result could not be recorded.");
   }
@@ -540,6 +566,10 @@ export function createMemoryReplayAgent(
     ...supplied,
     recordingLimits: normalizeRecordingLimits(supplied.recordingLimits),
   };
+  const isSecretKey = createSecretKeyClassifier({
+    nonSecretKeys: supplied.nonSecretKeys,
+    isSecretKey: supplied.isSecretKey,
+  });
   const finalizationWaitMs =
     supplied.finalizationWaitMs ?? DEFAULT_FINALIZATION_WAIT_MS;
   const client = new KitaruClient({
@@ -742,6 +772,7 @@ export function createMemoryReplayAgent(
       allowedReplayModels: options.allowedReplayModels,
       callerInput: rawInput,
       client,
+      isSecretKey,
       recordedInputProjector: async (input) => {
         baselineFiles = await createCapturedFiles(
           typeof options.files === "function"
@@ -754,11 +785,18 @@ export function createMemoryReplayAgent(
         // history files; without the application's resolver none can be.
         if (options.resolveFile)
           baselineFiles.acceptConversationUrls(collectFileNetworkUrls(input));
-        return encodeMemoryValue(baselineFiles.replaceDeclaredFileUrls(input));
+        return encodeMemoryValue(
+          baselineFiles.replaceDeclaredFileUrls(input),
+          undefined,
+          isSecretKey,
+        );
       },
       requestedModelId: options.requestedModelId,
     });
-    const historical = restoreMemoryReplayEnvelope(replay.effectiveInput);
+    const historical = restoreMemoryReplayEnvelope(
+      replay.effectiveInput,
+      isSecretKey,
+    );
     const invocationInput =
       historical?.rawInput ?? replay.effectiveRuntimeInput;
     if (Boolean(replay.spec) !== Boolean(historical))
@@ -785,7 +823,10 @@ export function createMemoryReplayAgent(
     }
     const recordedContext = historical?.requestContext ?? {};
     const safeContext = requireRecord(
-      decodeMemoryValue(encodeMemoryValue(recordedContext)),
+      decodeMemoryValue(
+        encodeMemoryValue(recordedContext, undefined, isSecretKey),
+        isSecretKey,
+      ),
       "request context",
     );
     try {
@@ -899,6 +940,7 @@ export function createMemoryReplayAgent(
         },
         mapString: (value) => sanitizer.replace(value),
         readInlineFile,
+        isSecretKey,
         isCapturedFile: baselineFiles
           ? (reference) => baselineFiles?.hasFile(reference) ?? false
           : undefined,
@@ -934,6 +976,7 @@ export function createMemoryReplayAgent(
         readFile: replayFiles?.readFile,
         referenceFileContent: referenceKnownContent,
         referenceInitialContent,
+        isSecretKey,
       });
     } else {
       const source = await options.sourceMemory();
@@ -954,6 +997,7 @@ export function createMemoryReplayAgent(
         recordMutation,
         onIncomplete,
         getRequestId: () => requestCapture?.currentRequestId,
+        isSecretKey,
       });
       const { Memory } = await import("@mastra/memory");
       const memory = new Memory({
@@ -1115,10 +1159,14 @@ export function createMemoryReplayAgent(
       let effectiveContext: Record<string, unknown>;
       let capturedContextJson: string;
       try {
-        const encodedContext = encodeMemoryValue(projectedContext);
+        const encodedContext = encodeMemoryValue(
+          projectedContext,
+          undefined,
+          isSecretKey,
+        );
         capturedContextJson = JSON.stringify(encodedContext);
         effectiveContext = requireRecord(
-          decodeMemoryValue(encodedContext),
+          decodeMemoryValue(encodedContext, isSecretKey),
           "request context",
         );
         validateMemoryReplayContext(selector, effectiveContext);
@@ -1186,7 +1234,10 @@ export function createMemoryReplayAgent(
         runOptions: effective,
         memoryConfig:
           historical?.configuration.memoryConfig ??
-          serializeMemoryConfiguration(runtime.memory.getMergedThreadConfig()),
+          serializeMemoryConfiguration(
+            runtime.memory.getMergedThreadConfig(),
+            isSecretKey,
+          ),
         memoryStore,
         ...(workspace ? { workspaceManifest: workspace.manifest } : {}),
       };
@@ -1231,6 +1282,7 @@ export function createMemoryReplayAgent(
           // Uploads pass through this sanitizer too; applying it first
           // keeps the recorded hash valid for the stored envelope.
           sanitizer.replace,
+          isSecretKey,
         );
       // A failed capture already recorded why; the envelope repeats it
       // instead of reporting a missing snapshot.
@@ -1276,6 +1328,7 @@ export function createMemoryReplayAgent(
             : options.recordingLimits,
         sanitizeEvidence: (value) =>
           sanitizer.replace(referenceKnownContent(value)),
+        isSecretKey,
         getMemoryRevision: () => runtime.binding.revision,
         onFailedAttempt: writeAttempt,
         onCaptureError: () =>
@@ -1296,6 +1349,7 @@ export function createMemoryReplayAgent(
         getState,
         recordingLimits: toolRecordingLimits,
         sanitizeEvidence: sanitizer.replace,
+        isSecretKey,
         abort(reason) {
           state?.storeFailure(reason);
           abort.abort(reason);
@@ -1328,8 +1382,9 @@ export function createMemoryReplayAgent(
       const isProjectionEdited = (): boolean => {
         try {
           return (
-            JSON.stringify(encodeMemoryValue(projectedContext)) !==
-            capturedContextJson
+            JSON.stringify(
+              encodeMemoryValue(projectedContext, undefined, isSecretKey),
+            ) !== capturedContextJson
           );
         } catch {
           return true;
@@ -1470,6 +1525,7 @@ export function createMemoryReplayAgent(
           input: { [MEMORY_REPLAY_KEY]: envelope },
           sanitizeEvidence: sanitizer.replace,
           recordingLimits: toolRecordingLimits,
+          isSecretKey,
           initialize(value) {
             state = value;
           },
@@ -1561,6 +1617,7 @@ export function createMemoryReplayAgent(
                   call,
                   sanitizer.replace,
                   toolRecordingLimits,
+                  isSecretKey,
                 ),
               );
             if (
@@ -1679,6 +1736,7 @@ export function createMemoryReplayAgent(
                 // A replay's own input keeps files recorded inline before
                 // blob storage unstored; no replay starts from it.
                 Boolean(historical),
+                isSecretKey,
               ),
             };
           },

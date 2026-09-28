@@ -71,7 +71,12 @@ export {
   isMockedToolCall,
   selectToolPolicy,
 } from "./tool-policy.js";
+export type {
+  SecretKeyClassifier,
+  SecretKeyOptions,
+} from "./url-credentials.js";
 export {
   containsUrlCredentials,
+  createSecretKeyClassifier,
   redactUrlCredentials,
 } from "./url-credentials.js";
