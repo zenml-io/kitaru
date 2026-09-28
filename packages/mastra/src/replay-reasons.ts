@@ -13,7 +13,11 @@ import {
 export type MastraReplayReason =
   /** The initial memory or another part of the replay input exceeds the replay size budget. */
   | "replay_input_too_large"
-  /** Memory, request context, or evidence holds a credential-named key such as `token` or `password`. */
+  /**
+   * Memory, request context, or evidence holds a key Kitaru always refuses,
+   * such as `authorization`, `cookie`, or `headers`, or a key the agent's
+   * `isSecretKey` names, or the request context holds Mastra's auth token.
+   */
   | "credential_key_unsupported"
   /** Observational memory uses custom extractors or models without a static identity. */
   | "om_config_unsupported"

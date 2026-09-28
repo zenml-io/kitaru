@@ -142,6 +142,31 @@ it("rejects reserved codec tags and cyclic objects instead of accepting ambiguou
   ).toThrow();
 });
 
+it("replaces the provider message in a stored message's error part only", () => {
+  const failure = { name: "APICallError", message: "PRIVATE_PROVIDER_TEXT" };
+  const message = {
+    id: "m1",
+    role: "assistant",
+    content: { format: 2, parts: [{ type: "error", error: failure }] },
+  };
+  expect(encodeMemoryValue([message])).toEqual([
+    {
+      ...message,
+      content: {
+        format: 2,
+        parts: [
+          {
+            type: "error",
+            error: { name: "APICallError", message: "[redacted]" },
+          },
+        ],
+      },
+    },
+  ]);
+  const toolResult = { type: "error", error: failure };
+  expect(encodeMemoryValue(toolResult)).toEqual(toolResult);
+});
+
 it("keeps the version-1 recalled conversation contract", () => {
   const messages = [{ role: "user", content: "hello" }];
   expect(

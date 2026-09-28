@@ -41,6 +41,7 @@ async function setup(
   result: Record<string, unknown>,
   adapter: Partial<MemoryReplayAgentOptions> = {},
   toolInput: Record<string, unknown> = { query: "shoes" },
+  doStream?: MastraLanguageModelV2Mock["doStream"],
 ) {
   const api = installTestApi();
   const store = new InMemoryStore();
@@ -73,20 +74,22 @@ async function setup(
   const actor = new MastraLanguageModelV2Mock({
     modelId: "actor",
     provider: "fixture",
-    doStream: async () =>
-      ++calls % 2 === 1
-        ? streamParts(
-            [
-              {
-                type: "tool-call",
-                toolCallId: `search-${calls}`,
-                toolName: "search",
-                input: JSON.stringify(toolInput),
-              },
-            ],
-            "tool-calls",
-          )
-        : textStream("done"),
+    doStream:
+      doStream ??
+      (async () =>
+        ++calls % 2 === 1
+          ? streamParts(
+              [
+                {
+                  type: "tool-call",
+                  toolCallId: `search-${calls}`,
+                  toolName: "search",
+                  input: JSON.stringify(toolInput),
+                },
+              ],
+              "tool-calls",
+            )
+          : textStream("done")),
   });
   const search = vi.fn(async () => result);
   const agent = createMemoryReplayAgent(
@@ -269,8 +272,10 @@ it("refuses a key that the application's isSecretKey names", async () => {
 const HARD_RULE_KEYS = [
   "authorization",
   "Proxy-Authorization",
+  "proxyAuthorization",
   "cookie",
   "Set-Cookie",
+  "set_cookie",
   "headers",
   "abortSignal",
 ];
@@ -326,4 +331,61 @@ it("rejects a malformed nonSecretKeys list when the agent is created", async () 
   await expect(setup(PAGED_RESULT, { nonSecretKeys: [""] })).rejects.toThrow(
     "nonSecretKeys must be a list of key names",
   );
+});
+
+it("hides transport keys in provider metadata", async () => {
+  const { api, turn } = await setup({}, {}, undefined, async () => ({
+    stream: new ReadableStream({
+      start(controller) {
+        controller.enqueue({ type: "stream-start", warnings: [] });
+        controller.enqueue({ type: "text-start", id: "text" });
+        controller.enqueue({ type: "text-delta", id: "text", delta: "done" });
+        controller.enqueue({ type: "text-end", id: "text" });
+        controller.enqueue({
+          type: "finish",
+          finishReason: "stop",
+          usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+          providerMetadata: {
+            fixture: {
+              headers: { "x-trace": "PRIVATE_METADATA_HEADER" },
+              abortSignal: "PRIVATE_METADATA_SIGNAL",
+              "set-cookie": "PRIVATE_METADATA_COOKIE",
+              "proxy-authorization": "PRIVATE_METADATA_PROXY",
+              requestId: "VISIBLE_REQUEST_ID",
+            },
+          },
+        });
+        controller.close();
+      },
+    }),
+  }));
+
+  expect(await turn()).toBe("done");
+
+  await closingUpdate(api);
+  const calls = JSON.stringify(api.calls);
+  expect(calls).not.toContain("PRIVATE_METADATA");
+  expect(calls).toContain("VISIBLE_REQUEST_ID");
+});
+
+it("never stores a provider error message saved in thread history", async () => {
+  let calls = 0;
+  const { api, turn } = await setup({}, {}, undefined, async () => {
+    if (++calls === 1)
+      throw new Error("PRIVATE_PROVIDER_ERROR echoed request body");
+    return textStream("done");
+  });
+
+  await turn().catch(() => undefined);
+  await closingUpdate(api);
+  // The second turn's recorded history holds the first turn's error part.
+  expect(await turn("Try again.")).toBe("done");
+
+  const second = await closingUpdate(api, 2);
+  expect(second).toMatchObject({
+    status: "completed",
+    metadata: { mastra_replay_state: "eligible" },
+  });
+  expect(JSON.stringify(second.inputs)).toContain('"type":"error"');
+  expect(JSON.stringify(api.calls)).not.toContain("PRIVATE_PROVIDER_ERROR");
 });

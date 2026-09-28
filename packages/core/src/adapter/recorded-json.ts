@@ -2,6 +2,7 @@ import { isPlainObject } from "../json.js";
 import type { JsonValue } from "../types.js";
 import {
   containsUrlCredentials,
+  getNormalizedKeyName,
   isCredentialKeyName,
   isNeverSecretKey,
   type SecretKeyClassifier,
@@ -55,15 +56,31 @@ const TRANSPORT_KEYS: ReadonlySet<string> = new Set([
   "abortsignal",
 ]);
 
+// The same names split into words, so other spellings such as `setCookie`,
+// `set_cookie`, or `proxyAuthorization` match too.
+const TRANSPORT_KEY_WORDS: ReadonlySet<string> = new Set([
+  "authorization",
+  "proxy_authorization",
+  "cookie",
+  "set_cookie",
+  "headers",
+  "abort_signal",
+]);
+const NO_KEYS: ReadonlySet<string> = new Set();
+
 /**
  * Whether an object key is a credential header or a transport object, such
- * as `authorization`, `cookie`, or `headers`, in any letter case.
+ * as `authorization`, `cookie`, or `headers`, in any letter case or word
+ * spelling, so `setCookie` and `set_cookie` match `set-cookie`.
  *
  * These keys are refused or redacted whatever an application's key-name
  * policy says.
  */
 export function isTransportKeyName(key: string): boolean {
-  return TRANSPORT_KEYS.has(key.toLowerCase());
+  return (
+    TRANSPORT_KEYS.has(key.toLowerCase()) ||
+    TRANSPORT_KEY_WORDS.has(getNormalizedKeyName(key))
+  );
 }
 
 /**
@@ -166,7 +183,17 @@ function getSecretKeyRules(
 ): SecretKeyRules {
   return isSecretKey === undefined
     ? { sensitiveKeys: SECRET_KEYS, isSecretKey: isCredentialKeyName }
-    : { sensitiveKeys: TRANSPORT_KEYS, isSecretKey };
+    : getTransportKeyRules(isSecretKey);
+}
+
+/** Hide the transport keys and the keys `isSecretKey` names. */
+function getTransportKeyRules(
+  isSecretKey: SecretKeyClassifier,
+): SecretKeyRules {
+  return {
+    sensitiveKeys: NO_KEYS,
+    isSecretKey: (key) => isTransportKeyName(key) || isSecretKey(key),
+  };
 }
 
 function markLossy(options: CloneOptions): void {
@@ -531,8 +558,9 @@ export function boundedRecorderJson(
 /**
  * Convert provider metadata for recording, hiding every sensitive key.
  *
- * Nothing looks a replay result up by metadata, so keys that carry credentials
- * and keys that carry blobs or transport envelopes are all replaced.
+ * Nothing looks a replay result up by metadata, so keys that carry credentials,
+ * the transport keys such as `headers` and `abortSignal`, and keys that carry
+ * blobs or transport envelopes are all replaced.
  */
 export function projectRecordedMetadata(
   value: unknown,
@@ -548,7 +576,7 @@ export function projectRecordedMetadata(
     rejectLongStrings: false,
     sensitiveKeyMode: "redact",
     sensitiveKeys: SENSITIVE_KEYS,
-    isSecretKey: isCredentialKeyName,
+    isSecretKey: (key) => isTransportKeyName(key) || isCredentialKeyName(key),
   };
   return withoutFailing(options, () => {
     const converted = convert(value, options);
@@ -648,8 +676,7 @@ export function strictMastraReplayValue(
     rejectLongStrings: true,
     rejectUrlCredentials: true,
     sensitiveKeyMode: "reject",
-    sensitiveKeys: TRANSPORT_KEYS,
-    isSecretKey,
+    ...getTransportKeyRules(isSecretKey),
   };
   let converted: JsonValue;
   try {
@@ -759,8 +786,7 @@ export function mastraReplayToolConversion(
     path,
     rejectLongStrings: false,
     sensitiveKeyMode: "redact",
-    sensitiveKeys: TRANSPORT_KEYS,
-    isSecretKey,
+    ...getTransportKeyRules(isSecretKey),
   };
   return withoutFailing(options, () => {
     const converted = convert(value, options);
@@ -817,7 +843,18 @@ export function projectMastraReplayInput(
     throw new TypeError(
       "Mastra replay input requires a complete version-3 envelope",
     );
-  return strictMastraReplayValue(value, "Mastra replay input", isSecretKey);
+  try {
+    return strictMastraReplayValue(value, "Mastra replay input", isSecretKey);
+  } catch (error) {
+    // Recording already refused transport keys, so a key refused here is one
+    // the replaying agent's key options treat as secret and the recording
+    // agent's did not.
+    if (error instanceof RecordedSensitiveKeyError)
+      throw new RecordedSensitiveKeyError(
+        `${error.message}; the replaying agent's isSecretKey or nonSecretKeys options treat it as a secret, so replay with the options that recorded the turn`,
+      );
+    throw error;
+  }
 }
 
 /**

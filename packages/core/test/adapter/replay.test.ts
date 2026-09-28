@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  isCredentialKeyName,
   parseReplayId,
   resolveReplayContext,
 } from "../../src/adapter/index.js";
@@ -77,8 +78,9 @@ describe("adapter replay preparation", () => {
       omTape: [],
     };
     for (const changed of [
-      { ...envelope, requestContext: { authorization: "secret" } },
+      { ...envelope, requestContext: { token: "secret" } },
       { ...envelope, requestContext: { headers: { "x-auth": "secret" } } },
+      { ...envelope, requestContext: { setCookie: "secret" } },
       {
         ...envelope,
         rawInput: "https://files.invalid/a?X-Amz-Signature=secret",
@@ -98,6 +100,41 @@ describe("adapter replay preparation", () => {
       ).rejects.toThrow();
     }
   });
+  it("names the key options when a replaying agent refuses a recorded key", async () => {
+    const envelope = {
+      version: 3,
+      complete: true,
+      reasons: [],
+      invocationId: "invocation",
+      rawInput: { apiKey: "recorded" },
+      initialSnapshot: null,
+      configuration: {},
+      requestContext: {},
+      files: [],
+      omTape: [],
+    };
+    const resolve = (isSecretKey: (key: string) => boolean) =>
+      resolveReplayContext({
+        callerInput: "caller",
+        client: fakeClient({
+          replay: replay(),
+          taskInput: { mastra_memory_replay: envelope },
+        }),
+        environment: { KITARU_REPLAY_ID: REPLAY_ID, KITARU_TASK_ID: TASK_ID },
+        isSecretKey,
+        requestedModelId: "requested",
+      });
+
+    await expect(resolve(() => false)).resolves.toMatchObject({
+      effectiveInput: {
+        mastra_memory_replay: { rawInput: { apiKey: "recorded" } },
+      },
+    });
+    await expect(resolve(isCredentialKeyName)).rejects.toThrow(
+      /'apiKey'.*isSecretKey or nonSecretKeys options/,
+    );
+  });
+
   it("keeps caller input and legacy override outside replay", async () => {
     const client = fakeClient();
     const context = await resolveReplayContext({

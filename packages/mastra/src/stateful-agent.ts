@@ -167,7 +167,12 @@ export interface MemoryReplayAgentOptions extends KitaruAgentOptions {
   mastra?: Mastra;
   /** Called only for new recordings. All writers must share exclusiveAccess. */
   sourceMemory(): MastraMemorySource | Promise<MastraMemorySource>;
-  /** Return only approved replay-relevant JSON context. Credentials are forbidden. */
+  /**
+   * Return only approved replay-relevant JSON context. It is recorded as it
+   * is, except that transport keys such as `authorization` or `headers`,
+   * Mastra's auth token, and keys `isSecretKey` names make a turn not
+   * replayable, so keep credentials out of it.
+   */
   captureRequestContext?(context: RequestContext): Record<string, unknown>;
   /**
    * File URLs the factory's `resolveFile` may fetch during a recorded turn,

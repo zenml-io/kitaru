@@ -205,7 +205,8 @@ export function isNeverSecretKey(): boolean {
   return false;
 }
 
-function getNormalizedKeyName(name: string): string {
+/** Join a key's words with underscores, so `resultToken` reads `result_token`. */
+export function getNormalizedKeyName(name: string): string {
   return getNameWords(name).join("_");
 }
 

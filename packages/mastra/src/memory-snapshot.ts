@@ -311,14 +311,66 @@ function validateUrl(value: string): URL {
   return url;
 }
 
+const REDACTED_ERROR_MESSAGE = "[redacted]";
+
+/**
+ * Replace the provider's message in the `error` parts of a stored message.
+ *
+ * Mastra saves a failed attempt's error name and message as an `error` part
+ * on the assistant message. Providers echo request content and credentials in
+ * that message, and Mastra drops `error` parts before it builds a model
+ * prompt, so the replacement changes nothing a replayed model sees.
+ */
+function withoutProviderErrorMessages(
+  message: Record<string, JsonValue>,
+): Record<string, JsonValue> {
+  const { content } = message;
+  if (
+    typeof message.role !== "string" ||
+    !isRecord(content) ||
+    content.format !== 2 ||
+    !Array.isArray(content.parts)
+  )
+    return message;
+  const parts: JsonValue[] = content.parts;
+  if (!parts.some(isProviderErrorPart)) return message;
+  return {
+    ...message,
+    content: {
+      ...content,
+      parts: parts.map((part) =>
+        isProviderErrorPart(part)
+          ? {
+              ...part,
+              error: { ...part.error, message: REDACTED_ERROR_MESSAGE },
+            }
+          : part,
+      ),
+    },
+  };
+}
+
+function isProviderErrorPart(
+  part: JsonValue,
+): part is { error: Record<string, JsonValue> } & Record<string, JsonValue> {
+  return (
+    isRecord(part) &&
+    part.type === "error" &&
+    isRecord(part.error) &&
+    typeof part.error.message === "string"
+  );
+}
+
 /**
  * Encode the few non-JSON values in native memory without losing their types.
  *
  * URL credentials in strings and URL values are redacted, so a signed link in
- * thread history or model output never reaches recorded JSON. `path` names
- * the value in a budget error; other failures keep the replay codec's own
- * reasons. `isSecretKey` decides which object keys name credentials, which
- * the codec refuses; by default the built-in credential key names do.
+ * thread history or model output never reaches recorded JSON, and so is the
+ * provider's message in a stored message's `error` part. `path` names the
+ * value in a budget error; other failures keep the replay codec's own
+ * reasons. `isSecretKey` decides which other object keys name credentials,
+ * which the codec refuses; by default no key is refused for its name alone,
+ * and transport keys such as `headers` and `authorization` always are.
  */
 export function encodeMemoryValue(
   value: unknown,
@@ -397,7 +449,7 @@ export function encodeMemoryValue(
         );
         result[key] = visit(descriptor.value, depth + 1);
       }
-      return result;
+      return withoutProviderErrorMessages(result);
     } finally {
       active.delete(current);
     }

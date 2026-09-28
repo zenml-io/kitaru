@@ -111,10 +111,31 @@ describe("recorded provider metadata", () => {
         url: "https://example.test/file",
       }),
     ).toEqual({
-      headers: { Token: "[redacted]" },
+      headers: "[redacted]",
       loop: { self: "[circular]" },
       text: `${"x".repeat(4_096)}[truncated]`,
       url: "[redacted]",
+    });
+  });
+
+  it("hides transport keys at any depth", () => {
+    const recorded = projectRecordedMetadata({
+      fixture: {
+        headers: { "x-trace": "test-value" },
+        abortSignal: "test-value",
+        "set-cookie": "test-value",
+        "proxy-authorization": "test-value",
+        kept: "visible",
+      },
+    });
+    expect(recorded).toEqual({
+      fixture: {
+        headers: "[redacted]",
+        abortSignal: "[redacted]",
+        "set-cookie": "[redacted]",
+        "proxy-authorization": "[redacted]",
+        kept: "visible",
+      },
     });
   });
 
@@ -309,6 +330,14 @@ describe("application key policy", () => {
     ["a set-cookie key", { "set-cookie": ["session=test-value"] }],
     ["a headers object", { headers: { "x-custom": "test-value" } }],
     ["an abort signal", { abortSignal: "test-value" }],
+    ["a camelCase set-cookie key", { setCookie: "test-value" }],
+    ["a snake_case set-cookie key", { set_cookie: "test-value" }],
+    [
+      "a camelCase proxy authorization key",
+      { proxyAuthorization: "test-value" },
+    ],
+    ["a padded authorization key", { "authorization ": "test-value" }],
+    ["an upper-case abort signal", { ABORT_SIGNAL: "test-value" }],
   ])("still hides %s when every name is allowed", (_name, hard) => {
     expect(Object.keys(hard).every(isTransportKeyName)).toBe(true);
     const allowAll = () => false;
