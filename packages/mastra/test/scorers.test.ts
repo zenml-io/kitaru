@@ -1,5 +1,6 @@
 import {
   createScorer,
+  notScorable,
   type ScorerRunInputForAgent,
   type ScorerRunOutputForAgent,
 } from "@mastra/core/evals";
@@ -198,6 +199,42 @@ describe("Mastra scorer evaluators", () => {
       await expect(evaluator(view, {})).rejects.toThrow();
     },
   );
+
+  it("omits not-scorable native scorers and keeps the scored results", async () => {
+    const evaluator = createMastraEvaluator({
+      scorers: () => ({
+        skipped: createScorer<ConversationInput, string>({
+          id: "skipped",
+          description: "Declines to score",
+        })
+          .preprocess(() => notScorable("no tool calls to inspect"))
+          .generateScore(() => 1),
+        scored: createScorer<ConversationInput, string>({
+          id: "scored",
+          description: "Scores",
+        }).generateScore(() => 0.5),
+      }),
+      mapInput,
+    });
+    await expect(evaluator(view, {})).resolves.toEqual([
+      { name: "scored", score: 0.5, explanation: undefined },
+    ]);
+  });
+
+  it("fails when every native scorer is not scorable", async () => {
+    const evaluator = createMastraEvaluator({
+      scorers: () => ({
+        skipped: createScorer<ConversationInput, string>({
+          id: "skipped",
+          description: "Declines to score",
+        })
+          .preprocess(() => notScorable())
+          .generateScore(() => 1),
+      }),
+      mapInput,
+    });
+    await expect(evaluator(view, {})).rejects.toThrow("not scorable");
+  });
 
   it("rejects invalid names before calling a judge", async () => {
     const run = vi.fn(async () => ({ score: 1 }));

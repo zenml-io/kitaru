@@ -6,11 +6,14 @@ import {
   validateEvaluationResults,
 } from "@zenml-io/kitaru/evaluator";
 
-/** The native scorer operation required by the evaluator bridge. */
+/**
+ * The native scorer operation required by the evaluator bridge. A run without a
+ * `score` is Mastra's not-scorable outcome and produces no Kitaru result.
+ */
 export interface RunnableMastraScorer<TInput, TOutput> {
   run(
     input: ScorerRun<TInput, TOutput>,
-  ): Promise<{ score: number; reason?: string }>;
+  ): Promise<{ score?: number; reason?: string }>;
 }
 
 export interface MastraEvaluatorOptions<TInput, TOutput> {
@@ -44,7 +47,13 @@ export function createMastraEvaluator<TInput, TOutput>(
     const results = [];
     for (const [name, scorer] of entries) {
       const result = await scorer.run(input);
+      if (result.score === undefined) continue;
       results.push({ name, score: result.score, explanation: result.reason });
+    }
+    if (results.length === 0) {
+      throw new Error(
+        "Every Mastra scorer reported the session as not scorable",
+      );
     }
     return validateEvaluationResults(results);
   };

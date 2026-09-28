@@ -2,7 +2,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import type { KitaruEnvironmentVariables } from "@zenml-io/kitaru";
 import type { AdapterClient } from "@zenml-io/kitaru/adapter";
 import { createKitaruGenerateText } from "@zenml-io/kitaru-vercel-ai";
-import type { LanguageModel, ToolSet } from "ai";
+import type { JSONSchema7, LanguageModel, ToolSet } from "ai";
 import { jsonSchema, Output, stepCountIs } from "ai";
 import { createDeterministicModel } from "./deterministic-model.js";
 import { type Resolution, resolutionActions } from "./models.js";
@@ -17,9 +17,7 @@ export type { ModelProvider } from "./preflight.js";
 
 export const REQUESTED_MODEL_ID = "openai/gpt-5-nano";
 
-export const RESOLUTION_JSON_SCHEMA: Parameters<
-  typeof jsonSchema<Resolution>
->[0] = {
+export const RESOLUTION_JSON_SCHEMA: JSONSchema7 = {
   additionalProperties: false,
   properties: {
     action: { enum: [...resolutionActions] },

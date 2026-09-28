@@ -20,6 +20,7 @@ import sys
 import time
 import tomllib
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -337,13 +338,26 @@ def test_get_python_run_argv_with_dependencies() -> None:
     ]
 
 
-def test_get_python_run_argv_allows_fresh_pinned_kitaru_plugins(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """New Kitaru releases can resolve under the worker's project cutoff."""
+CUTOFF = "2026-09-28T12:00:00Z"
+
+
+@pytest.fixture
+def uv_with_package_age_exceptions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pretend the installed uv accepts package-specific exclude-newer cutoffs."""
     monkeypatch.setattr(
         process_module, "_uv_supports_package_age_exceptions", lambda: True
     )
+
+
+@pytest.fixture
+def fixed_cutoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Freeze the package-age cutoff at CUTOFF."""
+    monkeypatch.setattr(process_module, "_get_package_age_cutoff", lambda: CUTOFF)
+
+
+@pytest.mark.usefixtures("uv_with_package_age_exceptions", "fixed_cutoff")
+def test_get_python_run_argv_allows_fresh_pinned_kitaru_plugins() -> None:
+    """New Kitaru releases can resolve under the worker's project cutoff."""
     argv = get_python_run_argv(
         "kitaru.task",
         ["import"],
@@ -357,9 +371,9 @@ def test_get_python_run_argv_allows_fresh_pinned_kitaru_plugins(
         sys.executable,
         "--prerelease=allow",
         "--exclude-newer-package",
-        "kitaru=0 days",
+        f"kitaru={CUTOFF}",
         "--exclude-newer-package",
-        "kitaru-langfuse-importer=0 days",
+        f"kitaru-langfuse-importer={CUTOFF}",
         "--with",
         "kitaru-langfuse-importer[api]==0.4.0",
         "--with",
@@ -371,13 +385,9 @@ def test_get_python_run_argv_allows_fresh_pinned_kitaru_plugins(
     ]
 
 
-def test_get_python_run_argv_allows_all_released_kitaru_packages(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+@pytest.mark.usefixtures("uv_with_package_age_exceptions", "fixed_cutoff")
+def test_get_python_run_argv_allows_all_released_kitaru_packages() -> None:
     """Every published first-party plugin can bypass a stale project cutoff."""
-    monkeypatch.setattr(
-        process_module, "_uv_supports_package_age_exceptions", lambda: True
-    )
     inventory = Path(__file__).resolve().parents[2] / "release/release-units.toml"
     units = tomllib.loads(inventory.read_text())["units"]
     for unit in units:
@@ -385,7 +395,7 @@ def test_get_python_run_argv_allows_all_released_kitaru_packages(
         if unit["registry"] != "pypi" or not package.startswith("kitaru-"):
             continue
         argv = get_python_run_argv("kitaru.task", ["evaluate"], [f"{package}==1.0.0"])
-        assert f"{package}=0 days" in argv, package
+        assert f"{package}={CUTOFF}" in argv, package
 
 
 def test_get_python_run_argv_keeps_legacy_uv_compatible(
@@ -437,5 +447,28 @@ def test_get_python_run_argv_keeps_custom_plugins_under_cutoff(
 ) -> None:
     """A custom plugin cannot bypass the worker's package-age cutoff."""
     argv = get_python_run_argv("kitaru.task", ["import"], [dependency])
-    assert "kitaru-custom=0 days" not in argv
     assert "--exclude-newer-package" not in argv
+
+
+@pytest.mark.usefixtures("uv_with_package_age_exceptions")
+def test_get_python_run_argv_passes_an_absolute_cutoff() -> None:
+    """Relative durations like "0 days" break uv releases before 0.9.17."""
+    argv = get_python_run_argv("kitaru.task", ["evaluate"], ["kitaru==1.0.0"])
+    cutoff = argv[argv.index("--exclude-newer-package") + 1].removeprefix("kitaru=")
+    parsed = datetime.strptime(cutoff, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    assert abs(datetime.now(UTC) - parsed) < timedelta(minutes=1)
+
+
+@pytest.mark.usefixtures("uv_with_package_age_exceptions")
+def test_get_python_run_argv_reads_the_cutoff_per_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A long-running worker accepts plugins released after it started."""
+    cutoffs = iter(["2026-09-28T12:00:00Z", "2026-09-29T12:00:00Z"])
+    monkeypatch.setattr(
+        process_module, "_get_package_age_cutoff", lambda: next(cutoffs)
+    )
+    first = get_python_run_argv("kitaru.task", ["evaluate"], ["kitaru==1.0.0"])
+    second = get_python_run_argv("kitaru.task", ["evaluate"], ["kitaru==1.0.0"])
+    assert "kitaru=2026-09-28T12:00:00Z" in first
+    assert "kitaru=2026-09-29T12:00:00Z" in second

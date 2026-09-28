@@ -45,7 +45,7 @@
     "@zenml-io/kitaru": "workspace:0.5.0"
   },
   "peerDependencies": {
-    "@mastra/core": ">=1.51.0 <1.68.0",
+    "@mastra/core": ">=1.51.0 <1.72.0",
     "@mastra/memory": "1.30.0"
   },
   "peerDependenciesMeta": {
