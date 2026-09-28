@@ -1331,10 +1331,10 @@ export function createMemoryReplayAgent(
         isSecretKey,
         getMemoryRevision: () => runtime.binding.revision,
         onFailedAttempt: writeAttempt,
-        onCaptureError: () =>
+        onCaptureError: (error) =>
           runtime.binding.markIncomplete(
             "Actor request evidence was incomplete.",
-            "request_evidence_incomplete",
+            getReplayReason(error, "request_evidence_incomplete"),
           ),
       });
       requestCapture = capture;

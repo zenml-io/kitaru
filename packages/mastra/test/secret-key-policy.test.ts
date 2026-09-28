@@ -231,7 +231,10 @@ it.each([
   expect(await turn()).toBe("done");
 
   expect(await closingUpdate(api)).toMatchObject({
-    metadata: { mastra_replay_state: "ineligible" },
+    metadata: {
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "credential_key_unsupported",
+    },
   });
   expect(JSON.stringify(api.calls)).not.toContain("PRIVATE_HARD");
 });
