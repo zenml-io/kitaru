@@ -3,6 +3,7 @@ import type { JsonValue } from "../types.js";
 import {
   containsUrlCredentials,
   isCredentialKeyName,
+  isNeverSecretKey,
   type SecretKeyClassifier,
 } from "./url-credentials.js";
 
@@ -42,13 +43,28 @@ const SECRET_KEYS: ReadonlySet<string> = new Set([
 ]);
 /**
  * Keys refused or redacted whatever an application's key-name policy says:
- * the HTTP credential header and the transport objects that carry headers.
+ * the HTTP headers that carry credentials and the transport objects that
+ * carry headers.
  */
 const TRANSPORT_KEYS: ReadonlySet<string> = new Set([
   "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
   "headers",
   "abortsignal",
 ]);
+
+/**
+ * Whether an object key is a credential header or a transport object, such
+ * as `authorization`, `cookie`, or `headers`, in any letter case.
+ *
+ * These keys are refused or redacted whatever an application's key-name
+ * policy says.
+ */
+export function isTransportKeyName(key: string): boolean {
+  return TRANSPORT_KEYS.has(key.toLowerCase());
+}
 
 /**
  * Keys whose value is a blob, a transport envelope, or a framework context
@@ -433,7 +449,8 @@ export function recordedPayloadJson(value: unknown, path: string): JsonValue {
  * Redacting a credential makes an input lossy, so callers must preserve the
  * returned flag and refuse to use that value as a history cache key. With
  * `isSecretKey`, that check replaces the built-in credential key names, and
- * only `authorization`, `headers`, and `abortSignal` are redacted regardless.
+ * only the transport keys, such as `authorization`, `cookie`, and `headers`,
+ * are redacted regardless.
  */
 export function recordedToolPayloadConversion(
   value: unknown,
@@ -608,13 +625,15 @@ function assertMastraReplayBytes(value: JsonValue, path: string): void {
 /**
  * Strict, independently bounded JSON for the Mastra historical read-set.
  *
- * `isSecretKey` decides which other key names hold credentials; transport
- * keys such as `headers` and `authorization` are refused regardless.
+ * `isSecretKey` names the other keys that hold credentials, which are
+ * refused; by default no key is refused for its name alone. Transport keys
+ * such as `headers`, `authorization`, and `cookie` are refused regardless,
+ * as are URL credentials.
  */
 export function strictMastraReplayValue(
   value: unknown,
   path = "Mastra memory replay",
-  isSecretKey: SecretKeyClassifier = isCredentialKeyName,
+  isSecretKey: SecretKeyClassifier = isNeverSecretKey,
 ): JsonValue {
   const options: CloneOptions = {
     budget: {
@@ -716,15 +735,16 @@ export function boundMastraReplayEvidence(
  * evidence, and replay serves a tool from history only when its recorded
  * result was kept whole. The whole value therefore shares the replay input's
  * byte and item budget instead of the tool recorder's, and per-value `limits`
- * apply only when the application set them. Credentials are redacted as
- * `boundedRecorderConversion` redacts them, with the same `isSecretKey`, and
- * a value over the budget becomes a degraded marker.
+ * apply only when the application set them. Transport keys such as
+ * `headers` and `authorization` are always redacted, other keys only when
+ * `isSecretKey` names them, and a value over the budget becomes a degraded
+ * marker.
  */
 export function mastraReplayToolConversion(
   value: unknown,
   path: string,
   limits?: RecordingLimits,
-  isSecretKey?: SecretKeyClassifier,
+  isSecretKey: SecretKeyClassifier = isNeverSecretKey,
 ): RecordedConversion {
   const resolved = limits && normalizeRecordingLimits(limits);
   const options: CloneOptions = {
@@ -739,7 +759,8 @@ export function mastraReplayToolConversion(
     path,
     rejectLongStrings: false,
     sensitiveKeyMode: "redact",
-    ...getSecretKeyRules(isSecretKey),
+    sensitiveKeys: TRANSPORT_KEYS,
+    isSecretKey,
   };
   return withoutFailing(options, () => {
     const converted = convert(value, options);

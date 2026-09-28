@@ -2,7 +2,7 @@ import { Agent } from "@mastra/core/agent";
 import { MessageList } from "@mastra/core/agent/message-list";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { KitaruClient } from "@zenml-io/kitaru";
-import { RunRecorder } from "@zenml-io/kitaru/adapter";
+import { isCredentialKeyName, RunRecorder } from "@zenml-io/kitaru/adapter";
 import { APICallError } from "ai";
 import { afterEach, expect, it, vi } from "vitest";
 import { decodeMemoryValue } from "../src/memory-snapshot.js";
@@ -364,10 +364,15 @@ it("retains unfinished calls and captures independently replaced models", async 
   expect(capture.takeSuccessful()).toBeUndefined();
 });
 
-it("excludes nested transport metadata and credentials from provider settings", async () => {
+/** Capture one `doGenerate` call with `providerOptions` and return its evidence. */
+async function captureProviderOptions(
+  providerOptions: Record<string, unknown>,
+  isSecretKey?: (key: string) => boolean,
+) {
   const capture = createRequestCapture({
     invocationId: "redaction",
     getMemoryRevision: () => 0,
+    isSecretKey,
   });
   capture.beginStep({ stepNumber: 0 });
   const model = capture.instrumentModel({
@@ -376,22 +381,27 @@ it("excludes nested transport metadata and credentials from provider settings", 
     provider: "fixture",
     doGenerate: async (_args: unknown) => "native",
   });
-  await model.doGenerate({
-    prompt: [],
-    providerOptions: {
-      vendor: { headers: { "x-custom-access": "SECRET_HEADER" } },
-    },
+  await model.doGenerate({ prompt: [], providerOptions });
+  return required(capture.takeSuccessful());
+}
+
+it("excludes nested transport metadata from provider settings", async () => {
+  const evidence = await captureProviderOptions({
+    vendor: { headers: { "x-custom-access": "SECRET_HEADER" } },
   });
-  const evidence = required(capture.takeSuccessful());
   expect(evidence.complete).toBe(false);
   expect(JSON.stringify(evidence)).not.toContain("SECRET_HEADER");
-  await model.doGenerate({
-    prompt: [],
-    providerOptions: { vendor: { apiKey: "SECRET_KEY" } },
-  });
-  const credentials = required(capture.takeSuccessful());
-  expect(credentials.complete).toBe(false);
-  expect(JSON.stringify(credentials)).not.toContain("SECRET_KEY");
+});
+
+it("records a credential-looking provider setting unless isSecretKey names it", async () => {
+  const options = { vendor: { apiKey: "SECRET_KEY" } };
+  const recorded = await captureProviderOptions(options);
+  expect(recorded.complete).toBe(true);
+  expect(JSON.stringify(recorded)).toContain("SECRET_KEY");
+
+  const refused = await captureProviderOptions(options, isCredentialKeyName);
+  expect(refused.complete).toBe(false);
+  expect(JSON.stringify(refused)).not.toContain("SECRET_KEY");
 });
 
 it("keeps ordinary multi-kilobyte prompts complete within replay payload bounds", async () => {

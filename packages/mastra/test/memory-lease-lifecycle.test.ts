@@ -1042,9 +1042,9 @@ it.each(["processInput", "processInputStep"] as const)(
 );
 
 it("closes a native fallback's session when an application processor trips", async () => {
-  // A credential-named context key makes the turn fall back to native Mastra.
+  // A credential header in the context makes the turn fall back to native Mastra.
   const { api } = await trippedTurn("processInput", () => ({
-    apiToken: "fixture",
+    authorization: "fixture",
   }));
   await vi.waitFor(() => {
     const update = api.calls.find((call) => call.method === "PATCH");

@@ -9,6 +9,7 @@ import { z } from "zod/v4";
 import {
   createMemoryReplayAgent,
   createProcessLocalMemoryAccess,
+  isCredentialKeyName,
   MEMORY_REPLAY_KEY,
 } from "../src/memory.js";
 import type { MemoryReplayAgentOptions } from "../src/stateful-agent.js";
@@ -179,8 +180,10 @@ it("names an oversized thread instead of reporting a malformed snapshot", async 
   );
 });
 
-it("names a credential-named key in thread history without storing its value", async () => {
-  const { api, memory, turn } = await setup();
+it("names a credential-named key in thread history without storing its value under isCredentialKeyName", async () => {
+  const { api, memory, turn } = await setup({
+    adapter: { isSecretKey: isCredentialKeyName },
+  });
   await memory.saveMessages({
     messages: [
       {
@@ -246,7 +249,7 @@ it("names a custom observational-memory extractor as unsupported configuration",
 
 it("reports a setup failure's reason and closes its session with the native outcome", async () => {
   const { api, reported, turn } = await setup({
-    adapter: { captureRequestContext: () => ({ apiToken: "PRIVATE" }) },
+    adapter: { captureRequestContext: () => ({ authorization: "PRIVATE" }) },
   });
 
   expect(await turn()).toBe("done");
@@ -268,9 +271,10 @@ it("reports a setup failure's reason and closes its session with the native outc
   expect(JSON.stringify(api.calls)).not.toContain("PRIVATE");
 });
 
-it("refuses a compound credential key nested in the captured request context", async () => {
+it("refuses a compound credential key nested in the captured request context under isCredentialKeyName", async () => {
   const { api, turn } = await setup({
     adapter: {
+      isSecretKey: isCredentialKeyName,
       captureRequestContext: () => ({
         profile: { access_token: "PRIVATE_NESTED_VALUE" },
       }),
@@ -306,10 +310,30 @@ it.each(["pageToken", "max_tokens", "keyboardLayout"])(
 );
 
 it.each(["accessToken", "api_key"])(
-  "refuses a credential request context key: %s",
+  "records a credential-looking request context key as it is by default: %s",
   async (key) => {
     const { api, turn } = await setup({
-      adapter: { captureRequestContext: () => ({ [key]: "PRIVATE" }) },
+      adapter: { captureRequestContext: () => ({ [key]: "RECORDED" }) },
+    });
+
+    expect(await turn()).toBe("done");
+
+    expect(await closingUpdate(api)).toMatchObject({
+      status: "completed",
+      metadata: { mastra_replay_state: "eligible" },
+    });
+    expect(JSON.stringify(recordedEnvelope(api))).toContain("RECORDED");
+  },
+);
+
+it.each(["accessToken", "api_key"])(
+  "refuses a credential request context key under isCredentialKeyName: %s",
+  async (key) => {
+    const { api, turn } = await setup({
+      adapter: {
+        isSecretKey: isCredentialKeyName,
+        captureRequestContext: () => ({ [key]: "PRIVATE" }),
+      },
     });
 
     expect(await turn()).toBe("done");
@@ -341,7 +365,7 @@ it("closes a setup failure's session as failed when the native turn fails", asyn
   });
   const { api, turn } = await setup({
     actor,
-    adapter: { captureRequestContext: () => ({ apiToken: "PRIVATE" }) },
+    adapter: { captureRequestContext: () => ({ authorization: "PRIVATE" }) },
   });
 
   await turn().catch(() => undefined);

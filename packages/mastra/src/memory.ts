@@ -1,3 +1,6 @@
+// Re-exported so an application can opt back into name-based credential
+// detection without importing the core adapter entry point.
+export { isCredentialKeyName } from "@zenml-io/kitaru/adapter";
 export type {
   MastraExclusiveMemoryAccess,
   MastraMemoryCaptureBinding,
@@ -35,5 +38,4 @@ export type {
   MemoryReplayAgentOptions,
   MemoryReplayFileCall,
 } from "./stateful-agent.js";
-
 export { createMemoryReplayAgent } from "./stateful-agent.js";

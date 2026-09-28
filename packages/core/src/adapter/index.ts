@@ -15,6 +15,7 @@ export {
   boundMastraReplayEvidence,
   boundRecordedSize,
   degradedMastraReplayEvidence,
+  isTransportKeyName,
   MAX_MASTRA_REPLAY_ITEMS,
   MAX_MASTRA_REPLAY_JSON_BYTES,
   MAX_RECORDED_PAYLOAD_CHARS,
@@ -78,5 +79,6 @@ export type {
 export {
   containsUrlCredentials,
   createSecretKeyClassifier,
+  isCredentialKeyName,
   redactUrlCredentials,
 } from "./url-credentials.js";

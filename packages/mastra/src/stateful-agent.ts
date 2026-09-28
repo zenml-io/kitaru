@@ -22,7 +22,6 @@ import {
   createSecretKeyClassifier,
   normalizeRecordingLimits,
   parseModelSettings,
-  RecordedSensitiveKeyError,
   type RecordingLimits,
   ROOT_NODE_EXTERNAL_ID,
   resolveReplayContext,
@@ -218,21 +217,23 @@ export interface MemoryReplayAgentOptions extends KitaruAgentOptions {
    */
   missingObservationalMemoryResults?: MissingOMResults;
   /**
-   * Object keys that never count as credentials by name in recorded
-   * application data: messages, memory, tool arguments and results, captured
-   * request context, and configuration. A listed name also matches other
-   * spellings of the same words, so `resultToken` covers `result_token`.
-   * Without this, a key such as `resultToken` makes the turn not replayable.
+   * Object keys that `isSecretKey` never sees and that always record as they
+   * are. A listed name also matches other spellings of the same words, so
+   * `resultToken` covers `result_token`.
    */
   nonSecretKeys?: readonly string[];
   /**
-   * Decide which object keys in recorded application data hold credentials,
-   * in place of the built-in credential key names. Return true to treat the
-   * key as a credential, which makes the turn not replayable, or false to
-   * record its value as it is. Keys in `nonSecretKeys` never reach it.
-   * `authorization`, `headers`, and `abortSignal` keys and Mastra's
-   * authentication token still make a turn not replayable, and credentials
-   * in URLs are still redacted, whatever it returns.
+   * Decide which object keys in recorded application data hold credentials:
+   * messages, memory, tool arguments and results, captured request context,
+   * and configuration. Return true to treat the key as a credential, which
+   * redacts its value on tool nodes and makes the turn not replayable, or
+   * false to record its value as it is. Without it, application data records
+   * as it is whatever its key names are; pass `isCredentialKeyName` to treat
+   * credential-looking names such as `accessToken` as credentials.
+   * `authorization`, `proxy-authorization`, `cookie`, `set-cookie`,
+   * `headers`, and `abortSignal` keys and Mastra's authentication token
+   * always make a turn not replayable, and credentials in URLs are always
+   * redacted, whatever it returns.
    */
   isSecretKey?: (key: string) => boolean;
 }
@@ -1171,9 +1172,13 @@ export function createMemoryReplayAgent(
         );
         validateMemoryReplayContext(selector, effectiveContext);
       } catch (error) {
-        // Encoding refuses a credential-named key at any depth; name it as
-        // the credential it is rather than as unsupported context.
-        if (error instanceof RecordedSensitiveKeyError)
+        // Encoding refuses a credential key at any depth, and validation
+        // refuses Mastra's auth token; name either as the credential it is
+        // rather than as unsupported context.
+        if (
+          getReplayReason(error, "context_unsupported") ===
+          "credential_key_unsupported"
+        )
           throw new MemoryReplayContextError(
             "Unsupported replay request context credential key.",
             "credential_key_unsupported",

@@ -605,9 +605,9 @@ it("marks credential-altered mutation evidence incomplete but keeps native argum
   await binding.captureInitial(runtime.memory);
   const result = await binding.domain.updateThread({
     id: THREAD,
-    metadata: { apiKey: "private-value" },
+    metadata: { authorization: "private-value" },
   });
-  expect(result.metadata?.apiKey).toBe("private-value");
+  expect(result.metadata?.authorization).toBe("private-value");
   await binding.drain();
   expect(binding.incompleteReasons.length).toBeGreaterThan(0);
   expect(JSON.stringify(recordMutation.mock.calls)).not.toContain(

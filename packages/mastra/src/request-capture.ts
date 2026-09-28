@@ -121,23 +121,10 @@ export function createRequestCapture(options: RequestCaptureOptions) {
         options.recordingLimits,
         options.isSecretKey,
       );
-      const encoded = evidence.value;
-      // Provider options can contain custom transport headers whose keys are
-      // not recognizable credential names. Do not persist that transport bag.
-      function containsTransport(current: JsonValue): boolean {
-        if (current === null || typeof current !== "object") return false;
-        if (Array.isArray(current)) return current.some(containsTransport);
-        return Object.entries(current).some(
-          ([key, item]) =>
-            /^(headers|abortsignal)$/i.test(key) || containsTransport(item),
-        );
-      }
-      if (containsTransport(encoded)) {
-        reasons.push(`${label} contains transport metadata.`);
-        return null;
-      }
+      // Encoding refuses transport keys such as `headers`, so custom
+      // transport headers in provider options never reach this point.
       if (evidence.lossReason) truncationReasons.push(evidence.lossReason);
-      return encoded;
+      return evidence.value;
     } catch (error) {
       reasons.push(`${label} could not be recorded losslessly.`);
       report(error);

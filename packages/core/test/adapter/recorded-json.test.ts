@@ -5,6 +5,8 @@ import {
   boundedRecorderConversion,
   boundRecordedSize,
   createSecretKeyClassifier,
+  isCredentialKeyName,
+  isTransportKeyName,
   MAX_RECORDED_PAYLOAD_CHARS,
   mastraReplayToolConversion,
   normalizeRecordingLimits,
@@ -219,11 +221,12 @@ describe("credential keys", () => {
     ["a camel-case PEM private key", { privateKeyPem: "test-value" }],
     ["an encoded token", { refreshTokenBase64Encoded: "test-value" }],
   ])(
-    "refuses %s in replay input and redacts it in evidence",
+    "refuses %s in replay input under isCredentialKeyName and redacts it in evidence",
     (_name, value) => {
-      expect(() => strictMastraReplayValue(value)).toThrow(
-        RecordedSensitiveKeyError,
-      );
+      expect(() =>
+        strictMastraReplayValue(value, "input", isCredentialKeyName),
+      ).toThrow(RecordedSensitiveKeyError);
+      expect(strictMastraReplayValue(value)).toEqual(value);
       const converted = boundedRecorderConversion(value, "tool input");
       expect(converted.lossy).toBe(true);
       expect(JSON.stringify(converted.value)).not.toContain("test-value");
@@ -238,16 +241,32 @@ describe("credential keys", () => {
     ["a suffixed pagination token", { pageTokenValue: "abc", sortKeyStr: "x" }],
     ["a keyboard layout", { keyboardLayout: "us", keyboard_layout_str: "us" }],
   ])("keeps %s", (_name, value) => {
-    expect(strictMastraReplayValue(value)).toEqual(value);
+    expect(
+      strictMastraReplayValue(value, "input", isCredentialKeyName),
+    ).toEqual(value);
   });
 });
 
 describe("application key policy", () => {
   const value = { resultToken: "test-value", notes: "test-note" };
 
+  it("records every key name without isSecretKey", () => {
+    const isSecretKey = createSecretKeyClassifier();
+    const credentials = { accessToken: "x", client_secret: "y", ...value };
+    expect(isSecretKey("accessToken")).toBe(false);
+    expect(strictMastraReplayValue(credentials, "input", isSecretKey)).toEqual(
+      credentials,
+    );
+    expect(mastraReplayToolConversion(credentials, "tool output")).toEqual({
+      lossy: false,
+      value: credentials,
+    });
+  });
+
   it("exempts listed keys in any spelling of the same words", () => {
     const isSecretKey = createSecretKeyClassifier({
       nonSecretKeys: ["result_token"],
+      isSecretKey: isCredentialKeyName,
     });
     expect(strictMastraReplayValue(value, "input", isSecretKey)).toEqual(value);
     expect(() =>
@@ -285,8 +304,13 @@ describe("application key policy", () => {
 
   it.each([
     ["an authorization key", { authorization: "Bearer test-value" }],
+    ["a proxy authorization key", { "Proxy-Authorization": "test-value" }],
+    ["a cookie key", { cookie: "session=test-value" }],
+    ["a set-cookie key", { "set-cookie": ["session=test-value"] }],
     ["a headers object", { headers: { "x-custom": "test-value" } }],
+    ["an abort signal", { abortSignal: "test-value" }],
   ])("still hides %s when every name is allowed", (_name, hard) => {
+    expect(Object.keys(hard).every(isTransportKeyName)).toBe(true);
     const allowAll = () => false;
     expect(() => strictMastraReplayValue(hard, "input", allowAll)).toThrow(
       RecordedSensitiveKeyError,

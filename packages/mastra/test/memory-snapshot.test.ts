@@ -115,7 +115,7 @@ it.each(["version", "hash", "missing", "inflight"])(
 );
 
 it.each([
-  { apiKey: "private-value" },
+  { authorization: "private-value" },
   { callback: () => "live" },
   { value: "a".repeat(16_777_216) },
   { value: new Map([["key", "value"]]) },
@@ -310,7 +310,7 @@ it("finalizes a separate version-3 envelope with an ordered OM tape", async () =
     { phase: "observation", ordinal: 0, output: "remember" },
   ]);
   expect(() =>
-    finalizeMemoryReplayEnvelope(provisional, [{ token: "secret" }]),
+    finalizeMemoryReplayEnvelope(provisional, [{ cookie: "secret" }]),
   ).toThrow();
 });
 

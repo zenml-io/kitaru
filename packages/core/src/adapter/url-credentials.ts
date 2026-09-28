@@ -186,15 +186,23 @@ export function isCredentialKeyName(name: string): boolean {
 /** Decides whether an object key in recorded application data names a secret. */
 export type SecretKeyClassifier = (key: string) => boolean;
 
-/** How an application overrides the built-in credential key names. */
+/** Which object keys in recorded application data an application treats as secrets. */
 export interface SecretKeyOptions {
   /**
    * Keys that never count as secrets by name. A listed name also matches
    * other spellings of the same words, so `resultToken` covers `result_token`.
    */
   nonSecretKeys?: readonly string[];
-  /** Replaces the built-in key names for every key not in `nonSecretKeys`. */
+  /**
+   * Names the keys that hold secrets, for every key not in `nonSecretKeys`.
+   * Without it, no key is a secret by its name alone.
+   */
   isSecretKey?: SecretKeyClassifier;
+}
+
+/** Treat no key as a secret by its name alone. */
+export function isNeverSecretKey(): boolean {
+  return false;
 }
 
 function getNormalizedKeyName(name: string): string {
@@ -205,7 +213,9 @@ function getNormalizedKeyName(name: string): string {
  * Build the key-name check for recorded application data.
  *
  * A key in `nonSecretKeys` is never a secret. Every other key is a secret
- * when `isSecretKey` says so, or, without it, when `isCredentialKeyName` does.
+ * when `isSecretKey` says so; without `isSecretKey`, no key is. Pass
+ * `isSecretKey: isCredentialKeyName` to treat credential-looking names such
+ * as `accessToken` or `client_secret` as secrets.
  */
 export function createSecretKeyClassifier(
   options: SecretKeyOptions = {},
@@ -221,7 +231,7 @@ export function createSecretKeyClassifier(
   if (isSecretKey !== undefined && typeof isSecretKey !== "function")
     throw new TypeError("isSecretKey must be a function");
   const exempt = new Set(nonSecretKeys.map(getNormalizedKeyName));
-  const decide = isSecretKey ?? isCredentialKeyName;
+  const decide = isSecretKey ?? isNeverSecretKey;
   if (exempt.size === 0) return decide;
   return (key) => !exempt.has(getNormalizedKeyName(key)) && decide(key);
 }

@@ -14,6 +14,7 @@ import {
   boundMastraReplayEvidence,
   containsUrlCredentials,
   degradedMastraReplayEvidence,
+  isTransportKeyName,
   MAX_MASTRA_REPLAY_ITEMS,
   MAX_MASTRA_REPLAY_JSON_BYTES,
   MastraReplayBudgetError,
@@ -877,8 +878,7 @@ function validateConfiguration(
     if (Array.isArray(value)) return value.some(containsTransport);
     if (!isRecord(value)) return false;
     return Object.entries(value).some(
-      ([key, item]) =>
-        /^(headers|abortsignal)$/i.test(key) || containsTransport(item),
+      ([key, item]) => isTransportKeyName(key) || containsTransport(item),
     );
   }
   requireValue(

@@ -63,10 +63,10 @@ it("keeps a tool result past the tool recorder's bounds whole on the replay budg
     lossy: false,
     value: rows,
   });
-  // Credentials are still redacted, and limits the application set apply.
+  // Transport keys are still redacted, and limits the application set apply.
   expect(
-    mastraReplayToolConversion({ rows, token: "secret" }, "tool output"),
-  ).toMatchObject({ lossy: true, value: { rows, token: "[redacted]" } });
+    mastraReplayToolConversion({ rows, cookie: "secret" }, "tool output"),
+  ).toMatchObject({ lossy: true, value: { rows, cookie: "[redacted]" } });
   expect(
     mastraReplayToolConversion(rows, "tool output", { maxItems: 100 }).lossy,
   ).toBe(true);

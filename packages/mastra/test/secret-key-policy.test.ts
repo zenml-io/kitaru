@@ -2,11 +2,12 @@ import { InMemoryStore } from "@mastra/core/storage";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
 import { Memory } from "@mastra/memory";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod/v4";
 import {
   createMemoryReplayAgent,
   createProcessLocalMemoryAccess,
+  isCredentialKeyName,
 } from "../src/memory.js";
 import type { MemoryReplayAgentOptions } from "../src/stateful-agent.js";
 import {
@@ -32,10 +33,14 @@ afterEach(async () => {
   for (const store of stores.splice(0)) await store.close();
 });
 
-/** A baseline adapter whose actor calls `search` once, which returns `result`. */
+/**
+ * A baseline adapter whose actor calls `search` once with `toolInput`, and
+ * `search` returns `result`.
+ */
 async function setup(
   result: Record<string, unknown>,
   adapter: Partial<MemoryReplayAgentOptions> = {},
+  toolInput: Record<string, unknown> = { query: "shoes" },
 ) {
   const api = installTestApi();
   const store = new InMemoryStore();
@@ -76,7 +81,7 @@ async function setup(
                 type: "tool-call",
                 toolCallId: `search-${calls}`,
                 toolName: "search",
-                input: JSON.stringify({ query: "shoes" }),
+                input: JSON.stringify(toolInput),
               },
             ],
             "tool-calls",
@@ -95,7 +100,7 @@ async function setup(
         search: createTool({
           id: "search",
           description: "Search the catalog",
-          inputSchema: z.object({ query: z.string() }),
+          inputSchema: z.record(z.string(), z.unknown()),
           execute: search,
         }),
       },
@@ -155,21 +160,60 @@ const PAGED_RESULT = {
   resultToken: "RESULT_VALUE",
 };
 
-it("refuses a tool result with a credential-like key by default", async () => {
-  const { api, turn } = await setup(PAGED_RESULT);
+it("refuses a tool result with a credential-like key under isCredentialKeyName", async () => {
+  const { api, turn } = await setup(PAGED_RESULT, {
+    isSecretKey: isCredentialKeyName,
+  });
 
   expect(await turn()).toBe("done");
 
   expect(await closingUpdate(api)).toMatchObject({
     status: "completed",
-    metadata: { mastra_replay_state: "ineligible" },
+    metadata: {
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "credential_key_unsupported",
+    },
   });
   expect(JSON.stringify(api.calls)).not.toContain("RESULT_VALUE");
+});
+
+it("records credential-looking application data as it is by default", async () => {
+  const result = {
+    items: ["runner"],
+    resultToken: "RESULT_VALUE",
+    apiKey: "API_KEY_VALUE",
+    client_secret: "CLIENT_SECRET_VALUE",
+  };
+  const { api, turn } = await setup(
+    result,
+    {},
+    {
+      query: "shoes",
+      accessToken: "ACCESS_TOKEN_VALUE",
+    },
+  );
+
+  expect(await turn()).toBe("done");
+
+  expect(await closingUpdate(api)).toMatchObject({
+    status: "completed",
+    metadata: { mastra_replay_state: "eligible" },
+  });
+  const [node] = searchNodes(api);
+  expect(node?.inputs).toEqual({
+    query: "shoes",
+    accessToken: "ACCESS_TOKEN_VALUE",
+  });
+  expect(node?.outputs).toEqual(result);
 });
 
 it.each<[string, Partial<MemoryReplayAgentOptions>]>([
   ["nonSecretKeys", { nonSecretKeys: ["resultToken"] }],
   ["nonSecretKeys in another spelling", { nonSecretKeys: ["result_token"] }],
+  [
+    "nonSecretKeys over isCredentialKeyName",
+    { nonSecretKeys: ["resultToken"], isSecretKey: isCredentialKeyName },
+  ],
   ["isSecretKey", { isSecretKey: () => false }],
 ])("records a key the application allows through %s", async (_, adapter) => {
   const { api, turn } = await setup(PAGED_RESULT, adapter);
@@ -222,21 +266,46 @@ it("refuses a key that the application's isSecretKey names", async () => {
   expect(JSON.stringify(api.calls)).not.toContain("PRIVATE_NOTE");
 });
 
-it.each([
-  ["an authorization key", { authorization: "Bearer PRIVATE_HARD" }],
-  ["a headers object", { headers: { "x-custom": "PRIVATE_HARD" } }],
-])("refuses %s even when isSecretKey allows every key", async (_, result) => {
-  const { api, turn } = await setup(result, { isSecretKey: () => false });
+const HARD_RULE_KEYS = [
+  "authorization",
+  "Proxy-Authorization",
+  "cookie",
+  "Set-Cookie",
+  "headers",
+  "abortSignal",
+];
+const POLICIES: [string, (key: string) => Partial<MemoryReplayAgentOptions>][] =
+  [
+    ["the default policy", () => ({})],
+    ["isSecretKey allowing every key", () => ({ isSecretKey: () => false })],
+    ["isCredentialKeyName", () => ({ isSecretKey: isCredentialKeyName })],
+    ["nonSecretKeys listing the key", (key) => ({ nonSecretKeys: [key] })],
+  ];
 
-  expect(await turn()).toBe("done");
+describe.each(HARD_RULE_KEYS)("a tool payload with a %s key", (key) => {
+  it.each(POLICIES)(
+    "is never uploaded and names the credential under %s",
+    async (_, policy) => {
+      const value = { "x-custom": "PRIVATE_HARD_RESULT" };
+      const { api, turn } = await setup(
+        { items: ["runner"], nested: [{ [key]: value }] },
+        policy(key),
+        { query: "shoes", [key]: "PRIVATE_HARD_ARGUMENT" },
+      );
 
-  expect(await closingUpdate(api)).toMatchObject({
-    metadata: {
-      mastra_replay_state: "ineligible",
-      mastra_replay_reason: "credential_key_unsupported",
+      expect(await turn()).toBe("done");
+
+      expect(await closingUpdate(api)).toMatchObject({
+        status: "completed",
+        metadata: {
+          mastra_replay_state: "ineligible",
+          mastra_replay_reason: "credential_key_unsupported",
+        },
+      });
+      const calls = JSON.stringify(api.calls);
+      expect(calls).not.toContain("PRIVATE_HARD");
     },
-  });
-  expect(JSON.stringify(api.calls)).not.toContain("PRIVATE_HARD");
+  );
 });
 
 it("redacts URL credentials even when isSecretKey allows every key", async () => {

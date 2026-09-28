@@ -77,7 +77,7 @@ describe("adapter replay preparation", () => {
       omTape: [],
     };
     for (const changed of [
-      { ...envelope, requestContext: { token: "secret" } },
+      { ...envelope, requestContext: { authorization: "secret" } },
       { ...envelope, requestContext: { headers: { "x-auth": "secret" } } },
       {
         ...envelope,
