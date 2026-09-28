@@ -2,6 +2,7 @@ import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -14,7 +15,13 @@ import { loadTypescriptPackageMetadata } from "./typescript-packages.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const lowerMastraVersion = "1.51.0";
-const upperMastraVersion = "1.67.0";
+const memoryMastraVersion = "1.67.0";
+const newestMastraVersion = JSON.parse(
+  readFileSync(
+    join(repositoryRoot, "packages/mastra-compat/package.json"),
+    "utf8",
+  ),
+).devDependencies["@mastra/core"];
 
 function parseOutputDirectory(args) {
   if (args.length === 0) {
@@ -508,7 +515,7 @@ function smokeConsumer({ artifactRoot, mastraVersion, npmCache }) {
       npmCache,
       ...tarballs,
       `@mastra/core@${mastraVersion}`,
-      ...(mastraVersion === upperMastraVersion
+      ...(mastraVersion === memoryMastraVersion
         ? ["@mastra/memory@1.30.0"]
         : []),
       "ai@7.0.65",
@@ -535,7 +542,7 @@ function smokeConsumer({ artifactRoot, mastraVersion, npmCache }) {
     consumerRoot,
   );
   run(process.execPath, ["generate.mjs"], consumerRoot);
-  if (mastraVersion === upperMastraVersion) {
+  if (mastraVersion !== lowerMastraVersion) {
     run(
       join(repositoryRoot, "node_modules", ".bin", "tsc"),
       ["-p", "tsconfig.stream.json"],
@@ -543,7 +550,7 @@ function smokeConsumer({ artifactRoot, mastraVersion, npmCache }) {
     );
   }
   run(process.execPath, ["stream.mjs", mastraVersion], consumerRoot);
-  if (mastraVersion === upperMastraVersion) {
+  if (mastraVersion === memoryMastraVersion) {
     copyFileSync(
       join(repositoryRoot, "scripts/fixtures/mastra-memory-smoke.mjs"),
       join(consumerRoot, "memory.mjs"),
@@ -584,16 +591,13 @@ try {
   }
 
   const npmCache = join(smokeRoot, "npm-cache");
-  smokeConsumer({
-    artifactRoot,
-    mastraVersion: lowerMastraVersion,
-    npmCache,
-  });
-  smokeConsumer({
-    artifactRoot,
-    mastraVersion: upperMastraVersion,
-    npmCache,
-  });
+  for (const mastraVersion of [
+    lowerMastraVersion,
+    memoryMastraVersion,
+    newestMastraVersion,
+  ]) {
+    smokeConsumer({ artifactRoot, mastraVersion, npmCache });
+  }
 } finally {
   rmSync(smokeRoot, { force: true, recursive: true });
 }
