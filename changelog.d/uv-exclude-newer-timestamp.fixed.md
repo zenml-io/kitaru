@@ -1,0 +1,2 @@
+- Fixed worker tasks, including replays with the built-in evaluators, failing before the agent ran on uv 0.8.4 through 0.9.16. The worker now passes an absolute timestamp to `--exclude-newer-package` instead of the relative `0 days` duration, which uv only understands from 0.9.17.
+- `kitaru doctor` now reports the installed uv version and warns when it is older than 0.8.4, which is too old for worker tasks to install newly released Kitaru plugins in a project with an `exclude-newer` cutoff.

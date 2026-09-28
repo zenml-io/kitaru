@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tomllib
 import uuid
+from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -115,6 +116,13 @@ def _uv_supports_package_age_exceptions() -> bool:
             "under an exclude-newer cutoff"
         )
     return supported
+
+
+def _get_package_age_cutoff() -> str:
+    """Return the current UTC time as an RFC 3339 exclude-newer cutoff."""
+    # uv accepts relative durations such as "0 days" only from 0.9.17, while
+    # --exclude-newer-package itself exists from 0.8.4 and accepts timestamps.
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class TaskProcess(NamedTuple):
@@ -426,6 +434,9 @@ def get_python_run_argv(
     # a pinned Kitaru plugin and the core release required by that plugin.
     allows_fresh_kitaru = False
     supports_package_age_exceptions: bool | None = None
+    # Read the clock per call so a long-running worker still accepts releases
+    # published after it started.
+    cutoff = _get_package_age_cutoff()
     for dependency in dependencies:
         requirement = Requirement(dependency)
         package = canonicalize_name(requirement.name)
@@ -440,10 +451,10 @@ def get_python_run_argv(
                 supports_package_age_exceptions = _uv_supports_package_age_exceptions()
             if supports_package_age_exceptions:
                 if not allows_fresh_kitaru:
-                    parts.extend(["--exclude-newer-package", "kitaru=0 days"])
+                    parts.extend(["--exclude-newer-package", f"kitaru={cutoff}"])
                     allows_fresh_kitaru = True
                 if package != "kitaru":
-                    parts.extend(["--exclude-newer-package", f"{package}=0 days"])
+                    parts.extend(["--exclude-newer-package", f"{package}={cutoff}"])
         parts.extend(["--with", dependency])
     parts.extend(["python", "-m", module, *args])
     return parts
