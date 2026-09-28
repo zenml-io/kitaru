@@ -1,0 +1,1 @@
+- Support `@mastra/core` 1.68 through 1.71 in the Mastra adapter, including recorded and replayed `Agent.stream()` calls, and develop and test against `@mastra/core` 1.71.0.
