@@ -22,6 +22,8 @@ from typing import Any
 
 import mlflow
 from mlflow.entities import Trace, TraceInfo
+from mlflow.exceptions import MlflowException
+from mlflow.tracing.client import TracingClient
 from pydantic import ConfigDict, Field
 
 from kitaru.api_models.v1.imports import ImportQuery
@@ -144,15 +146,27 @@ def fetch_traces(trace_ids: list[str]) -> list[Trace]:
     Args:
         trace_ids: Trace ids to fetch.
 
+    Raises:
+        MlflowException: The tracking server failed for a reason other than
+            a missing trace.
+
     Returns:
         Traces in the given order. A trace the server does not find is
         omitted.
     """
-    return [
-        trace
-        for trace_id in trace_ids
-        if (trace := mlflow.get_trace(trace_id, silent=True)) is not None
-    ]
+    # `mlflow.get_trace` returns None for every server error, including
+    # authentication and network failures, which would import a session
+    # without some of its traces for good. The client it wraps raises, so
+    # only a confirmed missing trace is skipped.
+    client = TracingClient()
+    traces: list[Trace] = []
+    for trace_id in trace_ids:
+        try:
+            traces.append(client.get_trace(trace_id))
+        except MlflowException as exc:
+            if exc.error_code != "RESOURCE_DOES_NOT_EXIST":
+                raise
+    return traces
 
 
 def serialize_traces(traces: list[Trace]) -> bytes:

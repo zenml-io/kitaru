@@ -97,7 +97,7 @@ Omitting FILE and setting `--since` selects an API import: the worker searches t
 
 | Query key | Meaning |
 | --- | --- |
-| `trace_ids` | MLflow trace ids to fetch. When present, exactly those traces are fetched and the time window is ignored. A trace the server does not find is skipped. |
+| `trace_ids` | MLflow trace ids to fetch. When present, exactly those traces are fetched and the time window is ignored. A trace the server reports as not found is skipped. |
 | `since` | Timezone-aware ISO 8601 datetime, lower bound of trace start time. Required when `trace_ids` is absent. |
 | `until` | Timezone-aware ISO 8601 datetime, upper bound of trace start time. Defaults to now. |
 | `experiment_ids` | Experiments a time window searches. Defaults to `MLFLOW_EXPERIMENT_ID`; a time window with neither fails. |
@@ -113,7 +113,7 @@ The worker installs the package's `api` extra for an API import, which carries t
 | `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD` | Credentials, for a server running MLflow's basic authentication. |
 | `MLFLOW_EXPERIMENT_ID` | Default experiment for time-window imports. |
 
-Without a connection, the worker's own environment supplies them, and only a worker started with `--selector kitaru/requires-credentials=mlflow` claims the task. A window lists matching traces first, then fetches them in batches that never split a session, so each session arrives complete. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way. Batches follow the default `mlflow.trace.session` grouping, because the fetch does not see importer params. With a custom `join_on`, a session whose traces land in different batches keeps the turns, outputs, and status from its first batch and only gains nodes from later ones, so prefer a file import for custom grouping over a large window.
+Without a connection, the worker's own environment supplies them, and only a worker started with `--selector kitaru/requires-credentials=mlflow` claims the task. A window lists matching traces first, then fetches them in batches that never split a session, so each session arrives complete. Any other tracking server error, such as a rejected token or an unreachable server, fails the import task instead of importing sessions with traces missing, so rerunning the import is safe. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way. Batches follow the default `mlflow.trace.session` grouping, because the fetch does not see importer params. With a custom `join_on`, a session whose traces land in different batches keeps the turns, outputs, and status from its first batch and only gains nodes from later ones, so prefer a file import for custom grouping over a large window.
 
 ## What a trace becomes
 

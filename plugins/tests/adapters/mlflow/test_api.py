@@ -23,7 +23,10 @@ from typing import Any
 import mlflow
 import pytest
 from mlflow.entities import Trace, TraceData
+from mlflow.exceptions import MlflowException
+from mlflow.protos.databricks_pb2 import INTERNAL_ERROR, RESOURCE_DOES_NOT_EXIST
 
+import kitaru_mlflow_importer.api as api_module
 from kitaru.task.importer import ImportedSession
 from kitaru_mlflow_importer.api import fetch, serialize_traces
 from kitaru_mlflow_importer.importer import importer, parse
@@ -48,6 +51,7 @@ class FakeMlflow:
     traces: dict[str, Trace]
     searches: list[dict[str, Any]] = field(default_factory=list)
     gets: list[str] = field(default_factory=list)
+    failing_ids: set[str] = field(default_factory=set)
 
     def search_traces(self, **kwargs: Any) -> list[Trace]:
         """Return every stored trace oldest first, without spans when asked."""
@@ -57,10 +61,17 @@ class FakeMlflow:
             return ordered
         return [Trace(info=t.info, data=TraceData(spans=[])) for t in ordered]
 
-    def get_trace(self, trace_id: str, silent: bool = False) -> Trace | None:
-        """Return one stored trace, None when absent."""
+    def get_trace(self, trace_id: str) -> Trace:
+        """Return one stored trace, raising as the tracking client does."""
         self.gets.append(trace_id)
-        return self.traces.get(trace_id)
+        if trace_id in self.failing_ids:
+            raise MlflowException("server unavailable", error_code=INTERNAL_ERROR)
+        if trace_id not in self.traces:
+            raise MlflowException(
+                f"Trace with ID '{trace_id}' not found.",
+                error_code=RESOURCE_DOES_NOT_EXIST,
+            )
+        return self.traces[trace_id]
 
 
 def _load_traces() -> list[dict[str, Any]]:
@@ -83,7 +94,7 @@ def _install(
         {doc["info"]["trace_id"]: Trace.from_dict(doc) for doc in documents}
     )
     monkeypatch.setattr(mlflow, "search_traces", fake.search_traces)
-    monkeypatch.setattr(mlflow, "get_trace", fake.get_trace)
+    monkeypatch.setattr(api_module, "TracingClient", lambda: fake)
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow.invalid")
     monkeypatch.setenv("MLFLOW_EXPERIMENT_ID", "1")
     return fake
@@ -234,3 +245,15 @@ def test_serialized_traces_parse_like_the_cli_export() -> None:
     assert list(parse(serialize_traces(traces), {})) == list(
         parse(json.dumps({"traces": documents}).encode(), {})
     )
+
+
+async def test_server_errors_abort_the_fetch_instead_of_dropping_traces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail a fetch whose trace retrieval fails rather than import a partial session."""
+    recorded = _load_traces()
+    fake = _install(monkeypatch, recorded)
+    fake.failing_ids = {recorded[0]["info"]["trace_id"]}
+
+    with pytest.raises(MlflowException, match="server unavailable"):
+        await collect_payloads(fetch({"since": SINCE.isoformat()}))
