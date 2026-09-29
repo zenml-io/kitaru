@@ -29,7 +29,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           python-version: '3.12'
           enable-cache: false
@@ -111,6 +111,8 @@ jobs:
         run: |
           sample_data=src/kitaru/server/application/services/sample_data.json
           gzip -9 -n -c "$sample_data" > "$sample_data.gz"
+      - name: Verify bundled MCP docs index
+        run: uv run --no-project python scripts/build_mcp_docs_index.py --check
       - name: Build Kitaru Python distribution
         run: |
           uv build --out-dir package-dist
@@ -409,7 +411,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           python-version: '3.12'
           enable-cache: false

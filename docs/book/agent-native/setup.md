@@ -60,6 +60,7 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_activity_read` | read-only | Read sessions, replays, evaluations, runs, jobs, and their children |
 | `kitaru_review_read` | read-only | Read [investigations and annotations](../concepts/investigations.md) |
 | `kitaru_connection_read` | read-only | Read [provider connections](../guides/provider-connections.md) without their secret values |
+| `kitaru_docs_search` | read-only | Search bundled Kitaru guides and return short excerpts with links to the published pages |
 | `kitaru_failure_matrix` | read-only | Show where a group of sessions first goes wrong, as an interactive [transition failure matrix](#transition-failure-matrix) |
 | `kitaru_failure_matrix_cell` | read-only | List the sessions behind one matrix cell; the matrix view calls it, and hosts that support MCP Apps hide it from the assistant |
 | `kitaru_cohorts_manage` | standard | Create or update cohorts and cohort versions |
@@ -73,6 +74,8 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_delete` | destructive | Delete a cohort, experiment, investigation, annotation, evaluator, version, connection, run, or tag; unlink an exact tag-resource tuple |
 
 Start assistants in `read-only`, move to `standard` when you want them building cohorts and starting runs, and reserve `destructive` for sessions where you are watching closely.
+
+Use `kitaru_docs_search` when the assistant needs to check how a Kitaru feature works. It searches the guides bundled with the installed Kitaru version and returns matching sections with published documentation URLs. Open the linked page when current behavior matters, since the live docs may have changed since the package was released. Exact session and experiment-run reads also return an `inspect` dashboard link, and exact investigation reads return a `review` link when the selected server reports a dashboard. These links point to the same record the tool returned and still require normal dashboard access.
 
 ### Transition failure matrix
 

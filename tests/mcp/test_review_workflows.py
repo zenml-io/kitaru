@@ -47,7 +47,7 @@ from kitaru.mcp.models.analyzers import (
     AnalyzerVersionCreate,
     AnalyzerVersionUpdate,
 )
-from kitaru.mcp.models.common import PageData
+from kitaru.mcp.models.common import PageData, ToolSuccessPayload
 from kitaru.mcp.models.evaluators import (
     EvaluatorCreate,
     EvaluatorsManageRequest,
@@ -195,7 +195,7 @@ async def test_review_sessions_read_is_one_ordered_sdk_page() -> None:
 async def test_review_get_routes_to_the_selected_resource(kind: str) -> None:
     item_id = uuid.uuid4()
     calls: list[str] = []
-    investigation = SimpleNamespace(id=item_id, kind="investigation")
+    investigation = _investigation().model_copy(update={"id": item_id})
     annotation = SimpleNamespace(id=item_id, kind="annotation")
     insight = SimpleNamespace(id=item_id, kind="insight")
 
@@ -214,7 +214,12 @@ async def test_review_get_routes_to_the_selected_resource(kind: str) -> None:
         calls.append("insight")
         return insight
 
+    async def get_info() -> ServerInfoResponse:
+        return ServerInfoResponse(version="0.0.0", auth_scheme=AuthScheme.LOCAL)
+
     client = SimpleNamespace(
+        base_url="https://api.example.com",
+        info=SimpleNamespace(get=get_info),
         investigations=SimpleNamespace(get=get_investigation),
         annotations=SimpleNamespace(get=get_annotation),
         insights=SimpleNamespace(get=get_insight),
@@ -228,7 +233,12 @@ async def test_review_get_routes_to_the_selected_resource(kind: str) -> None:
         "annotation": annotation,
         "insight": insight,
     }[kind]
-    assert result is expected
+    if kind == "investigation":
+        assert isinstance(result, ToolSuccessPayload)
+        assert result.data is expected
+        assert result.links == {}
+    else:
+        assert result is expected
     assert calls == [kind]
 
 
@@ -712,6 +722,52 @@ async def test_investigation_create_returns_dashboard_review_link() -> None:
         )
     }
     assert result.structured_content["warnings"] == []
+
+
+async def test_investigation_get_returns_dashboard_review_link() -> None:
+    investigation = _investigation()
+
+    async def get_investigation(_id: uuid.UUID) -> InvestigationResponse:
+        assert _id == investigation.id
+        return investigation
+
+    async def get_info() -> ServerInfoResponse:
+        return ServerInfoResponse(
+            version="0.0.0",
+            auth_scheme=AuthScheme.CONTROL_PLANE,
+            dashboard_url="https://cloud.example.com/workspaces/ws-1/",
+        )
+
+    client = SimpleNamespace(
+        base_url="https://api.example.com",
+        investigations=SimpleNamespace(get=get_investigation),
+        info=SimpleNamespace(get=get_info),
+    )
+    server, context = _get_context(client, CapabilityMode.READ_ONLY)
+    result = await server.call_tool(
+        "kitaru_review_read",
+        {
+            "request": {
+                "operation": "get",
+                "kind": "investigation",
+                "id": str(investigation.id),
+            }
+        },
+        context,
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.structured_content is not None
+    assert result.structured_content["data"]["id"] == str(investigation.id)
+    assert result.structured_content["links"] == {
+        "review": (
+            "https://cloud.example.com/workspaces/ws-1"
+            f"/agents/{investigation.agent_id}/investigations/{investigation.id}/review"
+        )
+    }
+    assert json.loads(cast(TextContent, result.content[0]).text) == (
+        result.structured_content
+    )
 
 
 @pytest.mark.parametrize(

@@ -15,6 +15,7 @@
 
 import json
 import os
+import subprocess
 from types import SimpleNamespace
 from typing import Any
 
@@ -419,6 +420,40 @@ async def test_doctor_worker_extra_hint_names_cli_and_worker(
     )
     assert worker_extra["status"] == "warn"
     assert worker_extra["detail"] == "Install kitaru[cli,worker] to run workers."
+
+
+@pytest.mark.parametrize(
+    ("stdout", "expected_status", "expected_detail"),
+    [
+        ("uv 0.11.28 (ebf0f43d7 2026-07-07)\n", "pass", "uv 0.11.28 at /bin/uv"),
+        ("uv 0.8.4\n", "pass", "uv 0.8.4 at /bin/uv"),
+        ("uv 0.8.3\n", "warn", "uv 0.8.3 at /bin/uv is older than 0.8.4."),
+        ("", "warn", "Could not read the uv version from /bin/uv."),
+    ],
+)
+async def test_doctor_warns_about_uv_too_old_for_worker_tasks(
+    tmp_path, monkeypatch, stdout: str, expected_status: str, expected_detail: str
+) -> None:
+    """Doctor warns when uv cannot install fresh Kitaru plugins under a cutoff."""
+    monkeypatch.delenv("KITARU_API_URL", raising=False)
+    monkeypatch.setattr(
+        diagnostics.shutil, "which", lambda name: "/bin/uv" if name == "uv" else None
+    )
+    monkeypatch.setattr(
+        diagnostics.subprocess,
+        "run",
+        lambda command, **_: subprocess.CompletedProcess(command, 0, stdout, ""),
+    )
+
+    result = await diagnostics.doctor(
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+        explicit_server=None,
+        timeout=0.1,
+    )
+
+    uv_check = next(check for check in result.item["checks"] if check["name"] == "uv")
+    assert uv_check["status"] == expected_status
+    assert uv_check["detail"].startswith(expected_detail)
 
 
 async def test_doctor_reports_missing_kitaru_skills_without_failing(
