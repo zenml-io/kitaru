@@ -27,6 +27,7 @@ INVENTORY_PATH = REPO_ROOT / "release" / "release-units.toml"
 
 EXPECTED_UNITS = {
     "kitaru": "kitaru",
+    "atif-importer": "kitaru-atif-importer",
     "braintrust-importer": "kitaru-braintrust-importer",
     "claude-agent-sdk": "kitaru-claude-agent-sdk",
     "evaluator": "kitaru-evaluator",
