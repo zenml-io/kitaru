@@ -25,6 +25,10 @@ export interface OMResultEntry {
   output: JsonValue;
   /** The provider call failed, so `output` is null. Mastra may have retried it. */
   failed?: true;
+  /** How many actor steps had started when the result arrived. */
+  actorStepsAtResult?: number;
+  /** Milliseconds from the call's start until its result arrived. */
+  durationMs?: number;
 }
 
 /** How a replay's OM calls departed from the recorded calls. */
@@ -300,6 +304,13 @@ interface RecordedCall {
   used: boolean;
 }
 
+function isOptionalCount(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (typeof value === "number" && Number.isFinite(value) && value >= 0)
+  );
+}
+
 function isRecordedEntry(value: unknown): value is OMResultEntry {
   if (typeof value !== "object" || value === null) return false;
   const entry = value as Record<string, unknown>;
@@ -308,7 +319,9 @@ function isRecordedEntry(value: unknown): value is OMResultEntry {
     (entry.method === "doGenerate" || entry.method === "doStream") &&
     typeof entry.ordinal === "number" &&
     typeof entry.inputFingerprint === "string" &&
-    (entry.failed === undefined || entry.failed === true)
+    (entry.failed === undefined || entry.failed === true) &&
+    isOptionalCount(entry.actorStepsAtResult) &&
+    isOptionalCount(entry.durationMs)
   );
 }
 
@@ -390,6 +403,13 @@ async function withReplayFileUrls(
  *   produced yet. A buffered observation therefore observes nothing, which
  *   leaves its messages in context as production had them while its observer
  *   ran, and a buffered reflection ends without a result.
+ * - A buffered call that matches its recorded call returns that result only
+ *   once the actor has started as many steps as it had when production's
+ *   result arrived, or once production's call duration has passed. Mastra
+ *   starts no new buffer round while one is running, so an instant result
+ *   would let it start rounds production never ran. Each such round seals
+ *   the messages it covers, which splits later steps into more messages and
+ *   raises the pending token count that decides when OM observes.
  * - A blocking call takes the next unused recorded call of its phase. With
  *   none left, replay fails, because an empty observation would drop the
  *   observed messages from the actor's context.
@@ -427,6 +447,34 @@ export function createOMResultTape(
   let next = 0;
   let served = 0;
   let incomplete = false;
+  let actorSteps = 0;
+  const holds = new Set<{ steps: number; release: () => void }>();
+
+  /** Resolve once `steps` actor steps have started, after `maxMs` at most. */
+  function waitForActorSteps(steps: number, maxMs: number): Promise<void> {
+    if (actorSteps >= steps) return Promise.resolve();
+    return new Promise((resolve) => {
+      const hold = {
+        steps,
+        release() {
+          clearTimeout(timer);
+          holds.delete(hold);
+          resolve();
+        },
+      };
+      // A replay that diverged may wait on this round at a step production
+      // never reached, so it waits no longer than production's observer did.
+      const timer = setTimeout(hold.release, maxMs);
+      timer.unref?.();
+      holds.add(hold);
+    });
+  }
+
+  /** Count an actor step that is about to call its model. */
+  function beginActorStep(): void {
+    actorSteps += 1;
+    for (const hold of [...holds]) if (actorSteps >= hold.steps) hold.release();
+  }
 
   function failCapture(): void {
     incomplete = true;
@@ -540,7 +588,19 @@ export function createOMResultTape(
     const matching = calls.find(
       (candidate) => !candidate.used && candidate.fingerprint === fingerprint,
     );
-    if (matching) return use(matching, method);
+    if (matching) {
+      const result = use(matching, method);
+      const { actorStepsAtResult, durationMs } = matching.result ?? {};
+      if (
+        !buffered ||
+        actorStepsAtResult === undefined ||
+        durationMs === undefined
+      )
+        return result;
+      return waitForActorSteps(actorStepsAtResult, durationMs).then(
+        () => result,
+      );
+    }
     const unused = calls.find((candidate) => !candidate.used);
     if (buffered) return skipBuffered(phase, method, calls, Boolean(unused));
     if (!unused) {
@@ -567,11 +627,19 @@ export function createOMResultTape(
     phase: OMPhase,
     method: OMMethod,
     output: JsonValue | undefined,
+    startedAt: number,
   ): void {
     entries[ordinal] =
       output === undefined
         ? { phase, ordinal, method, output: null, failed: true }
-        : { phase, ordinal, method, output };
+        : {
+            phase,
+            ordinal,
+            method,
+            output,
+            actorStepsAtResult: actorSteps,
+            durationMs: Math.round(performance.now() - startedAt),
+          };
   }
 
   /**
@@ -792,10 +860,11 @@ export function createOMResultTape(
         return async (input: unknown) => {
           const ordinal = next++;
           inputs[ordinal] = input;
+          const startedAt = performance.now();
           return callAndCapture(
             () => invoke(input),
             method,
-            (output) => record(ordinal, phase, method, output),
+            (output) => record(ordinal, phase, method, output, startedAt),
             failCapture,
           );
         };
@@ -806,12 +875,14 @@ export function createOMResultTape(
   }
 
   /**
-   * Wait for started calls and return the recorded entries.
+   * Release held buffered results, wait for started calls, and return the
+   * recorded entries.
    *
    * A replay fails when a call had no recorded result to use; the other
    * departures are counted in `divergence`.
    */
   async function finish(): Promise<OMTapeResult> {
+    for (const hold of [...holds]) hold.release();
     while (pending.size > 0) await Promise.all([...pending]);
     if (recorded) {
       if (malformed) failClosed("malformed recorded tape");
@@ -867,5 +938,5 @@ export function createOMResultTape(
     };
   }
 
-  return { instrument, finish };
+  return { instrument, beginActorStep, finish };
 }

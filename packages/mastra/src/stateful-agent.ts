@@ -1440,6 +1440,7 @@ export function createMemoryReplayAgent(
                 "file_url_sent_to_model",
               );
           }
+          omTape.beginActorStep();
           capture.beginStep({
             stepNumber: args.stepNumber,
             messageList: args.messageList,
@@ -1740,6 +1741,12 @@ export function createMemoryReplayAgent(
                   inputFingerprint: entry.inputFingerprint,
                   output: entry.output,
                   ...(entry.failed ? { failed: true } : {}),
+                  ...(entry.actorStepsAtResult === undefined
+                    ? {}
+                    : { actorStepsAtResult: entry.actorStepsAtResult }),
+                  ...(entry.durationMs === undefined
+                    ? {}
+                    : { durationMs: entry.durationMs }),
                 })),
                 sanitizer.replace,
                 attachmentTokens?.counts(),

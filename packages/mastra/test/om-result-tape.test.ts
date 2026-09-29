@@ -298,6 +298,94 @@ it("leaves buffered calls outside the recorded windows unobserved", async () => 
   });
 });
 
+it("records how many actor steps had started when an OM result arrived", async () => {
+  const tape = createOMResultTape(undefined, () => {
+    throw new Error("unexpected incomplete result");
+  });
+  let finishStream!: () => void;
+  const observer = tape.instrument(
+    {
+      doStream: async (_input: unknown) => ({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "text-delta", delta: "observed" });
+            finishStream = () => controller.close();
+          },
+        }),
+      }),
+    },
+    "observer",
+  );
+  tape.beginActorStep();
+  const output = await observer.doStream({ prompt: "message 1" });
+  // The actor keeps reading while the observer's stream is still open.
+  tape.beginActorStep();
+  tape.beginActorStep();
+  finishStream();
+  await collect(output.stream);
+  const [entry] = (await tape.finish()).entries;
+  expect(entry?.actorStepsAtResult).toBe(3);
+  expect(entry?.durationMs).toBeGreaterThanOrEqual(0);
+});
+
+it("holds a buffered result until the actor reaches production's step", async () => {
+  const [entry] = await recordCalls([
+    { phase: "observer", prompt: "message 1" },
+  ]);
+  if (!entry) throw new Error("Missing recorded entry");
+  const replay = createOMResultTape(
+    [{ ...entry, actorStepsAtResult: 2, durationMs: 60_000 }],
+    () => {},
+    { isBuffered: () => true },
+  );
+  const observer = replay.instrument(
+    answering(() => "live"),
+    "observer",
+  );
+  let settled = false;
+  const result = observer.doStream({ prompt: "message 1" }).finally(() => {
+    settled = true;
+  });
+  replay.beginActorStep();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  // Mastra starts no buffer round while this one is still running.
+  expect(settled).toBe(false);
+  replay.beginActorStep();
+  expect(await text(await result)).toBe("observed message 1");
+});
+
+it("releases a held buffered result once production's call duration has passed", async () => {
+  const [entry] = await recordCalls([
+    { phase: "observer", prompt: "message 1" },
+  ]);
+  if (!entry) throw new Error("Missing recorded entry");
+  vi.useFakeTimers();
+  try {
+    const replay = createOMResultTape(
+      [{ ...entry, actorStepsAtResult: 5, durationMs: 300 }],
+      () => {},
+      { isBuffered: () => true },
+    );
+    const observer = replay.instrument(
+      answering(() => "live"),
+      "observer",
+    );
+    let settled = false;
+    const result = observer.doStream({ prompt: "message 1" }).finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(299);
+    expect(settled).toBe(false);
+    // A replay that diverged never reaches the step, and Mastra may be
+    // waiting on this round.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(true);
+    expect(await text(await result)).toBe("observed message 1");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("fails a blocking call closed once its phase's recorded results are used", async () => {
   const entries = await recordCalls([{ phase: "observer", prompt: "first" }]);
   const live = answering(() => "live");

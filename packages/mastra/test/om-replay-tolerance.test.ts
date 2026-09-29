@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { InMemoryStore } from "@mastra/core/storage";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
@@ -273,17 +274,17 @@ async function replay(
   return fixture.api.calls.slice(start);
 }
 
-it("replays a baseline whose slow observer merged buffer rounds without live OM calls", async () => {
+/**
+ * Record a turn whose slow observer is still running while the actor reads
+ * more evidence, then replay it with an instant observer.
+ */
+async function replaySlowObserverBaseline(evidenceRepeats: number) {
   let delayMs = 300;
   const fixture = setup({
     observation: { messageTokens: 1200, bufferTokens: 0.2 },
     observe: () => new Promise((resolve) => setTimeout(resolve, delayMs)),
     toolSteps: () => 5,
-    // Keep the last step's pending messages about 100 tokens past
-    // `messageTokens` on every tested Mastra. The instant replay runs more
-    // buffer rounds, and their markers add about 20 tokens, so a baseline
-    // just under the threshold would observe only in the replay.
-    evidenceRepeats: 34,
+    evidenceRepeats,
   });
   const baseline = await recordBaseline(fixture);
   expect(baseline?.metadata).toMatchObject({ mastra_replay_state: "eligible" });
@@ -298,18 +299,55 @@ it("replays a baseline whose slow observer merged buffer rounds without live OM 
   const calls = await replay(fixture, baseline?.inputs);
   const [closed] = patches(calls);
   expect(closed?.body).toMatchObject({ status: "completed" });
-  // The instant replay starts buffer rounds earlier than the slow baseline
-  // did. None of them may show the actor evidence it has not read yet.
+  // The instant replay may not start buffer rounds the slow baseline never
+  // ran, and none of its rounds may show evidence the actor has not read yet.
   expect(contextOf(fixture.actorPrompts)).toEqual(baselineContext);
   const divergence = (
     closed?.body?.metadata as
       | { mastra_om_divergence?: { unused_results: number } }
       | undefined
   )?.mastra_om_divergence;
-  expect(divergence?.unused_results ?? 0).toBe(0);
+  expect(divergence).toBeUndefined();
   expect(fixture.runtime.observer.calls).toHaveLength(recorded);
   expect(fixture.runtime.reflector.calls).toHaveLength(0);
   await fixture.runtime.store.close();
+  return baselineContext;
+}
+
+// The evidence size at which the baseline's last step ends within about 20
+// tokens under `messageTokens`, by Mastra core minor version. Buffer rounds
+// the instant replay started early used to push it over.
+const JUST_UNDER_THRESHOLD: Record<string, number> = {
+  "1.67": 29,
+  "1.68": 30,
+  "1.69": 30,
+  "1.70": 30,
+  "1.71": 30,
+};
+
+function getMastraCoreMinor(): string {
+  // Compatibility packages answer this lookup with the Mastra they install.
+  const adapterRequire = createRequire(
+    new URL("../src/memory-replay.ts", import.meta.url),
+  );
+  const { version } = adapterRequire("@mastra/core/package.json") as {
+    version: string;
+  };
+  return version.split(".").slice(0, 2).join(".");
+}
+
+it("replays a baseline whose slow observer merged buffer rounds without live OM calls", async () => {
+  await replaySlowObserverBaseline(34);
+});
+
+it("keeps a baseline that ended just under the observation threshold unobserved in replay", async () => {
+  const minor = getMastraCoreMinor();
+  const evidenceRepeats = JUST_UNDER_THRESHOLD[minor];
+  if (evidenceRepeats === undefined)
+    throw new Error(`Calibrate JUST_UNDER_THRESHOLD for Mastra ${minor}.`);
+  const baselineContext = await replaySlowObserverBaseline(evidenceRepeats);
+  // The baseline's last step read every evidence unobserved but the first.
+  expect(baselineContext.at(-1)).toBe("raw=2,3,4,5 observed=1");
 });
 
 it("fails a replay closed when a blocking observation has no recorded result left", async () => {
