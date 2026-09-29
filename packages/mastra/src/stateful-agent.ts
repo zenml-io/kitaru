@@ -70,6 +70,7 @@ import {
   type MissingOMResults,
   type OMLiveCall,
   type OMResultEntry,
+  toStoredOMEntry,
 } from "./om-result-tape.js";
 import { describeProviderError } from "./provider-errors.js";
 import { createRecordedClock } from "./replay-clock.js";
@@ -1734,20 +1735,7 @@ export function createMemoryReplayAgent(
             return {
               [MEMORY_REPLAY_KEY]: finalizeMemoryReplayEnvelope(
                 recaptured.envelope,
-                omResults.map((entry) => ({
-                  phase: entry.phase,
-                  ordinal: entry.ordinal,
-                  method: entry.method,
-                  inputFingerprint: entry.inputFingerprint,
-                  output: entry.output,
-                  ...(entry.failed ? { failed: true } : {}),
-                  ...(entry.actorStepsAtResult === undefined
-                    ? {}
-                    : { actorStepsAtResult: entry.actorStepsAtResult }),
-                  ...(entry.durationMs === undefined
-                    ? {}
-                    : { durationMs: entry.durationMs }),
-                })),
+                omResults.map(toStoredOMEntry),
                 sanitizer.replace,
                 attachmentTokens?.counts(),
                 // A replay's own input keeps files recorded inline before

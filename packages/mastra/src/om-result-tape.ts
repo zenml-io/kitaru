@@ -6,6 +6,7 @@ import {
   redactUrlCredentials,
   type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
+import { isCount } from "./attachment-tokens.js";
 import { decodeMemoryValue, encodeMemoryValue } from "./memory-snapshot.js";
 import { MastraReplayReasonError } from "./replay-reasons.js";
 import {
@@ -304,11 +305,30 @@ interface RecordedCall {
   used: boolean;
 }
 
-function isOptionalCount(value: unknown): boolean {
-  return (
-    value === undefined ||
-    (typeof value === "number" && Number.isFinite(value) && value >= 0)
-  );
+/** Keep only an entry's tape fields, in the form a replay envelope stores. */
+export function toStoredOMEntry(entry: OMResultEntry): JsonValue {
+  const {
+    phase,
+    ordinal,
+    method,
+    inputFingerprint,
+    output,
+    failed,
+    actorStepsAtResult,
+    durationMs,
+  } = entry;
+  return Object.fromEntries(
+    Object.entries({
+      phase,
+      ordinal,
+      method,
+      inputFingerprint,
+      output,
+      failed,
+      actorStepsAtResult,
+      durationMs,
+    }).filter(([, value]) => value !== undefined),
+  ) as JsonValue;
 }
 
 function isRecordedEntry(value: unknown): value is OMResultEntry {
@@ -320,8 +340,9 @@ function isRecordedEntry(value: unknown): value is OMResultEntry {
     typeof entry.ordinal === "number" &&
     typeof entry.inputFingerprint === "string" &&
     (entry.failed === undefined || entry.failed === true) &&
-    isOptionalCount(entry.actorStepsAtResult) &&
-    isOptionalCount(entry.durationMs)
+    (entry.actorStepsAtResult === undefined ||
+      isCount(entry.actorStepsAtResult)) &&
+    (entry.durationMs === undefined || isCount(entry.durationMs))
   );
 }
 
@@ -473,7 +494,7 @@ export function createOMResultTape(
   /** Count an actor step that is about to call its model. */
   function beginActorStep(): void {
     actorSteps += 1;
-    for (const hold of [...holds]) if (actorSteps >= hold.steps) hold.release();
+    for (const hold of holds) if (actorSteps >= hold.steps) hold.release();
   }
 
   function failCapture(): void {
@@ -590,16 +611,10 @@ export function createOMResultTape(
     );
     if (matching) {
       const result = use(matching, method);
-      const { actorStepsAtResult, durationMs } = matching.result ?? {};
-      if (
-        !buffered ||
-        actorStepsAtResult === undefined ||
-        durationMs === undefined
-      )
-        return result;
-      return waitForActorSteps(actorStepsAtResult, durationMs).then(
-        () => result,
-      );
+      const { actorStepsAtResult: steps, durationMs } = matching.result ?? {};
+      return buffered && steps !== undefined && durationMs !== undefined
+        ? waitForActorSteps(steps, durationMs).then(() => result)
+        : result;
     }
     const unused = calls.find((candidate) => !candidate.used);
     if (buffered) return skipBuffered(phase, method, calls, Boolean(unused));
@@ -882,7 +897,7 @@ export function createOMResultTape(
    * departures are counted in `divergence`.
    */
   async function finish(): Promise<OMTapeResult> {
-    for (const hold of [...holds]) hold.release();
+    for (const hold of holds) hold.release();
     while (pending.size > 0) await Promise.all([...pending]);
     if (recorded) {
       if (malformed) failClosed("malformed recorded tape");

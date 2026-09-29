@@ -1,4 +1,3 @@
-import { createRequire } from "node:module";
 import { InMemoryStore } from "@mastra/core/storage";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
@@ -9,6 +8,7 @@ import {
   createMemoryReplayAgent,
   createProcessLocalMemoryAccess,
 } from "../src/memory.js";
+import { getMastraVersion } from "../src/stream-recording.js";
 import {
   type MemoryRuntime,
   type ModelCall,
@@ -302,12 +302,9 @@ async function replaySlowObserverBaseline(evidenceRepeats: number) {
   // The instant replay may not start buffer rounds the slow baseline never
   // ran, and none of its rounds may show evidence the actor has not read yet.
   expect(contextOf(fixture.actorPrompts)).toEqual(baselineContext);
-  const divergence = (
-    closed?.body?.metadata as
-      | { mastra_om_divergence?: { unused_results: number } }
-      | undefined
-  )?.mastra_om_divergence;
-  expect(divergence).toBeUndefined();
+  expect(closed?.body?.metadata ?? {}).not.toHaveProperty(
+    "mastra_om_divergence",
+  );
   expect(fixture.runtime.observer.calls).toHaveLength(recorded);
   expect(fixture.runtime.reflector.calls).toHaveLength(0);
   await fixture.runtime.store.close();
@@ -325,23 +322,13 @@ const JUST_UNDER_THRESHOLD: Record<string, number> = {
   "1.71": 30,
 };
 
-function getMastraCoreMinor(): string {
-  // Compatibility packages answer this lookup with the Mastra they install.
-  const adapterRequire = createRequire(
-    new URL("../src/memory-replay.ts", import.meta.url),
-  );
-  const { version } = adapterRequire("@mastra/core/package.json") as {
-    version: string;
-  };
-  return version.split(".").slice(0, 2).join(".");
-}
-
 it("replays a baseline whose slow observer merged buffer rounds without live OM calls", async () => {
   await replaySlowObserverBaseline(34);
 });
 
 it("keeps a baseline that ended just under the observation threshold unobserved in replay", async () => {
-  const minor = getMastraCoreMinor();
+  // Compatibility packages answer this lookup with the Mastra they install.
+  const minor = getMastraVersion().split(".").slice(0, 2).join(".");
   const evidenceRepeats = JUST_UNDER_THRESHOLD[minor];
   if (evidenceRepeats === undefined)
     throw new Error(`Calibrate JUST_UNDER_THRESHOLD for Mastra ${minor}.`);
