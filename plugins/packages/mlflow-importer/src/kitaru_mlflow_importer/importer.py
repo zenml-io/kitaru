@@ -27,7 +27,7 @@ from contextlib import aclosing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic_core import PydanticSerializationError
 
@@ -100,12 +100,14 @@ class _Span:
         return value.upper() if isinstance(value, str) and value else "UNKNOWN"
 
     @property
-    def has_usage(self) -> bool:
-        """Return whether the span records token usage or cost."""
-        return any(
-            self.attributes.get(key) not in (None, "", {})
-            for key in (_USAGE_KEY, _COST_KEY)
-        )
+    def has_tokens(self) -> bool:
+        """Return whether the span records token usage."""
+        return self.attributes.get(_USAGE_KEY) not in (None, "", {})
+
+    @property
+    def has_cost(self) -> bool:
+        """Return whether the span records a cost."""
+        return self.attributes.get(_COST_KEY) not in (None, "", {})
 
 
 @dataclass(frozen=True, slots=True)
@@ -785,30 +787,34 @@ def _link_spans(trace: _Trace, warnings: list[str]) -> list[_Span]:
     return roots
 
 
-def _build_nodes(trace: _Trace, span: _Span) -> tuple[ImportedNode, bool, bool]:
-    """Build one node subtree, returning whether it holds LLM spans and usage.
+class _Subtree(NamedTuple):
+    """A built node subtree and which kinds of span it contains."""
+
+    node: ImportedNode
+    has_llm: bool
+    has_tokens: bool
+    has_cost: bool
+
+
+def _build_nodes(trace: _Trace, span: _Span) -> _Subtree:
+    """Build one node subtree.
 
     A LangChain chat model span wraps the provider span that the OpenAI or
     Anthropic autolog records for the same request, and rollup integrations
     set cumulative usage on an agent span above per-call spans. Session
-    totals sum every node, so only the innermost span carrying usage keeps
-    its tokens and cost, and an LLM span wrapping another LLM span becomes a
-    plain span so the request is counted once.
+    totals sum every node, so only the innermost span carrying tokens keeps
+    them, the same holds independently for cost, and an LLM span wrapping
+    another LLM span becomes a plain span so the request is counted once.
     """
-    children: list[ImportedNode] = []
-    has_llm_descendant = False
-    has_usage_descendant = False
-    for child in span.children:
-        node, child_has_llm, child_has_usage = _build_nodes(trace, child)
-        children.append(node)
-        has_llm_descendant = has_llm_descendant or child_has_llm
-        has_usage_descendant = has_usage_descendant or child_has_usage
+    subtrees = [_build_nodes(trace, child) for child in span.children]
+    has_llm_descendant = any(subtree.has_llm for subtree in subtrees)
+    keeps_tokens = not any(subtree.has_tokens for subtree in subtrees)
+    keeps_cost = not any(subtree.has_cost for subtree in subtrees)
 
     node_type, tool_name = _node_type(span, has_llm_descendant)
     status = _node_status(span)
     inputs = span.attributes.get(_INPUTS_KEY)
     outputs = span.attributes.get(_OUTPUTS_KEY)
-    keeps_usage = not has_usage_descendant
     message_format = _string_attribute(span, _MESSAGE_FORMAT_KEY)
     requested_model = (
         str(inputs["model"])
@@ -825,7 +831,7 @@ def _build_nodes(trace: _Trace, span: _Span) -> tuple[ImportedNode, bool, bool]:
     }
     if message_format:
         metadata["mlflow.message_format"] = message_format
-    if span.has_usage and not keeps_usage:
+    if (span.has_tokens and not keeps_tokens) or (span.has_cost and not keeps_cost):
         metadata["mlflow.usage_counted_on_descendants"] = True
     node = ImportedNode(
         external_id=f"{trace.trace_id}:{span.span_id}",
@@ -841,8 +847,8 @@ def _build_nodes(trace: _Trace, span: _Span) -> tuple[ImportedNode, bool, bool]:
         requested_model=requested_model,
         model=_string_attribute(span, _MODEL_KEY),
         model_provider=_string_attribute(span, _PROVIDER_KEY),
-        tokens=_tokens(span) if keeps_usage else None,
-        cost=_cost(span) if keeps_usage else None,
+        tokens=_tokens(span) if keeps_tokens else None,
+        cost=_cost(span) if keeps_cost else None,
         model_params=model_params if isinstance(model_params, dict) else None,
         tool_name=tool_name,
         attributes={
@@ -854,18 +860,18 @@ def _build_nodes(trace: _Trace, span: _Span) -> tuple[ImportedNode, bool, bool]:
             "mlflow.events": span.events,
         },
         metadata=metadata,
-        children=children,
+        children=[subtree.node for subtree in subtrees],
     )
     node.input_text_selector = _input_text_selector(node.inputs)
     node.output_text_selector = _output_text_selector(node.outputs)
     if node_type is NodeType.LLM_CALL:
         node.system_prompt_selector = _system_prompt_selector(node.inputs)
         node.reasoning_selectors = _reasoning_selectors(node.outputs)
-    is_llm = span.span_type in _LLM_SPAN_TYPES
-    return (
-        node,
-        is_llm or has_llm_descendant,
-        span.has_usage or has_usage_descendant,
+    return _Subtree(
+        node=node,
+        has_llm=span.span_type in _LLM_SPAN_TYPES or has_llm_descendant,
+        has_tokens=span.has_tokens or not keeps_tokens,
+        has_cost=span.has_cost or not keeps_cost,
     )
 
 
@@ -941,6 +947,47 @@ def _detect_framework(traces: list[_Trace], configured: Any) -> str | None:
     return next(iter(matches)) if len(matches) == 1 else None
 
 
+def _parse_unique_traces(
+    documents: list[Any],
+) -> tuple[list[tuple[int, _Trace]], list[ImportFailure]]:
+    """Decode trace documents, dropping repeated trace ids.
+
+    Overlapping export pages and repeated fetch ids repeat a trace verbatim,
+    so identical copies collapse into the first. Differing copies of one
+    trace id cannot both be right, so every copy is rejected, even when the
+    copies would group into different sessions.
+
+    Returns:
+        Each kept trace with its 1-based document position, and failures.
+    """
+    failures: list[ImportFailure] = []
+    first: dict[str, tuple[int, _Trace]] = {}
+    conflicted: set[str] = set()
+    for index, document in enumerate(documents, start=1):
+        try:
+            trace = _parse_trace(document)
+        except InvalidImport as exc:
+            failures.append(
+                ImportFailure(line=index, error=_escape_failure_text(str(exc)))
+            )
+            continue
+        _, existing = first.setdefault(trace.trace_id, (index, trace))
+        if existing is not trace and existing.document != trace.document:
+            conflicted.add(trace.trace_id)
+    for trace_id in sorted(conflicted):
+        failures.append(
+            ImportFailure(
+                line=first[trace_id][0],
+                external_id=_escape_failure_text(trace_id),
+                error=_escape_failure_text(
+                    f"The import contains conflicting copies of trace '{trace_id}'"
+                ),
+            )
+        )
+    kept = [item for trace_id, item in first.items() if trace_id not in conflicted]
+    return kept, failures
+
+
 class MlflowTraceImporter:
     """Normalize MLflow traces into Kitaru sessions."""
 
@@ -949,23 +996,20 @@ class MlflowTraceImporter:
     ) -> Iterator[ImportedSession | ImportFailure]:
         """Parse MLflow traces into sessions and isolated failures."""
         documents, failures = _parse_documents(content)
+        traces, trace_failures = _parse_unique_traces(documents)
+        failures.extend(trace_failures)
         grouped: dict[tuple[str, str], list[_Trace]] = defaultdict(list)
         join_paths: dict[tuple[str, str], set[str]] = defaultdict(set)
         fallback_sessions: set[tuple[str, str]] = set()
-        for index, document in enumerate(documents, start=1):
-            trace_id: str | None = None
+        for index, trace in traces:
             try:
-                trace = _parse_trace(document)
-                trace_id = trace.trace_id
                 session_id, join_path, fallback = _join_value(trace, params)
                 source_instance = _get_source_instance(trace, params)
             except InvalidImport as exc:
                 failures.append(
                     ImportFailure(
                         line=index,
-                        external_id=_escape_failure_text(trace_id)
-                        if trace_id
-                        else None,
+                        external_id=_escape_failure_text(trace.trace_id),
                         error=_escape_failure_text(str(exc)),
                     )
                 )
@@ -1012,17 +1056,6 @@ class MlflowTraceImporter:
         trace_fallback: bool,
     ) -> ImportedSession:
         """Normalize one grouped MLflow session."""
-        # Overlapping export pages and repeated fetch ids repeat a trace
-        # verbatim, so identical copies collapse into one.
-        unique: dict[str, _Trace] = {}
-        for trace in traces:
-            existing = unique.setdefault(trace.trace_id, trace)
-            if existing.document != trace.document:
-                raise InvalidImport(
-                    f"Session '{session_id}' contains conflicting copies of "
-                    f"trace '{trace.trace_id}'"
-                )
-        traces = list(unique.values())
         warnings: list[str] = []
         if trace_fallback:
             warnings.append("No mlflow.trace.session metadata; grouped by trace id")
@@ -1049,7 +1082,7 @@ class MlflowTraceImporter:
                 ended_at=ended_at,
             )
             turns.append((turn, trace, root))
-            nodes.extend(_build_nodes(trace, span)[0] for span in roots)
+            nodes.extend(_build_nodes(trace, span).node for span in roots)
             if trace.state == "IN_PROGRESS":
                 warnings.append(f"Trace '{trace.trace_id}' was still in progress")
 

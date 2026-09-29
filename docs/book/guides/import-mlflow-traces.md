@@ -113,7 +113,7 @@ The worker installs the package's `api` extra for an API import, which carries t
 | `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD` | Credentials, for a server running MLflow's basic authentication. |
 | `MLFLOW_EXPERIMENT_ID` | Default experiment for time-window imports. |
 
-Without a connection, the worker's own environment supplies them, and only a worker started with `--selector kitaru/requires-credentials=mlflow` claims the task. A window lists matching traces first, then fetches them in batches that never split a session, so each session arrives complete. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way.
+Without a connection, the worker's own environment supplies them, and only a worker started with `--selector kitaru/requires-credentials=mlflow` claims the task. A window lists matching traces first, then fetches them in batches that never split a session, so each session arrives complete. Each fetched trace is parsed the same way an uploaded export would be, so the node mapping, grouping, and limitations below apply the same way. Batches follow the default `mlflow.trace.session` grouping, because the fetch does not see importer params. With a custom `join_on`, a session whose traces land in different batches keeps the turns, outputs, and status from its first batch and only gains nodes from later ones, so prefer a file import for custom grouping over a large window.
 
 ## What a trace becomes
 
@@ -141,7 +141,7 @@ Per node, the importer preserves:
 
 When you enable MLflow autologging for LangChain and for OpenAI together, one request produces two nested model spans: LangChain's chat model span and, inside it, the OpenAI span for the same network call. Both report the same tokens and cost. Integrations such as PydanticAI, DSPy, and Agno also record cumulative usage on an agent span above the per-call spans.
 
-Kitaru sums every node into the session totals, so the importer keeps usage where the request actually happened. Only the innermost span carrying token usage or cost keeps it; a span above it keeps its raw usage under `mlflow.attributes` and records `mlflow.usage_counted_on_descendants` in its metadata. A model span that wraps another model span becomes a `span` node, so the session's call count matches the requests made. The session totals then agree with the trace totals MLflow shows.
+Kitaru sums every node into the session totals, so the importer keeps usage where the request actually happened. Only the innermost span carrying token usage keeps its tokens, and independently, only the innermost span carrying a cost keeps its cost, because some integrations record tokens and cost at different levels. A span whose usage is counted below it keeps the raw values under `mlflow.attributes` and records `mlflow.usage_counted_on_descendants` in its metadata. A model span that wraps another model span becomes a `span` node, so the session's call count matches the requests made. The session totals then agree with the trace totals MLflow shows.
 
 ### Grouping traces into sessions
 
@@ -172,7 +172,7 @@ What the importer noticed while normalizing goes into `normalization_warnings` o
 - `"Span '<id>' references missing parent '<id>'"` when a parent span is not in the file. Those nodes are kept as roots.
 - `"Trace '<id>' was still in progress"` when a trace had not finished when it was exported. The session's `source_completeness` is then `partial` instead of `full`.
 
-Some problems fail one trace or one session rather than the file, and are reported as import failures: a trace without spans, a duplicate span id, a span parent cycle, span chains deeper than 64 levels, an invalid token count or cost, and two different copies of the same trace id in one session. A malformed file (non-UTF-8, empty, or no parseable JSON at all) fails the task as a whole.
+Some problems fail one trace or one session rather than the file, and are reported as import failures: a trace without spans, a duplicate span id, a span parent cycle, span chains deeper than 64 levels, an invalid token count or cost, and two different copies of the same trace id anywhere in the file, which rejects every copy of that trace. A malformed file (non-UTF-8, empty, or no parseable JSON at all) fails the task as a whole.
 
 Two more things worth knowing before you rely on an import:
 

@@ -701,3 +701,48 @@ def test_turns_and_nodes_follow_trace_start_time_not_payload_order() -> None:
     assert isinstance(session, ImportedSession)
     assert session.metadata["mlflow.trace_ids"] == ["tr-early", "tr-late"]
     assert [node.trace_id for node in session.nodes] == ["tr-early", "tr-late"]
+
+
+def test_conflicting_copies_in_different_sessions_are_rejected() -> None:
+    """Reject both copies even when their session metadata differs."""
+    first = trace(
+        "tr-a", [span("0000000000000001")], metadata={"mlflow.trace.session": "s1"}
+    )
+    second = trace(
+        "tr-a", [span("0000000000000001")], metadata={"mlflow.trace.session": "s2"}
+    )
+
+    items = parse([first, second, trace("tr-ok", [span("0000000000000001")])])
+
+    assert [i.external_id for i in items if isinstance(i, ImportedSession)] == [
+        "7:tr-ok"
+    ]
+    [failure] = [item for item in items if isinstance(item, ImportFailure)]
+    assert failure.external_id == "tr-a"
+    assert "conflicting copies of trace 'tr-a'" in failure.error
+
+
+def test_tokens_and_cost_are_deduplicated_independently() -> None:
+    """Keep a wrapper's cost when only its child records tokens."""
+    wrapper = span(
+        "0000000000000001",
+        span_type="CHAT_MODEL",
+        attributes={"mlflow.llm.cost": {"total_cost": 0.25}},
+    )
+    provider_call = span(
+        "0000000000000002",
+        span_type="LLM",
+        parent="0000000000000001",
+        offset=1,
+        attributes={"mlflow.chat.tokenUsage": {"input_tokens": 9, "output_tokens": 3}},
+    )
+
+    [session] = parse([trace("tr-a", [wrapper, provider_call])])
+
+    assert isinstance(session, ImportedSession)
+    outer, inner = flatten(session.nodes)
+    assert outer.cost == Decimal("0.25")
+    assert outer.tokens is None
+    assert "mlflow.usage_counted_on_descendants" not in outer.metadata
+    assert inner.cost is None
+    assert inner.tokens is not None and inner.tokens.input_tokens == 9
