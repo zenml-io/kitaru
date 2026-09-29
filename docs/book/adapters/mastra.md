@@ -183,10 +183,20 @@ A missing, incomplete, or lossy snapshot produces an actionable unsupported-repl
 
 ## Isolated memory replay
 
-Import `createMemoryReplayAgent()` from `@zenml-io/kitaru-mastra/memory` when a consumed stream needs thread-scoped schema working memory, observational memory, or controlled input processors. This opt-in factory requires exactly `@mastra/core@1.67.0` and `@mastra/memory@1.30.0`, and a Kitaru server newer than 0.27.1 (see [Recording readiness](#recording-readiness) for what happens on an older server). For PostgreSQL storage, use `@mastra/pg` 1.25.x: `@mastra/pg` 1.26.0 and later require `@mastra/core` 1.68 or later. Kitaru tests memory replay against `@mastra/pg` 1.25.0. The existing `KitaruAgent` wrapper stays at the package root, keeps its history-only memory behavior, and does not require `@mastra/memory`.
+Import `createMemoryReplayAgent()` from `@zenml-io/kitaru-mastra/memory` when a consumed stream needs thread-scoped schema working memory, observational memory, or controlled input processors. This opt-in factory requires a Kitaru server newer than 0.27.1 (see [Recording readiness](#recording-readiness) for what happens on an older server) and one of the Mastra release sets below. Install `@mastra/core` and `@mastra/memory` from the same row. For PostgreSQL storage, use that row's `@mastra/pg`, the release Kitaru's PostgreSQL replay tests run with. The factory records at Mastra's storage layer, so it accepts only these exact pairs; Kitaru adds a Mastra release here after the full adapter test suite, including PostgreSQL memory replay, passes on it.
+
+| `@mastra/core` | `@mastra/memory` | `@mastra/pg` |
+| --- | --- | --- |
+| 1.67.0 | 1.30.0 | 1.25.0 |
+| 1.68.0 | 1.31.0 | 1.26.0 |
+| 1.69.0 | 1.31.0 | 1.26.0 |
+| 1.70.0 | 1.32.0 | 1.27.0 |
+| 1.71.0 | 1.32.1 | 1.27.1 |
+
+With any other combination, including a supported core with another row's memory, a recorded turn answers natively without a recording and reports `version_mismatch`, and a replay fails with an error that lists the supported pairs. The existing `KitaruAgent` wrapper stays at the package root, keeps its history-only memory behavior, and does not require `@mastra/memory`.
 
 ```bash
-pnpm add @zenml-io/kitaru-mastra @mastra/core@1.67.0 @mastra/memory@1.30.0 zod
+pnpm add @zenml-io/kitaru-mastra @mastra/core@1.71.0 @mastra/memory@1.32.1 zod
 ```
 
 The factory creates a fresh native agent for each invocation. A baseline uses your source storage and records the starting state before recall, then records the observer and reflector model outputs produced during that invocation. Replay restores the starting state into a separate in-memory store and runs the actor again. Memory changes during replay in two different ways:
@@ -494,7 +504,7 @@ The adapter supports:
 
 - `Agent.generate()` calls on Mastra 1.51 through 1.71.
 - Ordinary consumed `Agent.stream()` calls and replay on stable Mastra 1.67.x through 1.71.x, with schema-only structured output.
-- Opt-in isolated native memory replay through `createMemoryReplayAgent()` on exact Mastra core 1.67.0 and memory 1.30.0, with `@mastra/pg` 1.25.x for PostgreSQL storage, against a Kitaru server newer than 0.27.1.
+- Opt-in isolated native memory replay through `createMemoryReplayAgent()` on a tested Mastra core and memory pair (core 1.67.0 through 1.71.0, see [Isolated memory replay](#isolated-memory-replay) for the matching memory and `@mastra/pg` releases), against a Kitaru server newer than 0.27.1.
 - Local function tools, including function-valued tools resolved from the run's `requestContext`.
 - Per-run model, system-instruction, model-setting, and input overrides.
 - Passthrough, static, and same-adapter history tool policies.
