@@ -15,8 +15,12 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib.metadata import version
+from itertools import chain
 from typing import Any, Protocol, TypeVar
 
+from langchain_core.messages import AIMessage
+from langchain_core.messages.ai import UsageMetadata, add_usage
+from langchain_core.outputs import ChatGeneration, LLMResult
 from langgraph.types import GraphOutput
 
 from kitaru.api_models.v1.replay import ReplayResponse
@@ -26,6 +30,7 @@ from kitaru.api_models.v1.session import (
     SessionOrigin,
     SessionStatus,
     SessionUpdateRequest,
+    TokenUsage,
 )
 from kitaru.api_models.v1.session_node import (
     NodeStatus,
@@ -38,6 +43,7 @@ from kitaru.client import KitaruAPIClient
 
 from .capability import UnsupportedWorkerInterruptError
 from .capture import CaptureBudget, CapturePolicy, capture_execution_view, capture_value
+from .pricing import estimate_cost
 
 ADAPTER_VERSION = version("kitaru-langgraph")
 FRAMEWORK = "langgraph"
@@ -69,6 +75,8 @@ class PendingRun:
     inputs: Any
     node_type: NodeType
     inputs_lossy: bool = False
+    requested_model: str | None = None
+    model_provider: str | None = None
 
 
 BridgeResultT = TypeVar("BridgeResultT")
@@ -326,6 +334,8 @@ class InvocationRecorder:
         name: str,
         inputs: Any,
         node_type: NodeType,
+        requested_model: str | None = None,
+        model_provider: str | None = None,
     ) -> None:
         """Reserve one observable model or tool call."""
         if run_id in self.pending_runs:
@@ -343,6 +353,8 @@ class InvocationRecorder:
             inputs=captured.value,
             node_type=node_type,
             inputs_lossy=captured.lossy,
+            requested_model=requested_model,
+            model_provider=model_provider,
         )
 
     async def finish_call(
@@ -375,6 +387,11 @@ class InvocationRecorder:
                 output = capture_value(outputs, self.policy).value
         else:
             output = capture_value(outputs, self.policy).value
+        model_fields = (
+            _describe_model_call(pending, outputs)
+            if pending.node_type is NodeType.LLM_CALL
+            else {}
+        )
         await self.buffer_node(
             SessionNodeCreateRequest(
                 external_id=pending.external_id,
@@ -390,7 +407,8 @@ class InvocationRecorder:
                 tool_name=(
                     pending.name if pending.node_type is NodeType.TOOL_CALL else None
                 ),
-                attributes={},
+                attributes=model_fields.pop("attributes", {}),
+                **model_fields,
             )
         )
 
@@ -566,6 +584,52 @@ class InvocationRecorder:
                     "kitaru_session_id": str(self.session_id),
                 },
             )
+
+
+def get_text_field(mapping: dict[str, Any] | None, key: str) -> str | None:
+    """Return one non-empty string value from a loosely typed mapping."""
+    value = mapping.get(key) if mapping else None
+    return value if isinstance(value, str) and value else None
+
+
+def _describe_model_call(pending: PendingRun, response: Any) -> dict[str, Any]:
+    """Return model identity, usage, and cost fields for one model node.
+
+    Chat models report the served model, provider, and usage on their response
+    messages. The start callback's ``ls_*`` metadata names the requested model
+    and fills the provider when a response omits it.
+    """
+    served_model: str | None = None
+    provider = pending.model_provider
+    usage: UsageMetadata | None = None
+    if isinstance(response, LLMResult):
+        for generation in chain.from_iterable(response.generations):
+            if not isinstance(generation, ChatGeneration):
+                continue
+            message = generation.message
+            metadata = message.response_metadata
+            served_model = served_model or get_text_field(metadata, "model_name")
+            provider = get_text_field(metadata, "model_provider") or provider
+            if isinstance(message, AIMessage) and message.usage_metadata:
+                usage = add_usage(usage, message.usage_metadata)
+        served_model = served_model or get_text_field(response.llm_output, "model_name")
+    model = served_model or pending.requested_model
+    fields: dict[str, Any] = {
+        "requested_model": pending.requested_model,
+        "model": model,
+        "model_provider": provider,
+        "attributes": {},
+    }
+    if usage is None:
+        return fields
+    tokens = TokenUsage(
+        input_tokens=usage["input_tokens"],
+        output_tokens=usage["output_tokens"],
+        cached_input_tokens=usage.get("input_token_details", {}).get("cache_read"),
+        reasoning_tokens=usage.get("output_token_details", {}).get("reasoning"),
+    )
+    cost, cost_attributes = estimate_cost(tokens, model, provider, pending.started_at)
+    return {**fields, "tokens": tokens, "cost": cost, "attributes": cost_attributes}
 
 
 def _has_interrupt(result: Any) -> bool:
