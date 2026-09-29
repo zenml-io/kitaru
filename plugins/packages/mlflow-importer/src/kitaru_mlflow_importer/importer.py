@@ -99,16 +99,6 @@ class _Span:
         value = self.attributes.get(_SPAN_TYPE_KEY)
         return value.upper() if isinstance(value, str) and value else "UNKNOWN"
 
-    @property
-    def has_tokens(self) -> bool:
-        """Return whether the span records token usage."""
-        return self.attributes.get(_USAGE_KEY) not in (None, "", {})
-
-    @property
-    def has_cost(self) -> bool:
-        """Return whether the span records a cost."""
-        return self.attributes.get(_COST_KEY) not in (None, "", {})
-
 
 @dataclass(frozen=True, slots=True)
 class _Trace:
@@ -486,19 +476,18 @@ def _span_error(span: _Span) -> str:
     return "MLflow span failed"
 
 
-def _tokens(span: _Span) -> TokenUsage | None:
-    """Map MLflow's normalized token usage."""
+def _token_counts(span: _Span) -> dict[str, int]:
+    """Map MLflow's normalized token usage to the token fields it records."""
     usage = _dict(span.attributes.get(_USAGE_KEY))
-    values = (
-        _parse_token_count(usage.get("input_tokens")),
-        _parse_token_count(usage.get("output_tokens")),
-        _parse_token_count(usage.get("cache_read_input_tokens")),
-    )
-    if all(value is None for value in values):
-        return None
-    return TokenUsage(
-        input_tokens=values[0], output_tokens=values[1], cached_input_tokens=values[2]
-    )
+    counts = {
+        field_name: _parse_token_count(usage.get(source_key))
+        for field_name, source_key in (
+            ("input_tokens", "input_tokens"),
+            ("output_tokens", "output_tokens"),
+            ("cached_input_tokens", "cache_read_input_tokens"),
+        )
+    }
+    return {name: count for name, count in counts.items() if count is not None}
 
 
 def _cost(span: _Span) -> Decimal | None:
@@ -788,12 +777,39 @@ def _link_spans(trace: _Trace, warnings: list[str]) -> list[_Span]:
 
 
 class _Subtree(NamedTuple):
-    """A built node subtree and which kinds of span it contains."""
+    """A built node subtree, whether it holds LLM spans, and the usage it counts."""
 
     node: ImportedNode
     has_llm: bool
-    has_tokens: bool
-    has_cost: bool
+    token_counts: dict[str, int]
+    cost: Decimal | None
+
+
+def _sum_token_counts(subtrees: list[_Subtree]) -> dict[str, int]:
+    """Sum the token fields counted across subtrees."""
+    totals: dict[str, int] = {}
+    for subtree in subtrees:
+        for name, count in subtree.token_counts.items():
+            totals[name] = totals.get(name, 0) + count
+    return totals
+
+
+def _get_residual_tokens(own: dict[str, int], below: dict[str, int]) -> dict[str, int]:
+    """Return the part of a span's token fields its descendants do not count."""
+    residual: dict[str, int] = {}
+    for name, count in own.items():
+        if name not in below:
+            residual[name] = count
+        elif count > below[name]:
+            residual[name] = count - below[name]
+    return residual
+
+
+def _get_residual_cost(own: Decimal | None, below: Decimal | None) -> Decimal | None:
+    """Return the part of a span's cost its descendants do not count."""
+    if own is None or below is None:
+        return own
+    return own - below if own > below else None
 
 
 def _build_nodes(trace: _Trace, span: _Span) -> _Subtree:
@@ -802,14 +818,20 @@ def _build_nodes(trace: _Trace, span: _Span) -> _Subtree:
     A LangChain chat model span wraps the provider span that the OpenAI or
     Anthropic autolog records for the same request, and rollup integrations
     set cumulative usage on an agent span above per-call spans. Session
-    totals sum every node, so only the innermost span carrying tokens keeps
-    them, the same holds independently for cost, and an LLM span wrapping
-    another LLM span becomes a plain span so the request is counted once.
+    totals sum every node, so descendants keep their own usage and a span
+    above them keeps only the part they do not account for, per token field
+    and for cost. An LLM span wrapping another LLM span becomes a plain span
+    so the request is counted once as a call.
     """
     subtrees = [_build_nodes(trace, child) for child in span.children]
     has_llm_descendant = any(subtree.has_llm for subtree in subtrees)
-    keeps_tokens = not any(subtree.has_tokens for subtree in subtrees)
-    keeps_cost = not any(subtree.has_cost for subtree in subtrees)
+    own_tokens = _token_counts(span)
+    own_cost = _cost(span)
+    below_tokens = _sum_token_counts(subtrees)
+    below_costs = [subtree.cost for subtree in subtrees if subtree.cost is not None]
+    below_cost = sum(below_costs, Decimal(0)) if below_costs else None
+    kept_tokens = _get_residual_tokens(own_tokens, below_tokens)
+    kept_cost = _get_residual_cost(own_cost, below_cost)
 
     node_type, tool_name = _node_type(span, has_llm_descendant)
     status = _node_status(span)
@@ -831,7 +853,7 @@ def _build_nodes(trace: _Trace, span: _Span) -> _Subtree:
     }
     if message_format:
         metadata["mlflow.message_format"] = message_format
-    if (span.has_tokens and not keeps_tokens) or (span.has_cost and not keeps_cost):
+    if kept_tokens != own_tokens or kept_cost != own_cost:
         metadata["mlflow.usage_counted_on_descendants"] = True
     node = ImportedNode(
         external_id=f"{trace.trace_id}:{span.span_id}",
@@ -847,8 +869,8 @@ def _build_nodes(trace: _Trace, span: _Span) -> _Subtree:
         requested_model=requested_model,
         model=_string_attribute(span, _MODEL_KEY),
         model_provider=_string_attribute(span, _PROVIDER_KEY),
-        tokens=_tokens(span) if keeps_tokens else None,
-        cost=_cost(span) if keeps_cost else None,
+        tokens=TokenUsage(**kept_tokens) if kept_tokens else None,
+        cost=kept_cost,
         model_params=model_params if isinstance(model_params, dict) else None,
         tool_name=tool_name,
         attributes={
@@ -870,8 +892,13 @@ def _build_nodes(trace: _Trace, span: _Span) -> _Subtree:
     return _Subtree(
         node=node,
         has_llm=span.span_type in _LLM_SPAN_TYPES or has_llm_descendant,
-        has_tokens=span.has_tokens or not keeps_tokens,
-        has_cost=span.has_cost or not keeps_cost,
+        token_counts={
+            name: below_tokens.get(name, 0) + kept_tokens.get(name, 0)
+            for name in below_tokens.keys() | kept_tokens.keys()
+        },
+        cost=None
+        if below_cost is None and kept_cost is None
+        else (below_cost or Decimal(0)) + (kept_cost or Decimal(0)),
     )
 
 

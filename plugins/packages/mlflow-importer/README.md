@@ -18,7 +18,7 @@ Traces that share `mlflow.trace.session` metadata become one session with one tu
 
 Source identity uses `source_instance`, then the `experiment_id` parameter alias, then the experiment in the trace location. Keep it stable across imports to preserve deduplication. Traces stored in a Databricks Unity Catalog location carry no experiment id; supply `source_instance` for those.
 
-The importer maps `LLM` and `CHAT_MODEL` spans to model calls and `TOOL` spans to tool calls, reading MLflow's normalized model, provider, token usage, and cost attributes. When a model span wraps another model span, such as a LangChain chat model around the OpenAI call it makes, only the innermost span counts as a model call, and only the innermost span carrying tokens keeps them and, independently, only the innermost span carrying a cost keeps it, so session totals count each request once. Valid MLflow assessments are kept in session metadata.
+The importer maps `LLM` and `CHAT_MODEL` spans to model calls and `TOOL` spans to tool calls, reading MLflow's normalized model, provider, token usage, and cost attributes. When a model span wraps another model span, such as a LangChain chat model around the OpenAI call it makes, only the innermost span counts as a model call, and a span keeps only the tokens and cost its descendants do not already account for, so session totals count each request once. Valid MLflow assessments are kept in session metadata.
 
 ## API import
 

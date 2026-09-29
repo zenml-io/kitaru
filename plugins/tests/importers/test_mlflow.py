@@ -746,3 +746,59 @@ def test_tokens_and_cost_are_deduplicated_independently() -> None:
     assert "mlflow.usage_counted_on_descendants" not in outer.metadata
     assert inner.cost is None
     assert inner.tokens is not None and inner.tokens.input_tokens == 9
+
+
+def _session_input_tokens(session: ImportedSession) -> int:
+    return sum(
+        node.tokens.input_tokens or 0 for node in flatten(session.nodes) if node.tokens
+    )
+
+
+def test_parent_keeps_rollup_usage_its_descendants_do_not_cover() -> None:
+    """Match MLflow's total when only some calls under a rollup report usage."""
+    agent = span(
+        "0000000000000001",
+        span_type="AGENT",
+        attributes={
+            "mlflow.chat.tokenUsage": {"input_tokens": 30, "output_tokens": 6},
+            "mlflow.llm.cost": {"total_cost": 0.8},
+        },
+    )
+    reported = llm_span("0000000000000002", 10, parent="0000000000000001", offset=1)
+    unreported = span(
+        "0000000000000003", span_type="LLM", parent="0000000000000001", offset=2
+    )
+
+    [session] = parse([trace("tr-a", [agent, reported, unreported])])
+
+    assert isinstance(session, ImportedSession)
+    root, first, second = flatten(session.nodes)
+    assert root.tokens is not None
+    assert root.tokens.model_dump(exclude_none=True) == {
+        "input_tokens": 20,
+        "output_tokens": 5,
+    }
+    assert root.cost == Decimal("0.3")
+    assert first.cost == Decimal("0.5")
+    assert root.metadata["mlflow.usage_counted_on_descendants"] is True
+    assert first.tokens is not None and first.tokens.input_tokens == 10
+    assert second.tokens is None
+    assert _session_input_tokens(session) == 30
+
+
+def test_parent_keeps_nothing_when_descendants_exceed_it() -> None:
+    agent = span(
+        "0000000000000001",
+        span_type="AGENT",
+        attributes={"mlflow.chat.tokenUsage": {"input_tokens": 30}},
+    )
+    calls = [
+        llm_span("0000000000000002", 20, parent="0000000000000001", offset=1),
+        llm_span("0000000000000003", 20, parent="0000000000000001", offset=2),
+    ]
+
+    [session] = parse([trace("tr-a", [agent, *calls])])
+
+    assert isinstance(session, ImportedSession)
+    assert session.nodes[0].tokens is None
+    assert _session_input_tokens(session) == 40
