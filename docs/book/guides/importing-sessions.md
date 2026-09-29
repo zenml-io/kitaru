@@ -7,7 +7,7 @@ icon: file-import
 
 Kitaru importers convert exported trace data into session graphs. Provider importers decode source records, join related traces into sessions, order turns, reconstruct node relationships, and project common fields for the UI while preserving source inputs and outputs.
 
-Use a provider importer for Langfuse, LangSmith, Braintrust, Logfire, or Arize Phoenix data. For Mastra full trace exports, follow the registration and import workflow in the [Mastra guide](../adapters/mastra.md); that importer is not a server default. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
+Use a provider importer for Langfuse, LangSmith, Braintrust, Logfire, Arize Phoenix, or MLflow data. For Mastra full trace exports, follow the registration and import workflow in the [Mastra guide](../adapters/mastra.md); that importer is not a server default. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
 
 ## The portable session contract
 

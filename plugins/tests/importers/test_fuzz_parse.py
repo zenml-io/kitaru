@@ -488,6 +488,41 @@ _NON_FINITE_COST_RECORDS: dict[str, list[dict[str, Any]]] = {
             },
         },
     ],
+    "mlflow": [
+        {
+            "info": {
+                "trace_id": "t1",
+                "experiment_id": "proj",
+            },
+            "data": {
+                "spans": [
+                    {
+                        "span_id": "000000000000000a",
+                        "name": "ok",
+                        "attributes": {"mlflow.spanType": '"LLM"'},
+                    }
+                ]
+            },
+        },
+        {
+            "info": {
+                "trace_id": "t2",
+                "experiment_id": "proj",
+            },
+            "data": {
+                "spans": [
+                    {
+                        "span_id": "000000000000000b",
+                        "name": "poison",
+                        "attributes": {
+                            "mlflow.spanType": '"LLM"',
+                            "mlflow.llm.cost": '{"total_cost": "NaN"}',
+                        },
+                    }
+                ]
+            },
+        },
+    ],
     "phoenix": [
         {
             "context": {"trace_id": "t1", "span_id": "a"},
