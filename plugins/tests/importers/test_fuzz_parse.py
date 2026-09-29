@@ -499,6 +499,8 @@ _NON_FINITE_COST_RECORDS: dict[str, list[dict[str, Any]]] = {
                     {
                         "span_id": "000000000000000a",
                         "name": "ok",
+                        "start_time_unix_nano": 1,
+                        "end_time_unix_nano": 2,
                         "attributes": {"mlflow.spanType": '"LLM"'},
                     }
                 ]
@@ -514,6 +516,8 @@ _NON_FINITE_COST_RECORDS: dict[str, list[dict[str, Any]]] = {
                     {
                         "span_id": "000000000000000b",
                         "name": "poison",
+                        "start_time_unix_nano": 1,
+                        "end_time_unix_nano": 2,
                         "attributes": {
                             "mlflow.spanType": '"LLM"',
                             "mlflow.llm.cost": '{"total_cost": "NaN"}',

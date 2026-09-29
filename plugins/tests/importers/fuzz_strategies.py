@@ -400,7 +400,7 @@ def _mlflow_span(draw: st.DrawFn, trace_id: str) -> dict[str, Any]:
             _mostly(st.integers(0, 2**62), adversarial_json_value(1))
         ),
         "end_time_unix_nano": draw(
-            _mostly(st.integers(0, 2**62) | st.none(), adversarial_json_value(1))
+            _mostly(st.integers(0, 2**62), st.none() | adversarial_json_value(1))
         ),
         "status": {
             "code": draw(

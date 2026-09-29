@@ -398,7 +398,12 @@ def test_conflicting_repeated_traces_fail_their_session() -> None:
 )
 def test_malformed_trace_info_never_aborts_the_import(info: dict[str, Any]) -> None:
     """Keep every trace importing when trace info holds out-of-range values."""
-    bad = trace("tr-bad", [span("0000000000000001", ended=False)])
+    # An orphaned span without an end time is not a root, so the trace is
+    # finished and its end falls back to the info duration.
+    bad = trace(
+        "tr-bad",
+        [span("0000000000000001", parent="00000000000000ff", ended=False)],
+    )
     bad["info"].update(info)
     if "timestamp_ms" in info:
         del bad["info"]["request_time"]
@@ -654,19 +659,27 @@ def test_usage_stays_on_a_parent_when_no_descendant_carries_it() -> None:
     assert provider_call.tokens is None
 
 
-def test_in_progress_trace_is_marked_partial() -> None:
-    [session] = parse(
-        [trace("tr-a", [span("0000000000000001", ended=False)], state="IN_PROGRESS")]
+@pytest.mark.parametrize(("state", "ended"), [("IN_PROGRESS", True), ("OK", False)])
+def test_unfinished_trace_defers_its_whole_session(state: str, ended: bool) -> None:
+    """Keep a session out of Kitaru until MLflow finishes its last trace."""
+    session_meta = {"mlflow.trace.session": "s"}
+    done = trace("tr-done", [span("0000000000000001")], metadata=session_meta)
+    active = trace(
+        "tr-active",
+        [span("0000000000000001", offset=5_000, ended=ended)],
+        metadata=session_meta,
+        state=state,
     )
 
-    assert isinstance(session, ImportedSession)
-    [node] = session.nodes
-    assert node.status == NodeStatus.IN_PROGRESS
-    assert session.metadata["source_completeness"] == "partial"
-    assert any(
-        "still in progress" in warning
-        for warning in session.metadata["normalization_warnings"]
-    )
+    items = parse([done, active, trace("tr-ok", [span("0000000000000001")])])
+
+    assert [i.external_id for i in items if isinstance(i, ImportedSession)] == [
+        "7:tr-ok"
+    ]
+    [failure] = [item for item in items if isinstance(item, ImportFailure)]
+    assert failure.external_id == "s"
+    assert "unfinished trace 'tr-active'" in failure.error
+    assert "re-import" in failure.error
 
 
 def test_invalidated_assessments_are_dropped() -> None:
@@ -802,3 +815,36 @@ def test_parent_keeps_nothing_when_descendants_exceed_it() -> None:
     assert isinstance(session, ImportedSession)
     assert session.nodes[0].tokens is None
     assert _session_input_tokens(session) == 40
+
+
+def test_override_cannot_merge_sessions_from_different_experiments() -> None:
+    """Reject one session id reused across experiments under a shared namespace."""
+    session_meta = {"mlflow.trace.session": "chat-1"}
+    production = trace(
+        "tr-prod", [span("0000000000000001")], metadata=session_meta, experiment_id="1"
+    )
+    staging = trace(
+        "tr-stage", [span("0000000000000001")], metadata=session_meta, experiment_id="2"
+    )
+
+    separate = parse([production, staging])
+    [failure] = parse([production, staging], {"source_instance": "acme"})
+
+    assert {i.external_id for i in separate if isinstance(i, ImportedSession)} == {
+        "1:chat-1",
+        "2:chat-1",
+    }
+    assert isinstance(failure, ImportFailure)
+    assert failure.external_id == "chat-1"
+    assert "conflicting MLflow experiment ids" in failure.error
+
+
+def test_metadata_records_the_embedded_experiment_under_an_override() -> None:
+    [session] = parse(
+        [trace("tr-a", [span("0000000000000001")], experiment_id="9")],
+        {"source_instance": "acme"},
+    )
+
+    assert isinstance(session, ImportedSession)
+    assert session.external_id == "acme:tr-a"
+    assert session.metadata["mlflow.experiment_id"] == "9"

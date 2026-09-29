@@ -78,7 +78,7 @@ kitaru session import mlflow-traces.json \
   --join-on '/info/trace_metadata/mlflow.trace.user' --wait
 ```
 
-Experiment ids are only unique within one tracking server. If you import from several MLflow servers into the same agent, give each server its own `source_instance`. Traces stored in a Databricks Unity Catalog location carry no experiment id, so those imports need `source_instance`; without it the affected trace fails with a `--params` remedy. See [Import your traces](../getting-started/import-your-traces.md) for the shared identity rules.
+Experiment ids are only unique within one tracking server. If you import from several MLflow servers into the same agent, give each server its own `source_instance`. A shared `source_instance` never merges sessions across experiments: when traces from different experiments share a session id under one override, that session fails with `"Session '<id>' contains conflicting MLflow experiment ids"`. `mlflow.experiment_id` in session metadata always records the experiment the traces came from. Traces stored in a Databricks Unity Catalog location carry no experiment id, so those imports need `source_instance`; without it the affected trace fails with a `--params` remedy. See [Import your traces](../getting-started/import-your-traces.md) for the shared identity rules.
 
 ## 3. Or fetch from an MLflow tracking server
 
@@ -170,9 +170,10 @@ What the importer noticed while normalizing goes into `normalization_warnings` o
 - `"No mlflow.trace.session metadata; grouped by trace id"` when a trace has no session to group on.
 - `"Trace '<id>' has <n> root spans"` when a trace has no single root span.
 - `"Span '<id>' references missing parent '<id>'"` when a parent span is not in the file. Those nodes are kept as roots.
-- `"Trace '<id>' was still in progress"` when a trace had not finished when it was exported. The session's `source_completeness` is then `partial` instead of `full`.
 
-Some problems fail one trace or one session rather than the file, and are reported as import failures: a trace without spans, a duplicate span id, a span parent cycle, span chains deeper than 64 levels, an invalid token count or cost, and two different copies of the same trace id anywhere in the file, which rejects every copy of that trace. A malformed file (non-UTF-8, empty, or no parseable JSON at all) fails the task as a whole.
+A session with a trace MLflow had not finished recording, because its state is `IN_PROGRESS` or its root span has no end time, is not imported yet. It fails with `"Session '<id>' includes unfinished trace '<id>'; re-import it after MLflow finishes the trace"`, including its finished turns. An imported session is never updated afterwards and re-imports skip it, so importing it early would keep it without its last turn for good. Run the same import again later and the finished session imports normally; this is common when an API import's window reaches the present.
+
+Some problems fail one trace or one session rather than the file, and are reported as import failures: a trace without spans, a duplicate span id, a span parent cycle, span chains deeper than 64 levels, an invalid token count or cost, two different copies of the same trace id anywhere in the file, which rejects every copy of that trace, and a session whose traces come from different experiments. A malformed file (non-UTF-8, empty, or no parseable JSON at all) fails the task as a whole.
 
 Two more things worth knowing before you rely on an import:
 

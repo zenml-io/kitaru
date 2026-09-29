@@ -315,17 +315,22 @@ def _get_identity(value: Any, field_name: str) -> str | None:
     return value.strip() or None
 
 
-def _get_source_instance(trace: _Trace, params: dict[str, Any]) -> str:
-    """Resolve the source namespace that keeps session ids from colliding."""
-    override = _get_identity(params.get("source_instance"), "source_instance")
-    alias = _get_identity(params.get("experiment_id"), "experiment_id parameter")
+def _get_embedded_experiment(trace: _Trace) -> str | None:
+    """Return the experiment id a trace records in either trace info schema."""
     experiment = _dict(_dict(trace.info.get("trace_location")).get("mlflow_experiment"))
-    embedded = _get_identity(
+    return _get_identity(
         experiment["experiment_id"]
         if "experiment_id" in experiment
         else trace.info.get("experiment_id"),
         "experiment_id",
     )
+
+
+def _get_source_instance(trace: _Trace, params: dict[str, Any]) -> str:
+    """Resolve the source namespace that keeps session ids from colliding."""
+    override = _get_identity(params.get("source_instance"), "source_instance")
+    alias = _get_identity(params.get("experiment_id"), "experiment_id parameter")
+    embedded = _get_embedded_experiment(trace)
     source_instance = override or alias or embedded
     if source_instance is None:
         raise InvalidImport(
@@ -974,6 +979,13 @@ def _detect_framework(traces: list[_Trace], configured: Any) -> str | None:
     return next(iter(matches)) if len(matches) == 1 else None
 
 
+def _is_unfinished(trace: _Trace) -> bool:
+    """Return whether MLflow had not finished recording a trace."""
+    return trace.state == "IN_PROGRESS" or any(
+        span.parent_id is None and span.ended_at is None for span in trace.spans
+    )
+
+
 def _parse_unique_traces(
     documents: list[Any],
 ) -> tuple[list[tuple[int, _Trace]], list[ImportFailure]]:
@@ -1083,6 +1095,24 @@ class MlflowTraceImporter:
         trace_fallback: bool,
     ) -> ImportedSession:
         """Normalize one grouped MLflow session."""
+        # An imported session is never updated after creation and a re-import
+        # is skipped as a duplicate, so a session with an unfinished trace is
+        # deferred whole rather than stored without its last turn.
+        unfinished = sorted(t.trace_id for t in traces if _is_unfinished(t))
+        if unfinished:
+            raise InvalidImport(
+                f"Session '{session_id}' includes unfinished trace "
+                f"'{unfinished[0]}'; re-import it after MLflow finishes the trace"
+            )
+        experiments = {
+            experiment
+            for trace in traces
+            if (experiment := _get_embedded_experiment(trace)) is not None
+        }
+        if len(experiments) > 1:
+            raise InvalidImport(
+                f"Session '{session_id}' contains conflicting MLflow experiment ids"
+            )
         warnings: list[str] = []
         if trace_fallback:
             warnings.append("No mlflow.trace.session metadata; grouped by trace id")
@@ -1110,8 +1140,6 @@ class MlflowTraceImporter:
             )
             turns.append((turn, trace, root))
             nodes.extend(_build_nodes(trace, span).node for span in roots)
-            if trace.state == "IN_PROGRESS":
-                warnings.append(f"Trace '{trace.trace_id}' was still in progress")
 
         nodes.sort(
             key=lambda node: (
@@ -1133,7 +1161,7 @@ class MlflowTraceImporter:
         )
         metadata: dict[str, Any] = {
             "mlflow.session_id": None if trace_fallback else session_id,
-            "mlflow.experiment_id": source_instance,
+            "mlflow.experiment_id": next(iter(experiments), None),
             "mlflow.trace_ids": [trace.trace_id for trace in ordered_traces],
             "mlflow.join_paths": sorted(join_paths),
             "mlflow.users": users,
@@ -1154,9 +1182,7 @@ class MlflowTraceImporter:
                 for assessment in _assessments(trace)
             ],
             "source_trace_count": len(turns),
-            "source_completeness": "partial"
-            if any(trace.state == "IN_PROGRESS" for trace in ordered_traces)
-            else "full",
+            "source_completeness": "full",
             "normalization_warnings": warnings,
         }
         return ImportedSession(
