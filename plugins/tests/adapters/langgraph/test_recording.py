@@ -1,8 +1,11 @@
 """Callback recording and ancestry contracts."""
 
 import uuid
+from decimal import Decimal
 from typing import Any
 
+import pytest
+from deepagents import create_deep_agent
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
@@ -11,6 +14,7 @@ from langchain_core.outputs import LLMResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.tools import tool
 
+from kitaru.api_models.v1.session import TokenUsage
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru_langgraph import KitaruGraphRunner
 from kitaru_langgraph.callbacks import AsyncKitaruCallback
@@ -177,3 +181,102 @@ async def test_callback_failures_preserve_error_text(fake_client: Any) -> None:
     assert tool.error == "service down"
     assert root.error == "graph failed"
     assert client.sessions.updated[-1][1].error == "graph failed"
+
+
+class OpenAIStyleFakeModel(ToolCallingFakeModel):
+    """Report model identity and usage the way ChatOpenAI does."""
+
+    def _get_ls_params(self, stop: list[str] | None = None, **kwargs: Any) -> Any:
+        return {
+            **super()._get_ls_params(stop=stop, **kwargs),
+            "ls_provider": "openai",
+            "ls_model_name": "gpt-5-nano",
+        }
+
+
+def _model_nodes(fake_client: Any) -> list[Any]:
+    batches = fake_client.instances[0].sessions.node_batches
+    return [
+        node
+        for _, batch in batches
+        for node in batch.nodes
+        if node.node_type is NodeType.LLM_CALL
+    ]
+
+
+def _openai_message(content: str, **fields: Any) -> AIMessage:
+    return AIMessage(
+        content=content,
+        response_metadata={
+            "model_name": "gpt-5-nano-2025-08-07",
+            "model_provider": "openai",
+        },
+        usage_metadata={
+            "input_tokens": 1000,
+            "output_tokens": 500,
+            "total_tokens": 1500,
+            "input_token_details": {"cache_read": 200},
+            "output_token_details": {"reasoning": 300},
+        },
+        **fields,
+    )
+
+
+@pytest.mark.parametrize("factory", [create_deep_agent, create_agent])
+def test_agent_factory_model_calls_record_model_usage_and_cost(
+    fake_client: Any, factory: Any
+) -> None:
+    @tool
+    def lookup_order(order_id: str) -> str:
+        """Look up an order."""
+        return f"{order_id} shipped"
+
+    call = {"name": "lookup_order", "args": {"order_id": "ORD-1007"}, "id": "c-1"}
+    model = OpenAIStyleFakeModel(
+        responses=[_openai_message("", tool_calls=[call]), _openai_message("Shipped.")]
+    )
+    runner = KitaruGraphRunner.from_agent_factory(
+        factory, factory_kwargs={"model": model, "tools": [lookup_order]}
+    )
+
+    result = runner.invoke({"messages": [{"role": "user", "content": "ORD-1007?"}]})
+
+    assert result["messages"][-1].content == "Shipped."
+    model_nodes = _model_nodes(fake_client)
+    assert len(model_nodes) == 2
+    for node in model_nodes:
+        assert node.requested_model == "gpt-5-nano"
+        assert node.model == "gpt-5-nano-2025-08-07"
+        assert node.model_provider == "openai"
+        assert node.tokens == TokenUsage(
+            input_tokens=1000,
+            output_tokens=500,
+            cached_input_tokens=200,
+            reasoning_tokens=300,
+        )
+        # 800 uncached and 200 cached input tokens plus 500 output tokens at
+        # gpt-5-nano's $0.05 / $0.005 / $0.40 per million token prices.
+        assert node.cost == Decimal("0.000241")
+        assert node.attributes == {
+            "cost": {"status": "estimated", "source": "genai-prices"}
+        }
+
+
+def test_model_call_without_usage_records_identity_but_no_cost(
+    fake_client: Any,
+) -> None:
+    model = OpenAIStyleFakeModel(responses=[AIMessage(content="done")])
+    runner = KitaruGraphRunner.from_agent_factory(
+        create_agent, factory_kwargs={"model": model, "tools": []}
+    )
+
+    runner.invoke({"messages": [{"role": "user", "content": "hi"}]})
+
+    [node] = _model_nodes(fake_client)
+    assert (node.requested_model, node.model, node.model_provider) == (
+        "gpt-5-nano",
+        "gpt-5-nano",
+        "openai",
+    )
+    assert node.tokens is None
+    assert node.cost is None

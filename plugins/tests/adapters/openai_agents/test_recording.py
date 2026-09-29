@@ -17,6 +17,7 @@ import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
 from unittest.mock import AsyncMock
@@ -24,7 +25,13 @@ from unittest.mock import AsyncMock
 import pytest
 from agents import (
     Agent,
+    AgentOutputSchemaBase,
+    Handoff,
+    Model,
     ModelResponse,
+    ModelSettings,
+    ModelTracing,
+    MultiProvider,
     RunConfig,
     RunContextWrapper,
     RunErrorDetails,
@@ -32,18 +39,27 @@ from agents import (
     RunItem,
     Runner,
     RunResult,
+    Tool,
     TResponseInputItem,
     Usage,
+    function_tool,
 )
 from agents.items import HandoffOutputItem, ToolCallItem, ToolCallOutputItem
 from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseOutputMessage,
     ResponseOutputText,
+    ResponseReasoningItem,
+)
+from openai.types.responses.response_prompt_param import ResponsePromptParam
+from openai.types.responses.response_reasoning_item import Summary
+from openai.types.responses.response_usage import (
+    InputTokensDetails,
+    OutputTokensDetails,
 )
 
 import kitaru_openai_agents.recording as recording_module
-from kitaru.api_models.v1.session import SessionStatus
+from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.client import KitaruAPIClient
@@ -55,6 +71,8 @@ from kitaru_openai_agents.recording import (
     UnsupportedInterruptionError,
     finalize_failure,
 )
+
+from .conftest import DeterministicModel
 
 
 class _FakeSessions:
@@ -962,3 +980,168 @@ async def test_composed_hooks_forward_caller_events_once(
     )
 
     assert events == ["llm:start", "llm:end"]
+
+
+class _ScriptedOpenAIModel(DeterministicModel):
+    """Answer like a reasoning OpenAI model: think, call a tool, then reply."""
+
+    def __init__(self, *, call_tool: bool = True) -> None:
+        super().__init__()
+        self.call_tool = call_tool
+        self.calls = 0
+
+    async def get_response(
+        self,
+        system_instructions: str | None,
+        input: str | list[TResponseInputItem],
+        model_settings: ModelSettings,
+        tools: list[Tool],
+        output_schema: AgentOutputSchemaBase | None,
+        handoffs: list[Handoff],
+        tracing: ModelTracing,
+        *,
+        previous_response_id: str | None,
+        conversation_id: str | None,
+        prompt: ResponsePromptParam | None,
+    ) -> ModelResponse:
+        self.calls += 1
+        reasoning = ResponseReasoningItem(
+            id=f"reasoning-{self.calls}",
+            type="reasoning",
+            summary=[Summary(text=f"thought {self.calls}", type="summary_text")],
+        )
+        answer: Any = (
+            ResponseFunctionToolCall(
+                arguments='{"order_id": "ORD-1007"}',
+                call_id="call-1",
+                name="lookup_order",
+                type="function_call",
+                id="item-1",
+                status="completed",
+            )
+            if self.call_tool and self.calls == 1
+            else ResponseOutputMessage(
+                id="message-2",
+                content=[
+                    ResponseOutputText(
+                        annotations=[], text="Shipped.", type="output_text", logprobs=[]
+                    )
+                ],
+                role="assistant",
+                status="completed",
+                type="message",
+            )
+        )
+        return ModelResponse(
+            output=[reasoning, answer],
+            usage=Usage(
+                requests=1,
+                input_tokens=1000,
+                output_tokens=500,
+                total_tokens=1500,
+                input_tokens_details=InputTokensDetails(
+                    cached_tokens=200, cache_write_tokens=0
+                ),
+                output_tokens_details=OutputTokensDetails(reasoning_tokens=300),
+            ),
+            response_id=f"response-{self.calls}",
+        )
+
+
+async def test_string_model_calls_record_model_usage_cost_and_reasoning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scripted = _ScriptedOpenAIModel()
+    requested: list[str | None] = []
+
+    def get_model(self: MultiProvider, model_name: str | None) -> Model:
+        requested.append(model_name)
+        return scripted
+
+    # Keep the stock provider object so the adapter sees an ordinary
+    # OpenAI-routed run; only the network-facing model is scripted.
+    monkeypatch.setattr(MultiProvider, "get_model", get_model)
+
+    @function_tool
+    def lookup_order(order_id: str) -> str:
+        """Look up an order."""
+        return f"{order_id} shipped"
+
+    agent = Agent[None](name="support", model="gpt-5-nano", tools=[lookup_order])
+    result = await KitaruRunner(agent_id=uuid.uuid4()).run(
+        agent, "Where is ORD-1007?", run_config=RunConfig(tracing_disabled=True)
+    )
+    nodes = _nodes(_FakeClient.instances[0])
+    model_nodes = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
+
+    assert result.final_output == "Shipped."
+    assert requested == ["gpt-5-nano", "gpt-5-nano"]
+    assert len(model_nodes) == 2
+    for position, node in enumerate(model_nodes, start=1):
+        assert node.requested_model == "gpt-5-nano"
+        assert node.model == "gpt-5-nano"
+        assert node.model_provider == "openai"
+        assert node.tokens == TokenUsage(
+            input_tokens=1000,
+            output_tokens=500,
+            cached_input_tokens=200,
+            reasoning_tokens=300,
+        )
+        # 800 uncached and 200 cached input tokens plus 500 output tokens at
+        # gpt-5-nano's $0.05 / $0.005 / $0.40 per million token prices.
+        assert node.cost == Decimal("0.000241")
+        assert node.attributes == {
+            "cost": {"status": "estimated", "source": "genai-prices"}
+        }
+        assert node.outputs[0] == {
+            "id": f"reasoning-{position}",
+            "type": "reasoning",
+            "summary": [f"thought {position}"],
+            "content": [],
+        }
+        assert node.reasoning_selectors == ["/0/summary/0"]
+    assert all(node.name != "unsupported_openai_item" for node in nodes)
+
+
+@pytest.mark.parametrize(
+    ("agent_model", "run_model", "expected"),
+    [
+        (None, "openai/gpt-5-mini", ("openai/gpt-5-mini", "gpt-5-mini", "openai")),
+        ("gpt-5-nano", "gpt-5-mini", ("gpt-5-mini", "gpt-5-mini", "openai")),
+        (
+            "litellm/anthropic/claude-haiku-4-5",
+            None,
+            (
+                "litellm/anthropic/claude-haiku-4-5",
+                None,
+                None,
+            ),
+        ),
+    ],
+)
+async def test_model_identity_follows_sdk_resolution_order(
+    monkeypatch: pytest.MonkeyPatch,
+    agent_model: str | None,
+    run_model: str | None,
+    expected: tuple[str | None, str | None, str | None],
+) -> None:
+    monkeypatch.setattr(
+        MultiProvider,
+        "get_model",
+        lambda self, name: _ScriptedOpenAIModel(call_tool=False),
+    )
+    agent = Agent[None](name="support", model=agent_model)
+
+    await KitaruRunner(agent_id=uuid.uuid4()).run(
+        agent, "hi", run_config=RunConfig(model=run_model, tracing_disabled=True)
+    )
+    node = next(
+        node
+        for node in _nodes(_FakeClient.instances[0])
+        if node.node_type is NodeType.LLM_CALL
+    )
+
+    assert (node.requested_model, node.model, node.model_provider) == expected
+    if expected[1] is None:
+        assert node.cost is None
+        assert node.attributes["cost"]["status"] == "unavailable"
