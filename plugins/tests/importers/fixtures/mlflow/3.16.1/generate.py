@@ -38,7 +38,9 @@ from langchain_openai import ChatOpenAI
 from mlflow.entities import AssessmentSource, SpanType
 
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).parent
-TRACKING_URI = f"sqlite:///{Path(tempfile.mkdtemp()) / 'mlflow.db'}"
+TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI") or (
+    f"sqlite:///{Path(tempfile.mkdtemp()) / 'mlflow.db'}"
+)
 mlflow.set_tracking_uri(TRACKING_URI)
 EXPERIMENT_ID = mlflow.create_experiment(
     "kitaru-fixtures", artifact_location="mlflow-artifacts:/kitaru-fixtures"

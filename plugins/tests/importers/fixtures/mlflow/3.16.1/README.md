@@ -18,3 +18,5 @@ Regenerate from the repository root:
 ```bash
 uv run plugins/tests/importers/fixtures/mlflow/3.16.1/generate.py
 ```
+
+The traces go to a temporary SQLite store unless `MLFLOW_TRACKING_URI` points at a tracking server, which is how to record them into a running MLflow server for an API import. An optional argument writes `traces.json` to another directory instead of this one.
