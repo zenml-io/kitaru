@@ -417,7 +417,8 @@ updates:
       # users are told is unsupported. Treat that PR as the prompt for a
       # deliberate range extension like #1092, not something to merge as is.
       # Separate groups keep a Mastra range question from holding up an `ai`
-      # patch.
+      # patch. `@mastra/*` version updates are ignored below, so for Mastra
+      # that range extension always starts by hand.
       vercel-ai:
         patterns:
           - ai
@@ -426,8 +427,10 @@ updates:
           - minor
           - patch
 
-      # `zod` is declared only by the Mastra adapter and its example, where it
-      # defines the tool schemas Mastra validates.
+      # `zod` is declared only by the Mastra adapter, its test packages and its
+      # example, where it defines the tool schemas Mastra validates. The
+      # `@mastra/*` version updates this group would carry are ignored below;
+      # the pattern stays so they never land in the catch-all either.
       mastra:
         patterns:
           - "@mastra/*"
@@ -465,6 +468,29 @@ updates:
       # package builds do not accidentally depend on APIs absent from Node 22.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # The Mastra memory replay factory accepts only the release sets in
+      # MEMORY_REPLAY_TESTED_VERSIONS (packages/mastra/src/memory-replay-versions.ts),
+      # and packages/mastra plus each packages/mastra-compat/<x.y> package pins
+      # one set so CI runs the full suite on it. Dependabot writes one version
+      # into every package.json that declares a dependency, and nothing here
+      # can scope an update to one workspace member: `ignore` takes only names
+      # and versions, `dependency-type` classifies a name across all members
+      # (the examples make `@mastra/core` a production dependency), and a
+      # second npm block inside this pnpm workspace fails as misconfigured. So
+      # any `@mastra/*` update would move every pin at once, as the cooldown-
+      # limited #1222 did when it moved `@mastra/core` from 1.71.0 down to 1.67.0.
+      #
+      # Each Mastra package is built against one core release (memory 1.31.0
+      # does not load on core 1.67.0), so all of `@mastra/*` moves by hand:
+      # validate a new release in a new compat package, add its row to the
+      # table, and bump the examples then. Listing every update type ignores
+      # version updates only; security updates still open, and CI fails them
+      # until their release set is tested.
+      - dependency-name: "@mastra/*"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
     cooldown:
       default-days: 7
       semver-major-days: 14
