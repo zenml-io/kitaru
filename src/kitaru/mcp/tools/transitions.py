@@ -5,6 +5,8 @@
 
 import dataclasses
 import hashlib
+import hmac
+import secrets
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -36,6 +38,8 @@ MAX_PATH = 8
 MAX_NOTE = 300
 MAX_LABEL = 80
 MAX_UNLOCATED_EVALUATIONS = 10
+
+_LABEL_KEY = secrets.token_bytes(32)
 
 Labeler = Callable[[SessionNodeResponse], str | None]
 Transition = tuple[str, str]
@@ -84,7 +88,15 @@ def build_labeler(state_by: StateBy, state_map: Mapping[str, str] | None) -> Lab
 def _display_state(name: str, patterns: Sequence[tuple[str, str]]) -> str:
     # Redact and bound here rather than on output: the view sends labels back to
     # the drill-down tool, which must compare them with the same string it shows.
-    return _bounded(redact(_escape_reserved(map_state(name, patterns))))
+    label = _escape_reserved(map_state(name, patterns))
+    shown = redact(label)
+    if shown != label:
+        # Redaction can map distinct labels to one string, and labels are grouping
+        # keys, so tag each with a keyed digest that cannot be used to test guesses.
+        # The space keeps output redaction from swallowing the tag again.
+        digest = hmac.new(_LABEL_KEY, label.encode(), hashlib.sha256).hexdigest()
+        shown = f"{shown} [{digest[:12]}]"
+    return _bounded(shown)
 
 
 def _bounded(label: str) -> str:

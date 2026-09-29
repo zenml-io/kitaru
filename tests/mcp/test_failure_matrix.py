@@ -281,6 +281,23 @@ def test_negative_first_failure_answers_are_not_marks(answer: JsonValue) -> None
     assert not outcome.failed and outcome.point is None
 
 
+def test_redacted_labels_stay_distinct_without_revealing_secrets() -> None:
+    sessions = [_session("failed"), _session("failed")]
+    secrets_ = ["KITKEY_alpha", "KITKEY_beta"]
+    nodes = {
+        s.id: [_node(s, "a", "tool_call", name, status="failed")]
+        for s, name in zip(sessions, secrets_, strict=True)
+    }
+
+    outcomes = analyze_group(
+        _records(nodes, sessions), build_labeler("tool", None), None
+    )
+    labels = [outcome.path[-1] for outcome in outcomes]
+
+    assert labels[0] != labels[1]
+    assert not any(secret in label for secret in secrets_ for label in labels)
+
+
 async def test_redacted_state_labels_stay_drillable() -> None:
     session = _session("failed")
     secret_named = "KITKEY_example"
