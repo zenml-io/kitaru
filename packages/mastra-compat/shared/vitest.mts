@@ -1,3 +1,4 @@
+import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vitest/config";
 
@@ -22,7 +23,7 @@ function resolveMastraFrom(anchor: string): Plugin {
 export function defineMastraCompatConfig(configUrl: string) {
   const anchor = fileURLToPath(configUrl);
   const packageDir = fileURLToPath(new URL(".", configUrl));
-  const packageTests = `${packageDir.slice(PACKAGES_DIR.length)}test/**/*.test.ts`;
+  const packageTests = `${relative(PACKAGES_DIR, packageDir)}/test/**/*.test.ts`;
   return defineConfig({
     plugins: [resolveMastraFrom(anchor)],
     test: {

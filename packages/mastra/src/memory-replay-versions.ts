@@ -6,14 +6,9 @@ export interface MemoryReplayTestedVersions {
   readonly pg: string;
 }
 
-// The factory records at Mastra's storage layer, so it accepts only the exact
-// `@mastra/core` + `@mastra/memory` pairs listed here. Each row must match the
-// devDependencies of one test package (`packages/mastra` or a
-// `packages/mastra-compat/<version>` package) that runs the full adapter suite;
-// `test/tested-versions.test.ts` fails when a row and a test package disagree.
-// Add a row only together with its test package, after that suite passes.
-// `memory` and `pg` are the releases built against `core` (1.69.0 shipped no
-// memory or pg release, so it uses the ones built against 1.68.0).
+// Exact `@mastra/core` + `@mastra/memory` pairs whose full adapter suite
+// passes; each row is one test package's pins (see test/tested-versions.test.ts).
+// 1.69.0 shipped no memory or pg release, so it uses the ones built for 1.68.0.
 export const MEMORY_REPLAY_TESTED_VERSIONS: readonly MemoryReplayTestedVersions[] =
   [
     { core: "1.67.0", memory: "1.30.0", pg: "1.25.0" },

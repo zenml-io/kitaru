@@ -79,6 +79,20 @@ describe("the Mastra versions under test", () => {
     );
   });
 
+  it.each(["mastra/README.md", "../docs/book/adapters/mastra.md"])(
+    "are the rows of the version table in %s",
+    (path) => {
+      const rows = readFileSync(new URL(path, PACKAGES_DIR), "utf8").match(
+        /^\| \d+\.\d+\.\d+ \| \d+\.\d+\.\d+ \| \d+\.\d+\.\d+ \|$/gm,
+      );
+      expect(rows).toEqual(
+        MEMORY_REPLAY_TESTED_VERSIONS.map(
+          ({ core, memory, pg }) => `| ${core} | ${memory} | ${pg} |`,
+        ),
+      );
+    },
+  );
+
   it("match the adapter's @mastra/memory peer range", () => {
     const peer = readPackageJson(new URL("mastra/", PACKAGES_DIR))
       .peerDependencies?.["@mastra/memory"];
@@ -102,7 +116,10 @@ describe("assertMemoryReplayVersions", () => {
       expect.objectContaining({
         reason: "version_mismatch",
         message: expect.stringContaining(
-          "@mastra/core@1.67.0 with @mastra/memory@1.30.0, @mastra/core@1.68.0 with @mastra/memory@1.31.0",
+          MEMORY_REPLAY_TESTED_VERSIONS.map(
+            (tested) =>
+              `@mastra/core@${tested.core} with @mastra/memory@${tested.memory}`,
+          ).join(", "),
         ),
       }),
     );

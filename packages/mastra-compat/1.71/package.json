@@ -2,12 +2,9 @@
   "name": "@zenml-io/kitaru-mastra-compat-1.71",
   "version": "0.0.0",
   "private": true,
-  "description": "Runs the Mastra adapter tests against @mastra/core 1.71.0",
+  "description": "Runs the Mastra adapter tests against one tested Mastra release set",
   "license": "Apache-2.0",
   "type": "module",
-  "engines": {
-    "node": ">=22.22.0 <23 || >=24 <25 || >=26 <27"
-  },
   "devDependencies": {
     "@mastra/core": "1.71.0",
     "@mastra/memory": "1.32.1",
