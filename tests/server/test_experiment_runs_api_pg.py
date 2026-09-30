@@ -14,12 +14,18 @@
 """End-to-end experiment run tests against PostgreSQL."""
 
 import json
+import uuid
 from collections.abc import AsyncGenerator
+from typing import NoReturn
 
 import httpx
 import pytest
 
 from conftest import db_settings, lifespan_client
+from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.experiment_run_service import (
+    ExperimentRunService,
+)
 
 
 @pytest.fixture
@@ -200,6 +206,53 @@ async def test_cancel_run_drains_pending_replicas_immediately(
 
     reloaded = (await client.get(f"/api/v1/experiment-runs/{run['id']}")).json()
     assert reloaded["status"] == "canceled"
+
+
+async def test_cancel_run_rolls_back_failed_job_cancellation_and_can_retry(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed second cancellation phase preserves the request and can be retried."""
+    setup = await _setup_run(client)
+    response = await client.post(
+        f"/api/v1/experiments/{setup['experiment_id']}/runs",
+        json={
+            "cohort_version_id": setup["cohort_version_id"],
+            "agent_version_id": setup["agent_version_id"],
+            "baseline_evaluation_mode": "none",
+        },
+    )
+    assert response.status_code == 201
+    run_id = response.json()["id"]
+    original = ExperimentRunService.cancel_run_jobs
+    failure = RuntimeError("injected failure after canceling experiment run jobs")
+
+    async def fail_after_canceling_jobs(
+        self: ExperimentRunService, experiment_run_id: uuid.UUID, actor: AuthContext
+    ) -> NoReturn:
+        await original(self, experiment_run_id, actor)
+        raise failure
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            ExperimentRunService, "cancel_run_jobs", fail_after_canceling_jobs
+        )
+        with pytest.raises(RuntimeError) as caught:
+            await client.post(f"/api/v1/experiment-runs/{run_id}/cancel")
+        assert caught.value is failure
+
+    reloaded = (await client.get(f"/api/v1/experiment-runs/{run_id}")).json()
+    assert reloaded["status"] == "canceling"
+    assert reloaded["progress"]["pending"] == 2
+    assert reloaded["progress"]["canceled"] == 0
+    jobs = (await client.get(f"/api/v1/experiment-runs/{run_id}/jobs")).json()["items"]
+    assert len(jobs) == 2
+    assert all(job["status"] == "pending" for job in jobs)
+    assert all(job["cancel_requested_at"] is None for job in jobs)
+
+    retried = await client.post(f"/api/v1/experiment-runs/{run_id}/cancel")
+    assert retried.status_code == 200
+    assert retried.json()["status"] == "canceled"
+    assert retried.json()["progress"]["canceled"] == 2
 
 
 async def test_delete_run_cascades_its_replays_and_cancels_its_jobs(
