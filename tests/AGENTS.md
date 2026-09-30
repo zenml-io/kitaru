@@ -50,7 +50,7 @@ For local reproduction, prefix the normal base pytest command with `KITARU_TEST_
 
 Manual CI dispatches offer a `test-processes` choice of `1` or `2` for the base and plugin suites. Regular push and pull-request CI remains serial until the two-process trial passes the acceptance checks. The trial uses `--dist loadfile` to keep each file together, retains both existing Python 3.14 partitions, and exports JUnit outcomes and combined core/plugin coverage JSON as one-day artifacts. Run each mode sequentially on the same commit and runner types; repeat the comparison to distinguish an improvement from runner noise.
 
-Adopt two-process execution only after median end-to-end CI execution time improves by at least 20%, excluding queue time, without worsening slower runs or introducing intermittent failures. Compare test identities and outcomes, unexpected skips, and per-file covered lines and branch arcs, including child processes. Retain the current Hypothesis settings, database-required failures, supported-version matrix, and package checks.
+Adopt two-process execution only after repeated same-commit comparisons show at least a 20% improvement in median queue-free CI critical-path execution time, without worsening slower runs or introducing intermittent failures. Reconstruct this metric from job execution durations and the workflow's `needs` graph, and report observed workflow elapsed time separately. Compare test identities and outcomes, unexpected skips, and per-file covered lines and branch arcs, including child processes. Retain the current Hypothesis settings, database-required failures, supported-version matrix, and package checks.
 
 ## Property-based tests
 
