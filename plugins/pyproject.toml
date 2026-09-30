@@ -13,6 +13,7 @@ kitaru-langgraph = { workspace = true }
 kitaru-langsmith-importer = { workspace = true }
 kitaru-logfire-importer = { workspace = true }
 kitaru-mastra-importer = { workspace = true }
+kitaru-mlflow-importer = { workspace = true }
 kitaru-openai-agents = { workspace = true }
 kitaru-phoenix-importer = { workspace = true }
 kitaru-post-import-insights = { workspace = true }
@@ -29,6 +30,7 @@ dev = [
     "kitaru-langsmith-importer[adapter]",
     "kitaru-logfire-importer[adapter]",
     "kitaru-mastra-importer",
+    "kitaru-mlflow-importer[api]",
     "kitaru-openai-agents",
     "kitaru-phoenix-importer[adapter]",
     "kitaru-post-import-insights[openai]",
@@ -89,6 +91,7 @@ known-first-party = [
     "kitaru_logfire_importer",
     "kitaru_langsmith_importer",
     "kitaru_mastra_importer",
+    "kitaru_mlflow_importer",
     "kitaru_openai_agents",
     "kitaru_phoenix_importer",
     "kitaru_post_import_insights",
@@ -103,6 +106,9 @@ known-third-party = ["mcp"]
 
 [tool.ty.src]
 include = ["packages/*/src/**/*.py", "tests/**/*.py"]
+# Fixture generators are PEP 723 scripts with their own pinned dependencies,
+# which the plugin workspace does not install at the same versions.
+exclude = ["tests/importers/fixtures/**"]
 
 [tool.ty.environment]
 python-version = "3.11"

@@ -84,6 +84,7 @@ _FIRST_PARTY_KITARU_PACKAGES = frozenset(
         "kitaru-langsmith-importer",
         "kitaru-logfire-importer",
         "kitaru-mastra-importer",
+        "kitaru-mlflow-importer",
         "kitaru-openai-agents",
         "kitaru-phoenix-importer",
         "kitaru-post-import-insights",
