@@ -29,6 +29,7 @@ from kitaru.mcp.models.failure_matrix import (
     FailureCellRequest,
     FailureMatrixData,
     FailureMatrixRequest,
+    FailureSource,
     GroupRecords,
     GroupSummary,
     MatrixCell,
@@ -48,6 +49,7 @@ PAGE_SIZE = 500
 TOP_CELLS_IN_TEXT = 5
 MAX_NODES_PER_SESSION = 2000
 MAX_NODES_PER_GROUP = 100_000
+MAX_STORED_ERROR = 1000
 MAX_RECORDS_PER_BATCH = 2000
 
 ItemT = TypeVar("ItemT", bound=ResponseModel)
@@ -90,7 +92,7 @@ async def handle_failure_matrix(
         if compare is not None
         else None,
     )
-    return ToolSuccessPayload(data=data, text=describe_matrix(data))
+    return ToolSuccessPayload(data=data, text=describe_matrix(data, request.sources))
 
 
 async def handle_failure_cell(
@@ -201,7 +203,8 @@ async def fetch_group(
             iterator = client.sessions.iter_nodes(
                 session_id, SessionNodeListParams(size=PAGE_SIZE)
             )
-            return await _read_up_to(iterator, node_limit)
+            nodes, capped = await _read_up_to(iterator, node_limit)
+            return [_slim(node) for node in nodes], capped
 
     (
         node_reads,
@@ -224,6 +227,32 @@ async def fetch_group(
         records_capped=annotations_capped
         or evaluations_capped
         or any(capped for _, capped in node_reads),
+        partial_sessions=frozenset(
+            session_id
+            for session_id, (_, capped) in zip(ids, node_reads, strict=True)
+            if capped
+        ),
+    )
+
+
+def _slim(node: SessionNodeResponse) -> SessionNodeResponse:
+    # Snapshots keep nodes for minutes; drop fields the analysis never reads so
+    # their size is bounded by the node count, not by recorded metadata.
+    return node.model_copy(
+        update={
+            "links": [],
+            "metadata": {},
+            "model_params": None,
+            "tokens": None,
+            "attributes": None,
+            "inputs": None,
+            "outputs": None,
+            "reasoning_selectors": [],
+            "input_text_selector": None,
+            "output_text_selector": None,
+            "system_prompt_selector": None,
+            "error": node.error[:MAX_STORED_ERROR] if node.error else None,
+        }
     )
 
 
@@ -259,16 +288,16 @@ async def _collect_by_session(
     )
 
 
-def describe_matrix(data: FailureMatrixData) -> str:
+def describe_matrix(data: FailureMatrixData, sources: Sequence[FailureSource]) -> str:
     """Summarize a matrix in plain language for the model and for hosts without UI."""
     base, compare = data.base, data.compare
     lines = [
         f"Transition failure matrix: rows are the last step that went right, "
         f"columns the first step that went wrong (states: {data.state_by}).",
-        _describe_group(base),
+        _describe_group(base, "annotation" in sources),
     ]
     if compare is not None:
-        lines.append(_describe_group(compare))
+        lines.append(_describe_group(compare, "annotation" in sources))
         changed = sorted(
             (c for c in data.cells if (c.compare_count or 0) != c.count),
             key=lambda c: -abs((c.compare_count or 0) - c.count),
@@ -294,7 +323,7 @@ def describe_matrix(data: FailureMatrixData) -> str:
     return "\n".join(lines)
 
 
-def _describe_group(group: GroupSummary) -> str:
+def _describe_group(group: GroupSummary, marks_counted: bool) -> str:
     text = (
         f"{group.label}: {group.session_count} sessions, {group.failed_count} failed, "
         f"{group.shown_count} placed in the matrix"
@@ -303,11 +332,15 @@ def _describe_group(group: GroupSummary) -> str:
         evaluations = ", ".join(
             f"{item.name} x{item.count}" for item in group.unlocated_evaluations
         )
+        text += f"; {group.unlocated_count} failed without a located step" + (
+            f" (failed evaluations: {evaluations})" if evaluations else ""
+        )
+        # A new mark is an annotation failure, which only shows when counted.
         text += (
-            f"; {group.unlocated_count} failed without a located step"
-            + (f" (failed evaluations: {evaluations})" if evaluations else "")
-            + ". Mark the step with an annotation on the node, value "
+            ". Mark the step with an annotation on the node, value "
             '{"first_failure": true, "note": "..."}, to place them'
+            if marks_counted
+            else '. Marking them places them only when sources include "annotation"'
         )
     if group.truncated:
         text += "; only the newest sessions were read (raise max_sessions for more)"

@@ -11,6 +11,7 @@ import uuid
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from fnmatch import fnmatchcase
 
 from kitaru.api_models.v1.annotation import AnnotationResponse
@@ -183,7 +184,10 @@ def _clip(text: str | None) -> str | None:
 
 
 def locate_failure(
-    nodes: Sequence[SessionNodeResponse], marks: Mapping[uuid.UUID, str | None]
+    nodes: Sequence[SessionNodeResponse],
+    marks: Mapping[uuid.UUID, str | None],
+    *,
+    nodes_complete: bool = True,
 ) -> FailurePoint | None:
     """Find the node where a session first went wrong.
 
@@ -195,6 +199,9 @@ def locate_failure(
     Args:
         nodes: The session's nodes in position order.
         marks: Node ids a reviewer marked as the first failure, with notes.
+        nodes_complete: Whether `nodes` holds every node of the session. A cut-off
+            list may hold a failed span but not the failed step inside it, so
+            only reviewer marks can locate the failure then.
 
     Returns:
         The failure point, or `None` when nothing in the session locates one.
@@ -202,6 +209,8 @@ def locate_failure(
     for node in nodes:
         if node.id in marks:
             return FailurePoint(node, "annotation", marks[node.id])
+    if not nodes_complete:
+        return None
     failed = [node for node in nodes if node.status == NodeStatus.FAILED]
     # A completed node can sit between two failed ones, so look at every
     # ancestor of each failure, not only its direct parent.
@@ -219,6 +228,7 @@ def analyze_session(
     failed_evaluations: Sequence[str],
     labeler: Labeler,
     state_map: Sequence[tuple[str, str]],
+    nodes_complete: bool = True,
 ) -> SessionOutcome:
     """Reduce one session to its state path and failure transition."""
     session_marks = {node.id: marks[node.id] for node in nodes if node.id in marks}
@@ -227,7 +237,11 @@ def analyze_session(
         or bool(failed_evaluations)
         or bool(session_marks)
     )
-    point = locate_failure(nodes, session_marks) if failed else None
+    point = (
+        locate_failure(nodes, session_marks, nodes_complete=nodes_complete)
+        if failed
+        else None
+    )
     if point is None:
         path = tuple(state for node in nodes if (state := labeler(node)) is not None)
         return SessionOutcome(
@@ -238,11 +252,13 @@ def analyze_session(
     # completed children also count as steps that went right before the failure.
     inside = _descendants(nodes, point.node)
     index = next(i for i, node in enumerate(nodes) if node.id == point.node.id)
+    failed_at = point.node.ended_at or point.node.started_at
     before = tuple(
         state
         for i, node in enumerate(nodes)
         if (i < index or node.external_id in inside)
         and node.status == NodeStatus.COMPLETED
+        and _finished_by(node, failed_at)
         and node.external_id not in ancestors
         and (state := labeler(node)) is not None
     )
@@ -261,6 +277,12 @@ def analyze_session(
         tuple(failed_evaluations),
         failure_is_state=own_state is not None,
     )
+
+
+def _finished_by(node: SessionNodeResponse, moment: datetime | None) -> bool:
+    # Position order is start order, so a slow call that started before the
+    # failing one may still have been running when it failed.
+    return node.ended_at is None or moment is None or node.ended_at <= moment
 
 
 def _pairs(path: Sequence[str]) -> tuple[Transition, ...]:
@@ -310,6 +332,7 @@ def analyze_group(
             failed_evaluations.get(session.id, ()),
             labeler,
             patterns,
+            nodes_complete=session.id not in records.partial_sessions,
         )
         for session in records.sessions
     ]

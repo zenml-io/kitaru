@@ -3,6 +3,7 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Transition failure matrix analysis, handlers, and MCP Apps wiring."""
 
+import dataclasses
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime, timedelta
@@ -61,6 +62,7 @@ def _node(
     status: str = "completed",
     error: str | None = None,
     at: int = 0,
+    ended: int | None = None,
 ) -> SessionNodeResponse:
     return SessionNodeResponse(
         id=uuid.uuid4(),
@@ -74,6 +76,7 @@ def _node(
         status=status,
         error=error,
         started_at=T0 + timedelta(seconds=at),
+        ended_at=None if ended is None else T0 + timedelta(seconds=ended),
         metadata={},
     )
 
@@ -227,6 +230,34 @@ def test_state_map_rejects_oversized_patterns() -> None:
         FailureMatrixRequest(state_map={f"p{i}": "g" for i in range(51)})
     with pytest.raises(ValidationError):
         FailureMatrixRequest(state_map={"x" * 201: "g"})
+
+
+def test_cut_off_session_is_not_placed_at_an_enclosing_span() -> None:
+    session = _session("failed")
+    # The read limit kept the failed span but not the failed step inside it.
+    nodes = [_node(session, "outer", "span", "outer", status="failed")]
+    records = dataclasses.replace(
+        _records({session.id: nodes}, [session]),
+        partial_sessions=frozenset({session.id}),
+    )
+
+    [outcome] = analyze_group(records, build_labeler("node", None), None)
+
+    assert outcome.failed and outcome.point is None
+
+
+def test_a_step_still_running_at_the_failure_is_not_the_last_good_one() -> None:
+    session = _session("failed")
+    nodes = [
+        _node(session, "slow", "tool_call", "slow_search", at=0, ended=5),
+        _node(session, "b", "tool_call", "charge", status="failed", at=1, ended=2),
+    ]
+
+    [outcome] = analyze_group(
+        _records({session.id: nodes}, [session]), build_labeler("tool", None), None
+    )
+
+    assert outcome.failure_transition == (START, "charge")
 
 
 def test_span_states_skip_ancestors_of_the_failing_node() -> None:
@@ -470,7 +501,11 @@ def test_comparison_text_lists_the_largest_changes_first() -> None:
         compare=summary,
     )
 
-    changes = describe_matrix(data).split("Changed transitions")[1].splitlines()[1:3]
+    changes = (
+        describe_matrix(data, ["error"])
+        .split("Changed transitions")[1]
+        .splitlines()[1:3]
+    )
 
     assert "step_2: 10 -> 18" in changes[0] and "step_3" in changes[1]
 
@@ -657,6 +692,41 @@ def test_cell_sessions_clip_long_session_names() -> None:
 
     name = data.sessions[0].name
     assert name is not None and len(name) <= 300
+
+
+async def test_snapshots_keep_only_the_node_fields_the_analysis_reads() -> None:
+    session = _session("failed")
+    node = _node(session, "a", "tool_call", "search", status="failed", error="e" * 5000)
+    heavy = node.model_copy(update={"metadata": {"blob": "x" * 10_000}})
+    client = _FakeClient(_records({session.id: [heavy]}, [session]))
+
+    records = await failure_matrix.fetch_group(
+        cast(Any, client), None, max_sessions=10, concurrency=2
+    )
+
+    [stored] = records.nodes[session.id]
+    assert stored.metadata == {} and len(stored.error or "") <= 1000
+    assert (stored.id, stored.name, stored.status) == (node.id, "search", node.status)
+
+
+def test_marking_advice_depends_on_annotations_being_counted() -> None:
+    summary = GroupSummary(
+        label="g",
+        session_count=2,
+        failed_count=1,
+        located_count=0,
+        shown_count=0,
+        unlocated_count=1,
+        unlocated_evaluations=[],
+        truncated=False,
+        records_capped=False,
+    )
+    data = FailureMatrixData(
+        snapshot_id="s", state_by="tool", rows=[START], cols=[], cells=[], base=summary
+    )
+
+    assert "to place them" in describe_matrix(data, ["error", "annotation"])
+    assert 'only when sources include "annotation"' in describe_matrix(data, ["error"])
 
 
 async def test_cell_tool_drills_into_the_matrix_snapshot() -> None:

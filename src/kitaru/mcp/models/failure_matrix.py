@@ -197,3 +197,4 @@ class GroupRecords:
     evaluations: tuple[EvaluationResponse, ...]
     truncated: bool
     records_capped: bool
+    partial_sessions: frozenset[uuid.UUID] = frozenset()
