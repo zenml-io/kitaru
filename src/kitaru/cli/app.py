@@ -19,7 +19,7 @@ import math
 import sys
 import uuid
 from collections.abc import Callable, Sequence
-from contextlib import suppress
+from contextlib import AbstractAsyncContextManager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
@@ -31,6 +31,8 @@ from cyclopts import App, Parameter
 from cyclopts.exceptions import CycloptsError
 from pydantic import ValidationError as PydanticValidationError
 
+from kitaru.api_models.v1.agent import AgentListParams
+from kitaru.api_models.v1.agent_version import AgentVersionListParams
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionVerdict,
     InvestigationStatus,
@@ -95,6 +97,7 @@ from kitaru.cli.skill_discovery import (
     SKILLS_URL,
     get_kitaru_skill_status,
 )
+from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.config import get_config_path
 from kitaru.client.control_plane import ControlPlaneLoginError
 from kitaru.client.credential_store import CredentialStore
@@ -1246,7 +1249,7 @@ _PLUGIN_SOURCE_PARAMETERS = (
 )
 
 
-def _open_asset_client():
+def _open_asset_client() -> AbstractAsyncContextManager[KitaruAPIClient]:
     """Open an SDK client for the invocation's resolved target."""
     invocation = _invocation()
     target = invocation.resolve_target()
@@ -1371,8 +1374,8 @@ async def agent_list(
     filter: str | None = None,
 ) -> CommandResult:
     """List one server page of agents."""
-    params = registration.list_params(
-        "agent", size=size, cursor=cursor, sort=sort, filter=filter
+    params = registration.build_list_params(
+        AgentListParams, size=size, cursor=cursor, sort=sort, filter=filter
     )
     async with _open_asset_client() as client:
         return registration.page_result(await client.agents.list(params), size=size)
@@ -1526,7 +1529,9 @@ async def agent_version_list(
     sort: str = "created:desc",
 ) -> CommandResult:
     """List one server page of agent versions."""
-    params = registration.version_list_params(size=size, cursor=cursor, sort=sort)
+    params = registration.build_list_params(
+        AgentVersionListParams, size=size, cursor=cursor, sort=sort, filter=None
+    )
     async with _open_asset_client() as client:
         parent = await registration.resolve_asset(client.agents, agent, "Agent")
         page = await client.agents.list_versions(parent.id, params)

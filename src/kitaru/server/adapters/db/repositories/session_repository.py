@@ -207,7 +207,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         )
         async with self._engine.begin() as connection:
             result = await connection.execute(statement)
-            row = result.first()
+            row = result.one_or_none()
         if row is None:
             raise AgentNotFound(agent_id)
         return row[0]
