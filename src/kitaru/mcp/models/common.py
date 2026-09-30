@@ -101,6 +101,11 @@ class ToolSuccessPayload(MCPModel):
     data: object
     warnings: list[str] = Field(default_factory=list)
     links: dict[str, str] = Field(default_factory=dict)
+    text: str | None = Field(
+        default=None,
+        description="Plain-language summary sent as the text result instead of "
+        "the JSON envelope; the structured result keeps the full data.",
+    )
 
 
 RegistryItem = (
