@@ -1,0 +1,1 @@
+- Added the `kitaru_failure_matrix` MCP tool, which shows where a group of sessions first goes wrong as a transition failure matrix (last step that went right against first step that went wrong). Hosts that support MCP Apps render it as an interactive heatmap with per-cell session drill-down and before/after comparison; other hosts get a text summary.
