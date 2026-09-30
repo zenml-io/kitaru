@@ -287,7 +287,7 @@ wheels = [
 
 [[package]]
 name = "braintrust"
-version = "0.41.1"
+version = "0.42.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chevron" },
@@ -301,9 +301,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/dd/97/efe95ed290214fece196d756038757f3efd456c9b32f168af5ae988990ac/braintrust-0.41.1.tar.gz", hash = "sha256:25c63f75d9f420345982b9a49e99d3751506c38b3b0d27262f1efff16be4eed5", size = 945987, upload-time = "2026-09-22T13:35:49.71Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/1e/302a6c5a833279caf4ccd072c6181d6ee81ce67721a23e59262837e89822/braintrust-0.42.0.tar.gz", hash = "sha256:bd91b8149c65c3aa1f250930c5a671fb7d9111c4b27a9530bfec6279827bc8e6", size = 963161, upload-time = "2026-09-22T19:52:32.567Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/76/363bf70250c15c27d86fd250741ea17eb12580adc941223296545a7ddbfc/braintrust-0.41.1-py3-none-any.whl", hash = "sha256:0b5062100d3923e871362fb74aeac167ad89ae45d050fe7b341cd750259fe2af", size = 1138091, upload-time = "2026-09-22T13:35:47.812Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/2e/27abeceda990a309b8600729369f271a48de102d76292c2c2dca449a4d43/braintrust-0.42.0-py3-none-any.whl", hash = "sha256:42c664d80cb6f62c347804b92f351a73aff239f8a4313e6006d0ff9e7f32bc9f", size = 1157277, upload-time = "2026-09-22T19:52:30.581Z" },
 ]
 
 [[package]]
