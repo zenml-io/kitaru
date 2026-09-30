@@ -21,9 +21,12 @@ from kitaru.api_models.v1.replay import (
     ReplayResponse,
     ReplayStatus,
 )
+from kitaru.api_models.v1.session import SessionDetailResponse, SessionOrigin
 from kitaru.cli import app as app_module
 from kitaru.cli import replays
+from kitaru.cli import sessions as cli_sessions
 from kitaru.cli.output import CLIError
+from kitaru.client.exceptions import APIError
 
 
 class StubReplayClient:
@@ -63,12 +66,24 @@ class StubReplayClient:
             updated=now,
         )
         self.create_calls: list[ReplayCreateRequest] = []
+        self.create_error: APIError | None = None
+        self.result_session: SessionDetailResponse | None = None
         self.create_idempotency_keys: list[str | None] = []
         self.list_calls: list[ReplayListParams] = []
         self.get_calls: list[uuid.UUID] = []
         self.agents = self._Agents(self)
         self.evaluators = self._Evaluators(self)
         self.replays = self._Replays(self)
+        self.sessions = self._Sessions(self)
+
+    class _Sessions:
+        def __init__(self, owner: "StubReplayClient") -> None:
+            self.owner = owner
+
+        async def get(self, session_id: uuid.UUID) -> SessionDetailResponse:
+            assert self.owner.result_session is not None
+            assert session_id == self.owner.result_session.id
+            return self.owner.result_session
 
     class _Agents:
         def __init__(self, owner: "StubReplayClient") -> None:
@@ -110,6 +125,8 @@ class StubReplayClient:
         ) -> ReplayResponse:
             self.owner.create_calls.append(request)
             self.owner.create_idempotency_keys.append(idempotency_key)
+            if self.owner.create_error is not None:
+                raise self.owner.create_error
             return self.owner.replay
 
         async def list(self, params: ReplayListParams) -> Any:
@@ -277,6 +294,123 @@ async def test_list_and_get_preserve_sdk_results() -> None:
     assert pending.item["status"] == "pending"
     assert completed.item["status"] == "completed"
     assert client.get_calls == [client.replay_id, client.replay_id]
+
+
+async def test_get_completed_replay_links_to_result_session() -> None:
+    """A CLI replay read retains the session id needed for evidence inspection."""
+    client = StubReplayClient()
+    result_session_id = uuid.uuid4()
+    client.replay.status = ReplayStatus.COMPLETED
+    client.replay.result_session_id = result_session_id
+
+    result = await replays.get_replay(client, client.replay_id)
+
+    assert result.item["status"] == "completed"
+    assert result.item["result_session_id"] == str(result_session_id)
+
+
+@pytest.mark.parametrize(
+    ("state", "reason"),
+    [
+        ("diverged", "mastra_om_call_order"),
+        ("failed", "replay_failed"),
+    ],
+)
+async def test_get_replay_result_session_exposes_failure_reason(
+    state: str, reason: str
+) -> None:
+    """The linked result session retains a durable replay failure reason."""
+    client = StubReplayClient()
+    now = datetime.now(UTC)
+    result_session_id = uuid.uuid4()
+    client.replay.status = ReplayStatus.FAILED
+    client.replay.result_session_id = result_session_id
+    client.result_session = SessionDetailResponse(
+        id=result_session_id,
+        owner_id=uuid.uuid4(),
+        agent_id=client.agent.id,
+        number=2,
+        origin=SessionOrigin.REPLAY,
+        status="failed",
+        inputs={},
+        outputs={},
+        metadata={"mastra_replay_state": state, "mastra_replay_reason": reason},
+        llm_call_count=0,
+        tool_call_count=0,
+        created=now,
+        updated=now,
+    )
+
+    replay = await replays.get_replay(client, client.replay_id)
+    session = await cli_sessions.get_session(client, result_session_id)
+
+    assert replay.item["result_session_id"] == str(result_session_id)
+    assert session.item["metadata"] == {
+        "mastra_replay_state": state,
+        "mastra_replay_reason": reason,
+    }
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["mastra_replay_pending", "mastra_replay_abandoned", "mastra_replay_tape_missing"],
+)
+def test_public_create_reports_safe_mastra_ineligibility_reason(
+    argv_client: StubReplayClient,
+    capsys: pytest.CaptureFixture[str],
+    reason: str,
+) -> None:
+    """A rejected replay exposes the server's safe reason in structured output."""
+    client = argv_client
+
+    client.create_error = APIError(409, f"Session {client.baseline_id}: {reason}")
+    assert (
+        app_module.main(
+            [
+                "replay",
+                "create",
+                str(client.baseline_id),
+                "--evaluator",
+                "quality@3",
+                "--output",
+                "json",
+            ]
+        )
+        == 5
+    )
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["kind"] == "conflict"
+    assert error["details"] == {
+        "status_code": 409,
+        "session_id": str(client.baseline_id),
+        "reason": reason,
+    }
+
+
+def test_public_create_keeps_unrelated_conflict_generic(
+    argv_client: StubReplayClient, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Only the exact safe Mastra reason grammar gets a reason field."""
+    client = argv_client
+
+    client.create_error = APIError(409, "unrelated conflict token=secret")
+    assert (
+        app_module.main(
+            [
+                "replay",
+                "create",
+                str(client.baseline_id),
+                "--evaluator",
+                "quality@3",
+                "--output",
+                "json",
+            ]
+        )
+        == 5
+    )
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["kind"] == "conflict"
+    assert error["details"] == {"status_code": 409}
 
 
 @pytest.fixture

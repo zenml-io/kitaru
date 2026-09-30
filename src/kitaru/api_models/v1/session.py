@@ -118,6 +118,9 @@ class SessionUpdateRequest(RequestModel):
         default=None, description="New session status."
     )
     outputs: Any = Field(default=None, description="New session outputs.")
+    inputs: Any = Field(
+        default=None, description="Final replay inputs for a pending Mastra recording."
+    )
     output_text_selector: str | None = Field(
         default=None, description="New output text selector."
     )

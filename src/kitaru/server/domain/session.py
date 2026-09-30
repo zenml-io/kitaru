@@ -30,6 +30,7 @@ from kitaru.server.domain.base import (
     NotFoundError,
     ValidationError,
 )
+from kitaru.server.domain.blob import Blob
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.payload import Payload
 
@@ -201,6 +202,141 @@ class SessionNotUpdatable(ConflictError):
         super().__init__(f"Session {session_id} does not accept updates")
 
 
+class SessionReplayFinalizationInvalid(ValidationError):
+    """Raised when a Mastra replay input transition is incomplete or unauthorized."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the session.
+        """
+        super().__init__(f"Session {session_id} has invalid Mastra replay finalization")
+
+
+class SessionReplayNotReady(ConflictError):
+    """Raised when a Mastra baseline cannot be replayed yet."""
+
+    def __init__(self, session_id: uuid.UUID, reason: str) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the baseline session.
+            reason: Stable replay eligibility reason code.
+        """
+        super().__init__(f"Session {session_id}: {reason}")
+        self.session_id = session_id
+        self.reason = reason
+
+
+def mastra_replay_uses_observational_memory(envelope: dict[str, Any]) -> bool:
+    """Return whether a recorded Mastra replay input enables observational memory."""
+    config = envelope.get("configuration")
+    memory = config.get("memoryConfig") if isinstance(config, dict) else None
+    om = memory.get("observationalMemory") if isinstance(memory, dict) else None
+    return om is True or (isinstance(om, dict) and om.get("enabled") is not False)
+
+
+def mastra_replay_v3_complete(envelope: dict[str, Any]) -> bool:
+    """Check the required shape of a finalized Mastra replay input."""
+    snapshot = envelope.get("initialSnapshot")
+    config = envelope.get("configuration")
+    files = envelope.get("files")
+    return (
+        envelope.get("version") == 3
+        and envelope.get("complete") is True
+        and envelope.get("reasons") == []
+        and isinstance(envelope.get("invocationId"), str)
+        and bool(envelope["invocationId"])
+        and "rawInput" in envelope
+        and isinstance(snapshot, dict)
+        and isinstance(snapshot.get("threadId"), str)
+        and isinstance(snapshot.get("resourceId"), str)
+        and isinstance(snapshot.get("messages"), list)
+        and isinstance(snapshot.get("records"), list)
+        and isinstance(config, dict)
+        and isinstance(config.get("memoryConfig"), dict)
+        and isinstance(envelope.get("requestContext"), dict)
+        and isinstance(files, list)
+        and isinstance(envelope.get("omTape"), list)
+    )
+
+
+class MastraStoredFile(FrozenModel):
+    """A recorded Mastra file whose content is stored as a blob."""
+
+    blob_id: uuid.UUID
+    sha256: str
+    length: int
+
+    def is_held_by(self, blob: Blob | None) -> bool:
+        """Return whether the blob exists and holds this file's content.
+
+        Args:
+            blob: The stored blob this file names, or None when it is missing.
+
+        Returns:
+            Whether the blob's hash and size match the recorded file.
+        """
+        return (
+            blob is not None and blob.sha256 == self.sha256 and blob.size == self.length
+        )
+
+
+def _read_mastra_stored_file(file: dict[str, Any]) -> MastraStoredFile | None:
+    """Read a file entry that names the blob holding its content.
+
+    Args:
+        file: Recorded file entry.
+
+    Returns:
+        The blob reference, or None when the entry is malformed.
+    """
+    blob_id = file.get("blobId")
+    if not isinstance(blob_id, str):
+        return None
+    try:
+        parsed = uuid.UUID(blob_id)
+    except ValueError:
+        return None
+    if str(parsed) != blob_id:
+        return None
+    return MastraStoredFile(
+        blob_id=parsed, sha256=file["sha256"], length=file["length"]
+    )
+
+
+def mastra_replay_stored_files(inputs: Any) -> list[MastraStoredFile]:
+    """Return the blob-stored files a Mastra replay input records.
+
+    Entries that are malformed or hold their content inline are skipped.
+
+    Args:
+        inputs: Session or task inputs, of any shape.
+
+    Returns:
+        The recorded files stored as blobs.
+    """
+    envelope = inputs.get("mastra_memory_replay") if isinstance(inputs, dict) else None
+    files = envelope.get("files") if isinstance(envelope, dict) else None
+    if not isinstance(files, list):
+        return []
+    stored: list[MastraStoredFile] = []
+    for file in files:
+        if (
+            not isinstance(file, dict)
+            or "base64" in file
+            or not isinstance(file.get("sha256"), str)
+            or not isinstance(file.get("length"), int)
+            or isinstance(file.get("length"), bool)
+        ):
+            continue
+        entry = _read_mastra_stored_file(file)
+        if entry is not None:
+            stored.append(entry)
+    return stored
+
+
 class SessionRollups(FrozenModel):
     """Session rollup deltas."""
 
@@ -330,6 +466,85 @@ class Session(DomainModel):
         """
         if self.status != SessionStatus.IN_PROGRESS:
             raise SessionNotUpdatable(self.id)
+
+    def resolve_replay_metadata(
+        self,
+        status: SessionStatus,
+        metadata: dict[str, Any],
+        inputs: Any,
+        replacing_inputs: bool,
+    ) -> dict[str, Any]:
+        """Validate a Mastra replay input transition and return the metadata to store.
+
+        A pending Mastra recording that ends without a replay decision is
+        stored as ineligible: ``abandoned`` when it failed, ``unfinalized``
+        when it completed.
+
+        Args:
+            status: Session status after the update.
+            metadata: Session metadata after the update.
+            inputs: Replacement input value, when supplied.
+            replacing_inputs: Whether the request explicitly supplied inputs.
+
+        Raises:
+            SessionReplayFinalizationInvalid: The update replaces inputs outside
+                a pending Mastra finalization, or publishes an invalid replay
+                state or input.
+
+        Returns:
+            Metadata to store with the update.
+        """
+        is_mastra_recording = (
+            self.framework == "mastra" and self.origin == SessionOrigin.RECORDED
+        )
+        if not is_mastra_recording:
+            if replacing_inputs:
+                raise SessionReplayFinalizationInvalid(self.id)
+            return metadata
+        prior = self.metadata.get("mastra_replay_state")
+        next_state = metadata.get("mastra_replay_state")
+        if prior != "pending":
+            if replacing_inputs:
+                raise SessionReplayFinalizationInvalid(self.id)
+            return metadata
+        if status == SessionStatus.IN_PROGRESS:
+            if replacing_inputs or next_state != "pending":
+                raise SessionReplayFinalizationInvalid(self.id)
+            return metadata
+        if next_state in {None, "pending"} and not replacing_inputs:
+            # Cleanup of a recorder that died mid-turn, and clients that do not
+            # send a replay decision, must still be able to close the session.
+            return {
+                **metadata,
+                "mastra_replay_state": "ineligible",
+                "mastra_replay_reason": "abandoned"
+                if status == SessionStatus.FAILED
+                else "unfinalized",
+            }
+        if next_state not in {"eligible", "ineligible"}:
+            raise SessionReplayFinalizationInvalid(self.id)
+        if replacing_inputs and (
+            not isinstance(inputs, dict)
+            or not isinstance(inputs.get("mastra_memory_replay"), dict)
+        ):
+            raise SessionReplayFinalizationInvalid(self.id)
+        if next_state == "eligible":
+            envelope = (
+                inputs.get("mastra_memory_replay")
+                if replacing_inputs and isinstance(inputs, dict)
+                else None
+            )
+            if (
+                status != SessionStatus.COMPLETED
+                or not isinstance(envelope, dict)
+                or not mastra_replay_v3_complete(envelope)
+            ):
+                raise SessionReplayFinalizationInvalid(self.id)
+            if mastra_replay_uses_observational_memory(envelope) and not isinstance(
+                envelope.get("omTape"), list
+            ):
+                raise SessionReplayFinalizationInvalid(self.id)
+        return metadata
 
     def check_evaluate(self) -> None:
         """Require the session to currently accept evaluations.

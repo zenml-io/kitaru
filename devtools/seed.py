@@ -9,7 +9,6 @@ from collections import Counter
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
-from fixtures import DEFAULT_IMPORTER_NAME, register_all
 from simulation import build_session_inputs
 from stack import (
     RUN_DIR,
@@ -28,6 +27,7 @@ from traces import (
     malformed_line_count,
 )
 
+from fixtures import DEFAULT_IMPORTER_NAME, register_all
 from kitaru.api_models.v1.cohort import CohortCreateRequest
 from kitaru.api_models.v1.cohort_version import CohortVersionCreateRequest
 from kitaru.api_models.v1.experiment import ExperimentCreateRequest

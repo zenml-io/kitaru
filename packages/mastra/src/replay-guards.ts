@@ -58,7 +58,7 @@ function formatMastraToolName(toolName: string): string {
   return formatted.slice(0, 63);
 }
 
-function assertStableToolName(toolName: string): void {
+export function assertStableToolName(toolName: string): void {
   const runtimeName = formatMastraToolName(toolName);
   if (runtimeName !== toolName) {
     throw new ToolPolicyError(

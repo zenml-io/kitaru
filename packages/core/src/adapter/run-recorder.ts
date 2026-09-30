@@ -1,5 +1,5 @@
 import { writeFile } from "node:fs/promises";
-
+import { KitaruApiError } from "../errors.js";
 import type {
   JsonValue,
   ReplaySpec,
@@ -26,6 +26,7 @@ function rootNode(
   options: {
     endedAt?: string;
     error?: string;
+    inputs?: JsonValue;
     output?: JsonValue;
     startedAt: string;
     status: "completed" | "failed" | "in_progress";
@@ -36,7 +37,8 @@ function rootNode(
     ended_at: options.endedAt,
     error: options.error,
     external_id: ROOT_NODE_EXTERNAL_ID,
-    inputs: state.effectiveInput,
+    inputs:
+      options.inputs === undefined ? state.effectiveInput : options.inputs,
     name: "run",
     node_type: "span",
     outputs: options.output ?? null,
@@ -62,12 +64,28 @@ export interface RunRecorderOptions {
   effectiveInput: JsonValue;
   effectiveModelSettings?: Record<string, JsonValue>;
   framework: string;
+  metadata?: Record<string, JsonValue>;
   name?: string;
   replayId?: string;
   requestedModelId: string;
   sessionIdFile?: string;
   spec?: ReplaySpec;
   startedAt?: string;
+}
+
+interface CompletionOptions {
+  inputs?: JsonValue;
+  metadata?: Record<string, JsonValue>;
+  /**
+   * Metadata to store instead when the server refuses `inputs` or
+   * `metadata`, so the completed session can say why it lacks them.
+   */
+  rejectedMetadata?: Record<string, JsonValue>;
+}
+
+export interface RunCompletion {
+  /** Whether the server stored the inputs and metadata passed to `complete`. */
+  finalizationAccepted: boolean;
 }
 
 export class RunRecorder {
@@ -97,6 +115,7 @@ export class RunRecorder {
       agent_version_id: options.agentVersionId,
       framework: options.framework,
       inputs: options.effectiveInput,
+      ...(options.metadata ? { metadata: options.metadata } : {}),
       name: options.name,
       origin: options.replayId ? "replay" : "recorded",
       outputs: null,
@@ -134,8 +153,32 @@ export class RunRecorder {
     }
   }
 
-  async complete(result: unknown): Promise<void> {
+  async complete(
+    result: unknown,
+    options: CompletionOptions = {},
+  ): Promise<RunCompletion> {
     await this.state.awaitSteps();
+    return this.#closeCompleted(result, options);
+  }
+
+  /**
+   * Record a run that finished but whose recording is incomplete.
+   *
+   * The session is completed with the run's result even when step uploads
+   * failed, and `metadata` states why the recording is incomplete.
+   */
+  async completeIncompleteRecording(
+    result: unknown,
+    metadata: Record<string, JsonValue>,
+  ): Promise<RunCompletion> {
+    await bestEffort(() => this.state.awaitSteps());
+    return this.#closeCompleted(result, { metadata });
+  }
+
+  async #closeCompleted(
+    result: unknown,
+    options: CompletionOptions,
+  ): Promise<RunCompletion> {
     // The run has finished by the time its result is recorded, so a result too
     // large or too circular to record is bounded instead of turning a
     // successful generation into a failed one.
@@ -145,36 +188,75 @@ export class RunRecorder {
       nodes: [
         rootNode(this.state, {
           endedAt,
+          inputs: options.inputs,
           output: serializedOutput,
           startedAt: this.#startedAt,
           status: "completed",
         }),
       ],
     });
-    await this.#client.updateSession(this.state.sessionId, {
+    const completion = {
       ended_at: endedAt,
       outputs: serializedOutput,
-      status: "completed",
+      status: "completed" as const,
+    };
+    const finalization = {
+      ...("inputs" in options ? { inputs: options.inputs } : {}),
+      ...(options.metadata ? { metadata: options.metadata } : {}),
+    };
+    try {
+      await this.#client.updateSession(this.state.sessionId, {
+        ...completion,
+        ...finalization,
+      });
+      return { finalizationAccepted: true };
+    } catch (error) {
+      // A server that predates these fields, or that refuses the replay
+      // inputs, answers 422 before it writes anything. The run itself
+      // succeeded, so it is still recorded as completed with its outputs,
+      // just without replay inputs.
+      if (
+        Object.keys(finalization).length === 0 ||
+        !(error instanceof KitaruApiError) ||
+        error.status !== 422
+      )
+        throw error;
+    }
+    await this.#client.updateSession(this.state.sessionId, {
+      ...completion,
+      ...(options.rejectedMetadata
+        ? { metadata: options.rejectedMetadata }
+        : {}),
     });
+    return { finalizationAccepted: false };
   }
 
-  async fail(error: unknown): Promise<void> {
+  async fail(
+    error: unknown,
+    metadata?: Record<string, JsonValue>,
+  ): Promise<void> {
     this.state.storeFailure(error);
     // Let queued step writes land before the failed ledger and the closing
     // node, so a late step cannot arrive after the session is marked failed.
     await bestEffort(() => this.state.awaitSteps());
     await bestEffort(() => flushFailedPolicyOutcomes(this.state));
-    await this.#closeFailed(error);
+    await this.#closeFailed(error, metadata);
   }
 
-  async failRecording(error: unknown): Promise<void> {
+  async failRecording(
+    error: unknown,
+    metadata?: Record<string, JsonValue>,
+  ): Promise<void> {
     // A telemetry failure must not enter application state. Tool hooks use
     // state.failure to stop execution after policy or runtime failures.
     await bestEffort(() => this.state.awaitSteps());
-    await this.#closeFailed(error);
+    await this.#closeFailed(error, metadata);
   }
 
-  async #closeFailed(error: unknown): Promise<void> {
+  async #closeFailed(
+    error: unknown,
+    metadata?: Record<string, JsonValue>,
+  ): Promise<void> {
     const endedAt = new Date().toISOString();
     await bestEffort(() =>
       this.#client.upsertSessionNodes(this.state.sessionId, {
@@ -192,6 +274,7 @@ export class RunRecorder {
       this.#client.updateSession(this.state.sessionId, {
         ended_at: endedAt,
         error: errorText(error),
+        ...(metadata ? { metadata } : {}),
         status: "failed",
       }),
     );
