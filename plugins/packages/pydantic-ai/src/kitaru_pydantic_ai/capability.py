@@ -62,7 +62,11 @@ from pydantic_ai.run import AgentRunResult
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import RunContext, ToolDefinition
 
-from kitaru.api_models.v1.replay import ReplayResponse, ToolLookupRequest
+from kitaru.api_models.v1.replay import (
+    ReplayResponse,
+    ToolLookupMatch,
+    ToolLookupRequest,
+)
 from kitaru.api_models.v1.replay_config import (
     HistoryConfig,
     HistoryScope,
@@ -477,10 +481,29 @@ class _RunState:
     started_at: datetime | None = None
     latest_llm_external_id: str | None = None
     history_occurrences: dict[str, int] = field(default_factory=dict)
+    history_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     buffer: list[SessionNodeCreateRequest] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     finished: bool = False
     closed: bool = False
+
+
+async def _lookup_history_match(
+    state: _RunState, tool_name: str, cache_key: str, occurrence: int | None
+) -> ToolLookupMatch | None:
+    assert state.replay is not None
+    response = await state.client.replays.tool_lookup(
+        state.replay.id,
+        ToolLookupRequest(
+            tool_name=tool_name, cache_key=cache_key, occurrence=occurrence
+        ),
+    )
+    if "match" not in response.model_fields_set:
+        raise ToolPolicyError(
+            "Kitaru server tool lookup response does not include "
+            "'match'; upgrade the server before using history replay"
+        )
+    return response.match
 
 
 @dataclass
@@ -796,28 +819,23 @@ class _KitaruCapability(AbstractCapability[Any]):
                         policy.type, policy.on_miss, call.tool_name, args, handler
                     )
                 else:
-                    occurrence = (
-                        state.history_occurrences.get(cache_key, 0)
-                        if policy.scope is HistoryScope.BASELINE
-                        else None
-                    )
-                    response = await state.client.replays.tool_lookup(
-                        state.replay.id,
-                        ToolLookupRequest(
-                            tool_name=call.tool_name,
-                            cache_key=cache_key,
-                            occurrence=occurrence,
-                        ),
-                    )
-                    if "match" not in response.model_fields_set:
-                        raise ToolPolicyError(
-                            "Kitaru server tool lookup response does not include "
-                            "'match'; upgrade the server before using history replay"
+                    if policy.scope is HistoryScope.BASELINE:
+                        # Hold the lock across the lookup so identical parallel
+                        # calls claim successive occurrences; a claim is final
+                        # only once the server matches.
+                        lock = state.history_locks.setdefault(cache_key, asyncio.Lock())
+                        async with lock:
+                            occurrence = state.history_occurrences.get(cache_key, 0)
+                            match = await _lookup_history_match(
+                                state, call.tool_name, cache_key, occurrence
+                            )
+                            if match is not None:
+                                state.history_occurrences[cache_key] = occurrence + 1
+                    else:
+                        match = await _lookup_history_match(
+                            state, call.tool_name, cache_key, None
                         )
-                    match = response.match
                     if match is not None:
-                        if occurrence is not None:
-                            state.history_occurrences[cache_key] = occurrence + 1
                         mocked_policy = policy.type
                         if match.status is NodeStatus.COMPLETED:
                             result = match.result

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Serialize baseline history lookups per cache key so identical tool calls dispatched in parallel replay successive recorded occurrences instead of all replaying the first one.
 - Record the requested and served model, provider, token usage, and estimated cost on model-call nodes.
 - Preserve LangGraph callback names on recorded chain spans and document upstream middleware input omissions.
 
