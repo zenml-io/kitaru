@@ -159,19 +159,14 @@ async def test_pending_mastra_baseline_creates_no_replay(
     assert not replays
 
 
-@pytest.mark.parametrize("invalid_field", ["raw_input", "file_hash"])
 async def test_malformed_eligible_mastra_baseline_creates_no_replay(
     services: ReplayServices,
     complete_mastra_memory_replay_inputs: dict[str, Any],
-    invalid_field: str,
 ) -> None:
     """Refuse a stored eligible marker when replay input is malformed."""
     version = await _agent_version_with_run_spec(services)
     invalid = deepcopy(complete_mastra_memory_replay_inputs)
-    if invalid_field == "raw_input":
-        del invalid["mastra_memory_replay"]["rawInput"]
-    else:
-        invalid["mastra_memory_replay"]["files"][0]["sha256"] = "0" * 64
+    del invalid["mastra_memory_replay"]["rawInput"]
     baseline = await create_session(
         services.sessions,
         ACTOR.account.id,
@@ -209,6 +204,10 @@ async def test_malformed_eligible_mastra_baseline_creates_no_replay(
             id="turn-start",
         ),
         pytest.param(lambda envelope: envelope["omTape"].append({}), id="om-tape"),
+        pytest.param(
+            lambda envelope: envelope["files"][0].update(sha256="0" * 64),
+            id="inline-file-hash",
+        ),
     ],
 )
 async def test_mastra_envelope_details_are_left_to_the_adapter(
