@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import uuid
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Mapping
 from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -18,9 +18,11 @@ from importlib.metadata import version
 from itertools import chain
 from typing import Any, Protocol, TypeVar
 
-from langchain_core.messages import AIMessage
+from langchain_core.callbacks.manager import AsyncCallbackManager, CallbackManager
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.messages.ai import UsageMetadata, add_usage
 from langchain_core.outputs import ChatGeneration, LLMResult
+from langgraph.config import get_config
 from langgraph.types import GraphOutput
 
 from kitaru.api_models.v1.replay import ReplayResponse
@@ -108,6 +110,8 @@ class InvocationRecorder:
     buffer: list[tuple[SessionNodeCreateRequest, int]] = field(default_factory=list)
     run_external_ids: dict[uuid.UUID, str] = field(default_factory=dict)
     pending_runs: dict[uuid.UUID, PendingRun] = field(default_factory=dict)
+    tool_attempts: dict[uuid.UUID, dict[str, PendingRun]] = field(default_factory=dict)
+    run_parents: dict[uuid.UUID, uuid.UUID | None] = field(default_factory=dict)
     failure: RecordingFailure | None = None
     writes_disabled: bool = False
     finished: bool = False
@@ -270,10 +274,13 @@ class InvocationRecorder:
         if self.writes_disabled:
             return
         if parent_run_id is None and not self.run_external_ids:
+            self.run_parents[run_id] = None
             self.run_external_ids[run_id] = ROOT_EXTERNAL_ID
+            self._track_tool_attempts(run_id, ROOT_EXTERNAL_ID, self.started_at, inputs)
             return
         if not await self.reserve_node_budget():
             return
+        self.run_parents[run_id] = parent_run_id
         external_id = str(run_id)
         parent_external_id = self.run_external_ids.get(parent_run_id, ROOT_EXTERNAL_ID)
         started_at = datetime.now(UTC)
@@ -301,11 +308,92 @@ class InvocationRecorder:
                 attributes={},
             )
         )
+        self._track_tool_attempts(run_id, external_id, started_at, inputs)
+
+    def _track_tool_attempts(
+        self, run_id: uuid.UUID, external_id: str, started_at: datetime, inputs: Any
+    ) -> None:
+        """Retain bounded arguments from a tool-call batch."""
+        if not isinstance(inputs, list):
+            return
+        attempts: dict[str, PendingRun] = {}
+        for call in inputs[: self.policy.max_collection_items]:
+            if not isinstance(call, Mapping) or call.get("type") != "tool_call":
+                continue
+            call_id = call.get("id")
+            name = call.get("name")
+            if not isinstance(call_id, str) or not isinstance(name, str):
+                continue
+            if call_id in attempts:
+                # Conflicting IDs cannot be matched to a result reliably.
+                return
+            arguments = capture_value(call.get("args", {}), self.policy)
+            attempts[call_id] = PendingRun(
+                external_id=f"{run_id}:{call_id}",
+                parent_external_id=external_id,
+                name=name,
+                started_at=started_at,
+                inputs=arguments.value,
+                node_type=NodeType.TOOL_CALL,
+                inputs_lossy=arguments.lossy,
+            )
+        if attempts:
+            self.tool_attempts[run_id] = attempts
+
+    def _mark_tool_observed(self, run_id: uuid.UUID | None, call_id: str) -> None:
+        """Remove an attempt from its callback run and enclosing runs."""
+        while run_id is not None:
+            self.tool_attempts.get(run_id, {}).pop(call_id, None)
+            run_id = self.run_parents.get(run_id)
+
+    async def _record_unexecuted_tools(self, run_id: uuid.UUID, outputs: Any) -> None:
+        """Record native results returned without a tool execution callback."""
+        attempts = self.tool_attempts.get(run_id)
+        if not attempts or not isinstance(outputs, Mapping):
+            self.tool_attempts.pop(run_id, None)
+            return
+        messages = outputs.get("messages")
+        if not isinstance(messages, list):
+            self.tool_attempts.pop(run_id, None)
+            return
+        for message in messages[: self.policy.max_collection_items]:
+            if not isinstance(message, ToolMessage):
+                continue
+            attempt = attempts.get(message.tool_call_id)
+            if attempt is None:
+                continue
+            self._mark_tool_observed(run_id, message.tool_call_id)
+            if not await self.reserve_node_budget():
+                continue
+            output = self._encode_tool_result(
+                message, inputs_lossy=attempt.inputs_lossy
+            )
+            await self.buffer_node(
+                SessionNodeCreateRequest(
+                    external_id=attempt.external_id,
+                    parent_external_id=attempt.parent_external_id,
+                    node_type=NodeType.TOOL_CALL,
+                    name=attempt.name,
+                    status=NodeStatus.COMPLETED,
+                    started_at=attempt.started_at,
+                    ended_at=datetime.now(UTC),
+                    inputs=attempt.inputs,
+                    outputs=output,
+                    tool_name=attempt.name,
+                    attributes={"execution": "short_circuited"},
+                )
+            )
+        self.tool_attempts.pop(run_id, None)
 
     async def finish_chain(
         self, *, run_id: uuid.UUID, outputs: Any, error: BaseException | None
     ) -> None:
         """Update one nested public ancestor when it completes."""
+        if error is None and not self.writes_disabled:
+            await self._record_unexecuted_tools(run_id, outputs)
+        else:
+            self.tool_attempts.pop(run_id, None)
+        self.run_parents.pop(run_id, None)
         pending = self.pending_runs.pop(run_id, None)
         if pending is None or self.writes_disabled:
             return
@@ -336,12 +424,16 @@ class InvocationRecorder:
         node_type: NodeType,
         requested_model: str | None = None,
         model_provider: str | None = None,
+        tool_call_id: str | None = None,
     ) -> None:
         """Reserve one observable model or tool call."""
+        if tool_call_id is not None:
+            self._mark_tool_observed(parent_run_id, tool_call_id)
         if run_id in self.pending_runs:
             return
         if not await self.reserve_node_budget():
             return
+        self.run_parents[run_id] = parent_run_id
         captured = capture_value(inputs, self.policy)
         self.pending_runs[run_id] = PendingRun(
             external_id=str(run_id),
@@ -357,6 +449,18 @@ class InvocationRecorder:
             model_provider=model_provider,
         )
 
+    def _encode_tool_result(self, result: Any, *, inputs_lossy: bool) -> dict[str, Any]:
+        """Encode a native result and mark lossy arguments as non-replayable."""
+        from .codec import encode_tool_outcome
+
+        output = encode_tool_outcome(result, policy=self.policy)
+        if inputs_lossy:
+            output["replayable"] = False
+            output["loss_reasons"] = list(
+                dict.fromkeys([*output.get("loss_reasons", []), "lossy_tool_arguments"])
+            )
+        return output
+
     async def finish_call(
         self,
         *,
@@ -367,22 +471,17 @@ class InvocationRecorder:
         """Buffer one completed observable model or tool call."""
         pending = self.pending_runs.pop(run_id, None)
         if pending is None or self.writes_disabled:
+            self.run_parents.pop(run_id, None)
             return
         if pending.node_type is NodeType.TOOL_CALL:
-            from langchain_core.messages import ToolMessage
             from langgraph.types import Command
 
-            from .codec import encode_tool_outcome
-
+            if isinstance(outputs, ToolMessage):
+                self._mark_tool_observed(run_id, outputs.tool_call_id)
             if isinstance(outputs, (ToolMessage, Command)):
-                output_value = encode_tool_outcome(outputs, policy=self.policy)
-                if pending.inputs_lossy:
-                    output_value["replayable"] = False
-                    reasons = list(output_value.get("loss_reasons", []))
-                    if "lossy_tool_arguments" not in reasons:
-                        reasons.append("lossy_tool_arguments")
-                    output_value["loss_reasons"] = reasons
-                output = output_value
+                output = self._encode_tool_result(
+                    outputs, inputs_lossy=pending.inputs_lossy
+                )
             else:
                 output = capture_value(outputs, self.policy).value
         else:
@@ -392,6 +491,7 @@ class InvocationRecorder:
             if pending.node_type is NodeType.LLM_CALL
             else {}
         )
+        self.run_parents.pop(run_id, None)
         await self.buffer_node(
             SessionNodeCreateRequest(
                 external_id=pending.external_id,
@@ -423,6 +523,12 @@ class InvocationRecorder:
         error: BaseException | None = None,
     ) -> None:
         """Record a middleware short-circuit that emits no live callback."""
+        try:
+            callbacks = get_config().get("callbacks")
+        except RuntimeError:
+            callbacks = None
+        if isinstance(callbacks, (CallbackManager, AsyncCallbackManager)):
+            self._mark_tool_observed(callbacks.parent_run_id, tool_call_id)
         if not await self.reserve_node_budget():
             return
         input_capture = capture_value(arguments, self.policy)
