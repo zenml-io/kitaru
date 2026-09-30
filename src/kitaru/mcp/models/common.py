@@ -130,6 +130,9 @@ class RegistryReadResult(ToolResult):
 # field descriptions in the discovery schema. The literal mirrors JobKind while
 # avoiding a separate enum definition in this already budget-constrained union.
 class _MCPJob(JobResponse):
+    # Paginated SDK reads contain JobResponse instances, not dictionaries.
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     kind: Literal["session_run", "import", "evaluation", "replay"]
 
