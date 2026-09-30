@@ -48,6 +48,10 @@ The Python 3.14 base suite runs on two independent runners, each with its own Po
 
 For local reproduction, prefix the normal base pytest command with `KITARU_TEST_SHARD_INDEX=0 KITARU_TEST_SHARD_COUNT=2`, then repeat with index `1`. Both partitions together must contain exactly the unpartitioned collection, with no overlap. Database-required behavior is independent of the partition settings.
 
+Manual CI dispatches offer a `test-processes` choice of `1` or `2` for the base and plugin suites. Regular push and pull-request CI remains serial until the two-process trial passes the acceptance checks. The trial uses `--dist loadfile` to keep each file together, retains both existing Python 3.14 partitions, and exports JUnit outcomes and combined core/plugin coverage JSON as one-day artifacts. Run each mode sequentially on the same commit and runner types; repeat the comparison to distinguish an improvement from runner noise.
+
+Adopt two-process execution only after median end-to-end CI execution time improves by at least 20%, excluding queue time, without worsening slower runs or introducing intermittent failures. Compare test identities and outcomes, unexpected skips, and per-file covered lines and branch arcs, including child processes. Retain the current Hypothesis settings, database-required failures, supported-version matrix, and package checks.
+
 ## Property-based tests
 
 Hypothesis tests live next to the surface they cover: `plugins/tests/importers/test_fuzz_parse.py` and `test_normalization_properties.py` (importer parsing and normalization contracts), property modules under `plugins/tests/evaluators/`, `tests/api_models/test_wire_properties.py`, `tests/mcp/test_fuzz_tools.py` (MCP tool boundary, requests generated from each tool's JSON schema), `tests/cli/test_redaction_properties.py`, `tests/server/test_fuzz_filters.py` (recursive JSON list filters), `tests/server/test_fuzz_api_sequences.py` (isolated successful agent/version API sequences), and codec, capture, and record/replay property modules under `plugins/tests/adapters/`.

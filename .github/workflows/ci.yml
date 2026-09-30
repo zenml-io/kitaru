@@ -1,6 +1,13 @@
 ---
 name: CI
 on:
+  workflow_dispatch:
+    inputs:
+      test-processes:
+        description: Test processes per base and plugin runner (benchmark only)
+        type: choice
+        options: ['1', '2']
+        default: '1'
   push:
     branches: [develop]
   pull_request:
@@ -375,6 +382,17 @@ jobs:
           -m pytest -q -c plugins/pyproject.toml
           plugins/tests
           tests/server/test_default_plugins.py
+        env:
+          # Keep regular CI serial until hosted timings and coverage prove the gain.
+          PYTEST_ADDOPTS: ${{ github.event_name == 'workflow_dispatch' && (inputs.test-processes == '2' && '-n 2 --dist loadfile --junitxml=ci-results.xml' || '--junitxml=ci-results.xml') || '' }}
+      - name: Upload plugin benchmark outcomes
+        if: ${{ always() && github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: benchmark-plugin-outcomes
+          path: ci-results.xml
+          retention-days: 1
+          if-no-files-found: error
       - name: Report plugin coverage
         run: |
           set -euo pipefail
@@ -393,6 +411,17 @@ jobs:
           uv run --project plugins python -c
           "from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS;
           assert DEFAULT_PLUGIN_DEFINITIONS"
+      - name: Export plugin benchmark coverage
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: uv run --project plugins coverage json -o ci-plugin-coverage.json
+      - name: Upload plugin benchmark coverage
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: benchmark-plugin-coverage
+          path: ci-plugin-coverage.json
+          retention-days: 1
+          if-no-files-found: error
   plugin-package:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     needs: release-units
@@ -551,9 +580,19 @@ jobs:
           assert importlib.util.find_spec('mcp') is None"
       - run: ${{ matrix.pytest-command }}
         env:
+          # File grouping preserves module fixtures and test order within each file.
+          PYTEST_ADDOPTS: ${{ github.event_name == 'workflow_dispatch' && (contains(matrix.name, 'base') && inputs.test-processes == '2' && '-n 2 --dist loadfile --junitxml=ci-results.xml' || '--junitxml=ci-results.xml') || '' }}
           KITARU_TEST_REQUIRE_POSTGRES: ${{ matrix.postgres && '1' || '' }}
           KITARU_TEST_SHARD_INDEX: ${{ matrix.shard-index }}
           KITARU_TEST_SHARD_COUNT: ${{ matrix.shard-count }}
+      - name: Upload benchmark outcomes
+        if: ${{ always() && github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: benchmark-${{ matrix.name }}-outcomes
+          path: ci-results.xml
+          retention-days: 1
+          if-no-files-found: error
       - name: Upload coverage data
         if: ${{ matrix.coverage }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -595,3 +634,14 @@ jobs:
             uv run --no-sync coverage report --format=markdown --skip-covered --sort=cover
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Export core benchmark coverage
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: uv run --no-sync coverage json -o ci-core-coverage.json
+      - name: Upload core benchmark coverage
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: benchmark-core-coverage
+          path: ci-core-coverage.json
+          retention-days: 1
+          if-no-files-found: error

@@ -138,6 +138,7 @@ dev = [
     "moto[s3]>=5.2.3",
     "flask>=3.1",
     "flask-cors>=6.0",
+    "pytest-xdist>=3.8",
 ]
 fuzz = [
     "schemathesis>=4.25,<5",
