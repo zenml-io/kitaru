@@ -120,7 +120,8 @@ Alongside the custom `redactor`, `CapturePolicy` carries the per-invocation boun
 The other adapters have no user-supplied redaction hook:
 
 - **OpenAI Agents SDK** applies fixed size, depth, and collection limits with truncation metadata, and excludes caller context, clients, credentials, callbacks, and private SDK fields.
-- **Mastra** and the **Vercel AI SDK** adapter replace credential-shaped keys (`authorization`, `token`, `secret`, `password`, `api_key`, `apikey`, `cookie`) with a redaction marker and bound oversized values.
+- The history-only Mastra **`KitaruAgent`** and the **Vercel AI SDK** adapter replace credential-shaped keys (`authorization`, `token`, `secret`, `password`, `api_key`, `apikey`, `cookie`) with a redaction marker and bound oversized values.
+- The Mastra **memory replay agent** (`createMemoryReplayAgent`) records application data as it is, including keys such as `token`, `password`, or `api_key`, so replay sees what the live turn saw. It never stores `authorization`, `proxy-authorization`, `cookie`, `set-cookie`, `headers`, or `abortSignal` keys, redacts URL credentials, and masks other keys only when you pass `isSecretKey`. See [Credentials in recorded data](mastra.md#credentials-in-recorded-data).
 - **PydanticAI** applies no redaction and no size bounds to recorded payloads. Prompts and tool payloads are serialized as-is.
 
 A key-name redactor is a safety net, not a data classifier. Sensitive values under names it cannot recognize, and free text inside prompts, still reach the server. Where the data is regulated, redact in your own tool and prompt construction, and apply the same access and retention rules to Kitaru sessions that you apply to the original payloads.
