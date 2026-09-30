@@ -1244,7 +1244,12 @@ async def test_experiment_run_and_activity_reads_link_replay_to_sessions() -> No
     async def get_session(item_id: uuid.UUID) -> SessionDetailResponse:
         return {baseline_id: baseline, result_id: result_session}[item_id]
 
+    async def get_info() -> ServerInfoResponse:
+        return ServerInfoResponse(version="0.0.0", auth_scheme=AuthScheme.LOCAL)
+
     client = SimpleNamespace(
+        base_url="https://api.example.com",
+        info=SimpleNamespace(get=get_info),
         experiments=SimpleNamespace(start_run=start_run),
         experiment_runs=SimpleNamespace(get=get_run),
         replays=SimpleNamespace(get=get_replay),
@@ -1323,7 +1328,14 @@ async def test_activity_result_session_exposes_durable_replay_failure_reason(
         assert item_id == result_session.id
         return result_session
 
-    client = SimpleNamespace(sessions=SimpleNamespace(get=get_session))
+    async def get_info() -> ServerInfoResponse:
+        return ServerInfoResponse(version="0.0.0", auth_scheme=AuthScheme.LOCAL)
+
+    client = SimpleNamespace(
+        base_url="https://api.example.com",
+        info=SimpleNamespace(get=get_info),
+        sessions=SimpleNamespace(get=get_session),
+    )
     server, context = _get_context(client, CapabilityMode.READ_ONLY)
     result = await server.call_tool(
         "kitaru_activity_read",
