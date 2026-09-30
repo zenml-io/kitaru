@@ -448,7 +448,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         )
         rows = (await self._session.execute(statement)).all()
         await self._session.flush()
-        stamped = {
+        stamped: dict[uuid.UUID, datetime | None] = {
             task_id: cancel_requested_at for task_id, cancel_requested_at in rows
         }
         return stamped, candidate_ids - stamped.keys()
