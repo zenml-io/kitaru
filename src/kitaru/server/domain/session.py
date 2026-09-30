@@ -241,125 +241,6 @@ def mastra_replay_uses_observational_memory(envelope: dict[str, Any]) -> bool:
     return om is True or (isinstance(om, dict) and om.get("enabled") is not False)
 
 
-_JS_ISO_TIMESTAMP = re.compile(
-    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z"
-)
-
-
-def _is_js_iso_timestamp(value: str) -> bool:
-    """Check that a string is exactly a JavaScript `Date#toISOString()` value.
-
-    Args:
-        value: The string to check, such as `2026-01-01T00:00:00.000Z`.
-
-    Returns:
-        Whether the string is a real UTC instant in that exact form.
-    """
-    if _JS_ISO_TIMESTAMP.fullmatch(value) is None:
-        return False
-    try:
-        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f%z")
-    except ValueError:
-        return False
-    # Require the value to render back unchanged, as the adapter's check does.
-    rendered = parsed.isoformat(timespec="milliseconds")
-    return rendered.removesuffix("+00:00") + "Z" == value
-
-
-def mastra_replay_v3_current(envelope: dict[str, Any]) -> bool:
-    """Check that a version-3 input carries its recorded key order and turn start.
-
-    Early version-3 inputs lack both, and the adapter can no longer decode them.
-    """
-    key_order = envelope.get("keyOrder")
-    started = envelope.get("turnStartedAt")
-    if not (
-        isinstance(key_order, dict)
-        and isinstance(key_order.get("permutations"), str)
-        and isinstance(key_order.get("sha256"), str)
-        and re.fullmatch(r"[a-f0-9]{64}", key_order["sha256"]) is not None
-        and isinstance(started, str)
-    ):
-        return False
-    # The adapter decodes only the exact `Date#toISOString()` form, so a looser
-    # ISO value would pass here and fail in the worker after queuing.
-    return _is_js_iso_timestamp(started)
-
-
-# Nine digits exceed any object count the replay input budget allows, and keep
-# every number far below Python's integer string conversion limit.
-_MASTRA_KEY_ORDER_NUMBER = r"[0-9]{1,9}"
-_MASTRA_KEY_ORDER_ENTRY = (
-    rf"{_MASTRA_KEY_ORDER_NUMBER}:{_MASTRA_KEY_ORDER_NUMBER}"
-    rf"(?:,{_MASTRA_KEY_ORDER_NUMBER})*"
-)
-_MASTRA_KEY_ORDER = re.compile(
-    rf"(?:{_MASTRA_KEY_ORDER_ENTRY}(?:;{_MASTRA_KEY_ORDER_ENTRY})*)?"
-)
-
-
-def _mastra_key_order_well_formed(key_order: Any) -> bool:
-    """Check that a recorded key order is one the adapter can apply.
-
-    Each entry must name a new object position and hold a permutation of its
-    key ranks. This does not match entries to the stored objects or check the
-    digest, which both need the JavaScript walk and serialization they were
-    computed from.
-
-    Args:
-        key_order: The input's `keyOrder` value.
-
-    Returns:
-        Whether the permutations follow the adapter's grammar.
-    """
-    permutations = (
-        key_order.get("permutations") if isinstance(key_order, dict) else None
-    )
-    if (
-        not isinstance(permutations, str)
-        or _MASTRA_KEY_ORDER.fullmatch(permutations) is None
-    ):
-        return False
-    for index, entry in enumerate(permutations.split(";") if permutations else []):
-        gap, order = entry.split(":")
-        ranks = [int(rank) for rank in order.split(",")]
-        if (index > 0 and int(gap) == 0) or sorted(ranks) != list(range(len(ranks))):
-            return False
-    return True
-
-
-def _mastra_om_tape_entry_well_formed(entry: Any) -> bool:
-    """Check that a recorded OM result is one the adapter's result tape serves.
-
-    The adapter refuses a whole tape that holds an entry without a known
-    phase and method, a numeric ordinal, a string input fingerprint, and a
-    failure marker that is absent or true. It also needs the recorded output,
-    which a successful stream call holds as its list of chunks.
-
-    Args:
-        entry: One item of the input's `omTape` list.
-
-    Returns:
-        Whether the adapter can serve the entry.
-    """
-    if not isinstance(entry, dict):
-        return False
-    ordinal = entry.get("ordinal")
-    failed = "failed" in entry
-    return (
-        entry.get("phase") in {"observer", "reflector"}
-        and entry.get("method") in {"doGenerate", "doStream"}
-        and isinstance(ordinal, int | float)
-        and not isinstance(ordinal, bool)
-        and isinstance(entry.get("inputFingerprint"), str)
-        and (not failed or entry["failed"] is True)
-        and "output" in entry
-        and (
-            failed or entry["method"] != "doStream" or isinstance(entry["output"], list)
-        )
-    )
-
-
 def mastra_replay_v3_complete(envelope: dict[str, Any]) -> bool:
     """Check the required shape of a finalized Mastra replay input."""
     snapshot = envelope.get("initialSnapshot")
@@ -383,9 +264,6 @@ def mastra_replay_v3_complete(envelope: dict[str, Any]) -> bool:
         and isinstance(files, list)
         and _mastra_replay_files_complete(files)
         and isinstance(envelope.get("omTape"), list)
-        and all(map(_mastra_om_tape_entry_well_formed, envelope["omTape"]))
-        and mastra_replay_v3_current(envelope)
-        and _mastra_key_order_well_formed(envelope["keyOrder"])
     )
 
 
