@@ -43,6 +43,7 @@ from kitaru.mcp.models.connections import (
     ConnectionReadRequest,
     ConnectionsManageRequest,
 )
+from kitaru.mcp.models.docs import DocsSearchRequest, DocsSearchResult
 from kitaru.mcp.models.evaluators import EvaluatorsManageRequest
 from kitaru.mcp.models.management import CohortsManageRequest, ExperimentsManageRequest
 from kitaru.mcp.models.registry import RegistryReadRequest
@@ -63,6 +64,7 @@ from kitaru.mcp.tools.connections import (
     handle_connections_manage,
 )
 from kitaru.mcp.tools.destructive import handle_delete, handle_workflow_cancel
+from kitaru.mcp.tools.docs import handle_docs_search
 from kitaru.mcp.tools.evaluators import handle_evaluators_manage
 from kitaru.mcp.tools.experiments import handle_experiments_manage
 from kitaru.mcp.tools.registry import handle_registry_read
@@ -132,6 +134,16 @@ async def connection_read_tool(
     return cast(
         ConnectionReadResult,
         await _invoke(context, request, ConnectionReadResult, handle_connection_read),
+    )
+
+
+async def docs_search_tool(
+    request: DocsSearchRequest, context: Context
+) -> DocsSearchResult:
+    """Search bundled Kitaru guides; return short excerpts and published source URLs."""
+    return cast(
+        DocsSearchResult,
+        await _invoke(context, request, DocsSearchResult, handle_docs_search),
     )
 
 
@@ -296,6 +308,13 @@ TOOL_SPECS = (
         connection_read_tool.__doc__ or "",
         _annotations(read_only=True, destructive=False, idempotent=True),
         connection_read_tool,
+    ),
+    ToolSpec(
+        "kitaru_docs_search",
+        CapabilityMode.READ_ONLY,
+        docs_search_tool.__doc__ or "",
+        _annotations(read_only=True, destructive=False, idempotent=True),
+        docs_search_tool,
     ),
     ToolSpec(
         "kitaru_cohorts_manage",
