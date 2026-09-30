@@ -188,6 +188,21 @@ maintenance-branch-prefix = "release/mastra/"
 checks = []
 
 [[units]]
+slug = "mlflow-importer"
+path = "plugins/packages/mlflow-importer"
+distribution = "kitaru-mlflow-importer"
+registry = "pypi"
+version-source = "plugins/packages/mlflow-importer/pyproject.toml"
+changelog = "plugins/packages/mlflow-importer/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = true
+release-label = "requires:plugin:mlflow"
+impact-paths = ["plugins/packages/mlflow-importer/**"]
+tag-prefix = "python/kitaru-mlflow-importer/v"
+maintenance-branch-prefix = "release/mlflow/"
+checks = []
+
+[[units]]
 slug = "openai-agents"
 path = "plugins/packages/openai-agents"
 distribution = "kitaru-openai-agents"
