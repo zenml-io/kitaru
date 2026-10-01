@@ -85,33 +85,9 @@ jobs:
       - run: pnpm run generate:check
       - run: pnpm run lint
       - run: pnpm run typecheck
-      - name: Test TypeScript packages, including Mastra memory on PostgreSQL
-        if: github.event_name != 'workflow_dispatch'
+      - name: Test TypeScript packages with coverage
         env:
-          POSTGRES_PASSWORD: password
-        run: >-
-          KITARU_TEST_MASTRA_POSTGRES_URL="postgres://postgres:${POSTGRES_PASSWORD}@localhost:5433/postgres"
-          pnpm run test:built
-      - name: Report TypeScript coverage
-        if: github.event_name != 'workflow_dispatch'
-        run: |
-          set -euo pipefail
-          for package in kitaru kitaru-mastra kitaru-vercel-ai; do
-            pnpm --filter "@zenml-io/$package" exec vitest run \
-              --coverage.enabled --coverage.provider=v8 \
-              --coverage.include='src/**' --coverage.exclude='src/generated/**' \
-              --coverage.reporter=text-summary | tee "$RUNNER_TEMP/coverage.txt"
-            {
-              echo "### \`@zenml-io/$package\` coverage"
-              echo '```text'
-              grep -E '^(Statements|Branches|Functions|Lines) ' "$RUNNER_TEMP/coverage.txt"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          done
-      - name: Benchmark TypeScript test and coverage execution
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          TYPESCRIPT_TEST_MODE: ${{ inputs.typescript-tests }}
+          TYPESCRIPT_TEST_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.typescript-tests || 'coverage-once' }}
           POSTGRES_PASSWORD: password
         run: >-
           KITARU_TEST_MASTRA_POSTGRES_URL="postgres://postgres:${POSTGRES_PASSWORD}@localhost:5433/postgres"
@@ -413,8 +389,8 @@ jobs:
           plugins/tests
           tests/server/test_default_plugins.py
         env:
-          # Keep regular CI serial until hosted timings and coverage prove the gain.
-          PYTEST_ADDOPTS: ${{ github.event_name == 'workflow_dispatch' && (inputs.test-processes == '2' && '-n 2 --dist loadfile --junitxml=ci-results.xml' || '--junitxml=ci-results.xml') || '' }}
+          # File grouping preserves module fixtures and test order within each file.
+          PYTEST_ADDOPTS: ${{ github.event_name == 'workflow_dispatch' && (inputs.test-processes == '2' && '-n 2 --dist loadfile --junitxml=ci-results.xml' || '--junitxml=ci-results.xml') || '-n 2 --dist loadfile' }}
       - name: Upload plugin benchmark outcomes
         if: ${{ always() && github.event_name == 'workflow_dispatch' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -611,7 +587,7 @@ jobs:
       - run: ${{ matrix.pytest-command }}
         env:
           # File grouping preserves module fixtures and test order within each file.
-          PYTEST_ADDOPTS: ${{ github.event_name == 'workflow_dispatch' && (contains(matrix.name, 'base') && inputs.test-processes == '2' && '-n 2 --dist loadfile --junitxml=ci-results.xml' || '--junitxml=ci-results.xml') || '' }}
+          PYTEST_ADDOPTS: ${{ github.event_name == 'workflow_dispatch' && (contains(matrix.name, 'base') && inputs.test-processes == '2' && '-n 2 --dist loadfile --junitxml=ci-results.xml' || '--junitxml=ci-results.xml') || (contains(matrix.name, 'base') && '-n 2 --dist loadfile' || '') }}
           KITARU_TEST_REQUIRE_POSTGRES: ${{ matrix.postgres && '1' || '' }}
           KITARU_TEST_SHARD_INDEX: ${{ matrix.shard-index }}
           KITARU_TEST_SHARD_COUNT: ${{ matrix.shard-count }}
