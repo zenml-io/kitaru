@@ -15,14 +15,13 @@
 
 import base64
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from typing import Any
 
 import pytest
 
 from conftest import (
-    RECORDED_OM_TAPE,
     ReplayServices,
     build_replay_services,
     build_task_actor,
@@ -160,33 +159,14 @@ async def test_pending_mastra_baseline_creates_no_replay(
     assert not replays
 
 
-@pytest.mark.parametrize(
-    "invalid_field",
-    [
-        "raw_input",
-        "file_hash",
-        "x",
-        "0:0,0",
-        "0:1",
-        "0:1,0;0:1,0",
-        "0:",
-        pytest.param("0:" + "9" * 5000, id="oversized-rank"),
-    ],
-)
 async def test_malformed_eligible_mastra_baseline_creates_no_replay(
     services: ReplayServices,
     complete_mastra_memory_replay_inputs: dict[str, Any],
-    invalid_field: str,
 ) -> None:
     """Refuse a stored eligible marker when replay input is malformed."""
     version = await _agent_version_with_run_spec(services)
     invalid = deepcopy(complete_mastra_memory_replay_inputs)
-    if invalid_field == "raw_input":
-        del invalid["mastra_memory_replay"]["rawInput"]
-    elif invalid_field == "file_hash":
-        invalid["mastra_memory_replay"]["files"][0]["sha256"] = "0" * 64
-    else:
-        invalid["mastra_memory_replay"]["keyOrder"]["permutations"] = invalid_field
+    del invalid["mastra_memory_replay"]["rawInput"]
     baseline = await create_session(
         services.sessions,
         ACTOR.account.id,
@@ -211,97 +191,38 @@ async def test_malformed_eligible_mastra_baseline_creates_no_replay(
     assert not replays
 
 
-@pytest.mark.parametrize("tape", [RECORDED_OM_TAPE, [*RECORDED_OM_TAPE, {}]])
-async def test_mastra_baseline_om_tape_entries_are_checked_before_replay(
-    services: ReplayServices,
-    complete_mastra_memory_replay_inputs: dict[str, Any],
-    tape: list[Any],
-) -> None:
-    """Refuse a stored OM tape the adapter would reject after the job exists."""
-    version = await _agent_version_with_run_spec(services)
-    inputs = deepcopy(complete_mastra_memory_replay_inputs)
-    inputs["mastra_memory_replay"]["omTape"] = deepcopy(tape)
-    baseline = await create_session(
-        services.sessions,
-        ACTOR.account.id,
-        agent_id=version.agent_id,
-        agent_version_id=version.id,
-        origin=SessionOrigin.RECORDED,
-        status=SessionStatus.COMPLETED,
-        framework="mastra",
-        inputs=inputs,
-        metadata={"mastra_replay_state": "eligible"},
-    )
-    create = ReplayCreate(
-        baseline_session_id=baseline.id,
-        evaluators=[],
-        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
-    )
-    if tape is RECORDED_OM_TAPE:
-        bundle = await services.replay_service.create_replay(create, actor=ACTOR)
-        assert bundle.replay.baseline_session_id == baseline.id
-        return
-    with pytest.raises(SessionReplayNotReady, match="mastra_replay_incomplete"):
-        await services.replay_service.create_replay(create, actor=ACTOR)
-    replays, _ = await services.replays.query(ReplayFilter())
-    assert not replays
-
-
-@pytest.mark.parametrize("missing_field", ["keyOrder", "turnStartedAt"])
-async def test_mastra_baseline_in_an_outdated_v3_format_is_refused(
-    services: ReplayServices,
-    complete_mastra_memory_replay_inputs: dict[str, Any],
-    missing_field: str,
-) -> None:
-    """Refuse an early v3 input the adapter can no longer decode."""
-    version = await _agent_version_with_run_spec(services)
-    outdated = deepcopy(complete_mastra_memory_replay_inputs)
-    del outdated["mastra_memory_replay"][missing_field]
-    baseline = await create_session(
-        services.sessions,
-        ACTOR.account.id,
-        agent_id=version.agent_id,
-        agent_version_id=version.id,
-        origin=SessionOrigin.RECORDED,
-        status=SessionStatus.COMPLETED,
-        framework="mastra",
-        inputs=outdated,
-        metadata={"mastra_replay_state": "eligible"},
-    )
-    with pytest.raises(SessionReplayNotReady, match="mastra_replay_recording_outdated"):
-        await services.replay_service.create_replay(
-            ReplayCreate(
-                baseline_session_id=baseline.id,
-                evaluators=[],
-                baseline_evaluation_mode=BaselineEvaluationMode.NONE,
-            ),
-            actor=ACTOR,
-        )
-    replays, _ = await services.replays.query(ReplayFilter())
-    assert not replays
-
-
 @pytest.mark.parametrize(
-    ("turn_started_at", "accepted"),
+    "change",
     [
-        ("1999-12-31T23:59:59.999Z", True),
-        ("2026-01-01", False),
-        ("2026-01-01T00:00:00+00:00", False),
-        ("2026-01-01T00:00:00.000+00:00", False),
-        ("2026-01-01T00:00:00Z", False),
-        ("2026-02-30T00:00:00.000Z", False),
+        pytest.param(lambda envelope: envelope.pop("keyOrder"), id="no-key-order"),
+        pytest.param(
+            lambda envelope: envelope["keyOrder"].update(permutations="x"),
+            id="key-order",
+        ),
+        pytest.param(
+            lambda envelope: envelope.update(turnStartedAt="2026-01-01"),
+            id="turn-start",
+        ),
+        pytest.param(lambda envelope: envelope["omTape"].append({}), id="om-tape"),
+        pytest.param(
+            lambda envelope: envelope["files"][0].update(sha256="0" * 64),
+            id="inline-file-hash",
+        ),
     ],
 )
-async def test_mastra_baseline_turn_start_must_be_a_javascript_iso_timestamp(
+async def test_mastra_envelope_details_are_left_to_the_adapter(
     services: ReplayServices,
     complete_mastra_memory_replay_inputs: dict[str, Any],
-    turn_started_at: str,
-    accepted: bool,
+    change: Callable[[dict[str, Any]], object],
 ) -> None:
-    """Accept only the `Date#toISOString()` form the adapter can decode."""
+    """Create the replay job for envelope details only the adapter decodes.
+
+    The adapter refuses such an envelope in the replay task before the model
+    runs, so the server keeps no second copy of those rules.
+    """
     version = await _agent_version_with_run_spec(services)
     inputs = deepcopy(complete_mastra_memory_replay_inputs)
-    inputs["mastra_memory_replay"]["turnStartedAt"] = turn_started_at
+    change(inputs["mastra_memory_replay"])
     baseline = await create_session(
         services.sessions,
         ACTOR.account.id,
@@ -313,19 +234,16 @@ async def test_mastra_baseline_turn_start_must_be_a_javascript_iso_timestamp(
         inputs=inputs,
         metadata={"mastra_replay_state": "eligible"},
     )
-    create = ReplayCreate(
-        baseline_session_id=baseline.id,
-        evaluators=[],
-        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[],
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+        ),
+        actor=ACTOR,
     )
-    if accepted:
-        bundle = await services.replay_service.create_replay(create, actor=ACTOR)
-        assert bundle.replay.baseline_session_id == baseline.id
-        return
-    with pytest.raises(SessionReplayNotReady, match="mastra_replay_recording_outdated"):
-        await services.replay_service.create_replay(create, actor=ACTOR)
-    replays, _ = await services.replays.query(ReplayFilter())
-    assert not replays
+    assert bundle.replay.baseline_session_id == baseline.id
+    assert bundle.replay.job_id is not None
 
 
 @pytest.mark.parametrize("blob", ["kept", "deleted", "deleted_after_first_check"])

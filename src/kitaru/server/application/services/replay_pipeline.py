@@ -50,7 +50,6 @@ from kitaru.server.domain.session import (
     mastra_replay_stored_files,
     mastra_replay_uses_observational_memory,
     mastra_replay_v3_complete,
-    mastra_replay_v3_current,
 )
 from kitaru.server.domain.task import AgentTask, EvaluationTask, Task
 from kitaru.server.utils import hash_params
@@ -90,8 +89,6 @@ def _check_mastra_replay_ready(baseline: Session) -> None:
         return  # Existing history-only Mastra recordings have no memory envelope.
     if baseline.status.value == "in_progress" or envelope.get("complete") is not True:
         raise SessionReplayNotReady(baseline.id, "mastra_replay_incomplete")
-    if envelope.get("version") == 3 and not mastra_replay_v3_current(envelope):
-        raise SessionReplayNotReady(baseline.id, "mastra_replay_recording_outdated")
     if envelope.get("version") == 3 and not mastra_replay_v3_complete(envelope):
         raise SessionReplayNotReady(baseline.id, "mastra_replay_incomplete")
     if mastra_replay_uses_observational_memory(envelope) and not isinstance(

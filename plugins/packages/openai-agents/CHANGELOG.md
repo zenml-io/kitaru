@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Record the configured model, provider, and estimated cost on model-call nodes, and store reasoning items as reasoning on their model-call node instead of as `unsupported_openai_item` spans.
+
 ## 0.3.0 - 2026-09-21
 
 - Record nodes and parent relationships with provider or synthetic external IDs, and retain concrete start times for materialized model, tool, and handoff nodes. Require Kitaru 0.27.0 or later for the new node contract.

@@ -465,14 +465,37 @@ it("fails replay closed when a phase has no recorded result", async () => {
   ).rejects.toBeInstanceOf(MastraOMDivergenceError);
   expect(live.doStream).not.toHaveBeenCalled();
   await expect(replay.finish()).rejects.toBeInstanceOf(MastraOMDivergenceError);
-  const malformed = createOMResultTape(
-    [{ phase: "observer" } as unknown as OMResultEntry],
-    () => {},
-  );
-  await expect(
-    malformed.instrument(live, "observer").doStream({ prompt: "x" }),
-  ).rejects.toBeInstanceOf(MastraOMDivergenceError);
-  expect(live.doStream).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["missing fields", { phase: "observer" }],
+  [
+    "missing output",
+    {
+      phase: "observer",
+      method: "doGenerate",
+      ordinal: 0,
+      inputFingerprint: "f",
+    },
+  ],
+  [
+    "stream output that is not a chunk list",
+    {
+      phase: "observer",
+      method: "doStream",
+      ordinal: 0,
+      inputFingerprint: "f",
+      output: { chunks: [] },
+    },
+  ],
+])("refuses a recorded tape with %s before replay starts", async (_, entry) => {
+  const entries = await recordCalls([{ phase: "observer", prompt: "only" }]);
+  expect(() =>
+    createOMResultTape(
+      [...entries, entry as unknown as OMResultEntry],
+      () => {},
+    ),
+  ).toThrow(MastraOMDivergenceError);
 });
 
 it.each(["fail", "live"] as const)(

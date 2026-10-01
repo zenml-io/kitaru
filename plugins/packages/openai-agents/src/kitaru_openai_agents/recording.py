@@ -23,6 +23,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal
 from itertools import islice
 from typing import Any, Generic, TypeVar
 
@@ -32,6 +33,12 @@ from agents import (
     HandoffOutputItem,
     MessageOutputItem,
     ModelResponse,
+    MultiProvider,
+    OpenAIChatCompletionsModel,
+    OpenAIProvider,
+    OpenAIResponsesModel,
+    ReasoningItem,
+    RunConfig,
     RunContextWrapper,
     RunErrorDetails,
     RunHooks,
@@ -41,11 +48,13 @@ from agents import (
     ToolCallOutputItem,
     TResponseInputItem,
 )
+from agents.models import get_default_model
 from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseOutputMessage,
     ResponseOutputRefusal,
     ResponseOutputText,
+    ResponseReasoningItem,
 )
 
 from kitaru.api_models.v1.replay import ReplayResponse
@@ -71,6 +80,7 @@ from .inputs import (
     normalize_openai_input,
     parse_tool_arguments,
 )
+from .pricing import estimate_cost
 
 TContext = TypeVar("TContext")
 SessionObserver = Callable[[SessionResponse], Awaitable[None] | None]
@@ -162,11 +172,48 @@ async def resolve_run_input(
     )
 
 
+@dataclass(frozen=True)
+class _ModelIdentity:
+    requested_model: str | None = None
+    model: str | None = None
+    provider: str | None = None
+
+
+def _resolve_model_identity(
+    agent: Agent[Any], run_config: RunConfig | None
+) -> _ModelIdentity:
+    """Name the model one call uses, following the Agents SDK resolution order.
+
+    The SDK drops the served model name from its model responses, so the
+    configured name is the most specific name available.
+    """
+    configured = run_config.model if run_config is not None else None
+    if configured is None:
+        configured = agent.model
+    if isinstance(configured, OpenAIResponsesModel | OpenAIChatCompletionsModel):
+        name = str(configured.model)
+        return _ModelIdentity(requested_model=name, model=name, provider="openai")
+    if configured is None:
+        configured = get_default_model()
+    if not isinstance(configured, str):
+        return _ModelIdentity()
+    model_provider = run_config.model_provider if run_config is not None else None
+    # Only the stock providers are known to route these names to OpenAI; a
+    # prefixed or custom-routed name may reach any backend. A missing run
+    # config means the SDK's default MultiProvider.
+    stock = model_provider is None or isinstance(model_provider, MultiProvider)
+    name = configured.removeprefix("openai/") if stock else configured
+    if isinstance(model_provider, OpenAIProvider) or (stock and "/" not in name):
+        return _ModelIdentity(requested_model=configured, model=name, provider="openai")
+    return _ModelIdentity(requested_model=configured)
+
+
 @dataclass
 class _ModelObservation:
     started_at: datetime
     system_prompt: str | None
     input_items: list[TResponseInputItem]
+    identity: _ModelIdentity
     ended_at: datetime | None = None
 
 
@@ -240,10 +287,10 @@ class RunRecorder:
         return session
 
     def compose_hooks(
-        self, caller: RunHooks[TContext] | None
+        self, caller: RunHooks[TContext] | None, run_config: RunConfig | None = None
     ) -> "RecordingRunHooks[TContext]":
         """Compose recorder bookkeeping with caller-owned run hooks."""
-        return RecordingRunHooks(self, caller)
+        return RecordingRunHooks(self, caller, run_config)
 
     async def reconcile(self, result: RunResult | RunErrorDetails) -> None:
         """Translate public result objects into stable buffered nodes."""
@@ -269,6 +316,12 @@ class RunRecorder:
             model_started_at[identity] = (
                 observation.started_at if observation else run_started_at
             )
+            model = observation.identity if observation else _ModelIdentity()
+            tokens = _capture_usage(response)
+            cost, cost_attributes = estimate_cost(
+                tokens, model.model, model.provider, model_started_at[identity]
+            )
+            outputs, reasoning_selectors = _capture_model_response(response)
             await self._append_node(
                 node_type=NodeType.LLM_CALL,
                 name="model",
@@ -284,8 +337,14 @@ class RunRecorder:
                     if observation
                     else None
                 ),
-                outputs=_capture_model_response(response),
-                tokens=_capture_usage(response),
+                outputs=outputs,
+                reasoning_selectors=reasoning_selectors,
+                requested_model=model.requested_model,
+                model=model.model,
+                model_provider=model.provider,
+                tokens=tokens,
+                cost=cost,
+                attributes=cost_attributes,
             )
             for output_item in response.output[:MAX_COLLECTION_ITEMS]:
                 output_id = _raw_id(output_item)
@@ -341,7 +400,15 @@ class RunRecorder:
                 subagent_id=target_name,
             )
 
-        known = (MessageOutputItem, ToolCallItem, ToolCallOutputItem, HandoffOutputItem)
+        # Reasoning belongs to the model call that produced it and is stored in
+        # that call's outputs, not as a separate step.
+        known = (
+            MessageOutputItem,
+            ReasoningItem,
+            ToolCallItem,
+            ToolCallOutputItem,
+            HandoffOutputItem,
+        )
         for position, item in enumerate(new_items):
             if isinstance(item, known):
                 continue
@@ -501,7 +568,12 @@ class RunRecorder:
         ended_at: datetime | None,
         inputs: Any,
         outputs: Any,
+        reasoning_selectors: list[str] | None = None,
+        requested_model: str | None = None,
+        model: str | None = None,
+        model_provider: str | None = None,
         tokens: TokenUsage | None = None,
+        cost: Decimal | None = None,
         tool_name: str | None = None,
         subagent_id: str | None = None,
         attributes: Any = None,
@@ -518,7 +590,12 @@ class RunRecorder:
                     ended_at=ended_at,
                     inputs=inputs,
                     outputs=outputs,
+                    reasoning_selectors=reasoning_selectors or [],
+                    requested_model=requested_model,
+                    model=model,
+                    model_provider=model_provider,
                     tokens=tokens,
+                    cost=cost,
                     tool_name=tool_name,
                     subagent_id=subagent_id,
                     attributes=attributes or {},
@@ -530,10 +607,14 @@ class RecordingRunHooks(RunHooks[TContext], Generic[TContext]):
     """Record narrow hook timing and forward caller hooks exactly once."""
 
     def __init__(
-        self, recorder: RunRecorder, caller: RunHooks[TContext] | None
+        self,
+        recorder: RunRecorder,
+        caller: RunHooks[TContext] | None,
+        run_config: RunConfig | None = None,
     ) -> None:
         self._recorder = recorder
         self._caller = caller
+        self._run_config = run_config
 
     async def on_agent_start(
         self, context: AgentHookContext[TContext], agent: Agent[TContext]
@@ -572,6 +653,7 @@ class RecordingRunHooks(RunHooks[TContext], Generic[TContext]):
                     started_at=datetime.now(UTC),
                     system_prompt=system_prompt,
                     input_items=input_items,
+                    identity=_resolve_model_identity(agent, self._run_config),
                 )
             )
         if self._caller is not None:
@@ -727,9 +809,30 @@ def _capture_error(error: BaseException) -> str:
     return captured["value"]
 
 
-def _capture_model_response(response: ModelResponse) -> Any:
+def _capture_model_response(response: ModelResponse) -> tuple[Any, list[str]]:
+    """Capture model output items and pointers to their visible reasoning."""
     output: list[Any] = []
+    reasoning_selectors: list[str] = []
     for item in response.output[:MAX_COLLECTION_ITEMS]:
+        if isinstance(item, ResponseReasoningItem):
+            # Encrypted reasoning is opaque to readers and can be large.
+            summary = [_capture(part.text) for part in item.summary]
+            content = [_capture(part.text) for part in item.content or []]
+            index = len(output)
+            reasoning_selectors.extend(
+                f"/{index}/{key}/{position}"
+                for key, texts in (("summary", summary), ("content", content))
+                for position in range(len(texts))
+            )
+            output.append(
+                {
+                    "id": item.id,
+                    "type": "reasoning",
+                    "summary": summary,
+                    "content": content,
+                }
+            )
+            continue
         if not isinstance(item, ResponseOutputMessage):
             output.append({"type": _raw_type(item) or type(item).__name__})
             continue
@@ -768,7 +871,7 @@ def _capture_model_response(response: ModelResponse) -> Any:
                 }
             }
         )
-    return output
+    return output, reasoning_selectors
 
 
 def _capture_usage(response: ModelResponse) -> TokenUsage:

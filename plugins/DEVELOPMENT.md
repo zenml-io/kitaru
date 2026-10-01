@@ -280,6 +280,7 @@ Use the package directory and distribution name from this table:
 | `post-import-insights` | `kitaru-post-import-insights` | `python/kitaru-post-import-insights/vX.Y.Z` |
 | `langsmith-importer` | `kitaru-langsmith-importer` | `python/kitaru-langsmith-importer/vX.Y.Z` |
 | `mastra-importer` | `kitaru-mastra-importer` | `python/kitaru-mastra-importer/vX.Y.Z` |
+| `mlflow-importer` | `kitaru-mlflow-importer` | `python/kitaru-mlflow-importer/vX.Y.Z` |
 | `openai-agents` | `kitaru-openai-agents` | `python/kitaru-openai-agents/vX.Y.Z` |
 | `pydantic-ai` | `kitaru-pydantic-ai` | `python/kitaru-pydantic-ai/vX.Y.Z` |
 | `typesafe-evaluator` | `kitaru-typesafe-evaluator` | `python/kitaru-typesafe-evaluator/vX.Y.Z` |

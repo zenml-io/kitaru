@@ -89,6 +89,8 @@ Define `remember_session` with `async def` when it needs to await other work. Th
 
 Before OpenAI executes the agent, Kitaru creates one session and an in-progress root node. As the run proceeds, it records structured observations for supported model calls, direct function-tool calls, provider-hosted tools, handoffs, token usage, final output, and failures. It completes the session only after all observations have been persisted.
 
+Each model-call node names its model and provider and carries an estimated cost from the bundled [`genai-prices`](https://github.com/pydantic/genai-prices) catalog. The OpenAI Agents SDK does not pass the model name the provider reports back to the adapter, so Kitaru records the name the run configured, in the SDK's own order: `RunConfig.model`, then the agent's `model`, then the SDK default. Names without a prefix, names prefixed with `openai/`, and `OpenAIResponsesModel` or `OpenAIChatCompletionsModel` instances are recorded with provider `openai`. Other prefixed names and custom model providers keep the configured name as `requested_model` but have no provider, served model, or cost, because Kitaru cannot tell which backend served them. A reasoning model's returned summary and reasoning text is stored in its model-call node's outputs and selected as that node's visible reasoning.
+
 These nodes are observations of what the OpenAI SDK run did. They are not independently replayable units, and they do not change how the SDK runs the agent.
 
 ## Replay behavior
@@ -133,7 +135,7 @@ The adapter exposes two public exceptions in `kitaru_openai_agents` for failures
 
 Kitaru recording is independent of OpenAI tracing. Disabling OpenAI tracing does not disable Kitaru session and node recording.
 
-The adapter excludes caller context, clients, credentials, environment state, callbacks, OpenAI SDK session objects, private SDK fields, provider-internal reasoning, and unknown-object serialization. Recorded values use deterministic size, depth, and collection limits with truncation metadata.
+The adapter excludes caller context, clients, credentials, environment state, callbacks, OpenAI SDK session objects, private SDK fields, encrypted reasoning content, and unknown-object serialization. Recorded values use deterministic size, depth, and collection limits with truncation metadata.
 
 Effective prompts, tool arguments, tool results, and exception summaries can still contain sensitive application data. Review what your application sends to models and tools, and apply the same access controls and retention policy to Kitaru data that you apply to the original application payloads.
 
