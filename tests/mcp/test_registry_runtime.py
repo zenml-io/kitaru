@@ -25,6 +25,8 @@ EXPECTED = {
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
+        "kitaru_failure_matrix",
+        "kitaru_failure_matrix_cell",
     ],
     CapabilityMode.STANDARD: [
         "kitaru_registry_read",
@@ -32,6 +34,8 @@ EXPECTED = {
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
+        "kitaru_failure_matrix",
+        "kitaru_failure_matrix_cell",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
@@ -47,6 +51,8 @@ EXPECTED = {
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
+        "kitaru_failure_matrix",
+        "kitaru_failure_matrix_cell",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
@@ -80,6 +86,8 @@ async def test_exact_capability_filtered_inventories_and_annotations() -> None:
                     "kitaru_review_read",
                     "kitaru_connection_read",
                     "kitaru_docs_search",
+                    "kitaru_failure_matrix",
+                    "kitaru_failure_matrix_cell",
                 }
             )
 
@@ -97,8 +105,8 @@ async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:
             tool["outputSchema"]
         )
         assert combined < 45 * 1024
-    assert _compact_size({"tools": dumped}) < 216 * 1024
-    assert len(tools) <= 15
+    assert _compact_size({"tools": dumped}) < 232 * 1024
+    assert len(tools) <= 17
 
 
 async def test_activity_child_schema_exposes_only_kind_specific_fields() -> None:

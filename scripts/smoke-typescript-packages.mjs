@@ -1,8 +1,15 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { loadTypescriptPackageMetadata } from "./typescript-packages.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -40,6 +47,66 @@ function assertPackageContents(tarball) {
   if (!result.stdout.split("\n").includes("package/LICENSE")) {
     throw new Error(`${tarball} does not contain package/LICENSE`);
   }
+}
+
+function assertLegacyDeclarations(consumerRoot) {
+  const upstream = join(consumerRoot, "upstream-types.ts");
+  const consumer = join(consumerRoot, "legacy-types.ts");
+  // Load the same upstream declaration graph without the adapter. Mastra's
+  // published declarations can have errors of their own; only exact matches
+  // from that independent baseline may be excluded from the consumer result.
+  writeFileSync(
+    upstream,
+    [
+      "@mastra/core/agent",
+      "@mastra/core/llm",
+      "@mastra/core/request-context",
+      "@mastra/core/stream",
+      "@mastra/core/tools",
+      "@mastra/core/evals",
+      "@zenml-io/kitaru",
+      "@zenml-io/kitaru/adapter",
+    ].map((name) => `import ${JSON.stringify(name)};`).join("\n"),
+  );
+  writeFileSync(
+    consumer,
+    `import type { Agent } from "@mastra/core/agent";
+import { KitaruAgent, type KitaruAgentOptions } from "@zenml-io/kitaru-mastra";
+declare const agent: Agent;
+declare const options: KitaruAgentOptions;
+new KitaruAgent(agent, options);
+`,
+  );
+  const options = {
+    lib: ["lib.es2022.d.ts", "lib.dom.d.ts"],
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    noEmit: true,
+    skipLibCheck: false,
+    strict: true,
+    types: [],
+  };
+  const baseline = ts.createProgram([upstream], options);
+  const candidate = ts.createProgram([consumer], options);
+  const signature = (diagnostic) => JSON.stringify({
+    file: diagnostic.file?.fileName,
+    start: diagnostic.start,
+    code: diagnostic.code,
+    message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+  });
+  const baselineDiagnostics = ts.getPreEmitDiagnostics(baseline);
+  const known = new Set(baselineDiagnostics.map(signature));
+  const unexpected = ts.getPreEmitDiagnostics(candidate).filter((diagnostic) =>
+    diagnostic.file?.fileName.includes("/node_modules/@zenml-io/") ||
+    !known.has(signature(diagnostic)),
+  );
+  const reachedMemory = candidate.getSourceFiles().some((file) =>
+    /\/kitaru-mastra\/dist\/(?:memory|stateful)[^/]*\.d\.ts$/.test(file.fileName),
+  );
+  if (reachedMemory || unexpected.length) {
+    throw new Error(`Legacy declaration isolation failed:\n${unexpected.map(signature).join("\n")}\nMemory declarations reached: ${reachedMemory}`);
+  }
+  console.log(`Legacy declarations: no adapter errors; ${baselineDiagnostics.length} upstream baseline diagnostics checked separately (skipLibCheck=false).`);
 }
 
 function writeConsumerFiles(consumerRoot) {
@@ -441,11 +508,26 @@ function smokeConsumer({ artifactRoot, mastraVersion, npmCache }) {
       npmCache,
       ...tarballs,
       `@mastra/core@${mastraVersion}`,
+      ...(mastraVersion === upperMastraVersion
+        ? ["@mastra/memory@1.30.0"]
+        : []),
       "ai@7.0.65",
       "zod@3.25.76",
     ],
     consumerRoot,
   );
+  if (mastraVersion === lowerMastraVersion) {
+    run(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        "try { import.meta.resolve('@mastra/memory'); throw new Error('Optional memory dependency unexpectedly installed'); } catch (error) { if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error; }",
+      ],
+      consumerRoot,
+    );
+    assertLegacyDeclarations(consumerRoot);
+  }
   run(process.execPath, ["index.mjs"], consumerRoot);
   run(
     join(repositoryRoot, "node_modules", ".bin", "tsc"),
@@ -461,6 +543,26 @@ function smokeConsumer({ artifactRoot, mastraVersion, npmCache }) {
     );
   }
   run(process.execPath, ["stream.mjs", mastraVersion], consumerRoot);
+  if (mastraVersion === upperMastraVersion) {
+    copyFileSync(
+      join(repositoryRoot, "scripts/fixtures/mastra-memory-smoke.mjs"),
+      join(consumerRoot, "memory.mjs"),
+    );
+    copyFileSync(
+      join(repositoryRoot, "scripts/fixtures/mastra-memory-types.ts"),
+      join(consumerRoot, "memory.ts"),
+    );
+    writeFileSync(
+      join(consumerRoot, "tsconfig.memory.json"),
+      JSON.stringify({ extends: "./tsconfig.stream.json", include: ["memory.ts"] }),
+    );
+    run(
+      join(repositoryRoot, "node_modules", ".bin", "tsc"),
+      ["-p", "tsconfig.memory.json"],
+      consumerRoot,
+    );
+    run(process.execPath, ["memory.mjs"], consumerRoot);
+  }
 }
 
 const outputDirectory = parseOutputDirectory(process.argv.slice(2));

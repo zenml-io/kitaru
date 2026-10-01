@@ -11,7 +11,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fixtures import register_agent
 from seed import TERMINAL_JOB_STATUSES, poll_until
 from stack import (
     RUN_DIR,
@@ -23,6 +22,7 @@ from stack import (
     wait_for_health,
 )
 
+from fixtures import register_agent
 from kitaru.api_models.v1.job import JobResponse, JobStatus
 from kitaru.api_models.v1.session_run import SessionRunCreateRequest
 from kitaru.api_models.v1.task import TaskResponse, TaskStatus
