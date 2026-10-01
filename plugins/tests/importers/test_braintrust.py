@@ -296,6 +296,22 @@ def test_groups_traces_by_json_pointer() -> None:
     assert session.metadata["braintrust.join_on"] == "/metadata/case~1id"
 
 
+def test_missing_dotted_join_path_reports_trace_and_path() -> None:
+    """Report the trace and explicit path instead of falling back to its trace ID."""
+    [failure] = list(
+        parse(
+            json.dumps([boundary_event("missing-case", metadata={})]).encode(),
+            {**params(), "join_on": "metadata.case_id"},
+        )
+    )
+
+    assert isinstance(failure, ImportFailure)
+    assert failure.external_id == "missing-case"
+    assert failure.error == (
+        "Trace 'missing-case' has no value at join_on path 'metadata.case_id'"
+    )
+
+
 def test_accepts_flat_ui_export_as_partial() -> None:
     """Accept Braintrust UI JSON with explicit project identity."""
     rows = [
