@@ -68,7 +68,7 @@ TERMINAL_STATUSES = [
 
 # Every status reached by some legal transition, used to probe that a
 # terminal task rejects every one of them.
-TRANSITION_TARGETS = {target for (_, target) in TRANSITIONS}
+TRANSITION_TARGETS = sorted({target for (_, target) in TRANSITIONS})
 
 ILLEGAL_TRANSITIONS = [
     (TaskStatus.PENDING, TaskStatus.RUNNING),
