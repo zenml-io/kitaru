@@ -42,6 +42,7 @@ dev = [
     "ty>=0.0.1a7",
     "hypothesis>=6.165",
     "coverage>=7.10",
+    "pytest-xdist>=3.8",
 ]
 
 [tool.ruff]

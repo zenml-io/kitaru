@@ -2,23 +2,37 @@ export type { CostCalculator, CostInput, ResolvedCost } from "./cost.js";
 export { resolveCost } from "./cost.js";
 export { MODEL_SETTING_KEYS, parseModelSettings } from "./model-settings.js";
 export { providerFamily } from "./provider.js";
-export type { RecordedConversion, RecordingLimits } from "./recorded-json.js";
+export type {
+  MastraReplayEvidence,
+  RecordedConversion,
+  RecordingLimits,
+} from "./recorded-json.js";
 export {
   assertSafeKeys,
   boundedRecordedText,
   boundedRecorderConversion,
   boundedRecorderJson,
+  boundMastraReplayEvidence,
   boundRecordedSize,
+  degradedMastraReplayEvidence,
+  isTransportKeyName,
+  MAX_MASTRA_REPLAY_ITEMS,
+  MAX_MASTRA_REPLAY_JSON_BYTES,
   MAX_RECORDED_PAYLOAD_CHARS,
   MAX_RECORDED_STRING_CHARS,
+  MastraReplayBudgetError,
+  mastraReplayToolConversion,
   normalizeRecordingLimits,
+  projectMastraReplayInput,
   projectRecordedInput,
   projectRecordedMetadata,
+  RecordedSensitiveKeyError,
   recordedPayloadConversion,
   recordedPayloadJson,
   recordedToolPayloadConversion,
   recordedToolPayloadJson,
   runResultSummary,
+  strictMastraReplayValue,
   strictRecordedJson,
 } from "./recorded-json.js";
 export type { ReplayContext } from "./replay.js";
@@ -30,7 +44,7 @@ export {
   resolveReplayContext,
   stripSystemMessages,
 } from "./replay.js";
-export type { RunRecorderOptions } from "./run-recorder.js";
+export type { RunCompletion, RunRecorderOptions } from "./run-recorder.js";
 export { RunRecorder } from "./run-recorder.js";
 export type { AdapterClient, AdapterRunState } from "./run-state.js";
 export { ROOT_NODE_EXTERNAL_ID } from "./run-state.js";
@@ -58,3 +72,13 @@ export {
   isMockedToolCall,
   selectToolPolicy,
 } from "./tool-policy.js";
+export type {
+  SecretKeyClassifier,
+  SecretKeyOptions,
+} from "./url-credentials.js";
+export {
+  containsUrlCredentials,
+  createSecretKeyClassifier,
+  isCredentialKeyName,
+  redactUrlCredentials,
+} from "./url-credentials.js";

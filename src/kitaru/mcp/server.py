@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from kitaru.analytics.source import AnalyticsSource
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.mcp.apps import build_apps_extension
 from kitaru.mcp.connection import MCPConnection
 from kitaru.mcp.connection import resolve_connection as resolve_fixed_connection
 from kitaru.mcp.lifecycle import MCPServerState
@@ -59,6 +60,7 @@ def create_server(
         debug=settings.debug,
         log_level="DEBUG" if settings.debug else "WARNING",
         lifespan=lifespan,
+        extensions=[build_apps_extension()],
     )
     register_tools(server, settings.mode)
     return server

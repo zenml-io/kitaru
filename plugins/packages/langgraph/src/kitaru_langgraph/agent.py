@@ -147,7 +147,11 @@ class KitaruGraphRunner(Generic[InputT, OutputT]):
         batch_size: int = 20,
         capture_policy: CapturePolicy | None = None,
     ) -> "KitaruGraphRunner[InputT, OutputT]":
-        """Construct a supported agent with Kitaru middleware outermost."""
+        """Construct a supported agent with Kitaru first in custom middleware.
+
+        Deep Agents places custom middleware after its built-in middleware.
+        Built-in tool rejections therefore precede Kitaru replay policies.
+        """
         create_agent, create_deep_agent = _import_supported_factories()
 
         if factory is not create_agent and factory is not create_deep_agent:
