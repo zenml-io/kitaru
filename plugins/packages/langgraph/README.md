@@ -38,6 +38,10 @@ Replay support depends on how the graph was constructed. See the [LangGraph adap
 
 LangGraph trace policies can omit middleware span inputs before callbacks receive them. With Deep Agents 0.7.9 and later, some built-in middleware spans therefore record `inputs: {}`; this does not prove that the hook received empty state. Model and tool call inputs remain recorded. See the [adapter guide](https://docs.zenml.io/kitaru/adapters/langgraph) for details.
 
+Deep Agents runs its built-in middleware before custom middleware, including Kitaru's. A built-in rejection, such as a parallel write to the same file, therefore takes precedence over Kitaru's static or history tool policy. Keeping the same Deep Agents version when replaying avoids changes to these built-in rules across versions.
+
+Tool attempts that return a native result without executing a tool are recorded with `execution: short_circuited`. An error `ToolMessage` remains a completed result with its native error status, so history replay can return it to the model rather than turn it into a raised exception.
+
 ## Links
 
 - [Kitaru documentation](https://docs.zenml.io/kitaru)
