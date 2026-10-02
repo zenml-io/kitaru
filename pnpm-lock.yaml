@@ -114,6 +114,15 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
 
+  packages/mastra-compat:
+    devDependencies:
+      '@mastra/core':
+        specifier: 1.71.0
+        version: 1.71.0(ai@7.0.109(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
+
   packages/vercel-ai:
     dependencies:
       '@zenml-io/kitaru':

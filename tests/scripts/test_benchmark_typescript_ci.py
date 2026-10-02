@@ -17,6 +17,14 @@ EXAMPLES = [
     "kitaru-example-mastra-adaptive-conversation",
 ]
 
+CANONICAL = [
+    "kitaru",
+    "kitaru-mastra",
+    "kitaru-mastra-compat",
+    "kitaru-vercel-ai",
+    *EXAMPLES,
+]
+
 
 @pytest.fixture
 def fake_pnpm(tmp_path: Path) -> dict[str, str]:
@@ -81,7 +89,7 @@ def test_trial_retains_canonical_suites_and_postgres_coverage_environment(
         json.loads(line)
         for line in Path(fake_pnpm["PNPM_CALLS"]).read_text().splitlines()
     ]
-    expected_packages = PUBLISHED + EXAMPLES
+    expected_packages = CANONICAL.copy()
     if mode == "repeated":
         expected_packages += PUBLISHED
     assert [call["args"][1] for call in calls] == [
@@ -89,10 +97,13 @@ def test_trial_retains_canonical_suites_and_postgres_coverage_environment(
     ]
     assert all(
         call["postgres"] == fake_pnpm["KITARU_TEST_MASTRA_POSTGRES_URL"]
-        for call in calls[:5]
+        for call in calls[: len(CANONICAL)]
     )
     for index, call in enumerate(calls):
-        covered = (mode == "coverage-once" and index < 3) or index >= 5
+        package = call["args"][1].removeprefix("@zenml-io/")
+        covered = (mode == "coverage-once" and package in PUBLISHED) or index >= len(
+            CANONICAL
+        )
         assert ("--coverage.enabled" in call["args"]) == covered
         assert call["args"][2:5] == ["exec", "vitest", "run"]
         if covered:
@@ -101,15 +112,15 @@ def test_trial_retains_canonical_suites_and_postgres_coverage_environment(
             assert "--coverage.exclude=src/generated/**" in call["args"]
             assert "--coverage.reporter=text-summary" in call["args"]
             assert "--coverage.reporter=json" in call["args"]
-        if index in (3, 4):
+        if package in EXAMPLES:
             assert "test" in call["args"]
-        if index >= 5:
+        if index >= len(CANONICAL):
             assert call["postgres"] is None
 
     evidence = tmp_path / "evidence"
     assert sorted(
         path.stem for path in (evidence / "outcomes").glob("*.json")
-    ) == sorted(PUBLISHED + EXAMPLES)
+    ) == sorted(CANONICAL)
     assert sorted(
         path.parent.name
         for path in (evidence / "coverage").glob("*/coverage-final.json")

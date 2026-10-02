@@ -62,4 +62,6 @@ For Python adapters, run the focused adapter tests, then the plugin workspace fo
 
 For TypeScript adapters, run the affected package's test, typecheck, lint, and build scripts. Run the root `pnpm test`, `pnpm typecheck`, `pnpm lint`, and `pnpm pack:check` when shared primitives, workspace metadata, or packaging changes.
 
+The Mastra adapter is tested against two `@mastra/core` installs. `packages/mastra/` installs the exact version the memory replay factory requires. The private `packages/mastra-compat/` package installs the newest supported version and runs the Mastra compatibility suite and the adapter tests that do not use the memory factory against it. When you raise the supported `@mastra/core` ceiling, update that package's `@mastra/core` devDependency and its compatibility suite in the same change; the packed-tarball smoke in `scripts/smoke-typescript-packages.mjs` reads the version from that devDependency. A new memory factory test fails in `packages/mastra-compat/` until you add it to `MEMORY_FACTORY_TESTS` in its `vitest.config.ts`.
+
 Use live provider or framework tests only when their credentials and external side effects are explicitly in scope.
