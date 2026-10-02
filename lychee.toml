@@ -18,6 +18,13 @@ timeout = 30
 # User agent for HTTP requests
 user_agent = "lychee/kitaru-ci (https://github.com/zenml-io/kitaru)"
 
+# Check repository file links through GitHub's raw endpoint because blob pages
+# can return 503 to automated requests even when the file is available.
+# Restrict this to known refs in this repository; missing files still fail.
+remap = [
+    '^https://github\.com/zenml-io/kitaru/blob/(main|develop)/(.*)$ https://raw.githubusercontent.com/zenml-io/kitaru/$1/$2',
+]
+
 #############################  Exclusions  ##########################
 
 # Skip private/internal IP ranges
