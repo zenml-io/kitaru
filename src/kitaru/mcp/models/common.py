@@ -101,6 +101,11 @@ class ToolSuccessPayload(MCPModel):
     data: object
     warnings: list[str] = Field(default_factory=list)
     links: dict[str, str] = Field(default_factory=dict)
+    text: str | None = Field(
+        default=None,
+        description="Plain-language summary sent as the text result instead of "
+        "the JSON envelope; the structured result keeps the full data.",
+    )
 
 
 RegistryItem = (
@@ -130,9 +135,6 @@ class RegistryReadResult(ToolResult):
 # field descriptions in the discovery schema. The literal mirrors JobKind while
 # avoiding a separate enum definition in this already budget-constrained union.
 class _MCPJob(JobResponse):
-    # Paginated SDK reads contain JobResponse instances, not dictionaries.
-    model_config = ConfigDict(from_attributes=True)
-
     id: uuid.UUID
     kind: Literal["session_run", "import", "evaluation", "replay"]
 
@@ -154,6 +156,7 @@ class ActivityReadResult(ToolResult):
     """Typed activity read result."""
 
     data: ActivityItem | PageData[ActivityItem] | None = None
+    links: dict[Literal["inspect"], str] = Field(default_factory=dict)
 
 
 ReviewItem = (
@@ -168,6 +171,7 @@ class ReviewReadResult(ToolResult):
     """Typed investigation, annotation, and insight read result."""
 
     data: ReviewItem | PageData[ReviewItem] | None = None
+    links: dict[Literal["review"], str] = Field(default_factory=dict)
 
 
 class ReviewManageResult(ToolResult):

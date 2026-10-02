@@ -338,7 +338,7 @@ Recording-only problems do not replace the baseline's native answer. When the na
 
 The remaining codes, such as `memory_evidence_incomplete`, `capture_setup_failed`, and `recording_finalization_failed`, cover causes the codes above do not name. For example, a turn whose code writes through the turn's memory storage to a thread or resource other than the turn's own, such as a tool that clones the thread into another resource or deletes another thread's message by ID, is `memory_evidence_incomplete`: the write still happens, but replay restores only the turn's own thread and resource. A Kitaru outage can prevent even these diagnostics from being persisted; missing status updates are not evidence of successful recording.
 
-The server stores two reasons of its own when a pending baseline is closed without a replay decision. Closing it as `failed` stores `abandoned`; this is how you clean up after a recorder that stopped mid-turn, because a plain `failed` session update is accepted. Closing it as `completed` stores `unfinalized`. A baseline still pending after 30 minutes is refused as `mastra_replay_abandoned` when replay is requested; this does not cancel a native turn or release a source lease. A baseline whose replay input lacks the recorded key order or turn start time, which early builds of this adapter did not store, is refused as `mastra_replay_recording_outdated`; record the turn again.
+The server stores two reasons of its own when a pending baseline is closed without a replay decision. Closing it as `failed` stores `abandoned`; this is how you clean up after a recorder that stopped mid-turn, because a plain `failed` session update is accepted. Closing it as `completed` stores `unfinalized`. A baseline still pending after 30 minutes is refused as `mastra_replay_abandoned` when replay is requested; this does not cancel a native turn or release a source lease.
 
 Memory replay needs a Kitaru server newer than 0.27.1. Kitaru 0.27.1 and earlier answer the final session update, which carries the replay input, with HTTP 422. The adapter then completes the session with its answer, marks it `ineligible` with `server_rejected_finalization`, and calls `onRecordingError`. The native answer is unaffected, but no turn recorded against such a server can be replayed.
 
@@ -411,6 +411,51 @@ For skills, set `skillsDirectory` to the directory containing your skill folders
 
 The factory must use the supplied memory and workspace instances. Processors and tools are application code: their dependencies must use these supplied bindings for replay isolation. Kitaru does not sandbox arbitrary callbacks or prevent code from opening another database connection or making a network request. Workflows, subagents, provider-executed tools, approval/resume modes, dynamic tool inventories, `prepareStep`, output processors, and secondary structured-output models remain unsupported.
 
+### Record processor decisions
+
+Use the factory's per-turn `decisions` binding when an input processor calls a model to choose skills or make another decision. Declare the decision in the factory, then call `run()` from the processor's `processInput` hook, which runs once per turn. Keep message changes outside `run()` so both live and pinned replay apply the returned decision to the current messages.
+
+```ts
+const agent = createMemoryReplayAgent(({ memory, decisions }) => {
+  const router = decisions.define("skill-router");
+  const classifier = router.instrumentModel(classifierModel);
+
+  return {
+    id: "support",
+    name: "Support",
+    model: actorModel,
+    memory,
+    inputProcessors: [{
+      id: "skill-router",
+      async processInput({ messages }) {
+        const skills = await router.run(() => classifySkills(messages, classifier));
+        return injectSkills(messages, skills);
+      },
+    }],
+  };
+}, memoryReplayOptions);
+```
+
+Here `classifierModel` is your public AI SDK model object, `classifySkills` calls that supplied model, and `injectSkills` applies the returned skill IDs. A model hidden inside `classifySkills` is not automatically recorded. Instrumentation supports nonstreaming `doGenerate` calls; streaming classifier calls keep their native behavior but make decision capture incomplete. This helper is available only on the isolated memory factory, not on the history-only `KitaruAgent` wrapper.
+
+A baseline records a span named `skill-router` with the returned decision in `outputs`. Calls through the instrumented classifier become child `llm_call` nodes with the prompt, response content, model identity and token usage. The configured `costCalculator` prices the classifier using its own model identity; cost stays unavailable without a calculator. Custom evaluators can read these nodes to check selected skills and compare baseline and replay decisions.
+
+Replay runs the callback live by default. To reuse the baseline's decision instead, include the reserved Mastra setting in the existing replay override:
+
+```json
+{
+  "model_params": {
+    "mastraProcessorDecisions": "pinned"
+  }
+}
+```
+
+`"live"` explicitly selects the default. The setting applies to all declared decisions for that turn, can accompany actor settings such as `maxOutputTokens`, and is consumed by the Mastra adapter before model settings reach the actor. It requires no new server API field. Pinned replay returns the recorded decision without calling the callback or classifier, while the main agent still runs. It validates all decision declarations and recorded results before processors or models execute. Keep the factory free of model calls and other execution side effects; this preflight runs after the factory has constructed its configuration.
+
+Decision results are stored separately from the OM tape in the replay input's `processorDecisions` extension, covered by the envelope's key-order hash and replay-data limits. Older baselines still support live replay; pinning requires a new baseline with complete decision capture and matching declarations. Failed callbacks, unsupported results, duplicate invocations, streaming classifier calls, truncated classifier evidence and failed diagnostic writes make that decision recording incomplete and prevent pinning. They do not by themselves disable live memory replay. If optional decision data would exceed the memory envelope's shared budget, Kitaru omits that extension and reports incomplete decision capture, preserving the otherwise valid memory replay input. The helper never caches a repeated baseline call: it executes each callback normally, but records the duplicate as incomplete. Use `processInput`, rather than `processInputStep`, for once-per-turn decisions.
+
+On a baseline or live replay, `run()` returns the original application result and propagates the original application exception. Recording failures never cause the callback to run again. Diagnostic uploads and cost calculation run in the background, with bounded finalization; the callback does not wait for Kitaru network writes. Local result capture still has a bounded CPU cost. Capture failures are reported through `onRecordingError` with reason `processor_decision_incomplete`. The decision follows the same credential redaction policy as other memory replay data. Pinning the returned decision does not add a guarantee about skill files or other dependencies read outside the callback.
+
 ### Tool policies and evidence
 
 Native memory tools execute against the isolated replay store, including under `history` with `on_miss: "fail"`. External tools, including tools added by a processor, follow the replay tool policy. A tool named `updateWorkingMemory` does not acquire the native-memory exemption by name. Use history with a failing miss when external tools must not execute.
@@ -423,7 +468,7 @@ Unlike ordinary wrapper recording, this path records the effective actor prompt,
 
 Each request, mutation, or tool call node has the same budget as the replay input: 16 MiB of serialized JSON, 200,000 items, and 64 levels of nesting. A history tool policy serves only a result that was recorded whole, so a memory turn records tool arguments and results on this budget too, for example a list of 1,400 rows of 10 fields. When storage returns the messages it just saved, the result records each unchanged message as a `savedMessageRef` with its id and SHA-256 instead of a second copy. A node over the budget stores a degraded marker that names the exceeded bound. When you set `recordingLimits`, they also truncate each recorded request and tool payload on this path, and a truncated tool result cannot be served from history. Truncated or degraded evidence sets `request_evidence_truncated` or `evidence_truncated` and lists the exact reason in `request_incomplete_reasons` or `evidence_truncation_reasons`. It does not make the turn ineligible, because replay rebuilds memory and requests from the replay input, not from these nodes.
 
-Consume replay streams through completion and inspect the replay session's final status and evidence completeness. Replay finalization waits for isolated memory work and closes its store. Mastra can settle a native stream after a policy failure, so native output alone does not establish replay success. Missing or incomplete starting state fails replay before model execution; a later OM call mismatch can fail after actor execution has begun. When a replay's agent process ends without writing a result, the replay's error names its result session, that session's status, and the session's error, such as the divergence reason, so you can see why it failed without opening the session. A failed or incomplete recording is not proof that all evidence was saved.
+Consume replay streams through completion and inspect the replay session's final status and evidence completeness. Replay finalization waits for isolated memory work and closes its store. Mastra can settle a native stream after a policy failure, so native output alone does not establish replay success. Missing, incomplete, or malformed starting state, such as a replay input from an early build of this adapter without the recorded key order or turn start time, or a malformed OM result tape, fails the replay task before model execution; a later OM call mismatch can fail after actor execution has begun. A failed or incomplete recording is not proof that all evidence was saved.
 
 ## Callback composition
 

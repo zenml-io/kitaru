@@ -66,6 +66,8 @@ result = runner.invoke({"request": "  Reset   my password  "})
 
 Kitaru creates the session and its root node before the graph starts. The session records bounded copies of the effective input and final output or error, plus public chain, graph, model, and tool callbacks that LangGraph exposes during the call. Ordinary Python calls and provider SDK calls that emit no public callback do not get invented child nodes.
 
+Each model-call node records the requested model from LangChain's `ls_model_name` callback metadata, the served model and provider from the chat model's response metadata, and token usage from the response message. When usage is present, Kitaru estimates the call's cost from the bundled [`genai-prices`](https://github.com/pydantic/genai-prices) catalog. Chat models that report no usage metadata are recorded without tokens or cost.
+
 LangGraph applies a middleware's trace policy before passing inputs to callbacks. Deep Agents 0.7.9 and later omit inputs for some built-in middleware hooks, so their Kitaru span nodes can contain `inputs: {}` even when the hook received state. The callback cannot distinguish an omitted payload from a genuinely empty one. Session inputs, model and tool call inputs, and replay data remain available, but `payload_coverage` can count these empty span inputs as present. If you configure a trace policy on your own middleware, the same limit applies; Kitaru does not override that policy because doing so would also change what other callbacks receive.
 
 The wrapper returns the exact graph value or raises the exact graph exception. Caller config, callbacks, tags, metadata, configurable values, thread ID, store, and checkpointer behavior remain with LangGraph. If a Kitaru task supplies task inputs, those replace the whole graph input; a caller `Command`, including `Command(resume=...)`, always takes precedence.
@@ -105,6 +107,8 @@ The factory path inserts Kitaru middleware before the agent is compiled. During 
 ## Substitute supported tool results
 
 Factory construction also installs public tool middleware. During a Kitaru replay, a matching static result or valid recorded-history result becomes a framework-valid `ToolMessage` or `Command` with the current tool-call identity. That hit is the only adapter path that skips a live dependency: the live tool is called zero times.
+
+Deep Agents places its built-in middleware before custom middleware, including Kitaru's. Built-in tool rejections therefore take precedence over Kitaru's static or history policy. For example, Deep Agents 0.7.17 rejects later parallel write, edit, or delete calls targeting the same file before Kitaru can substitute their results. Replaying recordings made with a different Deep Agents version can change these outcomes; keep framework versions consistent when comparing replay behavior.
 
 Misses follow the replay policy without silent fallback:
 

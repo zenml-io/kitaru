@@ -262,3 +262,14 @@ def test_default_importer_schemas_mark_secrets_write_only() -> None:
         assert secrets
         for name in secrets:
             assert schema["properties"][name]["format"] == "password"
+
+
+def test_mlflow_optional_secrets_are_write_only_on_the_property() -> None:
+    """Mark optional secrets at property level, where clients read secrecy."""
+    schema = bootstrap.MlflowConnection.model_json_schema()
+
+    assert schema["required"] == ["MLFLOW_TRACKING_URI"]
+    for name in ("MLFLOW_TRACKING_TOKEN", "MLFLOW_TRACKING_PASSWORD"):
+        assert schema["properties"][name]["writeOnly"] is True
+        assert schema["properties"][name]["format"] == "password"
+    assert "writeOnly" not in schema["properties"]["MLFLOW_TRACKING_USERNAME"]

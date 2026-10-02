@@ -261,17 +261,8 @@ async def check_mcp(
                 )
                 await asyncio.sleep(0.2)
             assert run["status"] == "completed", run
-            children = await call_mcp(
-                mcp,
-                "kitaru_activity_read",
-                {
-                    "operation": "list_children",
-                    "kind": "experiment_run_jobs",
-                    "parent_id": run_id,
-                    "size": 1,
-                },
-            )
-            assert len(children["items"]) == 1
+            jobs = await client.experiment_runs.list_jobs(uuid.UUID(run_id))
+            assert len(jobs.items) == 1
             replay_page = await call_mcp(
                 mcp,
                 "kitaru_activity_read",

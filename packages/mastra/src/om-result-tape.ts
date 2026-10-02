@@ -308,7 +308,12 @@ function isRecordedEntry(value: unknown): value is OMResultEntry {
     (entry.method === "doGenerate" || entry.method === "doStream") &&
     typeof entry.ordinal === "number" &&
     typeof entry.inputFingerprint === "string" &&
-    (entry.failed === undefined || entry.failed === true)
+    (entry.failed === undefined || entry.failed === true) &&
+    Object.hasOwn(entry, "output") &&
+    // A successful stream call replays its recorded chunks.
+    (entry.failed === true ||
+      entry.method !== "doStream" ||
+      Array.isArray(entry.output))
   );
 }
 
@@ -410,10 +415,12 @@ export function createOMResultTape(
   // a recording fingerprints each input only once the turn has finished.
   const inputs: unknown[] = [];
   const pending = new Set<Promise<void>>();
-  const malformed = recorded?.some((entry) => !isRecordedEntry(entry)) ?? false;
-  const recordedCalls = groupRecordedCalls(
-    recorded?.filter(isRecordedEntry) ?? [],
-  );
+  // Refuse a malformed recording when replay starts, before the actor or a
+  // passthrough tool runs: a replay that never calls OM would otherwise only
+  // find the problem once the turn had finished.
+  if (recorded?.some((entry) => !isRecordedEntry(entry)))
+    throw new MastraOMDivergenceError("malformed recorded tape");
+  const recordedCalls = groupRecordedCalls(recorded ?? []);
   const divergence: OMReplayDivergence = {
     inputMismatches: 0,
     surplusCalls: 0,
@@ -514,7 +521,6 @@ export function createOMResultTape(
     input: unknown,
     callLive: () => Promise<unknown>,
   ): unknown {
-    if (malformed) failClosed("malformed recorded tape");
     const replayCall = served++;
     const calls = recordedCalls.get(`${phase}:${method}`) ?? [];
     const buffered = options.isBuffered?.(phase) ?? false;
@@ -814,7 +820,6 @@ export function createOMResultTape(
   async function finish(): Promise<OMTapeResult> {
     while (pending.size > 0) await Promise.all([...pending]);
     if (recorded) {
-      if (malformed) failClosed("malformed recorded tape");
       if (failedClosed) throw failedClosed;
       divergence.unusedResults = [...recordedCalls.values()]
         .flat()

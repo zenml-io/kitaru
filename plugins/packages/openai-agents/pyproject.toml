@@ -23,6 +23,7 @@ classifiers = [
 ]
 keywords = ["ai-agents", "kitaru", "openai-agents", "recording", "replay"]
 dependencies = [
+    "genai-prices>=0.1.1,<0.2",
     "kitaru>=0.27.0",
     "openai-agents>=0.19.3,<0.23",
 ]

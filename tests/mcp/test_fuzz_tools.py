@@ -22,7 +22,7 @@ from functools import cache
 from typing import Any
 
 import pytest
-from hypothesis import Phase, given, settings
+from hypothesis import HealthCheck, Phase, given, settings
 from hypothesis import strategies as st
 from hypothesis_jsonschema import from_schema
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
@@ -190,6 +190,16 @@ def _is_model_valid(name: str, request: object) -> bool:
     return True
 
 
+# JSON Schema cannot express model validators such as ImportQuery requiring
+# `since` without `trace_ids`, so schema-drawn requests for those tools are
+# mostly filtered out. The filtered share sits near the health-check limit
+# and unrelated process state tips it over, so the check is suppressed for
+# the schema-derived properties rather than tuned per tool.
+_SCHEMA_SETTINGS = settings(
+    deadline=None, suppress_health_check=[HealthCheck.filter_too_much]
+)
+
+
 @cache
 def _schema_strategy(name: str) -> st.SearchStrategy[Any]:
     schema = _unroll_recursion(
@@ -203,7 +213,7 @@ def _schema_strategy(name: str) -> st.SearchStrategy[Any]:
 @pytest.mark.mcp_fuzz
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
-@settings(deadline=None)
+@_SCHEMA_SETTINGS
 def test_schema_valid_request_yields_envelope(
     spec: ToolSpec, data: st.DataObject
 ) -> None:
@@ -279,7 +289,7 @@ def _broken_request(draw: st.DrawFn, request: dict[str, Any]) -> dict[str, Any]:
 @pytest.mark.mcp_fuzz
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
-@settings(deadline=None)
+@_SCHEMA_SETTINGS
 def test_schema_valid_request_with_marker_never_leaks(
     spec: ToolSpec, data: st.DataObject
 ) -> None:
