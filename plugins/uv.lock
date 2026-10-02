@@ -19,6 +19,7 @@ exclude-newer-span = "P3D"
 members = [
     "kitaru-braintrust-importer",
     "kitaru-claude-agent-sdk",
+    "kitaru-elevenlabs-importer",
     "kitaru-evaluator",
     "kitaru-jsonl-importer",
     "kitaru-langfuse-importer",
@@ -41,6 +42,7 @@ dev = [
     { name = "kitaru", extras = ["server"], editable = "../" },
     { name = "kitaru-braintrust-importer", extras = ["adapter"], editable = "packages/braintrust-importer" },
     { name = "kitaru-claude-agent-sdk", editable = "packages/claude-agent-sdk" },
+    { name = "kitaru-elevenlabs-importer", editable = "packages/elevenlabs-importer" },
     { name = "kitaru-langfuse-importer", extras = ["adapter"], editable = "packages/langfuse-importer" },
     { name = "kitaru-langgraph", extras = ["deepagents"], editable = "packages/langgraph" },
     { name = "kitaru-langsmith-importer", extras = ["adapter"], editable = "packages/langsmith-importer" },
@@ -1464,6 +1466,18 @@ requires-dist = [
     { name = "claude-agent-sdk", specifier = ">=0.2.149,<0.3" },
     { name = "kitaru", editable = "../" },
 ]
+
+[[package]]
+name = "kitaru-elevenlabs-importer"
+version = "0.1.0"
+source = { editable = "packages/elevenlabs-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "../" }]
+provides-extras = ["api"]
 
 [[package]]
 name = "kitaru-evaluator"

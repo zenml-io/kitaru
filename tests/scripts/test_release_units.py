@@ -30,6 +30,7 @@ EXPECTED_UNITS = {
     "kitaru": "kitaru",
     "braintrust-importer": "kitaru-braintrust-importer",
     "claude-agent-sdk": "kitaru-claude-agent-sdk",
+    "elevenlabs-importer": "kitaru-elevenlabs-importer",
     "evaluator": "kitaru-evaluator",
     "jsonl-importer": "kitaru-jsonl-importer",
     "langfuse-importer": "kitaru-langfuse-importer",
@@ -629,7 +630,7 @@ def test_plugin_matrix_is_generated_from_the_plugin_units_in_three_shards() -> N
 
     shards = matrix["include"]
     assert [shard["shard"] for shard in shards] == ["1/3", "2/3", "3/3"]
-    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [5, 5, 5]
+    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [6, 5, 5]
     assert [
         package_path
         for shard in shards
@@ -890,7 +891,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 16 release units."),
+        (["validate"], "Validated 17 release units."),
         (
             [
                 "propose-core-version",
