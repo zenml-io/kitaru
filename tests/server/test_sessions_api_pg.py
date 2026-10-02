@@ -16,6 +16,7 @@
 import json
 import uuid
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import httpx
 import pytest
@@ -149,6 +150,87 @@ async def test_update_persists_across_requests(
     assert body["status"] == "completed"
     assert body["outputs"] == {"answer": 42}
     assert body["updated"] > created["updated"]
+
+
+async def test_mastra_replay_input_finalization_persists_across_requests(
+    client: httpx.AsyncClient,
+    agent_id: str,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+) -> None:
+    """Commit final inputs, eligibility, and status in the same database row."""
+    created = (
+        await client.post(
+            "/api/v1/sessions",
+            json=_session_body(
+                agent_id,
+                framework="mastra",
+                inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+                metadata={"mastra_replay_state": "pending"},
+            ),
+        )
+    ).json()
+    final_inputs = complete_mastra_memory_replay_inputs
+    response = await client.patch(
+        f"/api/v1/sessions/{created['id']}",
+        json={
+            "status": "completed",
+            "inputs": final_inputs,
+            "metadata": {"mastra_replay_state": "eligible"},
+        },
+    )
+    assert response.status_code == 200
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["status"] == "completed"
+    assert fetched["metadata"]["mastra_replay_state"] == "eligible"
+    assert fetched["inputs"] == final_inputs
+
+
+async def test_large_mastra_finalization_uses_payload_offload(
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+) -> None:
+    """Carry a final replay input above the old 1 MiB adapter gate as one update."""
+    settings = db_settings(PAYLOAD_OFFLOAD_THRESHOLD_BYTES=64)
+    async with lifespan_client(settings) as client:
+        agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+        created = (
+            await client.post(
+                "/api/v1/sessions",
+                json=_session_body(
+                    agent["id"],
+                    framework="mastra",
+                    inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+                    metadata={"mastra_replay_state": "pending"},
+                ),
+            )
+        ).json()
+        final_inputs = complete_mastra_memory_replay_inputs
+        final_inputs["mastra_memory_replay"]["rawInput"] = {"history": "x" * 1_200_000}
+        response = await client.patch(
+            f"/api/v1/sessions/{created['id']}",
+            json={
+                "status": "completed",
+                "inputs": final_inputs,
+                "metadata": {"mastra_replay_state": "eligible"},
+            },
+        )
+        assert response.status_code == 200
+        fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+        assert fetched["inputs"] == final_inputs
+
+        engine = create_async_engine(DatabaseService.generate_database_uri(settings))
+        try:
+            async with engine.connect() as connection:
+                inline, blob_id = (
+                    await connection.execute(
+                        select(SessionORM.inputs, SessionORM.inputs_blob_id).where(
+                            SessionORM.id == uuid.UUID(created["id"])
+                        )
+                    )
+                ).one()
+                assert inline is None
+                assert blob_id is not None
+        finally:
+            await engine.dispose()
 
 
 async def test_delete_persists_across_requests(

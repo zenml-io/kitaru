@@ -12,7 +12,7 @@ from langchain_core.outputs import LLMResult
 
 from kitaru.api_models.v1.session_node import NodeType
 
-from .recording import InvocationRecorder, SyncBridge
+from .recording import InvocationRecorder, SyncBridge, get_text_field
 
 
 def _name(
@@ -86,9 +86,10 @@ class SyncKitaruCallback(BaseCallbackHandler):
         *,
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None = None,
+        metadata: dict[str, Any] | None = None,
         **_: Any,
     ) -> None:
-        self._start_model(serialized, messages, run_id, parent_run_id)
+        self._start_model(serialized, messages, run_id, parent_run_id, metadata)
 
     def on_llm_start(
         self,
@@ -97,9 +98,10 @@ class SyncKitaruCallback(BaseCallbackHandler):
         *,
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None = None,
+        metadata: dict[str, Any] | None = None,
         **_: Any,
     ) -> None:
-        self._start_model(serialized, prompts, run_id, parent_run_id)
+        self._start_model(serialized, prompts, run_id, parent_run_id, metadata)
 
     def _start_model(
         self,
@@ -107,6 +109,7 @@ class SyncKitaruCallback(BaseCallbackHandler):
         inputs: Any,
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None,
+        metadata: dict[str, Any] | None,
     ) -> None:
         self._bridge.run(
             self._recorder.start_call(
@@ -115,6 +118,8 @@ class SyncKitaruCallback(BaseCallbackHandler):
                 name=_name(serialized, "model"),
                 inputs=inputs,
                 node_type=NodeType.LLM_CALL,
+                requested_model=get_text_field(metadata, "ls_model_name"),
+                model_provider=get_text_field(metadata, "ls_provider"),
             )
         )
 
@@ -138,6 +143,7 @@ class SyncKitaruCallback(BaseCallbackHandler):
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None = None,
         inputs: dict[str, Any] | None = None,
+        tool_call_id: str | None = None,
         **_: Any,
     ) -> None:
         name = _name(serialized, "tool")
@@ -148,6 +154,7 @@ class SyncKitaruCallback(BaseCallbackHandler):
                 name=name,
                 inputs=inputs if inputs is not None else input_str,
                 node_type=NodeType.TOOL_CALL,
+                tool_call_id=tool_call_id,
             )
         )
 
@@ -212,9 +219,10 @@ class AsyncKitaruCallback(AsyncCallbackHandler):
         *,
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None = None,
+        metadata: dict[str, Any] | None = None,
         **_: Any,
     ) -> None:
-        await self._start_model(serialized, messages, run_id, parent_run_id)
+        await self._start_model(serialized, messages, run_id, parent_run_id, metadata)
 
     async def on_llm_start(
         self,
@@ -223,9 +231,10 @@ class AsyncKitaruCallback(AsyncCallbackHandler):
         *,
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None = None,
+        metadata: dict[str, Any] | None = None,
         **_: Any,
     ) -> None:
-        await self._start_model(serialized, prompts, run_id, parent_run_id)
+        await self._start_model(serialized, prompts, run_id, parent_run_id, metadata)
 
     async def _start_model(
         self,
@@ -233,6 +242,7 @@ class AsyncKitaruCallback(AsyncCallbackHandler):
         inputs: Any,
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None,
+        metadata: dict[str, Any] | None,
     ) -> None:
         await self._recorder.start_call(
             run_id=run_id,
@@ -240,6 +250,8 @@ class AsyncKitaruCallback(AsyncCallbackHandler):
             name=_name(serialized, "model"),
             inputs=inputs,
             node_type=NodeType.LLM_CALL,
+            requested_model=get_text_field(metadata, "ls_model_name"),
+            model_provider=get_text_field(metadata, "ls_provider"),
         )
 
     async def on_llm_end(
@@ -260,6 +272,7 @@ class AsyncKitaruCallback(AsyncCallbackHandler):
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None = None,
         inputs: dict[str, Any] | None = None,
+        tool_call_id: str | None = None,
         **_: Any,
     ) -> None:
         await self._recorder.start_call(
@@ -268,6 +281,7 @@ class AsyncKitaruCallback(AsyncCallbackHandler):
             name=_name(serialized, "tool"),
             inputs=inputs if inputs is not None else input_str,
             node_type=NodeType.TOOL_CALL,
+            tool_call_id=tool_call_id,
         )
 
     async def on_tool_end(self, output: Any, *, run_id: uuid.UUID, **_: Any) -> None:

@@ -106,6 +106,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build]
 artifacts = [
+    "src/kitaru/mcp/data/docs_index.json",
     "src/kitaru/_ui/dist/**",
     "src/kitaru/_ui/bundle_manifest.json",
     "src/kitaru/server/application/services/sample_data.json.gz",
@@ -137,6 +138,7 @@ dev = [
     "moto[s3]>=5.2.3",
     "flask>=3.1",
     "flask-cors>=6.0",
+    "pytest-xdist>=3.8",
 ]
 fuzz = [
     "schemathesis>=4.25,<5",
@@ -182,6 +184,7 @@ convention = "google"
 
 [tool.ruff.lint.isort]
 known-first-party = [
+    "fixtures",
     "kitaru",
     "kitaru_openai_agents",
     "kitaru_pydantic_ai",
