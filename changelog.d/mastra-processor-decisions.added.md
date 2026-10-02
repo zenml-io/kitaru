@@ -1,0 +1,1 @@
+- Added per-turn Mastra processor decision recording with classifier model evidence and opt-in pinned replay through `model_params.mastraProcessorDecisions`.
