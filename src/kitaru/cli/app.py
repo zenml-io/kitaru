@@ -5273,7 +5273,7 @@ def _convert_error(
         message = str(issue["msg"]).removeprefix("Value error, ")
         prefix = f"Invalid {location}: " if location else "Invalid value: "
         return CLIError("invalid_arguments", f"{prefix}{message}.")
-    if isinstance(exception, (CycloptsError, ValueError)):
+    if isinstance(exception, CycloptsError):
         return CLIError("invalid_arguments", str(exception))
     if isinstance(exception, (DeviceLoginError, ControlPlaneLoginError)):
         return CLIError("authentication_failed", str(exception))
