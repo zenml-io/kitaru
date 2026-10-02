@@ -8,6 +8,7 @@ members = ["packages/*"]
 kitaru = { path = "..", editable = true }
 kitaru-claude-agent-sdk = { workspace = true }
 kitaru-braintrust-importer = { workspace = true }
+kitaru-elevenlabs-importer = { workspace = true }
 kitaru-langfuse-importer = { workspace = true }
 kitaru-langgraph = { workspace = true }
 kitaru-langsmith-importer = { workspace = true }
@@ -25,6 +26,7 @@ dev = [
     "kitaru[server]",
     "kitaru-claude-agent-sdk",
     "kitaru-braintrust-importer[adapter]",
+    "kitaru-elevenlabs-importer",
     "kitaru-langfuse-importer[adapter]",
     "kitaru-langgraph[deepagents]",
     "kitaru-langsmith-importer[adapter]",
@@ -61,6 +63,7 @@ known-first-party = [
     "kitaru",
     "kitaru_claude_agent_sdk",
     "kitaru_evaluator",
+    "kitaru_elevenlabs_importer",
     "kitaru_braintrust_importer",
     "kitaru_jsonl_importer",
     "kitaru_langfuse_importer",

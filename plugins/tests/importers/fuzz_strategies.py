@@ -15,6 +15,7 @@
 
 import copy
 import json
+from importlib import import_module
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -33,7 +34,10 @@ import kitaru_phoenix_importer.importer as phoenix
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 
+elevenlabs = import_module("kitaru_elevenlabs_importer.importer")
+
 IMPORTERS: dict[str, ModuleType] = {
+    "elevenlabs": elevenlabs,
     "langfuse": langfuse,
     "braintrust": braintrust,
     "langsmith": langsmith,
@@ -760,7 +764,69 @@ def _records_with_keys(
     return st.lists(record(), min_size=1, max_size=30)
 
 
+@st.composite
+def _elevenlabs_records(draw: st.DrawFn) -> list[dict[str, Any]]:
+    """Exercise real transcript and tool shapes with occasional hostile fields."""
+    records = []
+    for index in range(draw(st.integers(min_value=2, max_value=4))):
+        request_id = f"request-{index}"
+        message = _mostly(st.text(max_size=20), _WEIRD_TEXT)
+        tokens = _mostly(
+            st.integers(min_value=0, max_value=1_000), adversarial_json_value(1)
+        )
+        record = {
+            "conversation_id": f"conversation-{index}",
+            "agent_id": "fixture-agent",
+            "status": "done",
+            "metadata": {
+                "start_time_unix_secs": 1_790_899_200,
+                "call_duration_secs": 5,
+            },
+            "transcript": [
+                {"role": "user", "message": draw(message), "time_in_call_secs": 0},
+                {
+                    "role": "agent",
+                    "message": None,
+                    "time_in_call_secs": 1,
+                    "tool_calls": [
+                        {
+                            "request_id": request_id,
+                            "tool_name": "lookup",
+                            "params_as_json": json.dumps(draw(_MASTRA_JSON)),
+                        }
+                    ],
+                    "llm_usage": {
+                        "model_usage": {
+                            "fixture-model": {
+                                "input": {"tokens": draw(tokens), "price": 0},
+                                "output_total": {"tokens": draw(tokens), "price": 0},
+                            }
+                        }
+                    },
+                },
+                {
+                    "role": "agent",
+                    "message": None,
+                    "time_in_call_secs": 2,
+                    "tool_results": [
+                        {
+                            "request_id": request_id,
+                            "tool_name": "lookup",
+                            "result_value": draw(_JSON_IN_STRING),
+                            "is_error": draw(st.booleans()),
+                            "tool_latency_secs": 0.1,
+                        }
+                    ],
+                },
+                {"role": "agent", "message": draw(message), "time_in_call_secs": 3},
+            ],
+        }
+        records.append(record)
+    return records
+
+
 _RECORD_STRATEGIES = {
+    "elevenlabs": _elevenlabs_records,
     "langfuse": _langfuse_records,
     "braintrust": _braintrust_records,
     "langsmith": _langsmith_records,
@@ -781,7 +847,7 @@ def encode_records(name: str, records: list[dict[str, Any]]) -> bytes:
     """Serialize records in the container shape each importer accepts."""
     if name in {"langfuse", "logfire", "jsonl"}:
         return b"\n".join(json.dumps(r).encode() for r in records)
-    # braintrust, langsmith, mastra, mlflow, and phoenix accept a JSON array.
+    # The remaining importers accept a JSON array.
     return json.dumps(records).encode()
 
 
@@ -797,6 +863,8 @@ def importer_params(name: str) -> SearchStrategy[dict[str, Any]]:
     record-normalizing code these properties are about. `invalid_params()`
     covers the rejection paths separately.
     """
+    if name == "elevenlabs":
+        return st.just({})
     if name == "mastra":
         return st.fixed_dictionaries(
             {},
@@ -837,6 +905,8 @@ def importer_params(name: str) -> SearchStrategy[dict[str, Any]]:
 
 def invalid_params(name: str) -> SearchStrategy[dict[str, Any]]:
     """Generate parameter dictionaries each importer should reject."""
+    if name == "elevenlabs":
+        return st.fixed_dictionaries({"unknown": adversarial_json_value(1)})
     if name == "mastra":
         return st.one_of(
             st.fixed_dictionaries({"unknown": adversarial_json_value(1)}),
