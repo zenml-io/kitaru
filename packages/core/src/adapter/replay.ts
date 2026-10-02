@@ -2,7 +2,12 @@ import type { KitaruEnvironmentVariables } from "../environment.js";
 import { toRecorderJson } from "../json.js";
 import type { JsonValue, ReplayOverride, ReplaySpec } from "../types.js";
 import { isRecord, isUuid } from "../validation.js";
+import { projectMastraReplayInput } from "./recorded-json.js";
 import type { AdapterClient } from "./run-state.js";
+import {
+  isCredentialKeyName,
+  type SecretKeyClassifier,
+} from "./url-credentials.js";
 
 function parseUuidEnvironment(
   name: string,
@@ -220,6 +225,12 @@ export async function resolveReplayContext(options: {
   callerInput: unknown;
   client: AdapterClient;
   environment?: KitaruEnvironmentVariables;
+  /**
+   * Which keys in a Mastra memory replay input name credentials; by default
+   * the built-in credential key names do.
+   */
+  isSecretKey?: SecretKeyClassifier;
+  recordedInputProjector?: (input: unknown) => Promise<unknown> | unknown;
   requestedModelId: string;
 }): Promise<ReplayContext> {
   const environment = options.environment ?? process.env;
@@ -240,19 +251,33 @@ export async function resolveReplayContext(options: {
           "KITARU_OVERRIDE",
         )
       : undefined;
-  const effective = resolveEffectiveInputs(workerInput, override);
   const replacementModelId = modelReplacement(
     override,
     options.requestedModelId,
   );
   if (replacementModelId !== undefined) {
     // A replay override that swaps the model decides what every session in a
-    // batch spends, so the allowlist is checked before anything is recorded.
+    // batch spends, so the allowlist is checked before anything is recorded
+    // and before the input projector can download files.
     assertAllowedReplayModel(replacementModelId, options.allowedReplayModels);
   }
+  const effective = resolveEffectiveInputs(workerInput, override);
+  const recordedInput =
+    !spec && options.recordedInputProjector
+      ? await options.recordedInputProjector(effective.recorded)
+      : effective.recorded;
 
   return {
-    effectiveInput: toRecorderJson(effective.recorded),
+    effectiveInput:
+      spec &&
+      isRecord(recordedInput) &&
+      isRecord(recordedInput.mastra_memory_replay) &&
+      recordedInput.mastra_memory_replay.version === 3
+        ? projectMastraReplayInput(
+            recordedInput,
+            options.isSecretKey ?? isCredentialKeyName,
+          )
+        : toRecorderJson(recordedInput),
     effectiveRuntimeInput: effective.runtime,
     override,
     replayId,

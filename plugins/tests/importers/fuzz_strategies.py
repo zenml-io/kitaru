@@ -28,6 +28,7 @@ import kitaru_langfuse_importer.importer as langfuse
 import kitaru_langsmith_importer.importer as langsmith
 import kitaru_logfire_importer.importer as logfire
 import kitaru_mastra_importer.importer as mastra
+import kitaru_mlflow_importer.importer as mlflow
 import kitaru_phoenix_importer.importer as phoenix
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -38,6 +39,7 @@ IMPORTERS: dict[str, ModuleType] = {
     "langsmith": langsmith,
     "logfire": logfire,
     "mastra": mastra,
+    "mlflow": mlflow,
     "phoenix": phoenix,
     "jsonl": kitaru_jsonl,
 }
@@ -347,6 +349,120 @@ def _phoenix_records() -> SearchStrategy[list[dict[str, Any]]]:
     return st.lists(span, min_size=1, max_size=20)
 
 
+_MLFLOW_SPAN_IDS = st.sampled_from([f"{index:016x}" for index in range(1, 9)])
+_MLFLOW_TRACE_IDS = st.sampled_from([f"tr-{index:032x}" for index in range(1, 4)])
+_MLFLOW_ATTRIBUTE_KEYS = st.sampled_from(
+    [
+        "mlflow.spanType",
+        "mlflow.spanInputs",
+        "mlflow.spanOutputs",
+        "mlflow.chat.tokenUsage",
+        "mlflow.llm.cost",
+        "mlflow.llm.model",
+        "mlflow.llm.provider",
+        "mlflow.message.format",
+        "mlflow.spanFunctionName",
+        "invocation_params",
+    ]
+)
+
+
+def _mlflow_attribute(key: str) -> SearchStrategy[Any]:
+    """Draw a JSON-encoded MLflow attribute value, occasionally a raw one."""
+    if key == "mlflow.spanType":
+        valid = st.sampled_from(["LLM", "CHAT_MODEL", "TOOL", "AGENT", "bogus"])
+    elif key == "mlflow.chat.tokenUsage":
+        valid = st.fixed_dictionaries(
+            {},
+            optional={
+                "input_tokens": _mostly(st.integers(0, 100), _WEIRD_TEXT),
+                "output_tokens": _mostly(st.integers(0, 100), st.integers(-1, -1)),
+                "cache_read_input_tokens": _mostly(st.integers(0, 10), st.floats()),
+            },
+        )
+    elif key == "mlflow.llm.cost":
+        valid = st.fixed_dictionaries(
+            {"total_cost": _mostly(st.floats(0, 1), _DECIMAL_STRINGS | st.floats())}
+        )
+    else:
+        valid = adversarial_json_value(2)
+    return _mostly(valid.map(json.dumps), adversarial_json_value(1))
+
+
+@st.composite
+def _mlflow_span(draw: st.DrawFn, trace_id: str) -> dict[str, Any]:
+    keys = draw(st.lists(_MLFLOW_ATTRIBUTE_KEYS, unique=True, max_size=6))
+    span: dict[str, Any] = {
+        "trace_id": trace_id,
+        "span_id": draw(_mostly(_MLFLOW_SPAN_IDS, _WEIRD_TEXT)),
+        "name": draw(_mostly(st.sampled_from(["agent", "llm", "tool"]), _WEIRD_TEXT)),
+        "start_time_unix_nano": draw(
+            _mostly(st.integers(0, 2**62), adversarial_json_value(1))
+        ),
+        "end_time_unix_nano": draw(
+            _mostly(st.integers(0, 2**62), st.none() | adversarial_json_value(1))
+        ),
+        "status": {
+            "code": draw(
+                st.sampled_from(["STATUS_CODE_OK", "STATUS_CODE_ERROR", "OK", ""])
+            ),
+            "message": draw(_WEIRD_TEXT),
+        },
+        "attributes": {key: draw(_mlflow_attribute(key)) for key in keys},
+        "events": draw(st.lists(adversarial_json_value(1), max_size=2)),
+    }
+    if draw(st.booleans()):
+        span["parent_span_id"] = draw(_MLFLOW_SPAN_IDS | st.just(""))
+    return span
+
+
+@st.composite
+def _mlflow_traces(draw: st.DrawFn) -> list[dict[str, Any]]:
+    traces: list[dict[str, Any]] = []
+    for _ in range(draw(st.integers(1, 5))):
+        trace_id = draw(_mostly(_MLFLOW_TRACE_IDS, _WEIRD_TEXT))
+        metadata = draw(
+            st.fixed_dictionaries(
+                {},
+                optional={
+                    "mlflow.trace.session": _mostly(
+                        st.sampled_from(["session-a", "session-b"]), _WEIRD_TEXT
+                    ),
+                    "mlflow.trace.user": _WEIRD_TEXT,
+                    "mlflow.traceInputs": adversarial_json_value(1).map(json.dumps),
+                },
+            )
+        )
+        traces.append(
+            {
+                "info": {
+                    "trace_id": trace_id,
+                    "trace_location": {
+                        "type": "MLFLOW_EXPERIMENT",
+                        "mlflow_experiment": {
+                            "experiment_id": draw(_mostly(_PROJECT_IDS, _WEIRD_TEXT))
+                        },
+                    },
+                    "request_time": draw(_ISO_TIMES | _WEIRD_TEXT),
+                    "state": draw(st.sampled_from(["OK", "ERROR", "IN_PROGRESS"])),
+                    "trace_metadata": metadata,
+                    "tags": draw(
+                        st.dictionaries(st.text(max_size=8), _WEIRD_TEXT, max_size=2)
+                    ),
+                    "assessments": draw(
+                        st.lists(adversarial_json_value(2), max_size=2)
+                    ),
+                },
+                "data": {
+                    "spans": draw(
+                        st.lists(_mlflow_span(trace_id), min_size=1, max_size=8)
+                    )
+                },
+            }
+        )
+    return traces
+
+
 _MASTRA_JSON = st.recursive(
     st.none()
     | st.booleans()
@@ -650,6 +766,7 @@ _RECORD_STRATEGIES = {
     "langsmith": _langsmith_records,
     "logfire": _logfire_records,
     "mastra": _build_mastra_records,
+    "mlflow": _mlflow_traces,
     "phoenix": _phoenix_records,
     "jsonl": _kitaru_jsonl_records,
 }
@@ -664,7 +781,7 @@ def encode_records(name: str, records: list[dict[str, Any]]) -> bytes:
     """Serialize records in the container shape each importer accepts."""
     if name in {"langfuse", "logfire", "jsonl"}:
         return b"\n".join(json.dumps(r).encode() for r in records)
-    # braintrust, langsmith, mastra, and phoenix accept a JSON array.
+    # braintrust, langsmith, mastra, mlflow, and phoenix accept a JSON array.
     return json.dumps(records).encode()
 
 

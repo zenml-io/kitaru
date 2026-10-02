@@ -56,10 +56,16 @@ export type StreamMethod<TAgent> = [TAgent] extends [StreamCapable]
   ? TAgent["stream"]
   : never;
 
-export type StreamRecordingErrorStage = "step" | "complete";
+/** Where recording failed; `setup` means the turn ran natively without being recorded. */
+export type StreamRecordingErrorStage = "setup" | "step" | "complete";
 
 export interface StreamRecordingErrorEvent {
   error: unknown;
+  /**
+   * A short code for why recording failed. For a memory replay turn it is
+   * the session's `mastra_replay_reason`.
+   */
+  reason?: string;
   sessionId?: string;
   stage: StreamRecordingErrorStage;
 }

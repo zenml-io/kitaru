@@ -14,6 +14,7 @@
 """Tests for task use cases."""
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any
@@ -593,6 +594,37 @@ async def test_heartbeat_stamps_owned_reported_tasks(
     assert cancel_ids == []
     stored = await services.tasks.get(task_id)
     assert stored.heartbeat_at is not None
+
+
+async def test_heartbeat_keeps_a_locked_owned_task_running(
+    services: JobAndTaskServices, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A skipped heartbeat keeps a locked task running while missing tasks stop."""
+    job_id = await _pending_job(services)
+    await _claimable_agent_task(services, job_id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    busy_id = claimed[0].task.id
+    missing_id = uuid.uuid4()
+
+    async def stamp_heartbeats(
+        task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
+    ) -> tuple[dict[uuid.UUID, datetime | None], set[uuid.UUID]]:
+        assert list(task_ids) == [busy_id, missing_id]
+        assert worker_id == worker.id
+        return {}, {busy_id}
+
+    monkeypatch.setattr(services.tasks, "stamp_heartbeats", stamp_heartbeats)
+
+    cancel_ids = await services.task_service.heartbeat_worker(
+        worker.id,
+        [busy_id, missing_id],
+        actor=build_worker_actor(ACTOR.account, worker.id),
+    )
+
+    assert cancel_ids == [missing_id]
 
 
 async def test_heartbeat_returns_cancel_requested_missing_and_reassigned(

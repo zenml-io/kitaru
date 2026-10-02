@@ -1,6 +1,5 @@
 import {
   createScorer,
-  notScorable,
   type ScorerRunInputForAgent,
   type ScorerRunOutputForAgent,
 } from "@mastra/core/evals";
@@ -203,12 +202,9 @@ describe("Mastra scorer evaluators", () => {
   it("omits not-scorable native scorers and keeps the scored results", async () => {
     const evaluator = createMastraEvaluator({
       scorers: () => ({
-        skipped: createScorer<ConversationInput, string>({
-          id: "skipped",
-          description: "Declines to score",
-        })
-          .preprocess(() => notScorable("no tool calls to inspect"))
-          .generateScore(() => 1),
+        // A run without a score is Mastra's not-scorable outcome; building it
+        // directly keeps the test independent of the core version's helpers.
+        skipped: { run: async () => ({ reason: "no tool calls to inspect" }) },
         scored: createScorer<ConversationInput, string>({
           id: "scored",
           description: "Scores",
@@ -224,12 +220,7 @@ describe("Mastra scorer evaluators", () => {
   it("fails when every native scorer is not scorable", async () => {
     const evaluator = createMastraEvaluator({
       scorers: () => ({
-        skipped: createScorer<ConversationInput, string>({
-          id: "skipped",
-          description: "Declines to score",
-        })
-          .preprocess(() => notScorable())
-          .generateScore(() => 1),
+        skipped: { run: async () => ({}) },
       }),
       mapInput,
     });

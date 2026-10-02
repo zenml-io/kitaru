@@ -117,6 +117,30 @@ class LogfireConnection(BaseModel):
     LOGFIRE_READ_TOKEN: SecretStr
 
 
+class MlflowConnection(BaseModel):
+    """MLflow connection."""
+
+    MLFLOW_TRACKING_URI: str = Field(description="MLflow tracking server URL.")
+    # An optional secret gets writeOnly only inside its anyOf branch, so the
+    # property repeats it for clients that read secrecy from the property.
+    MLFLOW_TRACKING_TOKEN: SecretStr | None = Field(
+        default=None,
+        description="Bearer token for an authenticated tracking server.",
+        json_schema_extra={"writeOnly": True, "format": "password"},
+    )
+    MLFLOW_TRACKING_USERNAME: str | None = Field(
+        default=None, description="Username for a basic-auth tracking server."
+    )
+    MLFLOW_TRACKING_PASSWORD: SecretStr | None = Field(
+        default=None,
+        description="Password for a basic-auth tracking server.",
+        json_schema_extra={"writeOnly": True, "format": "password"},
+    )
+    MLFLOW_EXPERIMENT_ID: str | None = Field(
+        default=None, description="Experiment searched by time-window imports."
+    )
+
+
 class PhoenixConnection(BaseModel):
     """Phoenix connection."""
 
@@ -217,6 +241,16 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         requirement="kitaru-langsmith-importer==0.4.0",
         display_version="0.4.0",
         connection_schema=LangsmithConnection,
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.IMPORTER,
+        name=f"{RESERVED_NAMESPACE}/mlflow",
+        description="Import MLflow trace exports and tracking server traces.",
+        provider="mlflow",
+        entrypoint="kitaru_mlflow_importer.importer:importer",
+        requirement="kitaru-mlflow-importer==0.1.0",
+        display_version="0.1.0",
+        connection_schema=MlflowConnection,
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,

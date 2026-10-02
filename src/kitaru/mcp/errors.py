@@ -13,7 +13,7 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.base import JsonValue
-from kitaru.client.exceptions import APIError
+from kitaru.client.exceptions import APIError, parse_mastra_replay_refusal
 from kitaru.mcp.connection import ConnectionConfigurationError
 from kitaru.mcp.models.common import ToolError, ToolResult
 from kitaru.mcp.redaction import redact, redact_data
@@ -79,8 +79,17 @@ def error_result(result_type: type[ToolResult], error: BaseException) -> ToolRes
     )
 
 
-def protocol_result(envelope: ToolResult) -> CallToolResult:
-    """Render identical redacted canonical JSON as structured and text content."""
+def protocol_result(envelope: ToolResult, text: str | None = None) -> CallToolResult:
+    """Render redacted canonical JSON as structured content and as text.
+
+    Args:
+        envelope: The result envelope.
+        text: Summary to send as the text content of a successful result in
+            place of the JSON, for tools whose view renders the structured data.
+
+    Returns:
+        The protocol result.
+    """
     structured = redact_data(envelope)
     if not isinstance(structured, dict):
         # Whole-model normalization can fail before yielding any safe fields.
@@ -97,7 +106,10 @@ def protocol_result(envelope: ToolResult) -> CallToolResult:
                 "recovery": None,
             },
         }
-    text = json.dumps(structured, sort_keys=True, separators=(",", ":"))
+    if text is None or not structured["ok"]:
+        text = json.dumps(structured, sort_keys=True, separators=(",", ":"))
+    else:
+        text = redact(text)
     return CallToolResult(
         content=[TextContent(type="text", text=text)],
         structured_content=structured,
@@ -156,7 +168,13 @@ def map_exception(error: BaseException) -> MCPToolError:
             "rate_limited": "The Kitaru server rate limited the request.",
             "remote_failed": "The Kitaru server failed the request.",
         }
-        return MCPToolError(code, messages[code], retryable=retryable)
+        refusal = parse_mastra_replay_refusal(error.detail) if status == 409 else None
+        return MCPToolError(
+            code,
+            messages[code],
+            retryable=retryable,
+            details=dict(refusal) if refusal is not None else None,
+        )
     if isinstance(error, httpx.TimeoutException):
         return MCPToolError("timeout", "The Kitaru request timed out.", retryable=True)
     if isinstance(error, httpx.TransportError):
