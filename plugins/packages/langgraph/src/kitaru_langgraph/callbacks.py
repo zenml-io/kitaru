@@ -143,6 +143,7 @@ class SyncKitaruCallback(BaseCallbackHandler):
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None = None,
         inputs: dict[str, Any] | None = None,
+        tool_call_id: str | None = None,
         **_: Any,
     ) -> None:
         name = _name(serialized, "tool")
@@ -153,6 +154,7 @@ class SyncKitaruCallback(BaseCallbackHandler):
                 name=name,
                 inputs=inputs if inputs is not None else input_str,
                 node_type=NodeType.TOOL_CALL,
+                tool_call_id=tool_call_id,
             )
         )
 
@@ -270,6 +272,7 @@ class AsyncKitaruCallback(AsyncCallbackHandler):
         run_id: uuid.UUID,
         parent_run_id: uuid.UUID | None = None,
         inputs: dict[str, Any] | None = None,
+        tool_call_id: str | None = None,
         **_: Any,
     ) -> None:
         await self._recorder.start_call(
@@ -278,6 +281,7 @@ class AsyncKitaruCallback(AsyncCallbackHandler):
             name=_name(serialized, "tool"),
             inputs=inputs if inputs is not None else input_str,
             node_type=NodeType.TOOL_CALL,
+            tool_call_id=tool_call_id,
         )
 
     async def on_tool_end(self, output: Any, *, run_id: uuid.UUID, **_: Any) -> None:
