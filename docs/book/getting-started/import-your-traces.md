@@ -13,7 +13,7 @@ Imports execute on a [worker](../concepts/workers.md) in your environment. The e
 
 ## 1. Register the agent the traces belong to
 
-Importers for **Langfuse, LangSmith, Braintrust, Logfire, Arize Phoenix, and a native JSONL format** are built in, registered at server startup under the `kitaru/` namespace, so there is no importer code to write for those. For existing Mastra exports, register the supplied parser using the [Mastra import workflow](../adapters/mastra.md). Other formats come in through a [custom importer](../guides/custom-importer.md).
+Importers for **Langfuse, LangSmith, Braintrust, Logfire, Arize Phoenix, MLflow, and a native JSONL format** are built in, registered at server startup under the `kitaru/` namespace, so there is no importer code to write for those. For existing Mastra exports, register the supplied parser using the [Mastra import workflow](../adapters/mastra.md). Other formats come in through a [custom importer](../guides/custom-importer.md).
 
 {% hint style="info" %}
 **Traces in OpenTelemetry format?** There is no OTel ingestion endpoint yet. Export the spans and convert them to [Kitaru JSONL](../guides/importing-sessions.md), or wrap that conversion in a [custom importer](../guides/custom-importer.md) so your exports import directly; the `kitaru-importer-builder` skill drafts one from a sample export.
@@ -51,7 +51,7 @@ The same import is two calls on the [Python client](../deploy/configuration.md) 
 
 ## Or skip the export
 
-Langfuse, LangSmith, Braintrust, Logfire, and Arize Phoenix importers can fetch traces themselves instead of you exporting a file first. Omit the file argument, name a time window instead, and the worker calls the provider's API directly:
+Langfuse, LangSmith, Braintrust, Logfire, Arize Phoenix, and MLflow importers can fetch traces themselves instead of you exporting a file first. Omit the file argument, name a time window instead, and the worker calls the provider's API directly:
 
 ```bash
 kitaru session import \
@@ -63,11 +63,11 @@ kitaru session import \
 
 `--since` and `--until` accept an ISO 8601 timestamp or a relative duration such as `7d`, `12h`, or `30m`. `--trace-id` fetches exactly the trace ids you name instead of a window. These merge with `--query` into one `ImportQuery` (`kitaru.api_models.v1.imports`), validated before the import is created, and provider-specific keys pass through untouched. The fetch runs on your worker, the same way the parse does, so provider credentials never leave your infrastructure. A [connection](../guides/provider-connections.md) named with `--connection`, or the provider's default connection, supplies them, and the worker's own environment is still the fallback when neither is set. Each provider's guide lists its query keys and the environment variables the fetch reads.
 
-Use the file upload from step 2 when you already have an export, when you'd rather not hand a worker live API credentials, or for the Kitaru JSONL importer, which only accepts uploaded files. Use the API fetch to skip the export step for the five provider importers.
+Use the file upload from step 2 when you already have an export, when you'd rather not hand a worker live API credentials, or for the Kitaru JSONL importer, which only accepts uploaded files. Use the API fetch to skip the export step for the six provider importers.
 
 ## Source identity
 
-The five provider importers choose project identity in the same order: `params.source_instance`, the provider-specific parameter below, then project identity embedded in the export. If none is available, the affected trace or session fails with an error showing the `--params` remedy. Filenames and generic provider names are not identity fallbacks.
+The six provider importers choose project identity in the same order: `params.source_instance`, the provider-specific parameter below, then project identity embedded in the export. If none is available, the affected trace or session fails with an error showing the `--params` remedy. Filenames and generic provider names are not identity fallbacks.
 
 | Importer | Alternative parameter |
 | --- | --- |
@@ -76,6 +76,7 @@ The five provider importers choose project identity in the same order: `params.s
 | Braintrust | `project_id` |
 | Logfire | `project_id` |
 | Arize Phoenix | `project` |
+| MLflow | `experiment_id` |
 
 Identity values must be strings. Surrounding whitespace is removed; `null` and empty or whitespace-only strings count as absent. Other types are rejected, including when an explicit override is available. Conflicting embedded project identities fail the affected trace or session even with an override. Each importer keeps its existing rules for grouping traces into sessions.
 

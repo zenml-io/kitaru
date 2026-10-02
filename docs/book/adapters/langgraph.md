@@ -108,6 +108,8 @@ The factory path inserts Kitaru middleware before the agent is compiled. During 
 
 Factory construction also installs public tool middleware. During a Kitaru replay, a matching static result or valid recorded-history result becomes a framework-valid `ToolMessage` or `Command` with the current tool-call identity. That hit is the only adapter path that skips a live dependency: the live tool is called zero times.
 
+Deep Agents places its built-in middleware before custom middleware, including Kitaru's. Built-in tool rejections therefore take precedence over Kitaru's static or history policy. For example, Deep Agents 0.7.17 rejects later parallel write, edit, or delete calls targeting the same file before Kitaru can substitute their results. Replaying recordings made with a different Deep Agents version can change these outcomes; keep framework versions consistent when comparing replay behavior.
+
 Misses follow the replay policy without silent fallback:
 
 - `fail` raises before a live tool call.

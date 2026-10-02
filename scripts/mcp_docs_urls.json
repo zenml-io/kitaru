@@ -38,6 +38,7 @@
   "guides/import-braintrust-traces.md": "https://docs.zenml.io/kitaru/import-your-traces/import-braintrust-traces",
   "guides/import-logfire-traces.md": "https://docs.zenml.io/kitaru/import-your-traces/import-logfire-traces",
   "guides/import-phoenix-traces.md": "https://docs.zenml.io/kitaru/import-your-traces/import-phoenix-traces",
+  "guides/import-mlflow-traces.md": "https://docs.zenml.io/kitaru/import-your-traces/import-mlflow-traces",
   "guides/importing-sessions.md": "https://docs.zenml.io/kitaru/import-your-traces/importing-sessions",
   "guides/custom-importer.md": "https://docs.zenml.io/kitaru/import-your-traces/custom-importer",
   "guides/provider-connections.md": "https://docs.zenml.io/kitaru/import-your-traces/provider-connections",

@@ -14,6 +14,7 @@
 """Shared test helpers and in-memory fakes."""
 
 import asyncio
+import base64
 import hashlib
 import os
 import sys
@@ -371,6 +372,45 @@ def imported_session(
         metadata={},
         nodes=nodes or [],
     )
+
+
+@pytest.fixture
+def complete_mastra_memory_replay_inputs() -> dict[str, Any]:
+    """Build a structurally complete v3 input for server finalization tests."""
+    media_type = "text/plain"
+    content = b"recorded file"
+    reference = hashlib.sha256(media_type.encode() + b"\0" + content).hexdigest()
+    return {
+        "mastra_memory_replay": {
+            "version": 3,
+            "complete": True,
+            "reasons": [],
+            "invocationId": "test-invocation",
+            "rawInput": "hello",
+            "initialSnapshot": {
+                "threadId": "thread-1",
+                "resourceId": "resource-1",
+                "thread": None,
+                "resource": None,
+                "messages": [],
+                "records": [],
+            },
+            "configuration": {"memoryConfig": {}},
+            "requestContext": {},
+            "files": [
+                {
+                    "url": f"kitaru-file://sha256/{reference}",
+                    "mediaType": media_type,
+                    "base64": base64.b64encode(content).decode("ascii"),
+                    "length": len(content),
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                }
+            ],
+            "omTape": [],
+            "turnStartedAt": "2026-01-01T00:00:00.000Z",
+            "keyOrder": {"permutations": "", "sha256": "0" * 64},
+        }
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -3106,6 +3146,24 @@ class FakeSessionRepository:
         self._sessions[session.id] = updated
         return self._copy(updated, include_payloads=False)
 
+    async def finalize_replay_inputs(self, session: Session) -> Session:
+        """Persist final replay input and status in one fake repository update."""
+        stored = self._sessions.get(session.id)
+        if stored is None:
+            raise SessionNotFound(session.id)
+        self._check_duplicate_external_id(session)
+        updated = session.model_copy(
+            update={
+                "created": stored.created,
+                "updated": _renewed_timestamp(stored.updated),
+                "outputs": session.outputs
+                if "outputs" in session.model_fields_set
+                else stored.outputs,
+            }
+        )
+        self._sessions[session.id] = updated
+        return self._copy(updated, include_payloads=False)
+
     async def delete(self, session_id: uuid.UUID) -> None:
         """Delete a session by id.
 
@@ -4524,16 +4582,19 @@ class PayloadStoreFakes(NamedTuple):
 
 def build_payload_store(
     threshold_bytes: int = DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
+    blob_repository: FakeBlobRepository | None = None,
 ) -> PayloadStoreFakes:
-    """Build a payload store backed by fresh fake blob storage.
+    """Build a payload store backed by fake blob storage.
 
     Args:
         threshold_bytes: Serialized size above which a payload is offloaded.
+        blob_repository: Blob registry to share, or None for a fresh one.
 
     Returns:
-        Payload store bound to fresh fakes, and the fakes themselves.
+        Payload store bound to the fakes, and the fakes themselves.
     """
-    blob_repository = FakeBlobRepository()
+    if blob_repository is None:
+        blob_repository = FakeBlobRepository()
     blob_data_store = FakeBlobDataStore()
     store = PayloadStore(
         repository=blob_repository,
@@ -7432,7 +7493,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         transitions=transitions,
         policy=task_policy,
     )
-    payload_store = build_payload_store().store
+    payload_store = build_payload_store(blob_repository=blobs).store
     experiment_service = ExperimentService(
         repository=experiments,
         plugin_repository=plugins,

@@ -14,7 +14,8 @@ common = [
     "test (py311-base)",
     "test (py312-base)",
     "test (py313-base)",
-    "test (py314-base)",
+    "test (py314-base-1)",
+    "test (py314-base-2)",
 ]
 
 [[units]]
@@ -185,6 +186,21 @@ release-label = "requires:plugin:mastra"
 impact-paths = ["plugins/packages/mastra-importer/**"]
 tag-prefix = "python/kitaru-mastra-importer/v"
 maintenance-branch-prefix = "release/mastra/"
+checks = []
+
+[[units]]
+slug = "mlflow-importer"
+path = "plugins/packages/mlflow-importer"
+distribution = "kitaru-mlflow-importer"
+registry = "pypi"
+version-source = "plugins/packages/mlflow-importer/pyproject.toml"
+changelog = "plugins/packages/mlflow-importer/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = true
+release-label = "requires:plugin:mlflow"
+impact-paths = ["plugins/packages/mlflow-importer/**"]
+tag-prefix = "python/kitaru-mlflow-importer/v"
+maintenance-branch-prefix = "release/mlflow/"
 checks = []
 
 [[units]]

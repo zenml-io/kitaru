@@ -1,7 +1,27 @@
 import { describe, expect, it } from "vitest";
 import type { AdapterClient } from "../../src/adapter/index.js";
 import { RunRecorder, recordNormalizedStep } from "../../src/adapter/index.js";
-import { fakeClient, SESSION_ID } from "./helpers.js";
+import { KitaruApiError } from "../../src/errors.js";
+import { type FakeClient, fakeClient, SESSION_ID } from "./helpers.js";
+
+/** Reject session updates that carry replay inputs, as an older server does. */
+function rejectingFinalization(error: unknown): FakeClient {
+  const client = fakeClient();
+  const updateSession = client.updateSession;
+  client.updateSession = async (sessionId, request) => {
+    if ("inputs" in request) {
+      client.updates.push(request);
+      throw error;
+    }
+    return updateSession(sessionId, request);
+  };
+  return client;
+}
+
+const FINALIZATION = {
+  inputs: { mastra_memory_replay: { version: 3, complete: true } },
+  metadata: { mastra_replay_state: "eligible" },
+};
 
 async function recorder(client: AdapterClient): Promise<RunRecorder> {
   return RunRecorder.create({
@@ -16,6 +36,157 @@ async function recorder(client: AdapterClient): Promise<RunRecorder> {
 }
 
 describe("normalized run lifecycle", () => {
+  it("creates a pending recording with metadata atomically", async () => {
+    const client = fakeClient();
+    await RunRecorder.create({
+      adapterVersion: "test-adapter",
+      agentId: "018f0000-0000-7000-8000-000000000100",
+      client,
+      effectiveInput: { prompt: "hello" },
+      framework: "mastra",
+      metadata: { mastra_replay_state: "pending" },
+      requestedModelId: "requested-model",
+    });
+    expect(client.created[0]?.metadata).toEqual({
+      mastra_replay_state: "pending",
+    });
+  });
+
+  it("publishes final inputs and eligibility with completion", async () => {
+    const client = fakeClient();
+    const run = await recorder(client);
+    await run.initialize();
+    const finalInputs = {
+      mastra_memory_replay: { version: 3, complete: true },
+    };
+    await run.complete(
+      { text: "done" },
+      {
+        inputs: finalInputs,
+        metadata: {
+          mastra_replay_state: "eligible",
+          mastra_native_state: "completed",
+        },
+      },
+    );
+    expect(client.updates.at(-1)).toMatchObject({
+      inputs: finalInputs,
+      metadata: {
+        mastra_replay_state: "eligible",
+        mastra_native_state: "completed",
+      },
+      status: "completed",
+    });
+    expect(client.nodes.at(-1)?.nodes[0]?.inputs).toEqual(finalInputs);
+  });
+
+  it("keeps a completed run when the server rejects its replay inputs", async () => {
+    const client = rejectingFinalization(
+      new KitaruApiError(
+        "PATCH",
+        `/api/v1/sessions/${SESSION_ID}`,
+        422,
+        "Extra inputs are not permitted",
+      ),
+    );
+    const run = await recorder(client);
+    await run.initialize();
+
+    const completion = await run.complete({ text: "done" }, FINALIZATION);
+
+    expect(completion).toEqual({ finalizationAccepted: false });
+    expect(client.updates).toHaveLength(2);
+    expect(client.updates[0]).toMatchObject(FINALIZATION);
+    expect(client.updates[1]).toEqual({
+      ended_at: expect.any(String),
+      outputs: { text: "done" },
+      status: "completed",
+    });
+    expect(client.nodes.at(-1)?.nodes[0]).toMatchObject({
+      outputs: { text: "done" },
+      status: "completed",
+    });
+  });
+
+  it("stores the rejected-finalization metadata when the server refuses replay inputs", async () => {
+    const client = rejectingFinalization(
+      new KitaruApiError(
+        "PATCH",
+        `/api/v1/sessions/${SESSION_ID}`,
+        422,
+        "Extra inputs are not permitted",
+      ),
+    );
+    const run = await recorder(client);
+    await run.initialize();
+    const rejectedMetadata = {
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "server_rejected_finalization",
+    };
+
+    const completion = await run.complete(
+      { text: "done" },
+      { ...FINALIZATION, rejectedMetadata },
+    );
+
+    expect(completion).toEqual({ finalizationAccepted: false });
+    expect(client.updates[1]).toEqual({
+      ended_at: expect.any(String),
+      metadata: rejectedMetadata,
+      outputs: { text: "done" },
+      status: "completed",
+    });
+  });
+
+  it("completes a finished run whose step uploads failed", async () => {
+    const client = fakeClient();
+    const run = await recorder(client);
+    await run.initialize();
+    await run.state
+      .enqueueStep(async () => {
+        throw new Error("step upload failed");
+      })
+      .catch(() => undefined);
+    const metadata = {
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "recording_step_failed",
+    };
+
+    await expect(run.complete({ text: "done" })).rejects.toThrow(
+      "step upload failed",
+    );
+    await run.completeIncompleteRecording({ text: "done" }, metadata);
+
+    expect(run.state.failure).toBeUndefined();
+    expect(client.nodes.at(-1)?.nodes[0]).toMatchObject({
+      outputs: { text: "done" },
+      status: "completed",
+    });
+    expect(client.updates.at(-1)).toEqual({
+      ended_at: expect.any(String),
+      metadata,
+      outputs: { text: "done" },
+      status: "completed",
+    });
+  });
+
+  it("does not retry a completion rejected for another reason", async () => {
+    const conflict = new KitaruApiError(
+      "PATCH",
+      `/api/v1/sessions/${SESSION_ID}`,
+      409,
+      "Session does not accept updates",
+    );
+    const client = rejectingFinalization(conflict);
+    const run = await recorder(client);
+    await run.initialize();
+
+    await expect(run.complete({ text: "done" }, FINALIZATION)).rejects.toBe(
+      conflict,
+    );
+    expect(client.updates).toHaveLength(1);
+  });
+
   it("creates, records, and completes one run", async () => {
     const client = fakeClient();
     const run = await recorder(client);
@@ -315,6 +486,19 @@ describe("normalized run lifecycle", () => {
     expect(client.updates.at(-1)).toMatchObject({
       error: "node write failed",
       status: "failed",
+    });
+  });
+
+  it("persists an ineligible recording reason in its terminal update", async () => {
+    const client = fakeClient();
+    const run = await recorder(client);
+    await run.failRecording(new Error("capture failed"), {
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "capture_incomplete",
+    });
+    expect(client.updates.at(-1)?.metadata).toEqual({
+      mastra_replay_state: "ineligible",
+      mastra_replay_reason: "capture_incomplete",
     });
   });
 

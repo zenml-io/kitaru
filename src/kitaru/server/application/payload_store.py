@@ -144,6 +144,17 @@ class PayloadStore:
             assert media_type is not None
             payload.blob_id = registry[(sha256, media_type)].id
 
+    async def get_blobs(self, blob_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Blob]:
+        """Load blob registry rows by id.
+
+        Args:
+            blob_ids: Ids of the blobs to load.
+
+        Returns:
+            Stored blobs keyed by id, missing ids omitted.
+        """
+        return await self._repository.get_many(blob_ids)
+
     async def resolve(self, payloads: Sequence[Payload]) -> None:
         """Resolve every unresolved ref of a batch in one round trip per backend.
 

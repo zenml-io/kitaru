@@ -63,6 +63,67 @@ def test_agent_spec_grants_nothing() -> None:
     assert build_task_grants(spec) == {}
 
 
+def test_mastra_replay_agent_spec_grants_its_recorded_file_blobs() -> None:
+    """Grant a replaying agent task the blobs holding its recorded Mastra files."""
+    blob_id = uuid.uuid4()
+
+    def file(**fields: object) -> dict[str, object]:
+        return {
+            "url": "kitaru-file://sha256/" + "a" * 64,
+            "mediaType": "image/png",
+            "length": 4,
+            "sha256": "b" * 64,
+            **fields,
+        }
+
+    spec = TaskSpec(
+        task_id=uuid.uuid4(),
+        kind=TaskKind.AGENT,
+        timeout_seconds=60,
+        run_spec=TaskRunSpec(command="run.sh"),
+        details=AgentTaskDetails(
+            inputs={
+                "mastra_memory_replay": {
+                    "files": [
+                        file(blobId=str(blob_id)),
+                        file(base64="AAAA"),
+                        file(blobId="not-a-uuid"),
+                        "malformed",
+                    ]
+                }
+            },
+            replay_id=uuid.uuid4(),
+        ),
+    )
+    assert build_task_grants(spec) == {GrantKind.BLOB: frozenset({blob_id})}
+
+
+def test_non_replay_agent_spec_grants_no_blobs_named_in_its_inputs() -> None:
+    """Grant an ordinary agent task no blob its caller-supplied inputs name."""
+    spec = TaskSpec(
+        task_id=uuid.uuid4(),
+        kind=TaskKind.AGENT,
+        timeout_seconds=60,
+        run_spec=TaskRunSpec(command="run.sh"),
+        details=AgentTaskDetails(
+            inputs={
+                "mastra_memory_replay": {
+                    "files": [
+                        {
+                            "url": "kitaru-file://sha256/" + "a" * 64,
+                            "mediaType": "image/png",
+                            "length": 4,
+                            "sha256": "b" * 64,
+                            "blobId": str(uuid.uuid4()),
+                        }
+                    ]
+                }
+            },
+        ),
+    )
+    assert build_task_grants(spec) == {}
+
+
 def test_evaluation_spec_grants_its_input_session_and_script_blob() -> None:
     """Grant an evaluator task its input session and the blob holding its script."""
     input_session_id = uuid.uuid4()
