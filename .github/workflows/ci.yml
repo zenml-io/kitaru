@@ -1,6 +1,18 @@
 ---
 name: CI
 on:
+  workflow_dispatch:
+    inputs:
+      test-processes:
+        description: Test processes per base and plugin runner (benchmark only)
+        type: choice
+        options: ['1', '2']
+        default: '1'
+      typescript-tests:
+        description: TypeScript test and coverage execution (benchmark only)
+        type: choice
+        options: [repeated, coverage-once]
+        default: repeated
   push:
     branches: [develop]
   pull_request:
@@ -73,27 +85,23 @@ jobs:
       - run: pnpm run generate:check
       - run: pnpm run lint
       - run: pnpm run typecheck
-      - name: Test TypeScript packages, including Mastra memory on PostgreSQL
+      - name: Test TypeScript packages with coverage
         env:
+          TYPESCRIPT_TEST_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.typescript-tests || 'coverage-once' }}
           POSTGRES_PASSWORD: password
         run: >-
           KITARU_TEST_MASTRA_POSTGRES_URL="postgres://postgres:${POSTGRES_PASSWORD}@localhost:5433/postgres"
-          pnpm run test:built
-      - name: Report TypeScript coverage
-        run: |
-          set -euo pipefail
-          for package in kitaru kitaru-mastra kitaru-vercel-ai; do
-            pnpm --filter "@zenml-io/$package" exec vitest run \
-              --coverage.enabled --coverage.provider=v8 \
-              --coverage.include='src/**' --coverage.exclude='src/generated/**' \
-              --coverage.reporter=text-summary | tee "$RUNNER_TEMP/coverage.txt"
-            {
-              echo "### \`@zenml-io/$package\` coverage"
-              echo '```text'
-              grep -E '^(Statements|Branches|Functions|Lines) ' "$RUNNER_TEMP/coverage.txt"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          done
+          node scripts/benchmark-typescript-ci.mjs "$TYPESCRIPT_TEST_MODE"
+          "$RUNNER_TEMP/benchmark-typescript"
+      - name: Upload TypeScript benchmark evidence
+        if: always() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: benchmark-typescript
+          path: ${{ runner.temp }}/benchmark-typescript
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
       - run: pnpm run pack:check:built
       - run: uv sync --frozen --extra server --extra cli --extra worker
       - name: Test compiled TypeScript adapters through Worker
@@ -380,6 +388,17 @@ jobs:
           -m pytest -q -c plugins/pyproject.toml
           plugins/tests
           tests/server/test_default_plugins.py
+        env:
+          # File grouping preserves module fixtures and test order within each file.
+          PYTEST_ADDOPTS: ${{ github.event_name == 'workflow_dispatch' && (inputs.test-processes == '2' && '-n 2 --dist loadfile --junitxml=ci-results.xml' || '--junitxml=ci-results.xml') || '-n 2 --dist loadfile' }}
+      - name: Upload plugin benchmark outcomes
+        if: ${{ always() && github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: benchmark-plugin-outcomes
+          path: ci-results.xml
+          retention-days: 1
+          if-no-files-found: error
       - name: Report plugin coverage
         run: |
           set -euo pipefail
@@ -398,6 +417,17 @@ jobs:
           uv run --project plugins python -c
           "from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS;
           assert DEFAULT_PLUGIN_DEFINITIONS"
+      - name: Export plugin benchmark coverage
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: uv run --project plugins coverage json -o ci-plugin-coverage.json
+      - name: Upload plugin benchmark coverage
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: benchmark-plugin-coverage
+          path: ci-plugin-coverage.json
+          retention-days: 1
+          if-no-files-found: error
   plugin-package:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     needs: release-units
@@ -556,9 +586,19 @@ jobs:
           assert importlib.util.find_spec('mcp') is None"
       - run: ${{ matrix.pytest-command }}
         env:
+          # File grouping preserves module fixtures and test order within each file.
+          PYTEST_ADDOPTS: ${{ github.event_name == 'workflow_dispatch' && (contains(matrix.name, 'base') && inputs.test-processes == '2' && '-n 2 --dist loadfile --junitxml=ci-results.xml' || '--junitxml=ci-results.xml') || (contains(matrix.name, 'base') && '-n 2 --dist loadfile' || '') }}
           KITARU_TEST_REQUIRE_POSTGRES: ${{ matrix.postgres && '1' || '' }}
           KITARU_TEST_SHARD_INDEX: ${{ matrix.shard-index }}
           KITARU_TEST_SHARD_COUNT: ${{ matrix.shard-count }}
+      - name: Upload benchmark outcomes
+        if: ${{ always() && github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: benchmark-${{ matrix.name }}-outcomes
+          path: ci-results.xml
+          retention-days: 1
+          if-no-files-found: error
       - name: Upload coverage data
         if: ${{ matrix.coverage }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -600,3 +640,14 @@ jobs:
             uv run --no-sync coverage report --format=markdown --skip-covered --sort=cover
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Export core benchmark coverage
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: uv run --no-sync coverage json -o ci-core-coverage.json
+      - name: Upload core benchmark coverage
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: benchmark-core-coverage
+          path: ci-core-coverage.json
+          retention-days: 1
+          if-no-files-found: error

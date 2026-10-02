@@ -20,8 +20,8 @@ import {
   type AdapterClient,
   type AdapterRunState,
   createSecretKeyClassifier,
+  MastraReplayBudgetError,
   normalizeRecordingLimits,
-  parseModelSettings,
   type RecordingLimits,
   ROOT_NODE_EXTERNAL_ID,
   resolveReplayContext,
@@ -71,6 +71,11 @@ import {
   type OMLiveCall,
   type OMResultEntry,
 } from "./om-result-tape.js";
+import { parseProcessorDecisionOverride } from "./processor-decision-override.js";
+import {
+  createProcessorDecisions,
+  type ProcessorDecisions,
+} from "./processor-decisions.js";
 import { describeProviderError } from "./provider-errors.js";
 import { createRecordedClock } from "./replay-clock.js";
 import { assertStableToolName } from "./replay-guards.js";
@@ -255,6 +260,8 @@ export type DeclareMemoryReplayFiles = (
 
 export interface MemoryReplayAgentBindings {
   memory: Memory;
+  /** Define each named decision while constructing the per-turn agent. */
+  decisions: ProcessorDecisions;
   resolveFile(url: string): Promise<{ bytes: Uint8Array; mediaType: string }>;
   workspace?: Awaited<ReturnType<typeof loadSkillsWorkspace>>["workspace"];
 }
@@ -620,6 +627,11 @@ export function createMemoryReplayAgent(
       : undefined;
     const config = await factory({
       memory,
+      decisions: createProcessorDecisions({
+        mode: "live",
+        invocationId: globalThis.crypto.randomUUID(),
+        captureError: () => {},
+      }).binding,
       resolveFile: downloads.resolveNative,
       workspace: workspace?.workspace,
     });
@@ -813,6 +825,9 @@ export function createMemoryReplayAgent(
       throw new Error(
         "Memory replay supports system_prompt overrides; replacing raw invocation input requires a new recording.",
       );
+    const decisionOverride = parseProcessorDecisionOverride(replay.override);
+    if (decisionOverride.mode === "pinned" && !historical)
+      throw new Error("Pinned processor decisions require a recorded replay.");
     const selector = historical?.initialSnapshot ?? getSelector(callerOptions);
     const liveContext = callerOptions.requestContext ?? new RequestContext();
     if (!historical) {
@@ -1107,8 +1122,32 @@ export function createMemoryReplayAgent(
           tripwireListener?.(reason),
         ),
       );
+      const decisions = createProcessorDecisions({
+        mode: decisionOverride.mode,
+        recorded: historical?.processorDecisions,
+        invocationId,
+        sanitizeEvidence: sanitizer.replace,
+        isSecretKey,
+        costCalculator: options.costCalculator,
+        recordNode: (node) => {
+          const active = getState();
+          return active.client
+            .upsertSessionNodes(active.sessionId, {
+              nodes: [node],
+            })
+            .then(() => undefined);
+        },
+        captureError: (error) =>
+          reportLocalRecordingError(
+            error,
+            "processor_decision_incomplete",
+            "step",
+            state?.sessionId,
+          ),
+      });
       const config = await factory({
         memory: owned.memory,
+        decisions: decisions.binding,
         resolveFile:
           historical || !baselineFiles
             ? files.resolveFile
@@ -1117,6 +1156,7 @@ export function createMemoryReplayAgent(
               ),
         workspace: workspace?.workspace,
       });
+      decisions.validatePinned();
       if (config.memory !== undefined && config.memory !== owned.memory)
         unsupportedAgentConfiguration(
           "Agent factory must use its supplied Memory instance.",
@@ -1227,9 +1267,7 @@ export function createMemoryReplayAgent(
           "Per-call memory.options are unsupported. Set the complete memory configuration in sourceMemory instead.",
           "memory_config_unsupported",
         );
-      const overrideSettings = parseModelSettings(
-        replay.override?.model_params,
-      );
+      const overrideSettings = decisionOverride.modelSettings;
       if (overrideSettings)
         effective.modelSettings = {
           ...(record(effective.modelSettings) ? effective.modelSettings : {}),
@@ -1507,12 +1545,21 @@ export function createMemoryReplayAgent(
         client: evidenceClient,
         options,
         replayInput: replay.effectiveInput,
-        replay,
+        replay: {
+          ...replay,
+          override: replay.override
+            ? {
+                ...replay.override,
+                model_params: decisionOverride.modelSettings,
+              }
+            : undefined,
+        },
         nativeFallback: async (error, reason) => {
           try {
             // The turn's Memory has not run, so there is no work of its own
             // to join; joining would wait for other turns' buffering.
             await runtime.release();
+            await decisions.finish(finalizationWaitMs);
           } catch (cleanupError) {
             reportLocalRecordingError(
               cleanupError,
@@ -1568,6 +1615,7 @@ export function createMemoryReplayAgent(
             // this thread can acquire while evidence uploads, including failed
             // provider attempts, and the session update are sent.
             await runtime.release();
+            await decisions.finish(finalizationWaitMs);
             await capture.drain();
             await runtime.binding.drain();
             // An OM call past the deadline may never return; the turn is
@@ -1730,8 +1778,8 @@ export function createMemoryReplayAgent(
                 recaptured.envelope.reasons.join(" "),
                 recaptured.reason ?? "capture_prerequisite_failed",
               );
-            return {
-              [MEMORY_REPLAY_KEY]: finalizeMemoryReplayEnvelope(
+            const finalize = (processorDecisions?: JsonValue) =>
+              finalizeMemoryReplayEnvelope(
                 recaptured.envelope,
                 omResults.map((entry) => ({
                   phase: entry.phase,
@@ -1747,8 +1795,23 @@ export function createMemoryReplayAgent(
                 // blob storage unstored; no replay starts from it.
                 Boolean(historical),
                 isSecretKey,
-              ),
-            };
+                processorDecisions,
+              );
+            let finalEnvelope: ReturnType<typeof finalize>;
+            try {
+              finalEnvelope = finalize(decisions.snapshot());
+            } catch (error) {
+              if (!(error instanceof MastraReplayBudgetError)) throw error;
+              // Optional decision data must not discard a valid memory replay.
+              reportLocalRecordingError(
+                error,
+                "processor_decision_incomplete",
+                "complete",
+                state?.sessionId,
+              );
+              finalEnvelope = finalize();
+            }
+            return { [MEMORY_REPLAY_KEY]: finalEnvelope };
           },
           release: () => runtime.release(),
         },

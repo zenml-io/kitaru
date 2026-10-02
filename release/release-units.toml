@@ -14,7 +14,8 @@ common = [
     "test (py311-base)",
     "test (py312-base)",
     "test (py313-base)",
-    "test (py314-base)",
+    "test (py314-base-1)",
+    "test (py314-base-2)",
 ]
 
 [[units]]

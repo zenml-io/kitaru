@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 from packaging.version import Version
 from scripts.release_units import (
     ReleaseInventoryError,
@@ -840,6 +841,22 @@ def test_ci_quickstart_example_job_enforces_the_walkthrough() -> None:
     assert "tests/test_contract.py" in example_job
     assert "tests/test_repository_contract.py" in example_job
     assert "uv run --no-sync python scripts/run_ci_e2e.py" in example_job
+
+
+def test_core_release_requires_every_python_ci_matrix_check() -> None:
+    inventory = load_inventory()
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    test_job = workflow["jobs"]["test"]
+    emitted_checks = {
+        test_job["name"].replace("${{ matrix.name }}", entry["name"])
+        for entry in test_job["strategy"]["matrix"]["include"]
+    }
+    core = next(unit for unit in inventory.units if unit.slug == "kitaru")
+    required_python_checks = {
+        check for check in core.required_checks if check.startswith("test (")
+    }
+
+    assert required_python_checks == emitted_checks
 
 
 def test_each_unit_exposes_its_exact_release_critical_checks() -> None:
