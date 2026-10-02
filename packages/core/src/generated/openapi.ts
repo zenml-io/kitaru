@@ -9264,6 +9264,11 @@ export interface components {
              */
             error?: string | null;
             /**
+             * Inputs
+             * @description Final replay inputs for a pending Mastra recording.
+             */
+            inputs?: unknown;
+            /**
              * Metadata
              * @description New metadata.
              */

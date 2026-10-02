@@ -1,5 +1,12 @@
 import { isPlainObject } from "../json.js";
 import type { JsonValue } from "../types.js";
+import {
+  containsUrlCredentials,
+  getNormalizedKeyName,
+  isCredentialKeyName,
+  isNeverSecretKey,
+  type SecretKeyClassifier,
+} from "./url-credentials.js";
 
 export const MAX_RECORDED_STRING_CHARS = 4_096;
 const MAX_RECORDED_ITEMS = 100;
@@ -8,6 +15,9 @@ const MAX_RECORDED_JSON_CHARS = 65_536;
 export const MAX_RECORDED_PAYLOAD_CHARS = 1_048_576;
 const MAX_RECORDED_PAYLOAD_ITEMS = 10_000;
 const MAX_RECORDED_PAYLOAD_DEPTH = 64;
+/** Mastra's captured memory can exceed generic recorder limits. */
+export const MAX_MASTRA_REPLAY_JSON_BYTES = 16 * 1_048_576;
+export const MAX_MASTRA_REPLAY_ITEMS = 200_000;
 // Leave room for the session node and step envelope in toRecorderJson's
 // 10,000-item ceiling after the tool value is embedded in it.
 const MAX_BOUNDED_TOOL_ITEMS = 9_000;
@@ -19,7 +29,10 @@ const UNSUPPORTED_MARKER = "[unsupported]";
 
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-/** Keys whose value is a credential rather than part of the payload's meaning. */
+/**
+ * Keys whose value is a credential rather than part of the payload's meaning.
+ * Compound names such as `access_token` match through `isCredentialKeyName`.
+ */
 const SECRET_KEYS: ReadonlySet<string> = new Set([
   "api_key",
   "apikey",
@@ -29,6 +42,46 @@ const SECRET_KEYS: ReadonlySet<string> = new Set([
   "secret",
   "token",
 ]);
+/**
+ * Keys refused or redacted whatever an application's key-name policy says:
+ * the HTTP headers that carry credentials and the transport objects that
+ * carry headers.
+ */
+const TRANSPORT_KEYS: ReadonlySet<string> = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "headers",
+  "abortsignal",
+]);
+
+// The same names split into words, so other spellings such as `setCookie`,
+// `set_cookie`, or `proxyAuthorization` match too.
+const TRANSPORT_KEY_WORDS: ReadonlySet<string> = new Set([
+  "authorization",
+  "proxy_authorization",
+  "cookie",
+  "set_cookie",
+  "headers",
+  "abort_signal",
+]);
+const NO_KEYS: ReadonlySet<string> = new Set();
+
+/**
+ * Whether an object key is a credential header or a transport object, such
+ * as `authorization`, `cookie`, or `headers`, in any letter case or word
+ * spelling, so `setCookie` and `set_cookie` match `set-cookie`.
+ *
+ * These keys are refused or redacted whatever an application's key-name
+ * policy says.
+ */
+export function isTransportKeyName(key: string): boolean {
+  return (
+    TRANSPORT_KEYS.has(key.toLowerCase()) ||
+    TRANSPORT_KEY_WORDS.has(getNormalizedKeyName(key))
+  );
+}
 
 /**
  * Keys whose value is a blob, a transport envelope, or a framework context
@@ -112,8 +165,35 @@ interface CloneOptions {
   maxStringChars: number;
   path: string;
   rejectLongStrings: boolean;
+  rejectUrlCredentials?: boolean;
   sensitiveKeyMode: SensitiveKeyMode;
+  // Matched in lowercase, before and regardless of `isSecretKey`.
   sensitiveKeys: ReadonlySet<string>;
+  isSecretKey: SecretKeyClassifier;
+}
+
+type SecretKeyRules = Pick<CloneOptions, "sensitiveKeys" | "isSecretKey">;
+
+/**
+ * Choose the keys a redacting conversion hides: the built-in credential
+ * names, or an application's own check plus the transport keys.
+ */
+function getSecretKeyRules(
+  isSecretKey: SecretKeyClassifier | undefined,
+): SecretKeyRules {
+  return isSecretKey === undefined
+    ? { sensitiveKeys: SECRET_KEYS, isSecretKey: isCredentialKeyName }
+    : getTransportKeyRules(isSecretKey);
+}
+
+/** Hide the transport keys and the keys `isSecretKey` names. */
+function getTransportKeyRules(
+  isSecretKey: SecretKeyClassifier,
+): SecretKeyRules {
+  return {
+    sensitiveKeys: NO_KEYS,
+    isSecretKey: (key) => isTransportKeyName(key) || isSecretKey(key),
+  };
 }
 
 function markLossy(options: CloneOptions): void {
@@ -128,6 +208,9 @@ function spendBudget(options: CloneOptions, characters: number): void {
 }
 
 function boundedString(value: string, options: CloneOptions): JsonValue {
+  if (options.rejectUrlCredentials && containsUrlCredentials(value)) {
+    throw new TypeError(`${options.path} contains URL credentials`);
+  }
   if (value.length <= options.maxStringChars) {
     spendBudget(options, value.length);
     return value;
@@ -149,6 +232,9 @@ function unconvertible(options: CloneOptions, reason: string): JsonValue {
   markLossy(options);
   return null;
 }
+
+/** A value holds a credential-named key that its strict conversion refuses. */
+export class RecordedSensitiveKeyError extends TypeError {}
 
 function cloneJson(
   value: unknown,
@@ -286,10 +372,10 @@ function cloneRecord(
     spendBudget(options, key.length);
     if (
       options.sensitiveKeyMode !== "allow" &&
-      options.sensitiveKeys.has(key.toLowerCase())
+      (options.sensitiveKeys.has(key.toLowerCase()) || options.isSecretKey(key))
     ) {
       if (options.sensitiveKeyMode === "reject") {
-        throw new TypeError(
+        throw new RecordedSensitiveKeyError(
           `${options.path} contains unsupported sensitive key '${key}'`,
         );
       }
@@ -347,7 +433,7 @@ function largePayloadConversion(
   value: unknown,
   path: string,
   sensitiveKeyMode: SensitiveKeyMode,
-  sensitiveKeys: ReadonlySet<string>,
+  keys: SecretKeyRules,
 ): RecordedConversion {
   const options: CloneOptions = {
     budget: { chars: MAX_RECORDED_PAYLOAD_CHARS * 2 },
@@ -358,7 +444,7 @@ function largePayloadConversion(
     path,
     rejectLongStrings: false,
     sensitiveKeyMode,
-    sensitiveKeys,
+    ...keys,
   };
   return withoutFailing(options, () => {
     const converted = convert(value, options);
@@ -371,7 +457,10 @@ export function recordedPayloadConversion(
   value: unknown,
   path: string,
 ): RecordedConversion {
-  return largePayloadConversion(value, path, "allow", SENSITIVE_KEYS);
+  return largePayloadConversion(value, path, "allow", {
+    sensitiveKeys: SENSITIVE_KEYS,
+    isSecretKey: isCredentialKeyName,
+  });
 }
 
 /**
@@ -385,21 +474,31 @@ export function recordedPayloadJson(value: unknown, path: string): JsonValue {
  * Convert tool arguments or results with replay-sized bounds and credentials hidden.
  *
  * Redacting a credential makes an input lossy, so callers must preserve the
- * returned flag and refuse to use that value as a history cache key.
+ * returned flag and refuse to use that value as a history cache key. With
+ * `isSecretKey`, that check replaces the built-in credential key names, and
+ * only the transport keys, such as `authorization`, `cookie`, and `headers`,
+ * are redacted regardless.
  */
 export function recordedToolPayloadConversion(
   value: unknown,
   path: string,
+  isSecretKey?: SecretKeyClassifier,
 ): RecordedConversion {
-  return largePayloadConversion(value, path, "redact", SECRET_KEYS);
+  return largePayloadConversion(
+    value,
+    path,
+    "redact",
+    getSecretKeyRules(isSecretKey),
+  );
 }
 
 /** Convert tool arguments or results for recording without exposing credentials. */
 export function recordedToolPayloadJson(
   value: unknown,
   path: string,
+  isSecretKey?: SecretKeyClassifier,
 ): JsonValue {
-  return recordedToolPayloadConversion(value, path).value;
+  return recordedToolPayloadConversion(value, path, isSecretKey).value;
 }
 
 /**
@@ -411,11 +510,14 @@ export function recordedToolPayloadJson(
  * here would therefore take every tool that takes a `url`, `data`, `file`,
  * `request`, or `providerOptions` argument out of recorded history in every
  * replay, so only keys whose value is always a credential are redacted.
+ * `isSecretKey` replaces the built-in credential key names as it does for
+ * `recordedToolPayloadConversion`.
  */
 export function boundedRecorderConversion(
   value: unknown,
   path: string,
   limits?: RecordingLimits,
+  isSecretKey?: SecretKeyClassifier,
 ): RecordedConversion {
   const resolved = normalizeRecordingLimits(limits);
   const options: CloneOptions = {
@@ -432,7 +534,7 @@ export function boundedRecorderConversion(
     path,
     rejectLongStrings: false,
     sensitiveKeyMode: "redact",
-    sensitiveKeys: SECRET_KEYS,
+    ...getSecretKeyRules(isSecretKey),
   };
   return withoutFailing(options, () => {
     const converted = convert(value, options);
@@ -448,15 +550,17 @@ export function boundedRecorderJson(
   value: unknown,
   path: string,
   limits?: RecordingLimits,
+  isSecretKey?: SecretKeyClassifier,
 ): JsonValue {
-  return boundedRecorderConversion(value, path, limits).value;
+  return boundedRecorderConversion(value, path, limits, isSecretKey).value;
 }
 
 /**
  * Convert provider metadata for recording, hiding every sensitive key.
  *
- * Nothing looks a replay result up by metadata, so keys that carry credentials
- * and keys that carry blobs or transport envelopes are all replaced.
+ * Nothing looks a replay result up by metadata, so keys that carry credentials,
+ * the transport keys such as `headers` and `abortSignal`, and keys that carry
+ * blobs or transport envelopes are all replaced.
  */
 export function projectRecordedMetadata(
   value: unknown,
@@ -472,6 +576,7 @@ export function projectRecordedMetadata(
     rejectLongStrings: false,
     sensitiveKeyMode: "redact",
     sensitiveKeys: SENSITIVE_KEYS,
+    isSecretKey: (key) => isTransportKeyName(key) || isCredentialKeyName(key),
   };
   return withoutFailing(options, () => {
     const converted = convert(value, options);
@@ -501,9 +606,255 @@ export function projectRecordedInput(
     rejectLongStrings: true,
     sensitiveKeyMode: "reject",
     sensitiveKeys: SENSITIVE_KEYS,
+    isSecretKey: isCredentialKeyName,
   });
   assertJsonSize(converted, path, MAX_RECORDED_PAYLOAD_CHARS);
   return converted;
+}
+
+/** A Mastra replay value exceeded the replay input's byte, item, or depth budget. */
+export class MastraReplayBudgetError extends TypeError {}
+
+/** Restate a walk's budget error as the replay bound it exceeded. */
+function mastraReplayBudgetError(
+  error: unknown,
+  path: string,
+): MastraReplayBudgetError | undefined {
+  if (!(error instanceof TypeError)) return undefined;
+  if (
+    /recorded item count|maximum array length|maximum object size/.test(
+      error.message,
+    )
+  )
+    return new MastraReplayBudgetError(
+      `${path} exceeds maximum item count ${MAX_MASTRA_REPLAY_ITEMS}`,
+    );
+  if (/recorded JSON size|maximum string length/.test(error.message))
+    return new MastraReplayBudgetError(
+      `${path} exceeds maximum JSON bytes ${MAX_MASTRA_REPLAY_JSON_BYTES}`,
+    );
+  if (/maximum depth/.test(error.message))
+    return new MastraReplayBudgetError(
+      `${path} exceeds maximum depth ${MAX_RECORDED_PAYLOAD_DEPTH}`,
+    );
+  return undefined;
+}
+
+function assertMastraReplayBytes(value: JsonValue, path: string): void {
+  if (
+    Buffer.byteLength(JSON.stringify(value), "utf8") >
+    MAX_MASTRA_REPLAY_JSON_BYTES
+  )
+    throw new MastraReplayBudgetError(
+      `${path} exceeds maximum JSON bytes ${MAX_MASTRA_REPLAY_JSON_BYTES}`,
+    );
+}
+
+/**
+ * Strict, independently bounded JSON for the Mastra historical read-set.
+ *
+ * `isSecretKey` names the other keys that hold credentials, which are
+ * refused; by default no key is refused for its name alone. Transport keys
+ * such as `headers`, `authorization`, and `cookie` are refused regardless,
+ * as are URL credentials.
+ */
+export function strictMastraReplayValue(
+  value: unknown,
+  path = "Mastra memory replay",
+  isSecretKey: SecretKeyClassifier = isNeverSecretKey,
+): JsonValue {
+  const options: CloneOptions = {
+    budget: {
+      chars: MAX_MASTRA_REPLAY_JSON_BYTES * 2,
+      items: MAX_MASTRA_REPLAY_ITEMS,
+    },
+    lossy: false,
+    maxDepth: MAX_RECORDED_PAYLOAD_DEPTH,
+    maxItems: MAX_MASTRA_REPLAY_ITEMS,
+    maxStringChars: MAX_MASTRA_REPLAY_JSON_BYTES,
+    path,
+    rejectLongStrings: true,
+    rejectUrlCredentials: true,
+    sensitiveKeyMode: "reject",
+    ...getTransportKeyRules(isSecretKey),
+  };
+  let converted: JsonValue;
+  try {
+    converted = convert(value, options);
+  } catch (error) {
+    throw mastraReplayBudgetError(error, path) ?? error;
+  }
+  if (options.lossy) throw new TypeError(`${path} contains unsupported values`);
+  assertMastraReplayBytes(converted, path);
+  return converted;
+}
+
+/** Diagnostic evidence bounded by the Mastra replay budget, and why it lost information. */
+export interface MastraReplayEvidence {
+  value: JsonValue;
+  /** Set when the recorded value is truncated or degraded. */
+  lossReason?: string;
+}
+
+/** Record a replay budget overflow as a degraded marker that names the exceeded bound. */
+export function degradedMastraReplayEvidence(
+  path: string,
+  error: MastraReplayBudgetError,
+): MastraReplayEvidence {
+  return {
+    value: degradedPayload(path, error.message),
+    lossReason: error.message,
+  };
+}
+
+/**
+ * Bound already encoded Mastra evidence without failing the recording.
+ *
+ * The whole value shares the replay input's byte, item, and depth budget, and
+ * a value over it becomes a degraded marker. Per-value `limits` truncate
+ * strings, containers, and nesting as they do for tool payloads.
+ */
+export function boundMastraReplayEvidence(
+  value: JsonValue,
+  path: string,
+  limits?: RecordingLimits,
+): MastraReplayEvidence {
+  const resolved = limits && normalizeRecordingLimits(limits);
+  const options: CloneOptions = {
+    budget: {
+      chars: MAX_MASTRA_REPLAY_JSON_BYTES * 2,
+      items: MAX_MASTRA_REPLAY_ITEMS,
+    },
+    lossy: false,
+    maxDepth: resolved?.maxDepth ?? MAX_RECORDED_PAYLOAD_DEPTH,
+    maxItems: resolved?.maxItems ?? MAX_MASTRA_REPLAY_ITEMS,
+    maxStringChars: resolved?.maxStringChars ?? MAX_MASTRA_REPLAY_JSON_BYTES,
+    path,
+    rejectLongStrings: false,
+    sensitiveKeyMode: "allow",
+    sensitiveKeys: SECRET_KEYS,
+    isSecretKey: isCredentialKeyName,
+  };
+  try {
+    const converted = convert(value, options);
+    assertMastraReplayBytes(converted, path);
+    if (!options.lossy) return { value: converted };
+    return {
+      value: converted,
+      lossReason: resolved
+        ? `${path} exceeds the configured recordingLimits and was truncated`
+        : `${path} exceeds maximum depth ${MAX_RECORDED_PAYLOAD_DEPTH} and was truncated`,
+    };
+  } catch (error) {
+    const overflow =
+      error instanceof MastraReplayBudgetError
+        ? error
+        : mastraReplayBudgetError(error, path);
+    if (overflow) return degradedMastraReplayEvidence(path, overflow);
+    throw error;
+  }
+}
+
+/**
+ * Convert tool arguments or results on a Mastra memory replay's budget.
+ *
+ * A memory recording keeps a turn's tool results in full in its memory
+ * evidence, and replay serves a tool from history only when its recorded
+ * result was kept whole. The whole value therefore shares the replay input's
+ * byte and item budget instead of the tool recorder's, and per-value `limits`
+ * apply only when the application set them. Transport keys such as
+ * `headers` and `authorization` are always redacted, other keys only when
+ * `isSecretKey` names them, and a value over the budget becomes a degraded
+ * marker.
+ */
+export function mastraReplayToolConversion(
+  value: unknown,
+  path: string,
+  limits?: RecordingLimits,
+  isSecretKey: SecretKeyClassifier = isNeverSecretKey,
+): RecordedConversion {
+  const resolved = limits && normalizeRecordingLimits(limits);
+  const options: CloneOptions = {
+    budget: {
+      chars: MAX_MASTRA_REPLAY_JSON_BYTES * 2,
+      items: MAX_MASTRA_REPLAY_ITEMS,
+    },
+    lossy: false,
+    maxDepth: resolved?.maxDepth ?? MAX_RECORDED_PAYLOAD_DEPTH,
+    maxItems: resolved?.maxItems ?? MAX_MASTRA_REPLAY_ITEMS,
+    maxStringChars: resolved?.maxStringChars ?? MAX_MASTRA_REPLAY_JSON_BYTES,
+    path,
+    rejectLongStrings: false,
+    sensitiveKeyMode: "redact",
+    ...getTransportKeyRules(isSecretKey),
+  };
+  return withoutFailing(options, () => {
+    const converted = convert(value, options);
+    assertMastraReplayBytes(converted, path);
+    return converted;
+  });
+}
+
+/**
+ * Require a real version-3 envelope before using the larger Mastra bound.
+ *
+ * `isSecretKey` decides which keys name credentials, as for
+ * `strictMastraReplayValue`.
+ */
+export function projectMastraReplayInput(
+  value: unknown,
+  isSecretKey?: SecretKeyClassifier,
+): JsonValue {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !isPlainObject(value) ||
+    !Object.hasOwn(value, "mastra_memory_replay") ||
+    Object.keys(value).some(
+      (key) =>
+        !["mastra_memory_replay", "system_prompt", "prompt"].includes(key),
+    )
+  )
+    throw new TypeError("Mastra replay input requires a version-3 envelope");
+  const envelope = (value as Record<string, unknown>).mastra_memory_replay;
+  if (
+    typeof envelope !== "object" ||
+    envelope === null ||
+    !isPlainObject(envelope)
+  )
+    throw new TypeError(
+      "Mastra replay input requires a complete version-3 envelope",
+    );
+  const fields = envelope as Record<string, unknown>;
+  if (
+    fields.version !== 3 ||
+    fields.complete !== true ||
+    !Array.isArray(fields.reasons) ||
+    fields.reasons.length !== 0 ||
+    typeof fields.invocationId !== "string" ||
+    fields.invocationId.length === 0 ||
+    !Object.hasOwn(fields, "rawInput") ||
+    !Object.hasOwn(fields, "initialSnapshot") ||
+    !Object.hasOwn(fields, "configuration") ||
+    !Object.hasOwn(fields, "requestContext") ||
+    !Array.isArray(fields.files) ||
+    !Array.isArray(fields.omTape)
+  )
+    throw new TypeError(
+      "Mastra replay input requires a complete version-3 envelope",
+    );
+  try {
+    return strictMastraReplayValue(value, "Mastra replay input", isSecretKey);
+  } catch (error) {
+    // Recording already refused transport keys, so a key refused here is one
+    // the replaying agent's key options treat as secret and the recording
+    // agent's did not.
+    if (error instanceof RecordedSensitiveKeyError)
+      throw new RecordedSensitiveKeyError(
+        `${error.message}; the replaying agent's isSecretKey or nonSecretKeys options treat it as a secret, so replay with the options that recorded the turn`,
+      );
+    throw error;
+  }
 }
 
 /**
@@ -520,6 +871,7 @@ export function strictRecordedJson(value: unknown, path: string): JsonValue {
     rejectLongStrings: true,
     sensitiveKeyMode: "allow",
     sensitiveKeys: SENSITIVE_KEYS,
+    isSecretKey: isCredentialKeyName,
   });
   assertJsonSize(converted, path, MAX_RECORDED_JSON_CHARS);
   return converted;

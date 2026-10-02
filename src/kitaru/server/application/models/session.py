@@ -97,6 +97,7 @@ class SessionUpdate(FrozenModel):
 
     status: SessionStatus | None = None
     outputs: Any = None
+    inputs: Any = None
     output_text_selector: str | None = None
     error: str | None = None
     ended_at: datetime | None = None
