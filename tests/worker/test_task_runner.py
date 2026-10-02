@@ -617,6 +617,37 @@ async def test_completion_conflict_agent_with_incomplete_session(
     assert request.error == f"Result session {session.id} is failed, not completed."
 
 
+async def test_completion_conflict_agent_with_failed_session_names_its_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An agent completion conflict carries the failed result session's error."""
+    _patch_run_task_process(monkeypatch, _fake_run_task_process(0))
+    client = FakeKitaruAPIClient()
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    spec = make_agent_spec(task.id)
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    client.tasks.update_responses.append(running_task)
+    client.tasks.update_responses.append(APIError(409, "conflict"))
+    client.tasks.get_responses.append(running_task)
+    session = make_session_response(
+        status=SessionStatus.FAILED, error="No history result for tool lookup"
+    )
+    client.sessions.list_responses.append(Page(items=[session], next_cursor=None))
+    client.tasks.update_responses.append(
+        running_task.model_copy(update={"status": TaskStatus.FAILED})
+    )
+
+    await TaskRunner(_ctx(tmp_path, client)).execute(
+        make_claimed(task, spec), asyncio.Event()
+    )
+
+    _, request = client.tasks.update_calls[-1]
+    assert request.error == (
+        f"Result session {session.id} is failed, not completed. "
+        "No history result for tool lookup"
+    )
+
+
 async def test_completion_conflict_non_agent_missing_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
