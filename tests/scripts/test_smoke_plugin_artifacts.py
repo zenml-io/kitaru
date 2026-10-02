@@ -1,8 +1,11 @@
+import subprocess
 from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
 from scripts.smoke_plugin_artifacts import SmokeFailure, _validate_wheel_metadata
+
+from scripts import smoke_plugin_artifacts
 
 VALID_METADATA = """Metadata-Version: 2.4
 Name: kitaru-example
@@ -65,3 +68,39 @@ def test_wheel_metadata_rejects_an_invalid_project_url(tmp_path: Path) -> None:
 
     with pytest.raises(SmokeFailure, match="invalid Project-URL"):
         _validate_wheel_metadata(wheel, "kitaru-example", "1.0.0")
+
+
+def test_sqlalchemy_probe_reports_installed_versions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def run(
+        command: list[str | Path], *, environment: dict[str, str], cwd: Path
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            command, 0, stdout="SQLAlchemy==2.1.1 greenlet==3.5.3\n", stderr=""
+        )
+
+    monkeypatch.setattr(smoke_plugin_artifacts, "_run", run)
+
+    smoke_plugin_artifacts._probe_sqlalchemy(tmp_path / "python", tmp_path, {})
+
+    assert capsys.readouterr().out == "SQLAlchemy==2.1.1 greenlet==3.5.3\n"
+
+
+def test_sqlalchemy_probe_rejects_missing_async_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def run(
+        command: list[str | Path], *, environment: dict[str, str], cwd: Path
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="ValueError: the greenlet library is required to use this function",
+        )
+
+    monkeypatch.setattr(smoke_plugin_artifacts, "_run", run)
+
+    with pytest.raises(SmokeFailure, match="the greenlet library is required"):
+        smoke_plugin_artifacts._probe_sqlalchemy(tmp_path / "python", tmp_path, {})
