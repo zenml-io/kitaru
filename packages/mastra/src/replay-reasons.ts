@@ -45,6 +45,8 @@ export type MastraReplayReason =
   | "memory_mutation_failed"
   /** An observational-memory model result could not be recorded. */
   | "om_tape_incomplete"
+  /** A named application processor decision or its model evidence was not captured. */
+  | "processor_decision_incomplete"
   /** Observational-memory work did not settle before the finalization deadline. */
   | "om_settle_timeout"
   /** The model request sent to the provider could not be recorded faithfully. */

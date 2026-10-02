@@ -401,6 +401,51 @@ For skills, set `skillsDirectory` to the directory containing your skill folders
 
 The factory must use the supplied memory and workspace instances. Processors and tools are application code: their dependencies must use these supplied bindings for replay isolation. Kitaru does not sandbox arbitrary callbacks or prevent code from opening another database connection or making a network request. Workflows, subagents, provider-executed tools, approval/resume modes, dynamic tool inventories, `prepareStep`, output processors, and secondary structured-output models remain unsupported.
 
+### Record processor decisions
+
+Use the factory's per-turn `decisions` binding when an input processor calls a model to choose skills or make another decision. Declare the decision in the factory, then call `run()` from the processor's `processInput` hook, which runs once per turn. Keep message changes outside `run()` so both live and pinned replay apply the returned decision to the current messages.
+
+```ts
+const agent = createMemoryReplayAgent(({ memory, decisions }) => {
+  const router = decisions.define("skill-router");
+  const classifier = router.instrumentModel(classifierModel);
+
+  return {
+    id: "support",
+    name: "Support",
+    model: actorModel,
+    memory,
+    inputProcessors: [{
+      id: "skill-router",
+      async processInput({ messages }) {
+        const skills = await router.run(() => classifySkills(messages, classifier));
+        return injectSkills(messages, skills);
+      },
+    }],
+  };
+}, memoryReplayOptions);
+```
+
+Here `classifierModel` is your public AI SDK model object, `classifySkills` calls that supplied model, and `injectSkills` applies the returned skill IDs. A model hidden inside `classifySkills` is not automatically recorded. Instrumentation supports nonstreaming `doGenerate` calls; streaming classifier calls keep their native behavior but make decision capture incomplete. This helper is available only on the isolated memory factory, not on the history-only `KitaruAgent` wrapper.
+
+A baseline records a span named `skill-router` with the returned decision in `outputs`. Calls through the instrumented classifier become child `llm_call` nodes with the prompt, response content, model identity and token usage. The configured `costCalculator` prices the classifier using its own model identity; cost stays unavailable without a calculator. Custom evaluators can read these nodes to check selected skills and compare baseline and replay decisions.
+
+Replay runs the callback live by default. To reuse the baseline's decision instead, include the reserved Mastra setting in the existing replay override:
+
+```json
+{
+  "model_params": {
+    "mastraProcessorDecisions": "pinned"
+  }
+}
+```
+
+`"live"` explicitly selects the default. The setting applies to all declared decisions for that turn, can accompany actor settings such as `maxOutputTokens`, and is consumed by the Mastra adapter before model settings reach the actor. It requires no new server API field. Pinned replay returns the recorded decision without calling the callback or classifier, while the main agent still runs. It validates all decision declarations and recorded results before processors or models execute. Keep the factory free of model calls and other execution side effects; this preflight runs after the factory has constructed its configuration.
+
+Decision results are stored separately from the OM tape in the replay input's `processorDecisions` extension, covered by the envelope's key-order hash and replay-data limits. Older baselines still support live replay; pinning requires a new baseline with complete decision capture and matching declarations. Failed callbacks, unsupported results, duplicate invocations, streaming classifier calls, truncated classifier evidence and failed diagnostic writes make that decision recording incomplete and prevent pinning. They do not by themselves disable live memory replay. If optional decision data would exceed the memory envelope's shared budget, Kitaru omits that extension and reports incomplete decision capture, preserving the otherwise valid memory replay input. The helper never caches a repeated baseline call: it executes each callback normally, but records the duplicate as incomplete. Use `processInput`, rather than `processInputStep`, for once-per-turn decisions.
+
+On a baseline or live replay, `run()` returns the original application result and propagates the original application exception. Recording failures never cause the callback to run again. Diagnostic uploads and cost calculation run in the background, with bounded finalization; the callback does not wait for Kitaru network writes. Local result capture still has a bounded CPU cost. Capture failures are reported through `onRecordingError` with reason `processor_decision_incomplete`. The decision follows the same credential redaction policy as other memory replay data. Pinning the returned decision does not add a guarantee about skill files or other dependencies read outside the callback.
+
 ### Tool policies and evidence
 
 Native memory tools execute against the isolated replay store, including under `history` with `on_miss: "fail"`. External tools, including tools added by a processor, follow the replay tool policy. A tool named `updateWorkingMemory` does not acquire the native-memory exemption by name. Use history with a failing miss when external tools must not execute.
