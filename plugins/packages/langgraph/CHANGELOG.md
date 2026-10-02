@@ -2,7 +2,10 @@
 
 ## Unreleased
 
+- Record the requested and served model, provider, token usage, and estimated cost on model-call nodes.
 - Preserve LangGraph callback names on recorded chain spans and document upstream middleware input omissions.
+- Record tool attempts rejected by middleware, including Deep Agents parallel same-file mutations, while preserving native error results and avoiding duplicate execution or substitution records.
+- Clarify that Deep Agents built-in middleware runs before Kitaru replay middleware.
 
 ## 0.2.0 - 2026-09-21
 

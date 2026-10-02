@@ -99,6 +99,8 @@ export interface MastraMemoryReplayInput {
   requestContext: Record<string, unknown>;
   files: MastraRecordedFileSource[];
   omTape?: JsonValue[];
+  /** Named application processor results, independent of the OM result tape. */
+  processorDecisions?: JsonValue;
   /**
    * When the recorded turn started; replay evaluates memory time checks at
    * this time. Defaults to the envelope's creation time and is absent only in
@@ -1165,6 +1167,7 @@ export function finalizeMemoryReplayEnvelope(
   attachmentTokens: AttachmentTokenCounts = {},
   allowUnstoredFiles = false,
   isSecretKey?: SecretKeyClassifier,
+  processorDecisions?: JsonValue,
 ): MastraMemoryReplayEnvelope {
   const final = withKeyOrder(
     sanitize(
@@ -1172,6 +1175,7 @@ export function finalizeMemoryReplayEnvelope(
         {
           ...envelope,
           omTape,
+          ...(processorDecisions === undefined ? {} : { processorDecisions }),
           ...(Object.keys(attachmentTokens).length > 0
             ? { attachmentTokens }
             : {}),
@@ -1325,6 +1329,9 @@ function decodeConvertedMemoryReplayEnvelope(
       ? { omTape: value.omTape as JsonValue[], turnStartedAt }
       : {}),
     ...(attachmentTokens ? { attachmentTokens } : {}),
+    ...(value.processorDecisions === undefined
+      ? {}
+      : { processorDecisions: value.processorDecisions as JsonValue }),
   };
 }
 

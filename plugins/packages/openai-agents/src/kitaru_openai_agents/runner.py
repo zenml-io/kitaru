@@ -225,7 +225,11 @@ class KitaruRunner(Generic[TContext]):
             await _finalize_failure_and_close(recorder, error)
             raise
 
-        options["hooks"] = recorder.compose_hooks(options.get("hooks"))
+        run_config = options.get("run_config")
+        options["hooks"] = recorder.compose_hooks(
+            options.get("hooks"),
+            RunConfig(**run_config) if isinstance(run_config, dict) else run_config,
+        )
         try:
             result = await Runner.run(run_agent, run_input, **options)
         except AgentsException as error:

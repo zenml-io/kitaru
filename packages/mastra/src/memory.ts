@@ -30,6 +30,10 @@ export {
   restoreMemoryReplayEnvelope,
   validateMemorySnapshot,
 } from "./memory-snapshot.js";
+export type {
+  ProcessorDecision,
+  ProcessorDecisions,
+} from "./processor-decisions.js";
 export type { MastraReplayReason } from "./replay-reasons.js";
 export type {
   DeclareMemoryReplayFiles,

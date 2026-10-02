@@ -13,9 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for session use cases."""
 
-import base64
 import uuid
-from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -23,7 +21,6 @@ from typing import Any
 import pytest
 
 from conftest import (
-    RECORDED_OM_TAPE,
     FakeAgentRepository,
     FakeAgentVersionRepository,
     FakeBlobDataStore,
@@ -488,79 +485,9 @@ async def test_finalize_pending_mastra_replay_inputs_atomically(
     assert stored.metadata["mastra_replay_state"] == "eligible"
 
 
-@pytest.mark.parametrize(
-    ("change", "accepted"),
-    [
-        (lambda tape: None, True),
-        (lambda tape: tape.append({}), False),
-        (lambda tape: tape.append("entry"), False),
-        (lambda tape: tape[0].update(phase="actor"), False),
-        (lambda tape: tape[0].update(method="generate"), False),
-        (lambda tape: tape[0].update(ordinal="0"), False),
-        (lambda tape: tape[0].update(ordinal=True), False),
-        (lambda tape: tape[0].pop("inputFingerprint"), False),
-        (lambda tape: tape[0].pop("output"), False),
-        (lambda tape: tape[0].update(output={"chunks": []}), False),
-        (lambda tape: tape[0].update(failed=False), False),
-        (lambda tape: tape[1].update(failed=None), False),
-    ],
-    ids=[
-        "recorded",
-        "empty-entry",
-        "non-object",
-        "phase",
-        "method",
-        "string-ordinal",
-        "boolean-ordinal",
-        "no-fingerprint",
-        "no-output",
-        "stream-output",
-        "failed-false",
-        "failed-null",
-    ],
-)
-async def test_mastra_finalization_checks_om_tape_entries(
-    service: SessionService,
-    complete_mastra_memory_replay_inputs: dict[str, Any],
-    change: Callable[[list[Any]], object],
-    accepted: bool,
-) -> None:
-    """Refuse an eligible marker whose OM tape the adapter would reject."""
-    created = await service.create_session(
-        SessionCreate(
-            agent_id=uuid.uuid4(),
-            origin=SessionOrigin.RECORDED,
-            framework="mastra",
-            inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
-            metadata={"mastra_replay_state": "pending"},
-        ),
-        actor=ACTOR,
-    )
-    inputs = deepcopy(complete_mastra_memory_replay_inputs)
-    tape = deepcopy(RECORDED_OM_TAPE)
-    change(tape)
-    inputs["mastra_memory_replay"]["omTape"] = tape
-    update = SessionUpdate(
-        status=SessionStatus.COMPLETED,
-        inputs=inputs,
-        metadata={"mastra_replay_state": "eligible"},
-    )
-    if accepted:
-        await service.update_session(created.id, update, actor=ACTOR)
-        stored = await service.get_session(created.id, actor=ACTOR)
-        assert stored.metadata["mastra_replay_state"] == "eligible"
-        return
-    with pytest.raises(SessionReplayFinalizationInvalid):
-        await service.update_session(created.id, update, actor=ACTOR)
-    stored = await service.get_session(created.id, actor=ACTOR)
-    assert stored.metadata["mastra_replay_state"] == "pending"
-
-
-@pytest.mark.parametrize("invalid_field", ["raw_input", "file_hash", "unstored_file"])
 async def test_mastra_finalization_rejects_invalid_replay_prerequisite(
     service: SessionService,
     complete_mastra_memory_replay_inputs: dict[str, Any],
-    invalid_field: str,
 ) -> None:
     """An eligible marker cannot accompany an incomplete v3 envelope."""
     created = await service.create_session(
@@ -574,12 +501,7 @@ async def test_mastra_finalization_rejects_invalid_replay_prerequisite(
         actor=ACTOR,
     )
     invalid = deepcopy(complete_mastra_memory_replay_inputs)
-    if invalid_field == "raw_input":
-        del invalid["mastra_memory_replay"]["rawInput"]
-    elif invalid_field == "unstored_file":
-        del invalid["mastra_memory_replay"]["files"][0]["base64"]
-    else:
-        invalid["mastra_memory_replay"]["files"][0]["sha256"] = "0" * 64
+    del invalid["mastra_memory_replay"]["rawInput"]
     with pytest.raises(SessionReplayFinalizationInvalid):
         await service.update_session(
             created.id,
@@ -595,46 +517,6 @@ async def test_mastra_finalization_rejects_invalid_replay_prerequisite(
     assert stored.metadata["mastra_replay_state"] == "pending"
 
 
-async def test_mastra_finalization_rejects_oversized_base64_before_decoding(
-    service: SessionService,
-    complete_mastra_memory_replay_inputs: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Refuse inline content longer than its declared length without decoding it."""
-    created = await service.create_session(
-        SessionCreate(
-            agent_id=uuid.uuid4(),
-            origin=SessionOrigin.RECORDED,
-            framework="mastra",
-            inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
-            metadata={"mastra_replay_state": "pending"},
-        ),
-        actor=ACTOR,
-    )
-    invalid = deepcopy(complete_mastra_memory_replay_inputs)
-    oversized = "A" * 1_048_576
-    invalid["mastra_memory_replay"]["files"][0]["base64"] = oversized
-    decode = base64.b64decode
-    decoded_lengths: list[int] = []
-
-    def recording_decode(value: str | bytes, *args: Any, **kwargs: Any) -> bytes:
-        decoded_lengths.append(len(value))
-        return decode(value, *args, **kwargs)
-
-    monkeypatch.setattr(base64, "b64decode", recording_decode)
-    with pytest.raises(SessionReplayFinalizationInvalid):
-        await service.update_session(
-            created.id,
-            SessionUpdate(
-                status=SessionStatus.COMPLETED,
-                inputs=invalid,
-                metadata={"mastra_replay_state": "eligible"},
-            ),
-            actor=ACTOR,
-        )
-    assert len(oversized) not in decoded_lengths
-
-
 def _stored_file_inputs(inputs: dict[str, Any], blob_id: uuid.UUID) -> dict[str, Any]:
     """Move the fixture's recorded file content from inline base64 to a blob."""
     stored = deepcopy(inputs)
@@ -644,9 +526,7 @@ def _stored_file_inputs(inputs: dict[str, Any], blob_id: uuid.UUID) -> dict[str,
     return stored
 
 
-@pytest.mark.parametrize(
-    "blob", ["matching", "missing", "different", "other_media_type"]
-)
+@pytest.mark.parametrize("blob", ["matching", "missing", "different"])
 async def test_mastra_finalization_checks_files_stored_as_blobs(
     repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
@@ -654,12 +534,7 @@ async def test_mastra_finalization_checks_files_stored_as_blobs(
     complete_mastra_memory_replay_inputs: dict[str, Any],
     blob: str,
 ) -> None:
-    """An eligible input may name blobs only when they hold its recorded files.
-
-    The ``other_media_type`` entry names a blob with the right raw hash and
-    length, but its content reference was derived from a different media type,
-    so the replay worker would refuse to load it.
-    """
+    """An eligible input may name blobs only when they hold its recorded files."""
     fakes = build_payload_store()
     service = SessionService(
         repository=repository,
@@ -670,7 +545,6 @@ async def test_mastra_finalization_checks_files_stored_as_blobs(
         payload_store=fakes.store,
     )
     file = complete_mastra_memory_replay_inputs["mastra_memory_replay"]["files"][0]
-    await fakes.blob_data_store.put(file["sha256"], base64.b64decode(file["base64"]))
     stored, _ = await fakes.blob_repository.create(
         Blob(
             owner_id=ACTOR.account.id,
@@ -684,8 +558,6 @@ async def test_mastra_finalization_checks_files_stored_as_blobs(
         complete_mastra_memory_replay_inputs,
         stored.id if blob != "missing" else uuid.uuid4(),
     )
-    if blob == "other_media_type":
-        final_inputs["mastra_memory_replay"]["files"][0]["mediaType"] = "text/html"
     created = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),

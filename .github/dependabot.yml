@@ -277,6 +277,7 @@ updates:
           - langfuse
           - langsmith
           - logfire
+          - mlflow-tracing
         update-types:
           - minor
           - patch
@@ -312,6 +313,7 @@ updates:
           - langfuse
           - langsmith
           - logfire
+          - mlflow-tracing
         update-types:
           - minor
           - patch

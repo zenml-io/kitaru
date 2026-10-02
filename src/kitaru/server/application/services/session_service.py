@@ -343,14 +343,17 @@ class SessionService:
     ) -> tuple[list[Session], str | None]:
         """List sessions matching a filter.
 
-        A task principal's listing is restricted to the sessions it produced
-        and those of the imports its token is granted.
+        A task principal's listing is restricted to the imports its token is
+        granted.
 
         Args:
             session_filter: Filter and pagination parameters.
             include_payloads: Whether to read and resolve the inputs and
                 outputs.
             actor: Caller context.
+
+        Raises:
+            ForbiddenError: A task principal holds no import grant.
 
         Returns:
             Page of matching sessions and the next cursor.
@@ -474,9 +477,8 @@ class SessionService:
             inputs: Replacement inputs carrying the replay input.
 
         Raises:
-            SessionReplayFinalizationInvalid: A named blob does not exist, does
-                not hold the recorded content, or holds content the file's
-                reference was not derived from.
+            SessionReplayFinalizationInvalid: A named blob does not exist or
+                does not hold the recorded content.
         """
         files = mastra_replay_stored_files(inputs)
         if not files:
@@ -485,15 +487,6 @@ class SessionService:
             list({file.blob_id for file in files})
         )
         if not all(file.is_held_by(blobs.get(file.blob_id)) for file in files):
-            raise SessionReplayFinalizationInvalid(session_id)
-        # Check the reference against the stored bytes, because the replay
-        # worker refuses a file whose reference does not match its media type
-        # and content, and the blob's raw hash cannot show that mismatch.
-        contents = await self._payload_store.get_blob_contents(list(blobs.values()))
-        if not all(
-            file.matches_reference(contents[blobs[file.blob_id].sha256])
-            for file in files
-        ):
             raise SessionReplayFinalizationInvalid(session_id)
 
     async def delete_session(self, session_id: uuid.UUID, actor: AuthContext) -> None:

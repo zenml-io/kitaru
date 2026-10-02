@@ -23,6 +23,7 @@ from kitaru.server.application.models.auth import (
     TaskPrincipal,
 )
 from kitaru.server.application.models.session import SessionFilter
+from kitaru.server.domain.base import ForbiddenError
 from kitaru.server.domain.blob import BlobAccessDenied
 from kitaru.server.domain.session import (
     Session,
@@ -38,12 +39,7 @@ from kitaru.server.domain.task import (
     ScriptPluginSpec,
     TaskSpec,
 )
-from kitaru.server.filtering import (
-    AndExpression,
-    FilterCondition,
-    FilterExpression,
-    OrExpression,
-)
+from kitaru.server.filtering import AndExpression, FilterCondition
 
 
 async def check_task_attempt(actor: AuthContext, tasks: TaskRepository) -> None:
@@ -183,35 +179,28 @@ def check_task_blob_read(blob_id: uuid.UUID, actor: AuthContext) -> None:
 def scope_task_session_filter(
     session_filter: SessionFilter, actor: AuthContext
 ) -> SessionFilter:
-    """Restrict a session listing to the sessions a task principal may read.
+    """Restrict a session listing to the imports a task principal is granted.
 
-    A task principal lists the sessions it produced and those created by the
-    imports it is granted. An account principal's filter passes through
-    unchanged.
+    An account principal's filter passes through unchanged.
 
     Args:
         session_filter: Filter the caller sent.
         actor: Caller context.
 
+    Raises:
+        ForbiddenError: A task principal holds no import grant.
+
     Returns:
-        Filter restricted to the task's own and granted-import sessions.
+        Filter restricted to the granted imports.
     """
     if not isinstance(actor.principal, TaskPrincipal):
         return session_filter
-    principal = actor.principal
-    scope: FilterExpression = FilterCondition(
-        field="task_id", op=FilterOp.EQ, value=principal.task_id
-    )
-    import_ids = principal.grants.get(GrantKind.IMPORT)
-    if import_ids:
-        scope = OrExpression(
-            operands=(
-                scope,
-                FilterCondition(
-                    field="import_id", op=FilterOp.IN, value=sorted(import_ids)
-                ),
-            )
+    import_ids = actor.principal.grants.get(GrantKind.IMPORT)
+    if not import_ids:
+        raise ForbiddenError(
+            f"Task {actor.principal.task_id} is not granted a session listing"
         )
+    scope = FilterCondition(field="import_id", op=FilterOp.IN, value=sorted(import_ids))
     expression = (
         scope
         if session_filter.expression is None
