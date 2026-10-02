@@ -1,5 +1,6 @@
 """Verify the hosted TypeScript trial retains suites, coverage, and failures."""
 
+import fnmatch
 import json
 import os
 import shlex
@@ -20,7 +21,10 @@ EXAMPLES = [
 CANONICAL = [
     "kitaru",
     "kitaru-mastra",
-    "kitaru-mastra-compat",
+    "kitaru-mastra-compat-1.68",
+    "kitaru-mastra-compat-1.69",
+    "kitaru-mastra-compat-1.70",
+    "kitaru-mastra-compat-1.71",
     "kitaru-vercel-ai",
     *EXAMPLES,
 ]
@@ -139,19 +143,26 @@ def test_trial_retains_canonical_suites_and_postgres_coverage_environment(
     selected_packages = [
         tokens[index + 1] for index, token in enumerate(tokens) if token == "--filter"
     ]
+    manifests = {
+        manifest["name"]: (path, manifest)
+        for path in (
+            *repo_root.glob("packages/*/package.json"),
+            *repo_root.glob("packages/mastra-compat/*/package.json"),
+            *repo_root.glob("examples/typescript/*/package.json"),
+        )
+        for manifest in [json.loads(path.read_text())]
+    }
+    selected_packages = [
+        package
+        for pattern in selected_packages
+        for package in sorted(manifests)
+        if fnmatch.fnmatchcase(package, pattern)
+    ]
     assert [
         call["args"][1]
         for call, run in zip(calls, metadata["runs"], strict=True)
         if run["canonical"]
     ] == selected_packages
-    manifests = {
-        manifest["name"]: (path, manifest)
-        for path in (
-            *repo_root.glob("packages/*/package.json"),
-            *repo_root.glob("examples/typescript/*/package.json"),
-        )
-        for manifest in [json.loads(path.read_text())]
-    }
     for package in selected_packages:
         path, manifest = manifests[package]
         expected_script = (

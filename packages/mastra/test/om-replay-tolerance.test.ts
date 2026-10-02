@@ -279,6 +279,11 @@ it("replays a baseline whose slow observer merged buffer rounds without live OM 
     observation: { messageTokens: 1200, bufferTokens: 0.2 },
     observe: () => new Promise((resolve) => setTimeout(resolve, delayMs)),
     toolSteps: () => 5,
+    // Keep the last step's pending messages about 100 tokens past
+    // `messageTokens` on every tested Mastra. The instant replay runs more
+    // buffer rounds, and their markers add about 20 tokens, so a baseline
+    // just under the threshold would observe only in the replay.
+    evidenceRepeats: 34,
   });
   const baseline = await recordBaseline(fixture);
   expect(baseline?.metadata).toMatchObject({ mastra_replay_state: "eligible" });

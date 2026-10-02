@@ -27,7 +27,10 @@ const examples = [
 const canonicalPackages = [
   "kitaru",
   "kitaru-mastra",
-  "kitaru-mastra-compat",
+  "kitaru-mastra-compat-1.68",
+  "kitaru-mastra-compat-1.69",
+  "kitaru-mastra-compat-1.70",
+  "kitaru-mastra-compat-1.71",
   "kitaru-vercel-ai",
   ...examples,
 ];
