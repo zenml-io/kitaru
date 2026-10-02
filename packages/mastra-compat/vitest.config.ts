@@ -23,6 +23,7 @@ const MEMORY_FACTORY_TESTS = [
   "om-result-tape",
   "postgres-memory-replay",
   "processor-replay",
+  "processor-decision-replay",
   "replay-clock",
   "replay-diagnostics",
   "replay-fidelity",
