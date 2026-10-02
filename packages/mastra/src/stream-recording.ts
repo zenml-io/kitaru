@@ -143,7 +143,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function getMastraVersion(): string {
+export function getMastraVersion(): string {
   let metadata: unknown;
   try {
     metadata = createRequire(import.meta.url)("@mastra/core/package.json");
