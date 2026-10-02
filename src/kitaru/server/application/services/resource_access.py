@@ -25,8 +25,13 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.base import ForbiddenError
 from kitaru.server.domain.blob import BlobAccessDenied
-from kitaru.server.domain.session import Session, SessionAccessDenied
+from kitaru.server.domain.session import (
+    Session,
+    SessionAccessDenied,
+    mastra_replay_stored_files,
+)
 from kitaru.server.domain.task import (
+    AgentTaskDetails,
     AnalysisTaskDetails,
     BlobImportSourceSpec,
     EvaluationTaskDetails,
@@ -86,6 +91,14 @@ def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
         details.source, BlobImportSourceSpec
     ):
         blobs.add(details.source.blob_id)
+    # Grant recorded-file blobs only to replay tasks, whose inputs the server
+    # copied from a recorded baseline session. An ordinary session run takes
+    # its inputs verbatim from the caller and never reads recorded files, so
+    # blob ids named there must not turn into download rights for its token.
+    if isinstance(details, AgentTaskDetails) and details.replay_id is not None:
+        blobs.update(
+            file.blob_id for file in mastra_replay_stored_files(details.inputs)
+        )
     grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
     if sessions:
         grants[GrantKind.SESSION] = frozenset(sessions)

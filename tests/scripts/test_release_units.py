@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 from packaging.version import Version
 from scripts.release_units import (
     ReleaseInventoryError,
@@ -36,6 +37,7 @@ EXPECTED_UNITS = {
     "logfire-importer": "kitaru-logfire-importer",
     "langsmith-importer": "kitaru-langsmith-importer",
     "mastra-importer": "kitaru-mastra-importer",
+    "mlflow-importer": "kitaru-mlflow-importer",
     "openai-agents": "kitaru-openai-agents",
     "phoenix-importer": "kitaru-phoenix-importer",
     "post-import-insights": "kitaru-post-import-insights",
@@ -51,6 +53,7 @@ EXPECTED_DEFAULT_DISTRIBUTIONS = {
     "kitaru-langfuse-importer",
     "kitaru-logfire-importer",
     "kitaru-langsmith-importer",
+    "kitaru-mlflow-importer",
     "kitaru-phoenix-importer",
 }
 
@@ -147,6 +150,7 @@ def test_default_requirements_are_derived_from_release_units() -> None:
         "kitaru-jsonl-importer==0.2.0",
         "kitaru-langfuse-importer==0.4.0",
         "kitaru-langsmith-importer==0.4.0",
+        "kitaru-mlflow-importer==0.1.0",
         "kitaru-logfire-importer==0.4.0",
         "kitaru-phoenix-importer==0.4.0",
     }
@@ -625,7 +629,7 @@ def test_plugin_matrix_is_generated_from_the_plugin_units_in_three_shards() -> N
 
     shards = matrix["include"]
     assert [shard["shard"] for shard in shards] == ["1/3", "2/3", "3/3"]
-    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [5, 5, 4]
+    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [5, 5, 5]
     assert [
         package_path
         for shard in shards
@@ -839,6 +843,22 @@ def test_ci_quickstart_example_job_enforces_the_walkthrough() -> None:
     assert "uv run --no-sync python scripts/run_ci_e2e.py" in example_job
 
 
+def test_core_release_requires_every_python_ci_matrix_check() -> None:
+    inventory = load_inventory()
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    test_job = workflow["jobs"]["test"]
+    emitted_checks = {
+        test_job["name"].replace("${{ matrix.name }}", entry["name"])
+        for entry in test_job["strategy"]["matrix"]["include"]
+    }
+    core = next(unit for unit in inventory.units if unit.slug == "kitaru")
+    required_python_checks = {
+        check for check in core.required_checks if check.startswith("test (")
+    }
+
+    assert required_python_checks == emitted_checks
+
+
 def test_each_unit_exposes_its_exact_release_critical_checks() -> None:
     inventory = load_inventory()
     plugin_checks = build_plugin_checks(inventory)
@@ -870,7 +890,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 15 release units."),
+        (["validate"], "Validated 16 release units."),
         (
             [
                 "propose-core-version",

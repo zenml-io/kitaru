@@ -1,0 +1,600 @@
+{
+  "traces": [
+    {
+      "info": {
+        "trace_id": "tr-ee15aac697468bb79bddab85a40f8412",
+        "trace_location": {
+          "type": "MLFLOW_EXPERIMENT",
+          "mlflow_experiment": {
+            "experiment_id": "1"
+          }
+        },
+        "request_time": "2026-09-29T14:15:40.584Z",
+        "state": "OK",
+        "trace_metadata": {
+          "mlflow.source.type": "LOCAL",
+          "mlflow.source.name": "plugins/tests/importers/fixtures/mlflow/3.16.1/generate.py",
+          "mlflow.trace.cost": "{\"input_cost\": 5.7e-06, \"output_cost\": 6.5999999999999995e-06, \"total_cost\": 1.2299999999999999e-05}",
+          "mlflow.source.git.branch": "feat/mlflow-trace-importer-3f26e7",
+          "mlflow.trace.sizeBytes": "4728",
+          "mlflow.trace.sizeStats": "{\"total_size_bytes\": 4728, \"num_spans\": 2, \"max\": 1900, \"p25\": 1612, \"p50\": 1708, \"p75\": 1804}",
+          "mlflow.source.git.repoURL": "https://github.com/zenml-io/kitaru.git",
+          "mlflow.source.git.commit": "8d57366ef64af160bf4092f37e1ce013f3b4d73f",
+          "mlflow.trace.tokenUsage": "{\"input_tokens\": 42, \"output_tokens\": 11, \"total_tokens\": 53, \"cache_read_input_tokens\": 8}",
+          "mlflow.traceInputs": "{\"messages\": [{\"role\": \"user\", \"content\": \"Say hi\", \"tool_calls\": null, \"refusal\": null, \"tool_call_id\": null}]}",
+          "mlflow.trace.infoFinalized": "true",
+          "mlflow.user": "fixture-user",
+          "mlflow.traceOutputs": "{\"choices\": [{\"message\": {\"role\": \"assistant\", \"content\": \"It is 14C and cloudy in Delft.\", \"tool_calls\": null, \"refusal\": null, \"tool_call_id\": null}, \"finish_reason\": null}]}",
+          "mlflow.trace_schema.version": "3"
+        },
+        "tags": {
+          "mlflow.traceName": "ChatOpenAI",
+          "mlflow.trace.spansLocation": "TRACKING_STORE",
+          "mlflow.artifactLocation": "mlflow-artifacts:/kitaru-fixtures/traces/tr-ee15aac697468bb79bddab85a40f8412/artifacts"
+        },
+        "request_preview": "Say hi",
+        "response_preview": "It is 14C and cloudy in Delft.",
+        "execution_duration_ms": 6
+      },
+      "data": {
+        "spans": [
+          {
+            "trace_id": "7hWqxpdGi7eb3auFpA+EEg==",
+            "span_id": "RvCTceBvZ4g=",
+            "parent_span_id": null,
+            "name": "ChatOpenAI",
+            "start_time_unix_nano": 1790691340584189000,
+            "end_time_unix_nano": 1790691340590709000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-ee15aac697468bb79bddab85a40f8412\"",
+              "mlflow.spanType": "\"CHAT_MODEL\"",
+              "mlflow.spanInputs": "{\"messages\": [{\"role\": \"user\", \"content\": \"Say hi\", \"tool_calls\": null, \"refusal\": null, \"tool_call_id\": null}]}",
+              "invocation_params": "{\"model\": \"gpt-4o-mini\", \"model_name\": \"gpt-4o-mini\", \"stream\": false, \"_type\": \"openai-chat\", \"stop\": null}",
+              "options": "{\"stop\": null}",
+              "batch_size": "1",
+              "metadata": "{\"ls_provider\": \"openai\", \"ls_model_name\": \"gpt-4o-mini\", \"ls_model_type\": \"chat\", \"ls_temperature\": null, \"ls_integration\": \"langchain_chat_model\", \"lc_versions\": {\"langchain-core\": \"1.6.5\", \"langchain-openai\": \"1.6.6\"}}",
+              "mlflow.message.format": "\"langchain\"",
+              "mlflow.llm.model": "\"gpt-4o-mini\"",
+              "mlflow.llm.provider": "\"openai\"",
+              "mlflow.chat.tokenUsage": "{\"input_tokens\": 42, \"output_tokens\": 11, \"total_tokens\": 53, \"cache_read_input_tokens\": 8}",
+              "mlflow.spanOutputs": "{\"choices\": [{\"message\": {\"role\": \"assistant\", \"content\": \"It is 14C and cloudy in Delft.\", \"tool_calls\": null, \"refusal\": null, \"tool_call_id\": null}, \"finish_reason\": null}]}",
+              "mlflow.spanLogLevel": "20",
+              "mlflow.llm.cost": "{\"input_cost\": 5.7e-06, \"output_cost\": 6.5999999999999995e-06, \"total_cost\": 1.2299999999999999e-05}"
+            },
+            "links": []
+          },
+          {
+            "trace_id": "7hWqxpdGi7eb3auFpA+EEg==",
+            "span_id": "Ok8WZKpmnVs=",
+            "parent_span_id": "RvCTceBvZ4g=",
+            "name": "Completions",
+            "start_time_unix_nano": 1790691340584839000,
+            "end_time_unix_nano": 1790691340585409000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-ee15aac697468bb79bddab85a40f8412\"",
+              "mlflow.spanType": "\"CHAT_MODEL\"",
+              "mlflow.spanInputs": "{\"model\": \"gpt-4o-mini\", \"stream\": false, \"messages\": [{\"content\": \"Say hi\", \"role\": \"user\"}], \"extra_headers\": {\"X-Stainless-Raw-Response\": \"true\"}}",
+              "model": "\"gpt-4o-mini\"",
+              "stream": "false",
+              "extra_headers": "{\"X-Stainless-Raw-Response\": \"true\"}",
+              "mlflow.message.format": "\"openai\"",
+              "mlflow.llm.model": "\"gpt-4o-mini-2024-07-18\"",
+              "mlflow.chat.tokenUsage": "{\"input_tokens\": 42, \"output_tokens\": 11, \"total_tokens\": 53, \"cache_read_input_tokens\": 8}",
+              "mlflow.spanOutputs": "{\"id\": \"chatcmpl-5\", \"choices\": [{\"finish_reason\": \"stop\", \"index\": 0, \"logprobs\": null, \"message\": {\"content\": \"It is 14C and cloudy in Delft.\", \"refusal\": null, \"role\": \"assistant\", \"annotations\": null, \"audio\": null, \"function_call\": null, \"tool_calls\": null}}], \"created\": 1790000000, \"model\": \"gpt-4o-mini-2024-07-18\", \"object\": \"chat.completion\", \"metadata\": null, \"moderation\": null, \"service_tier\": null, \"system_fingerprint\": null, \"usage\": {\"completion_tokens\": 11, \"prompt_tokens\": 42, \"total_tokens\": 53, \"completion_tokens_details\": {\"accepted_prediction_tokens\": null, \"audio_tokens\": null, \"reasoning_tokens\": 0, \"rejected_prediction_tokens\": null, \"text_tokens\": null}, \"prompt_tokens_details\": {\"audio_tokens\": null, \"cache_write_tokens\": null, \"cached_tokens\": 8, \"image_tokens\": null, \"text_tokens\": null}}}",
+              "mlflow.spanLogLevel": "20",
+              "mlflow.llm.cost": "{\"input_cost\": 5.7e-06, \"output_cost\": 6.5999999999999995e-06, \"total_cost\": 1.2299999999999999e-05}"
+            },
+            "links": []
+          }
+        ]
+      }
+    },
+    {
+      "info": {
+        "trace_id": "tr-73106d76414a629c08688a5189e2d2e0",
+        "trace_location": {
+          "type": "MLFLOW_EXPERIMENT",
+          "mlflow_experiment": {
+            "experiment_id": "1"
+          }
+        },
+        "request_time": "2026-09-29T14:15:40.541Z",
+        "state": "ERROR",
+        "trace_metadata": {
+          "mlflow.source.type": "LOCAL",
+          "mlflow.source.name": "plugins/tests/importers/fixtures/mlflow/3.16.1/generate.py",
+          "mlflow.trace.session": "session-orders",
+          "mlflow.source.git.branch": "feat/mlflow-trace-importer-3f26e7",
+          "mlflow.trace.sizeBytes": "5977",
+          "mlflow.trace.sizeStats": "{\"total_size_bytes\": 5977, \"num_spans\": 2, \"max\": 3138, \"p25\": 2242, \"p50\": 2541, \"p75\": 2839}",
+          "mlflow.source.git.repoURL": "https://github.com/zenml-io/kitaru.git",
+          "mlflow.source.git.commit": "8d57366ef64af160bf4092f37e1ce013f3b4d73f",
+          "mlflow.traceInputs": "{\"order_id\": \"A-1001\"}",
+          "mlflow.user": "fixture-user",
+          "mlflow.trace.infoFinalized": "true",
+          "mlflow.traceOutputs": "",
+          "mlflow.trace_schema.version": "3"
+        },
+        "tags": {
+          "mlflow.traceName": "order_agent",
+          "mlflow.trace.spansLocation": "TRACKING_STORE",
+          "mlflow.artifactLocation": "mlflow-artifacts:/kitaru-fixtures/traces/tr-73106d76414a629c08688a5189e2d2e0/artifacts"
+        },
+        "request_preview": "{\"order_id\": \"A-1001\"}",
+        "execution_duration_ms": 4
+      },
+      "data": {
+        "spans": [
+          {
+            "trace_id": "cxBtdkFKYpwIaIpRieLS4A==",
+            "span_id": "VwbHiu6r9D4=",
+            "parent_span_id": null,
+            "name": "order_agent",
+            "start_time_unix_nano": 1790691340541456000,
+            "end_time_unix_nano": 1790691340546014000,
+            "events": [
+              {
+                "name": "exception",
+                "time_unix_nano": 1790691340545969920,
+                "attributes": {
+                  "exception.message": "Order A-1001 not found",
+                  "exception.type": "RuntimeError",
+                  "exception.stacktrace": "Traceback (most recent call last):\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/provider.py\", line 306, in with_active_span\n    yield\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/fluent.py\", line 681, in start_span\n    yield mlflow_span\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/fluent.py\", line 327, in _wrapping_logic\n    result = yield  # sync/async function output to be sent here\n             ^^^^^\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/fluent.py\", line 375, in wrapper\n    return wrapping_coro.send(fn(*args, **kwargs))\n                              ~~^^^^^^^^^^^^^^^^^\n  File \"<fixture-dir>/generate.py\", line 182, in order_agent\n    return lookup_order(order_id)\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/fluent.py\", line 373, in wrapper\n    _WrappingContext(fn, args, kwargs) as wrapping_coro,\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/fluent.py\", line 356, in __exit__\n    self.coro.throw(exc_value)\n    ~~~~~~~~~~~~~~~^^^^^^^^^^^\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/fluent.py\", line 327, in _wrapping_logic\n    result = yield  # sync/async function output to be sent here\n             ^^^^^\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/fluent.py\", line 375, in wrapper\n    return wrapping_coro.send(fn(*args, **kwargs))\n                              ~~^^^^^^^^^^^^^^^^^\n  File \"<fixture-dir>/generate.py\", line 141, in lookup_order\n    raise RuntimeError(f\"Order {order_id} not found\")\nRuntimeError: Order A-1001 not found"
+                }
+              }
+            ],
+            "status": {
+              "code": "STATUS_CODE_ERROR",
+              "message": "RuntimeError: Order A-1001 not found"
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-73106d76414a629c08688a5189e2d2e0\"",
+              "mlflow.spanType": "\"AGENT\"",
+              "mlflow.spanFunctionName": "\"order_agent\"",
+              "mlflow.spanInputs": "{\"order_id\": \"A-1001\"}",
+              "mlflow.spanLogLevel": "40"
+            },
+            "links": []
+          },
+          {
+            "trace_id": "cxBtdkFKYpwIaIpRieLS4A==",
+            "span_id": "vyc1f7L7XqI=",
+            "parent_span_id": "VwbHiu6r9D4=",
+            "name": "lookup_order",
+            "start_time_unix_nano": 1790691340541571000,
+            "end_time_unix_nano": 1790691340542671000,
+            "events": [
+              {
+                "name": "exception",
+                "time_unix_nano": 1790691340542629120,
+                "attributes": {
+                  "exception.message": "Order A-1001 not found",
+                  "exception.type": "RuntimeError",
+                  "exception.stacktrace": "Traceback (most recent call last):\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/provider.py\", line 306, in with_active_span\n    yield\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/fluent.py\", line 681, in start_span\n    yield mlflow_span\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/fluent.py\", line 327, in _wrapping_logic\n    result = yield  # sync/async function output to be sent here\n             ^^^^^\n  File \"<python-env>/lib/python3.14/site-packages/mlflow/tracing/fluent.py\", line 375, in wrapper\n    return wrapping_coro.send(fn(*args, **kwargs))\n                              ~~^^^^^^^^^^^^^^^^^\n  File \"<fixture-dir>/generate.py\", line 141, in lookup_order\n    raise RuntimeError(f\"Order {order_id} not found\")\nRuntimeError: Order A-1001 not found"
+                }
+              }
+            ],
+            "status": {
+              "code": "STATUS_CODE_ERROR",
+              "message": "RuntimeError: Order A-1001 not found"
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-73106d76414a629c08688a5189e2d2e0\"",
+              "mlflow.spanType": "\"TOOL\"",
+              "mlflow.spanFunctionName": "\"lookup_order\"",
+              "mlflow.spanInputs": "{\"order_id\": \"A-1001\"}",
+              "mlflow.spanLogLevel": "40"
+            },
+            "links": []
+          }
+        ]
+      }
+    },
+    {
+      "info": {
+        "trace_id": "tr-683d3de99d5fbef66c1463f809f1e2e2",
+        "trace_location": {
+          "type": "MLFLOW_EXPERIMENT",
+          "mlflow_experiment": {
+            "experiment_id": "1"
+          }
+        },
+        "request_time": "2026-09-29T14:15:40.260Z",
+        "state": "OK",
+        "trace_metadata": {
+          "mlflow.source.type": "LOCAL",
+          "mlflow.source.name": "plugins/tests/importers/fixtures/mlflow/3.16.1/generate.py",
+          "mlflow.trace.cost": "{\"input_cost\": 4.9999999999999996e-05, \"output_cost\": 9e-05, \"total_cost\": 0.00014}",
+          "mlflow.source.git.branch": "feat/mlflow-trace-importer-3f26e7",
+          "mlflow.trace.sizeBytes": "3157",
+          "mlflow.trace.sizeStats": "{\"total_size_bytes\": 3157, \"num_spans\": 2, \"max\": 1475, \"p25\": 821, \"p50\": 1039, \"p75\": 1257}",
+          "mlflow.source.git.repoURL": "https://github.com/zenml-io/kitaru.git",
+          "mlflow.source.git.commit": "8d57366ef64af160bf4092f37e1ce013f3b4d73f",
+          "mlflow.trace.tokenUsage": "{\"input_tokens\": 25, \"output_tokens\": 9, \"total_tokens\": 34}",
+          "mlflow.traceInputs": "{\"question\": \"How long do refunds take?\"}",
+          "mlflow.trace.infoFinalized": "true",
+          "mlflow.user": "fixture-user",
+          "mlflow.traceOutputs": "\"Refunds take 5 business days.\"",
+          "mlflow.trace_schema.version": "3"
+        },
+        "tags": {
+          "mlflow.traceName": "refund_agent",
+          "mlflow.trace.spansLocation": "TRACKING_STORE",
+          "mlflow.artifactLocation": "mlflow-artifacts:/kitaru-fixtures/traces/tr-683d3de99d5fbef66c1463f809f1e2e2/artifacts"
+        },
+        "request_preview": "{\"question\": \"How long do refunds take?\"}",
+        "response_preview": "\"Refunds take 5 business days.\"",
+        "execution_duration_ms": 273
+      },
+      "data": {
+        "spans": [
+          {
+            "trace_id": "aD096Z1fvvZsFGP4CfHi4g==",
+            "span_id": "fTsRWPVw82g=",
+            "parent_span_id": null,
+            "name": "refund_agent",
+            "start_time_unix_nano": 1790691340260479000,
+            "end_time_unix_nano": 1790691340534092000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-683d3de99d5fbef66c1463f809f1e2e2\"",
+              "mlflow.spanType": "\"AGENT\"",
+              "mlflow.spanFunctionName": "\"refund_agent\"",
+              "mlflow.spanInputs": "{\"question\": \"How long do refunds take?\"}",
+              "mlflow.spanOutputs": "\"Refunds take 5 business days.\"",
+              "mlflow.spanLogLevel": "20"
+            },
+            "links": []
+          },
+          {
+            "trace_id": "aD096Z1fvvZsFGP4CfHi4g==",
+            "span_id": "M8YNMN21uRM=",
+            "parent_span_id": "fTsRWPVw82g=",
+            "name": "Messages.create",
+            "start_time_unix_nano": 1790691340260699000,
+            "end_time_unix_nano": 1790691340266450000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-683d3de99d5fbef66c1463f809f1e2e2\"",
+              "mlflow.spanType": "\"CHAT_MODEL\"",
+              "mlflow.spanInputs": "{\"max_tokens\": 256, \"messages\": [{\"role\": \"user\", \"content\": \"How long do refunds take?\"}], \"model\": \"claude-sonnet-5-5\", \"system\": \"You answer refund questions.\"}",
+              "mlflow.message.format": "\"anthropic\"",
+              "mlflow.llm.model": "\"claude-sonnet-5-5\"",
+              "mlflow.llm.provider": "\"anthropic\"",
+              "mlflow.chat.tokenUsage": "{\"input_tokens\": 25, \"output_tokens\": 9, \"total_tokens\": 34}",
+              "mlflow.spanOutputs": "{\"id\": \"msg_01\", \"container\": null, \"content\": [{\"citations\": null, \"text\": \"Refunds take 5 business days.\", \"type\": \"text\"}], \"model\": \"claude-sonnet-5-5\", \"role\": \"assistant\", \"stop_details\": null, \"stop_reason\": \"end_turn\", \"stop_sequence\": null, \"type\": \"message\", \"usage\": {\"cache_creation\": null, \"cache_creation_input_tokens\": null, \"cache_read_input_tokens\": null, \"inference_geo\": null, \"input_tokens\": 25, \"output_tokens\": 9, \"output_tokens_details\": null, \"server_tool_use\": null, \"service_tier\": null}}",
+              "mlflow.spanLogLevel": "20",
+              "mlflow.llm.cost": "{\"input_cost\": 4.9999999999999996e-05, \"output_cost\": 9e-05, \"total_cost\": 0.00014}"
+            },
+            "links": []
+          }
+        ]
+      }
+    },
+    {
+      "info": {
+        "trace_id": "tr-3a397137411074db42011309d0425cc4",
+        "trace_location": {
+          "type": "MLFLOW_EXPERIMENT",
+          "mlflow_experiment": {
+            "experiment_id": "1"
+          }
+        },
+        "request_time": "2026-09-29T14:15:40.239Z",
+        "state": "OK",
+        "trace_metadata": {
+          "mlflow.trace.cost": "{\"input_cost\": 1.14e-05, \"output_cost\": 1.3199999999999999e-05, \"total_cost\": 2.4599999999999998e-05}",
+          "mlflow.source.git.branch": "feat/mlflow-trace-importer-3f26e7",
+          "mlflow.trace.sizeBytes": "7666",
+          "mlflow.trace.user": "user-42",
+          "mlflow.source.git.commit": "8d57366ef64af160bf4092f37e1ce013f3b4d73f",
+          "mlflow.trace.tokenUsage": "{\"input_tokens\": 84, \"output_tokens\": 22, \"total_tokens\": 106, \"cache_read_input_tokens\": 16}",
+          "mlflow.traceOutputs": "\"It is 14C and cloudy in Delft.\"",
+          "mlflow.trace_schema.version": "3",
+          "mlflow.source.type": "LOCAL",
+          "mlflow.source.name": "plugins/tests/importers/fixtures/mlflow/3.16.1/generate.py",
+          "mlflow.trace.session": "session-weather",
+          "mlflow.source.git.repoURL": "https://github.com/zenml-io/kitaru.git",
+          "mlflow.traceInputs": "{\"question\": \"And tomorrow?\", \"session\": \"session-weather\"}",
+          "mlflow.trace.sizeStats": "{\"total_size_bytes\": 7666, \"num_spans\": 4, \"max\": 2701, \"p25\": 624, \"p50\": 1550, \"p75\": 2528}",
+          "mlflow.user": "fixture-user",
+          "mlflow.trace.infoFinalized": "true"
+        },
+        "assessments": [
+          {
+            "assessment_id": "a-79b73ae94ed445a7afb1f260110314da",
+            "assessment_name": "helpfulness",
+            "trace_id": "tr-3a397137411074db42011309d0425cc4",
+            "source": {
+              "source_type": "HUMAN",
+              "source_id": "reviewer@example.com"
+            },
+            "create_time": "2026-09-29T14:15:40.259Z",
+            "last_update_time": "2026-09-29T14:15:40.259Z",
+            "feedback": {
+              "value": true
+            },
+            "rationale": "Answered the question",
+            "valid": true
+          }
+        ],
+        "tags": {
+          "mlflow.traceName": "weather_agent",
+          "mlflow.trace.spansLocation": "TRACKING_STORE",
+          "mlflow.artifactLocation": "mlflow-artifacts:/kitaru-fixtures/traces/tr-3a397137411074db42011309d0425cc4/artifacts",
+          "env": "test"
+        },
+        "request_preview": "{\"question\": \"And tomorrow?\", \"session\": \"session-weather\"}",
+        "response_preview": "\"It is 14C and cloudy in Delft.\"",
+        "execution_duration_ms": 12
+      },
+      "data": {
+        "spans": [
+          {
+            "trace_id": "OjlxN0EQdNtCARMJ0EJcxA==",
+            "span_id": "aqs5PUoakQk=",
+            "parent_span_id": null,
+            "name": "weather_agent",
+            "start_time_unix_nano": 1790691340239742000,
+            "end_time_unix_nano": 1790691340251960000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-3a397137411074db42011309d0425cc4\"",
+              "mlflow.spanType": "\"AGENT\"",
+              "mlflow.spanFunctionName": "\"weather_agent\"",
+              "mlflow.spanInputs": "{\"question\": \"And tomorrow?\", \"session\": \"session-weather\"}",
+              "mlflow.spanOutputs": "\"It is 14C and cloudy in Delft.\"",
+              "mlflow.spanLogLevel": "20"
+            },
+            "links": []
+          },
+          {
+            "trace_id": "OjlxN0EQdNtCARMJ0EJcxA==",
+            "span_id": "30piB9nt8u4=",
+            "parent_span_id": "aqs5PUoakQk=",
+            "name": "Completions",
+            "start_time_unix_nano": 1790691340240005000,
+            "end_time_unix_nano": 1790691340240688000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-3a397137411074db42011309d0425cc4\"",
+              "mlflow.spanType": "\"CHAT_MODEL\"",
+              "mlflow.spanInputs": "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"system\", \"content\": \"You are a weather assistant.\"}, {\"role\": \"user\", \"content\": \"And tomorrow?\"}], \"tools\": [{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}}}}]}",
+              "model": "\"gpt-4o-mini\"",
+              "tools": "[{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}}}}]",
+              "mlflow.message.format": "\"openai\"",
+              "mlflow.chat.tools": "[{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"properties\": {\"city\": {\"type\": \"string\"}}, \"type\": \"object\"}}}]",
+              "mlflow.llm.model": "\"gpt-4o-mini-2024-07-18\"",
+              "mlflow.chat.tokenUsage": "{\"input_tokens\": 42, \"output_tokens\": 11, \"total_tokens\": 53, \"cache_read_input_tokens\": 8}",
+              "mlflow.spanOutputs": "{\"id\": \"chatcmpl-3\", \"choices\": [{\"finish_reason\": \"tool_calls\", \"index\": 0, \"logprobs\": null, \"message\": {\"content\": null, \"refusal\": null, \"role\": \"assistant\", \"annotations\": null, \"audio\": null, \"function_call\": null, \"tool_calls\": [{\"id\": \"call_weather_1\", \"function\": {\"arguments\": \"{\\\"city\\\": \\\"Delft\\\"}\", \"name\": \"get_weather\"}, \"type\": \"function\"}]}}], \"created\": 1790000000, \"model\": \"gpt-4o-mini-2024-07-18\", \"object\": \"chat.completion\", \"metadata\": null, \"moderation\": null, \"service_tier\": null, \"system_fingerprint\": null, \"usage\": {\"completion_tokens\": 11, \"prompt_tokens\": 42, \"total_tokens\": 53, \"completion_tokens_details\": {\"accepted_prediction_tokens\": null, \"audio_tokens\": null, \"reasoning_tokens\": 0, \"rejected_prediction_tokens\": null, \"text_tokens\": null}, \"prompt_tokens_details\": {\"audio_tokens\": null, \"cache_write_tokens\": null, \"cached_tokens\": 8, \"image_tokens\": null, \"text_tokens\": null}}}",
+              "mlflow.spanLogLevel": "20",
+              "mlflow.llm.cost": "{\"input_cost\": 5.7e-06, \"output_cost\": 6.5999999999999995e-06, \"total_cost\": 1.2299999999999999e-05}"
+            },
+            "links": []
+          },
+          {
+            "trace_id": "OjlxN0EQdNtCARMJ0EJcxA==",
+            "span_id": "j+9xOovQPww=",
+            "parent_span_id": "aqs5PUoakQk=",
+            "name": "get_weather",
+            "start_time_unix_nano": 1790691340245558000,
+            "end_time_unix_nano": 1790691340245651000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-3a397137411074db42011309d0425cc4\"",
+              "mlflow.spanType": "\"TOOL\"",
+              "mlflow.spanFunctionName": "\"get_weather\"",
+              "mlflow.spanInputs": "{\"city\": \"Delft\"}",
+              "mlflow.spanOutputs": "{\"city\": \"Delft\", \"temp_c\": 14, \"sky\": \"cloudy\"}",
+              "mlflow.spanLogLevel": "20"
+            },
+            "links": []
+          },
+          {
+            "trace_id": "OjlxN0EQdNtCARMJ0EJcxA==",
+            "span_id": "hMRw6QitN+A=",
+            "parent_span_id": "aqs5PUoakQk=",
+            "name": "Completions",
+            "start_time_unix_nano": 1790691340247685000,
+            "end_time_unix_nano": 1790691340248382000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-3a397137411074db42011309d0425cc4\"",
+              "mlflow.spanType": "\"CHAT_MODEL\"",
+              "mlflow.spanInputs": "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"system\", \"content\": \"You are a weather assistant.\"}, {\"role\": \"user\", \"content\": \"And tomorrow?\"}, {\"role\": \"assistant\", \"tool_calls\": [{\"id\": \"call_weather_1\", \"function\": {\"arguments\": \"{\\\"city\\\": \\\"Delft\\\"}\", \"name\": \"get_weather\"}, \"type\": \"function\"}]}, {\"role\": \"tool\", \"tool_call_id\": \"call_weather_1\", \"content\": \"{\\\"city\\\": \\\"Delft\\\", \\\"temp_c\\\": 14, \\\"sky\\\": \\\"cloudy\\\"}\"}], \"tools\": [{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}}}}]}",
+              "model": "\"gpt-4o-mini\"",
+              "tools": "[{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}}}}]",
+              "mlflow.message.format": "\"openai\"",
+              "mlflow.chat.tools": "[{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"properties\": {\"city\": {\"type\": \"string\"}}, \"type\": \"object\"}}}]",
+              "mlflow.llm.model": "\"gpt-4o-mini-2024-07-18\"",
+              "mlflow.chat.tokenUsage": "{\"input_tokens\": 42, \"output_tokens\": 11, \"total_tokens\": 53, \"cache_read_input_tokens\": 8}",
+              "mlflow.spanOutputs": "{\"id\": \"chatcmpl-4\", \"choices\": [{\"finish_reason\": \"stop\", \"index\": 0, \"logprobs\": null, \"message\": {\"content\": \"It is 14C and cloudy in Delft.\", \"refusal\": null, \"role\": \"assistant\", \"annotations\": null, \"audio\": null, \"function_call\": null, \"tool_calls\": null}}], \"created\": 1790000000, \"model\": \"gpt-4o-mini-2024-07-18\", \"object\": \"chat.completion\", \"metadata\": null, \"moderation\": null, \"service_tier\": null, \"system_fingerprint\": null, \"usage\": {\"completion_tokens\": 11, \"prompt_tokens\": 42, \"total_tokens\": 53, \"completion_tokens_details\": {\"accepted_prediction_tokens\": null, \"audio_tokens\": null, \"reasoning_tokens\": 0, \"rejected_prediction_tokens\": null, \"text_tokens\": null}, \"prompt_tokens_details\": {\"audio_tokens\": null, \"cache_write_tokens\": null, \"cached_tokens\": 8, \"image_tokens\": null, \"text_tokens\": null}}}",
+              "mlflow.spanLogLevel": "20",
+              "mlflow.llm.cost": "{\"input_cost\": 5.7e-06, \"output_cost\": 6.5999999999999995e-06, \"total_cost\": 1.2299999999999999e-05}"
+            },
+            "links": []
+          }
+        ]
+      }
+    },
+    {
+      "info": {
+        "trace_id": "tr-9e59114102d414c9f92007bca51c6a21",
+        "trace_location": {
+          "type": "MLFLOW_EXPERIMENT",
+          "mlflow_experiment": {
+            "experiment_id": "1"
+          }
+        },
+        "request_time": "2026-09-29T14:15:40.175Z",
+        "state": "OK",
+        "trace_metadata": {
+          "mlflow.trace.cost": "{\"input_cost\": 1.14e-05, \"output_cost\": 1.3199999999999999e-05, \"total_cost\": 2.4599999999999998e-05}",
+          "mlflow.source.git.branch": "feat/mlflow-trace-importer-3f26e7",
+          "mlflow.trace.sizeBytes": "7741",
+          "mlflow.trace.user": "user-42",
+          "mlflow.source.git.commit": "8d57366ef64af160bf4092f37e1ce013f3b4d73f",
+          "mlflow.trace.tokenUsage": "{\"input_tokens\": 84, \"output_tokens\": 22, \"total_tokens\": 106, \"cache_read_input_tokens\": 16}",
+          "mlflow.traceOutputs": "\"It is 14C and cloudy in Delft.\"",
+          "mlflow.trace_schema.version": "3",
+          "mlflow.source.type": "LOCAL",
+          "mlflow.source.name": "plugins/tests/importers/fixtures/mlflow/3.16.1/generate.py",
+          "mlflow.trace.session": "session-weather",
+          "mlflow.source.git.repoURL": "https://github.com/zenml-io/kitaru.git",
+          "mlflow.traceInputs": "{\"question\": \"What's the weather in Delft?\", \"session\": \"session-weather\"}",
+          "mlflow.trace.sizeStats": "{\"total_size_bytes\": 7741, \"num_spans\": 4, \"max\": 2716, \"p25\": 636, \"p50\": 1565, \"p75\": 2543}",
+          "mlflow.user": "fixture-user",
+          "mlflow.trace.infoFinalized": "true"
+        },
+        "tags": {
+          "mlflow.traceName": "weather_agent",
+          "mlflow.trace.spansLocation": "TRACKING_STORE",
+          "mlflow.artifactLocation": "mlflow-artifacts:/kitaru-fixtures/traces/tr-9e59114102d414c9f92007bca51c6a21/artifacts",
+          "env": "test"
+        },
+        "request_preview": "{\"question\": \"What's the weather in Delft?\", \"session\": \"session-weather\"}",
+        "response_preview": "\"It is 14C and cloudy in Delft.\"",
+        "execution_duration_ms": 47
+      },
+      "data": {
+        "spans": [
+          {
+            "trace_id": "nlkRQQLUFMn5IAe8pRxqIQ==",
+            "span_id": "AFPKbQqD5mw=",
+            "parent_span_id": null,
+            "name": "weather_agent",
+            "start_time_unix_nano": 1790691340175512000,
+            "end_time_unix_nano": 1790691340222755000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-9e59114102d414c9f92007bca51c6a21\"",
+              "mlflow.spanType": "\"AGENT\"",
+              "mlflow.spanFunctionName": "\"weather_agent\"",
+              "mlflow.spanInputs": "{\"question\": \"What's the weather in Delft?\", \"session\": \"session-weather\"}",
+              "mlflow.spanOutputs": "\"It is 14C and cloudy in Delft.\"",
+              "mlflow.spanLogLevel": "20"
+            },
+            "links": []
+          },
+          {
+            "trace_id": "nlkRQQLUFMn5IAe8pRxqIQ==",
+            "span_id": "U3PohVAi9LY=",
+            "parent_span_id": "AFPKbQqD5mw=",
+            "name": "Completions",
+            "start_time_unix_nano": 1790691340194694000,
+            "end_time_unix_nano": 1790691340199349000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-9e59114102d414c9f92007bca51c6a21\"",
+              "mlflow.spanType": "\"CHAT_MODEL\"",
+              "mlflow.spanInputs": "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"system\", \"content\": \"You are a weather assistant.\"}, {\"role\": \"user\", \"content\": \"What's the weather in Delft?\"}], \"tools\": [{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}}}}]}",
+              "model": "\"gpt-4o-mini\"",
+              "tools": "[{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}}}}]",
+              "mlflow.message.format": "\"openai\"",
+              "mlflow.chat.tools": "[{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"properties\": {\"city\": {\"type\": \"string\"}}, \"type\": \"object\"}}}]",
+              "mlflow.llm.model": "\"gpt-4o-mini-2024-07-18\"",
+              "mlflow.chat.tokenUsage": "{\"input_tokens\": 42, \"output_tokens\": 11, \"total_tokens\": 53, \"cache_read_input_tokens\": 8}",
+              "mlflow.spanOutputs": "{\"id\": \"chatcmpl-1\", \"choices\": [{\"finish_reason\": \"tool_calls\", \"index\": 0, \"logprobs\": null, \"message\": {\"content\": null, \"refusal\": null, \"role\": \"assistant\", \"annotations\": null, \"audio\": null, \"function_call\": null, \"tool_calls\": [{\"id\": \"call_weather_1\", \"function\": {\"arguments\": \"{\\\"city\\\": \\\"Delft\\\"}\", \"name\": \"get_weather\"}, \"type\": \"function\"}]}}], \"created\": 1790000000, \"model\": \"gpt-4o-mini-2024-07-18\", \"object\": \"chat.completion\", \"metadata\": null, \"moderation\": null, \"service_tier\": null, \"system_fingerprint\": null, \"usage\": {\"completion_tokens\": 11, \"prompt_tokens\": 42, \"total_tokens\": 53, \"completion_tokens_details\": {\"accepted_prediction_tokens\": null, \"audio_tokens\": null, \"reasoning_tokens\": 0, \"rejected_prediction_tokens\": null, \"text_tokens\": null}, \"prompt_tokens_details\": {\"audio_tokens\": null, \"cache_write_tokens\": null, \"cached_tokens\": 8, \"image_tokens\": null, \"text_tokens\": null}}}",
+              "mlflow.spanLogLevel": "20",
+              "mlflow.llm.cost": "{\"input_cost\": 5.7e-06, \"output_cost\": 6.5999999999999995e-06, \"total_cost\": 1.2299999999999999e-05}"
+            },
+            "links": []
+          },
+          {
+            "trace_id": "nlkRQQLUFMn5IAe8pRxqIQ==",
+            "span_id": "8xPngnmdVEk=",
+            "parent_span_id": "AFPKbQqD5mw=",
+            "name": "get_weather",
+            "start_time_unix_nano": 1790691340214759000,
+            "end_time_unix_nano": 1790691340214889000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-9e59114102d414c9f92007bca51c6a21\"",
+              "mlflow.spanType": "\"TOOL\"",
+              "mlflow.spanFunctionName": "\"get_weather\"",
+              "mlflow.spanInputs": "{\"city\": \"Delft\"}",
+              "mlflow.spanOutputs": "{\"city\": \"Delft\", \"temp_c\": 14, \"sky\": \"cloudy\"}",
+              "mlflow.spanLogLevel": "20"
+            },
+            "links": []
+          },
+          {
+            "trace_id": "nlkRQQLUFMn5IAe8pRxqIQ==",
+            "span_id": "ixfqahuxS7w=",
+            "parent_span_id": "AFPKbQqD5mw=",
+            "name": "Completions",
+            "start_time_unix_nano": 1790691340217627000,
+            "end_time_unix_nano": 1790691340218660000,
+            "events": [],
+            "status": {
+              "code": "STATUS_CODE_OK",
+              "message": ""
+            },
+            "attributes": {
+              "mlflow.traceRequestId": "\"tr-9e59114102d414c9f92007bca51c6a21\"",
+              "mlflow.spanType": "\"CHAT_MODEL\"",
+              "mlflow.spanInputs": "{\"model\": \"gpt-4o-mini\", \"messages\": [{\"role\": \"system\", \"content\": \"You are a weather assistant.\"}, {\"role\": \"user\", \"content\": \"What's the weather in Delft?\"}, {\"role\": \"assistant\", \"tool_calls\": [{\"id\": \"call_weather_1\", \"function\": {\"arguments\": \"{\\\"city\\\": \\\"Delft\\\"}\", \"name\": \"get_weather\"}, \"type\": \"function\"}]}, {\"role\": \"tool\", \"tool_call_id\": \"call_weather_1\", \"content\": \"{\\\"city\\\": \\\"Delft\\\", \\\"temp_c\\\": 14, \\\"sky\\\": \\\"cloudy\\\"}\"}], \"tools\": [{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}}}}]}",
+              "model": "\"gpt-4o-mini\"",
+              "tools": "[{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}}}}]",
+              "mlflow.message.format": "\"openai\"",
+              "mlflow.chat.tools": "[{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"parameters\": {\"properties\": {\"city\": {\"type\": \"string\"}}, \"type\": \"object\"}}}]",
+              "mlflow.llm.model": "\"gpt-4o-mini-2024-07-18\"",
+              "mlflow.chat.tokenUsage": "{\"input_tokens\": 42, \"output_tokens\": 11, \"total_tokens\": 53, \"cache_read_input_tokens\": 8}",
+              "mlflow.spanOutputs": "{\"id\": \"chatcmpl-2\", \"choices\": [{\"finish_reason\": \"stop\", \"index\": 0, \"logprobs\": null, \"message\": {\"content\": \"It is 14C and cloudy in Delft.\", \"refusal\": null, \"role\": \"assistant\", \"annotations\": null, \"audio\": null, \"function_call\": null, \"tool_calls\": null}}], \"created\": 1790000000, \"model\": \"gpt-4o-mini-2024-07-18\", \"object\": \"chat.completion\", \"metadata\": null, \"moderation\": null, \"service_tier\": null, \"system_fingerprint\": null, \"usage\": {\"completion_tokens\": 11, \"prompt_tokens\": 42, \"total_tokens\": 53, \"completion_tokens_details\": {\"accepted_prediction_tokens\": null, \"audio_tokens\": null, \"reasoning_tokens\": 0, \"rejected_prediction_tokens\": null, \"text_tokens\": null}, \"prompt_tokens_details\": {\"audio_tokens\": null, \"cache_write_tokens\": null, \"cached_tokens\": 8, \"image_tokens\": null, \"text_tokens\": null}}}",
+              "mlflow.spanLogLevel": "20",
+              "mlflow.llm.cost": "{\"input_cost\": 5.7e-06, \"output_cost\": 6.5999999999999995e-06, \"total_cost\": 1.2299999999999999e-05}"
+            },
+            "links": []
+          }
+        ]
+      }
+    }
+  ],
+  "next_page_token": null
+}

@@ -321,7 +321,13 @@ async def test_list_insights_filters_by_agent_id(
     assert body["items"][0]["agent_id"] == agent_id
 
 
-@pytest.mark.parametrize("value, status", [(str(uuid.uuid4()), 200), ("bad-id", 422)])
+@pytest.mark.parametrize(
+    "value, status",
+    [
+        pytest.param(str(uuid.uuid4()), 200, id="valid-import-id"),
+        pytest.param("bad-id", 422, id="invalid-import-id"),
+    ],
+)
 async def test_list_insights_validates_import_filter(
     client: httpx.AsyncClient, value: str, status: int
 ) -> None:

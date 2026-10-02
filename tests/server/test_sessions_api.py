@@ -17,6 +17,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
@@ -641,6 +642,72 @@ async def test_update_session_clears_outputs_with_explicit_null(
     assert response.json()["status"] == "completed"
     fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
     assert fetched["outputs"] is None
+
+
+async def test_finalize_mastra_inputs_through_session_patch(
+    client: httpx.AsyncClient,
+    complete_mastra_memory_replay_inputs: dict[str, Any],
+) -> None:
+    """Expose the final replay input and eligibility through one REST update."""
+    created = (
+        await client.post(
+            "/api/v1/sessions",
+            json=_session_body(
+                framework="mastra",
+                inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+                metadata={"mastra_replay_state": "pending"},
+            ),
+        )
+    ).json()
+    final_inputs = complete_mastra_memory_replay_inputs
+    response = await client.patch(
+        f"/api/v1/sessions/{created['id']}",
+        json={
+            "status": "completed",
+            "inputs": final_inputs,
+            "metadata": {"mastra_replay_state": "eligible"},
+        },
+    )
+    assert response.status_code == 200
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["inputs"] == final_inputs
+    assert fetched["status"] == "completed"
+    assert fetched["metadata"]["mastra_replay_state"] == "eligible"
+    repeat = await client.patch(
+        f"/api/v1/sessions/{created['id']}", json={"inputs": final_inputs}
+    )
+    assert repeat.status_code == 409
+
+
+async def test_plain_failed_patch_closes_pending_mastra_session(
+    client: httpx.AsyncClient,
+) -> None:
+    """Close a recording whose process died before it decided replay eligibility."""
+    created = (
+        await client.post(
+            "/api/v1/sessions",
+            json=_session_body(
+                framework="mastra",
+                inputs={"mastra_memory_replay": {"version": 3, "complete": False}},
+                metadata={
+                    "mastra_replay_state": "pending",
+                    "mastra_native_state": "pending",
+                },
+            ),
+        )
+    ).json()
+    response = await client.patch(
+        f"/api/v1/sessions/{created['id']}",
+        json={"status": "failed", "error": "worker died"},
+    )
+    assert response.status_code == 200
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["status"] == "failed"
+    assert fetched["metadata"] == {
+        "mastra_replay_state": "ineligible",
+        "mastra_replay_reason": "abandoned",
+        "mastra_native_state": "pending",
+    }
 
 
 async def test_update_session_omitted_outputs_unchanged(
