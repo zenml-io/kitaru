@@ -7,27 +7,20 @@ This file covers repository, ORM, and transaction mechanics.
   `orm/__init__.py`.
 - Columns are declared with `Mapped[...]` annotations. Use a bare annotation
   when the column needs no arguments and `mapped_column(...)` only when it
-  does. Nullability follows the annotation (`Mapped[str | None]` is nullable),
-  never pass `nullable=` explicitly.
+  does. Nullability follows the annotation (`Mapped[str | None]` is nullable).
 - ORM classes are named with an `ORM` suffix (`AccountORM`, `SecretORM`).
   Never use a `Schema` or `Table` suffix. "Schema" refers to API models in
   the FastAPI ecosystem and to the database schema in the DDL sense, so it
   stays out of class and module names here.
 - Table names are singular (`__tablename__ = "agent"`, not `"agents"`).
-- Enforce uniqueness with a named `UniqueConstraint` in `__table_args__`, not
-  with `mapped_column(unique=True)`. A `UniqueConstraint` is backed by its own
-  index, so do not also index the same column separately.
-- Declare every other index as a named `Index` in `__table_args__`. Never pass
-  `index=True` to `mapped_column`. It bypasses `index_name` and leaves no
-  module-level constant for the migration and the repository to refer to.
+- Enforce uniqueness with a named `UniqueConstraint` in `__table_args__`, or a named partial unique `Index` for conditional uniqueness. A `UniqueConstraint` is backed by its own index, so do not also index the same column separately.
+- Declare every other index as a named `Index` in `__table_args__`, with a module-level constant for migrations and repositories to reference.
 - Sortable fields are declared via the `sortable_fields` ClassVar on the
   filter model (`server/base.py`), defaulting to `created`, which rides the
   UUIDv7 primary key and needs no index of its own. A field added beyond that
   default needs a matching `(field, id)` composite `Index` in
   `__table_args__`, an Alembic revision, and `paginate()` support.
-- Declare foreign keys as a named `ForeignKeyConstraint` in `__table_args__`,
-  never with `mapped_column(ForeignKey(...))`. An inline foreign key gets an
-  auto-generated name that `violated_constraint` can never match.
+- Declare foreign keys as a named `ForeignKeyConstraint` in `__table_args__` so `violated_constraint` can match the name.
 - Never hand-write index or constraint names. Generate them with `index_name`,
   `unique_constraint_name`, and `foreign_key_name` from
   `orm/orm_utils.py`, and store the result as the module-level constant
@@ -40,20 +33,16 @@ This file covers repository, ORM, and transaction mechanics.
   pass only `created`. Nothing outside a repository touches ORM models.
 - Repositories live one module per resource under `repositories/`, implement
   the application-layer Protocol, and take the session in the constructor.
-- Repositories never call `commit()`. Write methods end with `flush()` so the
-  SQL runs and constraint violations surface inside the repository method.
-  The request session commits at the REST boundary, through `KitaruAPIRoute`
-  (`adapters/rest/route.py`) after the route handler succeeds and
-  before the response is returned. Any exception skips the commit and
-  pending writes roll back when the session closes.
+- Repository and ORM syntax gates run in `just python-standards-check` (KIT001-KIT004).
+- Write methods end with `flush()` so the SQL runs and constraint violations surface inside the repository method. The request session commits at the REST boundary, through `KitaruAPIRoute` (`adapters/rest/route.py`) after the route handler succeeds and before the response is returned. Any exception skips the commit and pending writes roll back when the session closes.
+- Session-number allocation deliberately uses an independent `engine.begin()` transaction. It commits the counter before session creation and releases the agent lock; a failed creation leaves a gap.
 - `query` methods build a filtered, unordered `Select` and pass it to the
   shared `paginate()` helper along with the filter and the id column.
   `paginate()` decodes the incoming cursor, applies the keyset
   `WHERE`/`ORDER BY` for the requested sort direction, fetches one row beyond
   the requested size to detect a next page, and returns the matching rows plus
   the next cursor.
-- Unique-column lookups use `.one_or_none()`, never `.first()`, so a would-be
-  invariant violation surfaces instead of being hidden.
+- One-row queries expose unexpected multiplicity; intentional top-one queries need `LIMIT 1`.
 - Bulk id lookups go through `_load_by_ids` on `BaseSQLRepository`, which
   returns rows keyed by id with missing ids omitted. `get_many` methods wrap
   repository-specific conversion (`to_domain`, decryption, hydration) around

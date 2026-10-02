@@ -17,7 +17,9 @@ class SmokeFailure(RuntimeError):
     """Raised when an installed-wheel contract fails."""
 
 
-def _run(arguments: list[str], *, environment: dict[str, str] | None = None):
+def _run(
+    arguments: list[str], *, environment: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         arguments,
         env=environment,

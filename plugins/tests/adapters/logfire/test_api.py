@@ -551,7 +551,7 @@ async def test_fetch_by_time_window_defaults_until_to_now(
     fake_logfire: FakeLogfire,
 ) -> None:
     """Default until to the current time when it is not given."""
-    fake_logfire.list_builders = [lambda: []]
+    fake_logfire.list_builders = [list]
     before = datetime.now(UTC)
 
     await collect_payloads(fetch({"since": "2026-07-24T09:00:00Z"}))
@@ -565,7 +565,7 @@ async def test_fetch_by_time_window_yields_nothing_for_an_empty_listing(
     fake_logfire: FakeLogfire,
 ) -> None:
     """Yield nothing when the time window has no root traces."""
-    fake_logfire.list_builders = [lambda: []]
+    fake_logfire.list_builders = [list]
 
     payloads = await collect_payloads(
         fetch({"since": "2026-07-24T09:00:00Z", "until": "2026-07-24T10:00:00Z"})
