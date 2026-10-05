@@ -3,26 +3,30 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Session import handler."""
 
+import uuid
+
+from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.imports import (
     BlobImportSource,
     ImportCreateRequest,
 )
+from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
+from kitaru.mcp.models.common import SessionImportReceipt
 from kitaru.mcp.models.workflows import SessionImportRequest
 
 
 async def handle_session_import(
     state: MCPServerState, request: SessionImportRequest
-) -> object:
+) -> SessionImportReceipt:
     """Start one import and return immediately without polling."""
-    identity: dict[str, object]
+    blob_id: uuid.UUID | None = None
+    query: dict[str, JsonValue] | None = None
     if isinstance(request.source, BlobImportSource):
         blob = await state.client.blobs.get(request.source.blob_id)
-        identity = {"blob_id": str(blob.id)}
+        blob_id = blob.id
     else:
-        identity = {
-            "query": request.source.query.model_dump(mode="json", exclude_unset=True)
-        }
+        query = request.source.query.model_dump(mode="json", exclude_unset=True)
     importer_version = await state.client.importers.get_version(
         request.importer_id, request.importer_version
     )
@@ -42,16 +46,18 @@ async def handle_session_import(
     created_import = await state.client.imports.create(
         dto, idempotency_key=request.idempotency_key
     )
-    assert created_import.job_id is not None
+    if created_import.job_id is None:
+        raise MCPToolError("internal_error", "Import was created without a job id.")
     job = await state.client.jobs.get(created_import.job_id)
-    return {
-        "operation": "session_import",
-        "idempotency": "domain-deduplicated-only",
-        **identity,
-        "importer_id": str(importer.id),
-        "importer_version_id": str(importer_version.id),
-        "agent_id": str(agent_version.agent_id),
-        "agent_version_id": str(agent_version.id),
-        "import_id": str(created_import.id),
-        "result": job.model_dump(mode="json"),
-    }
+    return SessionImportReceipt(
+        operation="session_import",
+        idempotency="domain-deduplicated-only",
+        blob_id=blob_id,
+        query=query,
+        importer_id=importer.id,
+        importer_version_id=importer_version.id,
+        agent_id=agent_version.agent_id,
+        agent_version_id=agent_version.id,
+        import_id=created_import.id,
+        result=job,
+    )

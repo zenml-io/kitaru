@@ -47,6 +47,7 @@ class _Recorder:
         )
         self.recorded: list[dict[str, Any]] = []
         self.history_occurrences: dict[str, int] = {}
+        self.history_locks: dict[str, asyncio.Lock] = {}
         self.sync_bridge = _SyncBridge()
         self.client = SimpleNamespace(
             replays=SimpleNamespace(tool_lookup=self._unexpected_lookup)
@@ -505,6 +506,45 @@ async def test_history_hits_consume_baseline_occurrences_in_order() -> None:
 
     assert [result.content for result in results] == ["a", "b", "c"]
     assert [request.occurrence for request in requests] == [0, 1, 2]
+
+
+async def test_parallel_identical_history_calls_claim_successive_occurrences() -> None:
+    policy = ToolPolicy(
+        default=HistoryConfig(
+            scope=HistoryScope.BASELINE,
+            on_miss=ToolPolicyOnMiss.FAIL,
+        )
+    )
+    recorder = _Recorder(override=None, policy=policy)
+    requests: list[Any] = []
+    envelopes = [
+        encode_tool_outcome(ToolMessage(content=ticket, tool_call_id="old", name="old"))
+        for ticket in ["a", "b", "c"]
+    ]
+
+    async def lookup(_: Any, request: Any) -> Any:
+        requests.append(request)
+        # Yield so the parallel calls interleave inside the lookup round trip.
+        await asyncio.sleep(0)
+        return _history_match(envelopes[request.occurrence])
+
+    recorder.client.replays.tool_lookup = lookup
+    middleware = KitaruLangGraphMiddleware(requested_model=None)
+    token = _ACTIVE_INVOCATION.set(cast(Any, recorder))
+    try:
+        results = await asyncio.gather(
+            *(
+                middleware.awrap_tool_call(
+                    _request(), cast(Any, lambda _: pytest.fail("live tool called"))
+                )
+                for _ in range(3)
+            )
+        )
+    finally:
+        _ACTIVE_INVOCATION.reset(token)
+
+    assert sorted(request.occurrence for request in requests) == [0, 1, 2]
+    assert sorted(cast(Any, result).content for result in results) == ["a", "b", "c"]
 
 
 async def test_history_miss_does_not_advance_occurrence() -> None:
