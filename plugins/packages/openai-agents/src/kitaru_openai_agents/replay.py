@@ -353,6 +353,7 @@ def prepare_replay(
         input: Native OpenAI input or arbitrary Kitaru JSON input.
         run_config: Caller-owned OpenAI run configuration.
         replay: Kitaru replay and its resolved override policy.
+        client: Kitaru client for resolving history replay tool overrides.
 
     Raises:
         ToolPolicyError: If any tool policy or target is unsupported.
