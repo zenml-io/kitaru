@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Support PydanticAI 2.47 through 2.51 in addition to the existing 2.14 through 2.46 minor lines.
+- Support PydanticAI 2.47 through 2.54 in addition to the existing 2.14 through 2.46 minor lines.
 
 ## 0.3.0 - 2026-09-21
 
