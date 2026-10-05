@@ -77,8 +77,7 @@ def validate_release_impact(
             f"unknown release follow-up label: {unknown_release_labels[0]}"
         )
 
-    inferred = infer_release_labels(changed_files, inventory)
-    return inferred
+    return infer_release_labels(changed_files, inventory)
 
 
 def _parse_args() -> argparse.Namespace:

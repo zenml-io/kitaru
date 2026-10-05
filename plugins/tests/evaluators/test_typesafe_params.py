@@ -123,7 +123,7 @@ def test_choice_to_wire_keeps_criteria() -> None:
         },
     ],
 )
-def test_rejects_invalid_params(bad: dict) -> None:
+def test_rejects_invalid_params(bad: dict[str, object]) -> None:
     """Refuse a bad params block before anything is sent."""
     with pytest.raises(ValidationError):
         JudgeParams.model_validate(bad)

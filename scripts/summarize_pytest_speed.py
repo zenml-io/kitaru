@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Summarize Kitaru pytest speed probe JSONL output."""
 
-from __future__ import annotations
-
 import json
 import math
 import statistics
