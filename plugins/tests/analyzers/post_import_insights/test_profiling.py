@@ -2072,7 +2072,7 @@ def test_distribution_evidence_caps_reserve_ranked_sessions(
     assert candidate.coverage.evidence_retained == expected_count
     assert candidate.coverage.contributing_sessions_available == 11
     assert candidate.coverage.contributing_sessions_retained == min(contributor_cap, 11)
-    assert set(item.session_id for item in candidate.evidence) <= set(
+    assert {item.session_id for item in candidate.evidence} <= set(
         candidate.contributing_session_ids
     )
     assert candidate.contributing_session_ids == sorted(

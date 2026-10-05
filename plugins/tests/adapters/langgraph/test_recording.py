@@ -29,7 +29,7 @@ class ToolCallingFakeModel(FakeMessagesListChatModel):
         return self
 
 
-def _make_agent_runner() -> KitaruGraphRunner:
+def _make_agent_runner() -> KitaruGraphRunner[Any, Any]:
     model = ToolCallingFakeModel(responses=[AIMessage(content="done")])
     return KitaruGraphRunner.from_agent_factory(
         create_agent,

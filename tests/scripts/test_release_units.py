@@ -828,7 +828,12 @@ def test_ci_quickstart_example_job_enforces_the_walkthrough() -> None:
         "\n  links:\n", maxsplit=1
     )[0]
 
-    assert "scripts/audit-example-coverage.py" in lint_job
+    assert "- run: just example-coverage-audit" in lint_job
+    justfile = (REPO_ROOT / "Justfile").read_text()
+    example_audit_recipe = justfile.split("\nexample-coverage-audit:\n", maxsplit=1)[
+        1
+    ].split("\n\n", maxsplit=1)[0]
+    assert "scripts/audit-example-coverage.py" in example_audit_recipe
     assert "name: Quickstart example end to end" in example_job
     assert "repository: zenml-io/kitaru-template" not in workflow
     assert (
