@@ -243,7 +243,7 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
 
     async def _get_version_row(
         self,
-        statement: Select[tuple[PluginVersionORM]],
+        statement: Select[PluginVersionORM],
         plugin_id: uuid.UUID,
         version: int,
     ) -> PluginVersionORM:

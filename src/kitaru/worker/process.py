@@ -77,6 +77,7 @@ _FIRST_PARTY_KITARU_PACKAGES = frozenset(
     {
         "kitaru-braintrust-importer",
         "kitaru-claude-agent-sdk",
+        "kitaru-elevenlabs-importer",
         "kitaru-evaluator",
         "kitaru-jsonl-importer",
         "kitaru-langfuse-importer",

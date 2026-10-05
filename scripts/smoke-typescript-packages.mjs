@@ -8,13 +8,19 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
 import { loadTypescriptPackageMetadata } from "./typescript-packages.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const lowerMastraVersion = "1.51.0";
-const upperMastraVersion = "1.67.0";
+// The memory factory's tested release sets, read from the built adapter so
+// the consumers install exactly the pairs the factory accepts.
+const { MEMORY_REPLAY_TESTED_VERSIONS: memoryReplayVersions } = await import(
+  pathToFileURL(
+    join(repositoryRoot, "packages/mastra/dist/memory-replay-versions.js"),
+  ).href
+);
 
 function parseOutputDirectory(args) {
   if (args.length === 0) {
@@ -490,6 +496,9 @@ void assertSchemaInference;
 }
 
 function smokeConsumer({ artifactRoot, mastraVersion, npmCache }) {
+  const memoryVersion = memoryReplayVersions.find(
+    ({ core }) => core === mastraVersion,
+  )?.memory;
   const consumerRoot = join(
     smokeRoot,
     `consumer-mastra-${mastraVersion.replaceAll(".", "-")}`,
@@ -508,9 +517,7 @@ function smokeConsumer({ artifactRoot, mastraVersion, npmCache }) {
       npmCache,
       ...tarballs,
       `@mastra/core@${mastraVersion}`,
-      ...(mastraVersion === upperMastraVersion
-        ? ["@mastra/memory@1.30.0"]
-        : []),
+      ...(memoryVersion ? [`@mastra/memory@${memoryVersion}`] : []),
       "ai@7.0.65",
       "zod@3.25.76",
     ],
@@ -535,7 +542,7 @@ function smokeConsumer({ artifactRoot, mastraVersion, npmCache }) {
     consumerRoot,
   );
   run(process.execPath, ["generate.mjs"], consumerRoot);
-  if (mastraVersion === upperMastraVersion) {
+  if (mastraVersion !== lowerMastraVersion) {
     run(
       join(repositoryRoot, "node_modules", ".bin", "tsc"),
       ["-p", "tsconfig.stream.json"],
@@ -543,7 +550,7 @@ function smokeConsumer({ artifactRoot, mastraVersion, npmCache }) {
     );
   }
   run(process.execPath, ["stream.mjs", mastraVersion], consumerRoot);
-  if (mastraVersion === upperMastraVersion) {
+  if (memoryVersion) {
     copyFileSync(
       join(repositoryRoot, "scripts/fixtures/mastra-memory-smoke.mjs"),
       join(consumerRoot, "memory.mjs"),
@@ -584,16 +591,13 @@ try {
   }
 
   const npmCache = join(smokeRoot, "npm-cache");
-  smokeConsumer({
-    artifactRoot,
-    mastraVersion: lowerMastraVersion,
-    npmCache,
-  });
-  smokeConsumer({
-    artifactRoot,
-    mastraVersion: upperMastraVersion,
-    npmCache,
-  });
+  for (const mastraVersion of [
+    lowerMastraVersion,
+    memoryReplayVersions[0].core,
+    memoryReplayVersions.at(-1).core,
+  ]) {
+    smokeConsumer({ artifactRoot, mastraVersion, npmCache });
+  }
 } finally {
   rmSync(smokeRoot, { force: true, recursive: true });
 }

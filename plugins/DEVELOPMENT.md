@@ -271,6 +271,7 @@ Use the package directory and distribution name from this table:
 |---|---|---|
 | `braintrust-importer` | `kitaru-braintrust-importer` | `python/kitaru-braintrust-importer/vX.Y.Z` |
 | `claude-agent-sdk` | `kitaru-claude-agent-sdk` | `python/kitaru-claude-agent-sdk/vX.Y.Z` |
+| `elevenlabs-importer` | `kitaru-elevenlabs-importer` | `python/kitaru-elevenlabs-importer/vX.Y.Z` |
 | `evaluator` | `kitaru-evaluator` | `python/kitaru-evaluator/vX.Y.Z` |
 | `jsonl-importer` | `kitaru-jsonl-importer` | `python/kitaru-jsonl-importer/vX.Y.Z` |
 | `langfuse-importer` | `kitaru-langfuse-importer` | `python/kitaru-langfuse-importer/vX.Y.Z` |

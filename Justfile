@@ -10,18 +10,31 @@ UI_TAG := "latest"
 default:
     @just --list
 
-# Run all checks (format, lint, OpenAPI, typecheck, typos, yaml, actions, links)
+# Run root and plugin static checks, contracts, and repository checks
 check:
+    @printf '─── Lock Files ─────────────────────────────────\n'
+    @just lock-check
+    @just python-check-env
     @printf '─── Format Check ───────────────────────────────\n'
     @just format-check
     @printf '\n─── Lint ───────────────────────────────────────\n'
     @just lint
+    @printf '\n─── Import Architecture ────────────────────────\n'
+    @just import-check
+    @printf '\n─── Python Standards ───────────────────────────\n'
+    @just python-standards-check
+    @printf '\n─── MCP Schema ─────────────────────────────────\n'
+    @just mcp-schema-check
+    @printf '\n─── Example Coverage ───────────────────────────\n'
+    @just example-coverage-audit
     @printf '\n─── OpenAPI ────────────────────────────────────\n'
     @just openapi-check
     @printf '\n─── Changelog ──────────────────────────────────\n'
     @just changelog-check
     @printf '\n─── Type Check ─────────────────────────────────\n'
     @just typecheck
+    @printf '\n─── Plugin Static Checks ───────────────────────\n'
+    @just plugin-check
     @printf '\n─── Typos ──────────────────────────────────────\n'
     @just typos
     @printf '\n─── YAML Check ─────────────────────────────────\n'
@@ -35,6 +48,11 @@ check:
     @printf '\n─────────────────────────────────────────────────\n'
     @printf 'All checks passed!\n'
 
+# Verify both lock files match their pyproject.toml, because the --frozen syncs below install a stale lock without complaint
+lock-check:
+    uv lock --check
+    uv lock --project plugins --check
+
 # Check code formatting without modifying files
 format-check:
     uv run ruff format --check .
@@ -42,6 +60,21 @@ format-check:
 # Run linter
 lint:
     uv run ruff check .
+
+# Verify the Python import architecture contracts
+import-check:
+    uv run lint-imports
+
+# Verify database repository and ORM syntax standards
+python-standards-check:
+    uv run python scripts/check_python_standards.py
+
+# Check plugin formatting, lint, and types in the frozen plugin workspace
+plugin-check:
+    uv sync --project plugins --frozen --all-packages
+    uv run --project plugins --no-sync ruff format --config plugins/pyproject.toml --check plugins
+    uv run --project plugins --no-sync ruff check --config plugins/pyproject.toml plugins
+    uv run --project plugins --no-sync ty check --project plugins
 
 # Verify the committed OpenAPI specification matches the application schema
 openapi-check:
@@ -51,9 +84,13 @@ openapi-check:
 changelog-check:
     uv run python scripts/changelog_fragments.py check
 
+# Prepare the frozen root environment used by Python static checks
+python-check-env:
+    uv sync --frozen --extra server --extra otel --extra mcp --extra cli --extra worker --extra s3 --extra modal --group fuzz
+
 # Run type checker
-typecheck:
-    uv run ty check
+typecheck: python-check-env
+    uv run --no-sync ty check
 
 # Check for typos in source code
 typos:

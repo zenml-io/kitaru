@@ -11,6 +11,7 @@ import json
 import tempfile
 import threading
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -113,7 +114,7 @@ class _StubHandler(BaseHTTPRequestHandler):
 
 
 @contextlib.contextmanager
-def _stub_server():
+def _stub_server() -> Iterator[str]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _StubHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

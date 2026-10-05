@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - packages/mastra-compat/*
   - tests/typescript/fixture
   - examples/typescript/mastra_support_triage
   - examples/typescript/vercel_ai_support_triage

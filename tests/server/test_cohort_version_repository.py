@@ -266,6 +266,31 @@ async def test_create_numbers_versions_sequentially(setup: Setup) -> None:
     assert [first.version, second.version, third.version] == [1, 2, 3]
 
 
+async def test_get_agent_id(setup: Setup) -> None:
+    """Resolve the selected cohort version through its cohort to its agent."""
+    repository, sessions, owner_id, cohort_id, make_cohort_id, make_session_id, _, _ = (
+        setup
+    )
+    session_id = await make_session_id()
+    session = await sessions.get(session_id, include_payloads=False)
+    version = await repository.create(
+        CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=1),
+        [session_id],
+    )
+    other_cohort_id = await make_cohort_id()
+    await repository.create(
+        CohortVersion(owner_id=owner_id, cohort_id=other_cohort_id, session_count=0), []
+    )
+    assert await repository.get_agent_id(version.id) == session.agent_id
+
+
+async def test_get_agent_id_not_found(setup: Setup) -> None:
+    """Raise the version-specific error for a missing primary key."""
+    repository, *_ = setup
+    with pytest.raises(CohortVersionIdNotFound):
+        await repository.get_agent_id(uuid.uuid4())
+
+
 async def test_create_missing_cohort(setup: Setup) -> None:
     """Raise when the cohort does not exist."""
     repository, _, owner_id, _, _, _, _, _ = setup

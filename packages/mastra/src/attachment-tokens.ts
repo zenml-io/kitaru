@@ -52,7 +52,7 @@ function getAttachmentData(part: unknown): unknown {
   return data instanceof URL ? data.href : data;
 }
 
-function isCount(value: unknown): value is number {
+export function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 

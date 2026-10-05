@@ -43,16 +43,20 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
       - run: uv sync --frozen --extra server --extra otel --extra mcp
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run lint-imports
-      - run: uv run python scripts/report_mcp_schema.py --check
-      - run: uv run --no-sync python scripts/build_mcp_docs_index.py --check
-      - run: uv run bash scripts/check_openapi.sh
-      - run: uv run python scripts/changelog_fragments.py check
-      - run: uv run --with pyyaml python scripts/audit-example-coverage.py
-      - run: find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml
-          -print0 | xargs -0 uv run yamlfix --check
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3  # v4.0.0
+        with:
+          just-version: 1.58.0
+      - run: just lock-check
+      - run: just lint
+      - run: just format-check
+      - run: just import-check
+      - run: just python-standards-check
+      - run: just mcp-schema-check
+      - run: just mcp-docs-index-check
+      - run: just openapi-check
+      - run: just changelog-check
+      - run: just example-coverage-audit
+      - run: just yaml-check
   typescript:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
@@ -181,17 +185,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
-      - run: >-
-          uv sync --frozen
-          --extra server
-          --extra otel
-          --extra mcp
-          --extra cli
-          --extra worker
-          --extra s3
-          --extra modal
-          --group fuzz
-      - run: uv run ty check
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3  # v4.0.0
+        with:
+          just-version: 1.58.0
+      - run: just typecheck
   audit:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
@@ -376,13 +373,10 @@ jobs:
         with:
           python-version: '3.12'
       - run: uv sync --project plugins --frozen --all-packages
-      - run: >-
-          uv run --project plugins ruff format
-          --config plugins/pyproject.toml --check plugins
-      - run: >-
-          uv run --project plugins ruff check
-          --config plugins/pyproject.toml plugins
-      - run: uv run --project plugins ty check --project plugins
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3  # v4.0.0
+        with:
+          just-version: 1.58.0
+      - run: just plugin-check
       - run: >-
           uv run --project plugins coverage run --source=plugins/packages
           -m pytest -q -c plugins/pyproject.toml

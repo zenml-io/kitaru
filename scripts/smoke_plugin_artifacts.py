@@ -403,6 +403,7 @@ def _smoke_candidate_wheels(
             cwd=root,
         ),
     )
+    _probe_sqlalchemy(python, root, environment)
     probe = repository / "scripts" / "probe_plugin_artifacts.py"
     command: list[str | Path] = [python, probe]
     for requirement in requirements:
@@ -413,6 +414,28 @@ def _smoke_candidate_wheels(
         "probe installed plugin artifacts",
         _run(command, environment=environment, cwd=root),
     )
+
+
+def _probe_sqlalchemy(python: Path, root: Path, environment: dict[str, str]) -> None:
+    """Exercise the installed SQLAlchemy async runtime and report its versions."""
+    result = _expect_success(
+        "probe installed SQLAlchemy async runtime",
+        _run(
+            [
+                python,
+                "-c",
+                "import asyncio; "
+                "from importlib.metadata import version; "
+                "from sqlalchemy.util.concurrency import greenlet_spawn; "
+                "assert asyncio.run(greenlet_spawn(lambda: 42)) == 42; "
+                'print(f\'SQLAlchemy=={version("sqlalchemy")} '
+                'greenlet=={version("greenlet")}\')',
+            ],
+            environment=environment,
+            cwd=root,
+        ),
+    )
+    print(result.stdout.strip())
 
 
 def main() -> int:
