@@ -521,7 +521,7 @@ class _KitaruCapability(AbstractCapability[Any]):
     @classmethod
     def get_serialization_name(cls) -> None:
         """Exclude this runtime capability from PydanticAI agent specs."""
-        return None
+        return
 
     def get_ordering(self) -> CapabilityOrdering:
         """Record outside other capabilities so their final behavior is observed."""

@@ -88,7 +88,7 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
             .returning(AgentORM.latest_version)
         )
         result = await self._session.execute(statement)
-        row = result.first()
+        row = result.one_or_none()
         if row is None:
             raise AgentNotFound(agent_id)
         return row[0]
@@ -268,7 +268,7 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
             AgentVersionORM.id == agent_version_id
         )
         result = await self._session.execute(statement)
-        row = result.first()
+        row = result.one_or_none()
         if row is None:
             raise AgentVersionNotFound(agent_version_id)
         return row[0]
