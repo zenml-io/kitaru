@@ -1214,6 +1214,80 @@ async def test_history_policy_consumes_baseline_occurrences_in_order(
     assert [request.occurrence for _, request in client.replays.lookups] == [0, 1, 2]
 
 
+async def test_parallel_identical_history_calls_claim_successive_occurrences(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Identical tool calls from one model response claim distinct occurrences."""
+    real_calls: list[dict[str, Any]] = []
+    returned_results: list[Any] = []
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            HistoryConfig(scope=HistoryScope.BASELINE, on_miss=ToolPolicyOnMiss.FAIL)
+        ),
+    )
+
+    async def tool_lookup(
+        self: _FakeReplays, replay_id: uuid.UUID, request: Any
+    ) -> ToolLookupResponse:
+        self.lookups.append((replay_id, request))
+        # Yield so the parallel calls interleave inside the lookup round trip.
+        await asyncio.sleep(0)
+        return ToolLookupResponse(
+            match=ToolLookupMatch(
+                result={"ticket": ["a", "b", "c"][request.occurrence]},
+                status=NodeStatus.COMPLETED,
+                error=None,
+            )
+        )
+
+    monkeypatch.setattr(_FakeReplays, "tool_lookup", tool_lookup)
+
+    def model(messages: list[ModelMessage], _: AgentInfo) -> ModelResponse:
+        returns = [
+            part
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        if returns:
+            returned_results.extend(part.content for part in returns)
+            return ModelResponse(parts=[TextPart("finished")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart("lookup", {"city": "Paris", "units": "metric"})
+                for _ in range(3)
+            ]
+        )
+
+    wrapped = Agent(FunctionModel(model, model_name="tools"))
+
+    @wrapped.tool_plain
+    def lookup(city: str, units: str) -> dict[str, Any]:
+        arguments = {"city": city, "units": units}
+        real_calls.append(arguments)
+        return {"source": "real", **arguments}
+
+    agent = KitaruAgent(wrapped, agent_id=uuid.uuid4())
+
+    result = await agent.run("tickets")
+
+    assert result.output == "finished"
+    assert sorted(returned_results, key=lambda item: item["ticket"]) == [
+        {"ticket": "a"},
+        {"ticket": "b"},
+        {"ticket": "c"},
+    ]
+    assert real_calls == []
+    client = _FakeClient.instances[0]
+    assert sorted(request.occurrence for _, request in client.replays.lookups) == [
+        0,
+        1,
+        2,
+    ]
+
+
 async def test_history_policy_miss_does_not_advance_occurrence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

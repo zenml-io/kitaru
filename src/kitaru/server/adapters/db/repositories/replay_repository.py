@@ -16,7 +16,7 @@
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import NotNullable, func, select
 
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.server.adapters.db.filtering import (
@@ -315,7 +315,9 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             return {}
         statement = (
             select(
-                ReplayORM.experiment_run_id, ReplayORM.status, func.count(ReplayORM.id)
+                NotNullable(ReplayORM.experiment_run_id),
+                ReplayORM.status,
+                func.count(ReplayORM.id),
             )
             .where(ReplayORM.experiment_run_id.in_(experiment_run_ids))
             .group_by(ReplayORM.experiment_run_id, ReplayORM.status)

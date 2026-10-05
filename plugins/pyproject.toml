@@ -8,6 +8,7 @@ members = ["packages/*"]
 kitaru = { path = "..", editable = true }
 kitaru-claude-agent-sdk = { workspace = true }
 kitaru-braintrust-importer = { workspace = true }
+kitaru-elevenlabs-importer = { workspace = true }
 kitaru-langfuse-importer = { workspace = true }
 kitaru-langgraph = { workspace = true }
 kitaru-langsmith-importer = { workspace = true }
@@ -25,6 +26,7 @@ dev = [
     "kitaru[server]",
     "kitaru-claude-agent-sdk",
     "kitaru-braintrust-importer[adapter]",
+    "kitaru-elevenlabs-importer",
     "kitaru-langfuse-importer[adapter]",
     "kitaru-langgraph[deepagents]",
     "kitaru-langsmith-importer[adapter]",
@@ -51,7 +53,31 @@ src = ["packages", "tests"]
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+select = [
+    "E", "F", "I", "UP", "B", "SIM", "RUF",
+    # Require complete production signatures; fixture callbacks are exempt below.
+    "ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204", "ANN205", "ANN206",
+    "C400", "C401", "C402", "C403", "C404", "C405", "C406", "C408", "C409",
+    "C410", "C411", "C413", "C414", "C415", "C416", "C417", "C418", "C419", "C420",
+    "PIE790", "PIE794", "PIE796", "PIE800", "PIE804", "PIE807", "PIE808", "PIE810",
+    "RET501", "RET502", "RET503", "RET504", "RET505", "RET506", "RET507", "RET508",
+    "PERF101", "PERF102", "PERF402",
+    "ASYNC100", "ASYNC105", "ASYNC115", "ASYNC116", "ASYNC210", "ASYNC212",
+    "ASYNC220", "ASYNC222", "ASYNC230", "ASYNC250",
+    "DTZ001", "DTZ002", "DTZ003", "DTZ004", "DTZ005", "DTZ006", "DTZ007",
+    "DTZ012", "DTZ901", "ERA001", "TID251", "TRY002", "TRY201", "TRY203",
+    # Google docstring structure; framework callback method coverage is deferred.
+    "D101", "D103", "D104", "D201", "D202", "D205", "D209", "D210",
+    "D300", "D301", "D403", "D415", "D417",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"!**/packages/*/src/**" = ["ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204", "ANN205", "ANN206"]
+# Tests need not have docstrings; existing ones still follow Google formatting.
+"**/tests/**" = ["D101", "D103", "D104"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"__future__.annotations" = { msg = "Use eager annotations so runtime model inspection does not depend on resolving postponed names." }
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -61,6 +87,7 @@ known-first-party = [
     "kitaru",
     "kitaru_claude_agent_sdk",
     "kitaru_evaluator",
+    "kitaru_elevenlabs_importer",
     "kitaru_braintrust_importer",
     "kitaru_jsonl_importer",
     "kitaru_langfuse_importer",
@@ -90,6 +117,15 @@ exclude = ["tests/importers/fixtures/**"]
 [tool.ty.environment]
 python-version = "3.11"
 root = ["."]
+
+[tool.ty.rules]
+missing-type-argument = "error"
+blanket-ignore-comment = "error"
+unused-ignore-comment = "error"
+unused-type-ignore-comment = "error"
+ignore-comment-unknown-rule = "error"
+invalid-ignore-comment = "error"
+redundant-cast = "error"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

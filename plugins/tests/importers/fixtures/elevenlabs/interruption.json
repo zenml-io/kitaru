@@ -1,0 +1,1069 @@
+{
+  "agent_id": "agent_fixture_shop",
+  "agent_name": "Kitaru fixture shop",
+  "conversation_product": "agent",
+  "status": "done",
+  "user_id": null,
+  "branch_id": "branch_fixture_main",
+  "version_id": "version_fixture_one",
+  "metadata": {
+    "start_time_unix_secs": 1790959537,
+    "accepted_time_unix_secs": 1790959538,
+    "call_duration_secs": 52,
+    "queue_wait_secs": null,
+    "cost": 343,
+    "deletion_settings": {
+      "deletion_time_unix_secs": 1793551595,
+      "deleted_logs_at_time_unix_secs": null,
+      "deleted_audio_at_time_unix_secs": null,
+      "deleted_transcript_at_time_unix_secs": null,
+      "delete_transcript_and_pii": false,
+      "delete_audio": false
+    },
+    "feedback": {
+      "type": null,
+      "overall_score": null,
+      "likes": 0,
+      "dislikes": 0,
+      "rating": null,
+      "comment": null
+    },
+    "authorization_method": "signed_url",
+    "charging": {
+      "dev_discount": false,
+      "is_burst": false,
+      "tier": "free",
+      "llm_usage": {
+        "irreversible_generation": {
+          "model_usage": {
+            "qwen35-397b-a17b": {
+              "input": {
+                "tokens": 5209,
+                "price": 0.00328167
+              },
+              "input_cache_read": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "input_cache_write": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "output_total": {
+                "tokens": 184,
+                "price": 0.00276
+              }
+            }
+          },
+          "detailed_model_usage": [
+            {
+              "config": {
+                "model": "qwen35-397b-a17b",
+                "service_tier": "standard"
+              },
+              "usage": {
+                "input": {
+                  "tokens": 5209,
+                  "price": 0.00328167
+                },
+                "input_cache_read": {
+                  "tokens": 0,
+                  "price": 0.0
+                },
+                "input_cache_write": {
+                  "tokens": 0,
+                  "price": 0.0
+                },
+                "output_total": {
+                  "tokens": 184,
+                  "price": 0.00276
+                }
+              }
+            }
+          ]
+        },
+        "initiated_generation": {
+          "model_usage": {
+            "qwen35-397b-a17b": {
+              "input": {
+                "tokens": 5209,
+                "price": 0.00328167
+              },
+              "input_cache_read": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "input_cache_write": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "output_total": {
+                "tokens": 184,
+                "price": 0.00276
+              }
+            }
+          },
+          "detailed_model_usage": [
+            {
+              "config": {
+                "model": "qwen35-397b-a17b",
+                "service_tier": "standard"
+              },
+              "usage": {
+                "input": {
+                  "tokens": 5209,
+                  "price": 0.00328167
+                },
+                "input_cache_read": {
+                  "tokens": 0,
+                  "price": 0.0
+                },
+                "input_cache_write": {
+                  "tokens": 0,
+                  "price": 0.0
+                },
+                "output_total": {
+                  "tokens": 184,
+                  "price": 0.00276
+                }
+              }
+            }
+          ]
+        }
+      },
+      "llm_price": 0.00604167,
+      "llm_charge": 61,
+      "call_charge": 282,
+      "platform_charge": 282,
+      "platform_usage": {
+        "category_usage": {
+          "voice": {
+            "credits": 282,
+            "price": 0.028058170090452767,
+            "quantity": 0.8532778815288717
+          }
+        }
+      },
+      "platform_price": 0.028058170090452767,
+      "free_minutes_consumed": 0.0,
+      "free_llm_dollars_consumed": 0.0,
+      "tts_usage": {
+        "primary_tts_model": "eleven_v4_turbo",
+        "total_audio_output_seconds": 38.800000000000004,
+        "total_characters": 765,
+        "per_voice_usage": [
+          {
+            "voice_id": "voice_fixture_one",
+            "audio_output_seconds": 38.800000000000004
+          }
+        ]
+      },
+      "asr_usage": {
+        "asr_model": "scribe_realtime",
+        "total_transcription_calls": 85,
+        "total_audio_input_seconds": 14.872000000000009
+      },
+      "analysis": null
+    },
+    "phone_call": null,
+    "batch_call": null,
+    "termination_reason": "Client disconnected: 1000",
+    "error": null,
+    "warnings": [],
+    "main_language": "en",
+    "rag_usage": null,
+    "text_only": false,
+    "features_usage": {
+      "language_detection": {
+        "enabled": false,
+        "used": false
+      },
+      "transfer_to_agent": {
+        "enabled": false,
+        "used": false
+      },
+      "transfer_to_number": {
+        "enabled": false,
+        "used": false
+      },
+      "multivoice": {
+        "enabled": false,
+        "used": false
+      },
+      "dtmf_tones": {
+        "enabled": false,
+        "used": false
+      },
+      "external_mcp_servers": {
+        "enabled": false,
+        "used": false
+      },
+      "pii_zrm_workspace": false,
+      "pii_zrm_agent": false,
+      "tool_dynamic_variable_updates": {
+        "enabled": false,
+        "used": false
+      },
+      "is_livekit": false,
+      "voicemail_detection": {
+        "enabled": false,
+        "used": false
+      },
+      "dtmf_input": {
+        "enabled": false,
+        "used": false
+      },
+      "workflow": {
+        "enabled": false,
+        "tool_node": {
+          "enabled": false,
+          "used": false
+        },
+        "standalone_agent_node": {
+          "enabled": false,
+          "used": false
+        },
+        "phone_number_node": {
+          "enabled": false,
+          "used": false
+        },
+        "end_node": {
+          "enabled": false,
+          "used": false
+        },
+        "override_agent_node": {
+          "enabled": false,
+          "used": false
+        },
+        "say_node": {
+          "enabled": false,
+          "used": false
+        },
+        "update_state_node": {
+          "enabled": false,
+          "used": false
+        },
+        "subgraph_node": {
+          "enabled": false,
+          "used": false
+        },
+        "transfer_to_genesys_node": {
+          "enabled": false,
+          "used": false
+        }
+      },
+      "agent_testing": {
+        "enabled": false,
+        "tests_ran_after_last_modification": false,
+        "tests_ran_in_last_7_days": false
+      },
+      "versioning": {
+        "enabled": true,
+        "used": false
+      },
+      "file_input": {
+        "enabled": true,
+        "used": false
+      },
+      "freeform_procedure": {
+        "enabled": false,
+        "used": false
+      },
+      "structured_procedure": {
+        "enabled": false,
+        "used": false
+      }
+    },
+    "eleven_assistant": {
+      "is_eleven_assistant": false
+    },
+    "initiator_id": null,
+    "conversation_initiation_source": "js_sdk",
+    "conversation_initiation_source_version": "1.26.0",
+    "timezone": "Europe/Amsterdam",
+    "async_metadata": null,
+    "whatsapp": null,
+    "sms": null,
+    "agent_created_from": "api",
+    "agent_last_updated_from": "api",
+    "voice_rewards": [],
+    "cost_fiat": 0.03409984009045277
+  },
+  "analysis": {
+    "evaluation_criteria_results": {},
+    "data_collection_results": {},
+    "evaluation_criteria_results_list": [],
+    "data_collection_results_list": [],
+    "call_successful": "success",
+    "call_success_score": null,
+    "transcript_summary": "The user inquired about returning a clearance item. The agent provided the return policy, stating a 30-day window for unused items in original packaging, noting that clearance items are final sale. When the user couldn't provide an order number, the agent advised them to call back with it for further assistance.",
+    "call_summary_title": "Clearance Item Return Policy",
+    "scoped": [],
+    "sentiment_analysis": {
+      "overall_label": "neutral",
+      "overall_sentiment_score": 0.0,
+      "overall_frustration_score": 0.0,
+      "min_user_sentiment_score": 0.0,
+      "max_user_frustration_score": 0.0,
+      "num_scored_user_turns": 2
+    }
+  },
+  "visited_agents": [
+    {
+      "agent_id": "agent_fixture_shop",
+      "branch_id": "branch_fixture_main"
+    }
+  ],
+  "conversation_initiation_client_data": {
+    "conversation_config_override": {
+      "asr": null,
+      "turn": null,
+      "tts": {
+        "model_id": null,
+        "voice_id": null,
+        "supported_voices": null,
+        "stability": null,
+        "speed": null,
+        "similarity_boost": null,
+        "pronunciation_dictionary_locators": null
+      },
+      "conversation": {
+        "text_only": false,
+        "max_duration_seconds": null
+      },
+      "agent": {
+        "first_message": null,
+        "language": null,
+        "max_conversation_duration_message": null,
+        "prompt": null
+      }
+    },
+    "custom_llm_extra_body": {},
+    "user_id": null,
+    "source_info": {
+      "source": "js_sdk",
+      "version": "1.26.0"
+    },
+    "branch_id": null,
+    "environment": null,
+    "starting_workflow_node_id": null,
+    "experiments": [],
+    "procedure_ids": null,
+    "dynamic_variables": {
+      "system__agent_id": "agent_fixture_shop",
+      "system__agent_turns": 4,
+      "system__current_agent_turns": 4,
+      "system__current_subagent_turns": 4,
+      "system__current_agent_id": "agent_fixture_shop",
+      "system__conversation_id": "conv_fixture_interruption",
+      "system__call_duration_secs": 51,
+      "system__time_utc": "2026-10-02T16:46:29.047749+00:00",
+      "system__timezone": "Europe/Amsterdam",
+      "system__time": "Friday, 18:46 02 October 2026",
+      "system__time_hour": 18,
+      "system__time_minute": 46,
+      "system__time_second": 29,
+      "system__is_text_only": false,
+      "system__channel": "js_sdk",
+      "system__caller_id": null,
+      "system__called_number": null,
+      "system__call_sid": null,
+      "system__call_id": null,
+      "system__conversation_history": "{\"x-elevenlabs-history\": true, \"entries\": [{\"role\": \"agent\", \"message\": \"Hi, this is the Kitaru test shop. How can I help you today?\"}, {\"role\": \"user\", \"message\": \"Um, yeah. Hey, so I want to return a regular item, um, please. So, like, yeah, can you tell me a little bit how that would work?\"}, {\"role\": \"agent\", \"message\": \"[friendly] I can certainly help you with that!...\"}, {\"role\": \"user\", \"message\": \"Yeah, actually, um, so it was actually a clearance item. Uh, yeah.\"}, {\"role\": \"agent\", \"tool_requests\": [{\"tool_name\": \"get_return_policy\", \"params_as_json\": {\"product_type\": \"clearance\"}}]}, {\"role\": \"agent\", \"tool_results\": [{\"tool_name\": \"get_return_policy\", \"result_value\": \"{\\\"product_type\\\":\\\"clearance\\\",\\\"return_window_days\\\":30,\\\"conditions\\\":[\\\"unused\\\",\\\"original packaging\\\"],\\\"final_sale\\\":true}\"}]}, {\"role\": \"agent\", \"message\": \"[friendly] For clearance items, you have thirty days to return them as long as they are unused and in their original packaging. However, please note that clearance items are considered final sale, so you might not be able to get a refund depending on the specific circumstances. Do you have the order number for this item so I can check the details for you?\"}, {\"role\": \"user\", \"message\": \"Uh, yeah, actually no.\"}, {\"role\": \"agent\", \"message\": \"[friendly] No problem at all! If you can find your order number later, just give us a call back and we\\u2019ll be happy to assist you further. Is there anything else I can help you with in the meantime?\"}]}",
+      "system__user_id": null,
+      "system__initiator_id": null,
+      "system__environment": "production"
+    },
+    "tool_mock_config": {
+      "mocking_strategy": "none",
+      "fallback_strategy": "raise_error",
+      "mocked_tool_names": []
+    },
+    "tool_mock_overrides": {}
+  },
+  "environment": "production",
+  "experiment_assignments": null,
+  "hiding_reason": null,
+  "smb_metadata": null,
+  "conversation_id": "conv_fixture_interruption",
+  "has_audio": true,
+  "has_user_audio": true,
+  "has_response_audio": true,
+  "has_auxiliary_audio": false,
+  "transcript": [
+    {
+      "role": "agent",
+      "agent_metadata": {
+        "agent_id": "agent_fixture_shop",
+        "branch_id": "branch_fixture_main",
+        "workflow_node_id": null,
+        "version_id": "version_fixture_one"
+      },
+      "message": "Hi, this is the Kitaru test shop. How can I help you today?",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": "qwen35-397b-a17b",
+      "time_in_call_secs": 0,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_tts_service_ttfb": {
+            "elapsed_time": 0.06878088880330324
+          },
+          "convai_ttf_audio_since_silence": {
+            "elapsed_time": 0.07673765998333693
+          },
+          "convai_turn_silence_before_initiation": {
+            "elapsed_time": 0.0
+          }
+        },
+        "convai_asr_provider": null,
+        "convai_tts_model": "eleven_v4_turbo",
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": null,
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": null,
+      "source_event_id": 1,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "user",
+      "agent_metadata": null,
+      "message": "Um, yeah. Hey, so I want to return a regular item, um, please. So, like, yeah, can you tell me a little bit how that would work?",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": null,
+      "time_in_call_secs": 4,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_asr_trailing_service_latency": {
+            "elapsed_time": 0.025308349635452032
+          }
+        },
+        "convai_asr_provider": "Scribe v2 Realtime",
+        "convai_tts_model": null,
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": null,
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": "audio",
+      "source_event_id": 67,
+      "used_static_kb_document_ids": [],
+      "analysis": {
+        "user_sentiment_score": 0.0,
+        "user_frustration_score": 0.0
+      },
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "agent",
+      "agent_metadata": {
+        "agent_id": "agent_fixture_shop",
+        "branch_id": "branch_fixture_main",
+        "workflow_node_id": null,
+        "version_id": "version_fixture_one"
+      },
+      "message": "[friendly] I can certainly help you with that!...",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": "qwen35-397b-a17b",
+      "time_in_call_secs": 11,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_llm_service_ttf_sentence": {
+            "elapsed_time": 0.2976644868031144
+          },
+          "convai_llm_service_ttfb": {
+            "elapsed_time": 0.24042117781937122
+          },
+          "convai_llm_service_tt_last_sentence": {
+            "elapsed_time": 0.39115668600425124
+          },
+          "convai_tts_service_ttfb": {
+            "elapsed_time": 0.08051408920437098
+          },
+          "convai_ttf_audio_since_silence": {
+            "elapsed_time": 0.7382220249399543
+          },
+          "convai_turn_silence_before_initiation": {
+            "elapsed_time": 0.224
+          },
+          "convai_turn_asr_latency": {
+            "elapsed_time": 0.025308349635452032
+          }
+        },
+        "convai_asr_provider": null,
+        "convai_tts_model": "eleven_v4_turbo",
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": {
+        "model_usage": {
+          "qwen35-397b-a17b": {
+            "input": {
+              "tokens": 1215,
+              "price": 0.0007654500000000001
+            },
+            "input_cache_read": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "input_cache_write": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "output_total": {
+              "tokens": 35,
+              "price": 0.000525
+            }
+          }
+        },
+        "detailed_model_usage": [
+          {
+            "config": {
+              "model": "qwen35-397b-a17b",
+              "service_tier": "standard"
+            },
+            "usage": {
+              "input": {
+                "tokens": 1215,
+                "price": 0.0007654500000000001
+              },
+              "input_cache_read": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "input_cache_write": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "output_total": {
+                "tokens": 35,
+                "price": 0.000525
+              }
+            }
+          }
+        ]
+      },
+      "interrupted": true,
+      "ignored_as_backchannel": false,
+      "original_message": "[friendly] I can certainly help you with that! To give you the exact details, could you please tell me the order number for the item you want to return?",
+      "reasoning": [],
+      "source_medium": null,
+      "source_event_id": 67,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "user",
+      "agent_metadata": null,
+      "message": "Yeah, actually, um, so it was actually a clearance item. Uh, yeah.",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": null,
+      "time_in_call_secs": 13,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_asr_trailing_service_latency": {
+            "elapsed_time": 0.049526090268045664
+          }
+        },
+        "convai_asr_provider": "Scribe v2 Realtime",
+        "convai_tts_model": null,
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": null,
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": "audio",
+      "source_event_id": 110,
+      "used_static_kb_document_ids": [],
+      "analysis": {
+        "user_sentiment_score": 0.0,
+        "user_frustration_score": 0.0
+      },
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "agent",
+      "agent_metadata": {
+        "agent_id": "agent_fixture_shop",
+        "branch_id": "branch_fixture_main",
+        "workflow_node_id": null,
+        "version_id": "version_fixture_one"
+      },
+      "message": null,
+      "multivoice_message": null,
+      "tool_calls": [
+        {
+          "type": "client",
+          "request_id": "request_fixture_interruption_1",
+          "tool_name": "get_return_policy",
+          "params_as_json": "{\"product_type\": \"clearance\"}",
+          "tool_has_been_called": true,
+          "tool_details": {
+            "type": "client",
+            "parameters": "{\"product_type\": \"clearance\"}"
+          }
+        }
+      ],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": "qwen35-397b-a17b",
+      "time_in_call_secs": 17,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_llm_service_ttfb": {
+            "elapsed_time": 0.39596395613625646
+          },
+          "convai_llm_tool_request_generation_latency": {
+            "elapsed_time": 0.3965116459876299
+          }
+        },
+        "convai_asr_provider": null,
+        "convai_tts_model": null,
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": {
+        "model_usage": {
+          "qwen35-397b-a17b": {
+            "input": {
+              "tokens": 1255,
+              "price": 0.00079065
+            },
+            "input_cache_read": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "input_cache_write": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "output_total": {
+              "tokens": 29,
+              "price": 0.000435
+            }
+          }
+        },
+        "detailed_model_usage": [
+          {
+            "config": {
+              "model": "qwen35-397b-a17b",
+              "service_tier": "standard"
+            },
+            "usage": {
+              "input": {
+                "tokens": 1255,
+                "price": 0.00079065
+              },
+              "input_cache_read": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "input_cache_write": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "output_total": {
+                "tokens": 29,
+                "price": 0.000435
+              }
+            }
+          }
+        ]
+      },
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": null,
+      "source_event_id": 110,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "agent",
+      "agent_metadata": {
+        "agent_id": "agent_fixture_shop",
+        "branch_id": "branch_fixture_main",
+        "workflow_node_id": null,
+        "version_id": "version_fixture_one"
+      },
+      "message": null,
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [
+        {
+          "request_id": "request_fixture_interruption_1",
+          "tool_name": "get_return_policy",
+          "result_value": "{\"product_type\":\"clearance\",\"return_window_days\":30,\"conditions\":[\"unused\",\"original packaging\"],\"final_sale\":true}",
+          "is_error": false,
+          "is_blocked": false,
+          "tool_has_been_called": true,
+          "tool_latency_secs": 0.15679317899048328,
+          "error_type": "",
+          "raw_error_message": "",
+          "dynamic_variable_updates": [],
+          "type": "client"
+        }
+      ],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": null,
+      "time_in_call_secs": 18,
+      "conversation_turn_metrics": null,
+      "rag_retrieval_info": null,
+      "llm_usage": null,
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": null,
+      "source_event_id": 110,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "agent",
+      "agent_metadata": {
+        "agent_id": "agent_fixture_shop",
+        "branch_id": "branch_fixture_main",
+        "workflow_node_id": null,
+        "version_id": "version_fixture_one"
+      },
+      "message": "[friendly] For clearance items, you have thirty days to return them as long as they are unused and in their original packaging. However, please note that clearance items are considered final sale, so you might not be able to get a refund depending on the specific circumstances. Do you have the order number for this item so I can check the details for you?",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": "qwen35-397b-a17b",
+      "time_in_call_secs": 19,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_llm_service_ttf_sentence": {
+            "elapsed_time": 0.8087338320910931
+          },
+          "convai_llm_service_ttfb": {
+            "elapsed_time": 0.5760788340121508
+          },
+          "convai_llm_service_tt_last_sentence": {
+            "elapsed_time": 1.1950654489919543
+          },
+          "convai_tts_service_ttfb": {
+            "elapsed_time": 0.08837637910619378
+          },
+          "convai_ttf_audio_since_silence": {
+            "elapsed_time": 1.8379955851249397
+          },
+          "convai_turn_silence_before_initiation": {
+            "elapsed_time": 0.224
+          }
+        },
+        "convai_asr_provider": null,
+        "convai_tts_model": "eleven_v4_turbo",
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": {
+        "model_usage": {
+          "qwen35-397b-a17b": {
+            "input": {
+              "tokens": 1327,
+              "price": 0.00083601
+            },
+            "input_cache_read": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "input_cache_write": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "output_total": {
+              "tokens": 73,
+              "price": 0.001095
+            }
+          }
+        },
+        "detailed_model_usage": [
+          {
+            "config": {
+              "model": "qwen35-397b-a17b",
+              "service_tier": "standard"
+            },
+            "usage": {
+              "input": {
+                "tokens": 1327,
+                "price": 0.00083601
+              },
+              "input_cache_read": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "input_cache_write": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "output_total": {
+                "tokens": 73,
+                "price": 0.001095
+              }
+            }
+          }
+        ]
+      },
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": null,
+      "source_event_id": 110,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "user",
+      "agent_metadata": null,
+      "message": "Uh, yeah, actually no.",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": null,
+      "time_in_call_secs": 38,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_asr_trailing_service_latency": {
+            "elapsed_time": 0.05709898006170988
+          }
+        },
+        "convai_asr_provider": "Scribe v2 Realtime",
+        "convai_tts_model": null,
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": null,
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": "audio",
+      "source_event_id": 248,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "agent",
+      "agent_metadata": {
+        "agent_id": "agent_fixture_shop",
+        "branch_id": "branch_fixture_main",
+        "workflow_node_id": null,
+        "version_id": "version_fixture_one"
+      },
+      "message": "[friendly] No problem at all! If you can find your order number later, just give us a call back and we’ll be happy to assist you further. Is there anything else I can help you with in the meantime?",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": "qwen35-397b-a17b",
+      "time_in_call_secs": 40,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_llm_service_ttf_sentence": {
+            "elapsed_time": 0.2928104973398149
+          },
+          "convai_llm_service_ttfb": {
+            "elapsed_time": 0.22915253834798932
+          },
+          "convai_llm_service_tt_last_sentence": {
+            "elapsed_time": 0.44571369607001543
+          },
+          "convai_tts_service_ttfb": {
+            "elapsed_time": 0.07912154914811254
+          },
+          "convai_ttf_audio_since_silence": {
+            "elapsed_time": 0.7778393752649426
+          },
+          "convai_turn_silence_before_initiation": {
+            "elapsed_time": 0.224
+          },
+          "convai_turn_asr_latency": {
+            "elapsed_time": 0.05709898006170988
+          }
+        },
+        "convai_asr_provider": null,
+        "convai_tts_model": "eleven_v4_turbo",
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": {
+        "model_usage": {
+          "qwen35-397b-a17b": {
+            "input": {
+              "tokens": 1412,
+              "price": 0.0008895600000000001
+            },
+            "input_cache_read": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "input_cache_write": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "output_total": {
+              "tokens": 47,
+              "price": 0.000705
+            }
+          }
+        },
+        "detailed_model_usage": [
+          {
+            "config": {
+              "model": "qwen35-397b-a17b",
+              "service_tier": "standard"
+            },
+            "usage": {
+              "input": {
+                "tokens": 1412,
+                "price": 0.0008895600000000001
+              },
+              "input_cache_read": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "input_cache_write": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "output_total": {
+                "tokens": 47,
+                "price": 0.000705
+              }
+            }
+          }
+        ]
+      },
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": null,
+      "source_event_id": 248,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    }
+  ],
+  "tag_ids": [],
+  "realtime_config_snapshots": null,
+  "orchestrator": "conversational",
+  "otlp_traces": null
+}
