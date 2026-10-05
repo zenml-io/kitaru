@@ -275,6 +275,25 @@ async def test_create_numbers_versions_sequentially(setup: Setup) -> None:
     assert [first.version, second.version, third.version] == [1, 2, 3]
 
 
+async def test_get_agent_id(setup: Setup) -> None:
+    """Resolve the exact version id to its agent, not another version's agent."""
+    repository, owner_id, agent_id, make_agent_id, _, _, _, _ = setup
+    version = await repository.create(
+        AgentVersion(owner_id=owner_id, agent_id=agent_id)
+    )
+    other_agent_id = await make_agent_id()
+    await repository.create(AgentVersion(owner_id=owner_id, agent_id=other_agent_id))
+    assert await repository.get_agent_id(version.id) == agent_id
+
+
+async def test_get_agent_id_not_found(setup: Setup) -> None:
+    """Raise the version-specific error for a missing primary key."""
+    repository, *_ = setup
+    missing_id = uuid.uuid4()
+    with pytest.raises(AgentVersionNotFound):
+        await repository.get_agent_id(missing_id)
+
+
 async def test_create_missing_agent(setup: Setup) -> None:
     """Raise when the agent does not exist."""
     repository, owner_id, _, _, _, _, _, _ = setup
