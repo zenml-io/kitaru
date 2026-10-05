@@ -440,7 +440,7 @@ async def logout(
                 else []
             )
             return CommandResult(item=item, warnings=warnings)
-        elif delete_volumes:
+        if delete_volumes:
             raise CLIError(
                 "invalid_arguments",
                 "--volumes is only valid for the CLI-owned local deployment.",

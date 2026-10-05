@@ -84,6 +84,21 @@ maintenance-branch-prefix = "release/claude-agent-sdk/"
 checks = []
 
 [[units]]
+slug = "elevenlabs-importer"
+path = "plugins/packages/elevenlabs-importer"
+distribution = "kitaru-elevenlabs-importer"
+registry = "pypi"
+version-source = "plugins/packages/elevenlabs-importer/pyproject.toml"
+changelog = "plugins/packages/elevenlabs-importer/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = false
+release-label = "requires:plugin:elevenlabs"
+impact-paths = ["plugins/packages/elevenlabs-importer/**"]
+tag-prefix = "python/kitaru-elevenlabs-importer/v"
+maintenance-branch-prefix = "release/elevenlabs/"
+checks = []
+
+[[units]]
 slug = "evaluator"
 path = "plugins/packages/evaluator"
 distribution = "kitaru-evaluator"

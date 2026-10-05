@@ -16,6 +16,7 @@
 import builtins
 import io
 import json
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -782,7 +783,7 @@ def test_agent_spec_conflicts_with_direct_options(argv: list[str], capsys) -> No
         (APIError(409, "name already exists"), "conflict", False),
         (APIError(503, "upstream unavailable"), "network_error", True),
         (APIError(418, "teapot"), "internal_error", False),
-        (ValueError("size must be positive"), "invalid_arguments", False),
+        (ValueError("size must be positive"), "internal_error", False),
         (RuntimeError(), "internal_error", False),
     ],
 )
@@ -795,3 +796,41 @@ def test_convert_error_maps_failures_to_stable_kinds(
     assert error.kind == kind
     assert error.retryable is retryable
     assert error.message
+
+
+def test_bare_value_error_in_a_command_is_an_internal_error(
+    monkeypatch, capsys
+) -> None:
+    """A CLI bug that raises ValueError is not blamed on the caller's arguments."""
+
+    class BrokenClient:
+        @property
+        def cohorts(self) -> Any:
+            raise ValueError("boom")
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield BrokenClient()
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+
+    assert app_module.main(["cohort", "get", "x", "--output", "json"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["kind"] == "internal_error"
+    assert error["retryable"] is False
+    assert error["message"] == "boom"
+
+
+def test_option_type_conversion_failure_is_invalid_arguments(capsys) -> None:
+    """A value the parser cannot convert is still the caller's mistake."""
+    argv = ["cohort", "list", "--size", "not-a-number", "--output", "json"]
+    assert app_module.main(argv) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["kind"] == "invalid_arguments"
+    assert "--size" in error["message"]

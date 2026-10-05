@@ -245,8 +245,7 @@ def _escape_mdx(text: str) -> str:
     text = text.replace("{", "\\{")
     text = text.replace("}", "\\}")
     text = text.replace("<", "&lt;")
-    text = text.replace(">", "&gt;")
-    return text
+    return text.replace(">", "&gt;")
 
 
 def _prose_cell(text: str) -> str:

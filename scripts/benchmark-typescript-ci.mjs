@@ -24,6 +24,16 @@ const examples = [
   "kitaru-example-mastra-support-triage",
   "kitaru-example-mastra-adaptive-conversation",
 ];
+const canonicalPackages = [
+  "kitaru",
+  "kitaru-mastra",
+  "kitaru-mastra-compat-1.68",
+  "kitaru-mastra-compat-1.69",
+  "kitaru-mastra-compat-1.70",
+  "kitaru-mastra-compat-1.71",
+  "kitaru-vercel-ai",
+  ...examples,
+];
 const runs = [];
 mkdirSync(outputDirectory, { recursive: true });
 
@@ -96,13 +106,11 @@ function runSuite(packageName, { coverage, canonical, postgres }) {
   }
 }
 
-for (const packageName of packages) {
+for (const packageName of canonicalPackages) {
   runSuite(packageName, {
-    coverage: mode === "coverage-once", canonical: true, postgres: true,
+    coverage: mode === "coverage-once" && packages.includes(packageName),
+    canonical: true, postgres: true,
   });
-}
-for (const packageName of examples) {
-  runSuite(packageName, { coverage: false, canonical: true, postgres: true });
 }
 if (mode === "repeated") {
   for (const packageName of packages) {

@@ -1,7 +1,5 @@
 """Shared fake Google ADK modules for deterministic adapter tests."""
 
-from __future__ import annotations
-
 import sys
 from types import ModuleType
 from typing import Any
@@ -51,14 +49,16 @@ class FakePart:
         self.text = text
 
     @classmethod
-    def from_text(cls, *, text: str) -> FakePart:
+    def from_text(cls, *, text: str) -> "FakePart":
         return cls(text=text)
 
 
 class FakeContent:
     """Minimal stand-in for ``google.genai.types.Content``."""
 
-    def __init__(self, *, role: str | None = None, parts: list[Any] | None = None):
+    def __init__(
+        self, *, role: str | None = None, parts: list[Any] | None = None
+    ) -> None:
         self.role = role
         self.parts = list(parts or [])
 

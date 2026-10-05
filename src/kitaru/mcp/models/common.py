@@ -6,7 +6,7 @@
 import uuid
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.agent_version import AgentVersionResponse
@@ -135,6 +135,9 @@ class RegistryReadResult(ToolResult):
 # field descriptions in the discovery schema. The literal mirrors JobKind while
 # avoiding a separate enum definition in this already budget-constrained union.
 class _MCPJob(JobResponse):
+    # Paginated SDK reads contain JobResponse instances, not dictionaries.
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     kind: Literal["session_run", "import", "evaluation", "replay"]
 
@@ -220,17 +223,24 @@ class AnalyzersManageResult(ToolResult):
 
 
 class SessionImportReceipt(MCPModel):
-    """Receipt for a blob-backed import workflow."""
+    """Receipt for a blob-backed or provider-API import workflow."""
 
     operation: Literal["session_import"]
     idempotency: Literal["domain-deduplicated-only"]
-    blob_id: uuid.UUID
+    blob_id: uuid.UUID | None = None
+    query: dict[str, JsonValue] | None = None
     importer_id: uuid.UUID
     importer_version_id: uuid.UUID
     agent_id: uuid.UUID
     agent_version_id: uuid.UUID
     import_id: uuid.UUID
     result: JobResponse
+
+    @model_validator(mode="after")
+    def _validate_source(self) -> "SessionImportReceipt":
+        if (self.blob_id is None) == (self.query is None):
+            raise ValueError("exactly one of blob_id or query must be set")
+        return self
 
 
 class SessionImportResult(ToolResult):

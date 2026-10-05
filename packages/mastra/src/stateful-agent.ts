@@ -70,6 +70,7 @@ import {
   type MissingOMResults,
   type OMLiveCall,
   type OMResultEntry,
+  toStoredOMEntry,
 } from "./om-result-tape.js";
 import { parseProcessorDecisionOverride } from "./processor-decision-override.js";
 import {
@@ -1478,6 +1479,7 @@ export function createMemoryReplayAgent(
                 "file_url_sent_to_model",
               );
           }
+          omTape.beginActorStep();
           capture.beginStep({
             stepNumber: args.stepNumber,
             messageList: args.messageList,
@@ -1781,14 +1783,7 @@ export function createMemoryReplayAgent(
             const finalize = (processorDecisions?: JsonValue) =>
               finalizeMemoryReplayEnvelope(
                 recaptured.envelope,
-                omResults.map((entry) => ({
-                  phase: entry.phase,
-                  ordinal: entry.ordinal,
-                  method: entry.method,
-                  inputFingerprint: entry.inputFingerprint,
-                  output: entry.output,
-                  ...(entry.failed ? { failed: true } : {}),
-                })),
+                omResults.map(toStoredOMEntry),
                 sanitizer.replace,
                 attachmentTokens?.counts(),
                 // A replay's own input keeps files recorded inline before
