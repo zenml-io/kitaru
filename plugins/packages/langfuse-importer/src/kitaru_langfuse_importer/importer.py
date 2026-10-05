@@ -743,8 +743,7 @@ def _detect_shape(record: dict[str, Any]) -> str:
         return _TRACE_SHAPE
     event_type = str(record.get("type", "")).lower()
     if isinstance(record.get("body"), dict) and (
-        event_type.endswith("-create")
-        or event_type.endswith("-update")
+        event_type.endswith(("-create", "-update"))
         or event_type in {"trace", "span", "generation", "event"}
     ):
         return _EVENT_SHAPE

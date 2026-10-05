@@ -741,8 +741,7 @@ def extract_api(module_name: str) -> dict:
 
     # Round-trip through JSON to get plain dicts (CustomEncoder handles
     # griffe Expr objects, Path objects, etc.)
-    raw = json.loads(json.dumps(parsed, cls=CustomEncoder))
-    return raw
+    return json.loads(json.dumps(parsed, cls=CustomEncoder))
 
 
 def count_symbols(module: dict) -> tuple[int, int, int]:

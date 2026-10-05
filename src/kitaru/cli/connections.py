@@ -211,7 +211,7 @@ def _collect_schema_values(
             continue
         if not isinstance(definition, dict):
             definition = {}
-        secret = definition.get("writeOnly") is True
+        secret = _is_secret_property(definition)
         default = definition.get("default")
         default_text = None if default is None else str(default)
         prompt = secret_prompt if secret else value_prompt
@@ -226,6 +226,20 @@ def _collect_schema_values(
             secrets[key] = value
         else:
             env[key] = value
+
+
+def _is_secret_property(definition: dict[str, Any]) -> bool:
+    """Return whether a connection schema property is marked ``writeOnly``."""
+    # Pydantic puts ``writeOnly`` inside the non-null branch of an optional
+    # ``SecretStr | None`` field rather than on the property itself.
+    branches = [
+        branch
+        for key in ("anyOf", "oneOf")
+        if isinstance(options := definition.get(key), list)
+        for branch in options
+        if isinstance(branch, dict)
+    ]
+    return any(d.get("writeOnly") is True for d in (definition, *branches))
 
 
 def _prompt_label(key: str, definition: dict[str, Any], default: str | None) -> str:

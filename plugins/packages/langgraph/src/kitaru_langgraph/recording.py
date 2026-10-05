@@ -107,6 +107,7 @@ class InvocationRecorder:
     started_at: datetime
     budget: CaptureBudget
     history_occurrences: dict[str, int] = field(default_factory=dict)
+    history_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     buffer: list[tuple[SessionNodeCreateRequest, int]] = field(default_factory=list)
     run_external_ids: dict[uuid.UUID, str] = field(default_factory=dict)
     pending_runs: dict[uuid.UUID, PendingRun] = field(default_factory=dict)

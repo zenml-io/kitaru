@@ -1,0 +1,1 @@
+- Allowed SQLAlchemy 2.1 for server installations while excluding the broken 2.1.0 source distribution.
