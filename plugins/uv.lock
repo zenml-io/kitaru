@@ -290,7 +290,7 @@ wheels = [
 
 [[package]]
 name = "braintrust"
-version = "0.41.1"
+version = "0.42.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chevron" },
@@ -304,9 +304,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/dd/97/efe95ed290214fece196d756038757f3efd456c9b32f168af5ae988990ac/braintrust-0.41.1.tar.gz", hash = "sha256:25c63f75d9f420345982b9a49e99d3751506c38b3b0d27262f1efff16be4eed5", size = 945987, upload-time = "2026-09-22T13:35:49.71Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/1e/302a6c5a833279caf4ccd072c6181d6ee81ce67721a23e59262837e89822/braintrust-0.42.0.tar.gz", hash = "sha256:bd91b8149c65c3aa1f250930c5a671fb7d9111c4b27a9530bfec6279827bc8e6", size = 963161, upload-time = "2026-09-22T19:52:32.567Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/76/363bf70250c15c27d86fd250741ea17eb12580adc941223296545a7ddbfc/braintrust-0.41.1-py3-none-any.whl", hash = "sha256:0b5062100d3923e871362fb74aeac167ad89ae45d050fe7b341cd750259fe2af", size = 1138091, upload-time = "2026-09-22T13:35:47.812Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/2e/27abeceda990a309b8600729369f271a48de102d76292c2c2dca449a4d43/braintrust-0.42.0-py3-none-any.whl", hash = "sha256:42c664d80cb6f62c347804b92f351a73aff239f8a4313e6006d0ff9e7f32bc9f", size = 1157277, upload-time = "2026-09-22T19:52:30.581Z" },
 ]
 
 [[package]]
@@ -1395,7 +1395,7 @@ requires-dist = [
     { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9" },
     { name = "pyyaml", marker = "extra == 'cli'", specifier = ">=6.0" },
     { name = "rich", marker = "extra == 'cli'", specifier = ">=13.0" },
-    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'server'", specifier = ">=2.0.51,<2.1" },
+    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'server'", specifier = ">=2.0.51,!=2.1.0" },
     { name = "uuid-utils", marker = "extra == 'server'", specifier = ">=0.10" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.51" },
 ]
@@ -1913,7 +1913,7 @@ wheels = [
 
 [[package]]
 name = "langsmith"
-version = "0.14.1"
+version = "0.14.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1931,9 +1931,9 @@ dependencies = [
     { name = "xxhash" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/96/23/ba753811d6d768f4d98d0336ba49c2b3021afeeaa59a8f63ab83bf83efe7/langsmith-0.14.1.tar.gz", hash = "sha256:0b5cd2473420c9c5acef33a9bafe6c812a7cf96741e9a5af465b1d93bf77f7ae", size = 4966485, upload-time = "2026-09-25T17:38:08.216Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/97/7eb794dc527874098cebe323db3682df65c10ebb74106d2988d83fbf6509/langsmith-0.14.3.tar.gz", hash = "sha256:60c42b2c9e3e798ebbab3caa286ac25201b2b1861ed915dfe5851b076d6a9bc4", size = 4967528, upload-time = "2026-10-01T23:57:42.537Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/d6/1771421302dd230d3e52f29546b187cda824cff1443031067b69d46207ee/langsmith-0.14.1-py3-none-any.whl", hash = "sha256:dcfd8a25ba72d8663024bd87df02e372e470f43e18f4a726f37fbacc772c0193", size = 812092, upload-time = "2026-09-25T17:38:05.704Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/bd/24ff7a6de157cc3e64c0b3e6f7d6f98672d29632594da5e99c5e48b2c3a1/langsmith-0.14.3-py3-none-any.whl", hash = "sha256:4438b0c5d9ac14d5267d4373d67cfb58f1585c91c501564186b9ce196aad2988", size = 813913, upload-time = "2026-10-01T23:57:40.615Z" },
 ]
 
 [[package]]
