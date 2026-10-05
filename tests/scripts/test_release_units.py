@@ -30,6 +30,7 @@ EXPECTED_UNITS = {
     "kitaru": "kitaru",
     "braintrust-importer": "kitaru-braintrust-importer",
     "claude-agent-sdk": "kitaru-claude-agent-sdk",
+    "elevenlabs-importer": "kitaru-elevenlabs-importer",
     "evaluator": "kitaru-evaluator",
     "jsonl-importer": "kitaru-jsonl-importer",
     "langfuse-importer": "kitaru-langfuse-importer",
@@ -629,7 +630,7 @@ def test_plugin_matrix_is_generated_from_the_plugin_units_in_three_shards() -> N
 
     shards = matrix["include"]
     assert [shard["shard"] for shard in shards] == ["1/3", "2/3", "3/3"]
-    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [5, 5, 5]
+    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [6, 5, 5]
     assert [
         package_path
         for shard in shards
@@ -828,7 +829,12 @@ def test_ci_quickstart_example_job_enforces_the_walkthrough() -> None:
         "\n  links:\n", maxsplit=1
     )[0]
 
-    assert "scripts/audit-example-coverage.py" in lint_job
+    assert "- run: just example-coverage-audit" in lint_job
+    justfile = (REPO_ROOT / "Justfile").read_text()
+    example_audit_recipe = justfile.split("\nexample-coverage-audit:\n", maxsplit=1)[
+        1
+    ].split("\n\n", maxsplit=1)[0]
+    assert "scripts/audit-example-coverage.py" in example_audit_recipe
     assert "name: Quickstart example end to end" in example_job
     assert "repository: zenml-io/kitaru-template" not in workflow
     assert (
@@ -890,7 +896,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 16 release units."),
+        (["validate"], "Validated 17 release units."),
         (
             [
                 "propose-core-version",

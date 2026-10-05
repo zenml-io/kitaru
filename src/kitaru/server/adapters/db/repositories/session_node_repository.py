@@ -203,7 +203,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         return bool(await self._session.scalar(statement))
 
     async def _latest_match(
-        self, statement: Select[tuple[SessionNodeORM]]
+        self, statement: Select[SessionNodeORM]
     ) -> SessionNode | None:
         """Run a cache-key search statement and return its newest match.
 

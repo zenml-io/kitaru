@@ -3,8 +3,6 @@
 # ///
 """Verify that a built Kitaru wheel contains the bundled UI assets."""
 
-from __future__ import annotations
-
 import argparse
 import sys
 import zipfile

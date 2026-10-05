@@ -1,1 +1,1 @@
-- Support `@mastra/core` 1.72 through 1.74 in the Mastra adapter, including recorded and replayed `Agent.stream()` calls, and develop and test against `@mastra/core` 1.74.0.
+- Support `@mastra/core` 1.72 through 1.74 in the Mastra adapter, including recorded and replayed `Agent.stream()` calls, and accept the tested release sets core 1.72.0 with memory 1.33.0, core 1.73.0 with memory 1.34.0, and core 1.74.0 with memory 1.35.0 in the isolated memory replay factory.

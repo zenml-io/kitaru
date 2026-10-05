@@ -276,7 +276,7 @@ def _translate_query_timeout(error: DBAPIError) -> None:
 
 async def paginate(
     session: AsyncSession,
-    statement: Select[tuple[RowT]],
+    statement: Select[RowT],
     list_filter: ListFilter,
     order: PageOrder,
 ) -> tuple[Sequence[RowT], str | None]:

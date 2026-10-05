@@ -149,7 +149,7 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
             .where(CohortVersionORM.id == cohort_version_id)
         )
         result = await self._session.execute(statement)
-        row = result.first()
+        row = result.one_or_none()
         if row is None:
             raise CohortVersionIdNotFound(cohort_version_id)
         return row[0]

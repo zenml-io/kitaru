@@ -1,5 +1,6 @@
 """Verify the hosted TypeScript trial retains suites, coverage, and failures."""
 
+import fnmatch
 import json
 import os
 import shlex
@@ -15,6 +16,20 @@ PUBLISHED = ["kitaru", "kitaru-mastra", "kitaru-vercel-ai"]
 EXAMPLES = [
     "kitaru-example-mastra-support-triage",
     "kitaru-example-mastra-adaptive-conversation",
+]
+
+CANONICAL = [
+    "kitaru",
+    "kitaru-mastra",
+    "kitaru-mastra-compat-1.68",
+    "kitaru-mastra-compat-1.69",
+    "kitaru-mastra-compat-1.70",
+    "kitaru-mastra-compat-1.71",
+    "kitaru-mastra-compat-1.72",
+    "kitaru-mastra-compat-1.73",
+    "kitaru-mastra-compat-1.74",
+    "kitaru-vercel-ai",
+    *EXAMPLES,
 ]
 
 
@@ -81,7 +96,7 @@ def test_trial_retains_canonical_suites_and_postgres_coverage_environment(
         json.loads(line)
         for line in Path(fake_pnpm["PNPM_CALLS"]).read_text().splitlines()
     ]
-    expected_packages = PUBLISHED + EXAMPLES
+    expected_packages = CANONICAL.copy()
     if mode == "repeated":
         expected_packages += PUBLISHED
     assert [call["args"][1] for call in calls] == [
@@ -89,10 +104,13 @@ def test_trial_retains_canonical_suites_and_postgres_coverage_environment(
     ]
     assert all(
         call["postgres"] == fake_pnpm["KITARU_TEST_MASTRA_POSTGRES_URL"]
-        for call in calls[:5]
+        for call in calls[: len(CANONICAL)]
     )
     for index, call in enumerate(calls):
-        covered = (mode == "coverage-once" and index < 3) or index >= 5
+        package = call["args"][1].removeprefix("@zenml-io/")
+        covered = (mode == "coverage-once" and package in PUBLISHED) or index >= len(
+            CANONICAL
+        )
         assert ("--coverage.enabled" in call["args"]) == covered
         assert call["args"][2:5] == ["exec", "vitest", "run"]
         if covered:
@@ -101,15 +119,15 @@ def test_trial_retains_canonical_suites_and_postgres_coverage_environment(
             assert "--coverage.exclude=src/generated/**" in call["args"]
             assert "--coverage.reporter=text-summary" in call["args"]
             assert "--coverage.reporter=json" in call["args"]
-        if index in (3, 4):
+        if package in EXAMPLES:
             assert "test" in call["args"]
-        if index >= 5:
+        if index >= len(CANONICAL):
             assert call["postgres"] is None
 
     evidence = tmp_path / "evidence"
     assert sorted(
         path.stem for path in (evidence / "outcomes").glob("*.json")
-    ) == sorted(PUBLISHED + EXAMPLES)
+    ) == sorted(CANONICAL)
     assert sorted(
         path.parent.name
         for path in (evidence / "coverage").glob("*/coverage-final.json")
@@ -128,19 +146,26 @@ def test_trial_retains_canonical_suites_and_postgres_coverage_environment(
     selected_packages = [
         tokens[index + 1] for index, token in enumerate(tokens) if token == "--filter"
     ]
+    manifests = {
+        manifest["name"]: (path, manifest)
+        for path in (
+            *repo_root.glob("packages/*/package.json"),
+            *repo_root.glob("packages/mastra-compat/*/package.json"),
+            *repo_root.glob("examples/typescript/*/package.json"),
+        )
+        for manifest in [json.loads(path.read_text())]
+    }
+    selected_packages = [
+        package
+        for pattern in selected_packages
+        for package in sorted(manifests)
+        if fnmatch.fnmatchcase(package, pattern)
+    ]
     assert [
         call["args"][1]
         for call, run in zip(calls, metadata["runs"], strict=True)
         if run["canonical"]
     ] == selected_packages
-    manifests = {
-        manifest["name"]: (path, manifest)
-        for path in (
-            *repo_root.glob("packages/*/package.json"),
-            *repo_root.glob("examples/typescript/*/package.json"),
-        )
-        for manifest in [json.loads(path.read_text())]
-    }
     for package in selected_packages:
         path, manifest = manifests[package]
         expected_script = (

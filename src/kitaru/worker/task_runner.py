@@ -397,8 +397,8 @@ class TaskRunner:
             label: Process label used in the fallback error message.
 
         Returns:
-            Error message naming the missing result session, its status when
-            not completed, or a missing result.
+            Error message naming the missing result session, its status and
+            error when not completed, or a missing result.
         """
         if kind is not TaskKind.AGENT:
             return f"{label} process exited successfully without writing a result."
@@ -416,7 +416,8 @@ class TaskRunner:
                 "Agent process exited successfully without recording a result session."
             )
         if session.status is not SessionStatus.COMPLETED:
-            return f"Result session {session.id} is {session.status}, not completed."
+            message = f"Result session {session.id} is {session.status}, not completed."
+            return f"{message} {session.error}" if session.error else message
         return f"{label} process exited successfully without writing a result."
 
     async def _update(
