@@ -1646,7 +1646,7 @@ dependencies = [
 requires-dist = [
     { name = "genai-prices", specifier = ">=0.1.1,<0.2" },
     { name = "kitaru", editable = "../" },
-    { name = "openai-agents", specifier = ">=0.19.3,<0.23" },
+    { name = "openai-agents", specifier = ">=0.19.3,<0.24" },
 ]
 
 [[package]]
