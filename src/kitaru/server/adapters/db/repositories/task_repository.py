@@ -448,7 +448,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         )
         rows = (await self._session.execute(statement)).all()
         await self._session.flush()
-        stamped = {row[0]: row[1] for row in rows}
+        stamped: dict[uuid.UUID, datetime | None] = {row[0]: row[1] for row in rows}
         return stamped, candidate_ids - stamped.keys()
 
     async def lock_by_jobs(
