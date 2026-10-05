@@ -4,6 +4,7 @@
     "includes": [
       "packages/core/**",
       "packages/mastra/**",
+      "packages/mastra-compat/**",
       "packages/vercel-ai/**",
       "examples/typescript/mastra_support_triage/**",
       "examples/typescript/mastra_adaptive_conversation/**",
