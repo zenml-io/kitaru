@@ -11,7 +11,8 @@ from typing import Any
 from pydantic_ai import Agent
 
 from returns_agent.agent import MODEL, build_agent, build_prompt
-from returns_agent.fixtures import CASES
+from returns_agent.fixtures import CASES, DEMO_CASES
+from returns_agent.models import TicketInput
 from returns_agent.store import MockCommerceStore
 
 REQUEST_OPTIONS = {"timeout_in_seconds": 30, "max_retries": 3}
@@ -90,8 +91,12 @@ def _get_trace_id(result: Any) -> str:
     return parts[1]
 
 
-async def generate_traces(export_path: Path) -> Path:
-    """Run ten baseline tickets and write their Langfuse traces as JSONL."""
+async def generate_traces(
+    export_path: Path,
+    cases: tuple[TicketInput, ...] = CASES,
+    environment: str = "quickstart-example",
+) -> Path:
+    """Run the tickets and write their Langfuse traces as JSONL."""
     _require_environment()
     from langfuse import Langfuse, propagate_attributes
 
@@ -99,27 +104,32 @@ async def generate_traces(export_path: Path) -> Path:
     Agent.instrument_all()
     trace_data: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {}
 
-    for ticket in CASES:
+    # Each run is one model conversation, so a few at once keeps a larger
+    # ticket set from taking half an hour.
+    limit = asyncio.Semaphore(6)
+
+    async def run_ticket(ticket: TicketInput) -> None:
         trace_input = ticket.model_dump(mode="json")
         session_id = f"returns-{ticket.ticket_id}"
-        with propagate_attributes(
-            session_id=session_id,
-            trace_name=f"Returns ticket: {ticket.ticket_id}",
-            environment="quickstart-example",
-            version="baseline-v1",
-            tags=["returns-resolution", "kitaru-example"],
-            metadata={
-                "ticket_id": ticket.ticket_id,
-                "agent_release": "baseline-v1",
-            },
-        ):
-            result = await build_agent(MockCommerceStore(), MODEL).run(
-                build_prompt(ticket)
-            )
-            output = result.output.model_dump(mode="json")
-            trace_data[session_id] = (_get_trace_id(result), trace_input, output)
-        langfuse.flush()
+        async with limit:
+            with propagate_attributes(
+                session_id=session_id,
+                trace_name=f"Returns ticket: {ticket.ticket_id}",
+                environment=environment,
+                version="baseline-v1",
+                tags=["returns-resolution", "kitaru-example"],
+                metadata={
+                    "ticket_id": ticket.ticket_id,
+                    "agent_release": "baseline-v1",
+                },
+            ):
+                result = await build_agent(MockCommerceStore(), MODEL).run(
+                    build_prompt(ticket)
+                )
+                output = result.output.model_dump(mode="json")
+                trace_data[session_id] = (_get_trace_id(result), trace_input, output)
 
+    await asyncio.gather(*(run_ticket(ticket) for ticket in cases))
     langfuse.flush()
     traces = []
     for session_id in sorted(trace_data):
@@ -141,8 +151,18 @@ def _get_args() -> argparse.Namespace:
     """Parse the trace export destination."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path, help="Destination JSONL trace export.")
+    parser.add_argument(
+        "--cases",
+        choices=("baseline", "demo"),
+        default="baseline",
+        help="Ticket set to run.",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    asyncio.run(generate_traces(_get_args().output))
+    args = _get_args()
+    if args.cases == "demo":
+        asyncio.run(generate_traces(args.output, DEMO_CASES, "kaizen-demo"))
+    else:
+        asyncio.run(generate_traces(args.output))
