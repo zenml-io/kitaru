@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import BaseModel, SecretStr
 
 from kitaru.api_models.v1.connection import (
     ConnectionCreateRequest,
@@ -271,6 +272,51 @@ async def test_create_rejects_an_empty_required_property() -> None:
             secret_prompt=_answer({"LANGFUSE_PUBLIC_KEY": ""}),
         )
     assert client.created == []
+
+
+class _OptionalSecretConnection(BaseModel):
+    TRACKING_URI: str
+    TRACKING_TOKEN: SecretStr | None = None
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        _OptionalSecretConnection.model_json_schema(),
+        {
+            "type": "object",
+            "properties": {
+                "TRACKING_URI": {"type": "string"},
+                "TRACKING_TOKEN": {
+                    "oneOf": [{"type": "null"}, {"type": "string", "writeOnly": True}]
+                },
+            },
+        },
+    ],
+    ids=["pydantic-optional-secret-str", "one-of"],
+)
+async def test_create_treats_a_write_only_branch_as_a_secret(
+    schema: dict[str, Any],
+) -> None:
+    """A writeOnly flag inside an anyOf or oneOf branch marks the property secret."""
+    client = StubConnectionClient(connection_schema=schema)
+
+    await connections.create_connection(
+        client,
+        "tracking",
+        importer="zenml/langfuse",
+        provider=None,
+        values=None,
+        secret_values=None,
+        default=False,
+        non_interactive=False,
+        value_prompt=_answer({"TRACKING_URI": "https://tracking.example"}),
+        secret_prompt=_answer({"TRACKING_TOKEN": "token-test"}),
+    )
+
+    [request] = client.created
+    assert request.env == {"TRACKING_URI": "https://tracking.example"}
+    assert request.secrets["TRACKING_TOKEN"].get_secret_value() == "token-test"
 
 
 async def test_non_interactive_create_reports_missing_required_properties() -> None:

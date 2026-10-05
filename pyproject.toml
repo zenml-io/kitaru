@@ -165,6 +165,23 @@ select = [
     "SIM",  # simplify
     "RUF",  # ruff-specific rules
     "D",    # pydocstyle (Google convention, see [tool.ruff.lint.pydocstyle])
+    # Complete production signatures; ty checks their types, Ruff their presence.
+    "ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204", "ANN205", "ANN206",
+    # Stable collection and return rules, audited individually against this tree.
+    "C400", "C401", "C402", "C403", "C404", "C405", "C406", "C408", "C409",
+    "C410", "C411", "C413", "C414", "C415", "C416", "C417", "C418", "C419", "C420",
+    "PIE790", "PIE794", "PIE796", "PIE800", "PIE804", "PIE807", "PIE808", "PIE810",
+    "RET501", "RET502", "RET503", "RET504", "RET505", "RET506", "RET507", "RET508",
+    "PERF101", "PERF102", "PERF402",
+    # Detect blocking I/O and broken cancellation in async code. Timeout parameters,
+    # deliberate process polling, and filesystem scheduling require separate review.
+    "ASYNC100", "ASYNC105", "ASYNC115", "ASYNC116", "ASYNC210", "ASYNC212",
+    "ASYNC220", "ASYNC222", "ASYNC230", "ASYNC250",
+    "DTZ001", "DTZ002", "DTZ003", "DTZ004", "DTZ005", "DTZ006", "DTZ007",
+    "DTZ012", "DTZ901",
+    "ERA001",  # Commented-out code; explanations of why remain a review standard.
+    "TID251",  # Runtime annotation policy, configured below.
+    "TRY002", "TRY201", "TRY203",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -174,6 +191,17 @@ select = [
 # Test doubles whose methods only mirror the real ADK surface; class-level
 # docstrings already say what each fake stands in for.
 "scripts/google_adk_fakes.py" = ["D1"]
+# Production signatures are mandatory; fixture/callback and standalone script
+# signatures retain their own contracts. This also covers future support folders.
+"!src/**" = ["ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204", "ANN205", "ANN206"]
+# These fixtures intentionally exercise naive datetimes or JSON redaction.
+"tests/api_models/test_wire_properties.py" = ["DTZ001"]
+"tests/cli/test_redaction_properties.py" = ["DTZ001"]
+"tests/server/test_utils.py" = ["DTZ001"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Keep eagerly evaluated annotations for this repo's runtime model inspection.
+"__future__.annotations" = { msg = "Use eager annotations so runtime model inspection does not depend on resolving postponed names." }
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends"]
@@ -201,6 +229,31 @@ exclude = ["examples/python/**"]
 [tool.ty.environment]
 python-version = "3.11"
 root = [".", "src", "scripts", "tests"]
+
+[tool.ty.rules]
+missing-type-argument = "error"
+blanket-ignore-comment = "error"
+unused-ignore-comment = "error"
+unused-type-ignore-comment = "error"
+ignore-comment-unknown-rule = "error"
+invalid-ignore-comment = "error"
+redundant-cast = "error"
+
+# Documentation AST dictionaries and test doubles intentionally have dynamic
+# shapes. Historical migration annotations are kept with their original revision.
+[[tool.ty.overrides]]
+include = [
+    "scripts/generate_sdk_docs.py",
+    "tests/scripts/test_generate_sdk_docs.py",
+    "tests/mcp/test_handlers_protocol.py",
+    "tests/mcp/test_review_workflows.py",
+    "tests/server/test_fuzz_api.py",
+    "tests/task/test_importer.py",
+    "src/kitaru/server/database/migrations/versions/010_evaluation_provenance.py",
+]
+
+[tool.ty.overrides.rules]
+missing-type-argument = "ignore"
 
 # fumapy is installed from the npm package (docs/node_modules/fumadocs-python),
 # not PyPI, so it is absent from most environments that run ty.

@@ -244,7 +244,7 @@ TRACES = (
     _live_test_skip_reason() is not None, reason=_live_test_skip_reason() or ""
 )
 def test_live_flags_the_invented_refund_timelines() -> None:
-    """jev finds the five quickstart replies that promise days no tool returned."""
+    """Jev finds the five quickstart replies that promise days no tool returned."""
     question = {
         "type": "noul",
         "pass_when": "no",

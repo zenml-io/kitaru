@@ -4,6 +4,7 @@
 """Capability-filtered public MCP tool registry."""
 
 import inspect
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast
@@ -62,7 +63,7 @@ from kitaru.mcp.models.workflows import (
     WorkflowCancelRequest,
     WorkflowStartRequest,
 )
-from kitaru.mcp.redaction import redact_data
+from kitaru.mcp.redaction import redact, redact_data
 from kitaru.mcp.settings import CapabilityMode
 from kitaru.mcp.tools.activity import handle_activity_read
 from kitaru.mcp.tools.analyzers import handle_analyzers_manage
@@ -80,6 +81,8 @@ from kitaru.mcp.tools.registry import handle_registry_read
 from kitaru.mcp.tools.review import handle_review_manage, handle_review_read
 from kitaru.mcp.tools.workflow_start import handle_workflow_start
 from kitaru.mcp.tools.workflows import handle_session_import
+
+logger = logging.getLogger("kitaru.mcp.registry")
 
 ToolHandler = Callable[[MCPServerState, Any], Awaitable[object]]
 
@@ -320,8 +323,16 @@ async def _invoke(
     # payload is invalid, so a `ValidationError` here comes from the remote
     # response or from the result envelope.
     except ValidationError as error:
+        # Log only locations: error inputs can carry unredacted response data.
+        logger.debug(
+            "Tool result failed output validation: %s",
+            [detail["loc"] for detail in error.errors(include_url=False)],
+        )
         envelope = error_result(result_type, MCPOutputValidationError(error))
     except Exception as error:
+        logger.debug(
+            "Tool handler raised %s: %s", type(error).__name__, redact(str(error))
+        )
         envelope = error_result(result_type, error)
     return protocol_result(envelope, text)
 

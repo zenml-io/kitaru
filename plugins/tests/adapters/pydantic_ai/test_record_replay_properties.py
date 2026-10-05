@@ -211,11 +211,10 @@ def _get_recorded_tool_nodes(client: _FakeClient) -> list[SessionNodeCreateReque
         for node in batch.nodes
         if node.node_type is NodeType.TOOL_CALL
     ]
-    restored = [
+    return [
         SessionNodeCreateRequest.model_validate_json(node.model_dump_json())
         for node in captured
     ]
-    return restored
 
 
 def _build_lookup_table(
