@@ -83,7 +83,7 @@ def test_parse_contract_on_records(name: str, data: st.DataObject) -> None:
 def test_parse_contract_on_invalid_params(name: str, data: st.DataObject) -> None:
     """Cover the parameter-validation branches `importer_params()` avoids."""
     params = data.draw(invalid_params(name))
-    if name == "mastra":
+    if name in {"elevenlabs", "mastra"}:
         with pytest.raises(IMPORTERS[name].InvalidImport):
             list(IMPORTERS[name].parse(b"{}", params))
         return

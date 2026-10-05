@@ -15,6 +15,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
@@ -49,8 +50,8 @@ class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     owner_id: Mapped[uuid.UUID]
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
-    scope: Mapped[dict] = mapped_column(JSONB)
-    runtime: Mapped[dict] = mapped_column(JSONB)
+    scope: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    runtime: Mapped[dict[str, Any]] = mapped_column(JSONB)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     metadata_: Mapped[dict[str, str]] = mapped_column("metadata", JSONB)
 

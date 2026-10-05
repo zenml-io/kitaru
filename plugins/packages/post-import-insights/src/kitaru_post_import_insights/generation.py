@@ -429,11 +429,10 @@ def _build_candidate_projection(candidate: CandidateFinding) -> CandidateProject
 
 def build_analyst_projection(profiling: ProfilingResult) -> AnalystProjection:
     """Build the only deterministic envelope the analyst may receive."""
-    projection = AnalystProjection(
+    return AnalystProjection(
         content_hash=profiling.content_hash,
         candidates=[_build_candidate_projection(item) for item in profiling.candidates],
     )
-    return projection
 
 
 def validate_analyst_plan(

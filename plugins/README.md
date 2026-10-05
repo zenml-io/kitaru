@@ -10,6 +10,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 |---|---|---|
 | `braintrust-importer` | `kitaru-braintrust-importer` | Braintrust importer and importer-backed adapter |
 | `claude-agent-sdk` | `kitaru-claude-agent-sdk` | Claude Agent SDK recording and replay adapter |
+| `elevenlabs-importer` | `kitaru-elevenlabs-importer` | ElevenLabs conversation importer (unpublished, non-default); see [package guide](packages/elevenlabs-importer/README.md) |
 | `evaluator` | `kitaru-evaluator` | All built-in evaluators |
 | `jsonl-importer` | `kitaru-jsonl-importer` | Kitaru JSONL importer |
 | `langfuse-importer` | `kitaru-langfuse-importer` | Langfuse importer and importer-backed adapter |

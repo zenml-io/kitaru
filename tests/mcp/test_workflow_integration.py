@@ -2,20 +2,38 @@
 """Cross-resource MCP mutation integration contracts."""
 
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from mcp.types import CallToolResult
+from mcp_fakes import build_server_context
+from pydantic import ValidationError
 
-from kitaru.api_models.v1.imports import ApiImportSource, BlobImportSource
+from kitaru.api_models.v1.imports import BlobImportSource
+from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
+from kitaru.mcp.models.common import SessionImportReceipt
 from kitaru.mcp.models.management import EvaluatorSelection
 from kitaru.mcp.models.workflows import SessionImportRequest
-from kitaru.mcp.settings import MCPSettings
+from kitaru.mcp.settings import CapabilityMode, MCPSettings
 from kitaru.mcp.tools.evaluator_resolution import resolve_evaluator_selections
 from kitaru.mcp.tools.workflows import handle_session_import
+
+
+def _get_job_response(job_id: uuid.UUID) -> JobResponse:
+    now = datetime.now(UTC)
+    return JobResponse(
+        id=job_id,
+        owner_id=uuid.uuid4(),
+        kind=JobKind.IMPORT,
+        status=JobStatus.PENDING,
+        created=now,
+        updated=now,
+    )
 
 
 class _ImportClient:
@@ -57,10 +75,10 @@ class _ImportClient:
         self.idempotency_key = idempotency_key
         return SimpleNamespace(id=self.import_id, job_id=self.job_id)
 
-    async def _get_job(self, job_id: uuid.UUID) -> object:
+    async def _get_job(self, job_id: uuid.UUID) -> JobResponse:
         assert job_id == self.job_id
         self.calls.append("job")
-        return SimpleNamespace(model_dump=lambda **_kwargs: {"id": str(job_id)})
+        return _get_job_response(job_id)
 
 
 class _EvaluatorClient:
@@ -95,16 +113,13 @@ def _get_state(client: object) -> MCPServerState:
 async def test_existing_blob_import_uses_four_bounded_preflight_reads() -> None:
     """Import performs four direct reads, one create, one job read, and no polling."""
     client = _ImportClient()
-    result = cast(
-        dict[str, Any],
-        await handle_session_import(
-            _get_state(client),
-            SessionImportRequest(
-                source=BlobImportSource(blob_id=uuid.uuid4()),
-                importer_id=uuid.uuid4(),
-                importer_version=2,
-                agent_version_id=uuid.uuid4(),
-            ),
+    result = await handle_session_import(
+        _get_state(client),
+        SessionImportRequest(
+            source=BlobImportSource(blob_id=uuid.uuid4()),
+            importer_id=uuid.uuid4(),
+            importer_version=2,
+            agent_version_id=uuid.uuid4(),
         ),
     )
     assert client.calls == [
@@ -115,10 +130,10 @@ async def test_existing_blob_import_uses_four_bounded_preflight_reads() -> None:
         "create",
         "job",
     ]
-    assert result["operation"] == "session_import"
-    assert result["idempotency"] == "domain-deduplicated-only"
-    assert result["import_id"] == str(client.import_id)
-    assert result["result"] == {"id": str(client.job_id)}
+    assert result.operation == "session_import"
+    assert result.idempotency == "domain-deduplicated-only"
+    assert result.import_id == client.import_id
+    assert result.result.id == client.job_id
     assert client.request.evaluators == []
 
 
@@ -159,23 +174,33 @@ async def test_session_import_forwards_evaluators() -> None:
     assert client.request.evaluators == [evaluator]
 
 
+async def _call_session_import(
+    client: _ImportClient, source: dict[str, Any]
+) -> dict[str, Any]:
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    result = await server.call_tool(
+        "kitaru_session_import",
+        {
+            "request": {
+                "source": source,
+                "importer_id": str(uuid.uuid4()),
+                "importer_version": 2,
+                "agent_version_id": str(uuid.uuid4()),
+            }
+        },
+        context,
+    )
+    assert isinstance(result, CallToolResult)
+    assert result.structured_content is not None
+    return result.structured_content
+
+
 async def test_api_query_import_skips_blob_lookup() -> None:
     """An API import performs no blob lookup and reports the query in the receipt."""
     client = _ImportClient()
     query = {"since": "2026-08-01T00:00:00Z", "trace_ids": ["trace-1"]}
 
-    result = cast(
-        dict[str, Any],
-        await handle_session_import(
-            _get_state(client),
-            SessionImportRequest(
-                source=ApiImportSource(query=query),
-                importer_id=uuid.uuid4(),
-                importer_version=2,
-                agent_version_id=uuid.uuid4(),
-            ),
-        ),
-    )
+    result = await _call_session_import(client, {"type": "api", "query": query})
 
     assert client.calls == [
         "importer_version",
@@ -184,8 +209,50 @@ async def test_api_query_import_skips_blob_lookup() -> None:
         "create",
         "job",
     ]
-    assert result["query"] == query
-    assert "blob_id" not in result
+    assert result["ok"] is True, result["error"]
+    assert result["data"]["query"] == query
+    assert result["data"]["blob_id"] is None
+    assert result["data"]["import_id"] == str(client.import_id)
+
+
+async def test_blob_import_reports_blob_through_protocol() -> None:
+    """A blob import returns a valid receipt naming the blob and no query."""
+    client = _ImportClient()
+    blob_id = uuid.uuid4()
+
+    result = await _call_session_import(
+        client, {"type": "blob", "blob_id": str(blob_id)}
+    )
+
+    assert result["ok"] is True, result["error"]
+    assert result["data"]["blob_id"] == str(blob_id)
+    assert result["data"]["query"] is None
+    assert result["data"]["result"]["id"] == str(client.job_id)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        {},
+        {"blob_id": uuid.uuid4(), "query": {"trace_ids": ["trace-1"]}},
+    ],
+    ids=["neither", "both"],
+)
+def test_session_import_receipt_requires_exactly_one_source(
+    source: dict[str, Any],
+) -> None:
+    with pytest.raises(ValidationError, match="exactly one of blob_id or query"):
+        SessionImportReceipt(
+            operation="session_import",
+            idempotency="domain-deduplicated-only",
+            importer_id=uuid.uuid4(),
+            importer_version_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            agent_version_id=uuid.uuid4(),
+            import_id=uuid.uuid4(),
+            result=_get_job_response(uuid.uuid4()),
+            **source,
+        )
 
 
 async def test_session_import_forwards_analyzers() -> None:

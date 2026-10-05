@@ -1,0 +1,914 @@
+{
+  "agent_id": "agent_fixture_shop",
+  "agent_name": "Kitaru fixture shop",
+  "conversation_product": "agent",
+  "status": "done",
+  "user_id": null,
+  "branch_id": "branch_fixture_main",
+  "version_id": "version_fixture_one",
+  "metadata": {
+    "start_time_unix_secs": 1790959490,
+    "accepted_time_unix_secs": 1790959490,
+    "call_duration_secs": 24,
+    "queue_wait_secs": null,
+    "cost": 181,
+    "deletion_settings": {
+      "deletion_time_unix_secs": 1793551519,
+      "deleted_logs_at_time_unix_secs": null,
+      "deleted_audio_at_time_unix_secs": null,
+      "deleted_transcript_at_time_unix_secs": null,
+      "delete_transcript_and_pii": false,
+      "delete_audio": false
+    },
+    "feedback": {
+      "type": null,
+      "overall_score": null,
+      "likes": 0,
+      "dislikes": 0,
+      "rating": null,
+      "comment": null
+    },
+    "authorization_method": "signed_url",
+    "charging": {
+      "dev_discount": false,
+      "is_burst": false,
+      "tier": "free",
+      "llm_usage": {
+        "irreversible_generation": {
+          "model_usage": {
+            "qwen35-397b-a17b": {
+              "input": {
+                "tokens": 2389,
+                "price": 0.00150507
+              },
+              "input_cache_read": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "input_cache_write": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "output_total": {
+                "tokens": 78,
+                "price": 0.00117
+              }
+            }
+          },
+          "detailed_model_usage": [
+            {
+              "config": {
+                "model": "qwen35-397b-a17b",
+                "service_tier": "standard"
+              },
+              "usage": {
+                "input": {
+                  "tokens": 2389,
+                  "price": 0.00150507
+                },
+                "input_cache_read": {
+                  "tokens": 0,
+                  "price": 0.0
+                },
+                "input_cache_write": {
+                  "tokens": 0,
+                  "price": 0.0
+                },
+                "output_total": {
+                  "tokens": 78,
+                  "price": 0.00117
+                }
+              }
+            }
+          ]
+        },
+        "initiated_generation": {
+          "model_usage": {
+            "qwen35-397b-a17b": {
+              "input": {
+                "tokens": 4915,
+                "price": 0.00309645
+              },
+              "input_cache_read": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "input_cache_write": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "output_total": {
+                "tokens": 119,
+                "price": 0.0017850000000000001
+              }
+            }
+          },
+          "detailed_model_usage": [
+            {
+              "config": {
+                "model": "qwen35-397b-a17b",
+                "service_tier": "standard"
+              },
+              "usage": {
+                "input": {
+                  "tokens": 4915,
+                  "price": 0.00309645
+                },
+                "input_cache_read": {
+                  "tokens": 0,
+                  "price": 0.0
+                },
+                "input_cache_write": {
+                  "tokens": 0,
+                  "price": 0.0
+                },
+                "output_total": {
+                  "tokens": 119,
+                  "price": 0.0017850000000000001
+                }
+              }
+            }
+          ]
+        }
+      },
+      "llm_price": 0.004881450000000001,
+      "llm_charge": 49,
+      "call_charge": 132,
+      "platform_charge": 132,
+      "platform_usage": {
+        "category_usage": {
+          "voice": {
+            "credits": 132,
+            "price": 0.01307987531039398,
+            "quantity": 0.39939016092102975
+          }
+        }
+      },
+      "platform_price": 0.01307987531039398,
+      "free_minutes_consumed": 0.0,
+      "free_llm_dollars_consumed": 0.0,
+      "tts_usage": {
+        "primary_tts_model": "eleven_v4_turbo",
+        "total_audio_output_seconds": 18.679375,
+        "total_characters": 376,
+        "per_voice_usage": [
+          {
+            "voice_id": "voice_fixture_one",
+            "audio_output_seconds": 18.679375
+          }
+        ]
+      },
+      "asr_usage": {
+        "asr_model": "scribe_realtime",
+        "total_transcription_calls": 33,
+        "total_audio_input_seconds": 6.288000000000002
+      },
+      "analysis": null
+    },
+    "phone_call": null,
+    "batch_call": null,
+    "termination_reason": "Client disconnected: 1000",
+    "error": null,
+    "warnings": [],
+    "main_language": "en",
+    "rag_usage": null,
+    "text_only": false,
+    "features_usage": {
+      "language_detection": {
+        "enabled": false,
+        "used": false
+      },
+      "transfer_to_agent": {
+        "enabled": false,
+        "used": false
+      },
+      "transfer_to_number": {
+        "enabled": false,
+        "used": false
+      },
+      "multivoice": {
+        "enabled": false,
+        "used": false
+      },
+      "dtmf_tones": {
+        "enabled": false,
+        "used": false
+      },
+      "external_mcp_servers": {
+        "enabled": false,
+        "used": false
+      },
+      "pii_zrm_workspace": false,
+      "pii_zrm_agent": false,
+      "tool_dynamic_variable_updates": {
+        "enabled": false,
+        "used": false
+      },
+      "is_livekit": false,
+      "voicemail_detection": {
+        "enabled": false,
+        "used": false
+      },
+      "dtmf_input": {
+        "enabled": false,
+        "used": false
+      },
+      "workflow": {
+        "enabled": false,
+        "tool_node": {
+          "enabled": false,
+          "used": false
+        },
+        "standalone_agent_node": {
+          "enabled": false,
+          "used": false
+        },
+        "phone_number_node": {
+          "enabled": false,
+          "used": false
+        },
+        "end_node": {
+          "enabled": false,
+          "used": false
+        },
+        "override_agent_node": {
+          "enabled": false,
+          "used": false
+        },
+        "say_node": {
+          "enabled": false,
+          "used": false
+        },
+        "update_state_node": {
+          "enabled": false,
+          "used": false
+        },
+        "subgraph_node": {
+          "enabled": false,
+          "used": false
+        },
+        "transfer_to_genesys_node": {
+          "enabled": false,
+          "used": false
+        }
+      },
+      "agent_testing": {
+        "enabled": false,
+        "tests_ran_after_last_modification": false,
+        "tests_ran_in_last_7_days": false
+      },
+      "versioning": {
+        "enabled": true,
+        "used": false
+      },
+      "file_input": {
+        "enabled": true,
+        "used": false
+      },
+      "freeform_procedure": {
+        "enabled": false,
+        "used": false
+      },
+      "structured_procedure": {
+        "enabled": false,
+        "used": false
+      }
+    },
+    "eleven_assistant": {
+      "is_eleven_assistant": false
+    },
+    "initiator_id": null,
+    "conversation_initiation_source": "js_sdk",
+    "conversation_initiation_source_version": "1.26.0",
+    "timezone": "Europe/Amsterdam",
+    "async_metadata": null,
+    "whatsapp": null,
+    "sms": null,
+    "agent_created_from": "api",
+    "agent_last_updated_from": "api",
+    "voice_rewards": [],
+    "cost_fiat": 0.01796132531039398
+  },
+  "analysis": {
+    "evaluation_criteria_results": {},
+    "data_collection_results": {},
+    "evaluation_criteria_results_list": [],
+    "data_collection_results_list": [],
+    "call_successful": "success",
+    "call_success_score": null,
+    "transcript_summary": "The user inquired about order number 5000. The agent attempted to retrieve the order status but encountered a \"Deliberate lab failure: order service unavailable\" error. The agent informed the user that the order service was unavailable and advised them to try again later or use an alternative contact method. The user acknowledged this and ended the conversation.",
+    "call_summary_title": "Order Lookup Failure",
+    "scoped": [],
+    "sentiment_analysis": {
+      "overall_label": "neutral",
+      "overall_sentiment_score": 0.0,
+      "overall_frustration_score": 0.1,
+      "min_user_sentiment_score": 0.0,
+      "max_user_frustration_score": 0.0,
+      "num_scored_user_turns": 1
+    }
+  },
+  "visited_agents": [
+    {
+      "agent_id": "agent_fixture_shop",
+      "branch_id": "branch_fixture_main"
+    }
+  ],
+  "conversation_initiation_client_data": {
+    "conversation_config_override": {
+      "asr": null,
+      "turn": null,
+      "tts": {
+        "model_id": null,
+        "voice_id": null,
+        "supported_voices": null,
+        "stability": null,
+        "speed": null,
+        "similarity_boost": null,
+        "pronunciation_dictionary_locators": null
+      },
+      "conversation": {
+        "text_only": false,
+        "max_duration_seconds": null
+      },
+      "agent": {
+        "first_message": null,
+        "language": null,
+        "max_conversation_duration_message": null,
+        "prompt": null
+      }
+    },
+    "custom_llm_extra_body": {},
+    "user_id": null,
+    "source_info": {
+      "source": "js_sdk",
+      "version": "1.26.0"
+    },
+    "branch_id": null,
+    "environment": null,
+    "starting_workflow_node_id": null,
+    "experiments": [],
+    "procedure_ids": null,
+    "dynamic_variables": {
+      "system__agent_id": "agent_fixture_shop",
+      "system__agent_turns": 3,
+      "system__current_agent_turns": 3,
+      "system__current_subagent_turns": 3,
+      "system__current_agent_id": "agent_fixture_shop",
+      "system__conversation_id": "conv_fixture_tool_error",
+      "system__call_duration_secs": 23,
+      "system__time_utc": "2026-10-02T16:45:14.614061+00:00",
+      "system__timezone": "Europe/Amsterdam",
+      "system__time": "Friday, 18:45 02 October 2026",
+      "system__time_hour": 18,
+      "system__time_minute": 45,
+      "system__time_second": 14,
+      "system__is_text_only": false,
+      "system__channel": "js_sdk",
+      "system__caller_id": null,
+      "system__called_number": null,
+      "system__call_sid": null,
+      "system__call_id": null,
+      "system__conversation_history": "{\"x-elevenlabs-history\": true, \"entries\": [{\"role\": \"agent\", \"message\": \"Hi, this is the Kitaru test shop. How can I help you today?\"}, {\"role\": \"user\", \"message\": \"Um, hey. So what is happening with order number 5,000, please?\"}, {\"role\": \"agent\", \"tool_requests\": [{\"tool_name\": \"get_order\", \"params_as_json\": {\"order_id\": \"5000\"}}]}, {\"role\": \"agent\", \"tool_results\": [{\"tool_name\": \"get_order\", \"result_value\": \"Client tool execution failed: Deliberate lab failure: order service unavailable\", \"is_error\": true}]}, {\"role\": \"agent\", \"message\": \"I'm sorry, but our order service is currently unavailable, so I can't look up your order right now. Please try again later or contact us through another channel. Is there anything else I can help you with in the meantime?\"}, {\"role\": \"user\", \"message\": \"Uh, no, that's fine. Thanks.\"}, {\"role\": \"agent\", \"message\": \"You're...\"}]}",
+      "system__user_id": null,
+      "system__initiator_id": null,
+      "system__environment": "production"
+    },
+    "tool_mock_config": {
+      "mocking_strategy": "none",
+      "fallback_strategy": "raise_error",
+      "mocked_tool_names": []
+    },
+    "tool_mock_overrides": {}
+  },
+  "environment": "production",
+  "experiment_assignments": null,
+  "hiding_reason": null,
+  "smb_metadata": null,
+  "conversation_id": "conv_fixture_tool_error",
+  "has_audio": true,
+  "has_user_audio": true,
+  "has_response_audio": true,
+  "has_auxiliary_audio": false,
+  "transcript": [
+    {
+      "role": "agent",
+      "agent_metadata": {
+        "agent_id": "agent_fixture_shop",
+        "branch_id": "branch_fixture_main",
+        "workflow_node_id": null,
+        "version_id": "version_fixture_one"
+      },
+      "message": "Hi, this is the Kitaru test shop. How can I help you today?",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": "qwen35-397b-a17b",
+      "time_in_call_secs": 0,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_tts_service_ttfb": {
+            "elapsed_time": 0.08731612702831626
+          },
+          "convai_ttf_audio_since_silence": {
+            "elapsed_time": 0.09453795664012432
+          },
+          "convai_turn_silence_before_initiation": {
+            "elapsed_time": 0.0
+          }
+        },
+        "convai_asr_provider": null,
+        "convai_tts_model": "eleven_v4_turbo",
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": null,
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": null,
+      "source_event_id": 1,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "user",
+      "agent_metadata": null,
+      "message": "Um, hey. So what is happening with order number 5,000, please?",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": null,
+      "time_in_call_secs": 4,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_asr_trailing_service_latency": {
+            "elapsed_time": 0.0463983379304409
+          }
+        },
+        "convai_asr_provider": "Scribe v2 Realtime",
+        "convai_tts_model": null,
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": null,
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": "audio",
+      "source_event_id": 49,
+      "used_static_kb_document_ids": [],
+      "analysis": {
+        "user_sentiment_score": 0.0,
+        "user_frustration_score": 0.0
+      },
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "agent",
+      "agent_metadata": {
+        "agent_id": "agent_fixture_shop",
+        "branch_id": "branch_fixture_main",
+        "workflow_node_id": null,
+        "version_id": "version_fixture_one"
+      },
+      "message": null,
+      "multivoice_message": null,
+      "tool_calls": [
+        {
+          "type": "client",
+          "request_id": "request_fixture_tool_error_1",
+          "tool_name": "get_order",
+          "params_as_json": "{\"order_id\": \"5000\"}",
+          "tool_has_been_called": true,
+          "tool_details": {
+            "type": "client",
+            "parameters": "{\"order_id\": \"5000\"}"
+          }
+        }
+      ],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": "qwen35-397b-a17b",
+      "time_in_call_secs": 8,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_llm_service_ttfb": {
+            "elapsed_time": 0.3120590392500162
+          },
+          "convai_llm_tool_request_generation_latency": {
+            "elapsed_time": 0.3127112090587616
+          }
+        },
+        "convai_asr_provider": null,
+        "convai_tts_model": null,
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": {
+        "model_usage": {
+          "qwen35-397b-a17b": {
+            "input": {
+              "tokens": 1164,
+              "price": 0.0007333200000000001
+            },
+            "input_cache_read": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "input_cache_write": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "output_total": {
+              "tokens": 30,
+              "price": 0.00045
+            }
+          }
+        },
+        "detailed_model_usage": [
+          {
+            "config": {
+              "model": "qwen35-397b-a17b",
+              "service_tier": "standard"
+            },
+            "usage": {
+              "input": {
+                "tokens": 1164,
+                "price": 0.0007333200000000001
+              },
+              "input_cache_read": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "input_cache_write": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "output_total": {
+                "tokens": 30,
+                "price": 0.00045
+              }
+            }
+          }
+        ]
+      },
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": null,
+      "source_event_id": 49,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "agent",
+      "agent_metadata": {
+        "agent_id": "agent_fixture_shop",
+        "branch_id": "branch_fixture_main",
+        "workflow_node_id": null,
+        "version_id": "version_fixture_one"
+      },
+      "message": null,
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [
+        {
+          "request_id": "request_fixture_tool_error_1",
+          "tool_name": "get_order",
+          "result_value": "Client tool execution failed: Deliberate lab failure: order service unavailable",
+          "is_error": true,
+          "is_blocked": false,
+          "tool_has_been_called": true,
+          "tool_latency_secs": 0.15653563383966684,
+          "error_type": "unknown",
+          "raw_error_message": "",
+          "dynamic_variable_updates": [],
+          "type": "client"
+        }
+      ],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": null,
+      "time_in_call_secs": 8,
+      "conversation_turn_metrics": null,
+      "rag_retrieval_info": null,
+      "llm_usage": null,
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": null,
+      "source_event_id": 49,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "agent",
+      "agent_metadata": {
+        "agent_id": "agent_fixture_shop",
+        "branch_id": "branch_fixture_main",
+        "workflow_node_id": null,
+        "version_id": "version_fixture_one"
+      },
+      "message": "I'm sorry, but our order service is currently unavailable, so I can't look up your order right now. Please try again later or contact us through another channel. Is there anything else I can help you with in the meantime?",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": "qwen35-397b-a17b",
+      "time_in_call_secs": 8,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_llm_service_ttf_sentence": {
+            "elapsed_time": 0.2509329109452665
+          },
+          "convai_llm_service_ttfb": {
+            "elapsed_time": 0.19087178306654096
+          },
+          "convai_llm_service_tt_last_sentence": {
+            "elapsed_time": 0.39299305574968457
+          },
+          "convai_tts_service_ttfb": {
+            "elapsed_time": 0.094560616184026
+          },
+          "convai_ttf_audio_since_silence": {
+            "elapsed_time": 1.2356858350746334
+          },
+          "convai_turn_silence_before_initiation": {
+            "elapsed_time": 0.256
+          }
+        },
+        "convai_asr_provider": null,
+        "convai_tts_model": "eleven_v4_turbo",
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": {
+        "model_usage": {
+          "qwen35-397b-a17b": {
+            "input": {
+              "tokens": 1225,
+              "price": 0.00077175
+            },
+            "input_cache_read": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "input_cache_write": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "output_total": {
+              "tokens": 48,
+              "price": 0.00072
+            }
+          }
+        },
+        "detailed_model_usage": [
+          {
+            "config": {
+              "model": "qwen35-397b-a17b",
+              "service_tier": "standard"
+            },
+            "usage": {
+              "input": {
+                "tokens": 1225,
+                "price": 0.00077175
+              },
+              "input_cache_read": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "input_cache_write": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "output_total": {
+                "tokens": 48,
+                "price": 0.00072
+              }
+            }
+          }
+        ]
+      },
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": null,
+      "source_event_id": 49,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "user",
+      "agent_metadata": null,
+      "message": "Uh, no, that's fine. Thanks.",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": null,
+      "time_in_call_secs": 22,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_asr_trailing_service_latency": {
+            "elapsed_time": 0.07359790708869696
+          }
+        },
+        "convai_asr_provider": "Scribe v2 Realtime",
+        "convai_tts_model": null,
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": null,
+      "interrupted": false,
+      "ignored_as_backchannel": false,
+      "original_message": null,
+      "reasoning": [],
+      "source_medium": "audio",
+      "source_event_id": 142,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    },
+    {
+      "role": "agent",
+      "agent_metadata": {
+        "agent_id": "agent_fixture_shop",
+        "branch_id": "branch_fixture_main",
+        "workflow_node_id": null,
+        "version_id": "version_fixture_one"
+      },
+      "message": "You're...",
+      "multivoice_message": null,
+      "tool_calls": [],
+      "tool_results": [],
+      "feedback": null,
+      "llm_override": null,
+      "producing_llm": "qwen35-397b-a17b",
+      "time_in_call_secs": 23,
+      "conversation_turn_metrics": {
+        "metrics": {
+          "convai_llm_service_ttf_sentence": {
+            "elapsed_time": 0.26585123129189014
+          },
+          "convai_llm_service_ttfb": {
+            "elapsed_time": 0.21633561328053474
+          },
+          "convai_llm_service_tt_last_sentence": {
+            "elapsed_time": 0.3013628199696541
+          },
+          "convai_tts_service_ttfb": {
+            "elapsed_time": 0.08856218680739403
+          },
+          "convai_ttf_audio_since_silence": {
+            "elapsed_time": 15.199356202762575
+          },
+          "convai_turn_silence_before_initiation": {
+            "elapsed_time": 14.72
+          },
+          "convai_turn_asr_latency": {
+            "elapsed_time": 0.07359790708869696
+          }
+        },
+        "convai_asr_provider": null,
+        "convai_tts_model": "eleven_v4_turbo",
+        "convai_tts_cascade": null
+      },
+      "rag_retrieval_info": null,
+      "llm_usage": {
+        "model_usage": {
+          "qwen35-397b-a17b": {
+            "input": {
+              "tokens": 1288,
+              "price": 0.0008114400000000001
+            },
+            "input_cache_read": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "input_cache_write": {
+              "tokens": 0,
+              "price": 0.0
+            },
+            "output_total": {
+              "tokens": 22,
+              "price": 0.00033
+            }
+          }
+        },
+        "detailed_model_usage": [
+          {
+            "config": {
+              "model": "qwen35-397b-a17b",
+              "service_tier": "standard"
+            },
+            "usage": {
+              "input": {
+                "tokens": 1288,
+                "price": 0.0008114400000000001
+              },
+              "input_cache_read": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "input_cache_write": {
+                "tokens": 0,
+                "price": 0.0
+              },
+              "output_total": {
+                "tokens": 22,
+                "price": 0.00033
+              }
+            }
+          }
+        ]
+      },
+      "interrupted": true,
+      "ignored_as_backchannel": false,
+      "original_message": "You're welcome! Feel free to reach out anytime if you need further assistance. Have a great day!",
+      "reasoning": [],
+      "source_medium": null,
+      "source_event_id": 142,
+      "used_static_kb_document_ids": [],
+      "analysis": null,
+      "user_identifier": null,
+      "id": null,
+      "compaction": null,
+      "triggered_guardrails": [],
+      "file_input": null,
+      "file_inputs": [],
+      "contextual_update_info": null,
+      "config_snapshot_id": null,
+      "reasoned": false
+    }
+  ],
+  "tag_ids": [],
+  "realtime_config_snapshots": null,
+  "orchestrator": "conversational",
+  "otlp_traces": null
+}

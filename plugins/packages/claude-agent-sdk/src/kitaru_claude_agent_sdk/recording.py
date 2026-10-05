@@ -968,7 +968,7 @@ class InvocationRecorder:
     def _new_task_node(
         self, message: TaskProgressMessage | TaskNotificationMessage
     ) -> SessionNodeCreateRequest:
-        node = self._new_node(
+        return self._new_node(
             node_type=NodeType.SUBAGENT_CALL,
             name=message.description
             if isinstance(message, TaskProgressMessage)
@@ -981,7 +981,6 @@ class InvocationRecorder:
             subagent_id=message.task_id,
             attributes={"orphaned": True},
         )
-        return node
 
     async def _record_framework_event(
         self,

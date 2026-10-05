@@ -11162,7 +11162,7 @@
         },
         "SessionImportReceipt": {
           "additionalProperties": false,
-          "description": "Receipt for a blob-backed import workflow.",
+          "description": "Receipt for a blob-backed or provider-API import workflow.",
           "properties": {
             "agent_id": {
               "format": "uuid",
@@ -11175,9 +11175,17 @@
               "type": "string"
             },
             "blob_id": {
-              "format": "uuid",
-              "title": "Blob Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Blob Id"
             },
             "idempotency": {
               "const": "domain-deduplicated-only",
@@ -11204,6 +11212,19 @@
               "title": "Operation",
               "type": "string"
             },
+            "query": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Query"
+            },
             "result": {
               "$ref": "#/$defs/JobResponse"
             }
@@ -11211,7 +11232,6 @@
           "required": [
             "operation",
             "idempotency",
-            "blob_id",
             "importer_id",
             "importer_version_id",
             "agent_id",

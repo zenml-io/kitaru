@@ -1,0 +1,1 @@
+- Added the separately packaged ElevenLabs conversation importer, with JSON export and API fetching support for transcripts, tool calls and results, interruptions, usage metadata, and authenticated recording references.
