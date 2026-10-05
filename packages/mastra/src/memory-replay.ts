@@ -9,6 +9,7 @@ import {
   createProcessLocalMemoryAccess,
   type MastraMemoryCaptureOptions,
 } from "./memory-binding.js";
+import { MEMORY_REPLAY_TESTED_VERSIONS } from "./memory-replay-versions.js";
 import {
   decodeMemoryValue,
   encodeMemoryValue,
@@ -34,17 +35,34 @@ function unsupported(message: string, reason?: MastraReplayReason): never {
   throw unsupportedMemoryReplay(message, reason);
 }
 
-/** Require the dependency pair exercised by the native memory proof. */
-export function assertMemoryReplayVersions(): void {
-  const require = createRequire(import.meta.url);
-  for (const [name, version] of [
-    ["@mastra/core", "1.67.0"],
-    ["@mastra/memory", "1.30.0"],
-  ]) {
-    const metadata: unknown = require(`${name}/package.json`);
-    if (!record(metadata) || metadata.version !== version)
-      unsupported(`requires ${name}@${version}.`, "version_mismatch");
-  }
+function getInstalledVersion(name: string): string | undefined {
+  const metadata: unknown = createRequire(import.meta.url)(
+    `${name}/package.json`,
+  );
+  return record(metadata) && typeof metadata.version === "string"
+    ? metadata.version
+    : undefined;
+}
+
+/** Require a `@mastra/core` + `@mastra/memory` pair with a passing test suite. */
+export function assertMemoryReplayVersions(
+  core = getInstalledVersion("@mastra/core"),
+  memory = getInstalledVersion("@mastra/memory"),
+): void {
+  if (
+    MEMORY_REPLAY_TESTED_VERSIONS.some(
+      (tested) => tested.core === core && tested.memory === memory,
+    )
+  )
+    return;
+  const supported = MEMORY_REPLAY_TESTED_VERSIONS.map(
+    (tested) =>
+      `@mastra/core@${tested.core} with @mastra/memory@${tested.memory}`,
+  ).join(", ");
+  unsupported(
+    `requires one of ${supported}; found @mastra/core@${core} with @mastra/memory@${memory}.`,
+    "version_mismatch",
+  );
 }
 
 /** Save a model identity, never the provider client or its credentials. */
