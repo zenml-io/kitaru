@@ -9,7 +9,7 @@
     "@mastra/core": "1.71.0",
     "@mastra/memory": "1.32.1",
     "@mastra/pg": "1.27.1",
-    "zod": "3.25.76"
+    "zod": "4.6.5"
   },
   "scripts": {
     "test": "vitest run",
