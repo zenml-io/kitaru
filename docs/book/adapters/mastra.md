@@ -8,7 +8,7 @@ icon: robot
 The Kitaru Mastra adapter wraps an existing Mastra `Agent` and records `generate()` calls and supported streams as Kitaru [sessions](../concepts/agents-and-sessions.md). Mastra still runs the agent and Kitaru returns the native Mastra result unchanged. For thread-scoped working and observational memory, use the opt-in [isolated memory replay factory](#isolated-memory-replay).
 
 {% hint style="warning" %}
-`@zenml-io/kitaru-mastra` supports Node `>=22.22.0 <23 || >=26 <27`. `Agent.generate()` supports `@mastra/core >=1.51.0 <1.72.0`; recorded `Agent.stream()` calls require a stable Mastra 1.67.x through 1.71.x release.
+`@zenml-io/kitaru-mastra` supports Node `>=22.22.0 <23 || >=26 <27`. `Agent.generate()` supports `@mastra/core >=1.51.0 <1.75.0`; recorded `Agent.stream()` calls require a stable Mastra 1.67.x through 1.74.x release.
 {% endhint %}
 
 To bring in runs already recorded by Mastra, use [Import existing Mastra traces](#import-existing-mastra-traces). Importing an export does not require the original run to have used `KitaruAgent`.
@@ -18,13 +18,13 @@ To bring in runs already recorded by Mastra, use [Import existing Mastra traces]
 {% tabs %}
 {% tab title="pnpm" %}
 ```bash
-pnpm add @zenml-io/kitaru-mastra @mastra/core@1.71.0
+pnpm add @zenml-io/kitaru-mastra @mastra/core@1.74.0
 ```
 {% endtab %}
 
 {% tab title="npm" %}
 ```bash
-npm install @zenml-io/kitaru-mastra @mastra/core@1.71.0
+npm install @zenml-io/kitaru-mastra @mastra/core@1.74.0
 ```
 {% endtab %}
 {% endtabs %}
@@ -65,7 +65,7 @@ Configure the adapter subprocess with `KITARU_API_URL` and either the worker-pro
 
 ## Stream an agent
 
-On Mastra 1.67.x through 1.71.x, call the public wrapper and consume its native text stream in the ordinary way:
+On Mastra 1.67.x through 1.74.x, call the public wrapper and consume its native text stream in the ordinary way:
 
 ```ts
 const output = await recordedAgent.stream(messages, {
@@ -537,8 +537,8 @@ Run native Mastra scorers against stored and replayed sessions with the [TypeScr
 
 The adapter supports:
 
-- `Agent.generate()` calls on Mastra 1.51 through 1.71.
-- Ordinary consumed `Agent.stream()` calls and replay on stable Mastra 1.67.x through 1.71.x, with schema-only structured output.
+- `Agent.generate()` calls on Mastra 1.51 through 1.74.
+- Ordinary consumed `Agent.stream()` calls and replay on stable Mastra 1.67.x through 1.74.x, with schema-only structured output.
 - Opt-in isolated native memory replay through `createMemoryReplayAgent()` on exact Mastra core 1.67.0 and memory 1.30.0, with `@mastra/pg` 1.25.x for PostgreSQL storage, against a Kitaru server newer than 0.27.1.
 - Local function tools, including function-valued tools resolved from the run's `requestContext`.
 - Per-run model, system-instruction, model-setting, and input overrides.

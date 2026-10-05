@@ -28,7 +28,7 @@ The command prints the run state directory, session and replay IDs, both outbox 
 
 ## Provider-free streaming
 
-The separate `stream` entry point demonstrates recorded Mastra 1.67.x through 1.71.x streaming without replacing the worker-backed generate and replay flow above. It uses a deterministic local model, calls the side-effect-free `lookupOrder` fixture tool, and prints two text chunks through ordinary `for await` consumption. Kitaru records each model step and tool result as Mastra completes the step, then records the final text and terminal session state from the finish callback.
+The separate `stream` entry point demonstrates recorded Mastra 1.67.x through 1.74.x streaming without replacing the worker-backed generate and replay flow above. It uses a deterministic local model, calls the side-effect-free `lookupOrder` fixture tool, and prints two text chunks through ordinary `for await` consumption. Kitaru records each model step and tool result as Mastra completes the step, then records the final text and terminal session state from the finish callback.
 
 Point it at a running server and an existing agent. It makes no provider request:
 

@@ -1,13 +1,13 @@
 # `@zenml-io/kitaru-mastra`
 
-Experimental recording and replay support for Mastra. `generate()` supports `@mastra/core >=1.51.0 <1.72.0`; recorded and replayed `stream()` calls require a stable `@mastra/core` 1.67.x through 1.71.x release.
+Experimental recording and replay support for Mastra. `generate()` supports `@mastra/core >=1.51.0 <1.75.0`; recorded and replayed `stream()` calls require a stable `@mastra/core` 1.67.x through 1.74.x release.
 
 For native working and observational memory, use the opt-in [isolated memory replay factory](#isolated-memory-replay) on exact Mastra core 1.67.0 and memory 1.30.0, with a Kitaru server newer than 0.27.1.
 
 This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose repository directory is `packages/core/`. The packages are versioned and released together.
 
 ```bash
-pnpm add @zenml-io/kitaru-mastra @mastra/core@1.71.0
+pnpm add @zenml-io/kitaru-mastra @mastra/core@1.74.0
 ```
 
 ## Links
@@ -35,7 +35,7 @@ The wrapper calls the existing agent's public method. It does not recreate tools
 
 ## Streaming
 
-On Mastra 1.67.x through 1.71.x, `KitaruAgent.stream()` returns the native Mastra result and records model and local-tool steps as Mastra completes them, including during replay:
+On Mastra 1.67.x through 1.74.x, `KitaruAgent.stream()` returns the native Mastra result and records model and local-tool steps as Mastra completes them, including during replay:
 
 ```ts
 const output = await recorded.stream(messages, {
@@ -474,6 +474,6 @@ Recorded payloads preserve JSON values, convert dates to ISO strings, bigints to
 
 ## Existing wrapper scope
 
-This experimental release supports `Agent.generate()` with Mastra `>=1.51.0 <1.72.0` and consumed `Agent.stream()` calls, including replay, on stable Mastra 1.67.x through 1.71.x. Streaming supports local function tools and schema-only structured output. It rejects user `prepareStep` and input processors, approval and resume modes, background or `untilIdle` execution, and secondary structured-output models before native execution. Both replay entrypoints reject `prepareStep` and input processors because they can replace the model, prompt, or tools after preflight. Workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, and LLM tool policy are intentionally not implemented.
+This experimental release supports `Agent.generate()` with Mastra `>=1.51.0 <1.75.0` and consumed `Agent.stream()` calls, including replay, on stable Mastra 1.67.x through 1.74.x. Streaming supports local function tools and schema-only structured output. It rejects user `prepareStep` and input processors, approval and resume modes, background or `untilIdle` execution, and secondary structured-output models before native execution. Both replay entrypoints reject `prepareStep` and input processors because they can replace the model, prompt, or tools after preflight. Workflows, subagents, MCP tools, provider-native tool replay, dynamic instructions, and LLM tool policy are intentionally not implemented.
 
 Replay is execution, not a transaction. A passthrough tool can complete an external side effect before a later model or recording failure, and Kitaru cannot roll it back. Use application-level idempotency keys for side-effecting tools, or prefer static/history replay when execution must be suppressed.
