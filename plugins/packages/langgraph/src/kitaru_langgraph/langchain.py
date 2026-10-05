@@ -4,6 +4,7 @@
 #  you may not use this file except in compliance with the License.
 """Construction-time LangChain middleware for replay overrides."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
@@ -13,7 +14,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
 
-from kitaru.api_models.v1.replay import ToolLookupRequest
+from kitaru.api_models.v1.replay import ToolLookupMatch, ToolLookupRequest
 from kitaru.api_models.v1.replay_config import (
     HistoryConfig,
     HistoryScope,
@@ -60,6 +61,22 @@ def _tool_policy(recorder: InvocationRecorder, name: str) -> ToolConfig | None:
         return None
     policy = recorder.replay.tool_policy
     return policy.tools.get(name, policy.default)
+
+
+async def _lookup_history_match(
+    recorder: InvocationRecorder, name: str, cache_key: str, occurrence: int | None
+) -> ToolLookupMatch | None:
+    assert recorder.replay is not None
+    lookup = await recorder.client.replays.tool_lookup(
+        recorder.replay.id,
+        ToolLookupRequest(tool_name=name, cache_key=cache_key, occurrence=occurrence),
+    )
+    if "match" not in lookup.model_fields_set:
+        raise ToolPolicyError(
+            "Kitaru server tool lookup response does not include 'match'; "
+            "upgrade the server before using history replay"
+        )
+    return lookup.match
 
 
 def _replace_prompt(request: ModelRequest[Any], prompt: str) -> ModelRequest[Any]:
@@ -341,27 +358,21 @@ class KitaruLangGraphMiddleware(AgentMiddleware[Any, Any]):
         cache_key = compute_tool_cache_key(name, arguments)
         if cache_key is None or recorder.replay is None:
             return None
-        occurrence = (
-            recorder.history_occurrences.get(cache_key, 0)
-            if policy.scope is HistoryScope.BASELINE
-            else None
-        )
-        lookup = await recorder.client.replays.tool_lookup(
-            recorder.replay.id,
-            ToolLookupRequest(
-                tool_name=name, cache_key=cache_key, occurrence=occurrence
-            ),
-        )
-        if "match" not in lookup.model_fields_set:
-            raise ToolPolicyError(
-                "Kitaru server tool lookup response does not include 'match'; "
-                "upgrade the server before using history replay"
-            )
-        match = lookup.match
+        if policy.scope is HistoryScope.BASELINE:
+            # Hold the lock across the lookup so identical parallel calls claim
+            # successive occurrences; a claim is final only once the server matches.
+            lock = recorder.history_locks.setdefault(cache_key, asyncio.Lock())
+            async with lock:
+                occurrence = recorder.history_occurrences.get(cache_key, 0)
+                match = await _lookup_history_match(
+                    recorder, name, cache_key, occurrence
+                )
+                if match is not None:
+                    recorder.history_occurrences[cache_key] = occurrence + 1
+        else:
+            match = await _lookup_history_match(recorder, name, cache_key, None)
         if match is None:
             return None
-        if occurrence is not None:
-            recorder.history_occurrences[cache_key] = occurrence + 1
         if match.status is NodeStatus.COMPLETED:
             return decode_tool_outcome(
                 match.result,
