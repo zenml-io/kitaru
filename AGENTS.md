@@ -42,7 +42,7 @@ stack.
 - `uv sync`: install and sync dependencies
 - `uv sync --extra server`: include server components
 - `just fix`: auto-fix formatting, lint, and YAML issues
-- `just check`: run format, lint, OpenAPI freshness, typecheck, typos, YAML, actions lint, and links
+- `just check`: run root and plugin lint/types, import and schema contracts, example coverage, formatting, and repository checks
 - `just test`: run the full pytest suite
 - `just test tests/test_file.py::test_name`: run one targeted test
 - `just build`: build wheel and sdist locally
@@ -62,16 +62,12 @@ Replace `yourtask` with a unique task identifier. The pipeline reports failure i
 ## Coding Style
 
 - Follow US English spelling in code and docs (`initialize`, `serialize`, `color`).
-- Use type hints on public functions and return values.
-- Prefer modern annotations (`list[str]`, `str | None`) over legacy `typing` aliases.
-- Do not use `from __future__ import annotations`. Pydantic and FastAPI
-  inspect annotations at runtime, and string annotations break that
-  inspection.
+- Ruff enforces production signatures, modern annotations, Google docstring structure, and eager annotations. ty checks types and suppressions. Run `just check`.
+- Models and routes inspect annotations at runtime; keep referenced names resolvable.
 - Name a function or method for the action it performs, not the value it
   returns. Write `_get_bearer_credential`, `_get_account_name`,
   `_get_name_taken_message`, not `_bearer_credential`, `_account_name`,
   `_name_taken`. A bare noun reads as an attribute at the call site.
-- Follow Google Python style for docstrings.
 - Describe the symbol in a docstring, never its callers. Write "Set the account
   name and contact email", not "Set the identity fields mirrored from an
   external account". A caller named in a docstring is wrong as soon as a second

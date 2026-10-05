@@ -144,9 +144,9 @@ async def test_window_batches_single_trace_sessions_at_the_batch_size(
     monkeypatch.setattr(api_module, "_TRACES_PER_BATCH", 2)
     root_span_ids = ["root-a", "root-b", "root-c", "root-d", "root-e"]
     fake_braintrust.list_pages = [(list(root_span_ids), None)]
-    fake_braintrust.rows_builders_by_root_span_id = {
-        root_span_id: build_complete_rows for root_span_id in root_span_ids
-    }
+    fake_braintrust.rows_builders_by_root_span_id = dict.fromkeys(
+        root_span_ids, build_complete_rows
+    )
 
     payloads = await collect_payloads(
         fetch({"project_id": "project-1", "since": "2026-01-01T00:00:00+00:00"})

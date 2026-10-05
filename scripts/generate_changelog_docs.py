@@ -8,8 +8,6 @@ Usage:
     uv run python scripts/generate_changelog_docs.py
 """
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
 
@@ -35,8 +33,7 @@ def _escape_mdx_line(line: str) -> str:
     Skips lines inside fenced code blocks (handled by the caller).
     """
     line = _MDX_BRACE.sub(r"\\\1", line)
-    line = _MDX_ANGLE.sub("&lt;", line)
-    return line
+    return _MDX_ANGLE.sub("&lt;", line)
 
 
 def transform_changelog(source: str) -> str:
