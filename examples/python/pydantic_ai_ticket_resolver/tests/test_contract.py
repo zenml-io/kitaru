@@ -11,6 +11,7 @@ from kitaru.task.importer import ImportedSession, flatten_nodes
 from kitaru_langfuse_importer.importer import parse
 
 from returns_agent.agent import (
+    _ReturnGuard,
     build_agent,
     build_prompt,
     get_ticket_input,
@@ -68,6 +69,54 @@ def test_policy_lookup_normalizes_product_aliases_without_crashing() -> None:
     assert result.found is True
     assert result.policy is not None
     assert result.policy.category == "accessories"
+
+
+def test_return_guard_requires_found_canonical_policy() -> None:
+    """Block actions when policy lookup is missing, failed, or mismatched."""
+    store = MockCommerceStore()
+    guard = _ReturnGuard()
+    order = store.lookup_order(order_id="48215")
+    guard.record_order(order.found, order.orders)
+
+    assert guard.get_block_reason(Decimal("48.00"), False) is not None
+
+    missing = store.get_return_policy("not-a-category")
+    guard.record_policy("not-a-category", missing.found, missing.policy)
+    assert guard.get_block_reason(Decimal("48.00"), False) is not None
+
+    alias = store.get_return_policy("tote")
+    guard.record_policy("tote", alias.found, alias.policy)
+    assert guard.get_block_reason(Decimal("48.00"), False) is not None
+
+    canonical = store.get_return_policy("accessories")
+    guard.record_policy("accessories", canonical.found, canonical.policy)
+    assert guard.get_block_reason(Decimal("48.00"), False) is not None
+
+
+def test_return_guard_preserves_risk_threshold_and_eligibility_rules() -> None:
+    """Block risky, over-threshold, late, and final-sale returns."""
+    store = MockCommerceStore()
+
+    risky_guard = _ReturnGuard()
+    risky = store.lookup_order(order_id="48218")
+    risky_guard.record_order(risky.found, risky.orders)
+    policy = store.get_return_policy("apparel")
+    risky_guard.record_policy("apparel", policy.found, policy.policy)
+    assert risky_guard.get_block_reason(Decimal("120.00"), True) is not None
+
+    threshold_guard = _ReturnGuard()
+    expensive = store.lookup_order(order_id="48236")
+    threshold_guard.record_order(expensive.found, expensive.orders)
+    apparel = store.get_return_policy("apparel")
+    threshold_guard.record_policy("apparel", apparel.found, apparel.policy)
+    assert threshold_guard.get_block_reason(Decimal("280.00"), True) is not None
+
+    final_sale_guard = _ReturnGuard()
+    final_sale = store.lookup_order(order_id="48251")
+    final_sale_guard.record_order(final_sale.found, final_sale.orders)
+    footwear = store.get_return_policy("footwear")
+    final_sale_guard.record_policy("footwear", footwear.found, footwear.policy)
+    assert final_sale_guard.get_block_reason(Decimal("49.00"), False) is not None
 
 
 def test_agent_input_is_replay_safe() -> None:
