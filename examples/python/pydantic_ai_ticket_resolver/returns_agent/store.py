@@ -107,6 +107,21 @@ class MockCommerceStore:
                     message="Refund rejected because the order was already refunded.",
                 )
             )
+        policy = POLICIES[order.category]
+        if amount >= policy.human_approval_threshold:
+            return self._record(
+                ActionReceipt(
+                    accepted=False,
+                    action=ResolutionAction.REFUND,
+                    order_id=order_id,
+                    amount=amount,
+                    message=(
+                        "Refund rejected because the amount is at or above the "
+                        f"human approval threshold of {policy.human_approval_threshold}. "
+                        "Escalate to a human for approval."
+                    ),
+                )
+            )
         if amount <= 0 or amount > order.amount_paid:
             return self._record(
                 ActionReceipt(

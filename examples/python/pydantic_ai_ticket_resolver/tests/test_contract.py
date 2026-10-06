@@ -49,6 +49,37 @@ def test_mock_store_records_only_local_refund_side_effects() -> None:
     assert rejected.receipt_id is None
 
 
+def test_refund_at_or_above_policy_threshold_requires_human_approval() -> None:
+    """Reject every reviewed threshold violation before recording a refund."""
+    cases = (
+        ("48216", "280.00", "200.00"),
+        ("48230", "240.00", "200.00"),
+        ("48232", "320.00", "150.00"),
+        ("48234", "165.00", "100.00"),
+    )
+
+    for order_id, amount, threshold in cases:
+        store = MockCommerceStore()
+        receipt = store.issue_refund(order_id, Decimal(amount))
+
+        assert receipt.accepted is False
+        assert threshold in receipt.message
+        assert "Escalate to a human" in receipt.message
+        assert store.actions == [receipt]
+        assert store.orders[order_id].already_refunded is False
+
+
+def test_agent_prompt_makes_policy_threshold_a_hard_refund_boundary() -> None:
+    """Tell the model to escalate at the inclusive approval threshold."""
+    from returns_agent.agent import get_instructions
+
+    instructions = get_instructions()
+
+    assert "at or above" in instructions
+    assert "must never be sent to issue_refund" in instructions
+    assert "Only issue refunds strictly below the threshold" in instructions
+
+
 def test_order_lookup_can_retry_by_email_after_a_wrong_number() -> None:
     """Provide one natural repeated-tool path for the starting-point evaluator."""
     store = MockCommerceStore()

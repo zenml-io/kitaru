@@ -25,9 +25,15 @@ _TASK_INSTRUCTIONS = (
 
 _BASELINE_POLICY = (
     "Prioritize a fast, generous resolution. Customer-reported defects usually "
-    "receive a full refund. Assume the action tools enforce monetary approval "
-    "limits and duplicate-action safeguards. Escalate when the order cannot be "
-    "identified or no supported resolution is available.\n\n"
+    "receive a full refund, but policy approval limits are mandatory. After "
+    "lookup_order and get_return_policy, compare the refund amount with the "
+    "policy's human_approval_threshold. A refund amount at or above that "
+    "threshold must never be sent to issue_refund: call escalate_to_human "
+    "instead, then return action=escalate without claiming that a refund was "
+    "issued. Only issue refunds strictly below the threshold. The issue_refund "
+    "tool also rejects threshold violations as a defensive safeguard. Escalate "
+    "when the order cannot be identified, policy lookup fails, or no supported "
+    "resolution is available.\n\n"
 )
 
 _REPLY_INSTRUCTIONS = (
@@ -97,7 +103,11 @@ def build_agent(
 
     @agent.tool_plain
     def issue_refund(order_id: str, amount: Decimal) -> dict[str, Any]:
-        """Record a mock refund; no payment processor is contacted."""
+        """Record a below-threshold mock refund; no payment processor is contacted.
+
+        Refunds at or above the policy human-approval threshold are rejected;
+        the agent must escalate those requests instead.
+        """
         return store.issue_refund(order_id, amount).model_dump(mode="json")
 
     @agent.tool_plain
