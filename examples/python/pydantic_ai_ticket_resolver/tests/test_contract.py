@@ -6,11 +6,14 @@ import tomllib
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.task.importer import ImportedSession, flatten_nodes
 from kitaru_langfuse_importer.importer import parse
+from pydantic_ai import ModelRetry
 
 from returns_agent.agent import (
+    _ResolutionGuard,
     build_agent,
     build_prompt,
     get_ticket_input,
@@ -21,6 +24,7 @@ from returns_agent.generate_traces import (
     _get_trace_id,
     _sanitize_export,
 )
+from returns_agent.models import Resolution, ResolutionAction
 from returns_agent.store import MockCommerceStore
 from scripts.run_ci_e2e import _get_server_environment
 
@@ -59,6 +63,33 @@ def test_order_lookup_can_retry_by_email_after_a_wrong_number() -> None:
     assert missing.found is False
     assert recovered.found is True
     assert [order.order_id for order in recovered.orders] == ["48222"]
+
+
+def test_terminal_actions_require_a_canonical_policy_after_a_failed_lookup() -> None:
+    """Block actions after a miss until the order category policy is verified."""
+    store = MockCommerceStore()
+    guard = _ResolutionGuard()
+
+    guard.record_order_lookup(store.lookup_order(order_id="48218"))
+    guard.record_policy_lookup(store.get_return_policy("Clothing"))
+    assert guard.get_action_block("48218", ResolutionAction.REFUND) is not None
+
+    guard.record_policy_lookup(store.get_return_policy("apparel"))
+    assert guard.get_action_block("48218", ResolutionAction.REFUND) is None
+
+
+def test_output_cannot_claim_a_terminal_action_without_an_accepted_receipt() -> None:
+    """Reject a final refund claim when no refund tool action was accepted."""
+    guard = _ResolutionGuard()
+    resolution = Resolution(
+        action=ResolutionAction.REFUND,
+        amount=Decimal("120.00"),
+        reason="Refund issued.",
+        customer_reply="Hi Finn, your refund was issued.",
+    )
+
+    with pytest.raises(ModelRetry):
+        guard.validate_resolution(resolution)
 
 
 def test_policy_lookup_normalizes_product_aliases_without_crashing() -> None:
