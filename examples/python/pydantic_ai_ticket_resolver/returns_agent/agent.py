@@ -20,7 +20,10 @@ _TASK_INSTRUCTIONS = (
     "outcome, execute any refund, replacement, or escalation before replying, "
     "then return the structured resolution. Use lookup_order before making "
     "claims about an order. Use get_return_policy for return or refund "
-    "decisions. Use check_shipping for delivery problems.\n\n"
+    "decisions. Use check_shipping for delivery problems. If get_return_policy "
+    "returns found=false, retry it exactly once with the canonical category "
+    "from lookup_order before any refund or replacement. If that retry also "
+    "returns found=false, escalate instead of taking a terminal action.\n\n"
 )
 
 _BASELINE_POLICY = (
@@ -77,18 +80,57 @@ def build_agent(
         retries=2,
         model_settings={"openai_reasoning_summary": "auto"},
     )
+    known_order_categories: dict[str, str] = {}
+    verified_policies: dict[str, dict[str, Any]] = {}
 
     @agent.tool_plain
     def lookup_order(
         order_id: str | None = None, email: str | None = None
     ) -> dict[str, Any]:
         """Look up an order by exact order number or customer email."""
-        return store.lookup_order(order_id, email).model_dump(mode="json")
+        result = store.lookup_order(order_id, email).model_dump(mode="json")
+        for order in result.get("orders", []):
+            known_order_categories[order["order_id"]] = order["category"]
+        return result
 
     @agent.tool_plain
     def get_return_policy(category: str) -> dict[str, Any]:
         """Get the return window, defect rules, final-sale rule, and approval limit."""
-        return store.get_return_policy(category).model_dump(mode="json")
+        result = store.get_return_policy(category).model_dump(mode="json")
+        if result.get("found") and result.get("policy"):
+            policy = result["policy"]
+            verified_policies[policy["category"]] = policy
+        return result
+
+    def policy_guard_rejection(
+        order_id: str, action: str, amount: Decimal | None = None
+    ) -> dict[str, Any] | None:
+        """Reject terminal actions until the verified policy permits them."""
+        category = known_order_categories.get(order_id)
+        policy = verified_policies.get(category)
+        if policy is None:
+            message = (
+                "Action rejected: verify a return policy for the order category "
+                "first; if the canonical lookup still fails, escalate to a human."
+            )
+        elif (
+            action == "refund"
+            and amount is not None
+            and amount > Decimal(policy["human_approval_threshold"])
+        ):
+            message = (
+                "Action rejected: the refund exceeds the policy approval threshold; "
+                "escalate to a human for approval."
+            )
+        else:
+            return None
+        return {
+            "action": action,
+            "amount": None,
+            "accepted": False,
+            "order_id": order_id,
+            "message": message,
+        }
 
     @agent.tool_plain
     def check_shipping(tracking_no: str) -> dict[str, Any]:
@@ -98,11 +140,17 @@ def build_agent(
     @agent.tool_plain
     def issue_refund(order_id: str, amount: Decimal) -> dict[str, Any]:
         """Record a mock refund; no payment processor is contacted."""
+        rejection = policy_guard_rejection(order_id, "refund", amount)
+        if rejection is not None:
+            return rejection
         return store.issue_refund(order_id, amount).model_dump(mode="json")
 
     @agent.tool_plain
     def create_replacement(order_id: str) -> dict[str, Any]:
         """Record a mock replacement; no fulfillment order is created."""
+        rejection = policy_guard_rejection(order_id, "replacement")
+        if rejection is not None:
+            return rejection
         return store.create_replacement(order_id).model_dump(mode="json")
 
     @agent.tool_plain

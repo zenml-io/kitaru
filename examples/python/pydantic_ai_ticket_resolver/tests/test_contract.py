@@ -98,6 +98,57 @@ def test_baseline_agent_exposes_the_mock_commerce_tools() -> None:
     }
 
 
+def test_terminal_actions_require_a_successful_canonical_policy_lookup() -> None:
+    """Prevent refunds and replacements after an empty policy lookup."""
+    store = MockCommerceStore()
+    agent = build_agent(store, "test")
+    tools = agent._function_toolset.tools
+
+    tools["lookup_order"].function(order_id="48218")
+    assert tools["get_return_policy"].function(category="Clothing")["found"] is False
+    rejected = tools["issue_refund"].function(
+        order_id="48218", amount=Decimal("120.00")
+    )
+
+    assert rejected["accepted"] is False
+    assert store.actions == []
+
+    assert tools["get_return_policy"].function(category="apparel")["found"] is True
+    over_limit = tools["issue_refund"].function(
+        order_id="48218", amount=Decimal("200.00")
+    )
+    assert over_limit["accepted"] is False
+    assert store.actions == []
+
+    accepted = tools["issue_refund"].function(
+        order_id="48218", amount=Decimal("120.00")
+    )
+
+    assert accepted["accepted"] is True
+    assert store.actions[-1].action.value == "refund"
+
+
+def test_failed_policy_retry_requires_escalation_before_terminal_action() -> None:
+    """Require escalation when the canonical policy lookup cannot be recovered."""
+    store = MockCommerceStore()
+    agent = build_agent(store, "test")
+    tools = agent._function_toolset.tools
+
+    tools["lookup_order"].function(order_id="48218")
+    assert tools["get_return_policy"].function(category="unknown")["found"] is False
+    assert tools["get_return_policy"].function(category="still-unknown")["found"] is False
+    rejected = tools["create_replacement"].function(order_id="48218")
+
+    assert rejected["accepted"] is False
+    assert store.actions == []
+
+    escalated = tools["escalate_to_human"].function(
+        reason="The canonical return policy could not be verified."
+    )
+    assert escalated["accepted"] is True
+    assert store.actions[-1].action.value == "escalate"
+
+
 def test_checked_in_langfuse_export_contains_replayable_tool_traces() -> None:
     """Keep one imported baseline session per ticket with LLM and tool nodes."""
     sessions = [
