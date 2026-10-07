@@ -323,6 +323,15 @@ updates:
       # from PyPI. Release preparation rewrites their pins by hand. `kitaru*`
       # matches `kitaru[server]` and every `kitaru-*` plugin.
       - dependency-name: "kitaru*"
+      # logfire (required by kitaru-logfire-importer) declares
+      # opentelemetry-sdk<1.45, so this workspace cannot resolve 1.45 or later
+      # and every attempt fails the whole update job. Remove both entries once
+      # a logfire release inside the importer's `logfire>=4.35,<6` range lifts
+      # that cap.
+      - dependency-name: opentelemetry-api
+        versions: [">=1.45"]
+      - dependency-name: opentelemetry-sdk
+        versions: [">=1.45"]
     cooldown:
       default-days: 7
       semver-major-days: 14
@@ -373,11 +382,17 @@ updates:
       # template).
       - dependency-name: "@takumi-rs/image-response"
         update-types: ["version-update:semver-major"]
+    # Keep the patch cooldown equal to the minor one for pnpm. Dependabot passes
+    # the minor cooldown to pnpm as `--config.minimum-release-age` when it
+    # applies a minor update, and pnpm then rejects every direct dependency
+    # younger than that, including a patch release this same run just applied
+    # under a shorter patch cooldown. The rejected update is dropped from the
+    # group PR and the job reports `unknown_error`.
     cooldown:
       default-days: 7
       semver-major-days: 14
       semver-minor-days: 7
-      semver-patch-days: 3
+      semver-patch-days: 7
     target-branch: develop
   # The root pnpm workspace: the TypeScript SDK and adapters published to npm
   # (packages/*) plus the three workspace examples. From `/`, Dependabot reads
@@ -493,9 +508,11 @@ updates:
           - version-update:semver-major
           - version-update:semver-minor
           - version-update:semver-patch
+    # The patch cooldown matches the minor one for the pnpm reason given on the
+    # /docs entry above.
     cooldown:
       default-days: 7
       semver-major-days: 14
       semver-minor-days: 7
-      semver-patch-days: 3
+      semver-patch-days: 7
     target-branch: develop
