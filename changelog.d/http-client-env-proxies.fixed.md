@@ -1,0 +1,1 @@
+- The Python SDK, the CLI, and the control plane login now honor the `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` environment variables.
