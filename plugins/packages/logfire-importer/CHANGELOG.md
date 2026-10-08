@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 - 2026-10-08
 
 - Send API import queries through the Logfire SDK query client, which gives them the SDK's 30 second query timeout instead of the 5 second HTTP default, and stop importing the private `logfire._internal` region helper.
 

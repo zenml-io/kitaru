@@ -98,7 +98,7 @@ importers:
   packages/mastra:
     dependencies:
       '@zenml-io/kitaru':
-        specifier: workspace:0.5.0
+        specifier: workspace:0.6.0
         version: link:../core
     devDependencies:
       '@mastra/core':
@@ -177,7 +177,7 @@ importers:
   packages/vercel-ai:
     dependencies:
       '@zenml-io/kitaru':
-        specifier: workspace:0.5.0
+        specifier: workspace:0.6.0
         version: link:../core
     devDependencies:
       ai:
