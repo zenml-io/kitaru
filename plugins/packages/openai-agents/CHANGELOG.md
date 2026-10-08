@@ -2,6 +2,7 @@
 
 ## 0.4.0 - 2026-10-08
 
+- Support OpenAI Agents SDK 0.23.
 - Record the configured model, provider, and estimated cost on model-call nodes, and store reasoning items as reasoning on their model-call node instead of as `unsupported_openai_item` spans.
 
 ## 0.3.0 - 2026-09-21
