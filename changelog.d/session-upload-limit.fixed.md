@@ -1,1 +1,0 @@
-- Check session payload sizes before reading and uploading them, and explain server rejections with guidance to check the upload limit or split the payload.

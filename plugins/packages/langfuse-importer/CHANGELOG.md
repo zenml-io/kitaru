@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 - 2026-10-08
+
+- Simplify internal event-type matching without changing import behavior.
+
 ## 0.4.0 - 2026-09-21
 
 - Emit `reasoning_selectors` pointing at visible reasoning in node outputs instead of extracted `reasoning` text.

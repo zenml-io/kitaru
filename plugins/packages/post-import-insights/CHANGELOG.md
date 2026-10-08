@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 - 2026-10-08
+
+- Simplify internal return syntax without changing insight generation.
+
 ## 0.1.1 - 2026-09-21
 
 - Consume nodes in the server's materialized order and remove assumptions about positional node indexes, retaining compatibility with Kitaru 0.26.0 and later.
