@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Support PydanticAI 2.52 through 2.54 in addition to the existing 2.14 through 2.51 minor lines.
+
 ## 0.3.1 - 2026-10-08
 
 - Serialize baseline history lookups per cache key so identical tool calls dispatched in parallel replay successive recorded occurrences instead of all replaying the first one.
