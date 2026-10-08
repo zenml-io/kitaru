@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 - 2026-10-08
 
 - Map `decline_request` to the `reject` action in the example `action_executed` question, so jev no longer fails sessions that correctly declined a request.
 

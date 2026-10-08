@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 - 2026-10-08
+
+- Simplify internal return syntax without changing recording behavior.
+
 ## 0.1.0 - 2026-09-21
 
 - Emit `reasoning_selectors` pointing at Claude's thinking blocks in node outputs instead of extracted `reasoning` text.

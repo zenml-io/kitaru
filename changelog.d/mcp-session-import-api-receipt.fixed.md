@@ -1,1 +1,0 @@
-- `kitaru_session_import` now returns a valid receipt for provider-API import sources instead of `internal_error` after the import was created.

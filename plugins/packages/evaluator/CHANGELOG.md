@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 - 2026-10-08
 
 - Report priced call costs when ordinary tool calls have no cost metadata, while retaining aggregate fallback behavior.
 

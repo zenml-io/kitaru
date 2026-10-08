@@ -1,1 +1,0 @@
-- The CLI no longer reports internal `ValueError`s as `invalid_arguments`; only parser and validation failures use that error kind, and an unexpected `ValueError` now surfaces as `internal_error` with exit code 1.

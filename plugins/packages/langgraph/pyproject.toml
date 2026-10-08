@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-langgraph"
-version = "0.2.0"
+version = "0.3.0"
 description = "LangGraph recording and replay adapter for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
