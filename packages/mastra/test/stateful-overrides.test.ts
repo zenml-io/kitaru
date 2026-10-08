@@ -232,6 +232,7 @@ import {
   type MastraMemoryLease,
   MEMORY_REPLAY_KEY,
 } from "../src/memory.js";
+import { getMastraVersion } from "../src/stream-recording.js";
 import {
   AGENT_ID,
   installTestApi,
@@ -1151,7 +1152,10 @@ it("reports OM divergence when an override adds a new memory call", async () => 
   const output = await adapter.stream("ignored");
   expect(output).toBe(nativeResult);
   await output.consumeStream();
-  expect(await output.text).toBe("evolved");
+  // From Mastra 1.72 the added memory call is a blocking reflection, which
+  // fails the replayed turn closed before the actor answers.
+  const blockingReflection = Number(getMastraVersion().split(".")[1]) >= 72;
+  expect(await output.text).toBe(blockingReflection ? "" : "evolved");
   expect(runtime.observer.calls).toHaveLength(observerCalls);
   expect(runtime.reflector.calls).toHaveLength(reflectorCalls);
   await vi.waitFor(() =>

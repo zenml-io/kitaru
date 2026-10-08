@@ -109,7 +109,7 @@ describe("assertMemoryReplayVersions", () => {
   });
 
   it.each([
-    ["an untested core", "1.72.0", "1.32.1"],
+    ["an untested core", "1.75.0", "1.35.0"],
     ["a tested core with another core's memory", "1.68.0", "1.30.0"],
   ])("rejects %s, naming the tested pairs", (_case, core, memory) => {
     expect(() => assertMemoryReplayVersions(core, memory)).toThrow(
