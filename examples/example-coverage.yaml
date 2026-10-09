@@ -13,6 +13,35 @@ schema:
     - not_applicable
   cost_classes: [none, low, medium, high]
 examples:
+  - id: pydantic-ai-delivery-date
+    path: examples/python/pydantic_ai_delivery_date
+    public_docs: [examples/README.md]
+    owner_area: Delivery scenario MCP App, native customer simulation, policy experiments, and versioned regression test sets
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: examples/python/pydantic_ai_delivery_date/tests/test_contract.py
+        notes: Checks native history boundaries, reviewed policy proposals, editor execution, MCP handoff contracts, Langfuse payloads, frozen test sets, and narrow date assertions without model APIs.
+      local_smoke:
+        status: covered
+        command: uv run --no-sync python examples/python/pydantic_ai_delivery_date/scripts/run_ci_e2e.py
+        requires_server: true
+        timeout_seconds: 120
+        notes: Starts an isolated Kitaru server and database to verify scenario round trips, task-linked policy experiments, independent script evaluators, pinned regression reruns, and retry recovery.
+      live_provider:
+        status: manual_only
+        provider: openai
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 600
+        cost_class: low
+        command: cd examples/python/pydantic_ai_delivery_date && uv run --env-file .env --frozen python -m delivery_date --backend openai --model gpt-6-luna --scenario missing-date --variant fix
+        command_paths: [examples/python/pydantic_ai_delivery_date/delivery_date/__main__.py]
+        waiver:
+          reason: Requires an OpenAI API key and incurs hosted model charges.
+          reviewer_action: Run the documented OpenAI command and inspect the generated customer and agent turns.
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: pydantic-ai-ticket-resolver
     path: examples/python/pydantic_ai_ticket_resolver
     public_docs:

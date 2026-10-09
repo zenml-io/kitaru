@@ -6,6 +6,8 @@ Use [`python/pydantic_ai_ticket_resolver/`](python/pydantic_ai_ticket_resolver/)
 
 ## Python adapter examples
 
+[`python/pydantic_ai_delivery_date/`](python/pydantic_ai_delivery_date/) is a multi-turn delivery demo with an MCP App and local browser editor. Read captured Kitaru conversations, review generated variations, run them with a responsive customer loop, and save executed cases in versioned regression sets for pinned CI comparisons. App calls default to OpenAI `gpt-6-luna`; scripted terminal runs provide a provider-free fixture demonstration.
+
 The Python adapter examples use packages from the independent plugin workspace:
 
 - [`python/openai_agents_v2/`](python/openai_agents_v2/) uses `kitaru-openai-agents`.
