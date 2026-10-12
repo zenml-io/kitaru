@@ -323,6 +323,8 @@ const JUST_UNDER_THRESHOLD: Record<string, number> = {
   "1.72": 30,
   "1.73": 30,
   "1.74": 30,
+  "1.75": 30,
+  "1.76": 30,
 };
 
 it("replays a baseline whose slow observer merged buffer rounds without live OM calls", async () => {
