@@ -1,1 +1,0 @@
-- Record model, provider, token usage, and estimated cost on `kitaru-openai-agents` and `kitaru-langgraph` model-call nodes, so their sessions no longer report a zero cost. OpenAI reasoning items now appear as reasoning on their model-call node instead of as `unsupported_openai_item` spans.

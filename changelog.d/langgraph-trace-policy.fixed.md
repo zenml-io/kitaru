@@ -1,1 +1,0 @@
-- Preserve LangGraph middleware span names and document when upstream trace policies omit their recorded inputs.

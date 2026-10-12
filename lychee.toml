@@ -18,6 +18,11 @@ timeout = 30
 # User agent for HTTP requests
 user_agent = "lychee/kitaru-ci (https://github.com/zenml-io/kitaru)"
 
+# Treat 429 Too Many Requests as a pass. It means the host throttled the
+# shared CI runner address, which says nothing about the link, and it outlasts
+# the retries above. A page that is really gone still fails with 404.
+accept = ["100..=103", "200..=299", "429"]
+
 # Check repository file links through GitHub's raw endpoint because blob pages
 # can return 503 to automated requests even when the file is available.
 # Restrict this to known refs in this repository; missing files still fail.

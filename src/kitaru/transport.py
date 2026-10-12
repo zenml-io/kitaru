@@ -19,6 +19,7 @@ import uuid
 from typing import ClassVar
 
 import httpx
+from httpx._utils import get_environment_proxies
 
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 _IDEMPOTENT_METHODS = {"POST"}
@@ -120,6 +121,16 @@ def build_async_client(
     limits = httpx.Limits(
         max_connections=pool_size, max_keepalive_connections=pool_size
     )
+    # Mount the environment proxies explicitly because httpx ignores them
+    # when a custom transport is passed.
+    mounts: dict[str, httpx.AsyncBaseTransport | None] = {
+        pattern: RetryTransport(
+            httpx.AsyncHTTPTransport(limits=limits, proxy=proxy), retries=retries
+        )
+        if proxy
+        else None
+        for pattern, proxy in get_environment_proxies().items()
+    }
     return httpx.AsyncClient(
         base_url=base_url,
         headers=headers,
@@ -127,4 +138,5 @@ def build_async_client(
         transport=RetryTransport(
             httpx.AsyncHTTPTransport(limits=limits), retries=retries
         ),
+        mounts=mounts,
     )

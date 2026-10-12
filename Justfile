@@ -12,6 +12,8 @@ default:
 
 # Run root and plugin static checks, contracts, and repository checks
 check:
+    @printf '─── Lock Files ─────────────────────────────────\n'
+    @just lock-check
     @just python-check-env
     @printf '─── Format Check ───────────────────────────────\n'
     @just format-check
@@ -45,6 +47,11 @@ check:
     @just mcp-docs-index-check
     @printf '\n─────────────────────────────────────────────────\n'
     @printf 'All checks passed!\n'
+
+# Verify both lock files match their pyproject.toml, because the --frozen syncs below install a stale lock without complaint
+lock-check:
+    uv lock --check
+    uv lock --project plugins --check
 
 # Check code formatting without modifying files
 format-check:

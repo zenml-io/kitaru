@@ -20,10 +20,10 @@
     "typecheck": "pnpm --filter @zenml-io/kitaru typecheck && pnpm --filter @zenml-io/kitaru build && pnpm --filter @zenml-io/kitaru-mastra typecheck && pnpm --filter \"@zenml-io/kitaru-mastra-compat-*\" typecheck && pnpm --filter @zenml-io/kitaru-mastra build && pnpm --filter @zenml-io/kitaru-vercel-ai typecheck && pnpm --filter @zenml-io/kitaru-vercel-ai build && pnpm --filter @zenml-io/kitaru-example-mastra-support-triage typecheck && pnpm --filter @zenml-io/kitaru-example-vercel-ai-support-triage typecheck && pnpm --filter @zenml-io/kitaru-example-mastra-adaptive-conversation typecheck"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
-    "@types/node": "22.20.4",
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "22.20.5",
     "@vitest/coverage-v8": "4.1.11",
-    "ai": "7.0.109",
+    "ai": "7.0.127",
     "openapi-typescript": "7.13.0",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
