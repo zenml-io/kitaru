@@ -290,7 +290,7 @@ wheels = [
 
 [[package]]
 name = "braintrust"
-version = "0.43.0"
+version = "0.44.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chevron" },
@@ -304,9 +304,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/89/e6/a0f44b368d2c8067ee4de33e1b9b2ed5ee7b6b9b11d86b30062b16268ec7/braintrust-0.43.0.tar.gz", hash = "sha256:6245a00c63fab155e5c76514509082b33201c2f24b591f5178917984f85f586b", size = 966958, upload-time = "2026-09-28T21:38:21.692Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/28/3c/f09d56335ba4060252389398bb829da558669a90366e9b9bcebadd7a56a1/braintrust-0.44.1.tar.gz", hash = "sha256:2485e80ebfec37339526c3b7216df4e3319a2271cfafb7c033b9314c61c0b7fe", size = 976302, upload-time = "2026-10-05T17:00:30.998Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/c5/996b3373e0051e6e08975da38b09f64f3a32bdcafca1b27dded0e0adee0e/braintrust-0.43.0-py3-none-any.whl", hash = "sha256:9bc62b62eb02e98d654c38ad00e22be433ce2879e23ec4acb9795abc5459c4d8", size = 1161830, upload-time = "2026-09-28T21:38:19.869Z" },
+    { url = "https://files.pythonhosted.org/packages/01/bf/e25022629692c2fac1dff3e31abf5773348c7d408fd6efcda8ead7727d10/braintrust-0.44.1-py3-none-any.whl", hash = "sha256:3621e93ccbcde881423b4a5a96f5157ddb005ce4accff8e76d449431e1c061f9", size = 1171663, upload-time = "2026-10-05T17:00:28.581Z" },
 ]
 
 [[package]]
@@ -1913,7 +1913,7 @@ wheels = [
 
 [[package]]
 name = "langsmith"
-version = "0.14.4"
+version = "0.14.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1931,9 +1931,9 @@ dependencies = [
     { name = "xxhash" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/15/b9/10243797b942e7475ae21545fde1be484958672ae5c2f377f781c761a375/langsmith-0.14.4.tar.gz", hash = "sha256:a340199fcd2af60358f09dd1d7011bf7282f0d46a98aaa101bc7a521746da764", size = 4968005, upload-time = "2026-10-02T17:16:37.074Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/bf/a82bc6549ca7f45902995605466c607bdcf57deacbaab87f502c9d143653/langsmith-0.14.7.tar.gz", hash = "sha256:10ead0e0134ae2ee49371091e9d996e7f32a6103bc35860d55c26ee42d975bee", size = 5001042, upload-time = "2026-10-09T16:32:09.943Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/1f/5c2919fef6e3cf15167699abeb069a371d68da14a0e5cab89eeea11261d7/langsmith-0.14.4-py3-none-any.whl", hash = "sha256:ae0d98c2b0f9292ef7e12451d480937d79a0e7dcf2412ba847de6f053391b44a", size = 813097, upload-time = "2026-10-02T17:16:34.724Z" },
+    { url = "https://files.pythonhosted.org/packages/14/cc/85910477cdf1cadd0ae7f9fe4e81fff793f0423d70c6a82e7b4a88874f8f/langsmith-0.14.7-py3-none-any.whl", hash = "sha256:748538d163cd073879106837d7f0892f34849655ba43cbb5aa5e21509e24423d", size = 861973, upload-time = "2026-10-09T16:32:07.815Z" },
 ]
 
 [[package]]
@@ -2110,7 +2110,7 @@ wheels = [
 
 [[package]]
 name = "mlflow-tracing"
-version = "3.16.1"
+version = "3.17.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cachetools" },
@@ -2122,9 +2122,9 @@ dependencies = [
     { name = "protobuf" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/88/62/64068c0d17a7ba479f4dadfa78b3e48921cde8d20878414e7a4a929e66c0/mlflow_tracing-3.16.1.tar.gz", hash = "sha256:315ba1ace00d43498da2ad2b2bbb751f3198d6f9cd328168dfeb49911df41925", size = 1525331, upload-time = "2026-09-16T22:40:58.167Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/8b/8115b256c748855f1614909dcacac12c2fdb6de7e31759936ca36d92a43e/mlflow_tracing-3.17.0.tar.gz", hash = "sha256:6259dc0149bb681d6738c98f861f02db43c87c18e0a20a7ec9cbce1b7f386512", size = 1686449, upload-time = "2026-10-07T05:47:34.94Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/00/8c/f40c01433254f49f3b18ef88a4eba481a73a29494f27c072fb7a53812a76/mlflow_tracing-3.16.1-py3-none-any.whl", hash = "sha256:b3ab97c7b4f919704e0cbe0653e6e9b89cf1f8a790f8bb1b4cf7f236df258e9e", size = 1812478, upload-time = "2026-09-16T22:40:56.332Z" },
+    { url = "https://files.pythonhosted.org/packages/04/bf/b5b4d00ec9b48f0a735f5d514d0c5e2ee339a21d251de6f864cfe32dcdee/mlflow_tracing-3.17.0-py3-none-any.whl", hash = "sha256:8e5cb21bd53720f163098fe12a54e2cc5dff19e5b811889205ef10469248ee9e", size = 1978708, upload-time = "2026-10-07T05:47:33.381Z" },
 ]
 
 [[package]]
