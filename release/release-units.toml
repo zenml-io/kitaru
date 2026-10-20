@@ -249,6 +249,21 @@ maintenance-branch-prefix = "release/phoenix/"
 checks = []
 
 [[units]]
+slug = "model-swap"
+path = "plugins/packages/model-swap"
+distribution = "kitaru-model-swap"
+registry = "pypi"
+version-source = "plugins/packages/model-swap/pyproject.toml"
+changelog = "plugins/packages/model-swap/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = true
+release-label = "requires:plugin:model-swap"
+impact-paths = ["plugins/packages/model-swap/**"]
+tag-prefix = "python/kitaru-model-swap/v"
+maintenance-branch-prefix = "release/model-swap/"
+checks = []
+
+[[units]]
 slug = "post-import-insights"
 path = "plugins/packages/post-import-insights"
 distribution = "kitaru-post-import-insights"

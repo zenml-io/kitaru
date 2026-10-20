@@ -395,6 +395,7 @@ def test_public_argv_and_schema_cover_insight_lifecycle(
         "insight.delete",
         "insight.get",
         "insight.list",
+        "insight.report",
         "insight.update",
     }
     assert specs["insight.delete"]["side_effects"]["deletes_remote_state"]

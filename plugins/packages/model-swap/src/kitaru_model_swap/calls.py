@@ -1,0 +1,140 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+"""Collect and sample the recorded model calls of an import."""
+
+import json
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime
+from decimal import Decimal
+from uuid import UUID
+
+from kitaru.api_models.v1.session_node import (
+    NodeType,
+    SessionNodeResponse,
+    SessionWithNodesResponse,
+)
+from kitaru_model_swap.endpoint import Usage
+from kitaru_model_swap.normalize import ReplayRequest, Skipped, build_replay_request
+from kitaru_model_swap.params import ModelSwapParams
+
+# Rough characters per token, used only when the recording has no token counts.
+_CHARS_PER_TOKEN = 4
+_DEFAULT_OUTPUT_TOKENS = 500
+
+
+@dataclass(frozen=True)
+class RecordedCall:
+    """A replayable recorded call and what it cost when it was recorded."""
+
+    session_id: UUID
+    node_id: UUID
+    node_name: str
+    model: str | None
+    request: ReplayRequest
+    usage: Usage
+    cost: Decimal | None
+
+
+@dataclass
+class Collection:
+    """Replayable calls plus coverage and volume counts for an import."""
+
+    calls: list[RecordedCall] = field(default_factory=list)
+    llm_calls_seen: int = 0
+    sessions: int = 0
+    skipped: Counter[str] = field(default_factory=Counter)
+    first_started: datetime | None = None
+    last_started: datetime | None = None
+
+    def add_session(
+        self, session: SessionWithNodesResponse, params: ModelSwapParams
+    ) -> None:
+        """Rebuild every model call of one session, counting what is skipped."""
+        self.sessions += 1
+        started = session.session.started_at
+        if started is not None:
+            if self.first_started is None or started < self.first_started:
+                self.first_started = started
+            if self.last_started is None or started > self.last_started:
+                self.last_started = started
+        for node in session.nodes:
+            if node.node_type is not NodeType.LLM_CALL:
+                continue
+            self.llm_calls_seen += 1
+            result = build_replay_request(
+                node,
+                tool_schemas=params.tool_schemas,
+                tool_descriptions=params.tool_descriptions,
+                use_recorded_tools=params.use_recorded_tools,
+                infer_missing_schemas=params.infer_missing_schemas,
+            )
+            if isinstance(result, Skipped):
+                self.skipped[result.reason] += 1
+                continue
+            self.calls.append(_recorded_call(session.session.id, node, result))
+
+
+def _recorded_call(
+    session_id: UUID, node: SessionNodeResponse, request: ReplayRequest
+) -> RecordedCall:
+    """Pair a rebuilt request with the recorded usage and cost."""
+    tokens = node.tokens
+    usage = Usage(
+        input_tokens=(tokens.input_tokens or 0) if tokens else 0,
+        cached_input_tokens=(tokens.cached_input_tokens or 0) if tokens else 0,
+        output_tokens=(tokens.output_tokens or 0) if tokens else 0,
+        reasoning_tokens=(tokens.reasoning_tokens or 0) if tokens else 0,
+    )
+    return RecordedCall(
+        session_id=session_id,
+        node_id=node.id,
+        node_name=node.name,
+        model=node.model or node.requested_model,
+        request=request,
+        usage=usage,
+        cost=node.cost,
+    )
+
+
+def estimate_usage(call: RecordedCall, max_tokens: int | None) -> Usage:
+    """Estimate a replay's tokens from the recording."""
+    input_tokens = call.usage.input_tokens or (
+        len(json.dumps(call.request.messages) + json.dumps(call.request.tools))
+        // _CHARS_PER_TOKEN
+    )
+    output_tokens = call.usage.output_tokens or _DEFAULT_OUTPUT_TOKENS
+    if max_tokens is not None:
+        output_tokens = min(output_tokens, max_tokens)
+    return Usage(input_tokens=input_tokens, output_tokens=output_tokens)
+
+
+def sample_calls(calls: list[RecordedCall], max_calls: int) -> list[RecordedCall]:
+    """Pick up to `max_calls`, spread evenly across node names and models.
+
+    Groups are visited round-robin in recorded order, so a small sample still
+    covers every kind of call and the selection is repeatable.
+    """
+    groups: dict[tuple[str, str | None], list[RecordedCall]] = defaultdict(list)
+    for call in calls:
+        groups[(call.node_name, call.model)].append(call)
+    queues = list(groups.values())
+    sampled: list[RecordedCall] = []
+    index = 0
+    while len(sampled) < max_calls and any(index < len(q) for q in queues):
+        for queue in queues:
+            if index < len(queue) and len(sampled) < max_calls:
+                sampled.append(queue[index])
+        index += 1
+    return sampled

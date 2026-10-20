@@ -33,6 +33,7 @@ from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession
 
 MAX_PARENT_DEPTH = 64
+TOOL_DEFINITIONS_METADATA_KEY = "kitaru.tool_definitions"
 
 
 class InvalidImport(ValueError):
@@ -136,6 +137,49 @@ def _llm_messages(attributes: dict[str, Any], direction: str) -> Any:
     if messages is not None:
         return messages
     return _indexed_messages(attributes, f"llm.{direction}_messages")
+
+
+def _tool_definition(value: Any) -> dict[str, Any] | None:
+    """Normalize one tool definition to the OpenAI chat-completions form."""
+    value = _decode_json(value)
+    if not isinstance(value, dict) or value.get("type") not in (None, "function"):
+        return None
+    nested = value.get("function")
+    function = nested if isinstance(nested, dict) else value
+    name = function.get("name")
+    parameters = next(
+        (
+            _decode_json(function[key])
+            for key in ("parameters", "parameters_json_schema", "input_schema")
+            if key in function
+        ),
+        None,
+    )
+    # Keep only definitions that carry a real schema; a bare name cannot be
+    # replayed against another model.
+    if not isinstance(name, str) or not name or not isinstance(parameters, dict):
+        return None
+    normalized: dict[str, Any] = {"name": name}
+    description = function.get("description")
+    if isinstance(description, str) and description:
+        normalized["description"] = description
+    normalized["parameters"] = parameters
+    return {"type": "function", "function": normalized}
+
+
+def _tool_definitions(attributes: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return normalized OpenInference or GenAI tool definitions for one span."""
+    indexed_tools = _indexed_messages(attributes, "llm.tools") or []
+    values: Any = [tool.get("tool.json_schema") for tool in indexed_tools]
+    if not any(value is not None for value in values):
+        values = _attribute(attributes, "gen_ai.tool.definitions")
+    if not isinstance(values, list):
+        return []
+    return [
+        definition
+        for value in values
+        if (definition := _tool_definition(value)) is not None
+    ]
 
 
 def _parse_values(
@@ -503,6 +547,14 @@ def _node(span: dict[str, Any], trace_id: str) -> tuple[ImportedNode, str | None
         attributes["phoenix.annotations"] = span["annotations"]
     if span.get("notes") not in (None, []):
         attributes["phoenix.notes"] = span["notes"]
+    metadata: dict[str, Any] = {
+        "phoenix.span_id": span_id,
+        "phoenix.span_kind": span.get("span_kind"),
+    }
+    if node_type is NodeType.LLM_CALL and (
+        tool_definitions := _tool_definitions(raw_attributes)
+    ):
+        metadata[TOOL_DEFINITIONS_METADATA_KEY] = tool_definitions
     parent_id = _parent_id(span)
     return (
         ImportedNode(
@@ -590,7 +642,6 @@ def _node(span: dict[str, Any], trace_id: str) -> tuple[ImportedNode, str | None
                         raw_attributes,
                         "gen_ai.request.parameters",
                         "llm.invocation_parameters",
-                        "model_request_parameters",
                     ),
                     dict,
                 )
@@ -598,10 +649,7 @@ def _node(span: dict[str, Any], trace_id: str) -> tuple[ImportedNode, str | None
             ),
             tool_name=tool_name,
             attributes=attributes,
-            metadata={
-                "phoenix.span_id": span_id,
-                "phoenix.span_kind": span.get("span_kind"),
-            },
+            metadata=metadata,
             children=[],
         ),
         f"{trace_id}:{parent_id}" if parent_id else None,

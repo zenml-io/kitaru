@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Keep generation tool definitions under the `kitaru.tool_definitions` node metadata key, normalized to the OpenAI chat-completions form, from `input.tools`, PydanticAI `model_request_parameters` function and output tools, or `gen_ai.tool.definitions`.
+
 ## 0.4.1 - 2026-10-08
 
 - Simplify internal event-type matching without changing import behavior.

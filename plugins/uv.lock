@@ -12,7 +12,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-10-17T12:18:27.444248Z"
 exclude-newer-span = "P3D"
 
 [manifest]
@@ -28,6 +28,7 @@ members = [
     "kitaru-logfire-importer",
     "kitaru-mastra-importer",
     "kitaru-mlflow-importer",
+    "kitaru-model-swap",
     "kitaru-openai-agents",
     "kitaru-phoenix-importer",
     "kitaru-post-import-insights",
@@ -49,6 +50,7 @@ dev = [
     { name = "kitaru-logfire-importer", extras = ["adapter"], editable = "packages/logfire-importer" },
     { name = "kitaru-mastra-importer", editable = "packages/mastra-importer" },
     { name = "kitaru-mlflow-importer", extras = ["api"], editable = "packages/mlflow-importer" },
+    { name = "kitaru-model-swap", editable = "packages/model-swap" },
     { name = "kitaru-openai-agents", editable = "packages/openai-agents" },
     { name = "kitaru-phoenix-importer", extras = ["adapter"], editable = "packages/phoenix-importer" },
     { name = "kitaru-post-import-insights", extras = ["openai"], editable = "packages/post-import-insights" },
@@ -1051,8 +1053,8 @@ name = "httpcore2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11" },
-    { name = "truststore" },
+    { name = "h11", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
+    { name = "truststore", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/be/ad/f4f0e57345f1870f3e8cb624e058d7eca6e5a27d33bcc3311d9b618734cd/httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648", size = 67548, upload-time = "2026-08-18T13:22:08.211Z" }
 wheels = [
@@ -1645,6 +1647,23 @@ requires-dist = [
     { name = "mlflow-tracing", marker = "extra == 'api'", specifier = ">=3.16,<4" },
 ]
 provides-extras = ["api"]
+
+[[package]]
+name = "kitaru-model-swap"
+version = "0.1.0"
+source = { editable = "packages/model-swap" }
+dependencies = [
+    { name = "genai-prices" },
+    { name = "httpx" },
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "genai-prices", specifier = ">=0.1.1,<0.2" },
+    { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "kitaru", editable = "../" },
+]
 
 [[package]]
 name = "kitaru-openai-agents"

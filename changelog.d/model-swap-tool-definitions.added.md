@@ -1,0 +1,1 @@
+- Keep the tool definitions offered to the model on imported `llm_call` nodes under the reserved `kitaru.tool_definitions` node metadata key, normalized to the OpenAI chat-completions form, in the Langfuse, Logfire, and Phoenix importers.

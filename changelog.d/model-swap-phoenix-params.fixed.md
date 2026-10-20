@@ -1,0 +1,1 @@
+- The Logfire and Phoenix importers no longer store Pydantic AI's `model_request_parameters` attribute, which lists the tools offered to the model, as the call's model parameters.
