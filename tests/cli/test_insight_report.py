@@ -180,13 +180,40 @@ def test_rerun_cards_render_only_the_newest_insight_per_name() -> None:
         "notes",
         {"type": "text", "content": "first run"},
         created=NOW - timedelta(hours=1),
+        analyzer_version_id=ANALYZER_VERSION_ID,
     )
-    newer = insight("notes", {"type": "text", "content": "second run"})
+    newer = insight(
+        "notes",
+        {"type": "text", "content": "second run"},
+        analyzer_version_id=ANALYZER_VERSION_ID,
+    )
 
     document = render_insight_report([newer, older], import_id=IMPORT_ID)
 
     assert "second run" in document
     assert "first run" not in document
+
+
+def test_same_names_from_different_sources_are_all_kept() -> None:
+    by_analyzer = insight(
+        "summary",
+        {"type": "text", "content": "from analyzer"},
+        analyzer_version_id=ANALYZER_VERSION_ID,
+    )
+    by_other = insight(
+        "summary",
+        {"type": "text", "content": "from another analyzer"},
+        analyzer_version_id=uuid.uuid4(),
+    )
+    by_hand = insight("summary", {"type": "text", "content": "by hand"})
+
+    document = render_insight_report(
+        [by_analyzer, by_other, by_hand], import_id=IMPORT_ID
+    )
+
+    assert "from analyzer" in document
+    assert "from another analyzer" in document
+    assert "by hand" in document
 
 
 def test_covers_hide_only_insights_from_the_same_analyzer_version() -> None:

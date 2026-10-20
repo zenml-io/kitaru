@@ -79,18 +79,32 @@ class Budget:
         self.cap = cap
         self.spent = Decimal(0)
         self._reserved = Decimal(0)
+        self._settled = asyncio.Condition()
 
-    def reserve(self, amount: Decimal) -> bool:
-        """Reserve an estimated amount, or refuse when it would pass the cap."""
-        if self.cap is not None and self.spent + self._reserved + amount > self.cap:
-            return False
-        self._reserved += amount
-        return True
+    async def reserve(self, amount: Decimal) -> bool:
+        """Reserve an estimated amount, or refuse when it can never fit.
 
-    def settle(self, reserved: Decimal, actual: Decimal) -> None:
+        Reservations are usually larger than the final cost, so a call that
+        does not fit while others are in flight waits for them to settle
+        instead of being dropped.
+        """
+        async with self._settled:
+            while not self._fits(amount):
+                if self._reserved == 0:
+                    return False
+                await self._settled.wait()
+            self._reserved += amount
+            return True
+
+    async def settle(self, reserved: Decimal, actual: Decimal) -> None:
         """Replace a reservation with the actual cost."""
-        self._reserved -= reserved
-        self.spent += actual
+        async with self._settled:
+            self._reserved -= reserved
+            self.spent += actual
+            self._settled.notify_all()
+
+    def _fits(self, amount: Decimal) -> bool:
+        return self.cap is None or self.spent + self._reserved + amount <= self.cap
 
 
 class Runner:
@@ -282,18 +296,20 @@ class Runner:
             self.stopped_early = self.stopped_early or "time_budget"
             return "time_budget"
         reserved = _price_or_none(price, estimate) or Decimal(0)
-        if not self.budget.reserve(reserved):
+        if not await self.budget.reserve(reserved):
             self.stopped_early = self.stopped_early or "max_spend"
             return "max_spend"
         try:
-            async with asyncio.timeout(remaining):
+            async with asyncio.timeout(max(self._deadline - time.monotonic(), 0)):
                 result = await request()
         except TimeoutError:
-            self.budget.settle(reserved, Decimal(0))
+            # The provider has usually billed a call already under way, so the
+            # reservation is kept as its cost.
+            await self.budget.settle(reserved, reserved)
             self.stopped_early = self.stopped_early or "time_budget"
             return "time_budget"
         cost = _price_or_none(price, result.usage)
-        self.budget.settle(reserved, cost or Decimal(0))
+        await self.budget.settle(reserved, cost or Decimal(0))
         return result, cost
 
 

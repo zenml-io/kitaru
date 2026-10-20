@@ -282,11 +282,18 @@ def read_usage(usage: Any) -> Usage:
     """Read OpenAI-style usage, tolerating missing details."""
     if not isinstance(usage, dict):
         return Usage()
-    prompt_details = usage.get("prompt_tokens_details") or {}
-    completion_details = usage.get("completion_tokens_details") or {}
+    prompt_details = _as_dict(usage.get("prompt_tokens_details"))
+    completion_details = _as_dict(usage.get("completion_tokens_details"))
     return Usage(
-        input_tokens=int(usage.get("prompt_tokens") or 0),
-        cached_input_tokens=int(prompt_details.get("cached_tokens") or 0),
-        output_tokens=int(usage.get("completion_tokens") or 0),
-        reasoning_tokens=int(completion_details.get("reasoning_tokens") or 0),
+        input_tokens=_count(usage.get("prompt_tokens")),
+        cached_input_tokens=_count(prompt_details.get("cached_tokens")),
+        output_tokens=_count(usage.get("completion_tokens")),
+        reasoning_tokens=_count(completion_details.get("reasoning_tokens")),
     )
+
+
+def _count(value: Any) -> int:
+    """Read a token count; the endpoint's value must not lower the spend."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return 0
+    return max(int(value), 0)

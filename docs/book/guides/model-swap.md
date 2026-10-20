@@ -129,7 +129,7 @@ uv run kitaru insight report --import-id IMPORT_ID --out estimate.html
 
 ## Run the comparison
 
-Drop `dry_run` and set a spend cap. Before each call, the analyzer reserves its worst-case cost and does not send a call whose reservation would pass `max_spend_usd`, so the cap is not exceeded; the report counts the calls it did not send. A reservation assumes the candidate's `max_tokens` output when set, and otherwise four times the recorded output, at least 2048 tokens. Replace the `...` placeholder with the same candidates as the dry run; the command does not run as written:
+Drop `dry_run` and set a spend cap. Before each call, the analyzer reserves a high estimate of its cost: four times the recorded output, at least 2048 tokens, and never more than the candidate's `max_tokens`. A call whose reservation does not fit waits for calls in flight to settle, and is not sent if it still cannot fit; the report counts the calls it did not send. Reservations are estimates, so a reply far longer than reserved can push spend slightly past the cap; set `max_tokens` on each candidate to bound every reply. A call cut off by the time budget is charged at its reservation, because the provider has usually billed it already. Replace the `...` placeholder with the same candidates as the dry run; the command does not run as written:
 
 ```bash
 uv run kitaru import analyze IMPORT_ID \
@@ -159,7 +159,7 @@ A spend cap needs a price for every candidate; the analyzer refuses to start whe
 | `sessions_per_month` | derived | Traffic for monthly projections. Derived from the import's time span when it covers at least a day. |
 | `judge` | none | A judge that rules whether differing answers or arguments are equivalent: a decision model (see [Judge the differences quickly](#judge-the-differences-quickly)) or a candidate-shaped chat model. |
 | `concurrency` | `4` | Requests in flight. |
-| `time_budget_seconds` | `600` | Counted from the start of the analyzer task, including fetching sessions. When it ends, the analyzer stops starting new calls and cuts off calls still running, so the analysis returns results before the analyzer task timeout. |
+| `time_budget_seconds` | `600` | Counted from the start of the analyzer task, including fetching sessions. When it ends, the analyzer stops fetching sessions and starting new calls, and cuts off calls still running, so the analysis returns results before the analyzer task timeout. The report counts sessions that were not fetched. |
 | `max_disagreements` | `200` | Disagreements kept in the report. |
 
 ## Judge the differences quickly
@@ -196,7 +196,7 @@ A model that chooses a tool can only be replayed fairly when the candidate sees 
 2. **`tool_schemas`.** For traces without tool definitions, pass the schemas from your agent's code. A coding agent can read the code and produce them, and so can the framework itself. For a Pydantic AI agent, run it once against a `FunctionModel` and read `info.function_tools` and `info.output_tools`.
 3. **Inferred schemas,** only with `infer_missing_schemas`. A loose schema built from the arguments the recorded calls used. Calls replayed this way are marked as inferred and left out of the headline numbers.
 
-Supplied `tool_schemas` are offered on every replayed call, including text-only steps without recorded tools, because the agent offers its tools on every call; they fill in any tool the call did not record. Without any of these sources, calls that used a tool are skipped as `missing_tool_schema`, and the report says how many.
+Supplied `tool_schemas` are offered on calls that used a tool or recorded tool definitions, and fill in any tool the call did not record. Calls with no sign of tools get none, because an import can also hold routers and summarizers that never had tools; a text-only step of a tool-using agent that recorded no tool definitions is therefore replayed without tools. Without any of these sources, calls that used a tool are skipped as `missing_tool_schema`, and the report says how many.
 
 Agents recorded by a native adapter do not store tool definitions on their model calls today, so they need `tool_schemas` too.
 
@@ -205,7 +205,7 @@ Agents recorded by a native adapter do not store tool definitions on their model
 `kitaru insight report` writes one self-contained HTML file with no external resources, so you can open it in a browser or hand it to your coding agent. It shows, in order:
 
 - **Best for.** The closest match to today, then the cheapest and the fastest among candidates whose agreement rate is within 10 points of that closest match, plus the best open-weight model. The closest match can be your current model itself when it is a candidate, since it is compared like any other. Candidates failing more than 20% of calls are left out until their provider setup is fixed.
-- **Compare.** Tool choice, exact match, judged equivalence, failure rate, cost per call and month, latency, and open weights for every candidate, with a one-line summary of each.
+- **Compare.** Tool choice, exact match, judged equivalence, failure rate, cost per call and month, latency, and open weights for every candidate, with a one-line summary of each. Cost per call averages answered calls, weighted by how often each node name and model occurs; when a candidate failed every call of one kind, its cost is marked partial and it is not named cheapest.
 - **Why the cost differs.** Prices, tokens per call, reasoning tokens, retries, and where each price came from.
 - **Provider failures, agreement by recorded tool** (with per-argument agreement), and **coverage**.
 - **Disagreements.** Grouped by what the recorded model did, each with both answers and a link to the session in the dashboard.
@@ -223,7 +223,7 @@ Each run stores its own insights. The report renders the most recent model-swap 
 
 ## Supported trace shapes
 
-Messages are rebuilt from two shapes: OTel GenAI messages with typed parts (Langfuse and Logfire exports of Pydantic AI, Phoenix `gen_ai.*` spans) and OpenAI chat messages (MLflow, Braintrust, LangSmith OpenAI wrappers, most Kitaru JSONL files). Anything else is skipped and counted rather than guessed, including Anthropic-format messages, LangChain-serialized messages, images and other non-text content, failed recorded calls, and calls recorded without inputs.
+Messages are rebuilt from two shapes: OTel GenAI messages with typed parts (Langfuse and Logfire exports of Pydantic AI, Phoenix `gen_ai.*` spans) and OpenAI chat messages (MLflow, Braintrust, LangSmith OpenAI wrappers, most Kitaru JSONL files). Anything else is skipped and counted rather than guessed, including Anthropic-format messages, LangChain-serialized messages, images and other non-text content, failed recorded calls, calls recorded without inputs, and calls whose tool calls or results have no ids (skipped as `missing_tool_call_id`). When a recording keeps the system prompt as OTel GenAI `gen_ai.system_instructions` in the span attributes rather than in the messages, it is replayed as the system message; calls with no system prompt at all are counted in a report note.
 
 ## Limits
 

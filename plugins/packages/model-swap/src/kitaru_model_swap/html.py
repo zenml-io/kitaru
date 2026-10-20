@@ -129,7 +129,8 @@ def _compare(candidates: list[dict[str, Any]], *, judged: bool) -> str:
                 if judged
                 else None,
                 _pct(c["failure_rate"]),
-                _usd(c["cost"]["per_call_usd"]),
+                _usd(c["cost"]["per_call_usd"])
+                + ("" if c["cost_complete"] else " (partial)"),
                 _usd(c["cost"]["per_month_usd"]),
                 _seconds(c["latency_seconds"]["p50"]),
                 _seconds(c["latency_seconds"]["p95"]),

@@ -188,25 +188,26 @@ def _normalize_tool_definitions(values: Any) -> list[dict[str, Any]]:
 def _tool_definitions(attributes: dict[str, Any]) -> list[dict[str, Any]]:
     """Return normalized tool definitions offered to the model in one span.
 
-    OpenInference `llm.tools.*` schemas come first, then OTel GenAI
-    `gen_ai.tool.definitions`, then Pydantic AI's `model_request_parameters`.
+    OpenInference `llm.tools.*` schemas come first, then Pydantic AI's
+    `model_request_parameters`, which also lists output tools, then OTel
+    GenAI `gen_ai.tool.definitions`, the same order as the Logfire importer.
     """
     indexed_tools = _indexed_messages(attributes, "llm.tools") or []
     if definitions := _normalize_tool_definitions(
         [tool.get("tool.json_schema") for tool in indexed_tools]
     ):
         return definitions
-    if definitions := _normalize_tool_definitions(
-        _attribute(attributes, "gen_ai.tool.definitions")
+    request_parameters = _attribute(attributes, "model_request_parameters")
+    if isinstance(request_parameters, dict) and (
+        definitions := [
+            *_normalize_tool_definitions(request_parameters.get("function_tools")),
+            *_normalize_tool_definitions(request_parameters.get("output_tools")),
+        ]
     ):
         return definitions
-    request_parameters = _attribute(attributes, "model_request_parameters")
-    if not isinstance(request_parameters, dict):
-        return []
-    return [
-        *_normalize_tool_definitions(request_parameters.get("function_tools")),
-        *_normalize_tool_definitions(request_parameters.get("output_tools")),
-    ]
+    return _normalize_tool_definitions(
+        _attribute(attributes, "gen_ai.tool.definitions")
+    )
 
 
 def _parse_values(
