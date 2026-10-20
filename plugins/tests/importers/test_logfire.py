@@ -706,3 +706,27 @@ def test_chat_span_without_tools_has_no_tool_definitions() -> None:
     node = _llm_node({"gen_ai.tool.definitions": [{"name": "no_schema"}]})
 
     assert TOOL_DEFINITIONS_METADATA_KEY not in node.metadata
+
+
+def test_anthropic_custom_tools_become_tool_definitions() -> None:
+    """Normalize Anthropic `custom` tools that keep their schema in input_schema."""
+    node = _llm_node(
+        {
+            "gen_ai.tool.definitions": json.dumps(
+                [
+                    {
+                        "type": "custom",
+                        "name": "lookup_order",
+                        "input_schema": LOOKUP_ORDER_SCHEMA,
+                    }
+                ]
+            )
+        }
+    )
+
+    assert node.metadata[TOOL_DEFINITIONS_METADATA_KEY] == [
+        {
+            "type": "function",
+            "function": {"name": "lookup_order", "parameters": LOOKUP_ORDER_SCHEMA},
+        }
+    ]

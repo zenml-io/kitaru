@@ -13,6 +13,7 @@
 #  limitations under the License.
 """Analyzer entrypoint for model-swap comparisons."""
 
+import time
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit
@@ -62,6 +63,9 @@ async def run_model_swap(
     Raises:
         ValueError: A spend cap is set but a candidate has no known price.
     """
+    # The time budget covers fetching sessions too, so the analysis returns
+    # before the task timeout however large the import is.
+    deadline = time.monotonic() + params.time_budget_seconds
     prices = {c.name: resolve_price(c) for c in params.candidates}
     judge_price = resolve_price(params.judge) if params.judge else None
     if params.max_spend_usd is not None:
@@ -87,7 +91,7 @@ async def run_model_swap(
     stopped_early = None
     if not params.dry_run and sampled:
         runner = Runner(params, prices, judge_price=judge_price, transport=transport)
-        results = await runner.run(sampled)
+        results = await runner.run(sampled, deadline=deadline)
         spent = runner.budget.spent
         stopped_early = runner.stopped_early
     report = build_report(

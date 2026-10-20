@@ -400,3 +400,5 @@ def test_public_argv_and_schema_cover_insight_lifecycle(
     }
     assert specs["insight.delete"]["side_effects"]["deletes_remote_state"]
     assert specs["insight.create"]["side_effects"]["creates_remote_state"]
+    assert specs["insight.report"]["read_only"] is False
+    assert specs["insight.report"]["side_effects"]["writes_local_file"]

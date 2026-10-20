@@ -16,11 +16,13 @@
 Every insight is drawn from its stored data, so no model is called. An
 analyzer can supply its own rendered section by storing
 `{"html": ..., "covers": [...]}` under `REPORT_SECTION_KEY` in an insight's
-metadata; the section is embedded as is and the insights it names in
-`covers` are not drawn again as cards.
+metadata. The section is embedded only when an analyzer task created the
+insight, and the insights it names in `covers` from the same analyzer version
+are not drawn again as cards.
 """
 
 import html
+import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -69,9 +71,12 @@ async def write_insight_report(
             "path": str(out),
             "import_id": str(import_id),
             "insights": len(insights),
-            "sections": [insight.name for insight, _ in _get_sections(insights)],
+            "sections": [
+                insight.name
+                for insight, _ in _get_sections(_get_latest_per_name(insights))
+            ],
         },
-        next_actions=[f"open {out}"],
+        next_actions=[f"Open {out} in a browser."],
     )
 
 
@@ -83,11 +88,20 @@ def render_insight_report(
 ) -> str:
     """Build the HTML document for an import's insights."""
     generated = (generated_at or datetime.now(UTC)).strftime("%Y-%m-%d %H:%M UTC")
-    sections = _get_sections(insights)
-    hidden = {name for _, section in sections for name in section["covers"]}
-    hidden |= {owner.name for owner, _ in sections}
-    body = [section["html"] for _, section in sections]
-    cards = [_insight_card(i) for i in insights if i.name not in hidden]
+    latest = _get_latest_per_name(insights)
+    sections = _get_sections(latest)
+    hidden = {
+        (owner.analyzer_version_id, name)
+        for owner, section in sections
+        for name in section["covers"]
+    }
+    owners = {owner.name for owner, _ in sections}
+    body = [_strip_unsafe_tags(section["html"]) for _, section in sections]
+    cards = [
+        _insight_card(i)
+        for i in latest
+        if i.name not in owners and (i.analyzer_version_id, i.name) not in hidden
+    ]
     if cards:
         heading = "<h2>Other insights</h2>" if body else ""
         body.append(f"<section>{heading}{''.join(cards)}</section>")
@@ -99,30 +113,65 @@ def render_insight_report(
     )
 
 
-def _get_sections(
-    insights: list[InsightResponse],
-) -> list[tuple[InsightResponse, dict[str, Any]]]:
-    """Return the newest well-formed section per insight name, oldest first.
+def _get_latest_per_name(insights: list[InsightResponse]) -> list[InsightResponse]:
+    """Return the newest insight per name, oldest first.
 
     Rerunning an analyzer stores new insights under the same names, so only
     the latest run of each is rendered.
     """
-    latest: dict[str, tuple[InsightResponse, dict[str, Any]]] = {}
+    latest: dict[str, InsightResponse] = {}
     for insight in sorted(insights, key=lambda item: item.created):
+        latest.pop(insight.name, None)
+        latest[insight.name] = insight
+    return list(latest.values())
+
+
+def _get_sections(
+    insights: list[InsightResponse],
+) -> list[tuple[InsightResponse, dict[str, Any]]]:
+    """Return the well-formed sections of insights an analyzer task created.
+
+    Anyone with insight access can store metadata, so a section from an
+    insight without an analyzer version is ignored and the insight is drawn
+    as a card instead.
+    """
+    sections: list[tuple[InsightResponse, dict[str, Any]]] = []
+    for insight in insights:
         section = insight.metadata.get(REPORT_SECTION_KEY)
+        if insight.analyzer_version_id is None:
+            continue
         if not isinstance(section, dict) or not isinstance(section.get("html"), str):
             continue
         covers = section.get("covers", [])
-        latest[insight.name] = (
-            insight,
-            {
-                "html": section["html"],
-                "covers": [n for n in covers if isinstance(n, str)]
-                if isinstance(covers, list)
-                else [],
-            },
+        sections.append(
+            (
+                insight,
+                {
+                    "html": section["html"],
+                    "covers": [n for n in covers if isinstance(n, str)]
+                    if isinstance(covers, list)
+                    else [],
+                },
+            )
         )
-    return list(latest.values())
+    return sections
+
+
+_UNSAFE_TAG = re.compile(r"<\s*/?\s*(?:meta|base|link)\b[^>]*(?:>|$)", re.IGNORECASE)
+
+
+def _strip_unsafe_tags(markup: str) -> str:
+    """Remove `meta`, `base` and `link` tags from section markup.
+
+    The page CSP cannot stop a `<meta http-equiv="refresh">` navigation, so
+    such tags never reach the page. Stripping repeats until nothing matches so
+    that removing one tag cannot splice a new one together.
+    """
+    while True:
+        stripped = _UNSAFE_TAG.sub("", markup)
+        if stripped == markup:
+            return stripped
+        markup = stripped
 
 
 def _insight_card(insight: InsightResponse) -> str:

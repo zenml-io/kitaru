@@ -751,7 +751,13 @@ def _node_metadata(record: dict[str, Any], node_type: NodeType) -> dict[str, Any
 def _tool_definition(value: Any) -> dict[str, Any] | None:
     """Normalize one tool definition to the OpenAI chat-completions form."""
     value = _decode_json(value)
-    if not isinstance(value, dict) or value.get("type") not in (None, "function"):
+    # Anthropic marks its client tools `custom` and keeps the schema under
+    # `input_schema`; both forms describe a callable function.
+    if not isinstance(value, dict) or value.get("type") not in (
+        None,
+        "function",
+        "custom",
+    ):
         return None
     nested = value.get("function")
     function = nested if isinstance(nested, dict) else value

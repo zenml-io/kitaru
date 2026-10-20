@@ -1797,3 +1797,43 @@ def test_generation_without_tools_has_no_tool_definitions() -> None:
         langfuse_module.TOOL_DEFINITIONS_METADATA_KEY
         not in _generation_node(session).metadata
     )
+
+
+def test_keeps_anthropic_custom_tools_as_tool_definitions() -> None:
+    """Normalize Anthropic `custom` tools that keep their schema in input_schema."""
+    schema = {"type": "object", "properties": {"city": {"type": "string"}}}
+    session = sessions(
+        jsonl(
+            observation("root", "trace-1"),
+            observation(
+                "generation",
+                "trace-1",
+                parent_id="root",
+                observation_type="GENERATION",
+                input_={
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "tools": [
+                        {
+                            "type": "custom",
+                            "name": "get_weather",
+                            "description": "Current weather in a city.",
+                            "input_schema": schema,
+                        }
+                    ],
+                },
+            ),
+        )
+    )[0]
+
+    assert _generation_node(session).metadata[
+        langfuse_module.TOOL_DEFINITIONS_METADATA_KEY
+    ] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Current weather in a city.",
+                "parameters": schema,
+            },
+        }
+    ]

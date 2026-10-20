@@ -891,3 +891,74 @@ def test_model_request_parameters_are_not_model_params() -> None:
     )
 
     assert node.model_params is None
+
+
+def test_model_request_parameters_tools_become_tool_definitions() -> None:
+    """Fall back to Pydantic AI's function and output tools."""
+    result_schema = {"type": "object", "properties": {"reply": {"type": "string"}}}
+    node = _llm_node(
+        {
+            "llm.model_name": "gpt-4o-mini",
+            "model_request_parameters": json.dumps(
+                {
+                    "function_tools": [
+                        {
+                            "name": "get_weather",
+                            "description": "Current weather in a city.",
+                            "parameters_json_schema": WEATHER_SCHEMA,
+                            "kind": "function",
+                        }
+                    ],
+                    "output_tools": [
+                        {
+                            "name": "final_result",
+                            "parameters_json_schema": result_schema,
+                            "kind": "output",
+                        }
+                    ],
+                    "output_mode": "tool",
+                }
+            ),
+        }
+    )
+
+    assert node.model_params is None
+    assert node.metadata[TOOL_DEFINITIONS_METADATA_KEY] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Current weather in a city.",
+                "parameters": WEATHER_SCHEMA,
+            },
+        },
+        {
+            "type": "function",
+            "function": {"name": "final_result", "parameters": result_schema},
+        },
+    ]
+
+
+def test_anthropic_custom_tools_become_tool_definitions() -> None:
+    """Normalize Anthropic `custom` tools that keep their schema in input_schema."""
+    node = _llm_node(
+        {
+            "gen_ai.request.model": "claude-haiku-4-5",
+            "gen_ai.tool.definitions": json.dumps(
+                [
+                    {
+                        "type": "custom",
+                        "name": "get_weather",
+                        "input_schema": WEATHER_SCHEMA,
+                    }
+                ]
+            ),
+        }
+    )
+
+    assert node.metadata[TOOL_DEFINITIONS_METADATA_KEY] == [
+        {
+            "type": "function",
+            "function": {"name": "get_weather", "parameters": WEATHER_SCHEMA},
+        }
+    ]

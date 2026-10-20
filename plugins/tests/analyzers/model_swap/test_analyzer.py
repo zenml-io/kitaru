@@ -166,7 +166,7 @@ async def test_spend_cap_stops_cleanly(
         stub_client,
         server,
         candidates=[REFERENCE],
-        max_spend_usd="0.0005",
+        max_spend_usd="0.003",
         concurrency=1,
     )
     result = report(insights)
@@ -175,7 +175,7 @@ async def test_spend_cap_stops_cleanly(
     assert result["stopped_early"] == "max_spend"
     assert 0 < reference["calls_sent"] < 33
     assert reference["calls_not_run"] == {"max_spend": 33 - reference["calls_sent"]}
-    assert Decimal(result["spent_usd"]) <= Decimal("0.0005")
+    assert Decimal(result["spent_usd"]) <= Decimal("0.003")
 
 
 async def test_spend_cap_requires_known_prices(
@@ -332,6 +332,7 @@ async def test_core_report_command_renders_the_analyzer_output(
 ) -> None:
     insights = await run(stub_client, server, candidates=[REFERENCE, CHEAP])
     now = datetime.now(UTC)
+    analyzer_version_id = uuid.uuid4()
     stored = [
         InsightResponse.model_validate(
             {
@@ -340,6 +341,7 @@ async def test_core_report_command_renders_the_analyzer_output(
                 "owner_id": uuid.uuid4(),
                 "agent_id": uuid.uuid4(),
                 "import_id": uuid.uuid4(),
+                "analyzer_version_id": analyzer_version_id,
                 "created": now,
                 "updated": now,
             }

@@ -122,6 +122,10 @@ def build_replay_request(
         recorded = parse_recorded_output(node.outputs)
     except UnsupportedShapeError as error:
         return Skipped(error.reason, str(error))
+    # Traces are third-party data, so any other malformed value skips the
+    # call instead of failing the whole analysis.
+    except (TypeError, AttributeError, KeyError, ValueError) as error:
+        return Skipped("unsupported_input_format", f"malformed payload: {error}")
 
     definitions: dict[str, dict[str, Any]] = {}
     schema_source: SchemaSource = "none"
@@ -131,9 +135,10 @@ def build_replay_request(
         if definitions:
             schema_source = "recorded"
     used = _tool_names_used(messages, recorded)
-    if used or definitions:
-        # A model that may call tools must see every tool the agent offered,
-        # so supplied schemas fill in whatever the trace did not record.
+    if used or definitions or tool_schemas:
+        # The agent offers its tools on every call, including calls answered
+        # in text, so supplied schemas fill in whatever the trace did not
+        # record.
         for name, schema in tool_schemas.items():
             if name not in definitions:
                 definitions[name] = _definition(
@@ -215,7 +220,12 @@ def _convert_otel_messages(
         texts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
         tool_results: list[dict[str, Any]] = []
-        for part in message["parts"]:
+        parts = message["parts"]
+        if not isinstance(parts, list):
+            raise UnsupportedShapeError(
+                "unsupported_input_format", "message parts are not a list"
+            )
+        for part in parts:
             kind = part.get("type") if isinstance(part, dict) else None
             if kind == "text":
                 texts.append(str(part.get("content", "")))
@@ -232,7 +242,7 @@ def _convert_otel_messages(
                 tool_results.append(
                     {
                         "role": "tool",
-                        "tool_call_id": str(part.get("id")),
+                        "tool_call_id": _require_id(part.get("id")),
                         "content": (
                             result if isinstance(result, str) else json.dumps(result)
                         ),
@@ -253,6 +263,10 @@ def _convert_otel_messages(
                     entry["tool_calls"] = tool_calls
                 converted.append(entry)
         elif texts:
+            if role == "tool":
+                raise UnsupportedShapeError(
+                    "unsupported_input_format", "a tool message has no call id"
+                )
             converted.append({"role": role, "content": "\n".join(texts)})
     return converted, dropped
 
@@ -275,7 +289,7 @@ def _convert_openai_messages(
                 for call in message["tool_calls"]
             ]
         if role == "tool":
-            entry["tool_call_id"] = str(message.get("tool_call_id"))
+            entry["tool_call_id"] = _require_id(message.get("tool_call_id"))
         converted.append(entry)
     return converted
 
@@ -306,6 +320,19 @@ def _text(content: Any) -> str | None:
     raise UnsupportedShapeError("non_text_content", "content is not text")
 
 
+def _require_id(call_id: Any) -> str:
+    """Return a tool-call id, which endpoints need to pair calls and results.
+
+    Raises:
+        UnsupportedShapeError: The recording has no id.
+    """
+    if call_id is None or call_id == "":
+        raise UnsupportedShapeError(
+            "unsupported_input_format", "a tool call or result has no id"
+        )
+    return str(call_id)
+
+
 def _openai_tool_call(call_id: Any, name: Any, arguments: Any) -> dict[str, Any]:
     """Build an OpenAI `tool_calls` entry with string arguments."""
     if not isinstance(name, str) or not name:
@@ -313,7 +340,7 @@ def _openai_tool_call(call_id: Any, name: Any, arguments: Any) -> dict[str, Any]
             "unsupported_input_format", "a tool call has no name"
         )
     return {
-        "id": str(call_id),
+        "id": _require_id(call_id),
         "type": "function",
         "function": {
             "name": name,

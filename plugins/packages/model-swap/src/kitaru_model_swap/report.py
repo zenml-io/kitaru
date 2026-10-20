@@ -107,6 +107,7 @@ def build_report(
             by_candidate[candidate.name],
             prices.get(candidate.name),
             volume,
+            collection.group_seen,
             dry_run=params.dry_run,
         )
         for candidate in params.candidates
@@ -134,7 +135,7 @@ def build_report(
             ),
             "source": volume.source,
         },
-        "recorded": _recorded_report(sampled, volume),
+        "recorded": _recorded_report(sampled, volume, collection.group_seen),
         "candidates": candidates,
         "best_for": [] if params.dry_run else _best_for(candidates),
         "disagreements": disagreements[: params.max_disagreements],
@@ -166,6 +167,10 @@ def _coverage(collection: Collection, sampled: list[RecordedCall]) -> dict[str, 
         "calls_with_dropped_reasoning": sum(
             c.request.dropped_reasoning_parts > 0 for c in sampled
         ),
+        "calls_without_system_prompt": sum(
+            not any(m["role"] in {"system", "developer"} for m in c.request.messages)
+            for c in sampled
+        ),
     }
 
 
@@ -186,6 +191,12 @@ def _notes(coverage: dict[str, Any]) -> list[str]:
             "arguments. They are reported separately and left out of the "
             "headline agreement."
         )
+    if without := coverage["calls_without_system_prompt"]:
+        notes.append(
+            f"{without} sampled calls have no system prompt in their recording. "
+            "If the agent uses one, the trace source did not record it, and "
+            "candidates answer without it."
+        )
     if missing := coverage["skipped"].get("missing_tool_schema"):
         notes.append(
             f"{missing} calls were skipped "
@@ -195,10 +206,38 @@ def _notes(coverage: dict[str, Any]) -> list[str]:
     return notes
 
 
-def _recorded_report(sampled: list[RecordedCall], volume: Volume) -> dict[str, Any]:
+def weighted_per_call(
+    costs: list[tuple[RecordedCall, Decimal]], weights: Counter[tuple[str, str | None]]
+) -> Decimal | None:
+    """Mean cost per call, weighting each kind of call by how often it occurs.
+
+    Sampling takes an even number of calls from each node name and model, so
+    a plain mean would let rare, expensive calls stand in for common ones.
+    """
+    by_group: dict[tuple[str, str | None], list[Decimal]] = defaultdict(list)
+    for call, cost in costs:
+        by_group[(call.node_name, call.model)].append(cost)
+    total = sum(weights[group] for group in by_group)
+    if not by_group or not total:
+        return None
+    return sum(
+        (
+            sum(group_costs, Decimal(0)) / len(group_costs) * weights[group]
+            for group, group_costs in by_group.items()
+        ),
+        Decimal(0),
+    ) / Decimal(total)
+
+
+def _recorded_report(
+    sampled: list[RecordedCall],
+    volume: Volume,
+    weights: Counter[tuple[str, str | None]],
+) -> dict[str, Any]:
     """Summarize the recorded model and its cost on the sampled calls."""
-    costs = [c.cost for c in sampled if c.cost is not None]
-    per_call = sum(costs, Decimal(0)) / len(costs) if costs else None
+    per_call = weighted_per_call(
+        [(c, c.cost) for c in sampled if c.cost is not None], weights
+    )
     return {
         "models": dict(Counter(c.model or "unknown" for c in sampled).most_common()),
         "tokens_per_call": _mean_tokens([c.usage for c in sampled]),
@@ -212,6 +251,7 @@ def _candidate_report(
     results: list[CallResult],
     price: ResolvedPrice | None,
     volume: Volume,
+    weights: Counter[tuple[str, str | None]],
     *,
     dry_run: bool,
 ) -> dict[str, Any]:
@@ -219,7 +259,7 @@ def _candidate_report(
     report: dict[str, Any] = {
         "name": candidate.name,
         "model": candidate.model,
-        "endpoint_host": urlsplit(candidate.base_url).netloc,
+        "endpoint_host": urlsplit(candidate.base_url).hostname,
         "reference": candidate.reference,
         "open_weights": candidate.open_weights,
         "price": (
@@ -235,21 +275,19 @@ def _candidate_report(
     }
     if dry_run:
         max_tokens = candidate.provider_settings.max_tokens
-        total = (
-            None
+        estimates = (
+            []
             if price is None
-            else sum(
-                (call_cost(price, estimate_usage(c, max_tokens)) for c in sampled),
-                Decimal(0),
-            )
+            else [(c, call_cost(price, estimate_usage(c, max_tokens))) for c in sampled]
         )
         report["estimate"] = {
             "calls": len(sampled),
-            "spend_usd": _usd(total),
-            "cost": _projection(
-                None if total is None or not sampled else total / len(sampled),
-                volume,
+            "spend_usd": _usd(
+                sum((cost for _, cost in estimates), Decimal(0))
+                if price is not None
+                else None
             ),
+            "cost": _projection(weighted_per_call(estimates, weights), volume),
         }
         return report
 
@@ -265,7 +303,10 @@ def _candidate_report(
         r.agreement in {"same_tool_same_args", "same_tool_different_args"}
         for r in tool_calls
     )
-    costs = [r.cost for r in sent if r.cost is not None]
+    # Failed calls carry no usage, so pricing them at zero would make a
+    # failing candidate look cheap; only answered calls set the per-call cost.
+    answered_costs = [(r.call, r.cost) for r in answered if r.cost is not None]
+    spent = [r.cost for r in sent if r.cost is not None]
     replies = [r.reply for r in sent if r.reply]
     latencies = sorted(reply.latency_seconds for reply in replies)
     report |= {
@@ -289,10 +330,8 @@ def _candidate_report(
         },
         "tokens_per_call": _mean_tokens([reply.usage for reply in replies]),
         "retries": sum(reply.attempts - 1 for reply in replies),
-        "cost": _projection(
-            sum(costs, Decimal(0)) / len(costs) if costs else None, volume
-        ),
-        "spent_usd": _usd(sum(costs, Decimal(0)) if costs else None),
+        "cost": _projection(weighted_per_call(answered_costs, weights), volume),
+        "spent_usd": _usd(sum(spent, Decimal(0)) if spent else None),
     }
     return report
 
@@ -540,11 +579,12 @@ def _build_cards(report: dict[str, Any]) -> list[InsightInput]:
     ]
     cost_values = _cost_values(report)
     if cost_values:
-        unit = (
-            "USD per month"
-            if report["volume"]["sessions_per_month"] is not None
-            else "USD per session"
-        )
+        if report["dry_run"]:
+            unit = "USD for the sampled calls"
+        elif report["volume"]["sessions_per_month"] is not None:
+            unit = "USD per month"
+        else:
+            unit = "USD per session"
         insights.append(
             InsightInput(
                 name="model-swap-cost",
@@ -602,9 +642,6 @@ def _cost_values(report: dict[str, Any]) -> list[CategoryValue]:
         else "per_session_usd"
     )
     values = []
-    recorded = report["recorded"]["cost"][key]
-    if recorded is not None and not report["dry_run"]:
-        values.append(CategoryValue(label="Recorded", value=float(recorded)))
     for candidate in report["candidates"]:
         if report["dry_run"]:
             amount = candidate["estimate"]["spend_usd"]
@@ -612,6 +649,13 @@ def _cost_values(report: dict[str, Any]) -> list[CategoryValue]:
             amount = candidate["cost"][key]
         if amount is not None:
             values.append(CategoryValue(label=candidate["name"], value=float(amount)))
+    recorded = report["recorded"]["cost"][key]
+    if recorded is not None and not report["dry_run"]:
+        label = "Recorded"
+        # Category labels must be unique, and a candidate may be named so.
+        while any(value.label == label for value in values):
+            label += " (recording)"
+        values.append(CategoryValue(label=label, value=float(recorded)))
     return values
 
 

@@ -142,7 +142,13 @@ def _llm_messages(attributes: dict[str, Any], direction: str) -> Any:
 def _tool_definition(value: Any) -> dict[str, Any] | None:
     """Normalize one tool definition to the OpenAI chat-completions form."""
     value = _decode_json(value)
-    if not isinstance(value, dict) or value.get("type") not in (None, "function"):
+    # Anthropic marks its client tools `custom` and keeps the schema under
+    # `input_schema`; both forms describe a callable function.
+    if not isinstance(value, dict) or value.get("type") not in (
+        None,
+        "function",
+        "custom",
+    ):
         return None
     nested = value.get("function")
     function = nested if isinstance(nested, dict) else value
@@ -167,18 +173,39 @@ def _tool_definition(value: Any) -> dict[str, Any] | None:
     return {"type": "function", "function": normalized}
 
 
-def _tool_definitions(attributes: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return normalized OpenInference or GenAI tool definitions for one span."""
-    indexed_tools = _indexed_messages(attributes, "llm.tools") or []
-    values: Any = [tool.get("tool.json_schema") for tool in indexed_tools]
-    if not any(value is not None for value in values):
-        values = _attribute(attributes, "gen_ai.tool.definitions")
+def _normalize_tool_definitions(values: Any) -> list[dict[str, Any]]:
+    """Normalize a list of tool definitions, dropping entries without schemas."""
+    values = _decode_json(values)
     if not isinstance(values, list):
         return []
     return [
         definition
         for value in values
         if (definition := _tool_definition(value)) is not None
+    ]
+
+
+def _tool_definitions(attributes: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return normalized tool definitions offered to the model in one span.
+
+    OpenInference `llm.tools.*` schemas come first, then OTel GenAI
+    `gen_ai.tool.definitions`, then Pydantic AI's `model_request_parameters`.
+    """
+    indexed_tools = _indexed_messages(attributes, "llm.tools") or []
+    if definitions := _normalize_tool_definitions(
+        [tool.get("tool.json_schema") for tool in indexed_tools]
+    ):
+        return definitions
+    if definitions := _normalize_tool_definitions(
+        _attribute(attributes, "gen_ai.tool.definitions")
+    ):
+        return definitions
+    request_parameters = _attribute(attributes, "model_request_parameters")
+    if not isinstance(request_parameters, dict):
+        return []
+    return [
+        *_normalize_tool_definitions(request_parameters.get("function_tools")),
+        *_normalize_tool_definitions(request_parameters.get("output_tools")),
     ]
 
 

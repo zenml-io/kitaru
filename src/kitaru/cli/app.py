@@ -2423,6 +2423,7 @@ async def insight_delete(
                 "--out", "path", "option", False, "HTML file to write (report.html)."
             ),
         ),
+        read_only=False,
         side_effects=("writes_local_file",),
         idempotency="idempotent",
         errors=_UUID_READ_ERRORS,

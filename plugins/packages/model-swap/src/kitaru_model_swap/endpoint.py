@@ -35,6 +35,7 @@ FailureCategory = Literal[
     "refusal",
 ]
 
+_MAX_DETAIL = 200
 _RETRYABLE_STATUS = frozenset({408, 409, 429, 500, 502, 503, 504})
 _HERMES_BLOCK = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 
@@ -216,7 +217,9 @@ def _failure(
         latency_seconds=latency,
         attempts=attempts,
         failure=category,
-        failure_detail=detail,
+        # Refusal text comes from the endpoint, so it is bounded before it is
+        # stored in the report.
+        failure_detail=detail[:_MAX_DETAIL],
     )
 
 

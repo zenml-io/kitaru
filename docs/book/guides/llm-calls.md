@@ -35,7 +35,7 @@ for node in nodes.items:
 
 ## Tool definitions
 
-Imported `llm_call` nodes keep the tools that were offered to the model under the reserved node metadata key `kitaru.tool_definitions`, so a replay against a different model can present the same tools. The value is a list in the OpenAI chat-completions form:
+Some importers keep the tools that were offered to the model on imported `llm_call` nodes, under the reserved node metadata key `kitaru.tool_definitions`, so a replay against a different model can present the same tools. The value is a list in the OpenAI chat-completions form:
 
 ```json
 [
@@ -50,7 +50,7 @@ Imported `llm_call` nodes keep the tools that were offered to the model under th
 ]
 ```
 
-`description` is omitted when the source has none. Output tools, such as PydanticAI's `final_result`, appear like any other function tool. The Langfuse, Logfire, and Phoenix importers set the key only when the trace carries real JSON schemas: Langfuse reads the generation's `input.tools`, then PydanticAI's `model_request_parameters`, then `gen_ai.tool.definitions`; Logfire reads `model_request_parameters`, then `gen_ai.tool.definitions`; Phoenix reads OpenInference `llm.tools.N.tool.json_schema`, then `gen_ai.tool.definitions`. A call with no tool schemas in its source has no `kitaru.tool_definitions` key.
+`description` is omitted when the source has none. Output tools, such as PydanticAI's `final_result`, appear like any other function tool. The Langfuse, Logfire, and Phoenix importers set the key only when the trace carries real JSON schemas: Langfuse reads the generation's `input.tools`, then PydanticAI's `model_request_parameters`, then `gen_ai.tool.definitions`; Logfire reads `model_request_parameters`, then `gen_ai.tool.definitions`; Phoenix reads OpenInference `llm.tools.N.tool.json_schema`, then `gen_ai.tool.definitions`, then `model_request_parameters`. Anthropic `custom` tools, which keep their schema under `input_schema`, are normalized the same way. A call with no tool schemas in its source has no `kitaru.tool_definitions` key.
 
 ```python
 for node in nodes.items:

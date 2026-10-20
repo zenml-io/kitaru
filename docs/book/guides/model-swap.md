@@ -5,20 +5,20 @@ icon: shuffle
 
 # Choose the right model for your agent
 
-The right model for an agent depends on what you need: better answers, lower cost, faster replies, or a model you can run anywhere instead of being locked to one provider. The `kitaru/model-swap` analyzer compares candidate models on your agent's own recorded traffic: an open model on a provider, a local model on Ollama, a cheaper or newer closed model, and the model you use today. It sends each recorded model call, exactly as it was recorded, to every candidate and compares their answers. It runs on your worker with your keys, so your traces and credentials stay on your side.
+The right model for an agent depends on what you need: better answers, lower cost, faster replies, or a model you can run anywhere instead of being locked to one provider. The `kitaru/model-swap` analyzer compares candidate models on your agent's own recorded traffic: an open model on a provider, a local model on Ollama, a cheaper or newer closed model, and the model you use today. It rebuilds each recorded model call from its stored messages, sends it to every candidate, and compares their answers. It runs on your worker with your keys, so your traces and credentials stay on your side.
 
 The comparison shows where the candidates behave like your current model and where they differ. You then judge the differences, which decides quality, and confirm the finalists with a full [replay](replay-and-overrides.md) when your agent supports it.
 
-This is step-level replay: Kitaru does not re-run your agent. Every imported session already stores its model calls as `llm_call` nodes with their messages, tool definitions, answer, token usage, and cost (see [Track cost and model usage](llm-calls.md)). Each candidate sees the same messages the recorded model saw at that step, so the comparison works for agents imported from any supported trace source, including importer-backed agents, which cannot replay with a model override.
+This is step-level replay: Kitaru does not re-run your agent. Imported sessions store their model calls as `llm_call` nodes with their messages, answer, token usage, and cost, and some importers also store the tool definitions offered to the model (see [Track cost and model usage](llm-calls.md)). Each candidate sees the messages the recorded model saw at that step, except recorded reasoning parts, which are dropped. The comparison therefore works for any trace whose messages use a [supported shape](#supported-trace-shapes), including importer-backed agents, which cannot replay with a model override.
 
 You get a **Best for** summary (closest to today, cheapest, fastest, best open model) and, per candidate:
 
 - **Agreement.** Whether it called the same tool with the same arguments as your current model, or gave the same text answer, plus per-argument agreement for each tool.
 - **Provider failures.** Timeouts, rate limits, HTTP errors, empty replies, tool-call parse errors, and refusals, counted apart from disagreement, because they say more about the provider setup than about the model.
 - **Speed and tokens.** Median and 95th-percentile latency, and input, cached-input, output, and reasoning tokens per call.
-- **Cost.** Cost per call, projected per session and per month, split into price per token, tokens used, and retries.
+- **Cost.** Cost per call, projected per session and per month, explained by price per token and tokens used, with the number of retries shown next to it. Cost per call averages only the calls the candidate answered, weighted by how often each node name and model occurs in the import; failed attempts are not priced.
 - **Openness.** Whether the model's weights are open, as you declare it.
-- **Coverage.** How many recorded calls were seen, sampled, replayed, and skipped, and why.
+- **Coverage.** How many recorded calls were seen, sampled, replayable, and skipped, and why.
 
 ## Before you start
 
@@ -41,7 +41,7 @@ uv run kitaru session import traces/langfuse-traces.jsonl \
   --wait
 ```
 
-Note the `import_id` in the output; the analysis and the report use it.
+Note the `import_id` in the output; the analysis and the report use it. If you already imported these traces, for example while following the quickstart, reuse that import instead of importing again: `uv run kitaru import list` shows existing imports and their ids.
 
 ## Choose candidates
 
@@ -62,7 +62,7 @@ Each candidate is any endpoint that speaks the OpenAI chat-completions API:
 | `base_url` | Endpoint base URL, ending before `/chat/completions`. |
 | `model` | Model name sent in each request. |
 | `api_key_env` | Name of the environment variable holding the API key. Omit it for endpoints without authentication, such as a local Ollama. |
-| `reference` | Mark the model your agent uses today. It is compared like any other candidate, and its agreement with its own recording shows how much answers vary from run to run, the noise floor for every other candidate. |
+| `reference` | Mark the model your agent uses today. At most one candidate can be the reference. It is compared like any other candidate, and its agreement with its own recording shows how much answers vary from run to run, the noise floor for every other candidate. |
 | `open_weights` | `true` for open-weight models you could run with any provider or on your own hardware. Shown in the comparison and used for **Best open model**. |
 | `price` | `input_per_mtok`, `output_per_mtok`, and optional `cached_input_per_mtok`, in USD per million tokens. When omitted, the price comes from the bundled [genai-prices](https://github.com/pydantic/genai-prices) table, and the report names the table version. |
 | `price_provider` | Provider id for that lookup, such as `openai`, when the base URL does not identify the provider. |
@@ -86,6 +86,10 @@ uv run kitaru connection create model-swap-keys \
 
 Alternatively, set the variables in the worker's environment. See [Provider connections](provider-connections.md) for how values are merged.
 
+`api_key_env` cannot name a `KITARU_*` variable, so a candidate cannot send the worker's own Kitaru credentials to an endpoint. A key is sent only over `https`, unless the host is `localhost`, `127.0.0.1`, or `::1`, such as a local Ollama. `base_url` must not contain credentials; put the key in the variable `api_key_env` names instead.
+
+Any analyzer can read the worker's environment, not just model-swap. Run model-swap on a worker whose environment holds only the keys you intend to share with the candidate endpoints.
+
 ### Provider settings
 
 The same open model can behave very differently at different providers, and a wrong tool-call format can make almost every call fail. `provider_settings` adjusts each candidate:
@@ -99,7 +103,7 @@ The same open model can behave very differently at different providers, and a wr
 | `temperature` | not sent | Sampling temperature. |
 | `extra_body` | `{}` | Extra fields merged into every request. |
 | `timeout_seconds` | `120` | Per-request timeout. |
-| `max_retries` | `1` | Retries after a timeout, rate limit, or server error. Retries count toward cost and are reported. |
+| `max_retries` | `1` | Retries after a timeout, rate limit, or server error. Failed attempts are not priced; retries are counted and shown next to cost. |
 
 When a candidate's failure rate is high, the report's recommendation says to fix the provider setup first. Failures are never counted as disagreement.
 
@@ -125,7 +129,7 @@ uv run kitaru insight report --import-id IMPORT_ID --out estimate.html
 
 ## Run the comparison
 
-Drop `dry_run` and set a spend cap. The analyzer stops sending calls before its estimated spend would pass `max_spend_usd`, and the report counts the calls it did not send:
+Drop `dry_run` and set a spend cap. Before each call, the analyzer reserves its worst-case cost and does not send a call whose reservation would pass `max_spend_usd`, so the cap is not exceeded; the report counts the calls it did not send. A reservation assumes the candidate's `max_tokens` output when set, and otherwise four times the recorded output, at least 2048 tokens. Replace the `...` placeholder with the same candidates as the dry run; the command does not run as written:
 
 ```bash
 uv run kitaru import analyze IMPORT_ID \
@@ -155,18 +159,18 @@ A spend cap needs a price for every candidate; the analyzer refuses to start whe
 | `sessions_per_month` | derived | Traffic for monthly projections. Derived from the import's time span when it covers at least a day. |
 | `judge` | none | A candidate-shaped model that rules whether differing answers or arguments are equivalent. |
 | `concurrency` | `4` | Requests in flight. |
-| `time_budget_seconds` | `600` | Stop sending calls after this long, so the analysis returns results before the analyzer task timeout. |
+| `time_budget_seconds` | `600` | Counted from the start of the analyzer task, including fetching sessions. When it ends, the analyzer stops starting new calls and cuts off calls still running, so the analysis returns results before the analyzer task timeout. |
 | `max_disagreements` | `200` | Disagreements kept in the report. |
 
 ## Tool definitions
 
 A model that chooses a tool can only be replayed fairly when the candidate sees the same tool definitions the recorded model saw. The analyzer takes them, in order, from:
 
-1. **The recorded call.** The Langfuse, Logfire, and Phoenix importers store the tool definitions a trace carries, and the MLflow and LangSmith importers keep the request's `tools`. The quickstart export carries all seven tool schemas, so every call is replayable without extra input.
+1. **The recorded call.** The Langfuse, Logfire, and Phoenix importers store the tool definitions a trace carries, and the MLflow and LangSmith importers keep the raw request, so its `tools` are used when the request recorded them. The quickstart export carries all seven tool schemas, so every call is replayable without extra input.
 2. **`tool_schemas`.** For traces without tool definitions, pass the schemas from your agent's code. A coding agent can read the code and produce them, and so can the framework itself. For a Pydantic AI agent, run it once against a `FunctionModel` and read `info.function_tools` and `info.output_tools`.
 3. **Inferred schemas,** only with `infer_missing_schemas`. A loose schema built from the arguments the recorded calls used. Calls replayed this way are marked as inferred and left out of the headline numbers.
 
-Without any of these, calls that used a tool are skipped as `missing_tool_schema`, and the report says how many.
+Supplied `tool_schemas` are offered on every replayed call, including text-only steps without recorded tools, because the agent offers its tools on every call; they fill in any tool the call did not record. Without any of these sources, calls that used a tool are skipped as `missing_tool_schema`, and the report says how many.
 
 Agents recorded by a native adapter do not store tool definitions on their model calls today, so they need `tool_schemas` too.
 
@@ -174,7 +178,7 @@ Agents recorded by a native adapter do not store tool definitions on their model
 
 `kitaru insight report` writes one self-contained HTML file with no external resources, so you can open it in a browser or hand it to your coding agent. It shows, in order:
 
-- **Best for.** The closest match to today, and among candidates within 10 points of it, the cheapest and the fastest, plus the best open-weight model. Candidates failing more than 20% of calls are left out until their provider setup is fixed.
+- **Best for.** The closest match to today, then the cheapest and the fastest among candidates whose agreement rate is within 10 points of that closest match, plus the best open-weight model. The closest match can be your current model itself when it is a candidate, since it is compared like any other. Candidates failing more than 20% of calls are left out until their provider setup is fixed.
 - **Compare.** Tool choice, exact match, judged equivalence, failure rate, cost per call and month, latency, and open weights for every candidate, with a one-line summary of each.
 - **Why the cost differs.** Prices, tokens per call, reasoning tokens, retries, and where each price came from.
 - **Provider failures, agreement by recorded tool** (with per-argument agreement), and **coverage**.
@@ -189,7 +193,7 @@ How to read the agreement numbers:
 
 After review, confirm the finalists end to end with a [replay experiment](replay-and-overrides.md) on the reviewed sessions when your agent was recorded through an adapter that supports model overrides.
 
-Each run stores its own insights. The report renders the most recent model-swap run of the import, followed by the import's other insights. Session links use the dashboard URL the server reports when the analysis runs; they are left out when the server reports none. The full report is also available as JSON in the `kitaru.model_swap/v1` metadata of the `model-swap-summary` insight, for scripts and coding agents.
+Each run stores its own insights. The report renders the most recent model-swap run of the import, followed by the import's other insights. A card from an earlier run can still appear under **Other insights** when that run stored it under a name the latest run no longer uses. Session links use the dashboard URL the server reports when the analysis runs; they are left out when the server reports none. The full report is also available as JSON in the `kitaru.model_swap/v1` metadata of the `model-swap-summary` insight, for scripts and coding agents.
 
 ## Supported trace shapes
 
@@ -197,4 +201,4 @@ Messages are rebuilt from two shapes: OTel GenAI messages with typed parts (Lang
 
 ## Limits
 
-The analysis runs inside one analyzer task, which times out after 15 minutes without partial results. `time_budget_seconds` keeps it inside that window; for many calls or slow candidates, lower `max_calls` or raise `concurrency`. The analyzer needs network access from the worker to every candidate endpoint, so a local Ollama candidate requires a worker on the same machine.
+The analysis runs inside one analyzer task, which times out after 15 minutes without partial results. `time_budget_seconds` keeps it inside that window, so keep it comfortably under 15 minutes, leaving time to store the results; for many calls or slow candidates, lower `max_calls` or raise `concurrency`. The analyzer needs network access from the worker to every candidate endpoint, so a local Ollama candidate requires a worker on the same machine.

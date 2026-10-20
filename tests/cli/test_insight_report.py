@@ -29,6 +29,7 @@ from kitaru.cli import app as app_module
 from kitaru.cli.insight_report import REPORT_SECTION_KEY, render_insight_report
 
 IMPORT_ID = uuid.UUID("01990000-0000-7000-8000-000000000010")
+ANALYZER_VERSION_ID = uuid.UUID("01990000-0000-7000-8000-000000000020")
 NOW = datetime(2026, 10, 20, tzinfo=UTC)
 
 
@@ -38,6 +39,7 @@ def insight(
     *,
     created: datetime = NOW,
     metadata: dict[str, Any] | None = None,
+    analyzer_version_id: uuid.UUID | None = None,
 ) -> InsightResponse:
     return InsightResponse.model_validate(
         {
@@ -47,6 +49,7 @@ def insight(
             "updated": created,
             "agent_id": uuid.uuid4(),
             "import_id": IMPORT_ID,
+            "analyzer_version_id": analyzer_version_id,
             "name": name,
             "title": name.title(),
             "description": None,
@@ -58,6 +61,22 @@ def insight(
 
 def section(html: str, covers: list[str]) -> dict[str, Any]:
     return {REPORT_SECTION_KEY: {"html": html, "covers": covers}}
+
+
+def analyzer_insight(
+    name: str,
+    html: str | None = None,
+    covers: list[str] | None = None,
+    *,
+    created: datetime = NOW,
+    analyzer_version_id: uuid.UUID = ANALYZER_VERSION_ID,
+) -> InsightResponse:
+    return insight(
+        name,
+        created=created,
+        metadata=section(html, covers or []) if html is not None else None,
+        analyzer_version_id=analyzer_version_id,
+    )
 
 
 CHART = insight(
@@ -79,10 +98,8 @@ def test_renders_every_insight_as_a_card() -> None:
 
 
 def test_embeds_sections_and_hides_what_they_cover() -> None:
-    summary = insight(
-        "swap-summary", metadata=section("<h2>Swap section</h2>", ["swap-cost"])
-    )
-    covered = insight("swap-cost")
+    summary = analyzer_insight("swap-summary", "<h2>Swap section</h2>", ["swap-cost"])
+    covered = analyzer_insight("swap-cost")
 
     document = render_insight_report([summary, covered, CHART], import_id=IMPORT_ID)
 
@@ -94,12 +111,10 @@ def test_embeds_sections_and_hides_what_they_cover() -> None:
 
 
 def test_only_the_latest_section_per_name_is_embedded() -> None:
-    older = insight(
-        "swap-summary",
-        created=NOW - timedelta(hours=1),
-        metadata=section("<p>old run</p>", []),
+    older = analyzer_insight(
+        "swap-summary", "<p>old run</p>", created=NOW - timedelta(hours=1)
     )
-    newer = insight("swap-summary", metadata=section("<p>new run</p>", []))
+    newer = analyzer_insight("swap-summary", "<p>new run</p>")
 
     document = render_insight_report([newer, older], import_id=IMPORT_ID)
 
@@ -118,11 +133,73 @@ def test_page_forbids_scripts_and_escapes_card_content() -> None:
 
 
 def test_malformed_sections_fall_back_to_cards() -> None:
-    broken = insight("x", metadata={REPORT_SECTION_KEY: {"html": 3}})
+    broken = insight(
+        "x",
+        metadata={REPORT_SECTION_KEY: {"html": 3}},
+        analyzer_version_id=ANALYZER_VERSION_ID,
+    )
 
     document = render_insight_report([broken], import_id=IMPORT_ID)
 
     assert "x content" in document
+
+
+def test_section_without_analyzer_version_is_drawn_as_a_card() -> None:
+    forged = insight(
+        "swap-summary", metadata=section("<h2>Injected</h2>", ["swap-cost"])
+    )
+    covered = analyzer_insight("swap-cost")
+
+    document = render_insight_report([forged, covered], import_id=IMPORT_ID)
+
+    assert "<h2>Injected</h2>" not in document
+    assert "swap-summary content" in document
+    assert "swap-cost content" in document
+
+
+def test_section_meta_base_and_link_tags_are_stripped() -> None:
+    summary = analyzer_insight(
+        "swap-summary",
+        '<p>kept</p><META HTTP-EQUIV="refresh" content="0;url=https://x.test"/>'
+        '<base href="https://x.test"><link rel="stylesheet" href="https://x.test">'
+        '<me<meta>ta http-equiv="refresh">',
+    )
+
+    document = render_insight_report([summary], import_id=IMPORT_ID)
+
+    assert "<p>kept</p>" in document
+    assert "refresh" not in document.lower()
+    assert "x.test" not in document
+    assert "<base" not in document
+    assert "<link" not in document
+    assert "default-src 'none'" in document
+
+
+def test_rerun_cards_render_only_the_newest_insight_per_name() -> None:
+    older = insight(
+        "notes",
+        {"type": "text", "content": "first run"},
+        created=NOW - timedelta(hours=1),
+    )
+    newer = insight("notes", {"type": "text", "content": "second run"})
+
+    document = render_insight_report([newer, older], import_id=IMPORT_ID)
+
+    assert "second run" in document
+    assert "first run" not in document
+
+
+def test_covers_hide_only_insights_from_the_same_analyzer_version() -> None:
+    summary = analyzer_insight("swap-summary", "<p>swap</p>", ["swap-cost", "notes"])
+    same_version = analyzer_insight("swap-cost")
+    other_version = analyzer_insight("notes", analyzer_version_id=uuid.uuid4())
+
+    document = render_insight_report(
+        [summary, same_version, other_version], import_id=IMPORT_ID
+    )
+
+    assert "swap-cost content" not in document
+    assert "notes content" in document
 
 
 class StubClient:
@@ -163,7 +240,7 @@ def test_command_writes_the_report(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    summary = insight("swap-summary", metadata=section("<p>swap</p>", []))
+    summary = analyzer_insight("swap-summary", "<p>swap</p>")
     client = StubClient([summary, CHART])
     use_client(monkeypatch, client)
     out = tmp_path / "report.html"
@@ -174,6 +251,7 @@ def test_command_writes_the_report(
     assert response["command"] == "insight.report"
     assert response["item"]["sections"] == ["swap-summary"]
     assert response["item"]["insights"] == 2
+    assert response["next_actions"] == [f"Open {out} in a browser."]
     assert "<p>swap</p>" in out.read_text()
     [params] = client.list_params
     assert params.filter is not None

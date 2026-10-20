@@ -46,7 +46,7 @@ def no_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def candidate(**fields: Any) -> Candidate:
     return Candidate.model_validate(
-        {"name": "c", "base_url": "http://mock/v1", "model": "m"} | fields
+        {"name": "c", "base_url": "https://mock/v1", "model": "m"} | fields
     )
 
 

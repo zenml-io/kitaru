@@ -235,8 +235,10 @@ def _disagreements(report: dict[str, Any], dashboard_url: str | None) -> str:
     """List disagreeing calls grouped by what the recorded model did."""
     items = report["disagreements"]
     total = report["disagreements_total"]
-    if not items:
+    if not total:
         return "<h2>Disagreements</h2><p>None.</p>"
+    if not items:
+        return f"<h2>Disagreements ({total})</h2><p>Not listed in this report.</p>"
     parts = [f"<h2>Disagreements ({total})</h2>"]
     if total > len(items):
         parts.append(f"<p>Showing the first {len(items)}.</p>")
@@ -288,7 +290,13 @@ def _usd(value: str | None) -> str:
     if value is None:
         return "unknown"
     amount = float(value)
-    return f"${amount:,.2f}" if amount >= 1 else f"${amount:.6f}".rstrip("0")
+    if amount == 0:
+        return "$0"
+    if amount >= 1:
+        return f"${amount:,.2f}"
+    if amount < 0.000001:
+        return f"${amount:.1e}"
+    return f"${amount:.6f}".rstrip("0")
 
 
 def _seconds(value: float | None) -> str | None:

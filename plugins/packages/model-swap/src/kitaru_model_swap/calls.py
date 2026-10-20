@@ -33,6 +33,8 @@ from kitaru_model_swap.params import ModelSwapParams
 # Rough characters per token, used only when the recording has no token counts.
 _CHARS_PER_TOKEN = 4
 _DEFAULT_OUTPUT_TOKENS = 500
+_RESERVE_OUTPUT_FACTOR = 4
+_MIN_RESERVED_OUTPUT = 2048
 
 
 @dataclass(frozen=True)
@@ -53,9 +55,11 @@ class RecordedCall:
 class Collection:
     """Replayable calls plus coverage and volume counts for an import.
 
-    Sampling never takes more than `max_per_group` calls from one group of
-    node name and model, so later calls of a full group are counted but not
-    kept.
+    Sampling visits groups of node name and model round-robin, so it never
+    takes more than `max_per_group` calls from one group, nor any call from
+    a group first seen after `max_per_group` groups. Such calls are counted
+    but not kept. `group_seen` counts every replayable call per group, so
+    per-call costs can be weighted by how often each kind of call occurs.
     """
 
     max_per_group: int
@@ -66,6 +70,7 @@ class Collection:
     skipped: Counter[str] = field(default_factory=Counter)
     first_started: datetime | None = None
     last_started: datetime | None = None
+    group_seen: Counter[tuple[str, str | None]] = field(default_factory=Counter)
     _group_sizes: Counter[tuple[str, str | None]] = field(default_factory=Counter)
 
     def add_session(
@@ -95,6 +100,10 @@ class Collection:
                 continue
             self.replayable[result.schema_source] += 1
             group = (node.name, node.model or node.requested_model)
+            self.group_seen[group] += 1
+            kept = group in self._group_sizes
+            if not kept and len(self._group_sizes) >= self.max_per_group:
+                continue
             if self._group_sizes[group] < self.max_per_group:
                 self._group_sizes[group] += 1
                 self.calls.append(_recorded_call(session.session.id, node, result))
@@ -129,6 +138,21 @@ def estimate_usage(call: RecordedCall, max_tokens: int | None) -> Usage:
     output_tokens = call.usage.output_tokens or _DEFAULT_OUTPUT_TOKENS
     if max_tokens is not None:
         output_tokens = min(output_tokens, max_tokens)
+    return Usage(input_tokens=call.estimated_input_tokens, output_tokens=output_tokens)
+
+
+def reservation_usage(call: RecordedCall, max_tokens: int | None) -> Usage:
+    """Estimate a replay's tokens on the high side, for the spend cap.
+
+    A candidate can produce far more output than the recorded model, for
+    example when it reasons and the recorded model did not, so without an
+    output limit the reservation assumes several times the recorded output.
+    """
+    if max_tokens is not None:
+        output_tokens = max_tokens
+    else:
+        recorded = call.usage.output_tokens or _DEFAULT_OUTPUT_TOKENS
+        output_tokens = max(recorded * _RESERVE_OUTPUT_FACTOR, _MIN_RESERVED_OUTPUT)
     return Usage(input_tokens=call.estimated_input_tokens, output_tokens=output_tokens)
 
 

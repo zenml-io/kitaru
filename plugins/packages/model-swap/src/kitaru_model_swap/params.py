@@ -16,16 +16,20 @@
 import re
 from decimal import Decimal
 from typing import Any, Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ToolCallFormat = Literal["native", "hermes", "json_content"]
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 class _Params(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    # Parameters are stored with the task, and a key pasted into the wrong
+    # field must not be echoed back in a validation error.
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
 
 class Price(_Params):
@@ -118,19 +122,33 @@ class Candidate(_Params):
     provider_settings: ProviderSettings = Field(default_factory=ProviderSettings)
 
     @model_validator(mode="after")
-    def _check_env_name(self) -> Self:
-        """Reject an API key passed where a variable name belongs.
+    def _check_endpoint(self) -> Self:
+        """Keep credentials out of URLs and off unencrypted remote connections.
 
         Raises:
-            ValueError: The value is not an environment variable name.
+            ValueError: The URL carries credentials or is not http(s), the key
+                variable is not a variable name or is a Kitaru variable, or a
+                key would be sent to a remote host over plain http.
 
         Returns:
             The validated candidate.
         """
-        if self.api_key_env is not None and not _ENV_NAME.match(self.api_key_env):
+        url = urlsplit(self.base_url)
+        if url.scheme not in {"http", "https"} or not url.hostname:
+            raise ValueError("base_url must be an http(s) URL")
+        if url.username or url.password:
+            raise ValueError("base_url must not contain credentials")
+        if self.api_key_env is None:
+            return self
+        if not _ENV_NAME.match(self.api_key_env):
             raise ValueError(
                 "api_key_env must name an environment variable, not hold a key"
             )
+        # Kitaru variables hold the worker's own credentials for the server.
+        if self.api_key_env.upper().startswith("KITARU_"):
+            raise ValueError("api_key_env must not name a KITARU_ variable")
+        if url.scheme != "https" and url.hostname not in _LOCAL_HOSTS:
+            raise ValueError("an API key is only sent over https to remote hosts")
         return self
 
 
@@ -187,7 +205,7 @@ class ModelSwapParams(_Params):
             "equivalent. Its verdicts are reported next to strict agreement."
         ),
     )
-    max_disagreements: int = Field(default=200, ge=0, le=1000)
+    max_disagreements: int = Field(default=200, ge=0, le=500)
 
     @model_validator(mode="after")
     def _check_candidates(self) -> Self:
