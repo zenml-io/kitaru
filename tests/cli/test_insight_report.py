@@ -194,39 +194,46 @@ def test_rerun_cards_render_only_the_newest_insight_per_name() -> None:
     assert "first run" not in document
 
 
-def test_same_names_from_different_sources_are_all_kept() -> None:
+def test_a_rerun_after_a_new_analyzer_version_replaces_the_old_run() -> None:
+    old = analyzer_insight(
+        "swap-summary",
+        "<p>old run</p>",
+        created=NOW - timedelta(hours=1),
+        analyzer_version_id=uuid.uuid4(),
+    )
+    new = analyzer_insight("swap-summary", "<p>new run</p>")
+
+    document = render_insight_report([old, new], import_id=IMPORT_ID)
+
+    assert "new run" in document
+    assert "old run" not in document
+
+
+def test_hand_made_insights_sharing_a_name_are_all_kept() -> None:
     by_analyzer = insight(
         "summary",
         {"type": "text", "content": "from analyzer"},
         analyzer_version_id=ANALYZER_VERSION_ID,
     )
-    by_other = insight(
-        "summary",
-        {"type": "text", "content": "from another analyzer"},
-        analyzer_version_id=uuid.uuid4(),
-    )
-    by_hand = insight("summary", {"type": "text", "content": "by hand"})
+    first = insight("summary", {"type": "text", "content": "by hand"})
+    second = insight("summary", {"type": "text", "content": "also by hand"})
 
-    document = render_insight_report(
-        [by_analyzer, by_other, by_hand], import_id=IMPORT_ID
-    )
+    document = render_insight_report([by_analyzer, first, second], import_id=IMPORT_ID)
 
     assert "from analyzer" in document
-    assert "from another analyzer" in document
     assert "by hand" in document
+    assert "also by hand" in document
 
 
-def test_covers_hide_only_insights_from_the_same_analyzer_version() -> None:
+def test_covers_hide_analyzer_cards_but_not_hand_made_ones() -> None:
     summary = analyzer_insight("swap-summary", "<p>swap</p>", ["swap-cost", "notes"])
-    same_version = analyzer_insight("swap-cost")
-    other_version = analyzer_insight("notes", analyzer_version_id=uuid.uuid4())
+    covered = analyzer_insight("swap-cost", analyzer_version_id=uuid.uuid4())
+    by_hand = insight("notes", {"type": "text", "content": "my own notes"})
 
-    document = render_insight_report(
-        [summary, same_version, other_version], import_id=IMPORT_ID
-    )
+    document = render_insight_report([summary, covered, by_hand], import_id=IMPORT_ID)
 
     assert "swap-cost content" not in document
-    assert "notes content" in document
+    assert "my own notes" in document
 
 
 class StubClient:

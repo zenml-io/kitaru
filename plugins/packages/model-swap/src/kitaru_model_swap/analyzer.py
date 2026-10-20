@@ -13,7 +13,9 @@
 #  limitations under the License.
 """Analyzer entrypoint for model-swap comparisons."""
 
+import asyncio
 import time
+from contextlib import aclosing
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit
@@ -26,9 +28,14 @@ from kitaru.client import KitaruAPIClient
 from kitaru.client.dashboard_urls import get_dashboard_base_url
 from kitaru.client.exceptions import KitaruClientError
 from kitaru.task.importer import stream_bounded
-from kitaru_model_swap.calls import Collection, sample_calls
+from kitaru_model_swap.calls import (
+    Collection,
+    RecordedCall,
+    reservation_usage,
+    sample_calls,
+)
 from kitaru_model_swap.params import ModelSwapParams
-from kitaru_model_swap.pricing import resolve_price
+from kitaru_model_swap.pricing import ResolvedPrice, call_cost, resolve_price
 from kitaru_model_swap.report import build_insights, build_report
 from kitaru_model_swap.runner import Runner
 
@@ -79,16 +86,25 @@ async def run_model_swap(
             )
     collection = Collection(max_per_group=params.max_calls)
     async with KitaruAPIClient() as client:
-        async for session in stream_bounded(
-            (client.sessions.get_with_nodes(i) for i in session_ids),
-            _FETCH_CONCURRENCY,
-        ):
-            collection.add_session(session, params)
-            if time.monotonic() >= deadline:
-                collection.sessions_not_fetched = len(session_ids) - collection.sessions
-                break
+        try:
+            # Closing the stream on exit cancels fetches already started, and
+            # the timeout covers a fetch that hangs.
+            async with (
+                asyncio.timeout(max(deadline - time.monotonic(), 0)),
+                aclosing(
+                    stream_bounded(
+                        (client.sessions.get_with_nodes(i) for i in session_ids),
+                        _FETCH_CONCURRENCY,
+                    )
+                ) as sessions,
+            ):
+                async for session in sessions:
+                    collection.add_session(session, params)
+        except TimeoutError:
+            collection.sessions_not_fetched = len(session_ids) - collection.sessions
         dashboard_url = await _get_dashboard_url(client)
     sampled = sample_calls(collection.calls, params.max_calls)
+    _check_cap_fits(params, prices, sampled)
     results = []
     spent = Decimal(0)
     stopped_early = None
@@ -109,6 +125,36 @@ async def run_model_swap(
         stopped_early=stopped_early,
     )
     return build_insights(report, dashboard_url=dashboard_url)
+
+
+def _check_cap_fits(
+    params: ModelSwapParams,
+    prices: dict[str, ResolvedPrice | None],
+    sampled: list[RecordedCall],
+) -> None:
+    """Refuse a run whose spend cap cannot fit a single call.
+
+    Raises:
+        ValueError: One call's full reservation exceeds `max_spend_usd`.
+    """
+    cap = params.max_spend_usd
+    if cap is None or not sampled:
+        return
+    for candidate in params.candidates:
+        price = prices.get(candidate.name)
+        max_tokens = candidate.provider_settings.max_tokens
+        if price is None or max_tokens is None:
+            continue
+        largest = max(
+            call_cost(price, reservation_usage(call, max_tokens, strict=True))
+            for call in sampled
+        )
+        if largest > cap:
+            raise ValueError(
+                f"one call to {candidate.name} can cost up to ${largest:.6f} at "
+                f"max_tokens={max_tokens}, more than max_spend_usd; lower "
+                "max_tokens or raise the cap"
+            )
 
 
 async def _get_dashboard_url(client: KitaruAPIClient) -> str | None:

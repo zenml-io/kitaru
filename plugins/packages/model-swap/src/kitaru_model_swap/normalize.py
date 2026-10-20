@@ -121,10 +121,14 @@ def build_replay_request(
         else:
             messages, dropped = _convert_openai_messages(messages_in), 0
         recorded = parse_recorded_output(node.outputs)
-        if not any(m["role"] in {"system", "developer"} for m in messages):
-            instructions = _system_instructions(node.attributes)
-            if instructions:
-                messages = [{"role": "system", "content": instructions}, *messages]
+        instructions = _system_instructions(node.attributes)
+        # Pydantic AI can record a system prompt in the messages and separate
+        # instructions in the attributes, so both are kept unless repeated.
+        if instructions and not any(
+            m["role"] in {"system", "developer"} and m.get("content") == instructions
+            for m in messages
+        ):
+            messages = [{"role": "system", "content": instructions}, *messages]
     except UnsupportedShapeError as error:
         return Skipped(error.reason, str(error))
     # Traces are third-party data, so any other malformed value skips the
@@ -187,9 +191,13 @@ def _system_instructions(attributes: Any) -> str | None:
         value = scope.get("gen_ai.system_instructions")
         if isinstance(value, str):
             try:
-                value = json.loads(value)
+                parsed = json.loads(value)
             except json.JSONDecodeError:
                 return value or None
+            # Plain text that happens to parse as JSON stays plain text.
+            if not isinstance(parsed, list | str):
+                return value or None
+            value = parsed
         if isinstance(value, str):
             return value or None
         if isinstance(value, list):

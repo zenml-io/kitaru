@@ -119,9 +119,8 @@ def _compare(candidates: list[dict[str, Any]], *, judged: bool) -> str:
                 _pct(c["agreement_rate"]),
                 c["judged_equivalent"] if judged else None,
                 _pct(c["failure_rate"]),
-                _usd(c["cost"]["per_call_usd"])
-                + ("" if c["cost_complete"] else " (partial)"),
-                _usd(c["cost"]["per_month_usd"]),
+                _usd(c["cost"]["per_call_usd"]) + _partial(c),
+                _usd(c["cost"]["per_month_usd"]) + _partial(c),
                 _seconds(c["latency_seconds"]["p50"]),
                 _seconds(c["latency_seconds"]["p95"]),
                 None
@@ -268,6 +267,12 @@ def _disagreements(report: dict[str, Any], dashboard_url: str | None) -> str:
             "</div>"
         )
     return "".join(parts)
+
+
+def _partial(candidate: dict[str, Any]) -> str:
+    """Mark a cost that misses a kind of call."""
+    known = candidate["cost"]["per_call_usd"] is not None
+    return " (partial)" if known and not candidate["cost_complete"] else ""
 
 
 def _table(headers: list[str], rows: list[list[Any]]) -> str:
