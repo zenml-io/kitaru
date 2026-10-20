@@ -34,11 +34,23 @@ from kitaru.api_models.v1.insight import (
 )
 from kitaru_model_swap.calls import Collection, RecordedCall, estimate_usage
 from kitaru_model_swap.compare import AGREEING, AGREEMENT_LABELS, field_matches
+from kitaru_model_swap.decision_plan import TOOL_QUESTION, DecisionPlan, build_state
 from kitaru_model_swap.endpoint import Usage
 from kitaru_model_swap.html import render_section
-from kitaru_model_swap.params import Candidate, DecisionJudge, ModelSwapParams
+from kitaru_model_swap.params import (
+    Candidate,
+    DecisionCandidate,
+    DecisionJudge,
+    ModelSwapParams,
+)
 from kitaru_model_swap.pricing import ResolvedPrice, call_cost
-from kitaru_model_swap.runner import CallResult, NotRunReason, describe
+from kitaru_model_swap.runner import (
+    CallResult,
+    DecisionResult,
+    NotRunReason,
+    decision_tokens,
+    describe,
+)
 
 REPORT_METADATA_KEY = "kitaru.model_swap/v1"
 REPORT_SECTION_KEY = "kitaru.report_section/v1"
@@ -95,8 +107,11 @@ def build_report(
     *,
     spent: Decimal,
     stopped_early: NotRunReason | None,
+    plans: list[tuple[RecordedCall, DecisionPlan]] | None = None,
+    decision_results: list[DecisionResult] | None = None,
 ) -> dict[str, Any]:
     """Build the JSON report for a completed run or a dry run."""
+    plans = plans or []
     volume = get_volume(collection, params)
     by_candidate: dict[str, list[CallResult]] = defaultdict(list)
     for result in results:
@@ -151,6 +166,17 @@ def build_report(
         },
         "recorded": _recorded_report(sampled, volume, collection.group_seen),
         "candidates": candidates,
+        "decision_shapes": _decision_shapes(plans),
+        "decision_candidates": [
+            _decision_candidate_report(
+                candidate,
+                plans,
+                [r for r in decision_results or [] if r.candidate == candidate.name],
+                prices.get(candidate.name),
+                dry_run=params.dry_run,
+            )
+            for candidate in params.decision_candidates
+        ],
         "best_for": [] if params.dry_run else _best_for(candidates),
         "disagreements": kept,
         "disagreements_total": len(disagreements),
@@ -625,6 +651,25 @@ def _build_cards(report: dict[str, Any]) -> list[InsightInput]:
             ),
         ),
     ]
+    shapes = report["decision_shapes"]
+    if shapes["calls"]:
+        insights.append(
+            InsightInput(
+                name="model-swap-decision-shapes",
+                title="Calls a decision model could make",
+                data=CategoricalInsightData(
+                    unit="calls",
+                    values=[
+                        CategoryValue(label=label, value=shapes[shape])
+                        for shape, label in (
+                            ("decision", "Decision"),
+                            ("partial", "Partly a decision"),
+                            ("generative", "Needs an LLM"),
+                        )
+                    ],
+                ),
+            )
+        )
     cost_values = _cost_values(report)
     if cost_values:
         if report["dry_run"]:
@@ -660,25 +705,28 @@ def _build_cards(report: dict[str, Any]) -> list[InsightInput]:
                     ),
                 )
             )
-    insights.append(
-        InsightInput(
-            name="model-swap-failures",
-            title="Provider failures",
-            description="Failed requests, counted apart from disagreement.",
-            data=CategoricalInsightData(
-                unit="calls",
-                values=[
-                    CategoryValue(label=f"{candidate['name']}: {category}", value=count)
-                    for candidate in report["candidates"]
-                    for category, count in candidate["failures"].items()
-                ]
-                or [
-                    CategoryValue(label=candidate["name"], value=0)
-                    for candidate in report["candidates"]
-                ],
-            ),
+    if report["candidates"]:
+        insights.append(
+            InsightInput(
+                name="model-swap-failures",
+                title="Provider failures",
+                description="Failed requests, counted apart from disagreement.",
+                data=CategoricalInsightData(
+                    unit="calls",
+                    values=[
+                        CategoryValue(
+                            label=f"{candidate['name']}: {category}", value=count
+                        )
+                        for candidate in report["candidates"]
+                        for category, count in candidate["failures"].items()
+                    ]
+                    or [
+                        CategoryValue(label=candidate["name"], value=0)
+                        for candidate in report["candidates"]
+                    ],
+                ),
+            )
         )
-    )
     return insights
 
 
@@ -761,11 +809,135 @@ def render_markdown(report: dict[str, Any]) -> str:
             )
         lines.append("")
         lines.extend(f"- **{c['name']}**: {c['summary']}" for c in report["candidates"])
+    shapes = report["decision_shapes"]
+    if shapes["calls"]:
+        lines += [
+            "",
+            f"Decision-model fit: {shapes['decision']} decision, "
+            f"{shapes['partial']} partial, {shapes['generative']} generative "
+            f"of {shapes['calls']} sampled calls.",
+        ]
     if report["stopped_early"]:
         lines += ["", f"Stopped early: {report['stopped_early']}."]
     if report["notes"]:
         lines += ["", *(f"- {note}" for note in report["notes"])]
     return "\n".join(lines)
+
+
+def _decision_shapes(plans: list[tuple[RecordedCall, DecisionPlan]]) -> dict[str, Any]:
+    """Count which sampled calls a decision model could make, with their cost."""
+    shapes = Counter(plan.shape for _, plan in plans)
+    costs: dict[str, Decimal] = defaultdict(Decimal)
+    for call, plan in plans:
+        costs[plan.shape] += call.cost or Decimal(0)
+    total = sum(costs.values(), Decimal(0))
+    by_group: dict[str, Counter[str]] = defaultdict(Counter)
+    for call, plan in plans:
+        by_group[call.node_name][plan.shape] += 1
+    return {
+        "calls": len(plans),
+        "decision": shapes["decision"],
+        "partial": shapes["partial"],
+        "generative": shapes["generative"],
+        "recorded_cost_share": {
+            shape: _rate_decimal(costs[shape], total)
+            for shape in ("decision", "partial", "generative")
+        },
+        "reasons": dict(
+            Counter(plan.reason for _, plan in plans if plan.reason).most_common(10)
+        ),
+        "by_node": {name: dict(counts) for name, counts in sorted(by_group.items())},
+    }
+
+
+def _decision_candidate_report(
+    candidate: DecisionCandidate,
+    plans: list[tuple[RecordedCall, DecisionPlan]],
+    results: list[DecisionResult],
+    price: ResolvedPrice | None,
+    *,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Aggregate one decision candidate's answers against the recording."""
+    report: dict[str, Any] = {
+        "name": candidate.name,
+        "kind": candidate.kind,
+        "model": candidate.model,
+        "price": None if price is None else str(price.price.input_per_mtok),
+    }
+    asked = [(call, plan) for call, plan in plans if plan.questions]
+    if dry_run:
+        tokens = sum(
+            decision_tokens(build_state(call.request), len(plan.questions))
+            for call, plan in asked
+        )
+        report["estimate"] = {
+            "calls": len(asked),
+            "spend_usd": None
+            if price is None
+            else _usd(call_cost(price, Usage(input_tokens=tokens))),
+        }
+        return report
+    answered = [r for r in results if r.answers is not None]
+    failures = Counter(r.failure for r in results if r.failure)
+    tool_right = sum(
+        r.answers.get(TOOL_QUESTION) == r.plan.expected.get(TOOL_QUESTION)
+        for r in answered
+        if r.answers is not None and r.plan.expected
+    )
+    fields: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    all_right = 0
+    for r in answered:
+        assert r.answers is not None and r.plan.expected is not None
+        matches = {
+            key: r.answers.get(key) == value for key, value in r.plan.expected.items()
+        }
+        all_right += all(matches.values())
+        for key, matched in matches.items():
+            if key != TOOL_QUESTION:
+                fields[key.removeprefix("arg.")][0] += matched
+                fields[key.removeprefix("arg.")][1] += 1
+    decision_calls = [r for r in answered if r.plan.shape == "decision"]
+    costs = [r.cost for r in answered if r.cost is not None]
+    recorded = [r.call.cost for r in answered if r.call.cost is not None]
+    latencies = sorted(r.latency_seconds for r in answered if r.latency_seconds)
+    report |= {
+        "calls_asked": len(results) - sum(r.not_run is not None for r in results),
+        "calls_not_run": dict(Counter(r.not_run for r in results if r.not_run)),
+        "answered": len(answered),
+        "failures": dict(failures.most_common()),
+        "tool_choice_rate": _rate(tool_right, len(answered)),
+        "argument_rates": {
+            name: _rate(matched, total)
+            for name, (matched, total) in sorted(fields.items())
+        },
+        "decisions_match_rate": _rate(all_right, len(answered)),
+        "decision_calls": len(decision_calls),
+        "decision_calls_match_rate": _rate(
+            sum(
+                all(
+                    r.answers is not None and r.answers.get(k) == v
+                    for k, v in (r.plan.expected or {}).items()
+                )
+                for r in decision_calls
+            ),
+            len(decision_calls),
+        ),
+        "cost_per_call_usd": _usd(sum(costs, Decimal(0)) / len(costs))
+        if costs
+        else None,
+        "recorded_cost_per_call_usd": (
+            _usd(sum(recorded, Decimal(0)) / len(recorded)) if recorded else None
+        ),
+        "latency_p50_seconds": _round(statistics.median(latencies))
+        if latencies
+        else None,
+    }
+    return report
+
+
+def _rate_decimal(part: Decimal, whole: Decimal) -> float | None:
+    return round(float(part / whole), 4) if whole else None
 
 
 def _judge_label(params: ModelSwapParams) -> str | None:

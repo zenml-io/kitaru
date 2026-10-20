@@ -27,6 +27,7 @@ from kitaru.client.dashboard_urls import get_dashboard_base_url
 from kitaru.client.exceptions import KitaruClientError
 from kitaru.task.importer import stream_bounded
 from kitaru_model_swap.calls import Collection, sample_calls
+from kitaru_model_swap.decision_plan import plan_decisions
 from kitaru_model_swap.params import Candidate, ModelSwapParams
 from kitaru_model_swap.pricing import ResolvedPrice, resolve_price
 from kitaru_model_swap.report import build_insights, build_report
@@ -66,7 +67,10 @@ async def run_model_swap(
     # The time budget covers fetching sessions too, so the analysis returns
     # before the task timeout however large the import is.
     deadline = time.monotonic() + params.time_budget_seconds
-    prices = {c.name: resolve_price(c) for c in params.candidates}
+    prices = {c.name: resolve_price(c) for c in params.candidates} | {
+        c.name: ResolvedPrice(c.price, "params") if c.price else None
+        for c in params.decision_candidates
+    }
     judge_price = _get_judge_price(params)
     if params.max_spend_usd is not None:
         unpriced = [name for name, price in prices.items() if price is None]
@@ -89,12 +93,18 @@ async def run_model_swap(
                 break
         dashboard_url = await _get_dashboard_url(client)
     sampled = sample_calls(collection.calls, params.max_calls)
+    plans = [(call, plan_decisions(call.request)) for call in sampled]
+    decision_results = []
     results = []
     spent = Decimal(0)
     stopped_early = None
     if not params.dry_run and sampled:
         runner = Runner(params, prices, judge_price=judge_price, transport=transport)
         results = await runner.run(sampled, deadline=deadline)
+        if params.decision_candidates:
+            decision_results = await runner.run_decisions(
+                [(call, plan) for call, plan in plans if plan.questions]
+            )
         spent = runner.budget.spent
         stopped_early = runner.stopped_early
     if collection.sessions_not_fetched:
@@ -107,6 +117,8 @@ async def run_model_swap(
         prices,
         spent=spent,
         stopped_early=stopped_early,
+        plans=plans,
+        decision_results=decision_results,
     )
     return build_insights(report, dashboard_url=dashboard_url)
 

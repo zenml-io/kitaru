@@ -52,6 +52,7 @@ def render_section(report: dict[str, Any], dashboard_url: str | None) -> str:
             _failures(candidates),
             _by_tool(candidates),
         ]
+    parts.append(_decisions(report))
     parts.append(_coverage(report["coverage"]))
     if report["notes"]:
         parts.append(
@@ -150,6 +151,90 @@ def _recorded(recorded: dict[str, Any]) -> str:
         f"{_usd(cost['per_call_usd'])} per call, "
         f"{_usd(cost['per_month_usd'])} per month.</p>"
     )
+
+
+def _decisions(report: dict[str, Any]) -> str:
+    """Show which calls a decision model could make, and how candidates did."""
+    shapes = report.get("decision_shapes") or {}
+    if not shapes.get("calls"):
+        return ""
+    share = shapes["recorded_cost_share"]
+    parts = [
+        "<h2>Could a decision model make these calls?</h2>",
+        "<p>Decision models such as Jev, Clef, or OpenAI's Decisions API pick "
+        "from options instead of writing text. A call is a <b>decision</b> when "
+        "the model only chose a tool and enum or boolean values, <b>partial</b> "
+        "when the tool choice is a decision but free-form values or text need "
+        "an LLM, and <b>generative</b> otherwise.</p>",
+        _table(
+            ["Shape", "Sampled calls", "Share of recorded cost"],
+            [
+                [shape, shapes[shape], _pct(share[shape])]
+                for shape in ("decision", "partial", "generative")
+            ],
+        ),
+    ]
+    if shapes["reasons"]:
+        parts.append(
+            _table(
+                ["Why not fully a decision", "Calls"],
+                [[reason, count] for reason, count in shapes["reasons"].items()],
+            )
+        )
+    candidates = report.get("decision_candidates") or []
+    if report["dry_run"] and candidates:
+        parts.append(
+            _table(
+                ["Decision candidate", "Calls to ask", "Estimated spend"],
+                [
+                    [
+                        c["name"],
+                        c["estimate"]["calls"],
+                        _usd(c["estimate"]["spend_usd"]),
+                    ]
+                    for c in candidates
+                ],
+            )
+        )
+    elif candidates:
+        parts.append(
+            _table(
+                [
+                    "Decision candidate",
+                    "Tool choice",
+                    "All decisions match",
+                    "Argument agreement",
+                    "Failures",
+                    "Cost per call",
+                    "Recorded cost per call",
+                    "Latency p50",
+                ],
+                [
+                    [
+                        f"{c['name']} ({c['kind']} {c['model']})",
+                        _pct(c["tool_choice_rate"]),
+                        _pct(c["decisions_match_rate"]),
+                        ", ".join(
+                            f"{name} {_pct(rate)}"
+                            for name, rate in c["argument_rates"].items()
+                        )
+                        or None,
+                        ", ".join(f"{k} {v}" for k, v in c["failures"].items()) or None,
+                        _usd(c["cost_per_call_usd"]),
+                        _usd(c["recorded_cost_per_call_usd"]),
+                        _seconds(c["latency_p50_seconds"]),
+                    ]
+                    for c in candidates
+                ],
+            )
+        )
+        parts.append(
+            '<p class="muted">Agreement is with the recorded model\'s choices, '
+            "not proof they are right. Moving a partial call means changing the "
+            "agent to decide with the decision model and generate the rest with "
+            "an LLM.</p>"
+        )
+    return "".join(parts)
 
 
 def _cost_breakdown(candidates: list[dict[str, Any]]) -> str:

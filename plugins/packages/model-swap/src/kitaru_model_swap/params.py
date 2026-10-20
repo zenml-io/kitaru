@@ -163,12 +163,11 @@ _DECISION_DEFAULTS: dict[str, dict[str, str | None]] = {
 }
 
 
-class DecisionJudge(_Params):
-    """A decision model that rules whether two answers are equivalent.
+class DecisionModel(_Params):
+    """A decision model: it answers typed questions with probabilities.
 
-    Decision models return a probability for a fixed answer instead of
-    generating text, so they judge quickly and cheaply and say how sure
-    they are.
+    Decision models pick from options instead of generating text, so they
+    answer quickly, charge only for input, and say how sure they are.
     """
 
     kind: DecisionService = Field(
@@ -186,16 +185,6 @@ class DecisionJudge(_Params):
     )
     model: str = Field(min_length=1, description="Model; defaults per kind.")
     api_key_env: str = Field(description="Variable holding the key; defaults per kind.")
-    equivalent_at: float = Field(
-        default=0.8,
-        gt=0.5,
-        le=1.0,
-        description=(
-            "Probability at or above which answers count as equivalent; at or "
-            "below one minus this they count as different, and in between as "
-            "unsure."
-        ),
-    )
     price: Price | None = Field(
         default=None, description="Token prices, needed with `max_spend_usd`."
     )
@@ -244,6 +233,32 @@ class DecisionJudge(_Params):
         return self
 
 
+class DecisionJudge(DecisionModel):
+    """A decision model that rules whether two answers are equivalent."""
+
+    equivalent_at: float = Field(
+        default=0.8,
+        gt=0.5,
+        le=1.0,
+        description=(
+            "Probability at or above which answers count as equivalent; at or "
+            "below one minus this they count as different, and in between as "
+            "unsure."
+        ),
+    )
+
+
+class DecisionCandidate(DecisionModel):
+    """A decision model tried in place of the model's decisions.
+
+    It answers the decision parts of each recorded call: which tool to call
+    (or to answer in text) and which value each enum or boolean argument
+    takes. Parts that need generated text or free values are left to an LLM.
+    """
+
+    name: str = Field(min_length=1, max_length=80, description="Report label.")
+
+
 def check_endpoint(base_url: str, api_key_env: str | None) -> None:
     """Keep credentials out of URLs and off unencrypted remote connections.
 
@@ -280,7 +295,15 @@ def _judge_kind(value: Any) -> str:
 class ModelSwapParams(_Params):
     """Parameters of the model-swap analyzer."""
 
-    candidates: list[Candidate] = Field(min_length=1, max_length=8)
+    candidates: list[Candidate] = Field(default_factory=list, max_length=8)
+    decision_candidates: list[DecisionCandidate] = Field(
+        default_factory=list,
+        max_length=4,
+        description=(
+            "Decision models that answer the decision parts of each call, to "
+            "find which calls could move off an LLM."
+        ),
+    )
     max_calls: int = Field(
         default=100, ge=1, le=2000, description="Recorded calls to sample."
     )
@@ -343,15 +366,20 @@ class ModelSwapParams(_Params):
 
     @model_validator(mode="after")
     def _check_candidates(self) -> Self:
-        """Require unique candidate names and at most one reference.
+        """Require a candidate, unique names, and at most one reference.
 
         Raises:
-            ValueError: Names repeat or several candidates are references.
+            ValueError: There is no candidate, names repeat, or several
+                candidates are references.
 
         Returns:
             The validated parameters.
         """
-        names = [candidate.name for candidate in self.candidates]
+        if not self.candidates and not self.decision_candidates:
+            raise ValueError("give at least one of candidates or decision_candidates")
+        names = [c.name for c in self.candidates] + [
+            c.name for c in self.decision_candidates
+        ]
         if len(names) != len(set(names)):
             raise ValueError("candidate names must be unique")
         if sum(candidate.reference for candidate in self.candidates) > 1:

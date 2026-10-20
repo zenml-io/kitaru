@@ -148,7 +148,8 @@ A spend cap needs a price for every candidate; the analyzer refuses to start whe
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `candidates` | required | One to eight candidates. |
+| `candidates` | none | Up to eight OpenAI-compatible candidates. Give candidates, decision candidates, or both. |
+| `decision_candidates` | none | Up to four decision models that answer the decision parts of each call; see [Find calls a decision model could make](#find-calls-a-decision-model-could-make). |
 | `dry_run` | `false` | Estimate without sending. |
 | `max_spend_usd` | none | Spend cap across all candidates and the judge. |
 | `max_calls` | `100` | Recorded calls to sample, spread evenly across node names and models. |
@@ -187,6 +188,28 @@ The judge returns the probability that the answers are equivalent. At or above `
 The judge's key must be in the analyzer's provider connection or the worker environment (see [Keys](#keys)); a missing key stops the analysis before any call is sent. Judge requests count against `max_spend_usd` and `time_budget_seconds` like candidate calls, but the dry-run estimate covers candidates only, so leave headroom in the cap. Decision services are not in the bundled price table, so pass `price` (check the service's current pricing) when you set `max_spend_usd`. When a service does not report token usage, the request is charged at its estimate.
 
 Decision models trail large models on judgments that need several reasoning steps, and text inside a recorded answer can sway them, so read their rulings as a way to order your review, not as verdicts. A candidate-shaped chat model can still be the judge instead: give `name`, `base_url`, `model`, and `api_key_env` without `kind`.
+
+## Find calls a decision model could make
+
+Many calls inside an agent are decisions rather than writing: which tool to call next, whether to escalate, which category or action applies. A decision model such as TypeSafe Jev, Cloudflare Clef, or OpenAI's Decisions API answers that kind of question with a probability, quickly and for input tokens only, but it cannot write text or invent values. Every report classifies each sampled call, without calling any service:
+
+- **Decision:** the model chose a tool, and every argument it set is an enum or a boolean from the tool's schema. The call could move off an LLM.
+- **Partial:** the choice of tool, or of answering in text, is a decision, and so are any enum or boolean arguments, but free-form arguments or the text answer need a generative model.
+- **Generative:** there are no tools to choose from, or the call made several tool calls at once.
+
+The report shows how many sampled calls, and what share of their recorded cost, fall in each class, and why calls are not fully decisions.
+
+To try decision models on those calls, add them as `decision_candidates`:
+
+```json
+"decision_candidates": [
+  {"name": "jev", "kind": "jev", "price": {"input_per_mtok": "0.042", "output_per_mtok": "0"}}
+]
+```
+
+Each takes the same `kind`, `base_url`, `model`, `api_key_env`, `price`, and `timeout_seconds` as a decision judge (see [Judge the differences quickly](#judge-the-differences-quickly)), plus a `name`. For every decision or partial call, the analyzer sends the conversation and the tool names and asks, in one request, which tool to call (or to answer in text) and which value each enum or boolean argument should take. It compares the answers with what the recorded model chose and reports, per decision candidate: how often it picked the same tool, how often all of its decisions matched, agreement per argument, failures, cost per call next to the recorded model's cost on the same calls, and latency. You can run decision candidates without any `candidates`.
+
+Agreement with the recorded model's choices is not proof that either is right; review disagreements as for any candidate. Moving a partial call means changing the agent: decide with the decision model, then generate the rest with an LLM. Decision candidate requests count against `max_spend_usd` and `time_budget_seconds`, and the dry run estimates their spend.
 
 ## Tool definitions
 

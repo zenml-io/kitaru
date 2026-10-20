@@ -19,17 +19,23 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Literal, Protocol, TypeVar
+from typing import Any, Literal, Protocol, TypeVar
 
 import httpx
 
 from kitaru.task.importer import gather_bounded
 from kitaru_model_swap.calls import RecordedCall, reservation_usage
 from kitaru_model_swap.compare import Agreement, compare
-from kitaru_model_swap.decisions import classify, decide, get_decision_key
+from kitaru_model_swap.decision_plan import DecisionPlan, build_state
+from kitaru_model_swap.decisions import ask, classify, decide, get_decision_key
 from kitaru_model_swap.endpoint import CandidateReply, Usage, get_api_key, send
 from kitaru_model_swap.normalize import RecordedOutcome
-from kitaru_model_swap.params import Candidate, DecisionJudge, ModelSwapParams
+from kitaru_model_swap.params import (
+    Candidate,
+    DecisionCandidate,
+    DecisionJudge,
+    ModelSwapParams,
+)
 from kitaru_model_swap.pricing import ResolvedPrice, call_cost
 
 NotRunReason = Literal["max_spend", "time_budget"]
@@ -69,6 +75,20 @@ class CallResult:
     judge_equivalent: bool | None = None
     judge_probability: float | None = None
     judge_failure: str | None = None
+
+
+@dataclass(frozen=True)
+class DecisionResult:
+    """What one decision candidate answered for one recorded call."""
+
+    call: RecordedCall
+    candidate: str
+    plan: DecisionPlan
+    answers: dict[str, str | float] | None = None
+    failure: str | None = None
+    not_run: NotRunReason | None = None
+    cost: Decimal | None = None
+    latency_seconds: float | None = None
 
 
 class Budget:
@@ -124,6 +144,9 @@ class Runner:
         self._judge_price = judge_price
         self._transport = transport
         self._keys = {c.name: get_api_key(c) for c in params.candidates}
+        self._decision_keys = {
+            c.name: get_decision_key(c) for c in params.decision_candidates
+        }
         judge = params.judge
         self._judge: Candidate | DecisionJudge | None
         self._judge_key: str | None
@@ -170,6 +193,56 @@ class Runner:
                 ),
                 self._params.concurrency,
             )
+
+    async def run_decisions(
+        self, calls: list[tuple[RecordedCall, DecisionPlan]]
+    ) -> list[DecisionResult]:
+        """Ask every decision candidate the decision questions of each call."""
+        async with httpx.AsyncClient(transport=self._transport) as client:
+            return await gather_bounded(
+                (
+                    self._decide_one(client, call, plan, candidate)
+                    for call, plan in calls
+                    for candidate in self._params.decision_candidates
+                ),
+                self._params.concurrency,
+            )
+
+    async def _decide_one(
+        self,
+        client: httpx.AsyncClient,
+        call: RecordedCall,
+        plan: DecisionPlan,
+        candidate: DecisionCandidate,
+    ) -> DecisionResult:
+        """Ask one decision candidate one call's questions within the budgets."""
+        state = build_state(call.request)
+        estimated = decision_tokens(state, len(plan.questions))
+        started = time.monotonic()
+        asked = await self._within_budget(
+            self._prices.get(candidate.name),
+            Usage(input_tokens=estimated),
+            lambda: ask(
+                client,
+                candidate,
+                api_key=self._decision_keys[candidate.name],
+                state=state,
+                questions=plan.questions,
+                estimated_tokens=estimated,
+            ),
+        )
+        if isinstance(asked, str):
+            return DecisionResult(call, candidate.name, plan, not_run=asked)
+        answers, cost = asked
+        return DecisionResult(
+            call,
+            candidate.name,
+            plan,
+            answers=None if answers.failure else answers.values,
+            failure=answers.failure,
+            cost=cost,
+            latency_seconds=time.monotonic() - started,
+        )
 
     async def _run_one(
         self, client: httpx.AsyncClient, call: RecordedCall, candidate: Candidate
@@ -311,6 +384,11 @@ class Runner:
         cost = _price_or_none(price, result.usage)
         await self.budget.settle(reserved, cost or Decimal(0))
         return result, cost
+
+
+def decision_tokens(state: Any, questions: int) -> int:
+    """Estimate a decision request's input tokens from its state and questions."""
+    return len(json.dumps(state, default=str)) // 4 + 50 * questions
 
 
 def _price_or_none(price: ResolvedPrice | None, usage: Usage) -> Decimal | None:
