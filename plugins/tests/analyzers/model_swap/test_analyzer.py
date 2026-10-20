@@ -22,7 +22,11 @@ from typing import Any
 import httpx
 import pytest
 
-from kitaru.api_models.v1.insight import InsightInput, InsightResponse
+from kitaru.api_models.v1.insight import (
+    InsightInput,
+    InsightResponse,
+    TextInsightData,
+)
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from kitaru.cli.insight_report import render_insight_report
 from kitaru_model_swap import REPORT_METADATA_KEY, SUMMARY_INSIGHT_NAME
@@ -276,7 +280,8 @@ async def test_failures_are_not_counted_as_disagreement(
     assert candidate["failures"] == {"http_error": 5}
     assert candidate["failure_rate"] == 1.0
     assert candidate["agreement"] == {}
-    assert candidate["recommendation"].startswith("Fix the provider setup")
+    assert candidate["summary"].startswith("Fix the provider setup")
+    assert report(insights)["best_for"] == []
 
 
 async def test_judge_verdicts_are_reported(
@@ -344,7 +349,7 @@ async def test_core_report_command_renders_the_analyzer_output(
 
     document = render_insight_report(stored, import_id=uuid.uuid4())
 
-    assert "What changes if you switch models" in document
+    assert "Which model is right for this agent" in document
     assert "cheap-open-model" in document
     assert "https://ui.example/sessions/" in document
     # The section covers the analyzer's own cards, so none is drawn twice.
@@ -367,7 +372,7 @@ async def test_links_are_left_out_without_a_dashboard(
     assert "href=" not in str(section["html"])
 
 
-async def test_recommendation_warns_when_the_reference_is_noisy(
+async def test_summary_warns_when_the_current_model_is_noisy(
     stub_client: StubClient, server: MockOpenAIServer
 ) -> None:
     noisy_reference = REFERENCE | {"model": "escalator"}
@@ -378,8 +383,8 @@ async def test_recommendation_warns_when_the_reference_is_noisy(
 
     assert reference["tool_choice_rate"] < 0.5
     assert other["tool_choice_rate"] == 1.0
-    assert other["recommendation"].startswith("Picks the same tool")
-    assert "reference itself agrees only" in other["recommendation"]
+    assert other["summary"].startswith("Picks the same tool")
+    assert "matches itself only" in other["summary"]
 
 
 async def test_section_escapes_model_output(stub_client: StubClient) -> None:
@@ -397,3 +402,36 @@ async def test_section_escapes_model_output(stub_client: StubClient) -> None:
     assert isinstance(section, dict)
     assert "<script>" not in str(section["html"])
     assert "&lt;script&gt;" in str(section["html"])
+
+
+async def test_best_for_names_a_candidate_per_goal(
+    stub_client: StubClient, server: MockOpenAIServer
+) -> None:
+    open_copy = CHEAP | {"name": "open-copy", "model": "mirror", "open_weights": True}
+    worse = CHEAP | {
+        "name": "worse",
+        "price": {"input_per_mtok": "0", "output_per_mtok": "0"},
+    }
+
+    insights = await run(stub_client, server, candidates=[REFERENCE, open_copy, worse])
+    result = report(insights)
+    best = {choice["goal"]: choice["candidate"] for choice in result["best_for"]}
+
+    assert best["Closest to today"] == "gpt-5-nano (reference)"
+    # The free candidate behaves too differently to count as the cheapest
+    # comparable choice.
+    assert best["Cheapest"] == "open-copy"
+    assert best["Best open model"] == "open-copy"
+    assert "worse" not in best.values()
+    assert result["candidates"][1]["open_weights"] is True
+    summary = insights[SUMMARY_INSIGHT_NAME].data
+    assert isinstance(summary, TextInsightData)
+    assert "Best open model" in summary.content
+
+
+async def test_dry_run_has_no_choices(
+    stub_client: StubClient, server: MockOpenAIServer
+) -> None:
+    insights = await run(stub_client, server, candidates=[REFERENCE], dry_run=True)
+
+    assert report(insights)["best_for"] == []

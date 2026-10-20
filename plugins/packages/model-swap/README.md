@@ -1,12 +1,12 @@
 # Kitaru model swap
 
-Find out what changes if an agent's model calls move to another model. The `kitaru/model-swap` analyzer sends each recorded model call of an import, exactly as it was recorded, to OpenAI-compatible candidate endpoints (open models on a provider, a local Ollama model, or a cheaper closed tier) and compares the answers with the recording.
+Choose the right model for an agent from its own recorded traffic: better, cheaper, faster, or open. The `kitaru/model-swap` analyzer sends each recorded model call of an import, exactly as it was recorded, to OpenAI-compatible candidate endpoints (open models on a provider, a local Ollama model, other closed models, and the model in use today) and compares their answers.
 
 | Catalog name | Entrypoint | Configuration |
 |---|---|---|
 | `kitaru/model-swap` | `kitaru_model_swap.analyzer:analyze_model_swap` | `candidates` parameter; API keys come from environment variables each candidate names |
 
-It runs on your worker with your keys. It reports, per candidate:
+It runs on your worker with your keys. It names the best candidate for each goal (closest to today, cheapest, fastest, best open model) and reports, per candidate:
 
 - tool-call agreement (same tool, same arguments after JSON normalization) and answer agreement for text replies, with per-argument agreement for each tool;
 - provider failures (timeouts, rate limits, HTTP errors, empty replies, tool-call parse errors, refusals), counted apart from disagreement;
@@ -18,7 +18,7 @@ A dry run (`"dry_run": true`) only estimates calls and spend, and `max_spend_usd
 
 The `model-swap-summary` insight carries the full report as JSON under `kitaru.model_swap/v1` and a rendered HTML section under `kitaru.report_section/v1`. `kitaru insight report --import-id IMPORT_ID --out report.html` embeds that section in a self-contained HTML file. Session links point at the dashboard URL the server reports when the analysis runs.
 
-See "Find out what changes if you switch models" in the [Kitaru documentation](https://docs.zenml.io/kitaru) for parameters and a walkthrough.
+See "Choose the right model for your agent" in the [Kitaru documentation](https://docs.zenml.io/kitaru) for parameters and a walkthrough.
 
 ## Links
 

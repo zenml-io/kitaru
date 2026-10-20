@@ -26,7 +26,7 @@ from kitaru_model_swap.compare import AGREEMENT_LABELS
 def render_section(report: dict[str, Any], dashboard_url: str | None) -> str:
     """Render the verdicts, costs, coverage and disagreements of a report."""
     candidates = report["candidates"]
-    parts = ["<section><h2>What changes if you switch models</h2>"]
+    parts = ["<section><h2>Which model is right for this agent</h2>"]
     if report["dry_run"]:
         parts.append(
             '<p class="badge">Dry run: no calls were sent. Numbers are estimates.</p>'
@@ -39,11 +39,12 @@ def render_section(report: dict[str, Any], dashboard_url: str | None) -> str:
                 "Calls that were not sent are counted separately.</p>"
             )
         parts += [
-            _verdicts(candidates, judged=report["judge"] is not None),
+            _best_for(report["best_for"]),
+            _compare(candidates, judged=report["judge"] is not None),
             _recorded(report["recorded"]),
-            "<h2>Recommendation</h2><ul>",
+            "<ul>",
             *(
-                f"<li><strong>{_e(c['name'])}</strong>: {_e(c['recommendation'])}</li>"
+                f"<li><strong>{_e(c['name'])}</strong>: {_e(c['summary'])}</li>"
                 for c in candidates
             ),
             "</ul>",
@@ -80,32 +81,51 @@ def _estimates(candidates: list[dict[str, Any]]) -> str:
     )
 
 
-def _verdicts(candidates: list[dict[str, Any]], *, judged: bool) -> str:
-    return "<h2>Candidates</h2>" + _table(
+def _best_for(choices: list[dict[str, str]]) -> str:
+    if not choices:
+        return ""
+    return (
+        "<h2>Best for</h2>"
+        + _table(
+            ["Goal", "Candidate", "Why"],
+            [[c["goal"], c["candidate"], c["why"]] for c in choices],
+        )
+        + '<p class="muted">Quality here means matching your current model. '
+        "Your verdicts on the disagreements below decide which answers are "
+        "right.</p>"
+    )
+
+
+def _compare(candidates: list[dict[str, Any]], *, judged: bool) -> str:
+    return "<h2>Compare</h2>" + _table(
         [
             "Candidate",
             "Model",
             "Tool choice",
-            "Exact agreement",
+            "Exact match",
             "Judged equivalent",
             "Failures",
             "Cost per call",
-            "Per session",
             "Per month",
             "Latency p50",
+            "Latency p95",
+            "Open weights",
         ],
         [
             [
-                c["name"] + (" (reference)" if c["reference"] else ""),
+                c["name"] + (" (today)" if c["reference"] else ""),
                 c["model"],
                 _pct(c["tool_choice_rate"]),
                 _pct(c["agreement_rate"]),
                 c["judged_equivalent"] if judged else None,
                 _pct(c["failure_rate"]),
                 _usd(c["cost"]["per_call_usd"]),
-                _usd(c["cost"]["per_session_usd"]),
                 _usd(c["cost"]["per_month_usd"]),
                 _seconds(c["latency_seconds"]["p50"]),
+                _seconds(c["latency_seconds"]["p95"]),
+                None
+                if c["open_weights"] is None
+                else ("yes" if c["open_weights"] else "no"),
             ]
             for c in candidates
         ],

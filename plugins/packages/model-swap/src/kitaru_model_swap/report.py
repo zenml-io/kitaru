@@ -44,6 +44,11 @@ REPORT_METADATA_KEY = "kitaru.model_swap/v1"
 REPORT_SECTION_KEY = "kitaru.report_section/v1"
 SUMMARY_INSIGHT_NAME = "model-swap-summary"
 _EXCERPT = 600
+# A candidate failing more often than this is a setup problem, not a choice.
+_MAX_FAILURE_RATE = 0.2
+# Candidates this close to the best match count as behaving the same.
+_COMPARABLE_POINTS = 0.1
+_NOISY_REFERENCE = 0.5
 _DAYS_PER_MONTH = 30
 # Spans shorter than this are too short to extrapolate traffic from.
 _MIN_OBSERVED_DAYS = 1
@@ -106,7 +111,8 @@ def build_report(
         )
         for candidate in params.candidates
     ]
-    _add_recommendations(candidates)
+    if not params.dry_run:
+        _add_summaries(candidates)
     disagreements = [
         _disagreement(result)
         for result in results
@@ -130,6 +136,7 @@ def build_report(
         },
         "recorded": _recorded_report(sampled, volume),
         "candidates": candidates,
+        "best_for": [] if params.dry_run else _best_for(candidates),
         "disagreements": disagreements[: params.max_disagreements],
         "disagreements_total": len(disagreements),
         "spent_usd": _usd(spent),
@@ -214,6 +221,7 @@ def _candidate_report(
         "model": candidate.model,
         "endpoint_host": urlsplit(candidate.base_url).netloc,
         "reference": candidate.reference,
+        "open_weights": candidate.open_weights,
         "price": (
             None
             if price is None
@@ -337,20 +345,15 @@ def _primary_rate(candidate: dict[str, Any]) -> tuple[str, float | None]:
     return "gives the same answer", candidate["agreement_rate"]
 
 
-def _add_recommendations(candidates: list[dict[str, Any]]) -> None:
-    """Attach a plain-language, rule-based recommendation to each candidate."""
+def _add_summaries(candidates: list[dict[str, Any]]) -> None:
+    """Attach a plain-language, factual summary to each candidate."""
     reference = next((c for c in candidates if c["reference"]), None)
+    noise = _primary_rate(reference)[1] if reference else None
     for candidate in candidates:
-        if "estimate" in candidate:
-            continue
         what, rate = _primary_rate(candidate)
-        noise = _primary_rate(reference)[1] if reference else None
-        if candidate["reference"]:
-            text = (
-                f"Reference: {what} as its own recording {_pct(rate)} of the "
-                "time. Read other candidates against this number."
-            )
-        elif candidate["failure_rate"] is not None and candidate["failure_rate"] > 0.2:
+        if candidate["failure_rate"] is not None and candidate["failure_rate"] > (
+            _MAX_FAILURE_RATE
+        ):
             top = next(iter(candidate["failures"]), "unknown")
             text = (
                 f"Fix the provider setup first: {candidate['failure_rate']:.0%} "
@@ -358,26 +361,85 @@ def _add_recommendations(candidates: list[dict[str, Any]]) -> None:
                 "disagreement."
             )
         elif rate is None:
-            text = "No answered calls to judge."
-        elif noise is not None and rate >= noise - 0.05:
+            text = "No answered calls to compare."
+        elif candidate["reference"]:
             text = (
-                f"{what.capitalize()} as the recording {rate:.0%} of the time, "
-                f"within 5 points of the reference's {noise:.0%}. Review its "
-                "disagreements before switching."
+                f"Your current model, run again: {what} as its own recording "
+                f"{rate:.0%} of the time. This is how much answers vary from run "
+                "to run."
             )
         else:
-            text = (
-                f"{what.capitalize()} as the recording {rate:.0%} of the time"
-                + (f", below the reference's {noise:.0%}" if noise is not None else "")
-                + ". Review the disagreements to decide which calls could move."
-            )
-        if noise is not None and noise < 0.5 and not candidate["reference"]:
-            text += (
-                f" The reference itself agrees only {noise:.0%} of the time, so "
-                "these calls vary from run to run; use per-argument agreement "
-                "or a judge rather than this rate."
-            )
-        candidate["recommendation"] = text
+            text = f"{what.capitalize()} as your current model {rate:.0%} of the time."
+            if noise is not None and noise < _NOISY_REFERENCE:
+                text += (
+                    f" Your current model matches itself only {noise:.0%} of the "
+                    "time, so read per-argument agreement and your verdicts "
+                    "rather than this rate."
+                )
+        candidate["summary"] = text
+
+
+def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Name the best candidate for each goal, by simple, stated rules.
+
+    Quality here is closeness to the current model's recorded answers; the
+    user's verdicts on the disagreements decide which answers are right.
+    """
+    usable = [
+        c
+        for c in candidates
+        if _primary_rate(c)[1] is not None
+        and (c["failure_rate"] is None or c["failure_rate"] <= _MAX_FAILURE_RATE)
+    ]
+    if not usable:
+        return []
+    closest = max(usable, key=lambda c: _primary_rate(c)[1] or 0)
+    floor = (_primary_rate(closest)[1] or 0) - _COMPARABLE_POINTS
+    comparable = [c for c in usable if (_primary_rate(c)[1] or 0) >= floor]
+    choices = [
+        {
+            "goal": "Closest to today",
+            "candidate": closest["name"],
+            "why": f"{_primary_rate(closest)[0].capitalize()} as your current model "
+            f"{_pct(_primary_rate(closest)[1])} of the time.",
+        }
+    ]
+    priced = [c for c in comparable if c["cost"]["per_call_usd"] is not None]
+    if priced:
+        cheapest = min(priced, key=lambda c: Decimal(c["cost"]["per_call_usd"]))
+        choices.append(
+            {
+                "goal": "Cheapest",
+                "candidate": cheapest["name"],
+                "why": f"${cheapest['cost']['per_call_usd']} per call, within "
+                f"{_COMPARABLE_POINTS * 100:.0f} points of the closest match.",
+            }
+        )
+    timed = [c for c in comparable if c["latency_seconds"]["p50"] is not None]
+    if timed:
+        fastest = min(timed, key=lambda c: c["latency_seconds"]["p50"])
+        choices.append(
+            {
+                "goal": "Fastest",
+                "candidate": fastest["name"],
+                "why": f"{fastest['latency_seconds']['p50']:.2f}s median latency, "
+                f"within {_COMPARABLE_POINTS * 100:.0f} points of the closest match.",
+            }
+        )
+    open_models = [c for c in usable if c["open_weights"]]
+    if open_models:
+        best_open = max(open_models, key=lambda c: _primary_rate(c)[1] or 0)
+        choices.append(
+            {
+                "goal": "Best open model",
+                "candidate": best_open["name"],
+                "why": f"{_primary_rate(best_open)[0].capitalize()} as your current "
+                "model "
+                f"{_pct(_primary_rate(best_open)[1])} of the time, and you can "
+                "run it anywhere.",
+            }
+        )
+    return choices
 
 
 def _disagreement(result: CallResult) -> dict[str, Any]:
@@ -500,7 +562,7 @@ def _build_cards(report: dict[str, Any]) -> list[InsightInput]:
                 InsightInput(
                     name=f"model-swap-agreement-{slug}",
                     title=f"Agreement: {candidate['name']}",
-                    description=candidate.get("recommendation"),
+                    description=candidate.get("summary"),
                     data=CategoricalInsightData(
                         unit="calls",
                         values=[
@@ -584,25 +646,29 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"{estimate['spend_usd'] or 'unknown price'} |"
             )
     else:
-        lines.append(
-            "| Candidate | Agreement | Tool choice | Failures | Cost per call (USD) |"
+        lines.extend(
+            f"- **{choice['goal']}:** {choice['candidate']}. {choice['why']}"
+            for choice in report["best_for"]
         )
-        lines.append("|---|---|---|---|---|")
+        lines += [
+            "",
+            "| Candidate | Matches today | Failures | Cost per call (USD) "
+            "| Latency p50 | Open weights |",
+            "|---|---|---|---|---|---|",
+        ]
         for candidate in report["candidates"]:
-            label = candidate["name"] + (
-                " (reference)" if candidate["reference"] else ""
-            )
+            label = candidate["name"] + (" (today)" if candidate["reference"] else "")
+            p50 = candidate["latency_seconds"]["p50"]
             lines.append(
                 f"| {label}"
-                f" | {_pct(candidate['agreement_rate'])}"
-                f" | {_pct(candidate['tool_choice_rate'])}"
+                f" | {_pct(_primary_rate(candidate)[1])}"
                 f" | {_pct(candidate['failure_rate'])}"
-                f" | {candidate['cost']['per_call_usd'] or 'unknown'} |"
+                f" | {candidate['cost']['per_call_usd'] or 'unknown'}"
+                f" | {'n/a' if p50 is None else f'{p50:.2f}s'}"
+                f" | {_yes_no(candidate['open_weights'])} |"
             )
         lines.append("")
-        lines.extend(
-            f"- **{c['name']}**: {c['recommendation']}" for c in report["candidates"]
-        )
+        lines.extend(f"- **{c['name']}**: {c['summary']}" for c in report["candidates"])
     if report["stopped_early"]:
         lines += ["", f"Stopped early: {report['stopped_early']}."]
     if report["notes"]:
@@ -622,6 +688,10 @@ def _slug(name: str, used: set[str]) -> str:
 
 def _rate(part: int, whole: int) -> float | None:
     return round(part / whole, 4) if whole else None
+
+
+def _yes_no(value: bool | None) -> str:
+    return "unknown" if value is None else ("yes" if value else "no")
 
 
 def _pct(rate: float | None) -> str:

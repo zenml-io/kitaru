@@ -1,20 +1,23 @@
 ---
-description: Send your agent's recorded model calls to other models and see what would change, and what it would cost, before you switch.
+description: Compare models on your agent's own recorded calls for quality, cost, speed, and openness, and choose the right one.
 icon: shuffle
 ---
 
-# Find out what changes if you switch models
+# Choose the right model for your agent
 
-Your agent runs on one model in production, and you want to know what happens if its calls move to another one: an open model on a provider, a local model on Ollama, or a cheaper closed tier. The `kitaru/model-swap` analyzer answers that from your own traces. It sends each recorded model call, exactly as it was recorded, to the candidate models you name and compares their answers with the recording. It runs on your worker with your keys, so your traces and credentials stay on your side.
+The right model for an agent depends on what you need: better answers, lower cost, faster replies, or a model you can run anywhere instead of being locked to one provider. The `kitaru/model-swap` analyzer compares candidate models on your agent's own recorded traffic: an open model on a provider, a local model on Ollama, a cheaper or newer closed model, and the model you use today. It sends each recorded model call, exactly as it was recorded, to every candidate and compares their answers. It runs on your worker with your keys, so your traces and credentials stay on your side.
+
+The comparison shows where the candidates behave like your current model and where they differ. You then judge the differences, which decides quality, and confirm the finalists with a full [replay](replay-and-overrides.md) when your agent supports it.
 
 This is step-level replay: Kitaru does not re-run your agent. Every imported session already stores its model calls as `llm_call` nodes with their messages, tool definitions, answer, token usage, and cost (see [Track cost and model usage](llm-calls.md)). Each candidate sees the same messages the recorded model saw at that step, so the comparison works for agents imported from any supported trace source, including importer-backed agents, which cannot replay with a model override.
 
-You get, per candidate:
+You get a **Best for** summary (closest to today, cheapest, fastest, best open model) and, per candidate:
 
-- **Agreement.** Whether it called the same tool with the same arguments, or gave the same text answer, plus per-argument agreement for each tool.
+- **Agreement.** Whether it called the same tool with the same arguments as your current model, or gave the same text answer, plus per-argument agreement for each tool.
 - **Provider failures.** Timeouts, rate limits, HTTP errors, empty replies, tool-call parse errors, and refusals, counted apart from disagreement, because they say more about the provider setup than about the model.
-- **Latency and tokens.** Input, cached-input, output, and reasoning tokens per call.
+- **Speed and tokens.** Median and 95th-percentile latency, and input, cached-input, output, and reasoning tokens per call.
 - **Cost.** Cost per call, projected per session and per month, split into price per token, tokens used, and retries.
+- **Openness.** Whether the model's weights are open, as you declare it.
 - **Coverage.** How many recorded calls were seen, sampled, replayed, and skipped, and why.
 
 ## Before you start
@@ -59,14 +62,15 @@ Each candidate is any endpoint that speaks the OpenAI chat-completions API:
 | `base_url` | Endpoint base URL, ending before `/chat/completions`. |
 | `model` | Model name sent in each request. |
 | `api_key_env` | Name of the environment variable holding the API key. Omit it for endpoints without authentication, such as a local Ollama. |
-| `reference` | Mark one candidate as the production model. Its agreement with its own recording shows how much the model varies from run to run, which is the noise floor for every other candidate. |
+| `reference` | Mark the model your agent uses today. It is compared like any other candidate, and its agreement with its own recording shows how much answers vary from run to run, the noise floor for every other candidate. |
+| `open_weights` | `true` for open-weight models you could run with any provider or on your own hardware. Shown in the comparison and used for **Best open model**. |
 | `price` | `input_per_mtok`, `output_per_mtok`, and optional `cached_input_per_mtok`, in USD per million tokens. When omitted, the price comes from the bundled [genai-prices](https://github.com/pydantic/genai-prices) table, and the report names the table version. |
 | `price_provider` | Provider id for that lookup, such as `openai`, when the base URL does not identify the provider. |
 | `provider_settings` | Per-provider request settings, described below. |
 
-Include the production model as the reference. Without it, you cannot tell a candidate's disagreement from the production model's own variation.
+Include your current model as the reference. Without it, you cannot tell a candidate's disagreement from your current model's own variation.
 
-A good first set is one open model on a provider, one local model if you run Ollama, and one cheaper tier of your current provider.
+A good first set covers the choices you care about: one open model on a provider, one local model if you run Ollama, one cheaper tier and one stronger model from your current provider.
 
 ### Keys
 
@@ -170,8 +174,8 @@ Agents recorded by a native adapter do not store tool definitions on their model
 
 `kitaru insight report` writes one self-contained HTML file with no external resources, so you can open it in a browser or hand it to your coding agent. It shows, in order:
 
-- **Candidates.** Agreement, tool choice, judged equivalence, failure rate, cost per call, session and month, and latency.
-- **Recommendation.** A rule-based verdict per candidate, read against the reference.
+- **Best for.** The closest match to today, and among candidates within 10 points of it, the cheapest and the fastest, plus the best open-weight model. Candidates failing more than 20% of calls are left out until their provider setup is fixed.
+- **Compare.** Tool choice, exact match, judged equivalence, failure rate, cost per call and month, latency, and open weights for every candidate, with a one-line summary of each.
 - **Why the cost differs.** Prices, tokens per call, reasoning tokens, retries, and where each price came from.
 - **Provider failures, agreement by recorded tool** (with per-argument agreement), and **coverage**.
 - **Disagreements.** Grouped by what the recorded model did, each with both answers and a link to the session in the dashboard.
@@ -179,8 +183,11 @@ Agents recorded by a native adapter do not store tool definitions on their model
 How to read the agreement numbers:
 
 - **Tool choice** is the share of tool-using calls where the candidate picked the same tool. Arguments that hold free text, such as a customer reply, almost never match exactly, so tool choice and per-argument agreement on structured fields (an action, an amount) are usually the useful signals. **Agreement** is the strict share of calls with the same tool and arguments, or the same text.
-- **The reference sets the bar.** If the production model picks the same tool as its own recording 90% of the time, a candidate at 88% is within noise. When the reference itself rarely agrees, the recommendation says so.
+- **Matching today is not the same as being right.** Agreement measures how closely a candidate behaves like your current model, which tells you where they differ, not which one is better. Review the disagreements to decide which answers are right; a candidate that differs can be the better choice.
+- **Your current model sets the noise floor.** If it picks the same tool as its own recording 90% of the time, a candidate at 88% is within noise. When it rarely agrees with itself, the summaries say so.
 - **Reasoning is not replayed.** Recorded reasoning (thinking) parts are not sent to candidates, so a candidate sees less context than the recorded model did on later steps. The report counts the affected calls.
+
+After review, confirm the finalists end to end with a [replay experiment](replay-and-overrides.md) on the reviewed sessions when your agent was recorded through an adapter that supports model overrides.
 
 Each run stores its own insights. The report renders the most recent model-swap run of the import, followed by the import's other insights. Session links use the dashboard URL the server reports when the analysis runs; they are left out when the server reports none. The full report is also available as JSON in the `kitaru.model_swap/v1` metadata of the `model-swap-summary` insight, for scripts and coding agents.
 

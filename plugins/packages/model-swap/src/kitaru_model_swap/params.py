@@ -96,8 +96,16 @@ class Candidate(_Params):
     reference: bool = Field(
         default=False,
         description=(
-            "Mark the production model, so its agreement with its own "
-            "recording shows run-to-run noise."
+            "Mark the model the agent uses today. It is compared like any "
+            "other candidate, and its agreement with its own recording shows "
+            "how much answers vary from run to run."
+        ),
+    )
+    open_weights: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the model's weights are open, so it can be run by any "
+            "provider or on your own hardware."
         ),
     )
     price: Price | None = Field(
