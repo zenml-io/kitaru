@@ -260,7 +260,7 @@ async def test_judge_verdicts_survive_a_text_tool_call_format(
 ESCALATING = MockOpenAIServer({"escalator": escalator})
 
 
-async def test_dry_run_cost_card_is_not_labelled_monthly(
+async def test_dry_run_cost_card_is_not_labeled_monthly(
     stub_client: StubClient,
 ) -> None:
     insights = await run(
