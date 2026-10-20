@@ -17,213 +17,124 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import httpx
 import pytest
 
 from kitaru.api_models.v1.insight import InsightListParams, InsightResponse
 from kitaru.cli import app as app_module
-from kitaru.cli.insight_report import MODEL_SWAP_REPORT_KEY, render_insight_report
+from kitaru.cli.insight_report import REPORT_SECTION_KEY, render_insight_report
 
 IMPORT_ID = uuid.UUID("01990000-0000-7000-8000-000000000010")
-SESSION_ID = "01990000-0000-7000-8000-000000000011"
 NOW = datetime(2026, 10, 20, tzinfo=UTC)
 
-REPORT: dict[str, Any] = {
-    "schema": 1,
-    "dry_run": False,
-    "coverage": {
-        "sessions": 10,
-        "llm_calls_seen": 33,
-        "replayable": 30,
-        "replayable_inferred": 0,
-        "sampled": 30,
-        "skipped": {"missing_tool_schema": 3},
-        "schema_sources": {"recorded": 30},
-        "calls_with_dropped_reasoning": 20,
-    },
-    "volume": {"sessions": 10, "calls_per_session": 3.3, "sessions_per_month": 300},
-    "recorded": {
-        "models": {"gpt-5-nano": 30},
-        "cost": {
-            "per_call_usd": "0.0003",
-            "per_session_usd": "0.001",
-            "per_month_usd": "0.3",
-        },
-    },
-    "candidates": [
-        {
-            "name": "open-model",
-            "model": "qwen3",
-            "reference": False,
-            "price": {
-                "input_per_mtok": "0.1",
-                "output_per_mtok": "0.3",
-                "source": "params",
-            },
-            "agreement": {"same_tool_same_args": 20, "different_tool": 10},
-            "agreement_rate": 0.6667,
-            "tool_choice_rate": 0.8,
-            "judged_equivalent": 0,
-            "failures": {"tool_call_parse_error": 2},
-            "failure_rate": 0.0625,
-            "by_tool": {
-                "final_result": {
-                    "calls": 10,
-                    "agreement_rate": 0.1,
-                    "fields": {"final_result.action": 0.9},
-                }
-            },
-            "latency_seconds": {"p50": 1.2, "p95": 3.0},
-            "tokens_per_call": {
-                "input_tokens": 900.0,
-                "cached_input_tokens": 0.0,
-                "output_tokens": 300.0,
-                "reasoning_tokens": 100.0,
-            },
-            "retries": 1,
-            "cost": {
-                "per_call_usd": "0.0001",
-                "per_session_usd": "0.0003",
-                "per_month_usd": "0.1",
-            },
-            "recommendation": "Review the disagreements.",
-        }
-    ],
-    "disagreements": [
-        {
-            "candidate": "open-model",
-            "session_id": SESSION_ID,
-            "node_id": "01990000-0000-7000-8000-000000000012",
-            "node_name": "chat gpt-5-nano",
-            "group": "final_result",
-            "agreement": "different_tool",
-            "schema_source": "recorded",
-            "recorded": 'final_result({"reply": "<script>alert(1)</script>"})',
-            "candidate_answer": 'escalate_to_human({"reason": "x"})',
-            "judge_equivalent": None,
-        }
-    ],
-    "disagreements_total": 1,
-    "stopped_early": None,
-    "judge": None,
-    "notes": ["Reasoning is not sent to candidates."],
-}
 
-
-def insight(name: str, data: dict[str, Any], **metadata: Any) -> InsightResponse:
+def insight(
+    name: str,
+    data: dict[str, Any] | None = None,
+    *,
+    created: datetime = NOW,
+    metadata: dict[str, Any] | None = None,
+) -> InsightResponse:
     return InsightResponse.model_validate(
         {
             "id": uuid.uuid4(),
             "owner_id": uuid.uuid4(),
-            "created": NOW,
-            "updated": NOW,
+            "created": created,
+            "updated": created,
             "agent_id": uuid.uuid4(),
             "import_id": IMPORT_ID,
             "name": name,
             "title": name.title(),
             "description": None,
-            "data": data,
-            "metadata": metadata,
+            "data": data or {"type": "text", "content": f"{name} content"},
+            "metadata": metadata or {},
         }
     )
 
 
-SUMMARY = insight(
-    "model-swap-summary",
-    {"type": "text", "content": "summary"},
-    **{MODEL_SWAP_REPORT_KEY: REPORT},
-)
-OTHER = insight(
+def section(html: str, covers: list[str]) -> dict[str, Any]:
+    return {REPORT_SECTION_KEY: {"html": html, "covers": covers}}
+
+
+CHART = insight(
     "tool-retries",
     {"type": "categorical", "unit": "calls", "values": [{"label": "a", "value": 2}]},
 )
 
 
-def test_renders_model_swap_section_with_links() -> None:
+def test_renders_every_insight_as_a_card() -> None:
     document = render_insight_report(
-        [SUMMARY, OTHER], import_id=IMPORT_ID, dashboard_url="https://ui.example"
+        [CHART, insight("summary-text")], import_id=IMPORT_ID
     )
 
-    assert "<title>Model swap report</title>" in document
-    assert "open-model" in document
-    assert "67%" in document
-    assert "tool_call_parse_error" in document
-    assert "Skipped: missing_tool_schema" in document
-    assert f'href="https://ui.example/sessions/{SESSION_ID}"' in document
+    assert "<title>Insight report</title>" in document
+    assert "Tool-Retries" in document
+    assert "2 calls" in document
+    assert "summary-text content" in document
+    assert "Other insights" not in document
+
+
+def test_embeds_sections_and_hides_what_they_cover() -> None:
+    summary = insight(
+        "swap-summary", metadata=section("<h2>Swap section</h2>", ["swap-cost"])
+    )
+    covered = insight("swap-cost")
+
+    document = render_insight_report([summary, covered, CHART], import_id=IMPORT_ID)
+
+    assert "<h2>Swap section</h2>" in document
+    assert "swap-cost content" not in document
+    assert "swap-summary content" not in document
     assert "Other insights" in document
     assert "Tool-Retries" in document
 
 
-def test_recorded_content_is_escaped() -> None:
-    document = render_insight_report([SUMMARY], import_id=IMPORT_ID, dashboard_url=None)
+def test_only_the_latest_section_per_name_is_embedded() -> None:
+    older = insight(
+        "swap-summary",
+        created=NOW - timedelta(hours=1),
+        metadata=section("<p>old run</p>", []),
+    )
+    newer = insight("swap-summary", metadata=section("<p>new run</p>", []))
 
+    document = render_insight_report([newer, older], import_id=IMPORT_ID)
+
+    assert "new run" in document
+    assert "old run" not in document
+
+
+def test_page_forbids_scripts_and_escapes_card_content() -> None:
+    hostile = insight("x", {"type": "text", "content": "<script>alert(1)</script>"})
+
+    document = render_insight_report([hostile], import_id=IMPORT_ID)
+
+    assert "default-src 'none'" in document
     assert "<script>" not in document
     assert "&lt;script&gt;" in document
-    assert "href=" not in document
 
 
-def test_dry_run_report_shows_estimates() -> None:
-    dry = REPORT | {
-        "dry_run": True,
-        "candidates": [
-            {
-                "name": "open-model",
-                "model": "qwen3",
-                "reference": False,
-                "estimate": {
-                    "calls": 30,
-                    "spend_usd": "0.004",
-                    "cost": {"per_month_usd": "0.1"},
-                },
-            }
-        ],
-    }
-    document = render_insight_report(
-        [
-            insight(
-                "model-swap-summary",
-                {"type": "text", "content": "x"},
-                **{MODEL_SWAP_REPORT_KEY: dry},
-            )
-        ],
-        import_id=IMPORT_ID,
-        dashboard_url=None,
-    )
+def test_malformed_sections_fall_back_to_cards() -> None:
+    broken = insight("x", metadata={REPORT_SECTION_KEY: {"html": 3}})
 
-    assert "Dry run" in document
-    assert "Disagreements" not in document
+    document = render_insight_report([broken], import_id=IMPORT_ID)
 
-
-def test_without_model_swap_all_insights_are_rendered() -> None:
-    document = render_insight_report([OTHER], import_id=IMPORT_ID, dashboard_url=None)
-
-    assert "<title>Insight report</title>" in document
-    assert "Tool-Retries" in document
+    assert "x content" in document
 
 
 class StubClient:
-    def __init__(self, insights: list[InsightResponse], info_error: bool = False):
-        self.base_url = "http://localhost:8000"
+    def __init__(self, insights: list[InsightResponse]) -> None:
         self.list_params: list[InsightListParams] = []
         self._insights = insights
         self.insights = SimpleNamespace(iter=self._iter)
-        self.info = SimpleNamespace(get=self._info)
-        self._info_error = info_error
 
     async def _iter(self, params: InsightListParams) -> AsyncIterator[InsightResponse]:
         self.list_params.append(params)
         for item in self._insights:
             yield item
-
-    async def _info(self) -> Any:
-        if self._info_error:
-            raise httpx.ConnectError("down")
-        return SimpleNamespace(dashboard_url=None, ui_version="1.0", server_url=None)
 
 
 def use_client(monkeypatch: pytest.MonkeyPatch, client: StubClient) -> None:
@@ -234,62 +145,39 @@ def use_client(monkeypatch: pytest.MonkeyPatch, client: StubClient) -> None:
     monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
 
 
+def report_argv(out: Path) -> list[str]:
+    return [
+        "insight",
+        "report",
+        "--import-id",
+        str(IMPORT_ID),
+        "--out",
+        str(out),
+        "-o",
+        "json",
+    ]
+
+
 def test_command_writes_the_report(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    client = StubClient([SUMMARY])
+    summary = insight("swap-summary", metadata=section("<p>swap</p>", []))
+    client = StubClient([summary, CHART])
     use_client(monkeypatch, client)
     out = tmp_path / "report.html"
 
-    code = app_module.main(
-        [
-            "insight",
-            "report",
-            "--import-id",
-            str(IMPORT_ID),
-            "--out",
-            str(out),
-            "-o",
-            "json",
-        ]
-    )
+    assert app_module.main(report_argv(out)) == 0
 
-    assert code == 0
     response = json.loads(capsys.readouterr().out)
     assert response["command"] == "insight.report"
-    assert response["item"]["model_swap"] is True
-    assert "localhost:8000/sessions/" in out.read_text()
+    assert response["item"]["sections"] == ["swap-summary"]
+    assert response["item"]["insights"] == 2
+    assert "<p>swap</p>" in out.read_text()
     [params] = client.list_params
     assert params.filter is not None
     assert params.filter.model_dump()["value"] == str(IMPORT_ID)
-
-
-def test_command_survives_a_failing_info_request(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    use_client(monkeypatch, StubClient([SUMMARY], info_error=True))
-    out = tmp_path / "report.html"
-
-    code = app_module.main(
-        [
-            "insight",
-            "report",
-            "--import-id",
-            str(IMPORT_ID),
-            "--out",
-            str(out),
-            "-o",
-            "json",
-        ]
-    )
-
-    assert code == 0
-    assert json.loads(capsys.readouterr().out)["warnings"]
-    assert "href=" not in out.read_text()
 
 
 def test_command_fails_without_insights(
@@ -298,20 +186,8 @@ def test_command_fails_without_insights(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     use_client(monkeypatch, StubClient([]))
+    out = tmp_path / "r.html"
 
-    code = app_module.main(
-        [
-            "insight",
-            "report",
-            "--import-id",
-            str(IMPORT_ID),
-            "--out",
-            str(tmp_path / "r.html"),
-            "-o",
-            "json",
-        ]
-    )
-
-    assert code == 4
-    assert not (tmp_path / "r.html").exists()
+    assert app_module.main(report_argv(out)) == 4
+    assert not out.exists()
     capsys.readouterr()

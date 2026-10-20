@@ -182,7 +182,7 @@ How to read the agreement numbers:
 - **The reference sets the bar.** If the production model picks the same tool as its own recording 90% of the time, a candidate at 88% is within noise. When the reference itself rarely agrees, the recommendation says so.
 - **Reasoning is not replayed.** Recorded reasoning (thinking) parts are not sent to candidates, so a candidate sees less context than the recorded model did on later steps. The report counts the affected calls.
 
-Each run stores its own insights. The report renders the most recent model-swap run of the import, followed by the import's other insights.
+Each run stores its own insights. The report renders the most recent model-swap run of the import, followed by the import's other insights. Session links use the dashboard URL the server reports when the analysis runs; they are left out when the server reports none. The full report is also available as JSON in the `kitaru.model_swap/v1` metadata of the `model-swap-summary` insight, for scripts and coding agents.
 
 ## Supported trace shapes
 

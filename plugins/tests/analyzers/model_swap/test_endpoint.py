@@ -29,7 +29,7 @@ from kitaru_model_swap.endpoint import (
 )
 from kitaru_model_swap.normalize import ToolCall
 from kitaru_model_swap.params import Candidate, ModelSwapParams, Price
-from kitaru_model_swap.pricing import call_cost, resolve_price
+from kitaru_model_swap.pricing import ResolvedPrice, call_cost, resolve_price
 
 from .helpers import MockOpenAIServer, completion
 
@@ -254,14 +254,15 @@ def test_call_cost_splits_cached_input() -> None:
         input_tokens=1_000_000, cached_input_tokens=500_000, output_tokens=250_000
     )
 
-    assert call_cost(price, usage) == Decimal("1.55")
+    assert call_cost(ResolvedPrice(price, "params"), usage) == Decimal("1.55")
 
 
 def test_cached_input_defaults_to_input_price() -> None:
     price = Price(input_per_mtok=Decimal(2), output_per_mtok=Decimal(0))
 
     assert call_cost(
-        price, Usage(input_tokens=1000, cached_input_tokens=1000)
+        ResolvedPrice(price, "params"),
+        Usage(input_tokens=1000, cached_input_tokens=1000),
     ) == Decimal("0.002")
 
 
@@ -280,6 +281,15 @@ def test_bundled_price_table_knows_the_recorded_model() -> None:
     assert resolved is not None
     assert resolved.price.input_per_mtok == Decimal("0.05")
     assert resolved.source.startswith("genai-prices")
+
+
+def test_bundled_prices_follow_each_calls_tokens() -> None:
+    resolved = resolve_price(candidate(model="gpt-5-nano", price_provider="openai"))
+    assert resolved is not None
+
+    cost = call_cost(resolved, Usage(input_tokens=1_000_000, output_tokens=1_000_000))
+
+    assert cost == Decimal("0.45")
 
 
 def test_unknown_model_has_no_price() -> None:

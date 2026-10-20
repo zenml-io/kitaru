@@ -13,19 +13,19 @@
 #  limitations under the License.
 """Send sampled calls to every candidate within the spend and time budgets."""
 
-import asyncio
 import json
 import time
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
+from kitaru.task.importer import gather_bounded
 from kitaru_model_swap.calls import RecordedCall, estimate_usage
 from kitaru_model_swap.compare import Agreement, compare
 from kitaru_model_swap.endpoint import CandidateReply, Usage, get_api_key, send
-from kitaru_model_swap.normalize import RecordedOutcome, ToolCall
+from kitaru_model_swap.normalize import RecordedOutcome
 from kitaru_model_swap.params import Candidate, ModelSwapParams
 from kitaru_model_swap.pricing import ResolvedPrice, call_cost
 
@@ -40,6 +40,7 @@ _JUDGE_PROMPT = (
     "Answers are equivalent when they take the same action with the same "
     "facts and values; wording may differ."
 )
+_JUDGE_OUTPUT_TOKENS = 50
 
 
 @dataclass(frozen=True)
@@ -85,11 +86,13 @@ class Runner:
         params: ModelSwapParams,
         prices: dict[str, ResolvedPrice | None],
         *,
+        judge_price: ResolvedPrice | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        """Prepare credentials, budgets and the shared HTTP client settings."""
+        """Read credentials and set up the budget."""
         self._params = params
         self._prices = prices
+        self._judge_price = judge_price
         self._transport = transport
         self._keys = {c.name: get_api_key(c) for c in params.candidates}
         self._judge_key = get_api_key(params.judge) if params.judge else None
@@ -99,21 +102,14 @@ class Runner:
     async def run(self, calls: list[RecordedCall]) -> list[CallResult]:
         """Send every call to every candidate, in call order."""
         deadline = time.monotonic() + self._params.time_budget_seconds
-        semaphore = asyncio.Semaphore(self._params.concurrency)
         async with httpx.AsyncClient(transport=self._transport) as client:
-
-            async def one(call: RecordedCall, candidate: Candidate) -> CallResult:
-                async with semaphore:
-                    return await self._run_one(client, call, candidate, deadline)
-
-            return list(
-                await asyncio.gather(
-                    *(
-                        one(call, candidate)
-                        for call in calls
-                        for candidate in self._params.candidates
-                    )
-                )
+            return await gather_bounded(
+                (
+                    self._run_one(client, call, candidate, deadline)
+                    for call in calls
+                    for candidate in self._params.candidates
+                ),
+                self._params.concurrency,
             )
 
     async def _run_one(
@@ -127,27 +123,18 @@ class Runner:
         if time.monotonic() >= deadline:
             self.stopped_early = self.stopped_early or "time_budget"
             return CallResult(call, candidate.name, not_run="time_budget")
-        price = self._prices.get(candidate.name)
-        estimate = (
-            call_cost(
-                price.price,
-                estimate_usage(call, candidate.provider_settings.max_tokens),
-            )
-            if price
-            else Decimal(0)
-        )
-        if not self.budget.reserve(estimate):
-            self.stopped_early = "max_spend"
-            return CallResult(call, candidate.name, not_run="max_spend")
-        reply = await send(
+        sent = await self._send_within_budget(
             client,
             candidate,
+            price=self._prices.get(candidate.name),
             api_key=self._keys[candidate.name],
+            estimate=estimate_usage(call, candidate.provider_settings.max_tokens),
             messages=call.request.messages,
             tools=call.request.tools,
         )
-        cost = call_cost(price.price, reply.usage) if price else None
-        self.budget.settle(estimate, cost or Decimal(0))
+        if sent is None:
+            return CallResult(call, candidate.name, not_run="max_spend")
+        reply, cost = sent
         if reply.failure is not None:
             return CallResult(call, candidate.name, reply=reply, cost=cost)
         agreement = compare(call.request.recorded, reply)
@@ -170,59 +157,68 @@ class Runner:
         reply: CandidateReply,
     ) -> bool | None:
         """Ask the judge whether two answers are equivalent."""
-        judge = self._params.judge
-        assert judge is not None
-        price = self._prices.get(f"judge:{judge.name}")
-        estimate = Decimal(0)
-        if price is not None:
-            estimate = call_cost(price.price, estimate_usage_for_judge(recorded, reply))
-        if not self.budget.reserve(estimate):
-            self.stopped_early = "max_spend"
-            return None
-        verdict = await send(
+        assert self._params.judge is not None
+        prompt = (
+            f"Recorded answer:\n{describe(recorded)}\n\n"
+            f"Candidate answer:\n{describe(reply)}"
+        )
+        sent = await self._send_within_budget(
             client,
-            judge,
+            self._params.judge,
+            price=self._judge_price,
             api_key=self._judge_key,
+            estimate=Usage(
+                input_tokens=(len(_JUDGE_PROMPT) + len(prompt)) // 4,
+                output_tokens=_JUDGE_OUTPUT_TOKENS,
+            ),
             messages=[
                 {"role": "system", "content": _JUDGE_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        "Recorded answer:\n"
-                        + describe(recorded.tool_calls, recorded.text)
-                        + "\n\nCandidate answer:\n"
-                        + describe(reply.tool_calls, reply.text)
-                    ),
-                },
+                {"role": "user", "content": prompt},
             ],
             tools=[],
         )
-        cost = call_cost(price.price, verdict.usage) if price else Decimal(0)
-        self.budget.settle(estimate, cost)
-        if verdict.failure is not None or verdict.text is None:
+        if sent is None or sent[0].failure is not None or sent[0].text is None:
             return None
         try:
-            value = json.loads(verdict.text.strip().removeprefix("```json").strip("`"))
+            value = json.loads(sent[0].text.strip().removeprefix("```json").strip("`"))
         except json.JSONDecodeError:
             return None
         equivalent = value.get("equivalent") if isinstance(value, dict) else None
         return equivalent if isinstance(equivalent, bool) else None
 
+    async def _send_within_budget(
+        self,
+        client: httpx.AsyncClient,
+        candidate: Candidate,
+        *,
+        price: ResolvedPrice | None,
+        api_key: str | None,
+        estimate: Usage,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> tuple[CandidateReply, Decimal | None] | None:
+        """Reserve the estimated cost, send, and settle the actual cost.
 
-def estimate_usage_for_judge(recorded: RecordedOutcome, reply: CandidateReply) -> Usage:
-    """Estimate a judge call's tokens from the two answers."""
-    chars = len(describe(recorded.tool_calls, recorded.text)) + len(
-        describe(reply.tool_calls, reply.text)
-    )
-    return Usage(input_tokens=chars // 4 + 100, output_tokens=50)
+        Returns None without sending when the reservation would pass the cap.
+        """
+        reserved = call_cost(price, estimate) if price else Decimal(0)
+        if not self.budget.reserve(reserved):
+            self.stopped_early = "max_spend"
+            return None
+        reply = await send(
+            client, candidate, api_key=api_key, messages=messages, tools=tools
+        )
+        cost = call_cost(price, reply.usage) if price else None
+        self.budget.settle(reserved, cost or Decimal(0))
+        return reply, cost
 
 
-def describe(tool_calls: tuple[ToolCall, ...], text: str | None) -> str:
+def describe(answer: RecordedOutcome | CandidateReply) -> str:
     """Render an answer as short readable text."""
     parts = [
         f"{call.name}({json.dumps(call.arguments, sort_keys=True, default=str)})"
-        for call in tool_calls
+        for call in answer.tool_calls
     ]
-    if text:
-        parts.append(text)
+    if answer.text:
+        parts.append(answer.text)
     return "\n".join(parts) or "(empty)"

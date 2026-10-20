@@ -13,8 +13,9 @@
 #  limitations under the License.
 """Aggregate replay results into a report and insight cards.
 
-The full report is stored under `REPORT_METADATA_KEY` on the summary insight
-so the HTML report command can render it without calling any model.
+The summary insight carries the full report under `REPORT_METADATA_KEY`, for
+agents and scripts, and a rendered HTML section under `REPORT_SECTION_KEY`,
+which `kitaru insight report` embeds without calling any model.
 """
 
 import re
@@ -32,24 +33,16 @@ from kitaru.api_models.v1.insight import (
     TextInsightData,
 )
 from kitaru_model_swap.calls import Collection, RecordedCall, estimate_usage
-from kitaru_model_swap.compare import AGREEING, Agreement, field_matches
+from kitaru_model_swap.compare import AGREEING, AGREEMENT_LABELS, field_matches
 from kitaru_model_swap.endpoint import Usage
+from kitaru_model_swap.html import render_section
 from kitaru_model_swap.params import Candidate, ModelSwapParams
 from kitaru_model_swap.pricing import ResolvedPrice, call_cost
 from kitaru_model_swap.runner import CallResult, NotRunReason, describe
 
 REPORT_METADATA_KEY = "kitaru.model_swap/v1"
+REPORT_SECTION_KEY = "kitaru.report_section/v1"
 SUMMARY_INSIGHT_NAME = "model-swap-summary"
-
-AGREEMENT_LABELS: dict[Agreement, str] = {
-    "same_tool_same_args": "Same tool and arguments",
-    "same_tool_different_args": "Same tool, different arguments",
-    "different_tool": "Different tool",
-    "text_instead_of_tool": "Text instead of a tool call",
-    "same_text": "Same answer",
-    "different_text": "Different answer",
-    "tool_instead_of_text": "Tool call instead of an answer",
-}
 _EXCERPT = 600
 _DAYS_PER_MONTH = 30
 # Spans shorter than this are too short to extrapolate traffic from.
@@ -120,10 +113,11 @@ def build_report(
         if result.agreement is not None and result.agreement not in AGREEING
     ]
     disagreements.sort(key=lambda item: (item["group"], item["candidate"]))
+    coverage = _coverage(collection, sampled)
     return {
         "schema": 1,
         "dry_run": params.dry_run,
-        "coverage": _coverage(collection, sampled),
+        "coverage": coverage,
         "volume": {
             "sessions": volume.sessions,
             "calls_per_session": round(volume.calls_per_session, 2),
@@ -142,20 +136,18 @@ def build_report(
         "max_spend_usd": _usd(params.max_spend_usd),
         "stopped_early": stopped_early,
         "judge": params.judge.name if params.judge else None,
-        "notes": _notes(collection, sampled),
+        "notes": _notes(coverage),
     }
 
 
 def _coverage(collection: Collection, sampled: list[RecordedCall]) -> dict[str, Any]:
     """Count what was seen, replayable, sampled and skipped."""
-    replayable = collection.calls
+    inferred = collection.replayable["inferred"]
     return {
         "sessions": collection.sessions,
         "llm_calls_seen": collection.llm_calls_seen,
-        "replayable": sum(c.request.schema_source != "inferred" for c in replayable),
-        "replayable_inferred": sum(
-            c.request.schema_source == "inferred" for c in replayable
-        ),
+        "replayable": collection.replayable.total() - inferred,
+        "replayable_inferred": inferred,
         "sampled": len(sampled),
         "skipped": dict(sorted(collection.skipped.items())),
         "schema_sources": dict(
@@ -170,26 +162,26 @@ def _coverage(collection: Collection, sampled: list[RecordedCall]) -> dict[str, 
     }
 
 
-def _notes(collection: Collection, sampled: list[RecordedCall]) -> list[str]:
+def _notes(coverage: dict[str, Any]) -> list[str]:
     """Explain anything that changes how the numbers should be read."""
     notes = []
-    dropped = sum(c.request.dropped_reasoning_parts > 0 for c in sampled)
+    dropped = coverage["calls_with_dropped_reasoning"]
     if dropped:
         notes.append(
             f"{dropped} sampled calls had recorded reasoning in their history. "
             "Reasoning is not sent to candidates, so they see less context "
             "than the recorded model did."
         )
-    inferred = sum(c.request.schema_source == "inferred" for c in sampled)
+    inferred = coverage["schema_sources"].get("inferred", 0)
     if inferred:
         notes.append(
             f"{inferred} sampled calls use tool schemas inferred from recorded "
             "arguments. They are reported separately and left out of the "
             "headline agreement."
         )
-    if collection.skipped.get("missing_tool_schema"):
+    if missing := coverage["skipped"].get("missing_tool_schema"):
         notes.append(
-            f"{collection.skipped['missing_tool_schema']} calls were skipped "
+            f"{missing} calls were skipped "
             "because a tool they could use has no schema. Pass `tool_schemas` "
             "from the agent's code to include them."
         )
@@ -234,15 +226,15 @@ def _candidate_report(
         ),
     }
     if dry_run:
-        estimates = [
-            call_cost(
-                price.price,
-                estimate_usage(call, candidate.provider_settings.max_tokens),
+        max_tokens = candidate.provider_settings.max_tokens
+        total = (
+            None
+            if price is None
+            else sum(
+                (call_cost(price, estimate_usage(c, max_tokens)) for c in sampled),
+                Decimal(0),
             )
-            for call in sampled
-            if price is not None
-        ]
-        total = sum(estimates, Decimal(0)) if price is not None else None
+        )
         report["estimate"] = {
             "calls": len(sampled),
             "spend_usd": _usd(total),
@@ -257,9 +249,8 @@ def _candidate_report(
     answered = [r for r in sent if r.agreement is not None]
     headline = [r for r in answered if r.call.request.schema_source != "inferred"]
     inferred = [r for r in answered if r.call.request.schema_source == "inferred"]
-    failures = Counter(
-        r.reply.failure for r in sent if r.reply and r.reply.failure is not None
-    )
+    failed = [r.reply for r in sent if r.reply and r.reply.failure is not None]
+    failures = Counter(reply.failure for reply in failed)
     tool_calls = [r for r in headline if r.call.request.recorded.tool_calls]
     agreeing = sum(r.agreement in AGREEING for r in headline)
     same_tool = sum(
@@ -267,7 +258,8 @@ def _candidate_report(
         for r in tool_calls
     )
     costs = [r.cost for r in sent if r.cost is not None]
-    latencies = sorted(r.reply.latency_seconds for r in sent if r.reply)
+    replies = [r.reply for r in sent if r.reply]
+    latencies = sorted(reply.latency_seconds for reply in replies)
     report |= {
         "calls_sent": len(sent),
         "calls_not_run": dict(Counter(r.not_run for r in results if r.not_run)),
@@ -278,14 +270,17 @@ def _candidate_report(
         "judged_equivalent": sum(r.judge_equivalent is True for r in headline),
         "inferred_schema_agreement": dict(Counter(r.agreement for r in inferred)),
         "failures": dict(failures.most_common()),
+        "failure_examples": {
+            reply.failure: reply.failure_detail for reply in reversed(failed)
+        },
         "failure_rate": _rate(sum(failures.values()), len(sent)),
         "by_tool": _by_tool(headline),
         "latency_seconds": {
             "p50": _round(statistics.median(latencies)) if latencies else None,
             "p95": _round(_percentile(latencies, 0.95)) if latencies else None,
         },
-        "tokens_per_call": _mean_tokens([r.reply.usage for r in sent if r.reply]),
-        "retries": sum(r.reply.attempts - 1 for r in sent if r.reply),
+        "tokens_per_call": _mean_tokens([reply.usage for reply in replies]),
+        "retries": sum(reply.attempts - 1 for reply in replies),
         "cost": _projection(
             sum(costs, Decimal(0)) / len(costs) if costs else None, volume
         ),
@@ -388,7 +383,6 @@ def _add_recommendations(candidates: list[dict[str, Any]]) -> None:
 def _disagreement(result: CallResult) -> dict[str, Any]:
     """Describe one disagreeing call for review."""
     assert result.reply is not None and result.agreement is not None
-    recorded = result.call.request.recorded
     return {
         "candidate": result.candidate,
         "session_id": str(result.call.session_id),
@@ -397,10 +391,8 @@ def _disagreement(result: CallResult) -> dict[str, Any]:
         "group": _group(result.call),
         "agreement": result.agreement,
         "schema_source": result.call.request.schema_source,
-        "recorded": describe(recorded.tool_calls, recorded.text)[:_EXCERPT],
-        "candidate_answer": describe(result.reply.tool_calls, result.reply.text)[
-            :_EXCERPT
-        ],
+        "recorded": describe(result.call.request.recorded)[:_EXCERPT],
+        "candidate_answer": describe(result.reply)[:_EXCERPT],
         "judge_equivalent": result.judge_equivalent,
     }
 
@@ -438,8 +430,20 @@ def _mean_tokens(usages: list[Usage]) -> dict[str, float] | None:
     }
 
 
-def build_insights(report: dict[str, Any]) -> list[InsightInput]:
+def build_insights(
+    report: dict[str, Any], *, dashboard_url: str | None
+) -> list[InsightInput]:
     """Turn a report into insight cards; the summary carries the full report."""
+    summary, *cards = _build_cards(report)
+    summary.metadata[REPORT_SECTION_KEY] = {
+        "html": render_section(report, dashboard_url),
+        "covers": [card.name for card in cards],
+    }
+    return [summary, *cards]
+
+
+def _build_cards(report: dict[str, Any]) -> list[InsightInput]:
+    """Build the summary insight and one card per chart."""
     insights = [
         InsightInput(
             name=SUMMARY_INSIGHT_NAME,

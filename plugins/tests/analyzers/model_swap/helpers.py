@@ -22,6 +22,7 @@ from typing import Any
 
 import httpx
 
+from kitaru.api_models.v1.info import ServerInfoResponse
 from kitaru.api_models.v1.session import (
     SessionDetailResponse,
     SessionOrigin,
@@ -94,9 +95,17 @@ def load_quickstart_sessions() -> list[SessionWithNodesResponse]:
 class StubClient:
     """Serve stored sessions in place of the Kitaru API."""
 
-    def __init__(self, sessions: list[SessionWithNodesResponse]) -> None:
+    base_url = "http://localhost:8000"
+
+    def __init__(
+        self,
+        sessions: list[SessionWithNodesResponse],
+        dashboard_url: str | None = "https://ui.example",
+    ) -> None:
         """Index sessions by id."""
         self.sessions = self
+        self.info = self
+        self.dashboard_url = dashboard_url
         self._by_id = {item.session.id: item for item in sessions}
 
     async def __aenter__(self) -> "StubClient":
@@ -107,6 +116,11 @@ class StubClient:
 
     async def get_with_nodes(self, session_id: uuid.UUID) -> SessionWithNodesResponse:
         return self._by_id[session_id]
+
+    async def get(self) -> ServerInfoResponse:
+        return ServerInfoResponse(
+            version="0.0.0", auth_scheme="none", dashboard_url=self.dashboard_url
+        )
 
 
 Reply = Callable[[dict[str, Any]], httpx.Response]

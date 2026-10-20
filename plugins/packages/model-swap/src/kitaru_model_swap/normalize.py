@@ -26,7 +26,7 @@ Anything else is skipped with a reason instead of guessed.
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from kitaru.api_models.v1.session_node import NodeStatus, SessionNodeResponse
@@ -81,7 +81,6 @@ class ReplayRequest:
     source_format: str
     recorded: RecordedOutcome
     dropped_reasoning_parts: int = 0
-    inferred_tools: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -119,7 +118,7 @@ def build_replay_request(
         if source_format == "otel_parts":
             messages, dropped = _convert_otel_messages(messages_in)
         else:
-            messages, dropped = _convert_openai_messages(messages_in)
+            messages, dropped = _convert_openai_messages(messages_in), 0
         recorded = parse_recorded_output(node.outputs)
     except UnsupportedShapeError as error:
         return Skipped(error.reason, str(error))
@@ -143,7 +142,6 @@ def build_replay_request(
                 if schema_source == "none":
                     schema_source = "supplied"
     missing = sorted(used - definitions.keys())
-    inferred: tuple[str, ...] = ()
     if missing:
         if not infer_missing_schemas:
             return Skipped(
@@ -153,7 +151,6 @@ def build_replay_request(
             definitions[name] = _definition(
                 name, _infer_schema(name, messages, recorded), None
             )
-        inferred = tuple(missing)
         schema_source = "inferred"
     return ReplayRequest(
         messages=messages,
@@ -162,7 +159,6 @@ def build_replay_request(
         source_format=source_format,
         recorded=recorded,
         dropped_reasoning_parts=dropped,
-        inferred_tools=inferred,
     )
 
 
@@ -214,7 +210,7 @@ def _convert_otel_messages(
     for message in messages:
         role = message["role"]
         if "parts" not in message:
-            converted.extend(_convert_openai_messages([message])[0])
+            converted.extend(_convert_openai_messages([message]))
             continue
         texts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
@@ -263,7 +259,7 @@ def _convert_otel_messages(
 
 def _convert_openai_messages(
     messages: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], int]:
+) -> list[dict[str, Any]]:
     """Copy OpenAI chat messages, keeping only fields a request accepts."""
     converted: list[dict[str, Any]] = []
     for message in messages:
@@ -281,7 +277,7 @@ def _convert_openai_messages(
         if role == "tool":
             entry["tool_call_id"] = str(message.get("tool_call_id"))
         converted.append(entry)
-    return converted, 0
+    return converted
 
 
 def _function(call: Any) -> dict[str, Any]:
@@ -421,7 +417,7 @@ def _recorded_tool_definitions(
                     definitions.append(definition)
         if definitions:
             return definitions
-    return definitions
+    return []
 
 
 def _definition(

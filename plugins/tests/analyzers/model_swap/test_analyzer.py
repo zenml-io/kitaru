@@ -26,10 +26,12 @@ from kitaru.api_models.v1.insight import InsightInput, InsightResponse
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from kitaru.cli.insight_report import render_insight_report
 from kitaru_model_swap import REPORT_METADATA_KEY, SUMMARY_INSIGHT_NAME
+from kitaru_model_swap import analyzer as analyzer_module
 from kitaru_model_swap import runner as runner_module
 from kitaru_model_swap.analyzer import analyze_model_swap, run_model_swap
 from kitaru_model_swap.calls import Collection
 from kitaru_model_swap.params import ModelSwapParams
+from kitaru_model_swap.report import REPORT_SECTION_KEY
 
 from .helpers import MockOpenAIServer, StubClient, completion
 
@@ -51,7 +53,7 @@ CHEAP = {
 def mirror(sessions: list[SessionWithNodesResponse]) -> Any:
     """Reply with exactly what was recorded for the same messages."""
     params = ModelSwapParams.model_validate({"candidates": [REFERENCE]})
-    collection = Collection()
+    collection = Collection(max_per_group=100)
     for session in sessions:
         collection.add_session(session, params)
     recorded = {
@@ -257,7 +259,7 @@ async def test_supplied_schemas_restore_coverage(
 async def _recorded_tools(client: StubClient) -> list[dict[str, Any]]:
     session = await client.get_with_nodes(ids(client)[0])
     params = ModelSwapParams.model_validate({"candidates": [REFERENCE]})
-    collection = Collection()
+    collection = Collection(max_per_group=100)
     collection.add_session(session, params)
     return collection.calls[0].request.tools
 
@@ -340,13 +342,29 @@ async def test_core_report_command_renders_the_analyzer_output(
         for insight in insights.values()
     ]
 
-    document = render_insight_report(
-        stored, import_id=uuid.uuid4(), dashboard_url="https://ui.example"
-    )
+    document = render_insight_report(stored, import_id=uuid.uuid4())
 
-    assert "<title>Model swap report</title>" in document
+    assert "What changes if you switch models" in document
     assert "cheap-open-model" in document
     assert "https://ui.example/sessions/" in document
+    # The section covers the analyzer's own cards, so none is drawn twice.
+    assert "Other insights" not in document
+    assert "Recorded calls covered" not in document
+
+
+async def test_links_are_left_out_without_a_dashboard(
+    monkeypatch: pytest.MonkeyPatch,
+    quickstart_sessions: list[SessionWithNodesResponse],
+    server: MockOpenAIServer,
+) -> None:
+    client = StubClient(quickstart_sessions, dashboard_url=None)
+    monkeypatch.setattr(analyzer_module, "KitaruAPIClient", lambda: client)
+
+    insights = await run(client, server, candidates=[CHEAP], max_calls=3)
+    section = insights[SUMMARY_INSIGHT_NAME].metadata[REPORT_SECTION_KEY]
+
+    assert isinstance(section, dict)
+    assert "href=" not in str(section["html"])
 
 
 async def test_recommendation_warns_when_the_reference_is_noisy(
@@ -362,3 +380,20 @@ async def test_recommendation_warns_when_the_reference_is_noisy(
     assert other["tool_choice_rate"] == 1.0
     assert other["recommendation"].startswith("Picks the same tool")
     assert "reference itself agrees only" in other["recommendation"]
+
+
+async def test_section_escapes_model_output(stub_client: StubClient) -> None:
+    def hostile(body: dict[str, Any]) -> httpx.Response:
+        return completion(
+            tool_calls=[("escalate_to_human", {"reason": "<script>alert(1)</script>"})]
+        )
+
+    server = MockOpenAIServer({"hostile": hostile})
+    insights = await run(
+        stub_client, server, candidates=[CHEAP | {"model": "hostile"}], max_calls=3
+    )
+    section = insights[SUMMARY_INSIGHT_NAME].metadata[REPORT_SECTION_KEY]
+
+    assert isinstance(section, dict)
+    assert "<script>" not in str(section["html"])
+    assert "&lt;script&gt;" in str(section["html"])

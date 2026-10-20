@@ -146,14 +146,8 @@ async def send(
                 break
         if attempts <= settings.max_retries:
             await asyncio.sleep(min(2.0**attempts, 10.0))
-    return CandidateReply(
-        tool_calls=(),
-        text=None,
-        usage=Usage(),
-        latency_seconds=time.monotonic() - started,
-        attempts=attempts,
-        failure=failure,
-        failure_detail=detail,
+    return _failure(
+        failure, detail, latency=time.monotonic() - started, attempts=attempts
     )
 
 
@@ -165,26 +159,24 @@ def _classify(
     attempts: int,
 ) -> CandidateReply:
     """Turn a successful HTTP response into a reply or a failure category."""
-
-    def failed(category: FailureCategory, detail: str) -> CandidateReply:
-        return CandidateReply(
-            tool_calls=(),
-            text=None,
-            usage=usage,
-            latency_seconds=latency,
-            attempts=attempts,
-            failure=category,
-            failure_detail=detail,
-        )
-
-    usage = Usage()
     try:
         payload = response.json()
     except ValueError:
-        return failed("http_error", "the reply is not JSON")
+        payload = None
     if not isinstance(payload, dict):
-        return failed("http_error", "the reply is not a JSON object")
+        return _failure(
+            "http_error",
+            "the reply is not a JSON object",
+            latency=latency,
+            attempts=attempts,
+        )
     usage = read_usage(payload.get("usage"))
+
+    def failed(category: FailureCategory, detail: str) -> CandidateReply:
+        return _failure(
+            category, detail, latency=latency, attempts=attempts, usage=usage
+        )
+
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
         return failed("empty_reply", "the reply has no choices")
@@ -205,6 +197,26 @@ def _classify(
         usage=usage,
         latency_seconds=latency,
         attempts=attempts,
+    )
+
+
+def _failure(
+    category: FailureCategory,
+    detail: str,
+    *,
+    latency: float,
+    attempts: int,
+    usage: Usage | None = None,
+) -> CandidateReply:
+    """Build the reply for a failed request."""
+    return CandidateReply(
+        tool_calls=(),
+        text=None,
+        usage=usage or Usage(),
+        latency_seconds=latency,
+        attempts=attempts,
+        failure=category,
+        failure_detail=detail,
     )
 
 

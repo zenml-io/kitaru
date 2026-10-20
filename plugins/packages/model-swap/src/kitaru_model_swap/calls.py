@@ -20,6 +20,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
+from kitaru.api_models.v1.session import TokenUsage
 from kitaru.api_models.v1.session_node import (
     NodeType,
     SessionNodeResponse,
@@ -45,18 +46,27 @@ class RecordedCall:
     request: ReplayRequest
     usage: Usage
     cost: Decimal | None
+    estimated_input_tokens: int
 
 
 @dataclass
 class Collection:
-    """Replayable calls plus coverage and volume counts for an import."""
+    """Replayable calls plus coverage and volume counts for an import.
 
+    Sampling never takes more than `max_per_group` calls from one group of
+    node name and model, so later calls of a full group are counted but not
+    kept.
+    """
+
+    max_per_group: int
     calls: list[RecordedCall] = field(default_factory=list)
     llm_calls_seen: int = 0
     sessions: int = 0
+    replayable: Counter[str] = field(default_factory=Counter)
     skipped: Counter[str] = field(default_factory=Counter)
     first_started: datetime | None = None
     last_started: datetime | None = None
+    _group_sizes: Counter[tuple[str, str | None]] = field(default_factory=Counter)
 
     def add_session(
         self, session: SessionWithNodesResponse, params: ModelSwapParams
@@ -83,41 +93,43 @@ class Collection:
             if isinstance(result, Skipped):
                 self.skipped[result.reason] += 1
                 continue
-            self.calls.append(_recorded_call(session.session.id, node, result))
+            self.replayable[result.schema_source] += 1
+            group = (node.name, node.model or node.requested_model)
+            if self._group_sizes[group] < self.max_per_group:
+                self._group_sizes[group] += 1
+                self.calls.append(_recorded_call(session.session.id, node, result))
 
 
 def _recorded_call(
     session_id: UUID, node: SessionNodeResponse, request: ReplayRequest
 ) -> RecordedCall:
     """Pair a rebuilt request with the recorded usage and cost."""
-    tokens = node.tokens
-    usage = Usage(
-        input_tokens=(tokens.input_tokens or 0) if tokens else 0,
-        cached_input_tokens=(tokens.cached_input_tokens or 0) if tokens else 0,
-        output_tokens=(tokens.output_tokens or 0) if tokens else 0,
-        reasoning_tokens=(tokens.reasoning_tokens or 0) if tokens else 0,
-    )
+    tokens = node.tokens or TokenUsage()
     return RecordedCall(
         session_id=session_id,
         node_id=node.id,
         node_name=node.name,
         model=node.model or node.requested_model,
         request=request,
-        usage=usage,
+        usage=Usage(
+            input_tokens=tokens.input_tokens or 0,
+            cached_input_tokens=tokens.cached_input_tokens or 0,
+            output_tokens=tokens.output_tokens or 0,
+            reasoning_tokens=tokens.reasoning_tokens or 0,
+        ),
         cost=node.cost,
+        estimated_input_tokens=tokens.input_tokens
+        or len(json.dumps(request.messages) + json.dumps(request.tools))
+        // _CHARS_PER_TOKEN,
     )
 
 
 def estimate_usage(call: RecordedCall, max_tokens: int | None) -> Usage:
     """Estimate a replay's tokens from the recording."""
-    input_tokens = call.usage.input_tokens or (
-        len(json.dumps(call.request.messages) + json.dumps(call.request.tools))
-        // _CHARS_PER_TOKEN
-    )
     output_tokens = call.usage.output_tokens or _DEFAULT_OUTPUT_TOKENS
     if max_tokens is not None:
         output_tokens = min(output_tokens, max_tokens)
-    return Usage(input_tokens=input_tokens, output_tokens=output_tokens)
+    return Usage(input_tokens=call.estimated_input_tokens, output_tokens=output_tokens)
 
 
 def sample_calls(calls: list[RecordedCall], max_calls: int) -> list[RecordedCall]:

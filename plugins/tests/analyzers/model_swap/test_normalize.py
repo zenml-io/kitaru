@@ -166,11 +166,12 @@ def test_inferred_schemas_are_marked(
 
     assert len(replayable) == 33
     assert {item.schema_source for item in replayable} == {"inferred"}
-    refund = next(item for item in replayable if "issue_refund" in item.inferred_tools)
     schema = next(
         tool["function"]["parameters"]
-        for tool in refund.tools
+        for item in replayable
+        for tool in item.tools
         if tool["function"]["name"] == "issue_refund"
+        and tool["function"]["parameters"]["properties"]
     )
     assert set(schema["properties"]) == {"order_id", "amount"}
 

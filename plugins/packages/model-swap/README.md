@@ -16,7 +16,7 @@ It runs on your worker with your keys. It reports, per candidate:
 
 A dry run (`"dry_run": true`) only estimates calls and spend, and `max_spend_usd` stops cleanly before the estimate would pass the cap. Recorded reasoning parts are not sent to candidates; the report says how many calls this affects.
 
-The full report is stored in the metadata of the `model-swap-summary` insight. `kitaru insight report --import-id IMPORT_ID --out report.html` renders it as a self-contained HTML file.
+The `model-swap-summary` insight carries the full report as JSON under `kitaru.model_swap/v1` and a rendered HTML section under `kitaru.report_section/v1`. `kitaru insight report --import-id IMPORT_ID --out report.html` embeds that section in a self-contained HTML file. Session links point at the dashboard URL the server reports when the analysis runs.
 
 See "Find out what changes if you switch models" in the [Kitaru documentation](https://docs.zenml.io/kitaru) for parameters and a walkthrough.
 

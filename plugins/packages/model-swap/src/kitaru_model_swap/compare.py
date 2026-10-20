@@ -33,6 +33,15 @@ Agreement = Literal[
 ]
 
 AGREEING: frozenset[Agreement] = frozenset({"same_tool_same_args", "same_text"})
+AGREEMENT_LABELS: dict[Agreement, str] = {
+    "same_tool_same_args": "Same tool and arguments",
+    "same_tool_different_args": "Same tool, different arguments",
+    "different_tool": "Different tool",
+    "text_instead_of_tool": "Text instead of a tool call",
+    "same_text": "Same answer",
+    "different_text": "Different answer",
+    "tool_instead_of_text": "Tool call instead of an answer",
+}
 
 _NUMBER = re.compile(r"^-?\d+(\.\d+)?$")
 _SPACE = re.compile(r"\s+")

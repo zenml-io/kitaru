@@ -19,7 +19,7 @@ from importlib.metadata import version
 
 from genai_prices import Usage as PriceUsage
 from genai_prices import calc_price
-from genai_prices.types import TieredPrices
+from genai_prices.types import PriceCalculation, TieredPrices
 
 from kitaru_model_swap.endpoint import Usage
 from kitaru_model_swap.params import Candidate, Price
@@ -29,10 +29,16 @@ _MILLION = Decimal(1_000_000)
 
 @dataclass(frozen=True)
 class ResolvedPrice:
-    """A price with the place it came from."""
+    """A candidate's price, where it came from, and how to apply it.
+
+    `price` shows the base per-MTok rates. Prices from the bundled table are
+    applied through the table per call, so tiered rates follow each call's
+    tokens.
+    """
 
     price: Price
     source: str
+    candidate: Candidate | None = None
 
 
 def resolve_price(candidate: Candidate) -> ResolvedPrice | None:
@@ -40,47 +46,59 @@ def resolve_price(candidate: Candidate) -> ResolvedPrice | None:
     if candidate.price is not None:
         return ResolvedPrice(candidate.price, "params")
     try:
-        usage = PriceUsage(input_tokens=_MILLION, output_tokens=_MILLION)
-        if candidate.price_provider is not None:
-            result = calc_price(
-                usage, candidate.model, provider_id=candidate.price_provider
-            )
-        else:
-            result = calc_price(
-                usage, candidate.model, provider_api_url=candidate.base_url
-            )
+        result = _lookup(candidate, Usage(input_tokens=1, output_tokens=1))
     except LookupError:
         return None
-    model_price = result.model_price
-    cached = model_price.cache_read_mtok
-    if model_price.input_mtok is None or model_price.output_mtok is None:
+    rates = result.model_price
+    if rates.input_mtok is None or rates.output_mtok is None:
         return None
+    cached = rates.cache_read_mtok
     return ResolvedPrice(
         Price(
-            input_per_mtok=_flat(model_price.input_mtok),
-            output_per_mtok=_flat(model_price.output_mtok),
-            cached_input_per_mtok=None if cached is None else _flat(cached),
+            input_per_mtok=_base(rates.input_mtok),
+            output_per_mtok=_base(rates.output_mtok),
+            cached_input_per_mtok=None if cached is None else _base(cached),
         ),
         f"genai-prices {version('genai-prices')} ({result.provider.name} "
         f"{result.model.name})",
+        candidate,
     )
 
 
-def _flat(value: Decimal | TieredPrices) -> Decimal:
-    """Read a flat per-MTok price; tiered prices use their base tier."""
-    return value.base if isinstance(value, TieredPrices) else Decimal(value)
-
-
-def call_cost(price: Price, usage: Usage) -> Decimal:
+def call_cost(price: ResolvedPrice, usage: Usage) -> Decimal:
     """Cost of one call; reasoning tokens are billed inside output tokens."""
+    if price.candidate is not None:
+        return _lookup(price.candidate, usage).total_price
+    rates = price.price
     cached = min(usage.cached_input_tokens, usage.input_tokens)
-    cached_price = (
-        price.input_per_mtok
-        if price.cached_input_per_mtok is None
-        else price.cached_input_per_mtok
+    cached_rate = (
+        rates.input_per_mtok
+        if rates.cached_input_per_mtok is None
+        else rates.cached_input_per_mtok
     )
     return (
-        Decimal(usage.input_tokens - cached) * price.input_per_mtok
-        + Decimal(cached) * cached_price
-        + Decimal(usage.output_tokens) * price.output_per_mtok
+        Decimal(usage.input_tokens - cached) * rates.input_per_mtok
+        + Decimal(cached) * cached_rate
+        + Decimal(usage.output_tokens) * rates.output_per_mtok
     ) / _MILLION
+
+
+def _lookup(candidate: Candidate, usage: Usage) -> PriceCalculation:
+    """Price a call with the bundled table.
+
+    Raises:
+        LookupError: The table does not know the model.
+    """
+    tokens = PriceUsage(
+        input_tokens=usage.input_tokens,
+        cache_read_tokens=usage.cached_input_tokens,
+        output_tokens=usage.output_tokens,
+    )
+    if candidate.price_provider is not None:
+        return calc_price(tokens, candidate.model, provider_id=candidate.price_provider)
+    return calc_price(tokens, candidate.model, provider_api_url=candidate.base_url)
+
+
+def _base(value: Decimal | TieredPrices) -> Decimal:
+    """Read the base per-MTok rate of a flat or tiered price."""
+    return value.base if isinstance(value, TieredPrices) else Decimal(value)
