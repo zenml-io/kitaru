@@ -962,3 +962,34 @@ def test_anthropic_custom_tools_become_tool_definitions() -> None:
             "function": {"name": "get_weather", "parameters": WEATHER_SCHEMA},
         }
     ]
+
+
+def test_model_request_parameters_win_over_genai_tool_definitions() -> None:
+    """Prefer Pydantic AI's list, which also carries output tools."""
+    node = _llm_node(
+        {
+            "llm.model_name": "gpt-4o-mini",
+            "gen_ai.tool.definitions": json.dumps(
+                [
+                    {
+                        "type": "function",
+                        "name": "get_weather",
+                        "parameters": WEATHER_SCHEMA,
+                    }
+                ]
+            ),
+            "model_request_parameters": {
+                "function_tools": [
+                    {"name": "get_weather", "parameters_json_schema": WEATHER_SCHEMA}
+                ],
+                "output_tools": [
+                    {"name": "final_result", "parameters_json_schema": WEATHER_SCHEMA}
+                ],
+            },
+        }
+    )
+
+    names = [
+        d["function"]["name"] for d in node.metadata[TOOL_DEFINITIONS_METADATA_KEY]
+    ]
+    assert names == ["get_weather", "final_result"]

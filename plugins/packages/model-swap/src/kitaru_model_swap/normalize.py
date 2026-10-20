@@ -40,6 +40,7 @@ SkipReason = Literal[
     "non_text_content",
     "unrecognized_recorded_output",
     "missing_tool_schema",
+    "missing_tool_call_id",
 ]
 SchemaSource = Literal["recorded", "supplied", "inferred", "none"]
 
@@ -120,6 +121,10 @@ def build_replay_request(
         else:
             messages, dropped = _convert_openai_messages(messages_in), 0
         recorded = parse_recorded_output(node.outputs)
+        if not any(m["role"] in {"system", "developer"} for m in messages):
+            instructions = _system_instructions(node.attributes)
+            if instructions:
+                messages = [{"role": "system", "content": instructions}, *messages]
     except UnsupportedShapeError as error:
         return Skipped(error.reason, str(error))
     # Traces are third-party data, so any other malformed value skips the
@@ -135,10 +140,11 @@ def build_replay_request(
         if definitions:
             schema_source = "recorded"
     used = _tool_names_used(messages, recorded)
-    if used or definitions or tool_schemas:
-        # The agent offers its tools on every call, including calls answered
-        # in text, so supplied schemas fill in whatever the trace did not
-        # record.
+    if used or definitions:
+        # A model that may call tools must see every tool the agent offered,
+        # so supplied schemas fill in whatever the trace did not record. Calls
+        # with no sign of tools get none, since a multi-agent import also
+        # holds routers and summarizers that never had tools.
         for name, schema in tool_schemas.items():
             if name not in definitions:
                 definitions[name] = _definition(
@@ -165,6 +171,35 @@ def build_replay_request(
         recorded=recorded,
         dropped_reasoning_parts=dropped,
     )
+
+
+def _system_instructions(attributes: Any) -> str | None:
+    """Find OTel GenAI system instructions kept with the node's attributes.
+
+    Pydantic AI records instructions in `gen_ai.system_instructions` rather
+    than in the messages, and importers keep the raw span attributes nested
+    under their own key.
+    """
+    if not isinstance(attributes, dict):
+        return None
+    scopes = [attributes, *(v for v in attributes.values() if isinstance(v, dict))]
+    for scope in scopes:
+        value = scope.get("gen_ai.system_instructions")
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                return value or None
+        if isinstance(value, str):
+            return value or None
+        if isinstance(value, list):
+            texts = [
+                str(part.get("content", ""))
+                for part in value
+                if isinstance(part, dict) and part.get("type") == "text"
+            ]
+            return "\n".join(texts) or None
+    return None
 
 
 def _split_inputs(inputs: Any) -> tuple[list[Any], Any]:
@@ -265,7 +300,7 @@ def _convert_otel_messages(
         elif texts:
             if role == "tool":
                 raise UnsupportedShapeError(
-                    "unsupported_input_format", "a tool message has no call id"
+                    "missing_tool_call_id", "a tool message has no call id"
                 )
             converted.append({"role": role, "content": "\n".join(texts)})
     return converted, dropped
@@ -328,7 +363,7 @@ def _require_id(call_id: Any) -> str:
     """
     if call_id is None or call_id == "":
         raise UnsupportedShapeError(
-            "unsupported_input_format", "a tool call or result has no id"
+            "missing_tool_call_id", "a tool call or result has no id"
         )
     return str(call_id)
 

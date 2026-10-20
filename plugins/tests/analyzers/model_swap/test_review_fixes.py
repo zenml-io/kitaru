@@ -14,6 +14,7 @@
 """Regression tests for safety and robustness fixes."""
 
 import asyncio
+import json
 import time
 import uuid
 from collections import Counter
@@ -30,8 +31,9 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
 )
 from kitaru.cli.insight_report import REPORT_SECTION_KEY as CORE_SECTION_KEY
-from kitaru_model_swap.calls import Collection, RecordedCall
-from kitaru_model_swap.endpoint import Usage
+from kitaru_model_swap import analyzer as analyzer_module
+from kitaru_model_swap.calls import Collection, RecordedCall, reservation_usage
+from kitaru_model_swap.endpoint import Usage, read_usage
 from kitaru_model_swap.normalize import (
     RecordedOutcome,
     ReplayRequest,
@@ -45,7 +47,7 @@ from kitaru_model_swap.report import (
     SUMMARY_INSIGHT_NAME,
     weighted_per_call,
 )
-from kitaru_model_swap.runner import Runner
+from kitaru_model_swap.runner import Budget, Runner
 
 from .helpers import MockOpenAIServer, StubClient, completion
 from .test_analyzer import CHEAP, REFERENCE, escalator, report, run
@@ -291,3 +293,169 @@ async def test_a_candidate_named_recorded_does_not_break_the_cost_card(
 def test_section_key_matches_the_report_command() -> None:
     assert REPORT_SECTION_KEY == CORE_SECTION_KEY
     assert SUMMARY_INSIGHT_NAME == "model-swap-summary"
+
+
+async def test_budget_waits_for_calls_in_flight_instead_of_dropping() -> None:
+    budget = Budget(Decimal("1"))
+    assert await budget.reserve(Decimal("0.8"))
+
+    waiter = asyncio.create_task(budget.reserve(Decimal("0.5")))
+    await asyncio.sleep(0)
+    assert not waiter.done()
+    await budget.settle(Decimal("0.8"), Decimal("0.1"))
+
+    assert await waiter
+    assert budget.spent == Decimal("0.1")
+
+
+async def test_a_reservation_that_can_never_fit_is_refused() -> None:
+    assert not await Budget(Decimal("0.1")).reserve(Decimal("0.5"))
+
+
+def test_reservation_never_exceeds_the_output_limit() -> None:
+    call = recorded_call("planner", "0")
+
+    assert reservation_usage(call, max_tokens=None).output_tokens == 2048
+    assert reservation_usage(call, max_tokens=64000).output_tokens == 2048
+    assert reservation_usage(call, max_tokens=100).output_tokens == 100
+
+
+async def test_calls_cut_off_by_the_time_budget_are_charged(
+    quickstart_sessions: list[Any],
+) -> None:
+    params = ModelSwapParams.model_validate({"candidates": [CHEAP]})
+    collection = Collection(max_per_group=1)
+    for session in quickstart_sessions:
+        collection.add_session(session, params)
+    price = resolve_price(Candidate.model_validate(CHEAP))
+    runner = Runner(params, {"cheap-open-model": price}, transport=SlowTransport())
+
+    await runner.run(collection.calls, deadline=time.monotonic() + 0.1)
+
+    assert runner.budget.spent > 0
+
+
+def test_supplied_schemas_skip_calls_without_any_sign_of_tools() -> None:
+    result = build_replay_request(
+        node([{"role": "user", "content": "summarize"}], "a summary"),
+        tool_schemas={"lookup": {"type": "object"}},
+        tool_descriptions={},
+        use_recorded_tools=True,
+        infer_missing_schemas=False,
+    )
+
+    assert isinstance(result, ReplayRequest)
+    assert result.tools == []
+
+
+def test_system_instructions_kept_in_attributes_are_replayed() -> None:
+    recorded = node([{"role": "user", "content": "hi"}], "hello")
+    with_attributes = recorded.model_copy(
+        update={
+            "attributes": {
+                "logfire.attributes": {
+                    "gen_ai.system_instructions": json.dumps(
+                        [{"type": "text", "content": "Be brief."}]
+                    )
+                }
+            }
+        }
+    )
+
+    result = build_replay_request(
+        with_attributes,
+        tool_schemas={},
+        tool_descriptions={},
+        use_recorded_tools=True,
+        infer_missing_schemas=False,
+    )
+
+    assert isinstance(result, ReplayRequest)
+    assert result.messages[0] == {"role": "system", "content": "Be brief."}
+
+
+def test_missing_tool_call_ids_have_their_own_skip_reason() -> None:
+    result = rebuild(
+        [
+            {
+                "role": "assistant",
+                "parts": [{"type": "tool_call", "name": "lookup", "arguments": {}}],
+            }
+        ]
+    )
+
+    assert isinstance(result, Skipped)
+    assert result.reason == "missing_tool_call_id"
+
+
+def test_negative_token_counts_do_not_lower_spend() -> None:
+    usage = read_usage({"prompt_tokens": -100, "completion_tokens": "x"})
+
+    assert usage.input_tokens == 0
+    assert usage.output_tokens == 0
+
+
+async def test_a_candidate_failing_a_kind_of_call_is_not_named_cheapest(
+    quickstart_sessions: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Calls that follow a tool result become their own kind of call.
+    sessions = [
+        session.model_copy(
+            update={
+                "nodes": [
+                    node.model_copy(update={"name": "planner"})
+                    if node.node_type is NodeType.LLM_CALL
+                    and "tool_call_response" in json.dumps(node.inputs)
+                    else node
+                    for node in session.nodes
+                ]
+            }
+        )
+        for session in quickstart_sessions
+    ]
+    stub_client = StubClient(sessions)
+    monkeypatch.setattr(analyzer_module, "KitaruAPIClient", lambda: stub_client)
+
+    def fails_on_tools(body: dict[str, Any]) -> httpx.Response:
+        if any(m["role"] == "tool" for m in body["messages"]):
+            return httpx.Response(400)
+        return completion(tool_calls=[("escalate_to_human", {"reason": "x"})])
+
+    server = MockOpenAIServer({"escalator": escalator, "partial": fails_on_tools})
+    free = {"input_per_mtok": "0", "output_per_mtok": "0"}
+    insights = await run(
+        stub_client,
+        server,
+        candidates=[
+            REFERENCE | {"model": "escalator"},
+            CHEAP | {"name": "partial", "model": "partial", "price": free},
+        ],
+        max_calls=10,
+    )
+    result = report(insights)
+    partial = result["candidates"][1]
+
+    assert partial["cost_complete"] is False
+    assert all(
+        c["candidate"] != "partial"
+        for c in result["best_for"]
+        if c["goal"] == "Cheapest"
+    )
+
+
+async def test_fetching_stops_when_the_time_budget_runs_out(
+    stub_client: StubClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = iter(range(0, 100_000, 500))
+    monkeypatch.setattr(analyzer_module.time, "monotonic", lambda: next(clock))
+
+    insights = await run(
+        stub_client,
+        ESCALATING,
+        candidates=[REFERENCE | {"model": "escalator"}],
+        time_budget_seconds=600,
+    )
+    result = report(insights)
+
+    assert result["coverage"]["sessions_not_fetched"] > 0
+    assert result["stopped_early"] == "time_budget"

@@ -153,6 +153,7 @@ def _coverage(collection: Collection, sampled: list[RecordedCall]) -> dict[str, 
     inferred = collection.replayable["inferred"]
     return {
         "sessions": collection.sessions,
+        "sessions_not_fetched": collection.sessions_not_fetched,
         "llm_calls_seen": collection.llm_calls_seen,
         "replayable": collection.replayable.total() - inferred,
         "replayable_inferred": inferred,
@@ -194,8 +195,19 @@ def _notes(coverage: dict[str, Any]) -> list[str]:
     if without := coverage["calls_without_system_prompt"]:
         notes.append(
             f"{without} sampled calls have no system prompt in their recording. "
-            "If the agent uses one, the trace source did not record it, and "
-            "candidates answer without it."
+            "If the agent uses one, the trace source or importer did not keep "
+            "it, and candidates answer without it."
+        )
+    if no_ids := coverage["skipped"].get("missing_tool_call_id"):
+        notes.append(
+            f"{no_ids} calls were skipped because the recording has tool calls "
+            "or results without ids, which endpoints need to pair them."
+        )
+    if unfetched := coverage["sessions_not_fetched"]:
+        notes.append(
+            f"The time budget ran out while fetching sessions; {unfetched} "
+            "sessions were not read. Lower `max_calls` or raise "
+            "`time_budget_seconds`."
         )
     if missing := coverage["skipped"].get("missing_tool_schema"):
         notes.append(
@@ -331,6 +343,10 @@ def _candidate_report(
         "tokens_per_call": _mean_tokens([reply.usage for reply in replies]),
         "retries": sum(reply.attempts - 1 for reply in replies),
         "cost": _projection(weighted_per_call(answered_costs, weights), volume),
+        # A candidate that failed every call of some kind of call has no cost
+        # for it, so its per-call cost covers only the kinds it answered.
+        "cost_complete": {(c.node_name, c.model) for c in sampled}
+        <= {(call.node_name, call.model) for call, _ in answered_costs},
         "spent_usd": _usd(sum(spent, Decimal(0)) if spent else None),
     }
     return report
@@ -443,7 +459,11 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
             f"{_pct(_primary_rate(closest)[1])} of the time.",
         }
     ]
-    priced = [c for c in comparable if c["cost"]["per_call_usd"] is not None]
+    priced = [
+        c
+        for c in comparable
+        if c["cost"]["per_call_usd"] is not None and c["cost_complete"]
+    ]
     if priced:
         cheapest = min(priced, key=lambda c: Decimal(c["cost"]["per_call_usd"]))
         choices.append(

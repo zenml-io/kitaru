@@ -84,6 +84,9 @@ async def run_model_swap(
             _FETCH_CONCURRENCY,
         ):
             collection.add_session(session, params)
+            if time.monotonic() >= deadline:
+                collection.sessions_not_fetched = len(session_ids) - collection.sessions
+                break
         dashboard_url = await _get_dashboard_url(client)
     sampled = sample_calls(collection.calls, params.max_calls)
     results = []
@@ -94,6 +97,8 @@ async def run_model_swap(
         results = await runner.run(sampled, deadline=deadline)
         spent = runner.budget.spent
         stopped_early = runner.stopped_early
+    if collection.sessions_not_fetched:
+        stopped_early = stopped_early or "time_budget"
     report = build_report(
         params,
         collection,

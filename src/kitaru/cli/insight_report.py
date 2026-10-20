@@ -95,12 +95,12 @@ def render_insight_report(
         for owner, section in sections
         for name in section["covers"]
     }
-    owners = {owner.name for owner, _ in sections}
+    owners = {owner.id for owner, _ in sections}
     body = [_strip_unsafe_tags(section["html"]) for _, section in sections]
     cards = [
         _insight_card(i)
         for i in latest
-        if i.name not in owners and (i.analyzer_version_id, i.name) not in hidden
+        if i.id not in owners and (i.analyzer_version_id, i.name) not in hidden
     ]
     if cards:
         heading = "<h2>Other insights</h2>" if body else ""
@@ -114,15 +114,17 @@ def render_insight_report(
 
 
 def _get_latest_per_name(insights: list[InsightResponse]) -> list[InsightResponse]:
-    """Return the newest insight per name, oldest first.
+    """Return the newest insight per analyzer and name, oldest first.
 
     Rerunning an analyzer stores new insights under the same names, so only
-    the latest run of each is rendered.
+    the latest run of each is rendered. Different analyzers, and insights
+    created by hand, may reuse a name and are all kept.
     """
-    latest: dict[str, InsightResponse] = {}
+    latest: dict[tuple[uuid.UUID, str], InsightResponse] = {}
     for insight in sorted(insights, key=lambda item: item.created):
-        latest.pop(insight.name, None)
-        latest[insight.name] = insight
+        key = (insight.analyzer_version_id or insight.id, insight.name)
+        latest.pop(key, None)
+        latest[key] = insight
     return list(latest.values())
 
 
