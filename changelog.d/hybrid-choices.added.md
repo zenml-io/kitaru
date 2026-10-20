@@ -1,1 +1,0 @@
-- The `kitaru/model-swap` report adds a best mix (per kind of call, the cheapest allowed candidate that behaves like today's model there), provenance rules (`origin` per candidate and `excluded_origins`, which keep candidates out of recommendations), `repeats` for reading run-to-run noise, and tokens per call with a note that costs assume the recorded number of steps.
