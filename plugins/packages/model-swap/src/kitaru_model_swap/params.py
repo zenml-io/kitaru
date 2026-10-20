@@ -15,10 +15,17 @@
 
 import re
 from decimal import Decimal
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    Tag,
+    model_validator,
+)
 
 ToolCallFormat = Literal["native", "hermes", "json_content"]
 
@@ -134,17 +141,18 @@ class Candidate(_Params):
 
 DecisionService = Literal["jev", "clef", "openai_decisions"]
 
-# Where each decision service answers and which variable usually holds its
-# key. Clef runs per Cloudflare account, so its URL has no default.
+# Where each decision service answers, which variable usually holds its key,
+# and which model it runs. Clef runs per Cloudflare account, so it has no
+# default URL and therefore no default key either.
 _DECISION_DEFAULTS: dict[str, dict[str, str | None]] = {
     "jev": {
         "base_url": "https://api.typesafe.ai",
         "api_key_env": "TYPESAFE_API_KEY",
-        "model": None,
+        "model": "jev-latest",
     },
     "clef": {
         "base_url": None,
-        "api_key_env": "CLOUDFLARE_API_TOKEN",
+        "api_key_env": None,
         "model": "clef",
     },
     "openai_decisions": {
@@ -176,7 +184,7 @@ class DecisionJudge(_Params):
             "@cf/cloudflare/clef`."
         )
     )
-    model: str | None = Field(default=None, description="Model; defaults per kind.")
+    model: str = Field(min_length=1, description="Model; defaults per kind.")
     api_key_env: str = Field(description="Variable holding the key; defaults per kind.")
     equivalent_at: float = Field(
         default=0.8,
@@ -198,19 +206,30 @@ class DecisionJudge(_Params):
     def _fill_defaults(cls, value: Any) -> Any:
         """Fill the URL, key variable and model the service usually uses.
 
+        A default key variable is only paired with the default URL, so a key
+        is never sent to a URL the caller typed without naming the key.
+
         Raises:
-            ValueError: A Clef judge has no URL.
+            ValueError: A Clef judge has no URL, or a custom URL has no key
+                variable.
 
         Returns:
             The values with defaults filled in.
         """
         if not isinstance(value, dict) or value.get("kind") not in _DECISION_DEFAULTS:
             return value
+        given = {k: v for k, v in value.items() if v is not None}
         defaults = _DECISION_DEFAULTS[value["kind"]]
-        filled = {k: v for k, v in defaults.items() if v is not None} | value
+        if "base_url" in given and given["base_url"] != defaults["base_url"]:
+            defaults = {**defaults, "api_key_env": None}
+        filled = {k: v for k, v in defaults.items() if v is not None} | given
         if "base_url" not in filled:
             raise ValueError(
                 "a clef judge needs base_url, the Workers AI run URL for your account"
+            )
+        if "api_key_env" not in filled:
+            raise ValueError(
+                "a judge with its own base_url needs api_key_env naming its key"
             )
         return filled
 
@@ -249,6 +268,13 @@ def check_endpoint(base_url: str, api_key_env: str | None) -> None:
         raise ValueError("api_key_env must not name a KITARU_ variable")
     if url.scheme != "https" and url.hostname not in _LOCAL_HOSTS:
         raise ValueError("an API key is only sent over https to remote hosts")
+
+
+def _judge_kind(value: Any) -> str:
+    """Tell a decision judge (it has `kind`) from a chat-model judge."""
+    if isinstance(value, dict):
+        return "decision" if "kind" in value else "chat"
+    return "decision" if isinstance(value, DecisionJudge) else "chat"
 
 
 class ModelSwapParams(_Params):
@@ -297,7 +323,14 @@ class ModelSwapParams(_Params):
         gt=0,
         description="Traffic used for monthly projections; derived when omitted.",
     )
-    judge: DecisionJudge | Candidate | None = Field(
+    judge: (
+        Annotated[
+            Annotated[DecisionJudge, Tag("decision")]
+            | Annotated[Candidate, Tag("chat")],
+            Discriminator(_judge_kind),
+        ]
+        | None
+    ) = Field(
         default=None,
         description=(
             "Optional judge asked whether differing answers or arguments are "

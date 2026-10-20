@@ -86,10 +86,9 @@ def build_request(
         return f"{root}/decisions", body
     body = {
         "state": {"recorded_answer": recorded, "candidate_answer": candidate},
+        "model": judge.model,
         "questions": {QUESTION: {"type": "noul", "instructions": INSTRUCTIONS}},
     }
-    if judge.model is not None:
-        body["model"] = judge.model
     # Clef's Workers AI URL already names the model; Jev takes a path.
     url = f"{root}/v1/systemone" if judge.kind == "jev" else root
     return url, body
@@ -102,8 +101,13 @@ async def decide(
     api_key: str,
     recorded: str,
     candidate: str,
+    estimated_tokens: int,
 ) -> Decision:
-    """Ask the decision model and read the probability that answers match."""
+    """Ask the decision model and read the probability that answers match.
+
+    `estimated_tokens` stands in for usage the service does not report, so
+    the spend cap still counts the call.
+    """
     url, body = build_request(judge, recorded, candidate)
     try:
         response = await client.post(
@@ -123,17 +127,17 @@ async def decide(
         payload = response.json()
     except ValueError:
         return Decision(None, Usage(), "http_error")
-    return read_decision(payload)
+    return read_decision(payload, estimated_tokens=estimated_tokens)
 
 
-def read_decision(payload: Any) -> Decision:
+def read_decision(payload: Any, *, estimated_tokens: int = 0) -> Decision:
     """Read the probability from any supported response shape."""
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or payload.get("success") is False:
         return Decision(None, Usage(), "http_error")
     # Workers AI wraps the model output in a `result` envelope.
     if "answers" not in payload and isinstance(payload.get("result"), dict):
         payload = payload["result"]
-    usage = _read_usage(payload.get("usage"))
+    usage = _read_usage(payload.get("usage"), estimated_tokens)
     answer = _find_answer(payload.get("answers"))
     if isinstance(answer, dict) and answer.get("type") == "refusal":
         return Decision(None, usage, "refusal")
@@ -176,15 +180,21 @@ def _read_probability(answer: Any) -> float | None:
     return float(value) if 0 <= value <= 1 else None
 
 
-def _read_usage(usage: Any) -> Usage:
+def _read_usage(usage: Any, estimated_tokens: int) -> Usage:
+    """Read input tokens, falling back to the estimate when none are reported.
+
+    TypeSafe reports `billing_units` and may leave out token counts.
+    """
     if not isinstance(usage, dict):
-        return Usage()
+        return Usage(input_tokens=estimated_tokens)
     tokens = next(
         (
             usage[key]
-            for key in ("input_tokens", "prompt_tokens", "input")
-            if isinstance(usage.get(key), int)
+            for key in ("input_tokens", "prompt_tokens", "input", "billing_units")
+            if isinstance(usage.get(key), int) and not isinstance(usage.get(key), bool)
         ),
-        0,
+        None,
     )
-    return Usage(input_tokens=tokens)
+    if tokens is None:
+        return Usage(input_tokens=estimated_tokens)
+    return Usage(input_tokens=max(tokens, 0))

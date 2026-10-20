@@ -52,11 +52,15 @@ def test_jev_request_uses_system_one() -> None:
         "candidate_answer": "escalate()",
     }
     assert body["questions"][QUESTION]["type"] == "noul"
-    assert "model" not in body
+    assert body["model"] == "jev-latest"
 
 
 def test_clef_request_posts_to_the_workers_ai_url() -> None:
-    url, body = build_request(judge(kind="clef", base_url=CLEF_URL), "a", "b")
+    url, body = build_request(
+        judge(kind="clef", base_url=CLEF_URL, api_key_env="CLOUDFLARE_API_TOKEN"),
+        "a",
+        "b",
+    )
 
     assert url == CLEF_URL
     assert body["model"] == "clef"
@@ -77,6 +81,37 @@ def test_openai_decisions_request_uses_a_predicate() -> None:
     ]
     # Answers are quoted so they read as data.
     assert '"say \\"hi\\""' in body["input"]
+
+
+def test_a_custom_url_needs_an_explicit_key_variable() -> None:
+    with pytest.raises(ValidationError, match="api_key_env"):
+        judge(kind="openai_decisions", base_url="https://proxy.example/v1")
+    with pytest.raises(ValidationError, match="api_key_env"):
+        judge(kind="clef", base_url=CLEF_URL)
+
+    assert (
+        judge(
+            kind="openai_decisions",
+            base_url="https://proxy.example/v1",
+            api_key_env="K",
+        ).api_key_env
+        == "K"
+    )
+
+
+def test_explicit_nulls_keep_the_defaults() -> None:
+    assert judge(kind="openai_decisions", model=None).model == "gpt-6-luna"
+    assert judge(kind="jev", base_url=None).base_url == "https://api.typesafe.ai"
+
+
+def test_judge_errors_name_one_judge_type() -> None:
+    with pytest.raises(ValidationError) as error:
+        ModelSwapParams.model_validate(
+            {"candidates": [CHEAP], "judge": {"kind": "nope", "name": "x"}}
+        )
+
+    assert "judge.decision" in str(error.value)
+    assert "judge.chat" not in str(error.value)
 
 
 def test_clef_needs_an_account_url() -> None:
@@ -119,6 +154,33 @@ def test_reads_every_supported_answer_shape(
 
     assert decision.probability == probability
     assert decision.failure == failure
+
+
+def test_missing_usage_is_charged_at_the_estimate() -> None:
+    decision = read_decision(
+        {"answers": {QUESTION: {"noul": 0.9}}}, estimated_tokens=321
+    )
+
+    assert decision.usage.input_tokens == 321
+
+
+def test_billing_units_and_negative_counts() -> None:
+    billed = read_decision(
+        {"answers": {QUESTION: 0.9}, "usage": {"billing_units": 40}},
+        estimated_tokens=999,
+    )
+    negative = read_decision(
+        {"answers": {QUESTION: 0.9}, "usage": {"input_tokens": -50}}
+    )
+
+    assert billed.usage.input_tokens == 40
+    assert negative.usage.input_tokens == 0
+
+
+def test_a_cloudflare_error_envelope_is_an_error() -> None:
+    decision = read_decision({"success": False, "errors": [{"message": "no"}]})
+
+    assert decision.failure == "http_error"
 
 
 def test_usage_is_read_when_reported() -> None:
@@ -220,7 +282,7 @@ async def test_jev_judge_end_to_end(
 
     assert len(server.judge_requests) == 3
     assert server.judge_headers[0]["authorization"] == "Bearer ts-test"
-    assert result["judge"] == "jev"
+    assert result["judge"] == "jev (jev-latest)"
     assert candidate["judged_equivalent"] == 1
     assert candidate["judged_different"] == 1
     assert candidate["judged_unsure"] == 1
@@ -257,4 +319,32 @@ async def test_a_judge_failure_leaves_the_verdict_open(
     result = report({insight.name: insight for insight in insights})
 
     assert {d["judge_probability"] for d in result["disagreements"]} == {None}
+    assert {d["judge_failure"] for d in result["disagreements"]} == {"http_error"}
+    assert result["candidates"][0]["judge_failures"] == {"http_error": 2}
     assert result["candidates"][0]["agreement"] == {"same_tool_different_args": 2}
+
+
+async def test_the_judge_does_not_choose_which_disagreements_are_kept(
+    stub_client: StubClient,
+    quickstart_sessions: list[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-test")
+    params = {
+        "candidates": [CHEAP | {"model": "changed"}],
+        "max_calls": 4,
+        "max_disagreements": 2,
+    }
+
+    async def kept(judged: bool) -> set[str]:
+        server = DecisionServer(quickstart_sessions, [0.99, 0.99, 0.01, 0.01])
+        extra = {"judge": {"kind": "jev"}} if judged else {}
+        insights = await run_model_swap(
+            list(stub_client._by_id),
+            ModelSwapParams.model_validate(params | extra),
+            transport=server.transport(),
+        )
+        result = report({insight.name: insight for insight in insights})
+        return {d["node_id"] for d in result["disagreements"]}
+
+    assert await kept(judged=True) == await kept(judged=False)

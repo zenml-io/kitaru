@@ -164,15 +164,15 @@ A spend cap needs a price for every candidate; the analyzer refuses to start whe
 
 ## Judge the differences quickly
 
-Every disagreement still needs a human verdict to say which answer is right, and agents whose answers are free text can produce many. A judge reads each disagreement first and rules whether the two answers are equivalent. Its ruling is shown next to strict agreement and orders the disagreements for review: answers it found different come first, then unsure ones, then likely equivalent ones. It never replaces your verdict.
+Every disagreement still needs a human verdict to say which answer is right, and agents whose answers are free text can produce many. A judge reads each disagreement where a candidate called the same tool with different arguments, or gave a different text answer, and rules whether the two answers are equivalent. Different tool choices are not judged. Its ruling is shown next to strict agreement and orders the disagreements for review within each group: answers it found different first, then unsure or not judged ones, then likely equivalent ones. It never replaces your verdict, and it does not choose which disagreements the report keeps when `max_disagreements` cuts the list.
 
 A decision model suits this job: it answers a fixed yes-or-no question with a probability instead of generating text, so it is fast and charges only for input. Three services are supported:
 
 | `kind` | Service | Defaults |
 |---|---|---|
-| `jev` | TypeSafe Jev, the System One API | `https://api.typesafe.ai`, key in `TYPESAFE_API_KEY` |
-| `clef` | Cloudflare Clef on Workers AI, the same API | `base_url` required: `https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/run/@cf/cloudflare/clef`; key in `CLOUDFLARE_API_TOKEN`; model `clef` (or `clef-flash`) |
-| `openai_decisions` | OpenAI Decisions API (public beta) | `https://api.openai.com/v1`, key in `OPENAI_API_KEY`, model `gpt-6-luna` |
+| `jev` | TypeSafe Jev | `https://api.typesafe.ai`, key in `TYPESAFE_API_KEY`, model `jev-latest`. Access may require early access from TypeSafe. |
+| `clef` | Cloudflare Clef on Workers AI, with the same request shape | No defaults for the URL or key: set `base_url` to `https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/run/@cf/cloudflare/clef` and `api_key_env` (for example `CLOUDFLARE_API_TOKEN`). Model `clef`, or `clef-flash`. |
+| `openai_decisions` | OpenAI Decisions API (public beta) | `https://api.openai.com/v1`, key in `OPENAI_API_KEY`, model `gpt-6-luna`. |
 
 ```json
 "judge": {
@@ -182,7 +182,9 @@ A decision model suits this job: it answers a fixed yes-or-no question with a pr
 }
 ```
 
-The judge returns the probability that the answers are equivalent. At or above `equivalent_at` (default `0.8`) the ruling is "equivalent", at or below one minus it "different", and in between "unsure"; the report shows the probability next to each disagreement and counts the three rulings per candidate. A failed or refused judge request leaves the ruling open and does not affect the comparison. Decision services are not in the bundled price table, so pass `price` (check the service's current pricing) when you set `max_spend_usd`. `base_url`, `model`, `api_key_env`, and `timeout_seconds` override the defaults, and the same URL and key rules apply as for candidates.
+The judge returns the probability that the answers are equivalent. At or above `equivalent_at` (above 0.5, up to 1; default `0.8`) the ruling is "equivalent", at or below one minus it "different", and in between "unsure". The report shows the probability next to each disagreement and counts the rulings per candidate, along with judge requests that failed (for example a timeout, a refusal, or an unreadable answer); a failed request leaves that ruling open. `base_url`, `model`, `api_key_env`, and `timeout_seconds` override the defaults. When you set your own `base_url`, also name `api_key_env`, so a key is never sent to a custom URL without you choosing it; the same URL and key rules apply as for candidates.
+
+The judge's key must be in the analyzer's provider connection or the worker environment (see [Keys](#keys)); a missing key stops the analysis before any call is sent. Judge requests count against `max_spend_usd` and `time_budget_seconds` like candidate calls, but the dry-run estimate covers candidates only, so leave headroom in the cap. Decision services are not in the bundled price table, so pass `price` (check the service's current pricing) when you set `max_spend_usd`. When a service does not report token usage, the request is charged at its estimate.
 
 Decision models trail large models on judgments that need several reasoning steps, and text inside a recorded answer can sway them, so read their rulings as a way to order your review, not as verdicts. A candidate-shaped chat model can still be the judge instead: give `name`, `base_url`, `model`, and `api_key_env` without `kind`.
 

@@ -103,7 +103,7 @@ def _compare(candidates: list[dict[str, Any]], *, judged: bool) -> str:
             "Model",
             "Tool choice",
             "Exact match",
-            "Judged equivalent",
+            "Judge: equivalent / different / unsure",
             "Failures",
             "Cost per call",
             "Per month",
@@ -117,7 +117,17 @@ def _compare(candidates: list[dict[str, Any]], *, judged: bool) -> str:
                 c["model"],
                 _pct(c["tool_choice_rate"]),
                 _pct(c["agreement_rate"]),
-                c["judged_equivalent"] if judged else None,
+                (
+                    f"{c['judged_equivalent']} / {c['judged_different']} / "
+                    f"{c['judged_unsure']}"
+                    + (
+                        f" ({sum(c['judge_failures'].values())} failed)"
+                        if c["judge_failures"]
+                        else ""
+                    )
+                )
+                if judged
+                else None,
                 _pct(c["failure_rate"]),
                 _usd(c["cost"]["per_call_usd"]),
                 _usd(c["cost"]["per_month_usd"]),
@@ -253,7 +263,11 @@ def _disagreements(report: dict[str, Any], dashboard_url: str | None) -> str:
             if dashboard_url
             else f"session {session}"
         )
-        verdict = _judge_text(item["judge_equivalent"], item.get("judge_probability"))
+        verdict = _judge_text(
+            item["judge_equivalent"],
+            item.get("judge_probability"),
+            item.get("judge_failure"),
+        )
         parts.append(
             '<div class="card">'
             f"<p><strong>{_e(item['candidate'])}</strong>: "
@@ -266,12 +280,17 @@ def _disagreements(report: dict[str, Any], dashboard_url: str | None) -> str:
     return "".join(parts)
 
 
-def _judge_text(equivalent: bool | None, probability: float | None) -> str:
+def _judge_text(
+    equivalent: bool | None, probability: float | None, failure: str | None
+) -> str:
     """Describe the judge's ruling, with its probability when it gave one."""
+    if failure is not None:
+        return f" · judge failed ({failure})"
     if equivalent is None and probability is None:
         return ""
     label = {True: "equivalent", False: "different", None: "unsure"}[equivalent]
-    shown = "" if probability is None else f" (p={probability:.2f})"
+    # Three decimals, as stored, so the number never contradicts the label.
+    shown = "" if probability is None else f" (p={probability:.3f})"
     return f" · judge: {label}{shown}"
 
 

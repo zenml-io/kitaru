@@ -68,6 +68,7 @@ class CallResult:
     cost: Decimal | None = None
     judge_equivalent: bool | None = None
     judge_probability: float | None = None
+    judge_failure: str | None = None
 
 
 class Budget:
@@ -177,7 +178,7 @@ class Runner:
         if reply.failure is not None:
             return CallResult(call, candidate.name, reply=reply, cost=cost)
         agreement = compare(call.request.recorded, reply)
-        judged: tuple[bool | None, float | None] = (None, None)
+        judged: tuple[bool | None, float | None, str | None] = (None, None, None)
         if self._judge is not None and agreement in _JUDGED:
             judged = await self._ask_judge(client, call.request.recorded, reply)
         return CallResult(
@@ -188,6 +189,7 @@ class Runner:
             cost=cost,
             judge_equivalent=judged[0],
             judge_probability=judged[1],
+            judge_failure=judged[2],
         )
 
     async def _ask_judge(
@@ -195,11 +197,12 @@ class Runner:
         client: httpx.AsyncClient,
         recorded: RecordedOutcome,
         reply: CandidateReply,
-    ) -> tuple[bool | None, float | None]:
+    ) -> tuple[bool | None, float | None, str | None]:
         """Ask the judge whether two answers are equivalent.
 
-        Returns the verdict (None when unsure or unavailable) and, for
-        decision models, the probability that the answers are equivalent.
+        Returns the ruling (None when unsure or unavailable), the probability
+        that the answers are equivalent (decision models only), and why the
+        judge gave no ruling when it failed.
         """
         judge = self._judge
         assert judge is not None
@@ -207,23 +210,26 @@ class Runner:
         if isinstance(judge, DecisionJudge):
             # Decision judges always have a key; reading it raised otherwise.
             decision_key = self._judge_key or ""
+            estimated = (len(recorded_text) + len(candidate_text)) // 4 + 100
             decided = await self._within_budget(
                 self._judge_price,
-                Usage(
-                    input_tokens=(len(recorded_text) + len(candidate_text)) // 4 + 100
-                ),
+                Usage(input_tokens=estimated),
                 lambda: decide(
                     client,
                     judge,
                     api_key=decision_key,
                     recorded=recorded_text,
                     candidate=candidate_text,
+                    estimated_tokens=estimated,
                 ),
             )
             if isinstance(decided, str):
-                return None, None
-            probability = decided[0].probability
-            return classify(probability, judge.equivalent_at), probability
+                return None, None, decided
+            decision = decided[0]
+            if decision.failure is not None:
+                return None, None, decision.failure
+            ruling = classify(decision.probability, judge.equivalent_at)
+            return ruling, decision.probability, None
         prompt = (
             f"<recorded_answer>\n{recorded_text}\n</recorded_answer>\n"
             f"<candidate_answer>\n{candidate_text}\n</candidate_answer>"
@@ -246,14 +252,18 @@ class Runner:
                 tools=[],
             ),
         )
-        if isinstance(sent, str) or sent[0].failure is not None or not sent[0].text:
-            return None, None
+        if isinstance(sent, str):
+            return None, None, sent
+        if sent[0].failure is not None or not sent[0].text:
+            return None, None, sent[0].failure or "empty_reply"
         try:
             value = json.loads(sent[0].text.strip().removeprefix("```json").strip("`"))
         except json.JSONDecodeError:
-            return None, None
+            return None, None, "unreadable_answer"
         equivalent = value.get("equivalent") if isinstance(value, dict) else None
-        return (equivalent if isinstance(equivalent, bool) else None), None
+        if not isinstance(equivalent, bool):
+            return None, None, "unreadable_answer"
+        return equivalent, None, None
 
     async def _within_budget(
         self,

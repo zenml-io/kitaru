@@ -120,10 +120,14 @@ def build_report(
         for result in results
         if result.agreement is not None and result.agreement not in AGREEING
     ]
-    # Within each group, answers the judge found different come first, then
-    # unsure ones, then likely equivalent ones, so review starts where a
-    # verdict matters most.
-    disagreements.sort(
+    # Which disagreements are kept must not depend on the judge, whose rulings
+    # text inside an answer can sway, so the cap is applied in a fixed order
+    # first. Only the kept ones are then ordered for review within each group:
+    # answers the judge found different first, then unsure or not judged ones,
+    # then likely equivalent ones.
+    disagreements.sort(key=lambda item: (item["group"], item["candidate"]))
+    kept = disagreements[: params.max_disagreements]
+    kept.sort(
         key=lambda item: (
             item["group"],
             _REVIEW_ORDER[item["judge_equivalent"]],
@@ -148,7 +152,7 @@ def build_report(
         "recorded": _recorded_report(sampled, volume, collection.group_seen),
         "candidates": candidates,
         "best_for": [] if params.dry_run else _best_for(candidates),
-        "disagreements": disagreements[: params.max_disagreements],
+        "disagreements": kept,
         "disagreements_total": len(disagreements),
         "spent_usd": _usd(spent),
         "max_spend_usd": _usd(params.max_spend_usd),
@@ -329,10 +333,11 @@ def _candidate_report(
         "judged_equivalent": sum(r.judge_equivalent is True for r in headline),
         "judged_different": sum(r.judge_equivalent is False for r in headline),
         "judged_unsure": sum(
-            r.judge_equivalent is None
-            and r.agreement not in AGREEING
-            and r.judge_probability is not None
+            r.judge_equivalent is None and r.judge_probability is not None
             for r in headline
+        ),
+        "judge_failures": dict(
+            Counter(r.judge_failure for r in headline if r.judge_failure).most_common()
         ),
         "inferred_schema_agreement": dict(Counter(r.agreement for r in inferred)),
         "failures": dict(failures.most_common()),
@@ -517,6 +522,7 @@ def _disagreement(result: CallResult) -> dict[str, Any]:
             if result.judge_probability is None
             else round(result.judge_probability, 3)
         ),
+        "judge_failure": result.judge_failure,
     }
 
 
