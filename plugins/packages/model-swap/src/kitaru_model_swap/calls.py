@@ -142,18 +142,24 @@ def estimate_usage(call: RecordedCall, max_tokens: int | None) -> Usage:
     return Usage(input_tokens=call.estimated_input_tokens, output_tokens=output_tokens)
 
 
-def reservation_usage(call: RecordedCall, max_tokens: int | None) -> Usage:
+def reservation_usage(
+    call: RecordedCall, max_tokens: int | None, *, strict: bool = False
+) -> Usage:
     """Estimate a replay's tokens on the high side, for the spend cap.
 
-    A candidate can produce far more output than the recorded model, for
-    example when it reasons and the recorded model did not, so the
-    reservation assumes several times the recorded output, but never more
-    than the candidate's output limit.
+    With `strict` and an output limit, the reservation is the full limit, so
+    no reply can cost more than reserved. Otherwise a candidate can still
+    produce far more output than the recorded model, for example when it
+    reasons and the recorded model did not, so the reservation assumes
+    several times the recorded output, never more than the limit.
     """
-    recorded = call.usage.output_tokens or _DEFAULT_OUTPUT_TOKENS
-    output_tokens = max(recorded * _RESERVE_OUTPUT_FACTOR, _MIN_RESERVED_OUTPUT)
-    if max_tokens is not None:
-        output_tokens = min(output_tokens, max_tokens)
+    if strict and max_tokens is not None:
+        output_tokens = max_tokens
+    else:
+        recorded = call.usage.output_tokens or _DEFAULT_OUTPUT_TOKENS
+        output_tokens = max(recorded * _RESERVE_OUTPUT_FACTOR, _MIN_RESERVED_OUTPUT)
+        if max_tokens is not None:
+            output_tokens = min(output_tokens, max_tokens)
     return Usage(input_tokens=call.estimated_input_tokens, output_tokens=output_tokens)
 
 

@@ -13,6 +13,7 @@
 #  limitations under the License.
 """End-to-end tests of the analyzer on the quickstart traces."""
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
@@ -31,7 +32,6 @@ from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from kitaru.cli.insight_report import render_insight_report
 from kitaru_model_swap import REPORT_METADATA_KEY, SUMMARY_INSIGHT_NAME
 from kitaru_model_swap import analyzer as analyzer_module
-from kitaru_model_swap import runner as runner_module
 from kitaru_model_swap.analyzer import analyze_model_swap, run_model_swap
 from kitaru_model_swap.calls import Collection
 from kitaru_model_swap.params import ModelSwapParams
@@ -189,24 +189,27 @@ async def test_spend_cap_requires_known_prices(
 
 
 async def test_time_budget_stops_cleanly(
-    stub_client: StubClient,
-    server: MockOpenAIServer,
-    monkeypatch: pytest.MonkeyPatch,
+    stub_client: StubClient, quickstart_sessions: list[SessionWithNodesResponse]
 ) -> None:
-    clock = iter(range(0, 10_000, 100))
-    monkeypatch.setattr(runner_module.time, "monotonic", lambda: next(clock))
+    replay = mirror(quickstart_sessions)
 
-    insights = await run(
-        stub_client,
-        server,
-        candidates=[REFERENCE],
-        concurrency=1,
-        time_budget_seconds=250,
+    class SlowServer(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(0.05)
+            return replay(json.loads(request.content))
+
+    insights = await run_model_swap(
+        list(stub_client._by_id),
+        ModelSwapParams.model_validate(
+            {"candidates": [REFERENCE], "concurrency": 1, "time_budget_seconds": 0.4}
+        ),
+        transport=SlowServer(),
     )
-    result = report(insights)
+    result = report({insight.name: insight for insight in insights})
 
     assert result["stopped_early"] == "time_budget"
     assert result["candidates"][0]["calls_not_run"]["time_budget"] > 0
+    assert 0 < result["candidates"][0]["calls_sent"] < 33
 
 
 async def test_without_schemas_the_report_says_what_was_skipped(

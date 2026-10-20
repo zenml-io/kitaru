@@ -250,7 +250,11 @@ class Runner:
         """Send one call to one candidate unless a budget is exhausted."""
         sent = await self._within_budget(
             self._prices.get(candidate.name),
-            reservation_usage(call, candidate.provider_settings.max_tokens),
+            reservation_usage(
+                call,
+                candidate.provider_settings.max_tokens,
+                strict=self.budget.cap is not None,
+            ),
             lambda: send(
                 client,
                 candidate,
@@ -361,26 +365,39 @@ class Runner:
         """Reserve the estimated cost, make the request, and settle the cost.
 
         Returns why the request was not made, or was cut off, when a budget
-        runs out; a request cut off by the time budget is settled at no cost
-        because its usage is unknown.
+        runs out. A request cut off by the time budget is charged its
+        reservation, because the provider has usually billed it already.
         """
-        remaining = self._deadline - time.monotonic()
-        if remaining <= 0:
+        if time.monotonic() >= self._deadline:
             self.stopped_early = self.stopped_early or "time_budget"
             return "time_budget"
         reserved = _price_or_none(price, estimate) or Decimal(0)
-        if not await self.budget.reserve(reserved):
+        try:
+            # Waiting for other calls to settle must not outlast the deadline.
+            async with asyncio.timeout(self._deadline - time.monotonic()):
+                fits = await self.budget.reserve(reserved)
+        except TimeoutError:
+            fits = None
+        # A call that never started is not charged.
+        if fits is None or time.monotonic() >= self._deadline:
+            if fits:
+                await self.budget.settle(reserved, Decimal(0))
+            self.stopped_early = self.stopped_early or "time_budget"
+            return "time_budget"
+        if not fits:
             self.stopped_early = self.stopped_early or "max_spend"
             return "max_spend"
         try:
-            async with asyncio.timeout(max(self._deadline - time.monotonic(), 0)):
+            async with asyncio.timeout(self._deadline - time.monotonic()):
                 result = await request()
         except TimeoutError:
-            # The provider has usually billed a call already under way, so the
-            # reservation is kept as its cost.
             await self.budget.settle(reserved, reserved)
             self.stopped_early = self.stopped_early or "time_budget"
             return "time_budget"
+        except Exception:
+            # Release the reservation so calls waiting on the budget go on.
+            await self.budget.settle(reserved, Decimal(0))
+            raise
         cost = _price_or_none(price, result.usage)
         await self.budget.settle(reserved, cost or Decimal(0))
         return result, cost

@@ -459,3 +459,92 @@ async def test_fetching_stops_when_the_time_budget_runs_out(
 
     assert result["coverage"]["sessions_not_fetched"] > 0
     assert result["stopped_early"] == "time_budget"
+
+
+def test_a_capped_run_reserves_the_full_output_limit() -> None:
+    call = recorded_call("planner", "0")
+
+    assert reservation_usage(call, 64000, strict=True).output_tokens == 64000
+    assert reservation_usage(call, None, strict=True).output_tokens == 2048
+
+
+async def test_a_cap_that_cannot_fit_one_call_is_refused_up_front(
+    stub_client: StubClient,
+) -> None:
+    expensive = CHEAP | {
+        "price": {"input_per_mtok": "1", "output_per_mtok": "100"},
+        "provider_settings": {"max_tokens": 64000},
+    }
+
+    with pytest.raises(ValueError, match="max_tokens"):
+        await run(stub_client, ESCALATING, candidates=[expensive], max_spend_usd="1")
+
+
+async def test_waiting_past_the_deadline_is_not_charged(
+    quickstart_sessions: list[Any],
+) -> None:
+    params = ModelSwapParams.model_validate(
+        {"candidates": [CHEAP], "max_spend_usd": "1", "concurrency": 2}
+    )
+    collection = Collection(max_per_group=2)
+    for session in quickstart_sessions:
+        collection.add_session(session, params)
+    price = resolve_price(Candidate.model_validate(CHEAP))
+    runner = Runner(params, {"cheap-open-model": price}, transport=SlowTransport())
+    # The first call holds most of the budget, so the second waits for it.
+    await runner.budget.reserve(Decimal("0.99999"))
+
+    results = await runner.run(collection.calls[:2], deadline=time.monotonic() + 0.2)
+
+    assert {r.not_run for r in results} == {"time_budget"}
+
+
+class FailingTransport(httpx.AsyncBaseTransport):
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        raise RuntimeError("transport bug")
+
+
+async def test_an_unexpected_error_releases_its_reservation(
+    quickstart_sessions: list[Any],
+) -> None:
+    params = ModelSwapParams.model_validate(
+        {"candidates": [CHEAP], "max_spend_usd": "1"}
+    )
+    collection = Collection(max_per_group=1)
+    for session in quickstart_sessions:
+        collection.add_session(session, params)
+    price = resolve_price(Candidate.model_validate(CHEAP))
+    runner = Runner(params, {"cheap-open-model": price}, transport=FailingTransport())
+
+    with pytest.raises(RuntimeError):
+        await runner.run(collection.calls)
+
+    assert await runner.budget.reserve(Decimal("1"))
+
+
+def test_instructions_join_a_recorded_system_prompt() -> None:
+    recorded = node(
+        [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "hi"},
+        ],
+        "hello",
+    ).model_copy(
+        update={
+            "attributes": {"phoenix.attributes": {"gen_ai.system_instructions": "42"}}
+        }
+    )
+
+    result = build_replay_request(
+        recorded,
+        tool_schemas={},
+        tool_descriptions={},
+        use_recorded_tools=True,
+        infer_missing_schemas=False,
+    )
+
+    assert isinstance(result, ReplayRequest)
+    assert result.messages[:2] == [
+        {"role": "system", "content": "42"},
+        {"role": "system", "content": "You are helpful."},
+    ]

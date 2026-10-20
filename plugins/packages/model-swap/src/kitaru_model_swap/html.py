@@ -130,9 +130,8 @@ def _compare(candidates: list[dict[str, Any]], *, judged: bool) -> str:
                 if judged
                 else None,
                 _pct(c["failure_rate"]),
-                _usd(c["cost"]["per_call_usd"])
-                + ("" if c["cost_complete"] else " (partial)"),
-                _usd(c["cost"]["per_month_usd"]),
+                _usd(c["cost"]["per_call_usd"]) + _partial(c),
+                _usd(c["cost"]["per_month_usd"]) + _partial(c),
                 _seconds(c["latency_seconds"]["p50"]),
                 _seconds(c["latency_seconds"]["p95"]),
                 None
@@ -378,6 +377,12 @@ def _judge_text(
     # Three decimals, as stored, so the number never contradicts the label.
     shown = "" if probability is None else f" (p={probability:.3f})"
     return f" · judge: {label}{shown}"
+
+
+def _partial(candidate: dict[str, Any]) -> str:
+    """Mark a cost that misses a kind of call."""
+    known = candidate["cost"]["per_call_usd"] is not None
+    return " (partial)" if known and not candidate["cost_complete"] else ""
 
 
 def _table(headers: list[str], rows: list[list[Any]]) -> str:

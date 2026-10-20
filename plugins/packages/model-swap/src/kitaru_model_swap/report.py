@@ -391,8 +391,8 @@ def _candidate_report(
         "tokens_per_call": _mean_tokens([reply.usage for reply in replies]),
         "retries": sum(reply.attempts - 1 for reply in replies),
         "cost": _projection(weighted_per_call(answered_costs, weights), volume),
-        # A candidate that failed every call of some kind of call has no cost
-        # for it, so its per-call cost covers only the kinds it answered.
+        # A candidate with no answered call of some kind has no cost for it,
+        # so its per-call cost covers only the kinds it answered.
         "cost_complete": {(c.node_name, c.model) for c in sampled}
         <= {(call.node_name, call.model) for call, _ in answered_costs},
         "spent_usd": _usd(sum(spent, Decimal(0)) if spent else None),
@@ -744,7 +744,10 @@ def _cost_values(report: dict[str, Any]) -> list[CategoryValue]:
         else:
             amount = candidate["cost"][key]
         if amount is not None:
-            values.append(CategoryValue(label=candidate["name"], value=float(amount)))
+            label = candidate["name"]
+            if not report["dry_run"] and not candidate["cost_complete"]:
+                label += " (partial)"
+            values.append(CategoryValue(label=label, value=float(amount)))
     recorded = report["recorded"]["cost"][key]
     if recorded is not None and not report["dry_run"]:
         label = "Recorded"

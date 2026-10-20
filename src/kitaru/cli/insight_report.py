@@ -90,17 +90,14 @@ def render_insight_report(
     generated = (generated_at or datetime.now(UTC)).strftime("%Y-%m-%d %H:%M UTC")
     latest = _get_latest_per_name(insights)
     sections = _get_sections(latest)
-    hidden = {
-        (owner.analyzer_version_id, name)
-        for owner, section in sections
-        for name in section["covers"]
-    }
+    # A section may hide cards that analyzers wrote, never hand-made ones.
+    hidden = {name for _, section in sections for name in section["covers"]}
     owners = {owner.id for owner, _ in sections}
     body = [_strip_unsafe_tags(section["html"]) for _, section in sections]
     cards = [
         _insight_card(i)
         for i in latest
-        if i.id not in owners and (i.analyzer_version_id, i.name) not in hidden
+        if i.id not in owners and not (i.analyzer_version_id and i.name in hidden)
     ]
     if cards:
         heading = "<h2>Other insights</h2>" if body else ""
@@ -114,15 +111,16 @@ def render_insight_report(
 
 
 def _get_latest_per_name(insights: list[InsightResponse]) -> list[InsightResponse]:
-    """Return the newest insight per analyzer and name, oldest first.
+    """Return the newest analyzer insight per name, plus every hand-made one.
 
-    Rerunning an analyzer stores new insights under the same names, so only
-    the latest run of each is rendered. Different analyzers, and insights
-    created by hand, may reuse a name and are all kept.
+    Rerunning an analyzer, including after a new version of it is
+    registered, stores new insights under the same names, so only the latest
+    of each name is rendered. Insights created by hand may reuse a name and
+    are all kept.
     """
-    latest: dict[tuple[uuid.UUID, str], InsightResponse] = {}
+    latest: dict[str | uuid.UUID, InsightResponse] = {}
     for insight in sorted(insights, key=lambda item: item.created):
-        key = (insight.analyzer_version_id or insight.id, insight.name)
+        key = insight.name if insight.analyzer_version_id else insight.id
         latest.pop(key, None)
         latest[key] = insight
     return list(latest.values())
