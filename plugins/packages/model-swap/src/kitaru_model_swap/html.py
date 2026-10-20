@@ -253,10 +253,7 @@ def _disagreements(report: dict[str, Any], dashboard_url: str | None) -> str:
             if dashboard_url
             else f"session {session}"
         )
-        judge = item["judge_equivalent"]
-        verdict = (
-            "" if judge is None else f" · judge: {'' if judge else 'not '}equivalent"
-        )
+        verdict = _judge_text(item["judge_equivalent"], item.get("judge_probability"))
         parts.append(
             '<div class="card">'
             f"<p><strong>{_e(item['candidate'])}</strong>: "
@@ -267,6 +264,15 @@ def _disagreements(report: dict[str, Any], dashboard_url: str | None) -> str:
             "</div>"
         )
     return "".join(parts)
+
+
+def _judge_text(equivalent: bool | None, probability: float | None) -> str:
+    """Describe the judge's ruling, with its probability when it gave one."""
+    if equivalent is None and probability is None:
+        return ""
+    label = {True: "equivalent", False: "different", None: "unsure"}[equivalent]
+    shown = "" if probability is None else f" (p={probability:.2f})"
+    return f" · judge: {label}{shown}"
 
 
 def _table(headers: list[str], rows: list[list[Any]]) -> str:

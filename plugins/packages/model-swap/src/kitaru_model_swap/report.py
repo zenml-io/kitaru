@@ -36,7 +36,7 @@ from kitaru_model_swap.calls import Collection, RecordedCall, estimate_usage
 from kitaru_model_swap.compare import AGREEING, AGREEMENT_LABELS, field_matches
 from kitaru_model_swap.endpoint import Usage
 from kitaru_model_swap.html import render_section
-from kitaru_model_swap.params import Candidate, ModelSwapParams
+from kitaru_model_swap.params import Candidate, DecisionJudge, ModelSwapParams
 from kitaru_model_swap.pricing import ResolvedPrice, call_cost
 from kitaru_model_swap.runner import CallResult, NotRunReason, describe
 
@@ -44,6 +44,7 @@ REPORT_METADATA_KEY = "kitaru.model_swap/v1"
 REPORT_SECTION_KEY = "kitaru.report_section/v1"
 SUMMARY_INSIGHT_NAME = "model-swap-summary"
 _EXCERPT = 600
+_REVIEW_ORDER: dict[bool | None, int] = {False: 0, None: 1, True: 2}
 # A candidate failing more often than this is a setup problem, not a choice.
 _MAX_FAILURE_RATE = 0.2
 # Candidates this close to the best match count as behaving the same.
@@ -119,7 +120,16 @@ def build_report(
         for result in results
         if result.agreement is not None and result.agreement not in AGREEING
     ]
-    disagreements.sort(key=lambda item: (item["group"], item["candidate"]))
+    # Within each group, answers the judge found different come first, then
+    # unsure ones, then likely equivalent ones, so review starts where a
+    # verdict matters most.
+    disagreements.sort(
+        key=lambda item: (
+            item["group"],
+            _REVIEW_ORDER[item["judge_equivalent"]],
+            item["candidate"],
+        )
+    )
     coverage = _coverage(collection, sampled)
     return {
         "schema": 1,
@@ -143,7 +153,7 @@ def build_report(
         "spent_usd": _usd(spent),
         "max_spend_usd": _usd(params.max_spend_usd),
         "stopped_early": stopped_early,
-        "judge": params.judge.name if params.judge else None,
+        "judge": _judge_label(params),
         "notes": _notes(coverage),
     }
 
@@ -317,6 +327,13 @@ def _candidate_report(
         "agreement_rate": _rate(agreeing, len(headline)),
         "tool_choice_rate": _rate(same_tool, len(tool_calls)),
         "judged_equivalent": sum(r.judge_equivalent is True for r in headline),
+        "judged_different": sum(r.judge_equivalent is False for r in headline),
+        "judged_unsure": sum(
+            r.judge_equivalent is None
+            and r.agreement not in AGREEING
+            and r.judge_probability is not None
+            for r in headline
+        ),
         "inferred_schema_agreement": dict(Counter(r.agreement for r in inferred)),
         "failures": dict(failures.most_common()),
         "failure_examples": {
@@ -495,6 +512,11 @@ def _disagreement(result: CallResult) -> dict[str, Any]:
         "recorded": describe(result.call.request.recorded)[:_EXCERPT],
         "candidate_answer": describe(result.reply)[:_EXCERPT],
         "judge_equivalent": result.judge_equivalent,
+        "judge_probability": (
+            None
+            if result.judge_probability is None
+            else round(result.judge_probability, 3)
+        ),
     }
 
 
@@ -718,6 +740,14 @@ def render_markdown(report: dict[str, Any]) -> str:
     if report["notes"]:
         lines += ["", *(f"- {note}" for note in report["notes"])]
     return "\n".join(lines)
+
+
+def _judge_label(params: ModelSwapParams) -> str | None:
+    """Name the judge in the report."""
+    judge = params.judge
+    if isinstance(judge, DecisionJudge):
+        return judge.kind if judge.model is None else f"{judge.kind} ({judge.model})"
+    return None if judge is None else judge.name
 
 
 def _slug(name: str, used: set[str]) -> str:

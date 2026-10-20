@@ -14,6 +14,8 @@ It runs on your worker with your keys. It names the best candidate for each goal
 - cost per call, projected per session and per month at the import's observed traffic, using prices from the `price` parameter or the `genai-prices` table;
 - coverage: calls seen, sampled, replayable and skipped, with reasons.
 
+An optional judge rules whether differing answers are equivalent and orders them for review. It can be a decision model (TypeSafe Jev, Cloudflare Clef, or OpenAI's Decisions API) or an OpenAI-compatible chat model; it never replaces your verdict.
+
 A dry run (`"dry_run": true`) only estimates calls and spend, and `max_spend_usd` stops cleanly before the estimate would pass the cap. Recorded reasoning parts are not sent to candidates; the report says how many calls this affects.
 
 The `model-swap-summary` insight carries the full report as JSON under `kitaru.model_swap/v1` and a rendered HTML section under `kitaru.report_section/v1`. `kitaru insight report --import-id IMPORT_ID --out report.html` embeds that section in a self-contained HTML file. Session links point at the dashboard URL the server reports when the analysis runs.

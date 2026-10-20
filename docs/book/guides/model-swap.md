@@ -157,10 +157,34 @@ A spend cap needs a price for every candidate; the analyzer refuses to start whe
 | `use_recorded_tools` | `true` | Use tool definitions recorded on each call. |
 | `infer_missing_schemas` | `false` | Infer a loose schema from recorded arguments when no schema exists. |
 | `sessions_per_month` | derived | Traffic for monthly projections. Derived from the import's time span when it covers at least a day. |
-| `judge` | none | A candidate-shaped model that rules whether differing answers or arguments are equivalent. |
+| `judge` | none | A judge that rules whether differing answers or arguments are equivalent: a decision model (see [Judge the differences quickly](#judge-the-differences-quickly)) or a candidate-shaped chat model. |
 | `concurrency` | `4` | Requests in flight. |
 | `time_budget_seconds` | `600` | Counted from the start of the analyzer task, including fetching sessions. When it ends, the analyzer stops starting new calls and cuts off calls still running, so the analysis returns results before the analyzer task timeout. |
 | `max_disagreements` | `200` | Disagreements kept in the report. |
+
+## Judge the differences quickly
+
+Every disagreement still needs a human verdict to say which answer is right, and agents whose answers are free text can produce many. A judge reads each disagreement first and rules whether the two answers are equivalent. Its ruling is shown next to strict agreement and orders the disagreements for review: answers it found different come first, then unsure ones, then likely equivalent ones. It never replaces your verdict.
+
+A decision model suits this job: it answers a fixed yes-or-no question with a probability instead of generating text, so it is fast and charges only for input. Three services are supported:
+
+| `kind` | Service | Defaults |
+|---|---|---|
+| `jev` | TypeSafe Jev, the System One API | `https://api.typesafe.ai`, key in `TYPESAFE_API_KEY` |
+| `clef` | Cloudflare Clef on Workers AI, the same API | `base_url` required: `https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/run/@cf/cloudflare/clef`; key in `CLOUDFLARE_API_TOKEN`; model `clef` (or `clef-flash`) |
+| `openai_decisions` | OpenAI Decisions API (public beta) | `https://api.openai.com/v1`, key in `OPENAI_API_KEY`, model `gpt-6-luna` |
+
+```json
+"judge": {
+  "kind": "jev",
+  "equivalent_at": 0.8,
+  "price": {"input_per_mtok": "0.042", "output_per_mtok": "0"}
+}
+```
+
+The judge returns the probability that the answers are equivalent. At or above `equivalent_at` (default `0.8`) the ruling is "equivalent", at or below one minus it "different", and in between "unsure"; the report shows the probability next to each disagreement and counts the three rulings per candidate. A failed or refused judge request leaves the ruling open and does not affect the comparison. Decision services are not in the bundled price table, so pass `price` (check the service's current pricing) when you set `max_spend_usd`. `base_url`, `model`, `api_key_env`, and `timeout_seconds` override the defaults, and the same URL and key rules apply as for candidates.
+
+Decision models trail large models on judgments that need several reasoning steps, and text inside a recorded answer can sway them, so read their rulings as a way to order your review, not as verdicts. A candidate-shaped chat model can still be the judge instead: give `name`, `base_url`, `model`, and `api_key_env` without `kind`.
 
 ## Tool definitions
 

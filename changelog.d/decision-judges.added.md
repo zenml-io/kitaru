@@ -1,0 +1,1 @@
+- The `kitaru/model-swap` analyzer accepts decision models as its judge (TypeSafe Jev, Cloudflare Clef on Workers AI, and OpenAI's Decisions API). The judge's probability that a candidate's answer is equivalent to the recorded one is shown per disagreement and orders the disagreements for review, likely different answers first.

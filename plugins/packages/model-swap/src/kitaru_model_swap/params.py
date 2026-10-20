@@ -125,31 +125,130 @@ class Candidate(_Params):
     def _check_endpoint(self) -> Self:
         """Keep credentials out of URLs and off unencrypted remote connections.
 
-        Raises:
-            ValueError: The URL carries credentials or is not http(s), the key
-                variable is not a variable name or is a Kitaru variable, or a
-                key would be sent to a remote host over plain http.
-
         Returns:
             The validated candidate.
         """
-        url = urlsplit(self.base_url)
-        if url.scheme not in {"http", "https"} or not url.hostname:
-            raise ValueError("base_url must be an http(s) URL")
-        if url.username or url.password:
-            raise ValueError("base_url must not contain credentials")
-        if self.api_key_env is None:
-            return self
-        if not _ENV_NAME.match(self.api_key_env):
-            raise ValueError(
-                "api_key_env must name an environment variable, not hold a key"
-            )
-        # Kitaru variables hold the worker's own credentials for the server.
-        if self.api_key_env.upper().startswith("KITARU_"):
-            raise ValueError("api_key_env must not name a KITARU_ variable")
-        if url.scheme != "https" and url.hostname not in _LOCAL_HOSTS:
-            raise ValueError("an API key is only sent over https to remote hosts")
+        check_endpoint(self.base_url, self.api_key_env)
         return self
+
+
+DecisionService = Literal["jev", "clef", "openai_decisions"]
+
+# Where each decision service answers and which variable usually holds its
+# key. Clef runs per Cloudflare account, so its URL has no default.
+_DECISION_DEFAULTS: dict[str, dict[str, str | None]] = {
+    "jev": {
+        "base_url": "https://api.typesafe.ai",
+        "api_key_env": "TYPESAFE_API_KEY",
+        "model": None,
+    },
+    "clef": {
+        "base_url": None,
+        "api_key_env": "CLOUDFLARE_API_TOKEN",
+        "model": "clef",
+    },
+    "openai_decisions": {
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY",
+        "model": "gpt-6-luna",
+    },
+}
+
+
+class DecisionJudge(_Params):
+    """A decision model that rules whether two answers are equivalent.
+
+    Decision models return a probability for a fixed answer instead of
+    generating text, so they judge quickly and cheaply and say how sure
+    they are.
+    """
+
+    kind: DecisionService = Field(
+        description=(
+            "`jev` (TypeSafe), `clef` (Cloudflare Workers AI), or "
+            "`openai_decisions` (OpenAI Decisions API)."
+        )
+    )
+    base_url: str = Field(
+        description=(
+            "Service root. Defaults per kind; for `clef`, the Workers AI run URL "
+            "`https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/run/"
+            "@cf/cloudflare/clef`."
+        )
+    )
+    model: str | None = Field(default=None, description="Model; defaults per kind.")
+    api_key_env: str = Field(description="Variable holding the key; defaults per kind.")
+    equivalent_at: float = Field(
+        default=0.8,
+        gt=0.5,
+        le=1.0,
+        description=(
+            "Probability at or above which answers count as equivalent; at or "
+            "below one minus this they count as different, and in between as "
+            "unsure."
+        ),
+    )
+    price: Price | None = Field(
+        default=None, description="Token prices, needed with `max_spend_usd`."
+    )
+    timeout_seconds: float = Field(default=30, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_defaults(cls, value: Any) -> Any:
+        """Fill the URL, key variable and model the service usually uses.
+
+        Raises:
+            ValueError: A Clef judge has no URL.
+
+        Returns:
+            The values with defaults filled in.
+        """
+        if not isinstance(value, dict) or value.get("kind") not in _DECISION_DEFAULTS:
+            return value
+        defaults = _DECISION_DEFAULTS[value["kind"]]
+        filled = {k: v for k, v in defaults.items() if v is not None} | value
+        if "base_url" not in filled:
+            raise ValueError(
+                "a clef judge needs base_url, the Workers AI run URL for your account"
+            )
+        return filled
+
+    @model_validator(mode="after")
+    def _check_endpoint(self) -> Self:
+        """Apply the same URL and key rules as candidates.
+
+        Returns:
+            The validated judge.
+        """
+        check_endpoint(self.base_url, self.api_key_env)
+        return self
+
+
+def check_endpoint(base_url: str, api_key_env: str | None) -> None:
+    """Keep credentials out of URLs and off unencrypted remote connections.
+
+    Raises:
+        ValueError: The URL carries credentials or is not http(s), the key
+            variable is not a variable name or is a Kitaru variable, or a key
+            would be sent to a remote host over plain http.
+    """
+    url = urlsplit(base_url)
+    if url.scheme not in {"http", "https"} or not url.hostname:
+        raise ValueError("base_url must be an http(s) URL")
+    if url.username or url.password:
+        raise ValueError("base_url must not contain credentials")
+    if api_key_env is None:
+        return
+    if not _ENV_NAME.match(api_key_env):
+        raise ValueError(
+            "api_key_env must name an environment variable, not hold a key"
+        )
+    # Kitaru variables hold the worker's own credentials for the server.
+    if api_key_env.upper().startswith("KITARU_"):
+        raise ValueError("api_key_env must not name a KITARU_ variable")
+    if url.scheme != "https" and url.hostname not in _LOCAL_HOSTS:
+        raise ValueError("an API key is only sent over https to remote hosts")
 
 
 class ModelSwapParams(_Params):
@@ -198,11 +297,13 @@ class ModelSwapParams(_Params):
         gt=0,
         description="Traffic used for monthly projections; derived when omitted.",
     )
-    judge: Candidate | None = Field(
+    judge: DecisionJudge | Candidate | None = Field(
         default=None,
         description=(
-            "Optional model asked whether differing answers or arguments are "
-            "equivalent. Its verdicts are reported next to strict agreement."
+            "Optional judge asked whether differing answers or arguments are "
+            "equivalent: a decision model (`kind`) or an OpenAI-compatible chat "
+            "model. Its verdicts are reported next to strict agreement and "
+            "never replace the user's."
         ),
     )
     max_disagreements: int = Field(default=200, ge=0, le=500)

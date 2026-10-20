@@ -16,18 +16,20 @@
 import asyncio
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Literal, Protocol, TypeVar
 
 import httpx
 
 from kitaru.task.importer import gather_bounded
 from kitaru_model_swap.calls import RecordedCall, reservation_usage
 from kitaru_model_swap.compare import Agreement, compare
+from kitaru_model_swap.decisions import classify, decide, get_decision_key
 from kitaru_model_swap.endpoint import CandidateReply, Usage, get_api_key, send
 from kitaru_model_swap.normalize import RecordedOutcome
-from kitaru_model_swap.params import Candidate, ModelSwapParams
+from kitaru_model_swap.params import Candidate, DecisionJudge, ModelSwapParams
 from kitaru_model_swap.pricing import ResolvedPrice, call_cost
 
 NotRunReason = Literal["max_spend", "time_budget"]
@@ -46,6 +48,14 @@ _JUDGE_PROMPT = (
 _JUDGE_OUTPUT_TOKENS = 50
 
 
+class _Priced(Protocol):
+    @property
+    def usage(self) -> Usage: ...
+
+
+_R = TypeVar("_R", bound=_Priced)
+
+
 @dataclass(frozen=True)
 class CallResult:
     """What one candidate did with one recorded call."""
@@ -57,6 +67,7 @@ class CallResult:
     agreement: Agreement | None = None
     cost: Decimal | None = None
     judge_equivalent: bool | None = None
+    judge_probability: float | None = None
 
 
 class Budget:
@@ -98,20 +109,26 @@ class Runner:
         self._judge_price = judge_price
         self._transport = transport
         self._keys = {c.name: get_api_key(c) for c in params.candidates}
-        # The verdict is read from the reply text, whatever tool-call format
-        # the judge's endpoint uses for candidates.
-        self._judge = (
-            params.judge.model_copy(
+        judge = params.judge
+        self._judge: Candidate | DecisionJudge | None
+        self._judge_key: str | None
+        if isinstance(judge, Candidate):
+            # The verdict is read from the reply text, whatever tool-call
+            # format the judge's endpoint uses for candidates.
+            self._judge = judge.model_copy(
                 update={
-                    "provider_settings": params.judge.provider_settings.model_copy(
+                    "provider_settings": judge.provider_settings.model_copy(
                         update={"tool_call_format": "native"}
                     )
                 }
             )
-            if params.judge
-            else None
-        )
-        self._judge_key = get_api_key(params.judge) if params.judge else None
+            self._judge_key = get_api_key(judge)
+        elif judge is not None:
+            self._judge = judge
+            self._judge_key = get_decision_key(judge)
+        else:
+            self._judge = None
+            self._judge_key = None
         self.budget = Budget(params.max_spend_usd)
         self.stopped_early: NotRunReason | None = None
         self._deadline = 0.0
@@ -143,14 +160,16 @@ class Runner:
         self, client: httpx.AsyncClient, call: RecordedCall, candidate: Candidate
     ) -> CallResult:
         """Send one call to one candidate unless a budget is exhausted."""
-        sent = await self._send_within_budget(
-            client,
-            candidate,
-            price=self._prices.get(candidate.name),
-            api_key=self._keys[candidate.name],
-            estimate=reservation_usage(call, candidate.provider_settings.max_tokens),
-            messages=call.request.messages,
-            tools=call.request.tools,
+        sent = await self._within_budget(
+            self._prices.get(candidate.name),
+            reservation_usage(call, candidate.provider_settings.max_tokens),
+            lambda: send(
+                client,
+                candidate,
+                api_key=self._keys[candidate.name],
+                messages=call.request.messages,
+                tools=call.request.tools,
+            ),
         )
         if isinstance(sent, str):
             return CallResult(call, candidate.name, not_run=sent)
@@ -158,7 +177,7 @@ class Runner:
         if reply.failure is not None:
             return CallResult(call, candidate.name, reply=reply, cost=cost)
         agreement = compare(call.request.recorded, reply)
-        judged = None
+        judged: tuple[bool | None, float | None] = (None, None)
         if self._judge is not None and agreement in _JUDGED:
             judged = await self._ask_judge(client, call.request.recorded, reply)
         return CallResult(
@@ -167,7 +186,8 @@ class Runner:
             reply=reply,
             agreement=agreement,
             cost=cost,
-            judge_equivalent=judged,
+            judge_equivalent=judged[0],
+            judge_probability=judged[1],
         )
 
     async def _ask_judge(
@@ -175,53 +195,77 @@ class Runner:
         client: httpx.AsyncClient,
         recorded: RecordedOutcome,
         reply: CandidateReply,
-    ) -> bool | None:
-        """Ask the judge whether two answers are equivalent."""
-        assert self._judge is not None
+    ) -> tuple[bool | None, float | None]:
+        """Ask the judge whether two answers are equivalent.
+
+        Returns the verdict (None when unsure or unavailable) and, for
+        decision models, the probability that the answers are equivalent.
+        """
+        judge = self._judge
+        assert judge is not None
+        recorded_text, candidate_text = describe(recorded), describe(reply)
+        if isinstance(judge, DecisionJudge):
+            # Decision judges always have a key; reading it raised otherwise.
+            decision_key = self._judge_key or ""
+            decided = await self._within_budget(
+                self._judge_price,
+                Usage(
+                    input_tokens=(len(recorded_text) + len(candidate_text)) // 4 + 100
+                ),
+                lambda: decide(
+                    client,
+                    judge,
+                    api_key=decision_key,
+                    recorded=recorded_text,
+                    candidate=candidate_text,
+                ),
+            )
+            if isinstance(decided, str):
+                return None, None
+            probability = decided[0].probability
+            return classify(probability, judge.equivalent_at), probability
         prompt = (
-            f"<recorded_answer>\n{describe(recorded)}\n</recorded_answer>\n"
-            f"<candidate_answer>\n{describe(reply)}\n</candidate_answer>"
+            f"<recorded_answer>\n{recorded_text}\n</recorded_answer>\n"
+            f"<candidate_answer>\n{candidate_text}\n</candidate_answer>"
         )
-        sent = await self._send_within_budget(
-            client,
-            self._judge,
-            price=self._judge_price,
-            api_key=self._judge_key,
-            estimate=Usage(
+        key = self._judge_key
+        sent = await self._within_budget(
+            self._judge_price,
+            Usage(
                 input_tokens=(len(_JUDGE_PROMPT) + len(prompt)) // 4,
                 output_tokens=_JUDGE_OUTPUT_TOKENS,
             ),
-            messages=[
-                {"role": "system", "content": _JUDGE_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            tools=[],
+            lambda: send(
+                client,
+                judge,
+                api_key=key,
+                messages=[
+                    {"role": "system", "content": _JUDGE_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                tools=[],
+            ),
         )
         if isinstance(sent, str) or sent[0].failure is not None or not sent[0].text:
-            return None
+            return None, None
         try:
             value = json.loads(sent[0].text.strip().removeprefix("```json").strip("`"))
         except json.JSONDecodeError:
-            return None
+            return None, None
         equivalent = value.get("equivalent") if isinstance(value, dict) else None
-        return equivalent if isinstance(equivalent, bool) else None
+        return (equivalent if isinstance(equivalent, bool) else None), None
 
-    async def _send_within_budget(
+    async def _within_budget(
         self,
-        client: httpx.AsyncClient,
-        candidate: Candidate,
-        *,
         price: ResolvedPrice | None,
-        api_key: str | None,
         estimate: Usage,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-    ) -> tuple[CandidateReply, Decimal | None] | NotRunReason:
-        """Reserve the estimated cost, send, and settle the actual cost.
+        request: Callable[[], Awaitable[_R]],
+    ) -> tuple[_R, Decimal | None] | NotRunReason:
+        """Reserve the estimated cost, make the request, and settle the cost.
 
-        Returns why the call was not sent, or was cut off, when a budget runs
-        out; a call cut off by the time budget is settled at no cost because
-        its usage is unknown.
+        Returns why the request was not made, or was cut off, when a budget
+        runs out; a request cut off by the time budget is settled at no cost
+        because its usage is unknown.
         """
         remaining = self._deadline - time.monotonic()
         if remaining <= 0:
@@ -233,16 +277,14 @@ class Runner:
             return "max_spend"
         try:
             async with asyncio.timeout(remaining):
-                reply = await send(
-                    client, candidate, api_key=api_key, messages=messages, tools=tools
-                )
+                result = await request()
         except TimeoutError:
             self.budget.settle(reserved, Decimal(0))
             self.stopped_early = self.stopped_early or "time_budget"
             return "time_budget"
-        cost = _price_or_none(price, reply.usage)
+        cost = _price_or_none(price, result.usage)
         self.budget.settle(reserved, cost or Decimal(0))
-        return reply, cost
+        return result, cost
 
 
 def _price_or_none(price: ResolvedPrice | None, usage: Usage) -> Decimal | None:

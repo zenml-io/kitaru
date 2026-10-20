@@ -27,8 +27,8 @@ from kitaru.client.dashboard_urls import get_dashboard_base_url
 from kitaru.client.exceptions import KitaruClientError
 from kitaru.task.importer import stream_bounded
 from kitaru_model_swap.calls import Collection, sample_calls
-from kitaru_model_swap.params import ModelSwapParams
-from kitaru_model_swap.pricing import resolve_price
+from kitaru_model_swap.params import Candidate, ModelSwapParams
+from kitaru_model_swap.pricing import ResolvedPrice, resolve_price
 from kitaru_model_swap.report import build_insights, build_report
 from kitaru_model_swap.runner import Runner
 
@@ -67,11 +67,11 @@ async def run_model_swap(
     # before the task timeout however large the import is.
     deadline = time.monotonic() + params.time_budget_seconds
     prices = {c.name: resolve_price(c) for c in params.candidates}
-    judge_price = resolve_price(params.judge) if params.judge else None
+    judge_price = _get_judge_price(params)
     if params.max_spend_usd is not None:
         unpriced = [name for name, price in prices.items() if price is None]
         if params.judge is not None and judge_price is None:
-            unpriced.append(f"judge {params.judge.name}")
+            unpriced.append("the judge")
         if unpriced:
             raise ValueError(
                 "max_spend_usd needs a price for every model; set `price` on: "
@@ -104,6 +104,16 @@ async def run_model_swap(
         stopped_early=stopped_early,
     )
     return build_insights(report, dashboard_url=dashboard_url)
+
+
+def _get_judge_price(params: ModelSwapParams) -> ResolvedPrice | None:
+    """Price the judge; decision services are not in the bundled table."""
+    judge = params.judge
+    if isinstance(judge, Candidate):
+        return resolve_price(judge)
+    if judge is not None and judge.price is not None:
+        return ResolvedPrice(judge.price, "params")
+    return None
 
 
 async def _get_dashboard_url(client: KitaruAPIClient) -> str | None:
