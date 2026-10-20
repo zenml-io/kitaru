@@ -89,6 +89,22 @@ class ProviderSettings(_Params):
     )
 
 
+OriginField = Literal["lab", "lab_country", "host", "host_region"]
+
+
+class Origin(_Params):
+    """Where a model comes from and where it runs, as the user describes it."""
+
+    lab: str | None = Field(default=None, description="Lab that trained it.")
+    lab_country: str | None = Field(
+        default=None, description="Country of the lab, for example `US` or `CN`."
+    )
+    host: str | None = Field(default=None, description="Provider that serves it.")
+    host_region: str | None = Field(
+        default=None, description="Where it is served, for example `US` or `EU`."
+    )
+
+
 class Candidate(_Params):
     """One OpenAI-compatible model to send recorded calls to."""
 
@@ -118,6 +134,10 @@ class Candidate(_Params):
             "Whether the model's weights are open, so it can be run by any "
             "provider or on your own hardware."
         ),
+    )
+    origin: Origin | None = Field(
+        default=None,
+        description="Lab and hosting details, for provenance rules.",
     )
     price: Price | None = Field(
         default=None, description="Token prices; looked up when omitted."
@@ -365,6 +385,40 @@ class ModelSwapParams(_Params):
         ),
     )
     max_disagreements: int = Field(default=200, ge=0, le=500)
+    repeats: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        description=(
+            "Times each call is sent to each candidate. Above 1, the report "
+            "shows how often any and all attempts match, to read noise."
+        ),
+    )
+    excluded_origins: dict[OriginField, list[str]] = Field(
+        default_factory=dict,
+        description=(
+            "Origins a candidate must not have, for example "
+            '`{"lab_country": ["CN"]}`. Excluded candidates are still '
+            "compared but never recommended."
+        ),
+    )
+
+    def is_excluded(self, candidate: Candidate) -> bool:
+        """Tell whether a candidate's declared origin is excluded."""
+        origin = candidate.origin
+        if origin is None:
+            return False
+        values: dict[str, str | None] = {
+            "lab": origin.lab,
+            "lab_country": origin.lab_country,
+            "host": origin.host,
+            "host_region": origin.host_region,
+        }
+        return any(
+            (value := values[field]) is not None
+            and value.casefold() in {item.casefold() for item in excluded}
+            for field, excluded in self.excluded_origins.items()
+        )
 
     @model_validator(mode="after")
     def _check_candidates(self) -> Self:

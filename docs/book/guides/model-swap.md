@@ -64,6 +64,7 @@ Each candidate is any endpoint that speaks the OpenAI chat-completions API:
 | `api_key_env` | Name of the environment variable holding the API key. Omit it for endpoints without authentication, such as a local Ollama. |
 | `reference` | Mark the model your agent uses today. At most one candidate can be the reference. It is compared like any other candidate, and its agreement with its own recording shows how much answers vary from run to run, the noise floor for every other candidate. |
 | `open_weights` | `true` for open-weight models you could run with any provider or on your own hardware. Shown in the comparison and used for **Best open model**. |
+| `origin` | Where the model comes from and runs: `lab`, `lab_country`, `host`, `host_region`, as you declare them. Shown in the comparison and used by `excluded_origins`. |
 | `price` | `input_per_mtok`, `output_per_mtok`, and optional `cached_input_per_mtok`, in USD per million tokens. When omitted, the price comes from the bundled [genai-prices](https://github.com/pydantic/genai-prices) table, and the report names the table version. |
 | `price_provider` | Provider id for that lookup, such as `openai`, when the base URL does not identify the provider. |
 | `provider_settings` | Per-provider request settings, described below. |
@@ -162,6 +163,8 @@ A spend cap needs a price for every candidate; the analyzer refuses to start whe
 | `concurrency` | `4` | Requests in flight. |
 | `time_budget_seconds` | `600` | Counted from the start of the analyzer task, including fetching sessions. When it ends, the analyzer stops fetching sessions and starting new calls, and cuts off calls still running, so the analysis returns results before the analyzer task timeout. The report counts sessions that were not fetched. |
 | `max_disagreements` | `200` | Disagreements kept in the report. |
+| `repeats` | `1` | Times each call is sent to each candidate (up to 5). Above 1, the report shows how often any and all attempts matched; agreement still comes from the first attempt. |
+| `excluded_origins` | none | Origins a candidate must not have, by `lab`, `lab_country`, `host`, or `host_region`, for example `{"lab_country": ["CN"]}`. Excluded candidates are still compared but never recommended. |
 
 ## Judge the differences quickly
 
@@ -212,6 +215,16 @@ Each takes the same `kind`, `base_url`, `model`, `api_key_env`, `price`, and `ti
 **What leaves the worker.** A decision candidate receives each call's rebuilt conversation, including the system prompt and tool results, plus the tool names and descriptions, argument names, and enum values. A decision judge receives the two answers it compares. Use decision models only where sending that trace content to the service is acceptable.
 
 Agreement with the recorded model's choices is not proof that either is right; review disagreements as for any candidate. Moving a partial call means changing the agent: decide with the decision model, then generate the rest with an LLM. Decision candidate requests run before candidate calls, share `max_spend_usd` and `time_budget_seconds` with them, and are included in the dry-run estimate; give each a `price` when you set a spend cap.
+
+## Mix models, set provenance rules, and read noise
+
+**Best mix.** Many teams end up with a hybrid: an inexpensive model for most steps and a strong one where it matters. The report's **Best mix** table picks, for each kind of call (grouped by the tool the recorded model called, or text answers), the cheapest allowed candidate whose tool choice there (or answer agreement, for text answers) is within 10 points of your current model's on the same calls. Calls with no candidate that fits stay on today's model, and the reference candidate is never picked, since it is today's model run again. The table shows each kind's share of calls and the combined cost per call and per month against today's, and **Best for** gains a "Best mix" row when at least one kind of call can move.
+
+**Provenance.** Price and openness are not the only constraints: some teams cannot use models from certain labs or hosted in certain regions. Declare each candidate's `origin` (`lab`, `lab_country`, `host`, `host_region`) and list what is not allowed in `excluded_origins`. Excluded candidates are still compared, so you can see what you give up, but they are never named in **Best for** or **Best mix**. Origins are what you declare; Kitaru does not verify them.
+
+**Noise and repeats.** One answer per call is a noisy read on harder steps. With `repeats` set to 2 or more, each call is sent to each candidate that many times; agreement, the judge, and the disagreements still use the first attempt, and the comparison adds how often any attempt, and every attempt, matched the recording. Repeats multiply calls and spend, and the dry run shows that.
+
+**Cost per task.** Per-session and monthly costs assume each candidate takes the same steps as the recording. A model that is cheaper per token but needs more turns, retries, or tool calls to finish a task costs more per task than these numbers show; the report says so, and leads with tokens per call (input, output, and reasoning) so token-hungry models stand out. A full [replay](replay-and-overrides.md) of the agent measures cost per task.
 
 ## Tool definitions
 

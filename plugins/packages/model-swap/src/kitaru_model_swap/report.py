@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from kitaru.api_models.v1.insight import (
     CategoricalInsightData,
@@ -57,6 +58,8 @@ REPORT_SECTION_KEY = "kitaru.report_section/v1"
 SUMMARY_INSIGHT_NAME = "model-swap-summary"
 _EXCERPT = 600
 _REVIEW_ORDER: dict[bool | None, int] = {False: 0, None: 1, True: 2}
+_TEXT_GROUP = "text answer"
+_SAME_TOOL = frozenset({"same_tool_same_args", "same_tool_different_args"})
 # Names come from imported traces, so lists of them are bounded.
 _MAX_LISTED = 50
 # A candidate failing more often than this is a setup problem, not a choice.
@@ -127,6 +130,8 @@ def build_report(
             volume,
             collection.group_seen,
             dry_run=params.dry_run,
+            excluded=params.is_excluded(candidate),
+            repeats=params.repeats,
         )
         for candidate in params.candidates
     ]
@@ -135,7 +140,9 @@ def build_report(
     disagreements = [
         _disagreement(result)
         for result in results
-        if result.agreement is not None and result.agreement not in AGREEING
+        if result.attempt == 0
+        and result.agreement is not None
+        and result.agreement not in AGREEING
     ]
     # Which disagreements are kept must not depend on the judge, whose rulings
     # text inside an answer can sway, so the cap is applied in a fixed order
@@ -152,6 +159,7 @@ def build_report(
         )
     )
     coverage = _coverage(collection, sampled)
+    mix = None if params.dry_run else _best_mix(candidates, sampled, volume)
     return {
         "schema": 1,
         "dry_run": params.dry_run,
@@ -179,14 +187,26 @@ def build_report(
             )
             for candidate in params.decision_candidates
         ],
-        "best_for": [] if params.dry_run else _best_for(candidates),
+        "best_for": [] if params.dry_run else _best_for(candidates) + _mix_row(mix),
+        "best_mix": mix,
+        "excluded_origins": dict(params.excluded_origins),
         "disagreements": kept,
         "disagreements_total": len(disagreements),
         "spent_usd": _usd(spent),
         "max_spend_usd": _usd(params.max_spend_usd),
         "stopped_early": stopped_early,
         "judge": _judge_label(params),
-        "notes": _notes(coverage),
+        "notes": _notes(coverage)
+        + (
+            [
+                "Per-session and monthly costs assume each candidate takes the "
+                "same steps as the recording. A model that needs more turns, "
+                "retries, or tool calls to finish a task costs more per task; "
+                "a full replay of the agent measures that."
+            ]
+            if params.candidates and not params.dry_run
+            else []
+        ),
     }
 
 
@@ -302,20 +322,28 @@ def _recorded_report(
 def _candidate_report(
     candidate: Candidate,
     sampled: list[RecordedCall],
-    results: list[CallResult],
+    attempts: list[CallResult],
     price: ResolvedPrice | None,
     volume: Volume,
     weights: Counter[tuple[str, str | None]],
     *,
     dry_run: bool,
+    excluded: bool = False,
+    repeats: int = 1,
 ) -> dict[str, Any]:
-    """Aggregate one candidate's results."""
+    """Aggregate one candidate's results.
+
+    Agreement comes from the first attempt at each call; every attempt
+    counts toward cost, failures, latency and consistency.
+    """
     report: dict[str, Any] = {
         "name": candidate.name,
         "model": candidate.model,
         "endpoint_host": urlsplit(candidate.base_url).hostname,
         "reference": candidate.reference,
         "open_weights": candidate.open_weights,
+        "origin": None if candidate.origin is None else candidate.origin.model_dump(),
+        "excluded": excluded,
         "price": (
             None
             if price is None
@@ -335,9 +363,9 @@ def _candidate_report(
             else [(c, call_cost(price, estimate_usage(c, max_tokens))) for c in sampled]
         )
         report["estimate"] = {
-            "calls": len(sampled),
+            "calls": len(sampled) * repeats,
             "spend_usd": _usd(
-                sum((cost for _, cost in estimates), Decimal(0))
+                sum((cost for _, cost in estimates), Decimal(0)) * repeats
                 if price is not None
                 else None
             ),
@@ -345,11 +373,13 @@ def _candidate_report(
         }
         return report
 
+    results = [r for r in attempts if r.attempt == 0]
     sent = [r for r in results if r.reply is not None]
     answered = [r for r in sent if r.agreement is not None]
+    every_sent = [r for r in attempts if r.reply is not None]
     headline = [r for r in answered if r.call.request.schema_source != "inferred"]
     inferred = [r for r in answered if r.call.request.schema_source == "inferred"]
-    failed = [r.reply for r in sent if r.reply and r.reply.failure is not None]
+    failed = [r.reply for r in every_sent if r.reply and r.reply.failure is not None]
     failures = Counter(reply.failure for reply in failed)
     tool_calls = [r for r in headline if r.call.request.recorded.tool_calls]
     agreeing = sum(r.agreement in AGREEING for r in headline)
@@ -359,13 +389,18 @@ def _candidate_report(
     )
     # Failed calls carry no usage, so pricing them at zero would make a
     # failing candidate look cheap; only answered calls set the per-call cost.
-    answered_costs = [(r.call, r.cost) for r in answered if r.cost is not None]
-    spent = [r.cost for r in sent if r.cost is not None]
-    replies = [r.reply for r in sent if r.reply]
+    answered_costs = [
+        (r.call, r.cost)
+        for r in every_sent
+        if r.agreement is not None and r.cost is not None
+    ]
+    spent = [r.cost for r in every_sent if r.cost is not None]
+    replies = [r.reply for r in every_sent if r.reply]
     latencies = sorted(reply.latency_seconds for reply in replies)
     report |= {
-        "calls_sent": len(sent),
-        "calls_not_run": dict(Counter(r.not_run for r in results if r.not_run)),
+        "calls_sent": len(every_sent),
+        "calls_not_run": dict(Counter(r.not_run for r in attempts if r.not_run)),
+        "consistency": _consistency(attempts, repeats),
         "answered": len(headline),
         "agreement": dict(Counter(r.agreement for r in headline).most_common()),
         "agreement_rate": _rate(agreeing, len(headline)),
@@ -384,7 +419,7 @@ def _candidate_report(
         "failure_examples": {
             reply.failure: reply.failure_detail for reply in reversed(failed)
         },
-        "failure_rate": _rate(sum(failures.values()), len(sent)),
+        "failure_rate": _rate(sum(failures.values()), len(every_sent)),
         "by_tool": _by_tool(headline),
         "latency_seconds": {
             "p50": _round(statistics.median(latencies)) if latencies else None,
@@ -409,10 +444,19 @@ def _by_tool(results: list[CallResult]) -> dict[str, Any]:
         assert result.reply is not None
         group = groups.setdefault(
             _group(result.call),
-            {"calls": 0, "agreeing": 0, "fields": defaultdict(lambda: [0, 0])},
+            {
+                "calls": 0,
+                "agreeing": 0,
+                "same_tool": 0,
+                "costs": [],
+                "fields": defaultdict(lambda: [0, 0]),
+            },
         )
         group["calls"] += 1
         group["agreeing"] += result.agreement in AGREEING
+        group["same_tool"] += result.agreement in _SAME_TOOL
+        if result.cost is not None:
+            group["costs"].append(result.cost)
         for tool, fields in field_matches(
             result.call.request.recorded, result.reply
         ).items():
@@ -424,6 +468,12 @@ def _by_tool(results: list[CallResult]) -> dict[str, Any]:
         name: {
             "calls": group["calls"],
             "agreement_rate": _rate(group["agreeing"], group["calls"]),
+            "tool_choice_rate": (
+                None
+                if name == _TEXT_GROUP
+                else _rate(group["same_tool"], group["calls"])
+            ),
+            "cost_per_call_usd": _mean_usd(group["costs"]),
             "fields": {
                 field: _rate(matched, total)
                 for field, (matched, total) in sorted(group["fields"].items())
@@ -436,7 +486,7 @@ def _by_tool(results: list[CallResult]) -> dict[str, Any]:
 def _group(call: RecordedCall) -> str:
     """Group a call by the tools it recorded, or as a text answer."""
     names = sorted({c.name for c in call.request.recorded.tool_calls})
-    return " + ".join(names) if names else "text answer"
+    return " + ".join(names) if names else _TEXT_GROUP
 
 
 def _primary_rate(candidate: dict[str, Any]) -> tuple[str, float | None]:
@@ -493,7 +543,8 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
     usable = [
         c
         for c in candidates
-        if _primary_rate(c)[1] is not None
+        if not c["excluded"]
+        and _primary_rate(c)[1] is not None
         and (c["failure_rate"] is None or c["failure_rate"] <= _MAX_FAILURE_RATE)
     ]
     if not usable:
@@ -820,6 +871,12 @@ def render_markdown(report: dict[str, Any]) -> str:
             )
         lines.append("")
         lines.extend(f"- **{c['name']}**: {c['summary']}" for c in report["candidates"])
+    mix = report.get("best_mix")
+    if mix:
+        lines += ["", "Best mix:"]
+        for item in mix["groups"]:
+            use = item["candidate"] or "today's model"
+            lines.append(f"- {item['group']} ({_pct(item['share'])} of calls): {use}")
     shapes = report["decision_shapes"]
     if shapes["calls"]:
         lines += [
@@ -975,6 +1032,166 @@ def _mean_usd(costs: list[Decimal]) -> str | None:
 
 def _rate_decimal(part: Decimal, whole: Decimal) -> float | None:
     return round(float(part / whole), 4) if whole else None
+
+
+def _consistency(attempts: list[CallResult], repeats: int) -> dict[str, Any] | None:
+    """Report how often any and all attempts at a call matched the recording.
+
+    With one attempt per call there is nothing to compare.
+    """
+    if repeats < 2:
+        return None
+    by_call: dict[UUID, list[CallResult]] = defaultdict(list)
+    for result in attempts:
+        if result.call.request.schema_source != "inferred":
+            by_call[result.call.node_id].append(result)
+    complete = [
+        group
+        for group in by_call.values()
+        if len(group) == repeats and all(r.agreement is not None for r in group)
+    ]
+    return {
+        "repeats": repeats,
+        "calls": len(complete),
+        "any_match_rate": _rate(
+            sum(any(r.agreement in AGREEING for r in g) for g in complete),
+            len(complete),
+        ),
+        "all_match_rate": _rate(
+            sum(all(r.agreement in AGREEING for r in g) for g in complete),
+            len(complete),
+        ),
+    }
+
+
+def _best_mix(
+    candidates: list[dict[str, Any]],
+    sampled: list[RecordedCall],
+    volume: Volume,
+) -> dict[str, Any] | None:
+    """Pick, per kind of call, the cheapest candidate that behaves well enough.
+
+    A kind of call moves to a candidate only when its rate there is within
+    10 points of the reference's rate there (or of the best rate when there
+    is no reference); otherwise it stays on today's model. Excluded, failing
+    and unpriced candidates are never picked.
+    """
+    shares = Counter(_group(call) for call in sampled)
+    recorded_costs: dict[str, list[Decimal]] = defaultdict(list)
+    for call in sampled:
+        if call.cost is not None:
+            recorded_costs[_group(call)].append(call.cost)
+    # The reference is today's model run again, so it sets the bar but is not
+    # somewhere to move calls to.
+    usable = [
+        c
+        for c in candidates
+        if not c["excluded"]
+        and not c["reference"]
+        and (c["failure_rate"] is None or c["failure_rate"] <= _MAX_FAILURE_RATE)
+    ]
+    reference = next((c for c in candidates if c["reference"]), None)
+    rows: list[
+        tuple[str, float, str | None, float | None, Decimal | None, Decimal | None]
+    ] = []
+    for group, count in sorted(shares.items()):
+        today = _mean_decimal(recorded_costs[group])
+        rates: dict[str, float] = {}
+        costs: dict[str, Decimal] = {}
+        for c in usable:
+            rate = _group_rate(c, group)
+            cost = c["by_tool"].get(group, {}).get("cost_per_call_usd")
+            if rate is not None and cost is not None:
+                rates[c["name"]], costs[c["name"]] = rate, Decimal(cost)
+        bar = _group_rate(reference, group)
+        if bar is None and rates:
+            bar = max(rates.values())
+        fits = (
+            [name for name, rate in rates.items() if rate >= bar - _COMPARABLE_POINTS]
+            if bar is not None
+            else []
+        )
+        choice = min(fits, key=lambda name: costs[name], default=None)
+        # Keep today's model when it is cheaper than every candidate that fits.
+        if choice is not None and today is not None and costs[choice] > today:
+            choice = None
+        rows.append(
+            (
+                group,
+                count / len(sampled),
+                choice,
+                None if choice is None else rates[choice],
+                costs[choice] if choice else today,
+                today,
+            )
+        )
+    if not any(choice for _, _, choice, _, _, _ in rows):
+        return None
+    groups = [
+        {
+            "group": group,
+            "share": round(share, 4),
+            "candidate": choice,
+            "rate": rate,
+            "cost_per_call_usd": _usd(cost),
+        }
+        for group, share, choice, rate, cost, _ in rows
+    ]
+    if any(cost is None or today is None for _, _, _, _, cost, today in rows):
+        return {"groups": groups, "cost": None, "recorded_cost": None}
+    mixed = sum(
+        (
+            (cost or Decimal(0)) * Decimal(str(share))
+            for _, share, _, _, cost, _ in rows
+        ),
+        Decimal(0),
+    )
+    recorded = sum(
+        (
+            (today or Decimal(0)) * Decimal(str(share))
+            for _, share, _, _, _, today in rows
+        ),
+        Decimal(0),
+    )
+    return {
+        "groups": groups,
+        "cost": _projection(mixed, volume),
+        "recorded_cost": _projection(recorded, volume),
+    }
+
+
+def _mix_row(mix: dict[str, Any] | None) -> list[dict[str, str]]:
+    """Summarize the best mix as one "best for" row."""
+    if mix is None:
+        return []
+    moved = [item for item in mix["groups"] if item["candidate"]]
+    targets = sorted({item["candidate"] for item in moved})
+    why = (
+        f"Moves {len(moved)} of {len(mix['groups'])} kinds of call "
+        f"({_pct(sum(item['share'] for item in moved))} of calls) to "
+        f"{', '.join(targets)} and keeps the rest on today's model"
+    )
+    if mix["cost"] is not None and mix["recorded_cost"] is not None:
+        why += (
+            f": ${mix['cost']['per_call_usd']} per call against "
+            f"${mix['recorded_cost']['per_call_usd']} today"
+        )
+    return [{"goal": "Best mix", "candidate": " + ".join(targets), "why": why + "."}]
+
+
+def _group_rate(candidate: dict[str, Any] | None, group: str) -> float | None:
+    """The meaningful rate for one kind of call: tool choice, or the answer."""
+    if candidate is None:
+        return None
+    values = candidate["by_tool"].get(group)
+    if values is None:
+        return None
+    rate = values["tool_choice_rate"]
+    return values["agreement_rate"] if rate is None else rate
+
+
+def _mean_decimal(costs: list[Decimal]) -> Decimal | None:
+    return sum(costs, Decimal(0)) / len(costs) if costs else None
 
 
 def _judge_label(params: ModelSwapParams) -> str | None:

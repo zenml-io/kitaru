@@ -41,6 +41,7 @@ def render_section(report: dict[str, Any], dashboard_url: str | None) -> str:
         parts += [
             _best_for(report["best_for"]),
             _compare(candidates, judged=report["judge"] is not None),
+            _best_mix(report.get("best_mix")),
             _recorded(report["recorded"]),
             "<ul>",
             *(
@@ -98,26 +99,45 @@ def _best_for(choices: list[dict[str, str]]) -> str:
 
 
 def _compare(candidates: list[dict[str, Any]], *, judged: bool) -> str:
-    return "<h2>Compare</h2>" + _table(
-        [
-            "Candidate",
-            "Model",
-            "Tool choice",
-            "Exact match",
-            "Judge: equivalent / different / unsure",
-            "Failures",
-            "Cost per call",
-            "Per month",
-            "Latency p50",
-            "Latency p95",
-            "Open weights",
-        ],
-        [
+    repeated = any(c.get("consistency") for c in candidates)
+    headers = [
+        "Candidate",
+        "Model",
+        "Tool choice",
+        "Exact match",
+        *(["Any / all attempts match"] if repeated else []),
+        "Judge: equivalent / different / unsure",
+        "Failures",
+        "Tokens per call (in / out, of which reasoning)",
+        "Cost per call",
+        "Per month",
+        "Latency p50",
+        "Latency p95",
+        "Open weights",
+        "Origin",
+    ]
+    rows = []
+    for c in candidates:
+        consistency = c.get("consistency")
+        tokens = c["tokens_per_call"]
+        rows.append(
             [
-                c["name"] + (" (today)" if c["reference"] else ""),
+                c["name"]
+                + (" (today)" if c["reference"] else "")
+                + (" (excluded)" if c.get("excluded") else ""),
                 c["model"],
                 _pct(c["tool_choice_rate"]),
                 _pct(c["agreement_rate"]),
+                *(
+                    [
+                        f"{_pct(consistency['any_match_rate'])} / "
+                        f"{_pct(consistency['all_match_rate'])}"
+                        if consistency
+                        else None
+                    ]
+                    if repeated
+                    else []
+                ),
                 (
                     f"{c['judged_equivalent']} / {c['judged_different']} / "
                     f"{c['judged_unsure']}"
@@ -130,6 +150,10 @@ def _compare(candidates: list[dict[str, Any]], *, judged: bool) -> str:
                 if judged
                 else None,
                 _pct(c["failure_rate"]),
+                None
+                if tokens is None
+                else f"{tokens['input_tokens']:.0f} / {tokens['output_tokens']:.0f}, "
+                f"{tokens['reasoning_tokens']:.0f}",
                 _usd(c["cost"]["per_call_usd"]) + _partial(c),
                 _usd(c["cost"]["per_month_usd"]) + _partial(c),
                 _seconds(c["latency_seconds"]["p50"]),
@@ -137,9 +161,60 @@ def _compare(candidates: list[dict[str, Any]], *, judged: bool) -> str:
                 None
                 if c["open_weights"] is None
                 else ("yes" if c["open_weights"] else "no"),
+                _origin(c.get("origin")),
             ]
-            for c in candidates
-        ],
+        )
+    return "<h2>Compare</h2>" + _table(headers, rows)
+
+
+def _origin(origin: dict[str, Any] | None) -> str | None:
+    """Render a candidate's declared lab and hosting."""
+    if not origin:
+        return None
+    lab = " ".join(
+        v for v in (origin.get("lab"), _paren(origin.get("lab_country"))) if v
+    )
+    host = " ".join(
+        v for v in (origin.get("host"), _paren(origin.get("host_region"))) if v
+    )
+    return " · ".join(v for v in (lab, host and f"served by {host}") if v) or None
+
+
+def _paren(value: str | None) -> str | None:
+    return f"({value})" if value else None
+
+
+def _best_mix(mix: dict[str, Any] | None) -> str:
+    """Show which kind of call each candidate would take in the best mix."""
+    if not mix:
+        return ""
+    rows = [
+        [
+            item["group"],
+            _pct(item["share"]),
+            item["candidate"] or "today's model",
+            _pct(item["rate"]),
+            _usd(item["cost_per_call_usd"]),
+        ]
+        for item in mix["groups"]
+    ]
+    total = ""
+    if mix["cost"] is not None and mix["recorded_cost"] is not None:
+        total = (
+            f"<p>Mixed: {_usd(mix['cost']['per_call_usd'])} per call and "
+            f"{_usd(mix['cost']['per_month_usd'])} per month, against "
+            f"{_usd(mix['recorded_cost']['per_call_usd'])} and "
+            f"{_usd(mix['recorded_cost']['per_month_usd'])} today.</p>"
+        )
+    return (
+        "<h2>Best mix</h2><p>For each kind of call, the cheapest allowed "
+        "candidate that behaves within 10 points of today's model there; the "
+        "rest stays on today's model. Most agents can route by step, so a mix "
+        "can save more than any single model.</p>"
+        + _table(
+            ["Recorded", "Share of calls", "Use", "Matches", "Cost per call"], rows
+        )
+        + total
     )
 
 

@@ -83,6 +83,8 @@ class CallResult:
     judge_equivalent: bool | None = None
     judge_probability: float | None = None
     judge_failure: str | None = None
+    attempt: int = 0
+    """Which repeat this is; attempt 0 is the headline result."""
 
 
 @dataclass(frozen=True)
@@ -195,7 +197,8 @@ class Runner:
         async with httpx.AsyncClient(transport=self._transport) as client:
             return await gather_bounded(
                 (
-                    self._run_one(client, call, candidate)
+                    self._run_one(client, call, candidate, attempt)
+                    for attempt in range(self._params.repeats)
                     for call in calls
                     for candidate in self._params.candidates
                 ),
@@ -257,7 +260,11 @@ class Runner:
         )
 
     async def _run_one(
-        self, client: httpx.AsyncClient, call: RecordedCall, candidate: Candidate
+        self,
+        client: httpx.AsyncClient,
+        call: RecordedCall,
+        candidate: Candidate,
+        attempt: int = 0,
     ) -> CallResult:
         """Send one call to one candidate unless a budget is exhausted."""
         sent = await self._within_budget(
@@ -276,13 +283,16 @@ class Runner:
             ),
         )
         if isinstance(sent, str):
-            return CallResult(call, candidate.name, not_run=sent)
+            return CallResult(call, candidate.name, not_run=sent, attempt=attempt)
         reply, cost = sent
         if reply.failure is not None:
-            return CallResult(call, candidate.name, reply=reply, cost=cost)
+            return CallResult(
+                call, candidate.name, reply=reply, cost=cost, attempt=attempt
+            )
         agreement = compare(call.request.recorded, reply)
         judged: tuple[bool | None, float | None, str | None] = (None, None, None)
-        if self._judge is not None and agreement in _JUDGED:
+        # Only the headline attempt is judged; repeats measure consistency.
+        if self._judge is not None and agreement in _JUDGED and attempt == 0:
             judged = await self._ask_judge(client, call.request.recorded, reply)
         return CallResult(
             call,
@@ -293,6 +303,7 @@ class Runner:
             judge_equivalent=judged[0],
             judge_probability=judged[1],
             judge_failure=judged[2],
+            attempt=attempt,
         )
 
     async def _ask_judge(
