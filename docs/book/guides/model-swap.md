@@ -151,7 +151,7 @@ A spend cap needs a price for every candidate; the analyzer refuses to start whe
 | `candidates` | none | Up to eight OpenAI-compatible candidates. Give candidates, decision candidates, or both. |
 | `decision_candidates` | none | Up to four decision models that answer the decision parts of each call; see [Find calls a decision model could make](#find-calls-a-decision-model-could-make). |
 | `dry_run` | `false` | Estimate without sending. |
-| `max_spend_usd` | none | Spend cap across all candidates and the judge. |
+| `max_spend_usd` | none | Spend cap across candidates, decision candidates, and the judge. Decision models need an explicit `price`. |
 | `max_calls` | `100` | Recorded calls to sample, spread evenly across node names and models. |
 | `tool_schemas` | `{}` | Tool name to the JSON schema of its parameters, for tools the trace did not record. |
 | `tool_descriptions` | `{}` | Optional tool descriptions to go with `tool_schemas`. |
@@ -185,7 +185,7 @@ A decision model suits this job: it answers a fixed yes-or-no question with a pr
 
 The judge returns the probability that the answers are equivalent. At or above `equivalent_at` (above 0.5, up to 1; default `0.8`) the ruling is "equivalent", at or below one minus it "different", and in between "unsure". The report shows the probability next to each disagreement and counts the rulings per candidate, along with judge requests that failed (for example a timeout, a refusal, or an unreadable answer); a failed request leaves that ruling open. `base_url`, `model`, `api_key_env`, and `timeout_seconds` override the defaults. When you set your own `base_url`, also name `api_key_env`, so a key is never sent to a custom URL without you choosing it; the same URL and key rules apply as for candidates.
 
-The judge's key must be in the analyzer's provider connection or the worker environment (see [Keys](#keys)); a missing key stops the analysis before any call is sent. Judge requests count against `max_spend_usd` and `time_budget_seconds` like candidate calls, but the dry-run estimate covers candidates only, so leave headroom in the cap. Decision services are not in the bundled price table, so pass `price` (check the service's current pricing) when you set `max_spend_usd`. When a service does not report token usage, the request is charged at its estimate.
+The judge's key must be in the analyzer's provider connection or the worker environment (see [Keys](#keys)); a missing key stops the analysis before any call is sent. Judge requests count against `max_spend_usd` and `time_budget_seconds` like candidate calls, but the dry-run estimate covers candidates and decision candidates only, so leave headroom in the cap for the judge. Decision services are not in the bundled price table, so pass `price` (check the service's current pricing) when you set `max_spend_usd`. When a service does not report token usage, the request is charged at its estimate.
 
 Decision models trail large models on judgments that need several reasoning steps, and text inside a recorded answer can sway them, so read their rulings as a way to order your review, not as verdicts. A candidate-shaped chat model can still be the judge instead: give `name`, `base_url`, `model`, and `api_key_env` without `kind`.
 
@@ -193,11 +193,11 @@ Decision models trail large models on judgments that need several reasoning step
 
 Many calls inside an agent are decisions rather than writing: which tool to call next, whether to escalate, which category or action applies. A decision model such as TypeSafe Jev, Cloudflare Clef, or OpenAI's Decisions API answers that kind of question with a probability, quickly and for input tokens only, but it cannot write text or invent values. Every report classifies each sampled call, without calling any service:
 
-- **Decision:** the model chose a tool, and every argument it set is an enum or a boolean from the tool's schema. The call could move off an LLM.
-- **Partial:** the choice of tool, or of answering in text, is a decision, and so are any enum or boolean arguments, but free-form arguments or the text answer need a generative model.
-- **Generative:** there are no tools to choose from, or the call made several tool calls at once.
+- **Decision:** the model chose one tool, and every argument it set (ignoring null ones) takes one of a fixed set of values in the tool's schema: an enum or a boolean, including optional and referenced ones. The call could move off an LLM.
+- **Partial:** the choice of tool, or of answering in text, is a decision, and so are any such arguments, but at least one argument is free-form (a string, a number, or a value outside its enum) or the answer is text, and that part needs a generative model.
+- **Generative:** there are no tools to choose from, the call made several tool calls at once, the recorded tool is not among the offered ones, the call offers too many tools, or its tool schemas were inferred from recorded arguments and so cannot say what the model chose from.
 
-The report shows how many sampled calls, and what share of their recorded cost, fall in each class, and why calls are not fully decisions.
+The report shows how many sampled calls, and what share of their recorded cost, fall in each class, and the main reasons calls are not fully decisions.
 
 To try decision models on those calls, add them as `decision_candidates`:
 
@@ -207,9 +207,11 @@ To try decision models on those calls, add them as `decision_candidates`:
 ]
 ```
 
-Each takes the same `kind`, `base_url`, `model`, `api_key_env`, `price`, and `timeout_seconds` as a decision judge (see [Judge the differences quickly](#judge-the-differences-quickly)), plus a `name`. For every decision or partial call, the analyzer sends the conversation and the tool names and asks, in one request, which tool to call (or to answer in text) and which value each enum or boolean argument should take. It compares the answers with what the recorded model chose and reports, per decision candidate: how often it picked the same tool, how often all of its decisions matched, agreement per argument, failures, cost per call next to the recorded model's cost on the same calls, and latency. You can run decision candidates without any `candidates`.
+Each takes the same `kind`, `base_url`, `model`, `api_key_env`, `price`, and `timeout_seconds` as a decision judge (see [Judge the differences quickly](#judge-the-differences-quickly)), plus a `name`; its key goes in the provider connection like any other (see [Keys](#keys)). For every decision or partial call, the analyzer asks, in one request, which tool to call (or to answer in text) and which value each enum or boolean argument should take. It compares the answers with what the recorded model chose and reports, per decision candidate: how often it picked the same tool, how often all of its decisions matched, agreement per argument, failures, calls not run, cost per call for the decision parts, and latency. Savings are compared only on calls that are decisions throughout (cost per decision call next to the recorded model's cost on the same calls), because partial calls still need an LLM for the rest. You can run decision candidates without any `candidates`.
 
-Agreement with the recorded model's choices is not proof that either is right; review disagreements as for any candidate. Moving a partial call means changing the agent: decide with the decision model, then generate the rest with an LLM. Decision candidate requests count against `max_spend_usd` and `time_budget_seconds`, and the dry run estimates their spend.
+**What leaves the worker.** A decision candidate receives each call's rebuilt conversation, including the system prompt and tool results, plus the tool names and descriptions, argument names, and enum values. A decision judge receives the two answers it compares. Use decision models only where sending that trace content to the service is acceptable.
+
+Agreement with the recorded model's choices is not proof that either is right; review disagreements as for any candidate. Moving a partial call means changing the agent: decide with the decision model, then generate the rest with an LLM. Decision candidate requests run before candidate calls, share `max_spend_usd` and `time_budget_seconds` with them, and are included in the dry-run estimate; give each a `price` when you set a spend cap.
 
 ## Tool definitions
 

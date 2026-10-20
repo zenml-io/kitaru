@@ -37,9 +37,11 @@ DecisionShape = Literal["decision", "partial", "generative"]
 
 TOOL_QUESTION = "tool"
 TEXT_ANSWER = "answer_in_text"
-# Decision services accept at most 255 options per choice question.
+# Decision services accept at most 255 options per choice question, and Clef
+# at most 64 questions per request.
 _MAX_OPTIONS = 255
-_KEY = re.compile(r"[^A-Za-z0-9_.-]")
+_MAX_QUESTIONS = 60
+_KEY = re.compile(r"[^A-Za-z0-9_]")
 
 
 @dataclass(frozen=True)
@@ -50,10 +52,16 @@ class DecisionPlan:
     questions: tuple[Question, ...] = ()
     expected: Mapping[str, str] | None = None
     reason: str | None = None
+    arguments: Mapping[str, str] | None = None
+    """The argument each `arg_` question asks about, by question key."""
 
 
 def plan_decisions(request: ReplayRequest) -> DecisionPlan:
     """Split one rebuilt call into decision questions and the recorded answers."""
+    # Inferred schemas only echo the recorded arguments and list only the
+    # tools this call used, so they cannot say what the model chose from.
+    if request.schema_source == "inferred":
+        return DecisionPlan("generative", reason="tool schemas were inferred")
     tools = {tool["function"]["name"]: tool["function"] for tool in request.tools}
     if not tools:
         return DecisionPlan("generative", reason="no tools to choose from")
@@ -62,6 +70,8 @@ def plan_decisions(request: ReplayRequest) -> DecisionPlan:
         return DecisionPlan("generative", reason="several tool calls at once")
     if len(tools) + 1 > _MAX_OPTIONS:
         return DecisionPlan("generative", reason="too many tools to choose from")
+    if TEXT_ANSWER in tools:
+        return DecisionPlan("generative", reason=f"a tool is named {TEXT_ANSWER}")
     options: dict[str, str | None] = {
         name: function.get("description") for name, function in tools.items()
     }
@@ -86,16 +96,18 @@ def plan_decisions(request: ReplayRequest) -> DecisionPlan:
     properties = parameters.get("properties") or {}
     questions = [tool_question]
     expected = {TOOL_QUESTION: call.name}
+    arguments: dict[str, str] = {}
     free: list[str] = []
-    for argument, value in call.arguments.items():
+    for index, (argument, value) in enumerate(call.arguments.items()):
         if value is None:
             continue
         values = _decidable_values(properties.get(argument), parameters)
         label = _label(value)
-        if values is None or label not in values:
+        if values is None or label not in values or len(questions) >= _MAX_QUESTIONS:
             free.append(argument)
             continue
-        key = f"arg.{_KEY.sub('_', argument)}"
+        # The index keeps keys unique after unsafe characters are replaced.
+        key = f"arg_{index}_{_KEY.sub('_', argument)[:40]}"
         questions.append(
             Question(
                 key,
@@ -105,40 +117,70 @@ def plan_decisions(request: ReplayRequest) -> DecisionPlan:
             )
         )
         expected[key] = label
+        arguments[key] = argument[:80]
     if free:
         return DecisionPlan(
             "partial",
             tuple(questions),
             expected,
-            reason=f"free-form arguments: {', '.join(sorted(free))}",
+            reason=f"free-form arguments: {', '.join(sorted(free))}"[:200],
+            arguments=arguments,
         )
-    return DecisionPlan("decision", tuple(questions), expected)
+    return DecisionPlan("decision", tuple(questions), expected, arguments=arguments)
 
 
-def _decidable_values(
+def _decidable_values(schema: Any, root: Mapping[str, Any]) -> list[str] | None:
+    """Return the labels an argument can take, or None when it is free-form."""
+    values = _schema_values(schema, root)
+    if values is None:
+        return None
+    unique = list(dict.fromkeys(values))
+    # A single option is not a decision, and too many cannot be offered.
+    return unique if 1 < len(unique) <= _MAX_OPTIONS else None
+
+
+def _schema_values(
     schema: Any, root: Mapping[str, Any], depth: int = 0
 ) -> list[str] | None:
-    """Return the labels an argument can take, or None when it is free-form."""
+    """Collect every label a schema allows, or None when any value is allowed."""
     if not isinstance(schema, dict) or depth > 4:
         return None
     reference = schema.get("$ref")
-    if isinstance(reference, str) and reference.startswith("#/$defs/"):
-        definitions = root.get("$defs") or {}
-        return _decidable_values(
-            definitions.get(reference.removeprefix("#/$defs/")), root, depth + 1
-        )
+    if isinstance(reference, str):
+        for prefix, section in (
+            ("#/$defs/", "$defs"),
+            ("#/definitions/", "definitions"),
+        ):
+            if reference.startswith(prefix):
+                definitions = root.get(section) or {}
+                return _schema_values(
+                    definitions.get(reference.removeprefix(prefix)), root, depth + 1
+                )
+        return None
+    values: list[str] = []
     enum = schema.get("enum")
-    if isinstance(enum, list) and 1 < len(enum) <= _MAX_OPTIONS:
-        labels = [_label(value) for value in enum if value is not None]
-        return labels if len(set(labels)) == len(labels) else None
-    if schema.get("type") == "boolean":
-        return ["true", "false"]
-    # Optional enums are written as anyOf with null.
-    for option in schema.get("anyOf") or ():
-        values = _decidable_values(option, root, depth + 1)
-        if values is not None:
-            return values
-    return None
+    if isinstance(enum, list):
+        values += [_label(value) for value in enum if value is not None]
+    kinds = schema.get("type")
+    if kinds == "boolean" or (isinstance(kinds, list) and "boolean" in kinds):
+        values += ["true", "false"]
+    branches = [*(schema.get("anyOf") or ()), *(schema.get("oneOf") or ())]
+    for option in branches:
+        if isinstance(option, dict) and option.get("type") == "null":
+            continue
+        branch = _schema_values(option, root, depth + 1)
+        if branch is None:
+            # A free-form branch makes the whole argument free-form.
+            return None
+        values += branch
+    parts = schema.get("allOf") or ()
+    for part in parts:
+        branch = _schema_values(part, root, depth + 1)
+        if branch is not None:
+            values += branch
+    if not values and enum is None and not branches and not parts:
+        return None
+    return values
 
 
 def _label(value: Any) -> str:

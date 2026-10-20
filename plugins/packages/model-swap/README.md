@@ -4,7 +4,7 @@ Choose the right model for an agent from its own recorded traffic: better, cheap
 
 | Catalog name | Entrypoint | Configuration |
 |---|---|---|
-| `kitaru/model-swap` | `kitaru_model_swap.analyzer:analyze_model_swap` | `candidates` parameter; API keys come from environment variables each candidate names |
+| `kitaru/model-swap` | `kitaru_model_swap.analyzer:analyze_model_swap` | `candidates` and/or `decision_candidates`, optional `judge`; API keys come from environment variables each one names |
 
 It runs on your worker with your keys. It names the best candidate for each goal (closest to today, cheapest, fastest, best open model) and reports, per candidate:
 
@@ -18,7 +18,7 @@ It also reports which recorded calls a decision model could make instead of an L
 
 An optional judge rules whether differing answers are equivalent and orders them for review. It can be a decision model (TypeSafe Jev, Cloudflare Clef, or OpenAI's Decisions API) or an OpenAI-compatible chat model; it never replaces your verdict.
 
-A dry run (`"dry_run": true`) only estimates calls and spend, and `max_spend_usd` stops cleanly before the estimate would pass the cap. Recorded reasoning parts are not sent to candidates; the report says how many calls this affects.
+A dry run (`"dry_run": true`) only estimates calls and spend. `max_spend_usd` reserves each call's cost before sending it; with `max_tokens` set on a candidate the cap holds, and without it a reply far longer than estimated can pass the cap slightly. Recorded reasoning parts are not sent to candidates; the report says how many calls this affects.
 
 The `model-swap-summary` insight carries the full report as JSON under `kitaru.model_swap/v1` and a rendered HTML section under `kitaru.report_section/v1`. `kitaru insight report --import-id IMPORT_ID --out report.html` embeds that section in a self-contained HTML file. Session links point at the dashboard URL the server reports when the analysis runs.
 

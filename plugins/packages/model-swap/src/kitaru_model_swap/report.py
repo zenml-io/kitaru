@@ -57,6 +57,8 @@ REPORT_SECTION_KEY = "kitaru.report_section/v1"
 SUMMARY_INSIGHT_NAME = "model-swap-summary"
 _EXCERPT = 600
 _REVIEW_ORDER: dict[bool | None, int] = {False: 0, None: 1, True: 2}
+# Names come from imported traces, so lists of them are bounded.
+_MAX_LISTED = 50
 # A candidate failing more often than this is a setup problem, not a choice.
 _MAX_FAILURE_RATE = 0.2
 # Candidates this close to the best match count as behaving the same.
@@ -748,6 +750,12 @@ def _cost_values(report: dict[str, Any]) -> list[CategoryValue]:
             if not report["dry_run"] and not candidate["cost_complete"]:
                 label += " (partial)"
             values.append(CategoryValue(label=label, value=float(amount)))
+    if report["dry_run"]:
+        values += [
+            CategoryValue(label=c["name"], value=float(c["estimate"]["spend_usd"]))
+            for c in report["decision_candidates"]
+            if c["estimate"]["spend_usd"] is not None
+        ]
     recorded = report["recorded"]["cost"][key]
     if recorded is not None and not report["dry_run"]:
         label = "Recorded"
@@ -779,7 +787,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         + ".",
         "",
     ]
-    if report["dry_run"]:
+    if report["dry_run"] and report["candidates"]:
         lines.append("| Candidate | Calls | Estimated spend (USD) |")
         lines.append("|---|---|---|")
         for candidate in report["candidates"]:
@@ -788,7 +796,7 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"| {candidate['name']} | {estimate['calls']} | "
                 f"{estimate['spend_usd'] or 'unknown price'} |"
             )
-    else:
+    elif report["candidates"]:
         lines.extend(
             f"- **{choice['goal']}:** {choice['candidate']}. {choice['why']}"
             for choice in report["best_for"]
@@ -820,6 +828,20 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{shapes['partial']} partial, {shapes['generative']} generative "
             f"of {shapes['calls']} sampled calls.",
         ]
+    for candidate in report["decision_candidates"]:
+        if "estimate" in candidate:
+            spend = candidate["estimate"]["spend_usd"] or "unknown price"
+            lines.append(
+                f"- **{candidate['name']}** would be asked about "
+                f"{candidate['estimate']['calls']} calls, estimated ${spend}."
+            )
+        else:
+            lines.append(
+                f"- **{candidate['name']}** picked the recorded tool "
+                f"{_pct(candidate['tool_choice_rate'])} of the time and matched "
+                f"every decision {_pct(candidate['decisions_match_rate'])} of the "
+                f"time, at ${candidate['cost_per_call_usd'] or 'unknown'} per call."
+            )
     if report["stopped_early"]:
         lines += ["", f"Stopped early: {report['stopped_early']}."]
     if report["notes"]:
@@ -849,7 +871,10 @@ def _decision_shapes(plans: list[tuple[RecordedCall, DecisionPlan]]) -> dict[str
         "reasons": dict(
             Counter(plan.reason for _, plan in plans if plan.reason).most_common(10)
         ),
-        "by_node": {name: dict(counts) for name, counts in sorted(by_group.items())},
+        "by_node": {
+            name[:80]: dict(counts)
+            for name, counts in sorted(by_group.items())[:_MAX_LISTED]
+        },
     }
 
 
@@ -871,7 +896,7 @@ def _decision_candidate_report(
     asked = [(call, plan) for call, plan in plans if plan.questions]
     if dry_run:
         tokens = sum(
-            decision_tokens(build_state(call.request), len(plan.questions))
+            decision_tokens(candidate, build_state(call.request), plan.questions)
             for call, plan in asked
         )
         report["estimate"] = {
@@ -898,12 +923,18 @@ def _decision_candidate_report(
         all_right += all(matches.values())
         for key, matched in matches.items():
             if key != TOOL_QUESTION:
-                fields[key.removeprefix("arg.")][0] += matched
-                fields[key.removeprefix("arg.")][1] += 1
+                name = (r.plan.arguments or {}).get(key, key)
+                fields[name][0] += matched
+                fields[name][1] += 1
     decision_calls = [r for r in answered if r.plan.shape == "decision"]
     costs = [r.cost for r in answered if r.cost is not None]
-    recorded = [r.call.cost for r in answered if r.call.cost is not None]
-    latencies = sorted(r.latency_seconds for r in answered if r.latency_seconds)
+    # Partial calls still need an LLM for the rest, so savings are only
+    # compared on calls that are decisions throughout.
+    decision_costs = [r.cost for r in decision_calls if r.cost is not None]
+    recorded_decision = [r.call.cost for r in decision_calls if r.call.cost is not None]
+    latencies = sorted(
+        r.latency_seconds for r in answered if r.latency_seconds is not None
+    )
     report |= {
         "calls_asked": len(results) - sum(r.not_run is not None for r in results),
         "calls_not_run": dict(Counter(r.not_run for r in results if r.not_run)),
@@ -912,7 +943,7 @@ def _decision_candidate_report(
         "tool_choice_rate": _rate(tool_right, len(answered)),
         "argument_rates": {
             name: _rate(matched, total)
-            for name, (matched, total) in sorted(fields.items())
+            for name, (matched, total) in sorted(fields.items())[:_MAX_LISTED]
         },
         "decisions_match_rate": _rate(all_right, len(answered)),
         "decision_calls": len(decision_calls),
@@ -929,14 +960,17 @@ def _decision_candidate_report(
         "cost_per_call_usd": _usd(sum(costs, Decimal(0)) / len(costs))
         if costs
         else None,
-        "recorded_cost_per_call_usd": (
-            _usd(sum(recorded, Decimal(0)) / len(recorded)) if recorded else None
-        ),
+        "decision_call_cost_usd": _mean_usd(decision_costs),
+        "recorded_decision_call_cost_usd": _mean_usd(recorded_decision),
         "latency_p50_seconds": _round(statistics.median(latencies))
         if latencies
         else None,
     }
     return report
+
+
+def _mean_usd(costs: list[Decimal]) -> str | None:
+    return _usd(sum(costs, Decimal(0)) / len(costs)) if costs else None
 
 
 def _rate_decimal(part: Decimal, whole: Decimal) -> float | None:
@@ -947,7 +981,7 @@ def _judge_label(params: ModelSwapParams) -> str | None:
     """Name the judge in the report."""
     judge = params.judge
     if isinstance(judge, DecisionJudge):
-        return judge.kind if judge.model is None else f"{judge.kind} ({judge.model})"
+        return f"{judge.kind} ({judge.model})"
     return None if judge is None else judge.name
 
 

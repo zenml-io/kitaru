@@ -116,11 +116,14 @@ async def run_model_swap(
     stopped_early = None
     if not params.dry_run and sampled:
         runner = Runner(params, prices, judge_price=judge_price, transport=transport)
-        results = await runner.run(sampled, deadline=deadline)
+        # Decision requests are small and fast, so they go first and are not
+        # starved by slower candidate calls sharing the same budgets.
         if params.decision_candidates:
             decision_results = await runner.run_decisions(
-                [(call, plan) for call, plan in plans if plan.questions]
+                [(call, plan) for call, plan in plans if plan.questions],
+                deadline=deadline,
             )
+        results = await runner.run(sampled, deadline=deadline)
         spent = runner.budget.spent
         stopped_early = runner.stopped_early
     if collection.sessions_not_fetched:

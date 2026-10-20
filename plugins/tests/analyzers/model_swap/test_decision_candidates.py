@@ -31,7 +31,7 @@ from kitaru_model_swap.decisions import Question, build_questions_request, read_
 from kitaru_model_swap.normalize import RecordedOutcome, ReplayRequest, ToolCall
 from kitaru_model_swap.params import DecisionCandidate, ModelSwapParams
 
-from .helpers import StubClient
+from .helpers import StubClient, completion
 from .test_analyzer import CHEAP, report
 
 ACTION_SCHEMA = {
@@ -83,12 +83,17 @@ def test_enum_and_boolean_arguments_make_a_decision_call() -> None:
     assert plan.shape == "decision"
     assert plan.expected == {
         TOOL_QUESTION: "decide",
-        "arg.action": "refund",
-        "arg.urgent": "true",
-        "arg.priority": "low",
+        "arg_0_action": "refund",
+        "arg_1_urgent": "true",
+        "arg_2_priority": "low",
+    }
+    assert plan.arguments == {
+        "arg_0_action": "action",
+        "arg_1_urgent": "urgent",
+        "arg_2_priority": "priority",
     }
     options = {q.key: list(q.options or {}) for q in plan.questions}
-    assert options["arg.action"] == ["refund", "reject"]
+    assert options["arg_0_action"] == ["refund", "reject"]
     assert TEXT_ANSWER in options[TOOL_QUESTION]
 
 
@@ -99,7 +104,7 @@ def test_free_form_arguments_make_a_partial_call() -> None:
 
     assert plan.shape == "partial"
     assert plan.reason == "free-form arguments: note"
-    assert "arg.action" in (plan.expected or {})
+    assert "arg_0_action" in (plan.expected or {})
 
 
 def test_a_value_outside_the_enum_is_free_form() -> None:
@@ -145,7 +150,7 @@ def test_quickstart_calls_are_classified(quickstart_sessions: list[Any]) -> None
         p for p in plans if (p.expected or {}).get(TOOL_QUESTION) == "final_result"
     )
     # Pydantic AI writes the action enum through $defs.
-    assert final.expected is not None and final.expected["arg.action"] in {
+    assert final.expected is not None and final.expected["arg_0_action"] in {
         "refund",
         "replacement",
         "escalate",
@@ -228,7 +233,7 @@ def always_decides(request: httpx.Request) -> httpx.Response:
             if key == "tool" and "final_result" in options
             else options[0]
         )
-        if key == "arg.action":
+        if key.endswith("_action"):
             pick = "refund"
         answers[key] = {"choice": pick, "confidence": 0.9}
     return httpx.Response(
@@ -289,3 +294,129 @@ async def test_decision_candidates_in_a_dry_run(
 
     assert jev["estimate"]["calls"] == 25
     assert jev["estimate"]["spend_usd"] is not None
+
+
+def plan_for(schema: dict[str, Any], arguments: dict[str, Any]) -> Any:
+    built = ReplayRequest(
+        messages=[{"role": "user", "content": "help"}],
+        tools=[{"type": "function", "function": {"name": "act", "parameters": schema}}],
+        schema_source="recorded",
+        source_format="openai_chat",
+        recorded=RecordedOutcome(tool_calls=(ToolCall("act", arguments),), text=None),
+    )
+    return plan_decisions(built)
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"properties": {"x": {"type": ["boolean", "null"]}}},
+        {"properties": {"x": {"anyOf": [{"type": "boolean"}, {"enum": ["maybe"]}]}}},
+        {
+            "properties": {"x": {"allOf": [{"$ref": "#/definitions/Flag"}]}},
+            "definitions": {"Flag": {"type": "boolean"}},
+        },
+    ],
+)
+def test_more_schema_shapes_are_decisions(schema: dict[str, Any]) -> None:
+    assert plan_for(schema, {"x": True}).shape == "decision"
+
+
+def test_a_single_option_is_not_a_decision() -> None:
+    plan = plan_for({"properties": {"x": {"enum": [None, "only"]}}}, {"x": "only"})
+
+    assert plan.shape == "partial"
+
+
+def test_keys_stay_unique_after_unsafe_characters_are_replaced() -> None:
+    plan = plan_for(
+        {"properties": {"a b": {"type": "boolean"}, "a_b": {"type": "boolean"}}},
+        {"a b": True, "a_b": False},
+    )
+
+    keys = [q.key for q in plan.questions]
+    assert len(keys) == len(set(keys)) == 3
+    assert all("." not in key for key in keys)
+
+
+def test_questions_per_request_are_capped() -> None:
+    properties = {f"f{i}": {"type": "boolean"} for i in range(80)}
+
+    plan = plan_for({"properties": properties}, dict.fromkeys(properties, True))
+
+    assert len(plan.questions) == 60
+    assert plan.shape == "partial"
+
+
+def test_inferred_schemas_are_not_trusted() -> None:
+    built = request(ToolCall("decide", {"action": "refund"}))
+    inferred = ReplayRequest(
+        messages=built.messages,
+        tools=built.tools,
+        schema_source="inferred",
+        source_format=built.source_format,
+        recorded=built.recorded,
+    )
+
+    assert plan_decisions(inferred).shape == "generative"
+
+
+def test_a_tool_named_like_the_text_answer_is_generative() -> None:
+    built = ReplayRequest(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[
+            {"type": "function", "function": {"name": TEXT_ANSWER, "parameters": {}}}
+        ],
+        schema_source="recorded",
+        source_format="openai_chat",
+        recorded=RecordedOutcome(tool_calls=(), text="hello"),
+    )
+
+    assert plan_decisions(built).shape == "generative"
+
+
+async def test_decision_only_runs_summarize_and_chart_the_estimate(
+    stub_client: StubClient,
+) -> None:
+    insights = await run_model_swap(
+        list(stub_client._by_id),
+        ModelSwapParams.model_validate({"decision_candidates": [JEV], "dry_run": True}),
+        transport=httpx.MockTransport(always_decides),
+    )
+    by_name = {insight.name: insight for insight in insights}
+    summary = by_name["model-swap-summary"].data
+
+    assert getattr(summary, "content", "").count("| Candidate |") == 0
+    assert "would be asked about 25 calls" in getattr(summary, "content", "")
+    cost = by_name["model-swap-cost"].data
+    assert [v.label for v in getattr(cost, "values", [])] == ["jev"]
+
+
+async def test_decision_requests_run_before_candidates(
+    stub_client: StubClient,
+    quickstart_sessions: list[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-test")
+    order: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        order.append(
+            "decision" if request.url.path.endswith("/v1/systemone") else "llm"
+        )
+        if order[-1] == "decision":
+            return always_decides(request)
+        return completion(tool_calls=[("escalate_to_human", {"reason": "x"})])
+
+    await run_model_swap(
+        list(stub_client._by_id),
+        ModelSwapParams.model_validate(
+            {"candidates": [CHEAP], "decision_candidates": [JEV], "max_calls": 5}
+        ),
+        transport=httpx.MockTransport(handle),
+    )
+
+    assert order[0] == "decision"
+    assert order.index("llm") > max(
+        i for i, kind in enumerate(order) if kind == "decision"
+    )

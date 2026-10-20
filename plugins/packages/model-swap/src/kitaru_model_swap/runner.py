@@ -16,7 +16,7 @@
 import asyncio
 import json
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal, Protocol, TypeVar
@@ -27,13 +27,21 @@ from kitaru.task.importer import gather_bounded
 from kitaru_model_swap.calls import RecordedCall, reservation_usage
 from kitaru_model_swap.compare import Agreement, compare
 from kitaru_model_swap.decision_plan import DecisionPlan, build_state
-from kitaru_model_swap.decisions import ask, classify, decide, get_decision_key
+from kitaru_model_swap.decisions import (
+    Question,
+    ask,
+    build_questions_request,
+    classify,
+    decide,
+    get_decision_key,
+)
 from kitaru_model_swap.endpoint import CandidateReply, Usage, get_api_key, send
 from kitaru_model_swap.normalize import RecordedOutcome
 from kitaru_model_swap.params import (
     Candidate,
     DecisionCandidate,
     DecisionJudge,
+    DecisionModel,
     ModelSwapParams,
 )
 from kitaru_model_swap.pricing import ResolvedPrice, call_cost
@@ -195,9 +203,13 @@ class Runner:
             )
 
     async def run_decisions(
-        self, calls: list[tuple[RecordedCall, DecisionPlan]]
+        self, calls: list[tuple[RecordedCall, DecisionPlan]], *, deadline: float
     ) -> list[DecisionResult]:
-        """Ask every decision candidate the decision questions of each call."""
+        """Ask every decision candidate the decision questions of each call.
+
+        `deadline` is a `time.monotonic()` value shared with `run`.
+        """
+        self._deadline = deadline
         async with httpx.AsyncClient(transport=self._transport) as client:
             return await gather_bounded(
                 (
@@ -217,7 +229,7 @@ class Runner:
     ) -> DecisionResult:
         """Ask one decision candidate one call's questions within the budgets."""
         state = build_state(call.request)
-        estimated = decision_tokens(state, len(plan.questions))
+        estimated = decision_tokens(candidate, state, plan.questions)
         started = time.monotonic()
         asked = await self._within_budget(
             self._prices.get(candidate.name),
@@ -403,9 +415,16 @@ class Runner:
         return result, cost
 
 
-def decision_tokens(state: Any, questions: int) -> int:
-    """Estimate a decision request's input tokens from its state and questions."""
-    return len(json.dumps(state, default=str)) // 4 + 50 * questions
+def decision_tokens(
+    model: DecisionModel, state: Any, questions: Sequence[Question]
+) -> int:
+    """Estimate a decision request's input tokens from its whole body.
+
+    The body repeats tool descriptions and enum labels as options, so the
+    estimate counts what is actually sent, not only the conversation.
+    """
+    _, body = build_questions_request(model, state, questions)
+    return len(json.dumps(body, default=str)) // 4
 
 
 def _price_or_none(price: ResolvedPrice | None, usage: Usage) -> Decimal | None:

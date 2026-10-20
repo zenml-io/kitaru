@@ -204,8 +204,10 @@ def _decisions(report: dict[str, Any]) -> str:
                     "All decisions match",
                     "Argument agreement",
                     "Failures",
-                    "Cost per call",
-                    "Recorded cost per call",
+                    "Cost per call (decision parts)",
+                    "Cost per decision call",
+                    "Recorded cost per decision call",
+                    "Not run",
                     "Latency p50",
                 ],
                 [
@@ -220,7 +222,10 @@ def _decisions(report: dict[str, Any]) -> str:
                         or None,
                         ", ".join(f"{k} {v}" for k, v in c["failures"].items()) or None,
                         _usd(c["cost_per_call_usd"]),
-                        _usd(c["recorded_cost_per_call_usd"]),
+                        _usd(c["decision_call_cost_usd"]),
+                        _usd(c["recorded_decision_call_cost_usd"]),
+                        ", ".join(f"{k} {v}" for k, v in c["calls_not_run"].items())
+                        or None,
                         _seconds(c["latency_p50_seconds"]),
                     ]
                     for c in candidates

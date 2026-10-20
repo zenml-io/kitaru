@@ -173,7 +173,8 @@ def test_billing_units_and_negative_counts() -> None:
         {"answers": {QUESTION: 0.9}, "usage": {"input_tokens": -50}}
     )
 
-    assert billed.usage.input_tokens == 40
+    # Billing units are not tokens, so the estimate is used.
+    assert billed.usage.input_tokens == 999
     assert negative.usage.input_tokens == 0
 
 

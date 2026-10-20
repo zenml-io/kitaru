@@ -313,14 +313,15 @@ def _read_choice(answer: Any, options: Mapping[str, str | None]) -> str | None:
 def _read_usage(usage: Any, estimated_tokens: int) -> Usage:
     """Read input tokens, falling back to the estimate when none are reported.
 
-    TypeSafe reports `billing_units` and may leave out token counts.
+    TypeSafe reports `billing_units`, which are not tokens, and may leave out
+    token counts.
     """
     if not isinstance(usage, dict):
         return Usage(input_tokens=estimated_tokens)
     tokens = next(
         (
             usage[key]
-            for key in ("input_tokens", "prompt_tokens", "input", "billing_units")
+            for key in ("input_tokens", "prompt_tokens", "input")
             if isinstance(usage.get(key), int) and not isinstance(usage.get(key), bool)
         ),
         None,

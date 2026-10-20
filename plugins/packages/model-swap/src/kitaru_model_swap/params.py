@@ -214,11 +214,13 @@ class DecisionModel(_Params):
         filled = {k: v for k, v in defaults.items() if v is not None} | given
         if "base_url" not in filled:
             raise ValueError(
-                "a clef judge needs base_url, the Workers AI run URL for your account"
+                "a clef decision model needs base_url, the Workers AI run URL "
+                "for your account"
             )
         if "api_key_env" not in filled:
             raise ValueError(
-                "a judge with its own base_url needs api_key_env naming its key"
+                "a decision model with its own base_url needs api_key_env naming "
+                "its key"
             )
         return filled
 
