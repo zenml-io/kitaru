@@ -1304,11 +1304,11 @@ def _interval(part: int, whole: int, z: float = 1.96) -> list[float] | None:
     if not whole:
         return None
     p = part / whole
-    centre = (p + z * z / (2 * whole)) / (1 + z * z / whole)
+    center = (p + z * z / (2 * whole)) / (1 + z * z / whole)
     half = (z * math.sqrt(p * (1 - p) / whole + z * z / (4 * whole * whole))) / (
         1 + z * z / whole
     )
-    return [round(max(0.0, centre - half), 4), round(min(1.0, centre + half), 4)]
+    return [round(max(0.0, center - half), 4), round(min(1.0, center + half), 4)]
 
 
 def _yes_no(value: bool | None) -> str:
