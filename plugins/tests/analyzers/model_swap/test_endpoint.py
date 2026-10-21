@@ -315,7 +315,7 @@ def test_unknown_model_has_no_price() -> None:
 
 
 RESPONSES = {"provider_settings": {"api": "responses"}}
-TOOL = {
+TOOL: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "lookup_order",
