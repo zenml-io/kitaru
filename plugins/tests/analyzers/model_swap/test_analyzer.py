@@ -319,7 +319,13 @@ async def test_judge_verdicts_are_reported(
 
     assert candidate["agreement"] == {"same_tool_different_args": 3}
     assert candidate["judged_equivalent"] == 3
-    assert [r["model"] for r in server.requests].count("judge") == 3
+    # Three rulings, each asked again with the answers swapped.
+    assert [r["model"] for r in server.requests].count("judge") == 6
+    assert report(insights)["judge_check"] == {
+        "checked": 3,
+        "changed": 0,
+        "unanswered": 0,
+    }
     assert all(
         item["judge_equivalent"] is True for item in report(insights)["disagreements"]
     )

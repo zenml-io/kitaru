@@ -18,6 +18,7 @@ agents and scripts, and a rendered HTML section under `REPORT_SECTION_KEY`,
 which `kitaru insight report` embeds without calling any model.
 """
 
+import hashlib
 import math
 import re
 import statistics
@@ -73,6 +74,10 @@ _NOISY_REFERENCE = 0.5
 # A candidate matching today's model less than this share as often as the
 # closest candidate does is a clear failure, not worth a full replay.
 _CLEAR_FAILURE_RATIO = 0.5
+# A judge that changes this share of its rulings when only the order of the
+# answers changes is too unstable to lean on.
+_UNSTABLE_JUDGE = 0.2
+_MIN_JUDGE_RECHECKS = 5
 _DAYS_PER_MONTH = 30
 # Spans shorter than this are too short to extrapolate traffic from.
 _MIN_OBSERVED_DAYS = 1
@@ -120,6 +125,7 @@ def build_report(
     stopped_early: NotRunReason | None,
     plans: list[tuple[RecordedCall, DecisionPlan]] | None = None,
     decision_results: list[DecisionResult] | None = None,
+    judge_check: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Build the JSON report for a completed run or a dry run."""
     plans = plans or []
@@ -168,7 +174,13 @@ def build_report(
     mix = (
         None
         if params.dry_run
-        else _best_mix(candidates, sampled, volume, params.min_mix_calls)
+        else _best_mix(
+            candidates,
+            sampled,
+            volume,
+            params.min_mix_calls,
+            _split_routes(by_candidate, sampled),
+        )
     )
     return {
         "schema": 1,
@@ -206,7 +218,9 @@ def build_report(
         "max_spend_usd": _usd(params.max_spend_usd),
         "stopped_early": stopped_early,
         "judge": _judge_label(params),
+        "judge_check": judge_check,
         "notes": _notes(coverage)
+        + _build_setup_notes(params, judge_check)
         + (
             [
                 "Per-session and monthly costs assume each candidate takes the "
@@ -329,6 +343,49 @@ def _recorded_report(
     }
 
 
+def _build_setup_notes(
+    params: ModelSwapParams, judge_check: dict[str, int] | None
+) -> list[str]:
+    """Explain how the run's setup limits what its numbers can show."""
+    notes = []
+    if params.candidates and not any(c.reference for c in params.candidates):
+        notes.append(
+            "No candidate is marked `reference`, so there is no noise floor. "
+            "Today's model run again shows how much answers vary on their own, "
+            "and a difference smaller than that is noise. Add the current model "
+            "with `reference: true`."
+        )
+    if prompted := [c.name for c in params.candidates if c.system_prompt]:
+        notes.append(
+            f"{', '.join(prompted)} use their own system prompt instead of the "
+            "recorded one, so their numbers measure the prompt and the model "
+            "together."
+        )
+    judge = params.judge
+    if isinstance(judge, Candidate):
+        same = [
+            c.name
+            for c in params.candidates
+            if c.model.casefold() == judge.model.casefold()
+        ]
+        if same:
+            notes.append(
+                f"The judge runs the same model as {', '.join(same)}. A model may "
+                "favor answers like its own, so read the judge's rulings on "
+                "that candidate with care, or use a judge that is not a candidate."
+            )
+    if judge_check and judge_check["checked"]:
+        checked, changed = judge_check["checked"], judge_check["changed"]
+        note = (
+            f"The judge was asked again with the two answers in the other order "
+            f"on {checked} of its rulings and changed {changed}."
+        )
+        if checked >= _MIN_JUDGE_RECHECKS and changed / checked >= _UNSTABLE_JUDGE:
+            note += " Treat its rulings as weak evidence and review the answers."
+        notes.append(note)
+    return notes
+
+
 def _candidate_report(
     candidate: Candidate,
     sampled: list[RecordedCall],
@@ -370,7 +427,15 @@ def _candidate_report(
         estimates = (
             []
             if price is None
-            else [(c, call_cost(price, estimate_usage(c, max_tokens))) for c in sampled]
+            else [
+                (
+                    c,
+                    call_cost(
+                        price, estimate_usage(c, max_tokens, candidate.system_prompt)
+                    ),
+                )
+                for c in sampled
+            ]
         )
         report["estimate"] = {
             "calls": len(sampled) * repeats,
@@ -387,7 +452,7 @@ def _candidate_report(
     sent = [r for r in results if r.reply is not None]
     answered = [r for r in sent if r.agreement is not None]
     every_sent = [r for r in attempts if r.reply is not None]
-    headline = [r for r in answered if r.call.request.schema_source != "inferred"]
+    headline = _get_headline(attempts)
     inferred = [r for r in answered if r.call.request.schema_source == "inferred"]
     failed = [r.reply for r in every_sent if r.reply and r.reply.failure is not None]
     failures = Counter(reply.failure for reply in failed)
@@ -1216,20 +1281,63 @@ def _consistency(attempts: list[CallResult], repeats: int) -> dict[str, Any] | N
     }
 
 
+def _get_headline(attempts: list[CallResult]) -> list[CallResult]:
+    """First attempts that were answered, on calls with known tool schemas."""
+    return [
+        r
+        for r in attempts
+        if r.attempt == 0
+        and r.agreement is not None
+        and r.call.request.schema_source != "inferred"
+    ]
+
+
+def _is_learning_session(call: RecordedCall) -> bool:
+    """Put about half of the sessions in the learning set, by session id."""
+    return int(hashlib.sha256(str(call.session_id).encode()).hexdigest(), 16) % 2 == 0
+
+
+def _split_routes(
+    by_candidate: dict[str, list[CallResult]], sampled: list[RecordedCall]
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Per-step results of each candidate on the learning and held-out sessions.
+
+    Sessions, not calls, are split, so calls from one conversation never land
+    on both sides.
+    """
+    key = _route_key(sampled)
+    learning: dict[str, dict[str, Any]] = {}
+    held_out: dict[str, dict[str, Any]] = {}
+    for name, results in by_candidate.items():
+        halves: tuple[list[CallResult], list[CallResult]] = ([], [])
+        for r in _get_headline(results):
+            halves[0 if _is_learning_session(r.call) else 1].append(r)
+        learning[name] = _by_group(halves[0], key)
+        held_out[name] = _by_group(halves[1], key)
+    return learning, held_out
+
+
 def _best_mix(
     candidates: list[dict[str, Any]],
     sampled: list[RecordedCall],
     volume: Volume,
     min_calls: int,
+    split: tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]],
 ) -> dict[str, Any] | None:
     """Pick, per step, the cheapest candidate that behaves well enough.
 
     Steps are named by what comes just before a call (`_route`), which a
-    router can see. A step moves to a candidate only when the candidate
-    answered at least `min_calls` of its calls and its rate there is within
-    10 points of the reference's rate (or of the best rate when there is no
-    reference); otherwise it stays on today's model, as does a step where the
-    reference itself takes the recorded action less than half the time.
+    router can see. Picking the best of many candidates on many steps finds
+    some by luck, so each step is chosen on the learning half of the sessions
+    and checked on the held-out half. A step moves to a candidate only when
+    the candidate answered at least `min_calls` of the step's calls and its
+    rate on the learning half is within 10 points of the reference's rate
+    there (or of the best rate when there is no reference). A pick whose
+    held-out rate, on enough held-out calls, falls more than 10 points below
+    the reference's held-out rate (or the learning bar) is dropped
+    (`held_out: failed`); with too few held-out calls it stays but is marked
+    `too_few`. Otherwise the step stays on today's model, as does a step where
+    the reference itself takes the recorded action less than half the time.
     "Rate" is whether the candidate takes the same kind of action (the same
     tools, or a text answer), not exact wording. Today's cost is the
     reference's replay cost when there is a reference, since recorded calls
@@ -1256,25 +1364,33 @@ def _best_mix(
     groups: list[dict[str, Any]] = []
     # (share, cost per call with the mix, cost per call today) per step
     prices: list[tuple[Decimal, Decimal | None, Decimal | None]] = []
+    learning, held_out = split
     for group, count in sorted(shares.items()):
-        ref_values = reference["by_route"].get(group) if reference else None
+        ref_all = reference["by_route"].get(group) if reference else None
+        ref_values = (
+            learning.get(reference["name"], {}).get(group) if reference else None
+        )
+        ref_held = held_out.get(reference["name"], {}).get(group) if reference else None
         today = (
-            Decimal(ref_values["cost_per_call_usd"])
-            if ref_values and ref_values["cost_per_call_usd"] is not None
+            Decimal(ref_all["cost_per_call_usd"])
+            if ref_all and ref_all["cost_per_call_usd"] is not None
             else _mean_decimal(recorded_costs[group])
         )
         rates: dict[str, float] = {}
         costs: dict[str, Decimal] = {}
         too_few = False
         for c in usable:
-            values = c["by_route"].get(group)
-            if not values or values["cost_per_call_usd"] is None:
+            values = learning.get(c["name"], {}).get(group)
+            overall = c["by_route"].get(group)
+            if not overall or overall["cost_per_call_usd"] is None:
                 continue
-            if values["calls"] < min_calls:
+            if overall["calls"] < min_calls:
                 too_few = True
                 continue
+            if not values:
+                continue
             rates[c["name"]] = values["match_rate"]
-            costs[c["name"]] = Decimal(values["cost_per_call_usd"])
+            costs[c["name"]] = Decimal(overall["cost_per_call_usd"])
         bar = ref_values["match_rate"] if ref_values else None
         if bar is None and rates:
             bar = max(rates.values())
@@ -1292,6 +1408,18 @@ def _best_mix(
         # Keep today's model when it is cheaper than every candidate that fits.
         if choice is not None and today is not None and costs[choice] > today:
             choice = None
+        held_rate, held_calls, held_status = None, 0, None
+        if choice is not None and bar is not None:
+            held = held_out.get(choice, {}).get(group)
+            held_bar = ref_held["match_rate"] if ref_held else bar
+            held_calls = held["calls"] if held else 0
+            held_rate = held["match_rate"] if held else None
+            if held_rate is None or held_calls < max(1, min_calls // 4):
+                held_status = "too_few"
+            elif held_rate < held_bar - _COMPARABLE_POINTS:
+                choice, held_status = None, "failed"
+            else:
+                held_status = "held"
         cost = costs[choice] if choice else today
         share = round(count / len(sampled), 4)
         groups.append(
@@ -1304,10 +1432,14 @@ def _best_mix(
                 "cost_per_call_usd": _usd(cost),
                 "too_few_calls": choice is None and too_few and not rates,
                 "noisy_reference": noisy,
+                "held_out": held_status,
+                "held_out_rate": held_rate,
+                "held_out_calls": held_calls,
             }
         )
         prices.append((Decimal(str(share)), cost, today))
-    if not any(item["candidate"] for item in groups):
+    # A pick that failed on held-out sessions is a result worth showing.
+    if not any(item["candidate"] or item["held_out"] == "failed" for item in groups):
         return None
     if any(cost is None or today is None for _, cost, today in prices):
         return {
@@ -1333,6 +1465,8 @@ def _mix_row(mix: dict[str, Any] | None) -> list[dict[str, str]]:
     if mix is None:
         return []
     moved = [item for item in mix["groups"] if item["candidate"]]
+    if not moved:
+        return []
     targets = sorted({item["candidate"] for item in moved})
     why = (
         f"Moves {len(moved)} of {len(mix['groups'])} kinds of call "

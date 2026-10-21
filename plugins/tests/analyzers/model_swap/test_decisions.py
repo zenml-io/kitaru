@@ -47,10 +47,8 @@ def test_jev_request_uses_system_one() -> None:
     url, body = build_request(judge(kind="jev"), "refund(98)", "escalate()")
 
     assert url == "https://api.typesafe.ai/v1/systemone"
-    assert body["state"] == {
-        "recorded_answer": "refund(98)",
-        "candidate_answer": "escalate()",
-    }
+    # The judge is never told which answer is today's.
+    assert body["state"] == {"answer_a": "refund(98)", "answer_b": "escalate()"}
     assert body["questions"][QUESTION]["type"] == "noul"
     assert body["model"] == "jev-latest"
 
@@ -227,11 +225,16 @@ def changed_arguments(sessions: list[Any]) -> Any:
 
 
 class DecisionServer:
-    """Candidates change every argument; the judge returns a set probability."""
+    """Candidates change every argument; the judge returns a set probability.
+
+    The judge is stable: asked again about the same two answers, in either
+    order, it gives the same probability.
+    """
 
     def __init__(self, sessions: list[Any], probabilities: list[float]) -> None:
         self.candidate = changed_arguments(sessions)
         self.probabilities = iter(probabilities)
+        self.rulings: dict[frozenset[str], float] = {}
         self.judge_requests: list[dict[str, Any]] = []
         self.judge_headers: list[httpx.Headers] = []
 
@@ -247,11 +250,17 @@ class DecisionServer:
                 200,
                 json={
                     "model": "jev",
-                    "answers": {QUESTION: {"noul": next(self.probabilities)}},
+                    "answers": {QUESTION: {"noul": self._rule(body["state"])}},
                     "usage": {"input_tokens": 100},
                 },
             )
         return self.candidate(body)
+
+    def _rule(self, state: dict[str, str]) -> float:
+        pair = frozenset((state["answer_a"], state["answer_b"]))
+        if pair not in self.rulings:
+            self.rulings[pair] = next(self.probabilities)
+        return self.rulings[pair]
 
 
 async def test_jev_judge_end_to_end(
@@ -281,7 +290,9 @@ async def test_jev_judge_end_to_end(
     result = report({insight.name: insight for insight in insights})
     candidate = result["candidates"][0]
 
-    assert len(server.judge_requests) == 3
+    # Three rulings, then the two definite ones asked again in the other order.
+    assert len(server.judge_requests) == 5
+    assert result["judge_check"] == {"checked": 2, "changed": 0, "unanswered": 0}
     assert server.judge_headers[0]["authorization"] == "Bearer ts-test"
     assert result["judge"] == "jev (jev-latest)"
     assert candidate["judged_equivalent"] == 1

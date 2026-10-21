@@ -33,6 +33,7 @@ FailureCategory = Literal[
     "empty_reply",
     "tool_call_parse_error",
     "refusal",
+    "truncated",
 ]
 
 _MAX_DETAIL = 200
@@ -178,6 +179,18 @@ def _text(content: Any) -> str:
     return ""
 
 
+def with_system_prompt(
+    messages: list[dict[str, Any]], prompt: str
+) -> list[dict[str, Any]]:
+    """Replace the recorded system prompt, or add one when there is none.
+
+    Every system or developer message is replaced by a single system message
+    at the start, so the candidate sees only the prompt under test.
+    """
+    rest = [m for m in messages if m.get("role") not in {"system", "developer"}]
+    return [{"role": "system", "content": prompt}, *rest]
+
+
 async def send(
     client: httpx.AsyncClient,
     candidate: Candidate,
@@ -193,6 +206,8 @@ async def send(
         "/responses" if responses else "/chat/completions"
     )
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    if candidate.system_prompt is not None:
+        messages = with_system_prompt(messages, candidate.system_prompt)
     body = (build_responses_body if responses else build_body)(
         candidate, messages, tools
     )
@@ -285,6 +300,10 @@ def _classify(
     message = _as_dict(choice.get("message"))
     if message.get("refusal") or choice.get("finish_reason") == "content_filter":
         return failed("refusal", str(message.get("refusal") or "content filter"))
+    # A cut-off reply would otherwise count as a disagreement, mistaking a
+    # token limit for the model's choice.
+    if choice.get("finish_reason") == "length":
+        return failed("truncated", "the reply hit the output token limit")
     text = message.get("content") if isinstance(message.get("content"), str) else None
     try:
         tool_calls, text = _read_tool_calls(message, text, tool_call_format)
@@ -323,6 +342,13 @@ def _classify_responses(
             category, detail, latency=latency, attempts=attempts, usage=usage
         )
 
+    if payload.get("status") == "incomplete":
+        reason = _as_dict(payload.get("incomplete_details")).get("reason")
+        if reason == "max_output_tokens":
+            return failed("truncated", "the reply hit the output token limit")
+        if reason == "content_filter":
+            return failed("refusal", "content filter")
+        return failed("empty_reply", f"the reply is incomplete: {reason}")
     calls: list[ToolCall] = []
     texts: list[str] = []
     output = payload.get("output")

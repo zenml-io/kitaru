@@ -112,6 +112,7 @@ async def run_model_swap(
     plans = [(call, plan_decisions(call.request)) for call in sampled]
     decision_results = []
     results = []
+    judge_check = None
     spent = Decimal(0)
     stopped_early = None
     if not params.dry_run and sampled:
@@ -124,8 +125,11 @@ async def run_model_swap(
                 deadline=deadline,
             )
         results = await runner.run(sampled, deadline=deadline)
-        spent = runner.budget.spent
+        # Read before the recheck: a recheck cut short by the budget or the
+        # deadline leaves every call answered, so the run did not stop early.
         stopped_early = runner.stopped_early
+        judge_check = await runner.recheck_judge(results)
+        spent = runner.budget.spent
     if collection.sessions_not_fetched:
         stopped_early = stopped_early or "time_budget"
     report = build_report(
@@ -138,6 +142,7 @@ async def run_model_swap(
         stopped_early=stopped_early,
         plans=plans,
         decision_results=decision_results,
+        judge_check=judge_check,
     )
     return build_insights(report, dashboard_url=dashboard_url)
 
@@ -171,7 +176,15 @@ def _check_cap_fits(
         if price is None or max_tokens is None:
             continue
         largest = max(
-            call_cost(price, reservation_usage(call, max_tokens, strict=True))
+            call_cost(
+                price,
+                reservation_usage(
+                    call,
+                    max_tokens,
+                    strict=True,
+                    system_prompt=candidate.system_prompt,
+                ),
+            )
             for call in sampled
         )
         if largest > cap:

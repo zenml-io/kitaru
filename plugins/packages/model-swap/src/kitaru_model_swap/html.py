@@ -195,15 +195,26 @@ def _best_mix(mix: dict[str, Any] | None) -> str:
         [
             item["group"],
             _pct(item["share"]),
-            item["candidate"]
-            or (
+            (
+                item["candidate"]
+                + (
+                    " (too few held-out calls to confirm)"
+                    if item.get("held_out") == "too_few"
+                    else ""
+                )
+            )
+            if item["candidate"]
+            else (
                 f"today's model (fewer than {mix['min_calls']} calls)"
                 if item["too_few_calls"]
                 else "today's model (it does not match itself here)"
                 if item.get("noisy_reference")
+                else "today's model (the pick did not hold on held-out sessions)"
+                if item.get("held_out") == "failed"
                 else "today's model"
             ),
             _pct(item["rate"]),
+            _pct(item.get("held_out_rate")),
             _usd(item["cost_per_call_usd"]),
         ]
         for item in mix["groups"]
@@ -224,9 +235,13 @@ def _best_mix(mix: dict[str, Any] | None) -> str:
         "that answered at least "
         f"{mix['min_calls']} of its calls and takes the same kind of action (the "
         "same tools, or a text answer) within 10 points as often as today's "
-        "model there; the rest stays on today's model. Confirm a mix with a full "
-        "replay before routing traffic.</p>"
-        + _table(["Step", "Share of calls", "Use", "Matches", "Cost per call"], rows)
+        "model there, chosen on half of the sessions and dropped where it does "
+        "not hold on the other half; the rest stays on today's model. Confirm "
+        "a mix with a full replay before routing traffic.</p>"
+        + _table(
+            ["Step", "Share of calls", "Use", "Matches", "Held out", "Cost per call"],
+            rows,
+        )
         + total
     )
 

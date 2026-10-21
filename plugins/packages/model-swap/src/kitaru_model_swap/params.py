@@ -173,6 +173,14 @@ class Candidate(_Params):
         description="Provider id for the bundled price lookup, such as `openai`.",
     )
     provider_settings: ProviderSettings = Field(default_factory=ProviderSettings)
+    system_prompt: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "System prompt sent instead of the recorded one, to compare a "
+            "cleaned-up or rewritten prompt as its own candidate."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_endpoint(self) -> Self:

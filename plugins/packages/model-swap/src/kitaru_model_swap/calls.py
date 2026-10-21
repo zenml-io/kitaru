@@ -134,16 +134,31 @@ def _recorded_call(
     )
 
 
-def estimate_usage(call: RecordedCall, max_tokens: int | None) -> Usage:
+def estimate_usage(
+    call: RecordedCall, max_tokens: int | None, system_prompt: str | None = None
+) -> Usage:
     """Estimate a replay's tokens from the recording."""
     output_tokens = call.usage.output_tokens or _DEFAULT_OUTPUT_TOKENS
     if max_tokens is not None:
         output_tokens = min(output_tokens, max_tokens)
-    return Usage(input_tokens=call.estimated_input_tokens, output_tokens=output_tokens)
+    return Usage(
+        input_tokens=_input_tokens(call, system_prompt), output_tokens=output_tokens
+    )
+
+
+def _input_tokens(call: RecordedCall, system_prompt: str | None) -> int:
+    # A replacement prompt is counted on top of the recorded input rather than
+    # instead of the recorded prompt, which keeps the estimate on the high side.
+    extra = len(system_prompt) // _CHARS_PER_TOKEN if system_prompt else 0
+    return call.estimated_input_tokens + extra
 
 
 def reservation_usage(
-    call: RecordedCall, max_tokens: int | None, *, strict: bool = False
+    call: RecordedCall,
+    max_tokens: int | None,
+    *,
+    strict: bool = False,
+    system_prompt: str | None = None,
 ) -> Usage:
     """Estimate a replay's tokens on the high side, for the spend cap.
 
@@ -160,7 +175,9 @@ def reservation_usage(
         output_tokens = max(recorded * _RESERVE_OUTPUT_FACTOR, _MIN_RESERVED_OUTPUT)
         if max_tokens is not None:
             output_tokens = min(output_tokens, max_tokens)
-    return Usage(input_tokens=call.estimated_input_tokens, output_tokens=output_tokens)
+    return Usage(
+        input_tokens=_input_tokens(call, system_prompt), output_tokens=output_tokens
+    )
 
 
 def sample_calls(calls: list[RecordedCall], max_calls: int) -> list[RecordedCall]:
