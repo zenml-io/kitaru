@@ -292,7 +292,12 @@ async def test_jev_judge_end_to_end(
 
     # Three rulings, then the two definite ones asked again in the other order.
     assert len(server.judge_requests) == 5
-    assert result["judge_check"] == {"checked": 2, "changed": 0, "unanswered": 0}
+    assert result["judge_check"] == {
+        "checked": 2,
+        "changed": 0,
+        "unsure": 0,
+        "unanswered": 0,
+    }
     assert server.judge_headers[0]["authorization"] == "Bearer ts-test"
     assert result["judge"] == "jev (jev-latest)"
     assert candidate["judged_equivalent"] == 1

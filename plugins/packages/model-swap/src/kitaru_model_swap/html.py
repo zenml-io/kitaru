@@ -200,6 +200,8 @@ def _best_mix(mix: dict[str, Any] | None) -> str:
                 + (
                     " (too few held-out calls to confirm)"
                     if item.get("held_out") == "too_few"
+                    else " (seen in one half of the sessions only, not checked)"
+                    if item.get("held_out") == "no_split"
                     else ""
                 )
             )

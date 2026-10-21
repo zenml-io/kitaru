@@ -178,7 +178,16 @@ class Candidate(_Params):
         min_length=1,
         description=(
             "System prompt sent instead of the recorded one, to compare a "
-            "cleaned-up or rewritten prompt as its own candidate."
+            "cleaned-up or rewritten prompt as its own candidate. It replaces "
+            "every recorded system and developer message, including any "
+            "per-call context the agent put there."
+        ),
+    )
+    system_prompt_nodes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Node names whose calls get `system_prompt`; empty means every "
+            "call. Use it when the agent's nodes have different prompts."
         ),
     )
 
@@ -188,9 +197,23 @@ class Candidate(_Params):
 
         Returns:
             The validated candidate.
+
+        Raises:
+            ValueError: The reference candidate sets its own system prompt.
         """
         check_endpoint(self.base_url, self.api_key_env)
+        if self.reference and self.system_prompt is not None:
+            raise ValueError(
+                "the reference is today's model run again, so it cannot set "
+                "system_prompt; add the prompt as its own candidate"
+            )
         return self
+
+    def get_system_prompt(self, node_name: str) -> str | None:
+        """Return the prompt that replaces the recorded one on this node's calls."""
+        if self.system_prompt_nodes and node_name not in self.system_prompt_nodes:
+            return None
+        return self.system_prompt
 
 
 DecisionService = Literal["jev", "clef", "openai_decisions"]

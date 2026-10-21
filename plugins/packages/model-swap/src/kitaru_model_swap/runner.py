@@ -36,7 +36,13 @@ from kitaru_model_swap.decisions import (
     decide,
     get_decision_key,
 )
-from kitaru_model_swap.endpoint import CandidateReply, Usage, get_api_key, send
+from kitaru_model_swap.endpoint import (
+    CandidateReply,
+    Usage,
+    get_api_key,
+    replace_system_prompt,
+    send,
+)
 from kitaru_model_swap.normalize import RecordedOutcome
 from kitaru_model_swap.params import (
     Candidate,
@@ -244,8 +250,9 @@ class Runner:
                 ),
                 self._params.concurrency,
             )
-        # An unsure second ruling counts as changed; a failed request does not
-        # count at all.
+        # A failed request does not count; a second ruling that is unsure (a
+        # decision judge's probability between the bands) is counted apart from
+        # one that flipped.
         answered = [
             (r.judge_equivalent, ruling)
             for (r, _), (ruling, _, failure) in zip(ruled, again, strict=True)
@@ -253,7 +260,10 @@ class Runner:
         ]
         return {
             "checked": len(answered),
-            "changed": sum(before != after for before, after in answered),
+            "changed": sum(
+                after is not None and before != after for before, after in answered
+            ),
+            "unsure": sum(after is None for _, after in answered),
             "unanswered": len(ruled) - len(answered),
         }
 
@@ -319,19 +329,25 @@ class Runner:
         attempt: int = 0,
     ) -> CallResult:
         """Send one call to one candidate unless a budget is exhausted."""
+        prompt = candidate.get_system_prompt(call.node_name)
+        messages = (
+            call.request.messages
+            if prompt is None
+            else replace_system_prompt(call.request.messages, prompt)
+        )
         sent = await self._within_budget(
             self._prices.get(candidate.name),
             reservation_usage(
                 call,
                 candidate.provider_settings.max_tokens,
                 strict=self.budget.cap is not None,
-                system_prompt=candidate.system_prompt,
+                system_prompt=prompt,
             ),
             lambda: send(
                 client,
                 candidate,
                 api_key=self._keys[candidate.name],
-                messages=call.request.messages,
+                messages=messages,
                 tools=call.request.tools,
             ),
         )

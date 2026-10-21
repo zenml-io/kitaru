@@ -182,7 +182,7 @@ def _check_cap_fits(
                     call,
                     max_tokens,
                     strict=True,
-                    system_prompt=candidate.system_prompt,
+                    system_prompt=candidate.get_system_prompt(call.node_name),
                 ),
             )
             for call in sampled

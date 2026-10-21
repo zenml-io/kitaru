@@ -324,6 +324,7 @@ async def test_judge_verdicts_are_reported(
     assert report(insights)["judge_check"] == {
         "checked": 3,
         "changed": 0,
+        "unsure": 0,
         "unanswered": 0,
     }
     assert all(

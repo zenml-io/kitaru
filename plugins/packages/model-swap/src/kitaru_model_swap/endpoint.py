@@ -179,7 +179,7 @@ def _text(content: Any) -> str:
     return ""
 
 
-def with_system_prompt(
+def replace_system_prompt(
     messages: list[dict[str, Any]], prompt: str
 ) -> list[dict[str, Any]]:
     """Replace the recorded system prompt, or add one when there is none.
@@ -206,8 +206,6 @@ async def send(
         "/responses" if responses else "/chat/completions"
     )
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    if candidate.system_prompt is not None:
-        messages = with_system_prompt(messages, candidate.system_prompt)
     body = (build_responses_body if responses else build_body)(
         candidate, messages, tools
     )

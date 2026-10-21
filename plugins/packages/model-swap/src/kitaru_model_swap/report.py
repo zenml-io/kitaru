@@ -220,7 +220,7 @@ def build_report(
         "judge": _judge_label(params),
         "judge_check": judge_check,
         "notes": _notes(coverage)
-        + _build_setup_notes(params, judge_check)
+        + _build_setup_notes(params, judge_check, {c.model for c in sampled if c.model})
         + (
             [
                 "Per-session and monthly costs assume each candidate takes the "
@@ -344,7 +344,9 @@ def _recorded_report(
 
 
 def _build_setup_notes(
-    params: ModelSwapParams, judge_check: dict[str, int] | None
+    params: ModelSwapParams,
+    judge_check: dict[str, int] | None,
+    recorded_models: set[str],
 ) -> list[str]:
     """Explain how the run's setup limits what its numbers can show."""
     notes = []
@@ -363,27 +365,42 @@ def _build_setup_notes(
         )
     judge = params.judge
     if isinstance(judge, Candidate):
-        same = [
-            c.name
-            for c in params.candidates
-            if c.model.casefold() == judge.model.casefold()
-        ]
+        own = _normalize_model(judge.model)
+        same = [c.name for c in params.candidates if _normalize_model(c.model) == own]
+        if any(_normalize_model(m) == own for m in recorded_models):
+            same.append("today's recorded model")
         if same:
             notes.append(
                 f"The judge runs the same model as {', '.join(same)}. A model may "
                 "favor answers like its own, so read the judge's rulings on "
-                "that candidate with care, or use a judge that is not a candidate."
+                "those answers with care, or use a judge that is none of them."
             )
-    if judge_check and judge_check["checked"]:
+    if judge_check:
         checked, changed = judge_check["checked"], judge_check["changed"]
-        note = (
-            f"The judge was asked again with the two answers in the other order "
-            f"on {checked} of its rulings and changed {changed}."
-        )
-        if checked >= _MIN_JUDGE_RECHECKS and changed / checked >= _UNSTABLE_JUDGE:
-            note += " Treat its rulings as weak evidence and review the answers."
-        notes.append(note)
+        unsure, unanswered = judge_check["unsure"], judge_check["unanswered"]
+        if not checked:
+            notes.append(
+                f"The judge could not be asked again on any of its {unanswered} "
+                "sampled rulings (the time or spend budget ran out), so how "
+                "stable it is remains unknown."
+            )
+        else:
+            note = (
+                "The judge was asked again with the two answers in the other "
+                f"order on {checked} of its rulings: {changed} flipped"
+                + (f" and {unsure} became unsure" if unsure else "")
+                + (f"; {unanswered} could not be asked" if unanswered else "")
+                + "."
+            )
+            if checked >= _MIN_JUDGE_RECHECKS and changed / checked >= _UNSTABLE_JUDGE:
+                note += " Treat its rulings as weak evidence and review the answers."
+            notes.append(note)
     return notes
+
+
+def _normalize_model(name: str) -> str:
+    """Compare model names without a provider prefix such as `openai/`."""
+    return name.rsplit("/", 1)[-1].casefold()
 
 
 def _candidate_report(
@@ -431,7 +448,10 @@ def _candidate_report(
                 (
                     c,
                     call_cost(
-                        price, estimate_usage(c, max_tokens, candidate.system_prompt)
+                        price,
+                        estimate_usage(
+                            c, max_tokens, candidate.get_system_prompt(c.node_name)
+                        ),
                     ),
                 )
                 for c in sampled
@@ -1365,10 +1385,18 @@ def _best_mix(
     # (share, cost per call with the mix, cost per call today) per step
     prices: list[tuple[Decimal, Decimal | None, Decimal | None]] = []
     learning, held_out = split
+    sessions = {
+        "learning": len({c.session_id for c in sampled if _is_learning_session(c)}),
+        "held_out": len({c.session_id for c in sampled if not _is_learning_session(c)}),
+    }
     for group, count in sorted(shares.items()):
         ref_all = reference["by_route"].get(group) if reference else None
+        # A step seen in only one half of the sessions cannot be split; it is
+        # judged on all its calls and its pick marked as not checked.
         ref_values = (
-            learning.get(reference["name"], {}).get(group) if reference else None
+            learning.get(reference["name"], {}).get(group) or ref_all
+            if reference
+            else None
         )
         ref_held = held_out.get(reference["name"], {}).get(group) if reference else None
         today = (
@@ -1378,6 +1406,7 @@ def _best_mix(
         )
         rates: dict[str, float] = {}
         costs: dict[str, Decimal] = {}
+        unsplit: set[str] = set()
         too_few = False
         for c in usable:
             values = learning.get(c["name"], {}).get(group)
@@ -1388,7 +1417,8 @@ def _best_mix(
                 too_few = True
                 continue
             if not values:
-                continue
+                unsplit.add(c["name"])
+                values = overall
             rates[c["name"]] = values["match_rate"]
             costs[c["name"]] = Decimal(overall["cost_per_call_usd"])
         bar = ref_values["match_rate"] if ref_values else None
@@ -1414,7 +1444,9 @@ def _best_mix(
             held_bar = ref_held["match_rate"] if ref_held else bar
             held_calls = held["calls"] if held else 0
             held_rate = held["match_rate"] if held else None
-            if held_rate is None or held_calls < max(1, min_calls // 4):
+            if choice in unsplit:
+                held_status = "no_split"
+            elif held_rate is None or held_calls < max(1, min_calls // 4):
                 held_status = "too_few"
             elif held_rate < held_bar - _COMPARABLE_POINTS:
                 choice, held_status = None, "failed"
@@ -1446,6 +1478,7 @@ def _best_mix(
             "groups": groups,
             "min_calls": min_calls,
             "today_source": today_source,
+            "sessions": sessions,
             "cost": None,
             "recorded_cost": None,
         }
@@ -1455,6 +1488,7 @@ def _best_mix(
         "groups": groups,
         "min_calls": min_calls,
         "today_source": today_source,
+        "sessions": sessions,
         "cost": _projection(mixed, volume),
         "recorded_cost": _projection(recorded, volume),
     }

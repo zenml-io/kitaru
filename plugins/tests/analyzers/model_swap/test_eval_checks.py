@@ -25,8 +25,9 @@ import httpx
 import pytest
 
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
+from kitaru_model_swap.analyzer import run_model_swap
 from kitaru_model_swap.calls import Collection
-from kitaru_model_swap.endpoint import send, with_system_prompt
+from kitaru_model_swap.endpoint import replace_system_prompt, send
 from kitaru_model_swap.params import Candidate, ModelSwapParams
 
 from .helpers import MockOpenAIServer, StubClient, completion
@@ -117,33 +118,48 @@ async def test_responses_api_replies_hitting_the_limit_are_truncated() -> None:
     assert result.failure == "truncated"
 
 
-async def test_a_candidate_prompt_replaces_the_recorded_one() -> None:
-    server = MockOpenAIServer({"m": lambda _: completion(text="ok")})
-    item = Candidate.model_validate(
-        {
-            "name": "cleaned",
-            "base_url": "https://mock/v1",
-            "model": "m",
-            "system_prompt": "Be brief.",
-        }
-    )
+def test_a_replacement_prompt_takes_the_place_of_every_system_message() -> None:
     messages = [
         {"role": "system", "content": "Old rules."},
         {"role": "developer", "content": "More old rules."},
         {"role": "user", "content": "hi"},
     ]
 
-    async with httpx.AsyncClient(transport=server.transport()) as client:
-        await send(client, item, api_key=None, messages=messages, tools=[])
-
-    assert server.requests[0]["messages"] == [
+    assert replace_system_prompt(messages, "Be brief.") == [
         {"role": "system", "content": "Be brief."},
         {"role": "user", "content": "hi"},
     ]
-    assert with_system_prompt([{"role": "user", "content": "hi"}], "P")[0] == {
+    assert replace_system_prompt([{"role": "user", "content": "hi"}], "P")[0] == {
         "role": "system",
         "content": "P",
     }
+
+
+async def test_a_candidate_prompt_reaches_only_the_nodes_it_names(
+    stub_client: StubClient, server: MockOpenAIServer
+) -> None:
+    everywhere = CHEAP | {"name": "everywhere", "system_prompt": "Short."}
+    nowhere = CHEAP | {
+        "name": "nowhere",
+        "model": "mirror",
+        "system_prompt": "Short.",
+        "system_prompt_nodes": ["no-such-node"],
+    }
+
+    await run(stub_client, server, candidates=[everywhere, nowhere], max_calls=3)
+    systems = {
+        r["model"]: r["messages"][0]["content"]
+        for r in server.requests
+        if r["messages"][0]["role"] == "system"
+    }
+
+    assert systems["escalator"] == "Short."
+    assert systems["mirror"] != "Short."
+
+
+def test_the_reference_cannot_carry_its_own_prompt() -> None:
+    with pytest.raises(ValueError, match="reference"):
+        Candidate.model_validate(REFERENCE | {"system_prompt": "Short."})
 
 
 async def test_prompt_candidates_are_noted(
@@ -223,7 +239,7 @@ async def test_a_judge_that_flips_with_the_order_is_flagged(
     )
     result = report(insights)
 
-    assert result["judge_check"]["changed"] == result["judge_check"]["checked"] > 0
+    assert result["judge_check"]["changed"] == result["judge_check"]["checked"] > 4
     assert any("weak evidence" in note for note in result["notes"])
 
 
@@ -331,3 +347,25 @@ async def test_a_judge_keeps_its_own_instructions(
     assert systems
     assert all("<answer_a>" in s for s in systems)
     assert report(insights)["candidates"][0]["judged_equivalent"] == 3
+
+
+async def test_one_session_cannot_be_split_and_the_mix_says_so(
+    stub_client: StubClient, quickstart_sessions: list[SessionWithNodesResponse]
+) -> None:
+    server = MockOpenAIServer({"mirror": mirror(quickstart_sessions)})
+    honest = CHEAP | {"name": "honest", "model": "mirror"}
+
+    insights = await run_model_swap(
+        list(stub_client._by_id)[:1],
+        ModelSwapParams.model_validate(
+            {"candidates": [REFERENCE, honest], "min_mix_calls": 1}
+        ),
+        transport=server.transport(),
+    )
+    mix = report({i.name: i for i in insights})["best_mix"]
+    moved = [item for item in mix["groups"] if item["candidate"]]
+
+    assert sorted(mix["sessions"].values()) == [0, 1]
+    # Every pick stays, flagged as unchecked rather than silently confirmed.
+    assert moved
+    assert {item["held_out"] for item in moved} <= {"too_few", "no_split"}
