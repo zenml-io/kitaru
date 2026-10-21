@@ -385,6 +385,16 @@ class ModelSwapParams(_Params):
         ),
     )
     max_disagreements: int = Field(default=200, ge=0, le=500)
+    min_mix_calls: int = Field(
+        default=20,
+        ge=1,
+        le=1000,
+        description=(
+            "Answered calls a candidate needs on a step before the best mix "
+            "can move that step to it; below this the step stays on today's "
+            "model."
+        ),
+    )
     repeats: int = Field(
         default=1,
         ge=1,

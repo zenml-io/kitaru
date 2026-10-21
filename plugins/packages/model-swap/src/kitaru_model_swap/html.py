@@ -126,8 +126,10 @@ def _compare(candidates: list[dict[str, Any]], *, judged: bool) -> str:
                 + (" (today)" if c["reference"] else "")
                 + (" (excluded)" if c.get("excluded") else ""),
                 c["model"],
-                _pct(c["tool_choice_rate"]),
-                _pct(c["agreement_rate"]),
+                _rate_with_interval(
+                    c["tool_choice_rate"], c.get("tool_choice_interval")
+                ),
+                _rate_with_interval(c["agreement_rate"], c.get("agreement_interval")),
                 *(
                     [
                         f"{_pct(consistency['any_match_rate'])} / "
@@ -185,14 +187,21 @@ def _paren(value: str | None) -> str | None:
 
 
 def _best_mix(mix: dict[str, Any] | None) -> str:
-    """Show which kind of call each candidate would take in the best mix."""
+    """Show which step each candidate would take in the best mix."""
     if not mix:
         return ""
     rows = [
         [
             item["group"],
             _pct(item["share"]),
-            item["candidate"] or "today's model",
+            item["candidate"]
+            or (
+                f"today's model (fewer than {mix['min_calls']} calls)"
+                if item["too_few_calls"]
+                else "today's model (it does not match itself here)"
+                if item.get("noisy_reference")
+                else "today's model"
+            ),
             _pct(item["rate"]),
             _usd(item["cost_per_call_usd"]),
         ]
@@ -204,16 +213,19 @@ def _best_mix(mix: dict[str, Any] | None) -> str:
             f"<p>Mixed: {_usd(mix['cost']['per_call_usd'])} per call and "
             f"{_usd(mix['cost']['per_month_usd'])} per month, against "
             f"{_usd(mix['recorded_cost']['per_call_usd'])} and "
-            f"{_usd(mix['recorded_cost']['per_month_usd'])} today.</p>"
+            f"{_usd(mix['recorded_cost']['per_month_usd'])} today "
+            f"(from the {_e(mix['today_source'])}).</p>"
         )
     return (
-        "<h2>Best mix</h2><p>For each kind of call, the cheapest allowed "
-        "candidate that behaves within 10 points of today's model there; the "
-        "rest stays on today's model. Most agents can route by step, so a mix "
-        "can save more than any single model.</p>"
-        + _table(
-            ["Recorded", "Share of calls", "Use", "Matches", "Cost per call"], rows
-        )
+        "<h2>Best mix</h2><p>Steps are named by what comes just before a call "
+        "(the first turn, or the tool whose result the model is reading), which "
+        "is what a router can see. For each step, the cheapest allowed candidate "
+        "that answered at least "
+        f"{mix['min_calls']} of its calls and takes the same kind of action (the "
+        "same tools, or a text answer) within 10 points as often as today's "
+        "model there; the rest stays on today's model. Confirm a mix with a full "
+        "replay before routing traffic.</p>"
+        + _table(["Step", "Share of calls", "Use", "Matches", "Cost per call"], rows)
         + total
     )
 
@@ -476,6 +488,15 @@ def _table(headers: list[str], rows: list[list[Any]]) -> str:
 
 def _e(value: Any) -> str:
     return html.escape("-" if value is None else str(value))
+
+
+def _rate_with_interval(
+    value: float | None, interval: list[float] | None
+) -> str | None:
+    """Show a rate with its 95% interval, so small samples read as uncertain."""
+    if value is None or not interval:
+        return _pct(value)
+    return f"{_pct(value)} ({_pct(interval[0])} to {_pct(interval[1])})"
 
 
 def _pct(value: float | None) -> str | None:

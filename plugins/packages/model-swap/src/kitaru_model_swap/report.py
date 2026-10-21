@@ -18,9 +18,11 @@ agents and scripts, and a rendered HTML section under `REPORT_SECTION_KEY`,
 which `kitaru insight report` embeds without calling any model.
 """
 
+import math
 import re
 import statistics
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -60,6 +62,7 @@ _EXCERPT = 600
 _REVIEW_ORDER: dict[bool | None, int] = {False: 0, None: 1, True: 2}
 _TEXT_GROUP = "text answer"
 _SAME_TOOL = frozenset({"same_tool_same_args", "same_tool_different_args"})
+_TEXT_REPLY = frozenset({"same_text", "different_text"})
 # Names come from imported traces, so lists of them are bounded.
 _MAX_LISTED = 50
 # A candidate failing more often than this is a setup problem, not a choice.
@@ -159,7 +162,11 @@ def build_report(
         )
     )
     coverage = _coverage(collection, sampled)
-    mix = None if params.dry_run else _best_mix(candidates, sampled, volume)
+    mix = (
+        None
+        if params.dry_run
+        else _best_mix(candidates, sampled, volume, params.min_mix_calls)
+    )
     return {
         "schema": 1,
         "dry_run": params.dry_run,
@@ -404,7 +411,10 @@ def _candidate_report(
         "answered": len(headline),
         "agreement": dict(Counter(r.agreement for r in headline).most_common()),
         "agreement_rate": _rate(agreeing, len(headline)),
+        "agreement_interval": _interval(agreeing, len(headline)),
         "tool_choice_rate": _rate(same_tool, len(tool_calls)),
+        "tool_choice_interval": _interval(same_tool, len(tool_calls)),
+        "tool_choice_calls": len(tool_calls),
         "judged_equivalent": sum(r.judge_equivalent is True for r in headline),
         "judged_different": sum(r.judge_equivalent is False for r in headline),
         "judged_unsure": sum(
@@ -420,7 +430,8 @@ def _candidate_report(
             reply.failure: reply.failure_detail for reply in reversed(failed)
         },
         "failure_rate": _rate(sum(failures.values()), len(every_sent)),
-        "by_tool": _by_tool(headline),
+        "by_tool": _by_group(headline, _group),
+        "by_route": _by_group(headline, _route_key(sampled)),
         "latency_seconds": {
             "p50": _round(statistics.median(latencies)) if latencies else None,
             "p95": _round(_percentile(latencies, 0.95)) if latencies else None,
@@ -437,17 +448,27 @@ def _candidate_report(
     return report
 
 
-def _by_tool(results: list[CallResult]) -> dict[str, Any]:
-    """Agreement and per-argument agreement grouped by recorded tool."""
+def _by_group(
+    results: list[CallResult], key: Callable[[RecordedCall], str]
+) -> dict[str, Any]:
+    """Agreement and per-argument agreement grouped by `key`.
+
+    `match_rate` asks whether the candidate took the same kind of action: the
+    same tools, or a text answer where the recording answered in text. Exact
+    wording almost never matches, so it would make every text step look
+    unmovable, or, against a reference that does not match itself, movable to
+    anything.
+    """
     groups: dict[str, dict[str, Any]] = {}
     for result in results:
         assert result.reply is not None
         group = groups.setdefault(
-            _group(result.call),
+            key(result.call),
             {
                 "calls": 0,
                 "agreeing": 0,
                 "same_tool": 0,
+                "matching": 0,
                 "costs": [],
                 "fields": defaultdict(lambda: [0, 0]),
             },
@@ -455,6 +476,9 @@ def _by_tool(results: list[CallResult]) -> dict[str, Any]:
         group["calls"] += 1
         group["agreeing"] += result.agreement in AGREEING
         group["same_tool"] += result.agreement in _SAME_TOOL
+        group["matching"] += result.agreement in (
+            _SAME_TOOL if result.call.request.recorded.tool_calls else _TEXT_REPLY
+        )
         if result.cost is not None:
             group["costs"].append(result.cost)
         for tool, fields in field_matches(
@@ -473,6 +497,7 @@ def _by_tool(results: list[CallResult]) -> dict[str, Any]:
                 if name == _TEXT_GROUP
                 else _rate(group["same_tool"], group["calls"])
             ),
+            "match_rate": _rate(group["matching"], group["calls"]),
             "cost_per_call_usd": _mean_usd(group["costs"]),
             "fields": {
                 field: _rate(matched, total)
@@ -487,6 +512,48 @@ def _group(call: RecordedCall) -> str:
     """Group a call by the tools it recorded, or as a text answer."""
     names = sorted({c.name for c in call.request.recorded.tool_calls})
     return " + ".join(names) if names else _TEXT_GROUP
+
+
+def _route_key(sampled: list[RecordedCall]) -> Callable[[RecordedCall], str]:
+    """Key calls by the step they answer, named by what a router sees first.
+
+    The node name is added when the sample holds more than one.
+    """
+    several = len({call.node_name for call in sampled}) > 1
+    return lambda call: (f"{call.node_name}: " if several else "") + _route(call)
+
+
+def _route(call: RecordedCall) -> str:
+    """Name a call by what came just before it.
+
+    The tool the recorded model ends up calling is only known after the call,
+    so it cannot route one; the request's last messages are known before it.
+    """
+    messages = [
+        m for m in call.request.messages if m.get("role") not in {"system", "developer"}
+    ]
+    if not any(m.get("role") == "assistant" for m in messages):
+        return "first turn"
+    last = messages[-1]
+    if last.get("role") == "tool":
+        for message in reversed(messages):
+            calls = (
+                message.get("tool_calls")
+                if message.get("role") == "assistant"
+                else None
+            )
+            if calls:
+                names = sorted(
+                    {str(_as_dict(c.get("function")).get("name")) for c in calls}
+                )
+                return "after " + " + ".join(names)
+    if last.get("role") == "user":
+        return "after a user message"
+    return "after an assistant message"
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _primary_rate(candidate: dict[str, Any]) -> tuple[str, float | None]:
@@ -1068,19 +1135,28 @@ def _best_mix(
     candidates: list[dict[str, Any]],
     sampled: list[RecordedCall],
     volume: Volume,
+    min_calls: int,
 ) -> dict[str, Any] | None:
-    """Pick, per kind of call, the cheapest candidate that behaves well enough.
+    """Pick, per step, the cheapest candidate that behaves well enough.
 
-    A kind of call moves to a candidate only when its rate there is within
-    10 points of the reference's rate there (or of the best rate when there
-    is no reference); otherwise it stays on today's model. Excluded, failing
-    and unpriced candidates are never picked.
+    Steps are named by what comes just before a call (`_route`), which a
+    router can see. A step moves to a candidate only when the candidate
+    answered at least `min_calls` of its calls and its rate there is within
+    10 points of the reference's rate (or of the best rate when there is no
+    reference); otherwise it stays on today's model, as does a step where the
+    reference itself takes the recorded action less than half the time.
+    "Rate" is whether the candidate takes the same kind of action (the same
+    tools, or a text answer), not exact wording. Today's cost is the
+    reference's replay cost when there is a reference, since recorded calls
+    often hit a warm prompt cache that replayed single calls do not.
+    Excluded, failing and unpriced candidates are never picked.
     """
-    shares = Counter(_group(call) for call in sampled)
+    key = _route_key(sampled)
+    shares = Counter(key(call) for call in sampled)
     recorded_costs: dict[str, list[Decimal]] = defaultdict(list)
     for call in sampled:
         if call.cost is not None:
-            recorded_costs[_group(call)].append(call.cost)
+            recorded_costs[key(call)].append(call.cost)
     # The reference is today's model run again, so it sets the bar but is not
     # somewhere to move calls to.
     usable = [
@@ -1091,21 +1167,37 @@ def _best_mix(
         and (c["failure_rate"] is None or c["failure_rate"] <= _MAX_FAILURE_RATE)
     ]
     reference = next((c for c in candidates if c["reference"]), None)
-    rows: list[
-        tuple[str, float, str | None, float | None, Decimal | None, Decimal | None]
-    ] = []
+    today_source = "reference replay" if reference else "recording"
+    groups: list[dict[str, Any]] = []
+    # (share, cost per call with the mix, cost per call today) per step
+    prices: list[tuple[Decimal, Decimal | None, Decimal | None]] = []
     for group, count in sorted(shares.items()):
-        today = _mean_decimal(recorded_costs[group])
+        ref_values = reference["by_route"].get(group) if reference else None
+        today = (
+            Decimal(ref_values["cost_per_call_usd"])
+            if ref_values and ref_values["cost_per_call_usd"] is not None
+            else _mean_decimal(recorded_costs[group])
+        )
         rates: dict[str, float] = {}
         costs: dict[str, Decimal] = {}
+        too_few = False
         for c in usable:
-            rate = _group_rate(c, group)
-            cost = c["by_tool"].get(group, {}).get("cost_per_call_usd")
-            if rate is not None and cost is not None:
-                rates[c["name"]], costs[c["name"]] = rate, Decimal(cost)
-        bar = _group_rate(reference, group)
+            values = c["by_route"].get(group)
+            if not values or values["cost_per_call_usd"] is None:
+                continue
+            if values["calls"] < min_calls:
+                too_few = True
+                continue
+            rates[c["name"]] = values["match_rate"]
+            costs[c["name"]] = Decimal(values["cost_per_call_usd"])
+        bar = ref_values["match_rate"] if ref_values else None
         if bar is None and rates:
             bar = max(rates.values())
+        # When today's model does not take the same action as its own
+        # recording, agreement cannot tell candidates apart on this step.
+        noisy = bar is not None and bar < _NOISY_REFERENCE
+        if noisy:
+            bar = None
         fits = (
             [name for name, rate in rates.items() if rate >= bar - _COMPARABLE_POINTS]
             if bar is not None
@@ -1115,46 +1207,37 @@ def _best_mix(
         # Keep today's model when it is cheaper than every candidate that fits.
         if choice is not None and today is not None and costs[choice] > today:
             choice = None
-        rows.append(
-            (
-                group,
-                count / len(sampled),
-                choice,
-                None if choice is None else rates[choice],
-                costs[choice] if choice else today,
-                today,
-            )
+        cost = costs[choice] if choice else today
+        share = round(count / len(sampled), 4)
+        groups.append(
+            {
+                "group": group,
+                "share": share,
+                "calls": count,
+                "candidate": choice,
+                "rate": None if choice is None else rates[choice],
+                "cost_per_call_usd": _usd(cost),
+                "too_few_calls": choice is None and too_few and not rates,
+                "noisy_reference": noisy,
+            }
         )
-    if not any(choice for _, _, choice, _, _, _ in rows):
+        prices.append((Decimal(str(share)), cost, today))
+    if not any(item["candidate"] for item in groups):
         return None
-    groups = [
-        {
-            "group": group,
-            "share": round(share, 4),
-            "candidate": choice,
-            "rate": rate,
-            "cost_per_call_usd": _usd(cost),
+    if any(cost is None or today is None for _, cost, today in prices):
+        return {
+            "groups": groups,
+            "min_calls": min_calls,
+            "today_source": today_source,
+            "cost": None,
+            "recorded_cost": None,
         }
-        for group, share, choice, rate, cost, _ in rows
-    ]
-    if any(cost is None or today is None for _, _, _, _, cost, today in rows):
-        return {"groups": groups, "cost": None, "recorded_cost": None}
-    mixed = sum(
-        (
-            (cost or Decimal(0)) * Decimal(str(share))
-            for _, share, _, _, cost, _ in rows
-        ),
-        Decimal(0),
-    )
-    recorded = sum(
-        (
-            (today or Decimal(0)) * Decimal(str(share))
-            for _, share, _, _, _, today in rows
-        ),
-        Decimal(0),
-    )
+    mixed = sum((share * (cost or 0) for share, cost, _ in prices), Decimal(0))
+    recorded = sum((share * (today or 0) for share, _, today in prices), Decimal(0))
     return {
         "groups": groups,
+        "min_calls": min_calls,
+        "today_source": today_source,
         "cost": _projection(mixed, volume),
         "recorded_cost": _projection(recorded, volume),
     }
@@ -1214,6 +1297,18 @@ def _slug(name: str, used: set[str]) -> str:
 
 def _rate(part: int, whole: int) -> float | None:
     return round(part / whole, 4) if whole else None
+
+
+def _interval(part: int, whole: int, z: float = 1.96) -> list[float] | None:
+    """Wilson 95% interval for a rate, so small samples read as uncertain."""
+    if not whole:
+        return None
+    p = part / whole
+    centre = (p + z * z / (2 * whole)) / (1 + z * z / whole)
+    half = (z * math.sqrt(p * (1 - p) / whole + z * z / (4 * whole * whole))) / (
+        1 + z * z / whole
+    )
+    return [round(max(0.0, centre - half), 4), round(min(1.0, centre + half), 4)]
 
 
 def _yes_no(value: bool | None) -> str:

@@ -141,8 +141,7 @@ async def send(
                     attempts=attempts,
                 )
             failure = "rate_limited" if response.status_code == 429 else "http_error"
-            # Error bodies can echo the request, so only the status is kept.
-            detail = f"HTTP {response.status_code}"
+            detail = f"HTTP {response.status_code}" + _error_message(response)
             if response.status_code not in _RETRYABLE_STATUS:
                 break
         if attempts <= settings.max_retries:
@@ -150,6 +149,23 @@ async def send(
     return _failure(
         failure, detail, latency=time.monotonic() - started, attempts=attempts
     )
+
+
+def _error_message(response: httpx.Response) -> str:
+    """Return the provider's error message, which says how to fix the request.
+
+    Whole error bodies can echo the request, so only the `error.message`
+    field of a JSON body is kept; `_failure` bounds it.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    error = payload.get("error") if isinstance(payload, dict) else None
+    message = error.get("message") if isinstance(error, dict) else error
+    if not isinstance(message, str) or not message.strip():
+        return ""
+    return ": " + " ".join(message.split())
 
 
 def _classify(

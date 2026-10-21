@@ -58,21 +58,64 @@ def mixed_server(
 FINALS = CHEAP | {"name": "finals-only", "model": "finals"}
 
 
-async def test_best_mix_routes_each_kind_of_call(
+async def test_best_mix_routes_each_step(
     stub_client: StubClient, mixed_server: MockOpenAIServer
 ) -> None:
-    insights = await run(stub_client, mixed_server, candidates=[REFERENCE, FINALS])
+    insights = await run(
+        stub_client, mixed_server, candidates=[REFERENCE, FINALS], min_mix_calls=1
+    )
     result = report(insights)
     mix = result["best_mix"]
     by_group = {item["group"]: item for item in mix["groups"]}
 
-    assert by_group["final_result"]["candidate"] == "finals-only"
-    # The reference is today's model, so other calls stay on today's model.
-    assert by_group["lookup_order"]["candidate"] is None
+    # Steps are named by what a router sees before the call, never by the
+    # tool the recorded model ended up calling.
+    assert all(g == "first turn" or g.startswith("after ") for g in by_group)
+    # The first turn looks an order up, which finals-only never does.
+    assert by_group["first turn"]["candidate"] is None
+    assert any(item["candidate"] == "finals-only" for item in mix["groups"])
     assert sum(item["share"] for item in mix["groups"]) == pytest.approx(1, abs=0.01)
+    assert mix["today_source"] == "reference replay"
+    low, high = result["candidates"][0]["tool_choice_interval"]
+    assert low <= result["candidates"][0]["tool_choice_rate"] <= high
     assert mix["cost"]["per_call_usd"] is not None
     goals = {choice["goal"]: choice for choice in result["best_for"]}
     assert "finals-only" in goals["Best mix"]["candidate"]
+
+
+async def test_steps_where_today_does_not_match_itself_stay(
+    stub_client: StubClient, quickstart_sessions: list[SessionWithNodesResponse]
+) -> None:
+    # Today's model run again escalates everywhere, so outside the recorded
+    # escalations it never takes the recorded action; a candidate that also
+    # never does must not "fit" a bar of 0% minus 10 points there.
+    server = MockOpenAIServer({"escalator": escalator})
+    insights = await run(
+        stub_client,
+        server,
+        candidates=[
+            REFERENCE | {"model": "escalator"},
+            CHEAP | {"name": "also-escalates", "model": "escalator"},
+        ],
+        min_mix_calls=1,
+    )
+
+    mix = report(insights)["best_mix"] or {"groups": []}
+    for item in mix["groups"]:
+        assert item["candidate"] is None or item["rate"] >= 0.5
+    assert all(
+        item["candidate"] is None for item in mix["groups"] if item["noisy_reference"]
+    )
+
+
+async def test_small_steps_stay_on_todays_model(
+    stub_client: StubClient, mixed_server: MockOpenAIServer
+) -> None:
+    # 33 recorded calls spread over several steps: none reaches the default
+    # 20 answered calls, so nothing moves on a lucky handful.
+    insights = await run(stub_client, mixed_server, candidates=[REFERENCE, FINALS])
+
+    assert report(insights)["best_mix"] is None
 
 
 async def test_no_mix_when_nothing_can_move(
@@ -82,6 +125,7 @@ async def test_no_mix_when_nothing_can_move(
         stub_client,
         mixed_server,
         candidates=[REFERENCE, CHEAP | {"name": "escalates", "model": "escalator"}],
+        min_mix_calls=1,
     )
     result = report(insights)
 
@@ -91,7 +135,7 @@ async def test_no_mix_when_nothing_can_move(
     moved = [
         item["group"] for item in (mix or {"groups": []})["groups"] if item["candidate"]
     ]
-    assert moved in ([], ["escalate_to_human"])
+    assert all(group.startswith("after ") for group in moved)
 
 
 def test_excluded_origins_match_case_insensitively() -> None:
@@ -116,6 +160,7 @@ async def test_excluded_candidates_are_compared_but_never_recommended(
         mixed_server,
         candidates=[REFERENCE, excluded],
         excluded_origins={"lab_country": ["CN"]},
+        min_mix_calls=1,
     )
     result = report(insights)
     finals = next(c for c in result["candidates"] if c["name"] == "finals-only")

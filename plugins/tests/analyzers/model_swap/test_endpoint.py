@@ -174,6 +174,20 @@ async def test_client_errors_are_not_retried() -> None:
     assert len(server.requests) == 1
 
 
+async def test_error_messages_are_kept_but_not_the_body() -> None:
+    body = {
+        "error": {"message": "Function tools with reasoning_effort are not supported."},
+        "echo": "secret request text",
+    }
+    server = MockOpenAIServer({"m": lambda _: httpx.Response(400, json=body)})
+
+    result = await call(server, candidate())
+
+    assert result.failure_detail == (
+        "HTTP 400: Function tools with reasoning_effort are not supported."
+    )
+
+
 async def test_timeouts_are_categorized() -> None:
     def slow(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("slow", request=request)
