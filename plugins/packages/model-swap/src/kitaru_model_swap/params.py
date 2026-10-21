@@ -56,6 +56,15 @@ class Price(_Params):
 class ProviderSettings(_Params):
     """Request settings that differ between providers serving a model."""
 
+    api: Literal["chat_completions", "responses"] = Field(
+        default="chat_completions",
+        description=(
+            "Request shape: `chat_completions` posts to `/chat/completions`; "
+            "`responses` posts to OpenAI's `/responses`, which OpenAI's "
+            "reasoning models need to call tools with reasoning on."
+        ),
+    )
+
     tool_call_format: ToolCallFormat = Field(
         default="native",
         description=(
@@ -87,6 +96,23 @@ class ProviderSettings(_Params):
         le=5,
         description="Retries after a timeout, rate limit or server error.",
     )
+
+    @model_validator(mode="after")
+    def _check_api(self) -> Self:
+        """Tool calls come back in native form from the Responses API.
+
+        Returns:
+            The validated settings.
+
+        Raises:
+            ValueError: A text tool-call format is set with the Responses API.
+        """
+        if self.api == "responses" and self.tool_call_format != "native":
+            raise ValueError(
+                "the Responses API returns tool calls natively; leave "
+                "tool_call_format at `native`"
+            )
+        return self
 
 
 OriginField = Literal["lab", "lab_country", "host", "host_region"]

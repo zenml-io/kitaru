@@ -97,8 +97,9 @@ The same open model can behave very differently at different providers, and a wr
 
 | Setting | Default | Meaning |
 |---|---|---|
+| `api` | `chat_completions` | Request shape. `responses` posts to OpenAI's `/responses` instead of `/chat/completions`; OpenAI's reasoning models (GPT-6 and later) need it to call tools with reasoning on. Tool calls then come back natively. |
 | `tool_call_format` | `native` | Where tool calls come back. `native` reads the `tool_calls` field. `hermes` parses `<tool_call>{...}</tool_call>` blocks from the text, for endpoints served without a tool-call parser. `json_content` parses the whole text as one `{"name", "arguments"}` object. |
-| `reasoning_effort` | not sent | Sent as `reasoning_effort`. |
+| `reasoning_effort` | not sent | Sent as `reasoning_effort` (as `reasoning.effort` with the Responses API). |
 | `max_tokens` | not sent | Output token limit per call. |
 | `max_tokens_field` | `max_completion_tokens` | Request field for `max_tokens`; some servers only accept `max_tokens`. |
 | `temperature` | not sent | Sampling temperature. |

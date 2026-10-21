@@ -105,6 +105,79 @@ def build_body(
     return body
 
 
+def build_responses_body(
+    candidate: Candidate,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build an OpenAI Responses API request from a chat-completions request.
+
+    System and developer messages become `instructions`; assistant tool calls
+    and tool results become `function_call` and `function_call_output` items.
+    Nothing is stored on OpenAI's side.
+    """
+    settings = candidate.provider_settings
+    instructions = []
+    items: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role")
+        text = _text(message.get("content"))
+        if role in {"system", "developer"}:
+            instructions.append(text)
+        elif role == "tool":
+            items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": message.get("tool_call_id"),
+                    "output": text,
+                }
+            )
+        else:
+            if text:
+                items.append({"role": role, "content": text})
+            for call in message.get("tool_calls") or ():
+                function = _as_dict(_as_dict(call).get("function"))
+                arguments = function.get("arguments")
+                items.append(
+                    {
+                        "type": "function_call",
+                        "call_id": call.get("id"),
+                        "name": function.get("name"),
+                        "arguments": arguments
+                        if isinstance(arguments, str)
+                        else json.dumps(arguments or {}),
+                    }
+                )
+    body: dict[str, Any] = {"model": candidate.model, "input": items, "store": False}
+    if instructions:
+        body["instructions"] = "\n\n".join(instructions)
+    if tools:
+        body["tools"] = [
+            {"type": "function", **_as_dict(tool.get("function"))} for tool in tools
+        ]
+    if settings.reasoning_effort is not None:
+        body["reasoning"] = {"effort": settings.reasoning_effort}
+    if settings.max_tokens is not None:
+        body["max_output_tokens"] = settings.max_tokens
+    if settings.temperature is not None:
+        body["temperature"] = settings.temperature
+    body.update(settings.extra_body)
+    return body
+
+
+def _text(content: Any) -> str:
+    """Flatten chat message content (a string or text parts) to a string."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            str(part.get("text", ""))
+            for part in content
+            if isinstance(part, dict) and part.get("type") in {"text", "input_text"}
+        )
+    return ""
+
+
 async def send(
     client: httpx.AsyncClient,
     candidate: Candidate,
@@ -115,9 +188,14 @@ async def send(
 ) -> CandidateReply:
     """Send one request, retrying transient failures, and classify the reply."""
     settings = candidate.provider_settings
-    url = candidate.base_url.rstrip("/") + "/chat/completions"
+    responses = settings.api == "responses"
+    url = candidate.base_url.rstrip("/") + (
+        "/responses" if responses else "/chat/completions"
+    )
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    body = build_body(candidate, messages, tools)
+    body = (build_responses_body if responses else build_body)(
+        candidate, messages, tools
+    )
     started = time.monotonic()
     attempts = 0
     failure: FailureCategory = "http_error"
@@ -133,6 +211,12 @@ async def send(
         except httpx.HTTPError as error:
             failure, detail = "http_error", type(error).__name__
         else:
+            if response.status_code == 200 and responses:
+                return _classify_responses(
+                    response,
+                    latency=time.monotonic() - started,
+                    attempts=attempts,
+                )
             if response.status_code == 200:
                 return _classify(
                     response,
@@ -210,6 +294,62 @@ def _classify(
         return failed("empty_reply", "the reply has no text or tool calls")
     return CandidateReply(
         tool_calls=tool_calls,
+        text=text,
+        usage=usage,
+        latency_seconds=latency,
+        attempts=attempts,
+    )
+
+
+def _classify_responses(
+    response: httpx.Response, *, latency: float, attempts: int
+) -> CandidateReply:
+    """Turn a successful Responses API reply into a reply or a failure."""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict):
+        return _failure(
+            "http_error",
+            "the reply is not a JSON object",
+            latency=latency,
+            attempts=attempts,
+        )
+    usage = read_usage(payload.get("usage"))
+
+    def failed(category: FailureCategory, detail: str) -> CandidateReply:
+        return _failure(
+            category, detail, latency=latency, attempts=attempts, usage=usage
+        )
+
+    calls: list[ToolCall] = []
+    texts: list[str] = []
+    output = payload.get("output")
+    for item in output if isinstance(output, list) else ():
+        item = _as_dict(item)
+        if item.get("type") == "function_call":
+            if not item.get("name"):
+                return failed("tool_call_parse_error", "a tool call has no name")
+            arguments = parse_arguments(item.get("arguments") or "{}")
+            if isinstance(arguments, str):
+                return failed(
+                    "tool_call_parse_error",
+                    f"arguments of {item['name']} are not JSON",
+                )
+            calls.append(ToolCall(str(item["name"]), arguments))
+        elif item.get("type") == "message":
+            for part in item.get("content") or ():
+                part = _as_dict(part)
+                if part.get("type") == "refusal":
+                    return failed("refusal", str(part.get("refusal") or "refusal"))
+                if part.get("type") == "output_text":
+                    texts.append(str(part.get("text") or ""))
+    text = "".join(texts) or None
+    if not calls and not (text and text.strip()):
+        return failed("empty_reply", "the reply has no text or tool calls")
+    return CandidateReply(
+        tool_calls=tuple(calls),
         text=text,
         usage=usage,
         latency_seconds=latency,
@@ -295,9 +435,22 @@ def _parse_json_call(raw: str) -> ToolCall:
 
 
 def read_usage(usage: Any) -> Usage:
-    """Read OpenAI-style usage, tolerating missing details."""
+    """Read OpenAI-style usage, tolerating missing details.
+
+    Chat completions report `prompt_tokens` and `completion_tokens`; the
+    Responses API reports `input_tokens` and `output_tokens`.
+    """
     if not isinstance(usage, dict):
         return Usage()
+    if "input_tokens" in usage or "output_tokens" in usage:
+        input_details = _as_dict(usage.get("input_tokens_details"))
+        output_details = _as_dict(usage.get("output_tokens_details"))
+        return Usage(
+            input_tokens=_count(usage.get("input_tokens")),
+            cached_input_tokens=_count(input_details.get("cached_tokens")),
+            output_tokens=_count(usage.get("output_tokens")),
+            reasoning_tokens=_count(output_details.get("reasoning_tokens")),
+        )
     prompt_details = _as_dict(usage.get("prompt_tokens_details"))
     completion_details = _as_dict(usage.get("completion_tokens_details"))
     return Usage(

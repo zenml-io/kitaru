@@ -24,6 +24,7 @@ from kitaru_model_swap.endpoint import (
     MissingCredentialError,
     Usage,
     build_body,
+    build_responses_body,
     get_api_key,
     send,
 )
@@ -311,3 +312,130 @@ def test_unknown_model_has_no_price() -> None:
         resolve_price(candidate(model="qwen3:8b", base_url="http://localhost:11434/v1"))
         is None
     )
+
+
+RESPONSES = {"provider_settings": {"api": "responses"}}
+TOOL = {
+    "type": "function",
+    "function": {
+        "name": "lookup_order",
+        "description": "Look an order up.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}}},
+    },
+}
+
+
+def test_responses_body_converts_a_chat_request() -> None:
+    messages = [
+        {"role": "system", "content": "Be careful."},
+        {"role": "user", "content": [{"type": "text", "text": "Where is 7?"}]},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "lookup_order", "arguments": '{"id": "7"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "shipped"},
+    ]
+    settings = {"api": "responses", "reasoning_effort": "low", "max_tokens": 256}
+
+    body = build_responses_body(candidate(provider_settings=settings), messages, [TOOL])
+
+    assert body["instructions"] == "Be careful."
+    assert body["input"] == [
+        {"role": "user", "content": "Where is 7?"},
+        {
+            "type": "function_call",
+            "call_id": "c1",
+            "name": "lookup_order",
+            "arguments": '{"id": "7"}',
+        },
+        {"type": "function_call_output", "call_id": "c1", "output": "shipped"},
+    ]
+    assert body["tools"] == [{"type": "function", **TOOL["function"]}]
+    assert body["reasoning"] == {"effort": "low"}
+    assert body["max_output_tokens"] == 256
+    assert body["store"] is False
+
+
+async def responses_call(reply: dict[str, Any]) -> Any:
+    seen: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json=reply)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        result = await send(
+            client,
+            candidate(**RESPONSES),
+            api_key=None,
+            messages=MESSAGES,
+            tools=[TOOL],
+        )
+    assert seen == ["/v1/responses"]
+    return result
+
+
+async def test_responses_replies_are_read() -> None:
+    result = await responses_call(
+        {
+            "output": [
+                {"type": "reasoning", "summary": []},
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "On it."}],
+                },
+                {
+                    "type": "function_call",
+                    "name": "lookup_order",
+                    "arguments": '{"id": "7"}',
+                },
+            ],
+            "usage": {
+                "input_tokens": 100,
+                "input_tokens_details": {"cached_tokens": 40},
+                "output_tokens": 30,
+                "output_tokens_details": {"reasoning_tokens": 20},
+            },
+        }
+    )
+
+    assert result.failure is None
+    assert result.tool_calls == (ToolCall("lookup_order", {"id": "7"}),)
+    assert result.text == "On it."
+    assert result.usage == Usage(
+        input_tokens=100, cached_input_tokens=40, output_tokens=30, reasoning_tokens=20
+    )
+
+
+@pytest.mark.parametrize(
+    ("output", "category"),
+    [
+        ([{"type": "reasoning", "summary": []}], "empty_reply"),
+        (
+            [{"type": "message", "content": [{"type": "refusal", "refusal": "no"}]}],
+            "refusal",
+        ),
+        (
+            [{"type": "function_call", "name": "f", "arguments": "{oops"}],
+            "tool_call_parse_error",
+        ),
+    ],
+)
+async def test_responses_failures_are_categorized(
+    output: list[dict[str, Any]], category: str
+) -> None:
+    result = await responses_call({"output": output})
+
+    assert result.failure == category
+
+
+def test_responses_api_needs_native_tool_calls() -> None:
+    with pytest.raises(ValueError, match="natively"):
+        candidate(provider_settings={"api": "responses", "tool_call_format": "hermes"})
