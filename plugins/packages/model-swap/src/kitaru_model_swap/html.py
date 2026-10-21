@@ -94,7 +94,8 @@ def _best_for(choices: list[dict[str, str]]) -> str:
         )
         + '<p class="muted">Quality here means matching your current model. '
         "Your verdicts on the disagreements below decide which answers are "
-        "right.</p>"
+        "right, and a full replay of the finalists decides which model keeps "
+        "your outcomes.</p>"
     )
 
 

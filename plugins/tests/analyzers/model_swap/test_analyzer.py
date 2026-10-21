@@ -422,16 +422,49 @@ async def test_best_for_names_a_candidate_per_goal(
     result = report(insights)
     best = {choice["goal"]: choice["candidate"] for choice in result["best_for"]}
 
-    assert best["Closest to today"] == "gpt-5-nano (reference)"
+    # Today's model run again sets the bar; it is never its own closest match.
+    assert best["Closest to today"] == "open-copy"
     # The free candidate behaves too differently to count as the cheapest
     # comparable choice.
     assert best["Cheapest"] == "open-copy"
     assert best["Best open model"] == "open-copy"
-    assert "worse" not in best.values()
+    assert best["Worth a full replay"] == "open-copy + worse"
     assert result["candidates"][1]["open_weights"] is True
     summary = insights[SUMMARY_INSIGHT_NAME].data
     assert isinstance(summary, TextInsightData)
     assert "Best open model" in summary.content
+
+
+async def test_no_equivalent_names_finalists_instead_of_a_cheapest(
+    stub_client: StubClient, server: MockOpenAIServer
+) -> None:
+    # Today's model matches itself every time; the only candidate rarely does,
+    # so nothing is comparable and the report must not crown a cheap choice.
+    insights = await run(stub_client, server, candidates=[REFERENCE, CHEAP])
+    best = {c["goal"]: c for c in report(insights)["best_for"]}
+
+    assert best["Closest to today"]["candidate"] == "cheap-open-model"
+    assert "Cheapest" not in best
+    assert "Fastest" not in best
+    assert best["Worth a full replay"]["candidate"] == "cheap-open-model"
+    assert "cannot name an equivalent" in best["Worth a full replay"]["why"]
+
+
+async def test_noisy_reference_names_finalists_only(
+    stub_client: StubClient, server: MockOpenAIServer
+) -> None:
+    # Today's model run again escalates everywhere, so it rarely matches its
+    # own recording and agreement cannot vouch for any candidate.
+    insights = await run(
+        stub_client,
+        server,
+        candidates=[REFERENCE | {"model": "escalator"}, CHEAP | {"model": "mirror"}],
+    )
+    best = {c["goal"]: c for c in report(insights)["best_for"]}
+
+    assert "Cheapest" not in best
+    assert best["Worth a full replay"]["candidate"] == "cheap-open-model"
+    assert "matches its own recording only" in best["Worth a full replay"]["why"]
 
 
 async def test_dry_run_has_no_choices(

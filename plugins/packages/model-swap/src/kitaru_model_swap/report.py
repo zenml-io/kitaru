@@ -70,6 +70,8 @@ _MAX_FAILURE_RATE = 0.2
 # Candidates this close to the best match count as behaving the same.
 _COMPARABLE_POINTS = 0.1
 _NOISY_REFERENCE = 0.5
+# Candidates named for a full replay, closest by step agreement first.
+_FINALISTS = 3
 _DAYS_PER_MONTH = 30
 # Spans shorter than this are too short to extrapolate traffic from.
 _MIN_OBSERVED_DAYS = 1
@@ -605,7 +607,9 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
     """Name the best candidate for each goal, by simple, stated rules.
 
     Quality here is closeness to the current model's recorded answers; the
-    user's verdicts on the disagreements decide which answers are right.
+    user's verdicts on the disagreements decide which answers are right. The
+    current model run again sets the bar: a candidate counts as comparable
+    within a few points of how often today's model matches itself.
     """
     usable = [
         c
@@ -614,17 +618,33 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
         and _primary_rate(c)[1] is not None
         and (c["failure_rate"] is None or c["failure_rate"] <= _MAX_FAILURE_RATE)
     ]
-    if not usable:
+    reference = next((c for c in usable if c["reference"]), None)
+    others = [c for c in usable if not c["reference"]]
+    if not others:
         return []
-    closest = max(usable, key=lambda c: _primary_rate(c)[1] or 0)
-    floor = (_primary_rate(closest)[1] or 0) - _COMPARABLE_POINTS
-    comparable = [c for c in usable if (_primary_rate(c)[1] or 0) >= floor]
+
+    def rate(candidate: dict[str, Any]) -> float:
+        return _primary_rate(candidate)[1] or 0
+
+    closest = max(others, key=rate)
+    bar = rate(reference) if reference is not None else rate(closest)
+    # When today's model does not take the same action as its own recording,
+    # agreement cannot tell an equivalent candidate from a different one.
+    noisy = reference is not None and bar < _NOISY_REFERENCE
+    comparable = (
+        [] if noisy else [c for c in others if rate(c) >= bar - _COMPARABLE_POINTS]
+    )
     choices = [
         {
             "goal": "Closest to today",
             "candidate": closest["name"],
             "why": f"{_primary_rate(closest)[0].capitalize()} as your current model "
-            f"{_pct(_primary_rate(closest)[1])} of the time.",
+            f"{_pct(rate(closest))} of the time"
+            + (
+                f"; your current model run again does {_pct(bar)}."
+                if reference is not None
+                else "."
+            ),
         }
     ]
     priced = [
@@ -634,14 +654,30 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
     ]
     if priced:
         cheapest = min(priced, key=lambda c: Decimal(c["cost"]["per_call_usd"]))
-        choices.append(
-            {
-                "goal": "Cheapest",
-                "candidate": cheapest["name"],
-                "why": f"${cheapest['cost']['per_call_usd']} per call, within "
-                f"{_COMPARABLE_POINTS * 100:.0f} points of the closest match.",
-            }
-        )
+        today = (reference or {}).get("cost", {}).get("per_call_usd")
+        if (
+            reference is not None
+            and today is not None
+            and Decimal(today) <= Decimal(cheapest["cost"]["per_call_usd"])
+        ):
+            choices.append(
+                {
+                    "goal": "Cheapest",
+                    "candidate": reference["name"],
+                    "why": f"${today} per call: no comparable candidate costs less "
+                    "than your current model.",
+                }
+            )
+        else:
+            choices.append(
+                {
+                    "goal": "Cheapest",
+                    "candidate": cheapest["name"],
+                    "why": f"${cheapest['cost']['per_call_usd']} per call, within "
+                    f"{_COMPARABLE_POINTS * 100:.0f} points of how often your "
+                    "current model matches itself.",
+                }
+            )
     timed = [c for c in comparable if c["latency_seconds"]["p50"] is not None]
     if timed:
         fastest = min(timed, key=lambda c: c["latency_seconds"]["p50"])
@@ -650,22 +686,45 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "goal": "Fastest",
                 "candidate": fastest["name"],
                 "why": f"{fastest['latency_seconds']['p50']:.2f}s median latency, "
-                f"within {_COMPARABLE_POINTS * 100:.0f} points of the closest match.",
+                f"within {_COMPARABLE_POINTS * 100:.0f} points of how often your "
+                "current model matches itself.",
             }
         )
-    open_models = [c for c in usable if c["open_weights"]]
+    open_models = [c for c in others if c["open_weights"]]
     if open_models:
-        best_open = max(open_models, key=lambda c: _primary_rate(c)[1] or 0)
+        best_open = max(open_models, key=rate)
         choices.append(
             {
                 "goal": "Best open model",
                 "candidate": best_open["name"],
                 "why": f"{_primary_rate(best_open)[0].capitalize()} as your current "
-                "model "
-                f"{_pct(_primary_rate(best_open)[1])} of the time, and you can "
-                "run it anywhere.",
+                f"model {_pct(rate(best_open))} of the time, and you can run it "
+                "anywhere.",
             }
         )
+    finalists = sorted(others, key=rate, reverse=True)[:_FINALISTS]
+    if noisy:
+        reason = (
+            f"Your current model matches its own recording only {_pct(bar)} of "
+            "the time, so step agreement cannot show which candidate is "
+            "equivalent."
+        )
+    elif not comparable:
+        reason = (
+            f"No candidate comes within {_COMPARABLE_POINTS * 100:.0f} points of "
+            f"how often your current model matches itself ({_pct(bar)}), so step "
+            "agreement cannot name an equivalent."
+        )
+    else:
+        reason = "Step agreement ranks candidates but does not show outcomes."
+    choices.append(
+        {
+            "goal": "Worth a full replay",
+            "candidate": " + ".join(c["name"] for c in finalists),
+            "why": f"{reason} Replay these, the closest by step agreement, end to "
+            "end with your evaluator before switching.",
+        }
+    )
     return choices
 
 
