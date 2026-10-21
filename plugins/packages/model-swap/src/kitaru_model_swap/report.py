@@ -70,8 +70,9 @@ _MAX_FAILURE_RATE = 0.2
 # Candidates this close to the best match count as behaving the same.
 _COMPARABLE_POINTS = 0.1
 _NOISY_REFERENCE = 0.5
-# Candidates named for a full replay, closest by step agreement first.
-_FINALISTS = 3
+# A candidate matching today's model less than this share as often as the
+# closest candidate does is a clear failure, not worth a full replay.
+_CLEAR_FAILURE_RATIO = 0.5
 _DAYS_PER_MONTH = 30
 # Spans shorter than this are too short to extrapolate traffic from.
 _MIN_OBSERVED_DAYS = 1
@@ -702,7 +703,24 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "anywhere.",
             }
         )
-    finalists = sorted(others, key=rate, reverse=True)[:_FINALISTS]
+    # Step agreement ranks a cheap model low when it reaches the same outcome by
+    # a different route, so only clear failures are dropped and the cheapest
+    # candidate is always kept.
+    cutoff = rate(closest) * _CLEAR_FAILURE_RATIO
+    finalists = sorted((c for c in others if rate(c) >= cutoff), key=rate, reverse=True)
+    priced_others = [
+        c
+        for c in others
+        if c["cost"]["per_call_usd"] is not None and c["cost_complete"]
+    ]
+    cheapest_overall = min(
+        priced_others,
+        key=lambda c: Decimal(c["cost"]["per_call_usd"]),
+        default=None,
+    )
+    if cheapest_overall is not None and cheapest_overall not in finalists:
+        finalists.append(cheapest_overall)
+    dropped = [c["name"] for c in others if c not in finalists]
     if noisy:
         reason = (
             f"Your current model matches its own recording only {_pct(bar)} of "
@@ -717,12 +735,20 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
         )
     else:
         reason = "Step agreement ranks candidates but does not show outcomes."
+    left_out = (
+        f" Left out as clear failures, matching today's model less than half as "
+        f"often as the closest candidate: {', '.join(dropped)}."
+        if dropped
+        else ""
+    )
     choices.append(
         {
             "goal": "Worth a full replay",
             "candidate": " + ".join(c["name"] for c in finalists),
-            "why": f"{reason} Replay these, the closest by step agreement, end to "
-            "end with your evaluator before switching.",
+            "why": f"{reason} Replay these end to end with your evaluator before "
+            "switching: every candidate except clear failures, plus the "
+            "cheapest, which step agreement often ranks low even when it keeps "
+            f"outcomes.{left_out}",
         }
     )
     return choices

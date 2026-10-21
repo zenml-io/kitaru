@@ -450,6 +450,32 @@ async def test_no_equivalent_names_finalists_instead_of_a_cheapest(
     assert "cannot name an equivalent" in best["Worth a full replay"]["why"]
 
 
+async def test_finalists_drop_clear_failures_but_keep_the_cheapest(
+    stub_client: StubClient, server: MockOpenAIServer
+) -> None:
+    copy = CHEAP | {"name": "copy", "model": "mirror"}
+    pricey_miss = CHEAP | {
+        "name": "pricey-miss",
+        "price": {"input_per_mtok": "5", "output_per_mtok": "20"},
+    }
+    cheap_miss = CHEAP | {
+        "name": "cheap-miss",
+        "price": {"input_per_mtok": "0", "output_per_mtok": "0"},
+    }
+
+    insights = await run(
+        stub_client, server, candidates=[REFERENCE, copy, pricey_miss, cheap_miss]
+    )
+    best = {c["goal"]: c for c in report(insights)["best_for"]}
+    finalists = best["Worth a full replay"]
+
+    # Both misses rarely match today's model; only the cheapest one survives,
+    # because a cheap model can keep outcomes by a different route.
+    assert finalists["candidate"] == "copy + cheap-miss"
+    assert "clear failures" in finalists["why"]
+    assert "pricey-miss" in finalists["why"]
+
+
 async def test_noisy_reference_names_finalists_only(
     stub_client: StubClient, server: MockOpenAIServer
 ) -> None:
