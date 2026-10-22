@@ -14,7 +14,7 @@
 """Shared Langfuse SDK fakes for the Langfuse adapter."""
 
 import asyncio
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -284,7 +284,7 @@ class FakeLangfuseClient:
     @contextmanager
     def start_as_current_observation(
         self, *, name: str, trace_context: TraceContext
-    ) -> Iterator[None]:
+    ) -> Generator[None, None, None]:
         self.trace_contexts.append(trace_context)
         self.events.append("span-enter")
         yield
