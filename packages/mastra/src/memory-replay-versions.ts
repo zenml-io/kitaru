@@ -21,4 +21,7 @@ export const MEMORY_REPLAY_TESTED_VERSIONS: readonly MemoryReplayTestedVersions[
     { core: "1.74.0", memory: "1.35.0", pg: "1.29.0" },
     { core: "1.75.0", memory: "1.36.0", pg: "1.30.0" },
     { core: "1.76.0", memory: "1.37.0", pg: "1.31.0" },
+    { core: "1.77.0", memory: "1.37.1", pg: "1.31.1" },
+    { core: "1.78.0", memory: "1.38.0", pg: "1.31.2" },
+    { core: "1.79.0", memory: "1.39.0", pg: "1.32.0" },
   ];

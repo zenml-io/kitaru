@@ -566,7 +566,7 @@ export function createRegisteredWriteDomain(
       const value: unknown = Reflect.get(target, property, target);
       if (typeof value !== "function") return value;
       if (methods.has(property)) return methods.get(property);
-      const bound = MUTATIONS.has(property as keyof MemoryStorage)
+      const bound = MUTATIONS.has(property)
         ? async (...args: unknown[]): Promise<unknown> => {
             const registration = await registerWrite();
             try {
@@ -584,7 +584,11 @@ export function createRegisteredWriteDomain(
 
 // The pinned public MemoryStorage mutation inventory. Delegation binds `this` to
 // the original domain, so a native method's own helper calls record only once.
-const MUTATIONS = new Set<keyof MemoryStorage>([
+const MUTATIONS: ReadonlySet<PropertyKey> = new Set<
+  | keyof MemoryStorage
+  | "commitActiveObservations"
+  | "appendBufferedObservations"
+>([
   "dangerouslyClearAll",
   "prune",
   "saveThread",
@@ -601,7 +605,9 @@ const MUTATIONS = new Set<keyof MemoryStorage>([
   "updateResource",
   "initializeObservationalMemory",
   "updateActiveObservations",
+  "commitActiveObservations",
   "updateBufferedObservations",
+  "appendBufferedObservations",
   "swapBufferedToActive",
   "createReflectionGeneration",
   "updateBufferedReflection",
@@ -733,7 +739,9 @@ function getAddressedRows(
         records: [],
       };
     case "updateActiveObservations":
+    case "commitActiveObservations":
     case "updateBufferedObservations":
+    case "appendBufferedObservations":
     case "swapBufferedToActive":
     case "updateBufferedReflection":
     case "updateObservationalMemoryConfig":
@@ -1053,7 +1061,7 @@ export function createMemoryCaptureBinding(
       const value: unknown = Reflect.get(target, property, target);
       if (typeof value !== "function") return value;
       if (methods.has(property)) return methods.get(property);
-      if (!MUTATIONS.has(property as keyof MemoryStorage)) {
+      if (!MUTATIONS.has(property)) {
         const bound = value.bind(target);
         methods.set(property, bound);
         return bound;
