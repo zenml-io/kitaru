@@ -13,6 +13,7 @@
 #  limitations under the License.
 """Tests for rebuilding chat requests from recorded nodes."""
 
+import copy
 import uuid
 from collections import Counter
 from typing import Any
@@ -126,6 +127,72 @@ def test_otel_parts_become_openai_messages(
     assert isinstance(tool_message["content"], str)
     assert request.dropped_reasoning_parts > 0
     assert all("thinking" not in str(m.get("content")) for m in request.messages[2:])
+
+
+@pytest.mark.parametrize("source_format", ["otel_parts", "openai_chat"])
+@pytest.mark.parametrize("id_length", [64, 65, 668])
+def test_tool_call_ids_fit_provider_limits_without_changing_the_recording(
+    source_format: str, id_length: int
+) -> None:
+    call_ids = ["x" * (id_length - 1) + suffix for suffix in ("a", "b")]
+    messages: list[dict[str, Any]]
+    if source_format == "otel_parts":
+        messages = [
+            {
+                "role": "assistant",
+                "parts": [
+                    {
+                        "type": "tool_call",
+                        "id": call_id,
+                        "name": "lookup",
+                        "arguments": {},
+                    }
+                    for call_id in call_ids
+                ],
+            },
+            {
+                "role": "user",
+                "parts": [
+                    {"type": "tool_call_response", "id": call_id, "result": "found"}
+                    for call_id in call_ids
+                ],
+            },
+        ]
+    else:
+        messages = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {"name": "lookup", "arguments": "{}"},
+                    }
+                    for call_id in call_ids
+                ],
+            },
+            *[
+                {"role": "tool", "tool_call_id": call_id, "content": "found"}
+                for call_id in call_ids
+            ],
+        ]
+    original = copy.deepcopy(messages)
+    recorded = node(inputs=messages, outputs="done")
+    options = {"tool_schemas": {"lookup": {"type": "object"}}}
+
+    request = rebuild(recorded, **options)
+    repeated = rebuild(recorded, **options)
+
+    assert isinstance(request, ReplayRequest)
+    assert isinstance(repeated, ReplayRequest)
+    rebuilt_ids = [call["id"] for call in request.messages[0]["tool_calls"]]
+    assert len(set(rebuilt_ids)) == len(call_ids)
+    assert all(len(call_id) <= 64 for call_id in rebuilt_ids)
+    assert [m["tool_call_id"] for m in request.messages[1:]] == rebuilt_ids
+    assert repeated.messages == request.messages
+    assert recorded.inputs == original
+    if id_length <= 64:
+        assert rebuilt_ids == call_ids
 
 
 def test_quickstart_calls_are_skipped_without_any_schema(

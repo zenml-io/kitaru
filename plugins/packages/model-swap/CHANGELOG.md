@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Shorten oversized tool-call ids consistently in rebuilt requests without changing the recording, and clarify that instructions may be present in user messages when no system or developer message was recorded. Document explicit Responses API selection for GPT-5.6 candidates using tools with reasoning.
 - Present the report as stage 1 of 2: a screen that rules candidates out, with full replays graded on outcomes deciding.
 - Keep comparisons honest: `system_prompt` per candidate (optionally only on `system_prompt_nodes`) to try a rewritten prompt, a `truncated` failure for replies cut off by the token limit, a blind judge (answers A and B in varying order) rechecked with the order swapped (`judge_check`) and flagged when unstable or when it runs a candidate's model, a note when there is no reference to set a noise floor, and a best mix chosen on half of the sessions and kept only where it holds on the other half.
 - Measure candidates against how often today's model matches itself: today's model is the bar and never its own closest match, no cheapest or fastest candidate is named when none is comparable or today's model is too noisy to compare against, and every report ends with the candidates worth a full replay: every candidate except clear failures, plus the cheapest.

@@ -24,6 +24,7 @@ depends on the source rather than on the importer. Two shapes are rebuilt:
 Anything else is skipped with a reason instead of guessed.
 """
 
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -364,7 +365,7 @@ def _text(content: Any) -> str | None:
 
 
 def _require_id(call_id: Any) -> str:
-    """Return a tool-call id, which endpoints need to pair calls and results.
+    """Return a tool-call id, shortening oversized ids consistently.
 
     Raises:
         UnsupportedShapeError: The recording has no id.
@@ -373,7 +374,8 @@ def _require_id(call_id: Any) -> str:
         raise UnsupportedShapeError(
             "missing_tool_call_id", "a tool call or result has no id"
         )
-    return str(call_id)
+    value = str(call_id)
+    return hashlib.sha256(value.encode()).hexdigest() if len(value) > 64 else value
 
 
 def _openai_tool_call(call_id: Any, name: Any, arguments: Any) -> dict[str, Any]:

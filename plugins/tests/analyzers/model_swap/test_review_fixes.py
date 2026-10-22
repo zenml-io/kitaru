@@ -18,6 +18,7 @@ import json
 import time
 import uuid
 from collections import Counter
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
@@ -45,6 +46,7 @@ from kitaru_model_swap.pricing import call_cost, resolve_price
 from kitaru_model_swap.report import (
     REPORT_SECTION_KEY,
     SUMMARY_INSIGHT_NAME,
+    build_report,
     weighted_per_call,
 )
 from kitaru_model_swap.runner import Budget, Runner
@@ -165,6 +167,33 @@ def recorded_call(name: str, cost: str) -> RecordedCall:
         cost=Decimal(cost),
         estimated_input_tokens=1,
     )
+
+
+def test_missing_system_message_does_not_imply_missing_instructions() -> None:
+    policy = "Verify the customer's account before making changes."
+    request = rebuild([{"role": "user", "content": policy}])
+    assert isinstance(request, ReplayRequest)
+    call = replace(recorded_call("chat", "0"), request=request)
+    collection = Collection(
+        max_per_group=1,
+        calls=[call],
+        llm_calls_seen=1,
+        sessions=1,
+        replayable=Counter({"none": 1}),
+        group_seen=Counter({("chat", "m"): 1}),
+    )
+    params = ModelSwapParams(candidates=[candidate()], dry_run=True)
+
+    result = build_report(
+        params, collection, [call], [], {}, spent=Decimal(0), stopped_early=None
+    )
+
+    assert request.messages == [{"role": "user", "content": policy}]
+    assert result["coverage"]["calls_without_system_prompt"] == 1
+    assert (
+        "Sampled calls without a system or developer message: 1. "
+        "The first user message may carry the instructions."
+    ) in result["notes"]
 
 
 def test_per_call_cost_is_weighted_by_how_often_calls_occur() -> None:

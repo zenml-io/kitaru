@@ -45,7 +45,7 @@ Note the `import_id` in the output; the analysis and the report use it. If you a
 
 ## Choose candidates
 
-Each candidate is any endpoint that speaks the OpenAI chat-completions API:
+Each candidate is an endpoint that speaks the OpenAI chat-completions or Responses API:
 
 ```json
 {
@@ -59,7 +59,7 @@ Each candidate is any endpoint that speaks the OpenAI chat-completions API:
 | Field | Meaning |
 |---|---|
 | `name` | Label in the report. Must be unique. |
-| `base_url` | Endpoint base URL, ending before `/chat/completions`. |
+| `base_url` | Endpoint base URL, ending before `/chat/completions` or `/responses`. |
 | `model` | Model name sent in each request. |
 | `api_key_env` | Name of the environment variable holding the API key. Omit it for endpoints without authentication, such as a local Ollama. |
 | `reference` | Mark the model your agent uses today. At most one candidate can be the reference. It is compared like any other candidate, and its agreement with its own recording shows how much answers vary from run to run, the noise floor for every other candidate. |
@@ -103,7 +103,7 @@ The same open model can behave very differently at different providers, and a wr
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `api` | `chat_completions` | Request shape. `responses` posts to OpenAI's `/responses` instead of `/chat/completions`; OpenAI's reasoning models (GPT-6 and later) need it to call tools with reasoning on. Tool calls then come back natively. |
+| `api` | `chat_completions` | Request shape. `responses` posts to OpenAI's `/responses` instead of `/chat/completions`. Use it when an OpenAI model rejects function tools with reasoning at `/chat/completions`, including GPT-5.6 Sol and Luna. Tool calls then come back natively. |
 | `tool_call_format` | `native` | Where tool calls come back. `native` reads the `tool_calls` field. `hermes` parses `<tool_call>{...}</tool_call>` blocks from the text, for endpoints served without a tool-call parser. `json_content` parses the whole text as one `{"name", "arguments"}` object. |
 | `reasoning_effort` | not sent | Sent as `reasoning_effort` (as `reasoning.effort` with the Responses API). |
 | `max_tokens` | not sent | Output token limit per call. |
@@ -112,6 +112,8 @@ The same open model can behave very differently at different providers, and a wr
 | `extra_body` | `{}` | Extra fields merged into every request. |
 | `timeout_seconds` | `120` | Per-request timeout. |
 | `max_retries` | `1` | Retries after a timeout, rate limit, or server error. Failed attempts are not priced; retries are counted and shown next to cost. |
+
+For example, a GPT-5.6 candidate using tools with medium reasoning can set `"provider_settings": {"api": "responses", "reasoning_effort": "medium"}`. Preserve the reasoning effort you intend to compare when selecting the API.
 
 When a candidate's failure rate is high, the report's recommendation says to fix the provider setup first. Failures are never counted as disagreement. A reply cut off by the output token limit is its own failure, `truncated`, so a low `max_tokens` shows up as a setup problem rather than as the model answering differently.
 
@@ -273,7 +275,7 @@ Each run stores its own insights. The report renders the most recent model-swap 
 
 ## Supported trace shapes
 
-Messages are rebuilt from two shapes: OTel GenAI messages with typed parts (Langfuse and Logfire exports of Pydantic AI, Phoenix `gen_ai.*` spans) and OpenAI chat messages (MLflow, Braintrust, LangSmith OpenAI wrappers, most Kitaru JSONL files). Anything else is skipped and counted rather than guessed, including Anthropic-format messages, LangChain-serialized messages, images and other non-text content, failed recorded calls, calls recorded without inputs, and calls whose tool calls or results have no ids (skipped as `missing_tool_call_id`). When a recording keeps the system prompt as OTel GenAI `gen_ai.system_instructions` in the span attributes rather than in the messages, it is replayed as the system message; calls with no system prompt at all are counted in a report note.
+Messages are rebuilt from two shapes: OTel GenAI messages with typed parts (Langfuse and Logfire exports of Pydantic AI, Phoenix `gen_ai.*` spans) and OpenAI chat messages (MLflow, Braintrust, LangSmith OpenAI wrappers, most Kitaru JSONL files). Anything else is skipped and counted rather than guessed, including Anthropic-format messages, LangChain-serialized messages, images and other non-text content, failed recorded calls, calls recorded without inputs, and calls whose tool calls or results have no ids (skipped as `missing_tool_call_id`). IDs longer than 64 characters are shortened consistently in rebuilt requests, keeping calls paired with their results and leaving the recording unchanged. When a recording keeps the system prompt as OTel GenAI `gen_ai.system_instructions` in the span attributes rather than in the messages, it is replayed as the system message. Calls without a system or developer message are counted in a report note; the first user message may carry the instructions.
 
 ## Limits
 

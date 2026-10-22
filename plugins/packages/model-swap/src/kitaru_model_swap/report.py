@@ -280,9 +280,8 @@ def _notes(coverage: dict[str, Any]) -> list[str]:
         )
     if without := coverage["calls_without_system_prompt"]:
         notes.append(
-            f"{without} sampled calls have no system prompt in their recording. "
-            "If the agent uses one, the trace source or importer did not keep "
-            "it, and candidates answer without it."
+            "Sampled calls without a system or developer message: "
+            f"{without}. The first user message may carry the instructions."
         )
     if no_ids := coverage["skipped"].get("missing_tool_call_id"):
         notes.append(
