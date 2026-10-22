@@ -3659,16 +3659,17 @@ export interface paths {
          * @description Seed the sample agent and everything recorded under it.
          *
          *     Clients observe HTTP 201 on success and 409 when the agent name is
-         *     already registered.
+         *     already registered unless resume_existing requests repair of sample data.
+         *     Conflicting resources that do not match the sample data also return 409.
          *
          *     Args:
          *         seeder: Sample data seeder.
-         *         session: Request-scoped database session.
+         *         prepare_agent: Sample-agent preparation with its own transaction.
          *         actor: Caller context.
          *         body: Sample data create request, None uses the sample data's agent name.
          *
          *     Returns:
-         *         Agent the sample data was seeded under.
+         *         Sample agent and the session and investigation opened by its tour.
          */
         post: operations["create_sample_data_api_v1_ui_sample_data_post"];
         delete?: never;
@@ -8275,6 +8276,12 @@ export interface components {
              * @description Agent name, None uses the sample data's agent name.
              */
             agent_name?: string | null;
+            /**
+             * Resume Existing
+             * @description Repair a previous sample-data load under this agent name.
+             * @default false
+             */
+            resume_existing: boolean;
         };
         /**
          * SampleDataResponse
@@ -8287,6 +8294,28 @@ export interface components {
              * @description Agent the sample data was seeded under.
              */
             agent_id: string;
+            /**
+             * Agent Name
+             * @description Name of the sample agent.
+             */
+            agent_name: string;
+            /**
+             * Failing Session Id
+             * Format: uuid
+             * @description Session opened by the sample-data tour.
+             */
+            failing_session_id: string;
+            /**
+             * Failing Session Number
+             * @description Agent-relative number of the failing session.
+             */
+            failing_session_number: number;
+            /**
+             * Investigation Id
+             * Format: uuid
+             * @description Investigation opened by the sample-data tour.
+             */
+            investigation_id: string;
         };
         /**
          * ScriptPluginSource
@@ -20939,7 +20968,9 @@ export interface operations {
     create_sample_data_api_v1_ui_sample_data_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
