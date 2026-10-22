@@ -15,7 +15,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import aclosing, asynccontextmanager
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -91,7 +91,7 @@ def _get_query_client() -> AsyncLogfireQueryClient:
 
 
 @asynccontextmanager
-async def _open_http_client(read_token: str) -> AsyncIterator[httpx.AsyncClient]:
+async def _open_http_client(read_token: str) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Open an HTTP client for the Query API region of a read token.
 
     Args:

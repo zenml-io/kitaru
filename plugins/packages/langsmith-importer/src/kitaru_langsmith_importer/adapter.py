@@ -15,7 +15,7 @@
 
 import asyncio
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from langsmith import Client, trace, tracing_context
@@ -54,7 +54,7 @@ class LangSmithAdapter(ImporterBackedAdapter):
         self._completed_runs: dict[str, list[Run]] = {}
 
     @contextmanager
-    def open_trace(self) -> Iterator[str]:
+    def open_trace(self) -> Generator[str, None, None]:
         """Activate a LangSmith trace and yield its trace id.
 
         Yields:
