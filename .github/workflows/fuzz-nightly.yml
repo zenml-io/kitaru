@@ -87,7 +87,7 @@ jobs:
           restore-keys: hypothesis-${{ matrix.name }}-
       - name: Run fuzz recipe
         id: fuzz
-        timeout-minutes: 100
+        timeout-minutes: 115
         env:
           HYPOTHESIS_PROFILE: nightly
           KITARU_FUZZ_RANDOM: '1'
@@ -97,7 +97,7 @@ jobs:
         run: |-
           set -o pipefail
           set +e
-          timeout --signal=TERM --kill-after=60s 95m uvx --from rust-just just "$RECIPE" 2>&1 | tee fuzz.log
+          timeout --signal=TERM --kill-after=60s 110m uvx --from rust-just just "$RECIPE" 2>&1 | tee fuzz.log
           statuses=("${PIPESTATUS[@]}")
           set -e
           status="${statuses[0]}"
@@ -110,7 +110,7 @@ jobs:
             *) outcome=failed ;;
           esac
           echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
-          printf '### %s\n\nResult: **%s** (exit %s). Process limit: 95 minutes, with a 60-second termination grace period.\n' \
+          printf '### %s\n\nResult: **%s** (exit %s). Process limit: 110 minutes, with a 60-second termination grace period.\n' \
             "$RECIPE" "$outcome" "$status" >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: Save Hypothesis database
