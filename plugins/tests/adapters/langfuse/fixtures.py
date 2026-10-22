@@ -24,15 +24,13 @@ from langfuse.api import (
     ObservationsV2Meta,
     ObservationsV2Response,
     ObservationV2,
-    Traces,
-    TraceWithFullDetails,
 )
 from langfuse.types import TraceContext
 
 import kitaru_langfuse_importer.adapter as adapter_module
 import kitaru_langfuse_importer.api as api_module
 
-TraceBuilder = Callable[[str], TraceWithFullDetails]
+TraceBuilder = Callable[[str], api_module.FetchedTrace]
 
 
 def build_observation(
@@ -45,28 +43,14 @@ def build_observation(
     **extra: Any,
 ) -> dict[str, Any]:
     """Build one Langfuse API observation record."""
-    record: dict[str, Any] = {
-        "id": observation_id,
-        "trace_id": trace_id,
-        "type": observation_type,
-        "name": observation_id,
-        "start_time": "2026-07-24T10:00:00Z",
-        "usage": {"input": 3, "output": 5, "total": 8, "unit": "TOKENS"},
-        "level": "DEFAULT",
-        "usage_details": {"input": 3, "output": 5},
-        "cost_details": {"total": 0.001},
-        "environment": "default",
-        "input": None,
-        "output": None,
-        "metadata": None,
-        "model_parameters": None,
+    return build_observation_v2(
+        observation_id,
+        trace_id,
+        parent_id=parent_id,
+        observation_type=observation_type,
+        end_time=end_time,
         **extra,
-    }
-    if end_time is not None:
-        record["end_time"] = end_time
-    if parent_id is not None:
-        record["parent_observation_id"] = parent_id
-    return record
+    ).model_dump()
 
 
 def build_observation_v2(
@@ -97,8 +81,7 @@ def build_observation_v2(
         "model_parameters": None,
         **extra,
     }
-    if end_time is not None:
-        fields["end_time"] = end_time
+    fields["end_time"] = end_time
     if parent_id is not None:
         fields["parent_observation_id"] = parent_id
     return ObservationV2.model_validate(fields)
@@ -118,71 +101,20 @@ def build_trace(
     observations: list[dict[str, Any]],
     *,
     session_id: str | None = None,
-) -> TraceWithFullDetails:
-    """Build one Langfuse API trace response with nested observations."""
-    return TraceWithFullDetails.model_validate(
-        {
-            "id": trace_id,
-            "timestamp": "2026-07-24T10:00:00Z",
-            "project_id": "project-1",
-            "session_id": session_id,
-            "name": "run",
-            "input": {"prompt": "hello"},
-            "output": {"answer": "world"},
-            "metadata": None,
-            "tags": [],
-            "public": False,
-            "environment": "default",
-            "html_path": f"/project/project-1/traces/{trace_id}",
-            "latency": 1.0,
-            "total_cost": 0.001,
-            "observations": observations,
-            "scores": [],
-        }
-    )
-
-
-def build_trace_page(
-    trace_ids: list[str],
-    page: int,
-    total_pages: int,
-    *,
-    session_ids: dict[str, str] | None = None,
-    timestamps: dict[str, str] | None = None,
-    latencies: dict[str, float] | None = None,
-) -> Traces:
-    """Build one page of the Langfuse trace-list response."""
-    session_ids = session_ids or {}
-    timestamps = timestamps or {}
-    latencies = latencies or {}
-    return Traces.model_validate(
-        {
-            "data": [
-                {
-                    "id": trace_id,
-                    "timestamp": timestamps.get(trace_id, "2026-07-24T10:00:00Z"),
-                    "latency": latencies.get(trace_id, 1.0),
-                    "session_id": session_ids.get(trace_id),
-                    "tags": [],
-                    "public": False,
-                    "environment": "default",
-                    "html_path": f"/project/project-1/traces/{trace_id}",
-                }
-                for trace_id in trace_ids
-            ],
-            "meta": {
-                "page": page,
-                "limit": max(len(trace_ids), 1),
-                "total_items": len(trace_ids),
-                "total_pages": total_pages,
-            },
-        }
+) -> api_module.FetchedTrace:
+    """Build a project trace snapshot from real SDK observation models."""
+    return api_module.FetchedTrace(
+        id=trace_id,
+        observations=[
+            ObservationV2.model_validate({**row, "session_id": session_id})
+            for row in observations
+        ],
     )
 
 
 def build_complete_trace(
     trace_id: str, *, session_id: str | None = None
-) -> TraceWithFullDetails:
+) -> api_module.FetchedTrace:
     """Build one finished trace with a root span and a nested generation."""
     return build_trace(
         trace_id,
@@ -201,50 +133,23 @@ def build_complete_trace(
 
 
 class FakeLangfuseClient:
-    """Langfuse client fake with a scripted trace API."""
+    """Langfuse client fake with only the observations read API."""
 
     def __init__(self) -> None:
         self.trace_builders: list[TraceBuilder | Exception] = []
-        self.trace_list_pages: list[Traces] = []
         self.observation_pages: dict[str, list[ObservationsV2Response]] = {}
         self.observations: list[ObservationV2] = []
         self.observation_page_size: int | None = None
         self.observation_calls: list[dict[str, Any]] = []
         self.requested: list[str] = []
-        self.list_calls: list[dict[str, Any]] = []
         self.events: list[str] = []
         self.trace_contexts: list[TraceContext] = []
-        self.fetch_delays: list[float] = []
-        self.in_flight = 0
-        self.peak_in_flight = 0
         self.observation_delays: list[float] = []
         self.observation_in_flight = 0
         self.observation_peak_in_flight = 0
         self.async_api = SimpleNamespace(
-            trace=SimpleNamespace(get=self._get, list=self._list),
             observations=SimpleNamespace(get_many=self._get_many),
         )
-
-    async def _get(self, trace_id: str, **kwargs: Any) -> TraceWithFullDetails:
-        self.in_flight += 1
-        self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
-        try:
-            if self.fetch_delays:
-                await asyncio.sleep(self.fetch_delays.pop(0))
-            self.requested.append(trace_id)
-            self.events.append("poll")
-            assert self.trace_builders, "unexpected trace poll"
-            builder = self.trace_builders.pop(0)
-            if isinstance(builder, Exception):
-                raise builder
-            return builder(trace_id)
-        finally:
-            self.in_flight -= 1
-
-    async def _list(self, **kwargs: Any) -> Traces:
-        self.list_calls.append(kwargs)
-        assert self.trace_list_pages, "unexpected trace list call"
-        return self.trace_list_pages.pop(0)
 
     async def _get_many(self, **kwargs: Any) -> ObservationsV2Response:
         self.observation_calls.append(dict(kwargs))
@@ -257,9 +162,29 @@ class FakeLangfuseClient:
                 await asyncio.sleep(self.observation_delays.pop(0))
             trace_id = kwargs.get("trace_id")
             if trace_id is not None:
+                if kwargs["fields"] == "core,basic":
+                    return self._page(
+                        [row for row in self.observations if row.trace_id == trace_id],
+                        kwargs,
+                    )
+                if kwargs.get("cursor") is None:
+                    self.requested.append(trace_id)
+                    self.events.append("poll")
+                    if self.trace_builders:
+                        builder = self.trace_builders.pop(0)
+                        if isinstance(builder, Exception):
+                            raise builder
+                        trace = builder(trace_id)
+                        self.observation_pages[trace_id] = [
+                            build_observations_page(trace.observations)
+                        ]
                 pages = self.observation_pages.get(trace_id)
-                assert pages, f"unexpected observations listing for trace {trace_id!r}"
-                return pages.pop(0)
+                if pages:
+                    return pages.pop(0)
+                return self._page(
+                    [row for row in self.observations if row.trace_id == trace_id],
+                    kwargs,
+                )
             return self._list_window(kwargs)
         finally:
             self.observation_in_flight -= 1
@@ -273,6 +198,15 @@ class FakeLangfuseClient:
             for observation in self.observations
             if since <= observation.start_time < until
         ]
+        return self._page(matching, kwargs)
+
+    def _page(
+        self, observations: list[ObservationV2], kwargs: dict[str, Any]
+    ) -> ObservationsV2Response:
+        """Return newest-first cursor pages, like the real endpoint."""
+        matching = sorted(
+            observations, key=lambda row: (row.start_time, row.id), reverse=True
+        )
         page_size = self.observation_page_size or kwargs["limit"]
         cursor = kwargs.get("cursor")
         offset = int(cursor.removeprefix("offset-")) if cursor else 0
@@ -319,11 +253,10 @@ def seed_default_observations(
                 trace_id,
                 parent_id="obs-root",
                 observation_type="GENERATION",
-                provided_model_name="gpt-5-nano",
+                model="gpt-5-nano",
                 start_time=start_time,
             ),
         ]
-        fake.observation_pages[trace_id] = [build_observations_page(observations)]
         fake.observations.extend(observations)
 
 
