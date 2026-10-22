@@ -3432,14 +3432,23 @@ async def experiment_run_list(
         "Get an experiment run and its aggregate progress by exact UUID.",
         parameters=(
             ParameterSpec("RUN", "UUID", "argument", True, "Experiment-run ID."),
+            ParameterSpec(
+                "--aggregate",
+                "boolean",
+                "option",
+                False,
+                "Include pinned baseline and result evaluation aggregates.",
+            ),
         ),
         errors=_UUID_READ_ERRORS,
     ),
 )
-async def experiment_run_get(run: uuid.UUID, /) -> CommandResult:
+async def experiment_run_get(
+    run: uuid.UUID, /, *, aggregate: bool = False
+) -> CommandResult:
     """Get one experiment run without mapping terminal status to an error."""
     async with _open_asset_client() as client:
-        return await experiment_runs.get_run(client, run)
+        return await experiment_runs.get_run(client, run, aggregate=aggregate)
 
 
 @_register(

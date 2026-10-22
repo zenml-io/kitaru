@@ -99,6 +99,44 @@ def _format_verdict(value: Any) -> str:
     return "-"
 
 
+def _format_evaluation_stats(stats: dict[str, Any]) -> str:
+    """Format evaluation counts, mean scores, pass rates, and category totals."""
+    parts = [f"count={stats['count']}"]
+    if stats.get("mean") is not None:
+        parts.append(f"mean score={stats['mean']:g}")
+    if stats.get("pass_rate") is not None:
+        parts.append(f"pass rate={100 * stats['pass_rate']:g}%")
+    if counts := stats.get("value_counts"):
+        categories = ", ".join(f"{name}={count}" for name, count in counts.items())
+        parts.append(f"values: {categories}")
+    return "; ".join(parts)
+
+
+def _format_evaluation_aggregates(value: Any) -> str:
+    """Summarize aggregate groups without including per-replay values."""
+    if not value:
+        return "No evaluation aggregates found."
+    summaries = []
+    for aggregate in value:
+        evaluator = aggregate.get("evaluator_name") or "-"
+        if aggregate.get("evaluator_version") is not None:
+            evaluator += f"@{aggregate['evaluator_version']}"
+        lines = [
+            f"{aggregate['name']} ({aggregate['data_type']})",
+            f"Evaluator: {evaluator}",
+        ]
+        if aggregate.get("evaluator_version_id") is not None:
+            lines.append(f"Evaluator version ID: {aggregate['evaluator_version_id']}")
+        lines.extend(
+            (
+                f"Baseline: {_format_evaluation_stats(aggregate['baseline'])}",
+                f"Result: {_format_evaluation_stats(aggregate['result'])}",
+            )
+        )
+        summaries.append("\n".join(lines))
+    return "\n\n".join(summaries)
+
+
 _ID = HumanField("id", "ID", no_wrap=True)
 _CREATED = HumanField("created", "Created", 110)
 _UPDATED = HumanField("updated", "Updated")
@@ -557,6 +595,16 @@ _VIEWS: dict[str, HumanView] = {
                     HumanField("cohort_version_id", "Cohort version ID"),
                     HumanField("agent_version_id", "Agent version ID"),
                     HumanField("baseline_evaluation_mode", "Baseline evaluation mode"),
+                ),
+            ),
+            HumanSection(
+                "Evaluation aggregates",
+                (
+                    HumanField(
+                        "evaluation_aggregates",
+                        "Summary",
+                        formatter=_format_evaluation_aggregates,
+                    ),
                 ),
             ),
             HumanSection("Error", (HumanField("error", "Error"),)),
