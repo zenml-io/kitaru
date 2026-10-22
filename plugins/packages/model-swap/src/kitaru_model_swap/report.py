@@ -70,6 +70,8 @@ _MAX_LISTED = 50
 _MAX_FAILURE_RATE = 0.2
 # Candidates this close to the best match count as behaving the same.
 _COMPARABLE_POINTS = 0.1
+# A candidate must answer this share of its calls to be ranked.
+_MIN_COVERAGE = 0.8
 _NOISY_REFERENCE = 0.5
 # A candidate matching today's model less than this share as often as the
 # closest candidate does is a clear failure, not worth a full replay.
@@ -154,6 +156,7 @@ def build_report(
         for candidate in params.candidates
     ]
     if not params.dry_run:
+        _add_paired_rates(candidates, by_candidate)
         _add_summaries(candidates)
     disagreements = [
         _disagreement(result)
@@ -511,7 +514,10 @@ def _candidate_report(
     spent = [r.cost for r in every_sent if r.cost is not None]
     replies = [r.reply for r in every_sent if r.reply]
     latencies = sorted(reply.latency_seconds for reply in replies)
+    step_results = _get_step_results(attempts)
     report |= {
+        "coverage": {"answered": len(headline), "attempted": len(step_results)},
+        "measured": _is_measured(len(headline), len(step_results)),
         "calls_sent": len(every_sent),
         "calls_not_run": dict(Counter(r.not_run for r in attempts if r.not_run)),
         "consistency": _consistency(attempts, repeats),
@@ -537,8 +543,8 @@ def _candidate_report(
             reply.failure: reply.failure_detail for reply in reversed(failed)
         },
         "failure_rate": _rate(sum(failures.values()), len(every_sent)),
-        "by_tool": _by_group(_get_step_results(attempts), _group, weight),
-        "by_route": _by_group(_get_step_results(attempts), _route_key(sampled), weight),
+        "by_tool": _by_group(step_results, _group, weight),
+        "by_route": _by_group(step_results, _route_key(sampled), weight),
         "latency_seconds": {
             "p50": _round(statistics.median(latencies)) if latencies else None,
             "p95": _round(_percentile(latencies, 0.95)) if latencies else None,
@@ -736,6 +742,56 @@ def _primary_rate(candidate: dict[str, Any]) -> tuple[str, float | None]:
     return "gives the same answer", candidate["agreement_rate"]
 
 
+def _is_measured(answered: int, attempted: int) -> bool:
+    """Tell whether a candidate answered enough of its calls to be ranked.
+
+    A candidate the budget stopped early answered only the first calls, so a
+    rate over them neither covers the sample nor can be compared with a
+    candidate that answered all of it.
+    """
+    return attempted > 0 and answered >= math.ceil(_MIN_COVERAGE * attempted)
+
+
+def _hits(result: CallResult, tool_choice: bool) -> bool:
+    """Whether one answer counts as a match under the candidate's headline rate."""
+    if tool_choice:
+        return result.agreement in _SAME_TOOL
+    return result.agreement in AGREEING
+
+
+def _add_paired_rates(
+    candidates: list[dict[str, Any]], by_candidate: dict[str, list[CallResult]]
+) -> None:
+    """Compare each candidate with the reference on the calls both answered.
+
+    Rates over different calls are not comparable when one candidate answered
+    only some of them, so equivalence is judged on the common calls.
+    """
+    reference = next((c for c in candidates if c["reference"]), None)
+    if reference is None:
+        return
+    ref_answers = {
+        r.call.node_id: r for r in _get_headline(by_candidate[reference["name"]])
+    }
+    for candidate in candidates:
+        if candidate["reference"]:
+            continue
+        tool_choice = candidate["tool_choice_rate"] is not None
+        pairs = [
+            (r, ref_answers[r.call.node_id])
+            for r in _get_headline(by_candidate[candidate["name"]])
+            if r.call.node_id in ref_answers
+            and (not tool_choice or r.call.request.recorded.tool_calls)
+        ]
+        candidate["paired"] = {
+            "calls": len(pairs),
+            "rate": _rate(sum(_hits(r, tool_choice) for r, _ in pairs), len(pairs)),
+            "reference_rate": _rate(
+                sum(_hits(ref, tool_choice) for _, ref in pairs), len(pairs)
+            ),
+        }
+
+
 def _add_summaries(candidates: list[dict[str, Any]]) -> None:
     """Attach a plain-language, factual summary to each candidate."""
     reference = next((c for c in candidates if c["reference"]), None)
@@ -776,7 +832,9 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
     Quality here is closeness to the current model's recorded answers; the
     user's verdicts on the disagreements decide which answers are right. The
     current model run again sets the bar: a candidate counts as comparable
-    within a few points of how often today's model matches itself.
+    within a few points of how often today's model matches itself, measured
+    on the calls both answered. Only candidates that answered most of their
+    calls are ranked; the rest are named as needing more measurement.
     """
     usable = [
         c
@@ -786,33 +844,51 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
         and (c["failure_rate"] is None or c["failure_rate"] <= _MAX_FAILURE_RATE)
     ]
     reference = next((c for c in usable if c["reference"]), None)
-    others = [c for c in usable if not c["reference"]]
+    others = [c for c in usable if not c["reference"] and c["measured"]]
+    # Candidates failing too often get "fix the provider setup" instead.
+    unmeasured = [
+        c
+        for c in candidates
+        if not c["excluded"]
+        and not c["reference"]
+        and not c["measured"]
+        and (c["failure_rate"] is None or c["failure_rate"] <= _MAX_FAILURE_RATE)
+    ]
+    choices = _unmeasured_row(unmeasured)
     if not others:
-        return []
+        return choices
 
     def rate(candidate: dict[str, Any]) -> float:
         return _primary_rate(candidate)[1] or 0
 
     closest = max(others, key=rate)
     bar = rate(reference) if reference is not None else rate(closest)
+
+    def is_comparable(candidate: dict[str, Any]) -> bool:
+        paired = candidate.get("paired")
+        if reference is None or not paired or paired["rate"] is None:
+            return rate(candidate) >= bar - _COMPARABLE_POINTS
+        return paired["rate"] >= paired["reference_rate"] - _COMPARABLE_POINTS
+
     # When today's model does not take the same action as its own recording,
-    # agreement cannot tell an equivalent candidate from a different one.
-    noisy = reference is not None and bar < _NOISY_REFERENCE
-    comparable = (
-        [] if noisy else [c for c in others if rate(c) >= bar - _COMPARABLE_POINTS]
-    )
+    # agreement cannot tell an equivalent candidate from a different one; and
+    # when it answered too few calls, it sets no bar at all.
+    unbarred = reference is not None and not reference["measured"]
+    noisy = reference is not None and (unbarred or bar < _NOISY_REFERENCE)
+    comparable = [] if noisy else [c for c in others if is_comparable(c)]
     choices = [
         {
             "goal": "Closest to today",
             "candidate": closest["name"],
             "why": f"{_primary_rate(closest)[0].capitalize()} as your current model "
-            f"{_pct(rate(closest))} of the time"
+            f"{_pct(rate(closest))} of the time{_answered(closest)}"
             + (
                 f"; your current model run again does {_pct(bar)}."
                 if reference is not None
                 else "."
             ),
-        }
+        },
+        *choices,
     ]
     priced = [
         c
@@ -842,7 +918,7 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
                     "candidate": cheapest["name"],
                     "why": f"${cheapest['cost']['per_call_usd']} per call, within "
                     f"{_COMPARABLE_POINTS * 100:.0f} points of how often your "
-                    "current model matches itself.",
+                    f"current model matches itself{_answered(cheapest)}.",
                 }
             )
     timed = [c for c in comparable if c["latency_seconds"]["p50"] is not None]
@@ -854,7 +930,7 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "candidate": fastest["name"],
                 "why": f"{fastest['latency_seconds']['p50']:.2f}s median latency, "
                 f"within {_COMPARABLE_POINTS * 100:.0f} points of how often your "
-                "current model matches itself.",
+                f"current model matches itself{_answered(fastest)}.",
             }
         )
     open_models = [c for c in others if c["open_weights"]]
@@ -865,8 +941,8 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "goal": "Best open model",
                 "candidate": best_open["name"],
                 "why": f"{_primary_rate(best_open)[0].capitalize()} as your current "
-                f"model {_pct(rate(best_open))} of the time, and you can run it "
-                "anywhere.",
+                f"model {_pct(rate(best_open))} of the time{_answered(best_open)}, "
+                "and you can run it anywhere.",
             }
         )
     # Step agreement ranks a cheap model low when it reaches the same outcome by
@@ -887,7 +963,13 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
     if cheapest_overall is not None and cheapest_overall not in finalists:
         finalists.append(cheapest_overall)
     dropped = [c["name"] for c in others if c not in finalists]
-    if noisy:
+    if unbarred:
+        reason = (
+            "Your current model run again answered too few of its calls to "
+            "set a bar, so step agreement cannot show which candidate is "
+            "equivalent."
+        )
+    elif noisy:
         reason = (
             f"Your current model matches its own recording only {_pct(bar)} of "
             "the time, so step agreement cannot show which candidate is "
@@ -918,6 +1000,32 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
         }
     )
     return choices
+
+
+def _answered(candidate: dict[str, Any]) -> str:
+    """Say how many of its calls a candidate answered."""
+    coverage = candidate["coverage"]
+    return f" (answered {coverage['answered']} of {coverage['attempted']} calls)"
+
+
+def _unmeasured_row(unmeasured: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Name candidates that answered too few calls to be ranked or ruled out."""
+    if not unmeasured:
+        return []
+    return [
+        {
+            "goal": "Needs more measurement",
+            "candidate": " + ".join(c["name"] for c in unmeasured),
+            "why": "Answered too few of their calls to be ranked or ruled out: "
+            + ", ".join(
+                f"{c['name']} {c['coverage']['answered']} of "
+                f"{c['coverage']['attempted']}"
+                for c in unmeasured
+            )
+            + ". Raise the spend cap or time budget and run again before "
+            "keeping or dropping them.",
+        }
+    ]
 
 
 def _disagreement(result: CallResult) -> dict[str, Any]:

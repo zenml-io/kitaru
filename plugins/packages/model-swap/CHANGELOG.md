@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Rank only candidates that answered at least 80% of their calls in **Best for**, judge comparability on the calls both the candidate and today's model answered, show answered-of-attempted calls next to each pick, and list under-measured candidates as "Needs more measurement".
 - Weight best-mix steps and costs by the recorded traffic each sampled call stands for, for the mix and for today's cost, so a mix that picks one candidate everywhere costs what that candidate costs. Report attempted, answered, failed and not-run calls per step, keep a candidate off a step where it fails on more than a fifth of the calls (overall or on held-out sessions), and say per step whether today's cost comes from the reference replay or the recording.
 - Keep each recorded call's `tool_choice`, `parallel_tool_calls`, `response_format` and strict function schemas in rebuilt chat-completions and Responses API requests, or skip the call with a counted reason (`unsupported_request_control`, `unsupported_tool`) when a control or offered tool cannot be sent faithfully. Offer functions without parameters with an empty schema, and keep recorded plain text that is valid JSON as text.
 - Hold the spend cap for the request actually sent: reject `extra_body` fields the analyzer sets itself (model, messages, tools, request controls, token limits, `n`, `stream`), reserve the judge's own output limit, reserve room for each retry, and charge replies without usage, timeouts and broken connections their full reservation. Unknown usage is no longer a measured zero cost.
