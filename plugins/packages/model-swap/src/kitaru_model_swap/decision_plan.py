@@ -42,6 +42,7 @@ TEXT_ANSWER = "answer_in_text"
 _MAX_OPTIONS = 255
 _MAX_QUESTIONS = 60
 _KEY = re.compile(r"[^A-Za-z0-9_]")
+_NULL = "null"
 
 
 @dataclass(frozen=True)
@@ -98,10 +99,15 @@ def plan_decisions(request: ReplayRequest) -> DecisionPlan:
     expected = {TOOL_QUESTION: call.name}
     arguments: dict[str, str] = {}
     free: list[str] = []
+    required = parameters.get("required") or ()
     for index, (argument, value) in enumerate(call.arguments.items()):
-        if value is None:
+        # A null optional argument is the same as leaving it out, but a null
+        # required one is a choice the model made, so it is asked about.
+        if value is None and argument not in required:
             continue
-        values = _decidable_values(properties.get(argument), parameters)
+        values = _decidable_values(
+            properties.get(argument), parameters, with_null=argument in required
+        )
         label = _label(value)
         if values is None or label not in values or len(questions) >= _MAX_QUESTIONS:
             free.append(argument)
@@ -129,12 +135,18 @@ def plan_decisions(request: ReplayRequest) -> DecisionPlan:
     return DecisionPlan("decision", tuple(questions), expected, arguments=arguments)
 
 
-def _decidable_values(schema: Any, root: Mapping[str, Any]) -> list[str] | None:
-    """Return the labels an argument can take, or None when it is free-form."""
+def _decidable_values(
+    schema: Any, root: Mapping[str, Any], *, with_null: bool
+) -> list[str] | None:
+    """Return the labels an argument can take, or None when it is free-form.
+
+    Null is an option only `with_null`, for a required argument; for an
+    optional one it means the same as leaving the argument out.
+    """
     values = _schema_values(schema, root)
     if values is None:
         return None
-    unique = list(dict.fromkeys(values))
+    unique = [v for v in dict.fromkeys(values) if with_null or v != _NULL]
     # A single option is not a decision, and too many cannot be offered.
     return unique if 1 < len(unique) <= _MAX_OPTIONS else None
 
@@ -160,13 +172,17 @@ def _schema_values(
     values: list[str] = []
     enum = schema.get("enum")
     if isinstance(enum, list):
-        values += [_label(value) for value in enum if value is not None]
+        values += [_label(value) for value in enum]
     kinds = schema.get("type")
     if kinds == "boolean" or (isinstance(kinds, list) and "boolean" in kinds):
         values += ["true", "false"]
+    # Null is one of the options a nullable decision can take.
+    if kinds == "null" or (isinstance(kinds, list) and "null" in kinds):
+        values.append(_NULL)
     branches = [*(schema.get("anyOf") or ()), *(schema.get("oneOf") or ())]
     for option in branches:
         if isinstance(option, dict) and option.get("type") == "null":
+            values.append(_NULL)
             continue
         branch = _schema_values(option, root, depth + 1)
         if branch is None:

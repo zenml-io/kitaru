@@ -279,12 +279,22 @@ async def send(
         else:
             if response.status_code == 200:
                 classify = _classify_responses if responses else _classify
-                reply = classify(
-                    response,
-                    settings.tool_call_format,
-                    latency=time.monotonic() - started,
-                    attempts=attempts,
-                )
+                try:
+                    reply = classify(
+                        response,
+                        settings.tool_call_format,
+                        latency=time.monotonic() - started,
+                        attempts=attempts,
+                    )
+                # Replies come from third-party endpoints, so a shape the
+                # parsers do not expect is one failed call, not a failed run.
+                except (TypeError, AttributeError, KeyError, ValueError) as error:
+                    reply = _failure(
+                        "tool_call_parse_error",
+                        f"malformed reply: {error}",
+                        latency=time.monotonic() - started,
+                        attempts=attempts,
+                    )
                 return replace(
                     reply,
                     unmetered_attempts=unmetered + (not reply.usage.reported),
@@ -418,10 +428,10 @@ def _classify_responses(
             if not item.get("name"):
                 return failed("tool_call_parse_error", "a tool call has no name")
             arguments = parse_arguments(item.get("arguments") or "{}")
-            if isinstance(arguments, str):
+            if not isinstance(arguments, dict):
                 return failed(
                     "tool_call_parse_error",
-                    f"arguments of {item['name']} are not JSON",
+                    f"arguments of {item['name']} are not a JSON object",
                 )
             calls.append(ToolCall(str(item["name"]), arguments))
         elif item.get("type") == "message":
@@ -479,15 +489,20 @@ def _read_tool_calls(
         ValueError: The tool calls cannot be parsed.
     """
     if tool_call_format == "native":
+        raw_calls = message.get("tool_calls") or []
+        if not isinstance(raw_calls, list):
+            raise ValueError("tool_calls is not a list")
         calls = []
-        for call in message.get("tool_calls") or ():
+        for call in raw_calls:
             function = call.get("function") if isinstance(call, dict) else None
             if not isinstance(function, dict) or not function.get("name"):
                 raise ValueError("a tool call has no function name")
-            arguments = parse_arguments(function.get("arguments") or "{}")
-            if isinstance(arguments, str):
-                raise ValueError(f"arguments of {function['name']} are not JSON")
-            calls.append(ToolCall(str(function["name"]), arguments))
+            calls.append(
+                ToolCall(
+                    str(function["name"]),
+                    _object_arguments(function["name"], function.get("arguments")),
+                )
+            )
         return tuple(calls), text
     if text is None:
         return (), None
@@ -516,8 +531,21 @@ def _parse_json_call(raw: str) -> ToolCall:
         raise ValueError("a tool call is not valid JSON") from error
     if not isinstance(value, dict) or not isinstance(value.get("name"), str):
         raise ValueError("a tool call has no name")
-    arguments = parse_arguments(value.get("arguments", value.get("parameters", {})))
-    return ToolCall(value["name"], arguments)
+    arguments = value.get("arguments", value.get("parameters"))
+    return ToolCall(value["name"], _object_arguments(value["name"], arguments))
+
+
+def _object_arguments(name: Any, arguments: Any) -> dict[str, Any]:
+    """Parse tool-call arguments, which must be a JSON object.
+
+    Raises:
+        ValueError: The arguments are not a JSON object, so the call could
+            not be executed.
+    """
+    parsed = parse_arguments(arguments if arguments not in (None, "") else "{}")
+    if not isinstance(parsed, dict):
+        raise ValueError(f"arguments of {name} are not a JSON object")
+    return parsed
 
 
 def read_usage(usage: Any) -> Usage:

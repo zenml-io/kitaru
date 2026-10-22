@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Count malformed candidate replies (a non-list `tool_calls`, or arguments that are not a JSON object in any tool-call format) as `tool_call_parse_error` instead of aborting the run or accepting them, and ask decision models about required nullable arguments recorded as `null`, with `null` as an option.
 - Rank only candidates that answered at least 80% of their calls in **Best for**, judge comparability on the calls both the candidate and today's model answered, show answered-of-attempted calls next to each pick, and list under-measured candidates as "Needs more measurement".
 - Weight best-mix steps and costs by the recorded traffic each sampled call stands for, for the mix and for today's cost, so a mix that picks one candidate everywhere costs what that candidate costs. Report attempted, answered, failed and not-run calls per step, keep a candidate off a step where it fails on more than a fifth of the calls (overall or on held-out sessions), and say per step whether today's cost comes from the reference replay or the recording.
 - Keep each recorded call's `tool_choice`, `parallel_tool_calls`, `response_format` and strict function schemas in rebuilt chat-completions and Responses API requests, or skip the call with a counted reason (`unsupported_request_control`, `unsupported_tool`) when a control or offered tool cannot be sent faithfully. Offer functions without parameters with an empty schema, and keep recorded plain text that is valid JSON as text.
