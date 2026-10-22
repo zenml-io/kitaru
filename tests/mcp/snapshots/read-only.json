@@ -6777,7 +6777,7 @@
                 }
               ],
               "default": null,
-              "description": "Import whose sessions produced the insight.",
+              "description": "Import associated with the insight.",
               "title": "Import Id"
             },
             "metadata": {

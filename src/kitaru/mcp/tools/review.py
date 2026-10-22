@@ -163,13 +163,16 @@ async def handle_review_manage(
             request.agent_id,
             request.insights,
             idempotency_key=request.idempotency_key,
+            **request.model_dump(include={"import_id"}, exclude_none=True),
         )
     if isinstance(request, InsightUpdate):
         values = request.model_dump(
-            include={"title", "description"}, exclude_unset=True
+            include={"title", "description", "import_id"}, exclude_unset=True
         )
         if request.clear_description:
             values["description"] = None
+        if request.clear_import:
+            values["import_id"] = None
         return await state.client.insights.update(
             request.insight_id, InsightUpdateRequest.model_validate(values)
         )

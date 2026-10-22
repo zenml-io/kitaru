@@ -145,6 +145,9 @@ class InsightBatchCreateRequest(RequestModel):
     """Insight batch create request."""
 
     agent_id: uuid.UUID = Field(description="Agent the insights belong to.")
+    import_id: uuid.UUID | None = Field(
+        default=None, description="Import associated with every insight in the batch."
+    )
     insights: list[InsightInput] = Field(
         min_length=1,
         max_length=MAX_INSIGHT_BATCH_SIZE,
@@ -155,6 +158,10 @@ class InsightBatchCreateRequest(RequestModel):
 class InsightUpdateRequest(RequestModel):
     """Insight update request."""
 
+    import_id: uuid.UUID | None = Field(
+        default=None,
+        description="Associated import; null detaches, omission preserves it.",
+    )
     title: str | None = Field(default=None, description="New insight title.")
     description: str | None = Field(
         default=None, description="New insight description."
@@ -171,7 +178,7 @@ class InsightResponse(OwnedResponseModel):
     id: uuid.UUID = Field(description="Insight id.")
     agent_id: uuid.UUID = Field(description="Agent the insight belongs to.")
     import_id: uuid.UUID | None = Field(
-        default=None, description="Import whose sessions produced the insight."
+        default=None, description="Import associated with the insight."
     )
     analyzer_version_id: uuid.UUID | None = Field(
         default=None, description="Analyzer version that produced the insight."

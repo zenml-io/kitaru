@@ -22,6 +22,7 @@ import pytest
 
 from conftest import (
     FakeAgentRepository,
+    FakeImportRepository,
     FakeInsightRepository,
     FakePluginRepository,
     create_agent,
@@ -70,9 +71,16 @@ def insight_repository(
 
 
 @pytest.fixture
+def import_repository() -> FakeImportRepository:
+    """Provide fake imports for association validation."""
+    return FakeImportRepository()
+
+
+@pytest.fixture
 async def client(
     agent_repository: FakeAgentRepository,
     insight_repository: FakeInsightRepository,
+    import_repository: FakeImportRepository,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed insight services."""
     app = create_app(
@@ -85,6 +93,7 @@ async def client(
     insight_service = InsightService(
         repository=insight_repository,
         agent_repository=agent_repository,
+        import_repository=import_repository,
     )
     app.dependency_overrides[get_insight_service] = lambda: insight_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)

@@ -13,10 +13,12 @@
 #  permissions and limitations under the License.
 """End-to-end insight tests against PostgreSQL."""
 
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import httpx
 import pytest
@@ -245,6 +247,7 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
                         data=TextInsightData(content="Latency regressed."),
                         analyzer_version_id=version.id,
                         task_id=task.id,
+                        invocation_id=uuid.uuid4(),
                         import_id=import_id,
                         analyzer_params={"window_days": 7},
                     )
@@ -266,6 +269,10 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
             retained = await SQLInsightRepository(session).get(stored[0].id)
             assert retained.task_id is None
             assert retained.import_id == import_id
+        rejected = await client.patch(
+            f"/api/v1/insights/{stored[0].id}", json={"import_id": None}
+        )
+        assert rejected.status_code == 422
         await _create_insights(client, agent["id"])
         response = await client.get(
             "/api/v1/insights",
@@ -287,3 +294,170 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
         assert response.status_code == 200
         assert response.json()["import_id"] is None
         assert response.json()["analyzer_params"] == {"window_days": 7}
+
+        async with _raw_session(settings) as session:
+            await SQLPluginRepository(session).delete(plugin.id)
+            await session.commit()
+        async with _raw_session(settings) as session:
+            retained = await SQLInsightRepository(session).get(stored[0].id)
+            assert retained.analyzer_version_id is None
+            assert retained.task_id is None
+            assert retained.import_id is None
+            assert retained.invocation_id == stored[0].invocation_id
+        rejected = await client.patch(
+            f"/api/v1/insights/{stored[0].id}",
+            json={"title": "must not persist", "import_id": None},
+        )
+        assert rejected.status_code == 422
+        unchanged = await client.get(f"/api/v1/insights/{stored[0].id}")
+        assert unchanged.json()["title"] == "insight"
+        renamed = await client.patch(
+            f"/api/v1/insights/{stored[0].id}", json={"title": "still editable"}
+        )
+        assert renamed.status_code == 200
+
+
+async def test_manual_import_association_persists_across_requests() -> None:
+    """Create, filter, preserve, reassign, and detach manual cards on real storage."""
+    settings = db_settings()
+    async with lifespan_client(settings) as client:
+        agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+        other_agent = (
+            await client.post("/api/v1/agents", json={"name": "other"})
+        ).json()
+        async with _raw_session(settings) as session:
+            imports = [
+                await SQLImportRepository(session).create(
+                    Import(
+                        owner_id=uuid.UUID(agent["owner_id"]),
+                        agent_id=uuid.UUID(agent_id),
+                        fetch_query={},
+                    )
+                )
+                for agent_id in [agent["id"], agent["id"], other_agent["id"]]
+            ]
+            await session.commit()
+        payload = {
+            "agent_id": agent["id"],
+            "import_id": str(imports[0].id),
+            "insights": [
+                {"name": name, "title": name, "data": {"type": "text", "content": "x"}}
+                for name in ["first", "second"]
+            ],
+        }
+        created = await client.post("/api/v1/insights", json=payload)
+        assert created.status_code == 201
+        cards = created.json()
+        for card in cards:
+            assert card["import_id"] == str(imports[0].id)
+            assert card["analyzer_version_id"] is None
+            assert card["analyzer_params"] is None
+            loaded = await client.get(f"/api/v1/insights/{card['id']}")
+            assert loaded.json() == card
+        filtered = await client.get(
+            "/api/v1/insights",
+            params={
+                "filter": json.dumps(
+                    {"field": "import_id", "op": "eq", "value": str(imports[0].id)}
+                )
+            },
+        )
+        assert {item["id"] for item in filtered.json()["items"]} == {
+            card["id"] for card in cards
+        }
+        path = f"/api/v1/insights/{cards[0]['id']}"
+        for patch, expected in [
+            ({"title": "renamed"}, str(imports[0].id)),
+            ({"import_id": str(imports[1].id)}, str(imports[1].id)),
+            ({"import_id": None}, None),
+        ]:
+            updated = await client.patch(path, json=patch)
+            assert updated.status_code == 200
+            loaded = await client.get(path)
+            assert loaded.json()["import_id"] == expected
+        for import_id, status_code in [
+            (str(imports[2].id), 422),
+            (str(uuid.uuid4()), 404),
+            ("malformed", 422),
+        ]:
+            rejected = await client.patch(
+                path, json={"title": "must not persist", "import_id": import_id}
+            )
+            assert rejected.status_code == status_code
+            rejected_create = await client.post(
+                "/api/v1/insights", json={**payload, "import_id": import_id}
+            )
+            assert rejected_create.status_code == status_code
+            loaded = await client.get(path)
+            assert loaded.json()["title"] == "renamed"
+            assert loaded.json()["import_id"] is None
+        all_cards = await client.get("/api/v1/insights")
+        assert {item["id"] for item in all_cards.json()["items"]} == {
+            card["id"] for card in cards
+        }
+        async with _raw_session(settings) as session:
+            for card in cards:
+                stored = await SQLInsightRepository(session).get(uuid.UUID(card["id"]))
+                assert stored.invocation_id is None
+                assert stored.task_id is None
+                assert stored.params_hash is None
+
+
+async def test_concurrent_title_update_preserves_import_association(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent partial updates preserve both the title and import association."""
+    settings = db_settings()
+    async with lifespan_client(settings) as client:
+        agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+        card = (await _create_insights(client, agent["id"]))[0]
+        async with _raw_session(settings) as session:
+            import_ = await SQLImportRepository(session).create(
+                Import(
+                    owner_id=uuid.UUID(agent["owner_id"]),
+                    agent_id=uuid.UUID(agent["id"]),
+                    fetch_query={},
+                )
+            )
+            await session.commit()
+        title_read = asyncio.Event()
+        release_title = asyncio.Event()
+        original_get = SQLInsightRepository.get
+
+        async def paused_get(
+            repository: SQLInsightRepository, insight_id: uuid.UUID, **kwargs: Any
+        ) -> Insight:
+            insight = await original_get(repository, insight_id, **kwargs)
+            if not title_read.is_set():
+                title_read.set()
+                await release_title.wait()
+            return insight
+
+        monkeypatch.setattr(SQLInsightRepository, "get", paused_get)
+        path = f"/api/v1/insights/{card['id']}"
+        title_task = asyncio.create_task(client.patch(path, json={"title": "renamed"}))
+        await asyncio.wait_for(title_read.wait(), timeout=5)
+        association_task = asyncio.create_task(
+            client.patch(path, json={"import_id": str(import_.id)})
+        )
+        try:
+            async with asyncio.timeout(5), _raw_session(settings) as observer:
+                while not association_task.done():
+                    blocked = await observer.scalar(
+                        text(
+                            "SELECT count(*) FROM pg_stat_activity "
+                            "WHERE datname = current_database() "
+                            "AND wait_event_type = 'Lock'"
+                        )
+                    )
+                    await observer.commit()
+                    if blocked:
+                        break
+                    await asyncio.sleep(0.01)
+        finally:
+            release_title.set()
+            responses = await asyncio.gather(title_task, association_task)
+        assert all(response.status_code == 200 for response in responses)
+        loaded = (await client.get(path)).json()
+        assert loaded["title"] == "renamed"
+        assert loaded["import_id"] == str(import_.id)

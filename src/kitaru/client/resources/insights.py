@@ -47,6 +47,8 @@ class InsightsResource:
         agent_id: uuid.UUID,
         insights: list[InsightInput],
         idempotency_key: str | None = None,
+        *,
+        import_id: uuid.UUID | None = None,
     ) -> list[InsightResponse]:
         """Create a batch of insights for one agent in one shot.
 
@@ -55,6 +57,8 @@ class InsightsResource:
             insights: Insights to create, in input order.
             idempotency_key: Idempotency key overriding the transport's
                 random default.
+            import_id: Import to associate with every insight in the batch.
+                None leaves the batch unassociated.
 
         Raises:
             APIError: The request failed, including 404 when the agent does
@@ -64,6 +68,8 @@ class InsightsResource:
             Created insights in input order.
         """
         request = InsightBatchCreateRequest(agent_id=agent_id, insights=insights)
+        if import_id is not None:
+            request.import_id = import_id
         response = await self._client.request(
             "POST",
             "/api/v1/insights",
@@ -132,11 +138,12 @@ class InsightsResource:
     async def update(
         self, insight_id: uuid.UUID, request: InsightUpdateRequest
     ) -> InsightResponse:
-        """Update an insight's title and description.
+        """Update an insight's title, description, or import association.
 
         Args:
             insight_id: Id of the insight.
             request: Insight update request, unset fields stay unchanged.
+                Set import_id to attach or reassign, or None to detach.
 
         Raises:
             APIError: The request failed, including 404 for a missing

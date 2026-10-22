@@ -94,3 +94,21 @@ class Insight(DomainModel):
             description: New description.
         """
         self.description = description
+
+    def update_import_id(self, import_id: uuid.UUID | None) -> None:
+        """Set or clear a manual insight's import association.
+
+        Args:
+            import_id: Associated import, or None to detach.
+
+        Raises:
+            ValidationError: The insight was produced by an analyzer.
+        """
+        if any(
+            value is not None
+            for value in (self.invocation_id, self.analyzer_version_id, self.task_id)
+        ):
+            raise ValidationError(
+                "Cannot change the import association of an analyzer-generated insight"
+            )
+        self.import_id = import_id

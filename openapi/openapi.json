@@ -5170,6 +5170,19 @@
             "title": "Agent Id",
             "type": "string"
           },
+          "import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Import associated with every insight in the batch.",
+            "title": "Import Id"
+          },
           "insights": {
             "description": "Insights to create, in input order.",
             "items": {
@@ -5344,7 +5357,7 @@
                 "type": "null"
               }
             ],
-            "description": "Import whose sessions produced the insight.",
+            "description": "Import associated with the insight.",
             "title": "Import Id"
           },
           "metadata": {
@@ -5406,6 +5419,19 @@
             ],
             "description": "New insight description.",
             "title": "Description"
+          },
+          "import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Associated import; null detaches, omission preserves it.",
+            "title": "Import Id"
           },
           "title": {
             "anyOf": [
@@ -21289,7 +21315,7 @@
         ]
       },
       "post": {
-        "description": "Create a batch of insights for one agent in one shot.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist,\nand 422 on validation.\n\nArgs:\n    body: Insight batch create request.\n    service: Insight service.\n    actor: Caller context.\n\nReturns:\n    Created insights in input order.",
+        "description": "Create a batch of insights for one agent in one shot.\n\nClients observe HTTP 201 on success, 404 when the agent or import does not exist,\nand 422 on invalid data or an import belonging to another agent.\n\nArgs:\n    body: Insight batch create request.\n    service: Insight service.\n    actor: Caller context.\n\nReturns:\n    Created insights in input order.",
         "operationId": "create_insights_api_v1_insights_post",
         "parameters": [
           {
@@ -21560,7 +21586,7 @@
         ]
       },
       "patch": {
-        "description": "Update an insight's title and description.\n\nClients observe HTTP 200 on success, 404 when no insight has this id,\nand 422 when the update clears the insight title.\n\nArgs:\n    insight_id: Id of the insight.\n    body: Insight update request.\n    service: Insight service.\n    actor: Caller context.\n\nReturns:\n    Updated insight.",
+        "description": "Update an insight's title, description, and manual import association.\n\nClients observe HTTP 200 on success, 404 when the insight or import does not exist,\nand 422 for invalid titles, foreign-agent imports, or changes to an\nanalyzer-generated import association.\n\nArgs:\n    insight_id: Id of the insight.\n    body: Insight update request.\n    service: Insight service.\n    actor: Caller context.\n\nReturns:\n    Updated insight.",
         "operationId": "update_insight_api_v1_insights__insight_id__patch",
         "parameters": [
           {

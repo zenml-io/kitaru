@@ -40,6 +40,10 @@ def test_handler_parameters_match_command_schema() -> None:
             schema_names = [
                 "all_sessions" if name == "all" else name for name in schema_names
             ]
+        if spec.path in {("insight", "create"), ("insight", "update")}:
+            schema_names = [
+                "import_id" if name == "import" else name for name in schema_names
+            ]
         if spec.path == ("worker", "start"):
             # The singular public --claim and --selector options intentionally
             # map to the plural handler parameters that receive their

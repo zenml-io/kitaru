@@ -51,6 +51,33 @@ Insight metadata contains the analysis coverage, source import, supporting refer
 
 SDK and REST consumers can read the same records through `client.insights` and `/api/v1/insights`. In MCP, `kitaru_session_import` starts the import workflow, and `kitaru_review_read` reads insights with `kind: "insight"`. See [Set up your coding agent](../agent-native/setup.md) for MCP configuration.
 
+## Save reviewed findings
+
+Use `kitaru insight create` to save a finding you or a coding agent have already written. Add `--import` to associate the cards in that call with an existing import of the same agent:
+
+```bash
+uv run kitaru insight create --agent customer-service \
+  --import <import-id> \
+  --insight '{"name":"reviewed-retries","title":"Repeated retries need review","data":{"type":"text","content":"Several sessions repeat the same failed request. Review the retry policy before increasing the limit."}}'
+```
+
+Omit `--import` for an agent-wide finding. Its `import_id` remains `null`. The Insights page shows findings for the selected import; use the CLI or SDK to read agent-wide findings.
+
+You can attach an existing manual insight, move it to another import of the same agent, or remove its association:
+
+```bash
+uv run kitaru insight update <insight-id> --import <import-id>
+uv run kitaru insight update <insight-id> --clear-import
+```
+
+An update that omits both options preserves the current association. `--import` and `--clear-import` cannot be combined. Analyzer-generated insights retain their original association; these options apply to manually authored findings.
+
+In Python, pass `import_id` to `client.insights.create(...)`. For an existing insight, send `InsightUpdateRequest(import_id=import_id)` to `client.insights.update(...)`, or `InsightUpdateRequest(import_id=None)` to detach it. REST clients use the optional top-level `import_id` in `POST /api/v1/insights` and `PATCH /api/v1/insights/{insight_id}`. An omitted PATCH field preserves the association; explicit `null` clears it.
+
+In MCP, use `kitaru_review_manage` with `operation: "create_insights"` and optional `import_id`. For `operation: "update_insight"`, pass `import_id` to set the association or `clear_import: true` to remove it.
+
+Saving a supplied finding does not run analysis or create a worker job. Even when linked to an import, it has no analyzer provenance. Use the analyzer workflow below when you want a plugin to inspect sessions and record which analyzer version and params produced its findings.
+
 ## Rerun an analyzer
 
 An analyzer that failed, for example because the OpenAI analyzer was missing credentials, can be run again over the sessions an import already created. Pass the import id from the import receipt or `kitaru import list`:

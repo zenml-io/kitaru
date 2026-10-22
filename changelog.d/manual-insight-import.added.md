@@ -1,0 +1,1 @@
+- Added optional import association for manually authored insights through the API, Python SDK, CLI, and MCP, including reassignment and removal with same-agent validation.

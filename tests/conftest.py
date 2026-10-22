@@ -7119,11 +7119,12 @@ class FakeInsightRepository:
             self._insights[insight.id] = insight
         return [insight.model_copy() for insight in stored]
 
-    async def get(self, insight_id: uuid.UUID) -> Insight:
+    async def get(self, insight_id: uuid.UUID, exclusive: bool = False) -> Insight:
         """Load an insight by id.
 
         Args:
             insight_id: Id of the insight.
+            exclusive: Accepted for protocol parity; the fake does not lock.
 
         Raises:
             InsightNotFound: No insight has this id.

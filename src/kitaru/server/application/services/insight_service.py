@@ -17,6 +17,7 @@ import uuid
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.agent_repository import AgentRepository
+from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.insight_repository import InsightRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.insight import (
@@ -39,6 +40,7 @@ class InsightService:
         self,
         repository: InsightRepository,
         agent_repository: AgentRepository,
+        import_repository: ImportRepository,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -47,10 +49,12 @@ class InsightService:
             repository: Insight repository.
             agent_repository: Agent repository, to validate the insights'
                 agent exists.
+            import_repository: Import repository for association validation.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._agents = agent_repository
+        self._imports = import_repository
         self._analytics = analytics
 
     async def create_insights(
@@ -64,15 +68,20 @@ class InsightService:
 
         Raises:
             AgentNotFound: No agent has the command's agent id.
+            ImportNotFound: No import has the associated import id.
+            ValidationError: The import belongs to another agent.
 
         Returns:
             Created insights in input order.
         """
         await self._agents.get(command.agent_id)
+        if command.import_id is not None:
+            await self._validate_import_agent(command.import_id, command.agent_id)
         insights = [
             Insight(
                 owner_id=actor.account.id,
                 agent_id=command.agent_id,
+                import_id=command.import_id,
                 name=item.name,
                 title=item.title,
                 description=item.description,
@@ -125,7 +134,7 @@ class InsightService:
     async def update_insight(
         self, insight_id: uuid.UUID, command: InsightUpdate, actor: AuthContext
     ) -> Insight:
-        """Partially update an insight's title and description.
+        """Partially update an insight's title, description, and import association.
 
         Args:
             insight_id: Id of the insight.
@@ -134,14 +143,20 @@ class InsightService:
 
         Raises:
             InsightNotFound: No insight has this id.
-            ValidationError: The command clears the insight title.
+            ImportNotFound: No import has the associated import id.
+            ValidationError: The title is cleared, the import belongs to another
+                agent, or an analyzer-generated association is changed.
 
         Returns:
             Updated insight.
         """
         _ = actor
-        insight = await self._repository.get(insight_id)
+        insight = await self._repository.get(insight_id, exclusive=True)
         fields = command.model_fields_set
+        if "import_id" in fields:
+            insight.update_import_id(command.import_id)
+            if command.import_id is not None:
+                await self._validate_import_agent(command.import_id, insight.agent_id)
         if "title" in fields:
             if command.title is None:
                 raise ValidationError("Insight title cannot be cleared")
@@ -162,3 +177,22 @@ class InsightService:
         """
         _ = actor
         await self._repository.delete(insight_id)
+
+    async def _validate_import_agent(
+        self, import_id: uuid.UUID, agent_id: uuid.UUID
+    ) -> None:
+        """Require an import to belong to the specified agent.
+
+        Args:
+            import_id: Associated import.
+            agent_id: Agent the insight belongs to.
+
+        Raises:
+            ImportNotFound: No import has this id.
+            ValidationError: The import belongs to another agent.
+        """
+        import_ = await self._imports.get(import_id)
+        if import_.agent_id != agent_id:
+            raise ValidationError(
+                f"Import {import_id} does not belong to agent {agent_id}"
+            )

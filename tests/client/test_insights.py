@@ -13,13 +13,17 @@
 #  permissions and limitations under the License.
 """Round-trip tests for the insights SDK resource."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
+from typing import Any
 
+import httpx
 import pytest
 
 from conftest import (
     FakeAgentRepository,
+    FakeImportRepository,
     FakeInsightRepository,
     asgi_api_client,
     override_idempotency,
@@ -46,12 +50,21 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.insight_service import InsightService
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.imports import Import
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 
 @pytest.fixture
-async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
+def import_repository() -> FakeImportRepository:
+    """Provide imports for SDK association round trips."""
+    return FakeImportRepository()
+
+
+@pytest.fixture
+async def api_client(
+    import_repository: FakeImportRepository,
+) -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with a fake-backed insight service."""
     app = create_app(
         APISettings(
@@ -66,7 +79,9 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         repository=agent_repository
     )
     app.dependency_overrides[get_insight_service] = lambda: InsightService(
-        repository=insight_repository, agent_repository=agent_repository
+        repository=insight_repository,
+        agent_repository=agent_repository,
+        import_repository=import_repository,
     )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     override_idempotency(app, ACCOUNT)
@@ -119,6 +134,7 @@ async def test_create(api_client: KitaruAPIClient) -> None:
     assert insights[0].agent_id == agent_id
     assert insights[0].description == "rationale"
     assert insights[1].description is None
+    assert all(item.import_id is None for item in insights)
 
 
 async def test_create_missing_agent(api_client: KitaruAPIClient) -> None:
@@ -199,3 +215,90 @@ async def test_delete(api_client: KitaruAPIClient) -> None:
     await api_client.insights.delete(created.id)
     with pytest.raises(NotFoundError):
         await api_client.insights.get(created.id)
+
+
+async def test_import_association_round_trip(
+    api_client: KitaruAPIClient, import_repository: FakeImportRepository
+) -> None:
+    """Batch attachment, reassignment, omission, and detachment reach REST."""
+    agent_id = await _make_agent(api_client)
+    first = await import_repository.create(
+        Import(owner_id=ACCOUNT.id, agent_id=agent_id, payload_blob_id=uuid.uuid4())
+    )
+    second = await import_repository.create(
+        Import(owner_id=ACCOUNT.id, agent_id=agent_id, payload_blob_id=uuid.uuid4())
+    )
+    payloads: list[dict[str, Any]] = []
+
+    async def record_request(request: httpx.Request) -> None:
+        if request.method in {"POST", "PATCH"}:
+            payloads.append(json.loads(request.content))
+
+    api_client._http.event_hooks["request"].append(record_request)
+    created = await api_client.insights.create(
+        agent_id,
+        [_insight_input(title="one"), _insight_input(title="two")],
+        import_id=first.id,
+    )
+    assert [item.import_id for item in created] == [first.id, first.id]
+    assert (await api_client.insights.get(created[0].id)).import_id == first.id
+    updated = await api_client.insights.update(
+        created[0].id, InsightUpdateRequest(title="renamed")
+    )
+    assert updated.import_id == first.id
+    updated = await api_client.insights.update(
+        created[0].id, InsightUpdateRequest(import_id=second.id)
+    )
+    assert updated.import_id == second.id
+    updated = await api_client.insights.update(
+        created[0].id, InsightUpdateRequest(import_id=None)
+    )
+    assert updated.import_id is None
+    assert (await api_client.insights.get(created[0].id)).import_id is None
+    assert payloads[0]["import_id"] == str(first.id)
+    assert payloads[1:] == [
+        {"title": "renamed"},
+        {"import_id": str(second.id)},
+        {"import_id": None},
+    ]
+
+
+async def test_create_default_omits_import_from_wire(
+    api_client: KitaruAPIClient,
+) -> None:
+    """Existing positional calls keep their original request payload."""
+    agent_id = await _make_agent(api_client)
+    payloads: list[dict[str, Any]] = []
+
+    async def record_request(request: httpx.Request) -> None:
+        payloads.append(json.loads(request.content))
+
+    api_client._http.event_hooks["request"].append(record_request)
+    await api_client.insights.create(agent_id, [_insight_input()], "legacy-key")
+    await api_client.insights.create(agent_id, [_insight_input()], import_id=None)
+    assert len(payloads) == 2
+    assert all("import_id" not in payload for payload in payloads)
+
+
+async def test_attach_manual_insight_to_import(
+    api_client: KitaruAPIClient, import_repository: FakeImportRepository
+) -> None:
+    """A manual insight can be attached and discovered by its import."""
+    agent_id = await _make_agent(api_client)
+    import_ = await import_repository.create(
+        Import(owner_id=ACCOUNT.id, agent_id=agent_id, payload_blob_id=uuid.uuid4())
+    )
+    manual = (await api_client.insights.create(agent_id, [_insight_input()]))[0]
+    assert manual.import_id is None
+    attached = await api_client.insights.update(
+        manual.id, InsightUpdateRequest(import_id=import_.id)
+    )
+    assert attached.import_id == import_.id
+    page = await api_client.insights.list(
+        InsightListParams(
+            filter=FilterCondition(
+                field="import_id", op=FilterOp.EQ, value=str(import_.id)
+            )
+        )
+    )
+    assert [item.id for item in page.items] == [manual.id]

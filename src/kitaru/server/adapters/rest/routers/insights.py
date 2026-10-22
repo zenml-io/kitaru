@@ -51,8 +51,8 @@ async def create_insights(
 ) -> list[InsightResponse]:
     """Create a batch of insights for one agent in one shot.
 
-    Clients observe HTTP 201 on success, 404 when the agent does not exist,
-    and 422 on validation.
+    Clients observe HTTP 201 on success, 404 when the agent or import does not exist,
+    and 422 on invalid data or an import belonging to another agent.
 
     Args:
         body: Insight batch create request.
@@ -123,10 +123,11 @@ async def update_insight(
     service: Annotated[InsightService, Depends(get_insight_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> InsightResponse:
-    """Update an insight's title and description.
+    """Update an insight's title, description, and manual import association.
 
-    Clients observe HTTP 200 on success, 404 when no insight has this id,
-    and 422 when the update clears the insight title.
+    Clients observe HTTP 200 on success, 404 when the insight or import does not exist,
+    and 422 for invalid titles, foreign-agent imports, or changes to an
+    analyzer-generated import association.
 
     Args:
         insight_id: Id of the insight.

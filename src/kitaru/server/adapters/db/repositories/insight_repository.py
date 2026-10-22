@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Mapping
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
@@ -112,11 +113,12 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
         )
         return [row.to_domain() for row in rows]
 
-    async def get(self, insight_id: uuid.UUID) -> Insight:
+    async def get(self, insight_id: uuid.UUID, exclusive: bool = False) -> Insight:
         """Load an insight by id.
 
         Args:
             insight_id: Id of the insight.
+            exclusive: Whether to lock the insight for the transaction.
 
         Raises:
             InsightNotFound: No insight has this id.
@@ -124,7 +126,7 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
         Returns:
             Stored insight.
         """
-        row = await self._get_row(insight_id)
+        row = await self._get_row(insight_id, exclusive=exclusive)
         return row.to_domain()
 
     async def query(
@@ -161,14 +163,27 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
 
         Raises:
             InsightNotFound: No insight has this id.
+            ImportNotFound: The associated import no longer exists.
 
         Returns:
             Stored insight with the updated timestamp renewed.
         """
         row = await self._get_row(insight.id)
-        row.title = insight.title
-        row.description = insight.description
-        await self._flush()
+
+        def _import_not_found() -> ImportNotFound:
+            assert insight.import_id is not None
+            return ImportNotFound(insight.import_id)
+
+        try:
+            async with self._session.begin_nested():
+                row.title = insight.title
+                row.description = insight.description
+                row.import_id = insight.import_id
+                await self._session.flush()
+        except IntegrityError as exc:
+            self._raise_translated(
+                exc, {INSIGHT_IMPORT_ID_FOREIGN_KEY: _import_not_found}
+            )
         return row.to_domain()
 
     async def delete(self, insight_id: uuid.UUID) -> None:

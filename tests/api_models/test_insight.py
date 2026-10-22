@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Tests for insight API models."""
 
+import uuid
+
 import pytest
 from pydantic import ValidationError
 
@@ -21,7 +23,9 @@ from kitaru.api_models.v1.insight import (
     BinnedInsightData,
     CategoricalInsightData,
     CategoryValue,
+    InsightBatchCreateRequest,
     InsightInput,
+    InsightUpdateRequest,
     TextInsightData,
 )
 
@@ -183,3 +187,27 @@ def test_binned_discriminator_resolves_type() -> None:
     )
     assert isinstance(insight.data, BinnedInsightData)
     assert insight.data.bins[0].count == 1
+
+
+def test_manual_batch_accepts_import_association() -> None:
+    """Associate the whole batch without adding provenance to shared inputs."""
+    import_id = uuid.uuid4()
+    body = InsightBatchCreateRequest(
+        agent_id=uuid.uuid4(),
+        import_id=import_id,
+        insights=[InsightInput(name="n", title="t", data=TextInsightData(content="x"))],
+    )
+    assert body.import_id == import_id
+    assert "import_id" not in InsightInput.model_fields
+
+
+def test_import_update_distinguishes_omitted_and_null() -> None:
+    """Preserve the partial update contract for import associations."""
+    assert InsightUpdateRequest().model_dump(exclude_unset=True) == {}
+    assert InsightUpdateRequest(import_id=None).model_dump(exclude_unset=True) == {
+        "import_id": None
+    }
+    import_id = uuid.uuid4()
+    assert InsightUpdateRequest(import_id=import_id).model_dump(exclude_unset=True) == {
+        "import_id": import_id
+    }

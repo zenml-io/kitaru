@@ -18,7 +18,13 @@ from typing import Any
 
 import pytest
 
-from conftest import FakeAgentRepository, FakeInsightRepository, create_agent
+from conftest import (
+    FakeAgentRepository,
+    FakeImportRepository,
+    FakeInsightRepository,
+    create_agent,
+    create_import,
+)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.insight import (
@@ -38,7 +44,8 @@ from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.insight import InsightNotFound
+from kitaru.server.domain.imports import ImportNotFound
+from kitaru.server.domain.insight import Insight, InsightNotFound
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -80,12 +87,22 @@ def insight_repository() -> FakeInsightRepository:
 
 
 @pytest.fixture
+def import_repository() -> FakeImportRepository:
+    """Provide imports for association validation."""
+    return FakeImportRepository()
+
+
+@pytest.fixture
 def service(
-    insight_repository: FakeInsightRepository, agent_repository: FakeAgentRepository
+    insight_repository: FakeInsightRepository,
+    agent_repository: FakeAgentRepository,
+    import_repository: FakeImportRepository,
 ) -> InsightService:
     """Provide an insight service backed by fake repositories."""
     return InsightService(
-        repository=insight_repository, agent_repository=agent_repository
+        repository=insight_repository,
+        agent_repository=agent_repository,
+        import_repository=import_repository,
     )
 
 
@@ -463,6 +480,7 @@ async def test_create_insights_tracks_insight_created(
     insight_repository: FakeInsightRepository,
     agent_repository: FakeAgentRepository,
     agent_id: uuid.UUID,
+    import_repository: FakeImportRepository,
 ) -> None:
     """Fire INSIGHT_CREATED once per insight with its data type."""
     analytics = _RecordingAnalytics()
@@ -470,6 +488,7 @@ async def test_create_insights_tracks_insight_created(
         repository=insight_repository,
         agent_repository=agent_repository,
         analytics=analytics,
+        import_repository=import_repository,
     )
 
     await service.create_insights(
@@ -517,3 +536,138 @@ async def test_create_insights_without_analytics_tracker(
         actor=ACTOR,
     )
     assert insights[0].owner_id == ACTOR.account.id
+
+
+async def test_manual_import_association_lifecycle(
+    service: InsightService,
+    agent_id: uuid.UUID,
+    import_repository: FakeImportRepository,
+) -> None:
+    """Attach every card, retain association on omission, reassign, and detach."""
+    imports = [
+        await create_import(import_repository, ACTOR.account.id, agent_id)
+        for _ in range(2)
+    ]
+    created = await service.create_insights(
+        InsightCreate(
+            agent_id=agent_id,
+            import_id=imports[0].id,
+            insights=[
+                InsightInput(name=name, title=name, data=TextInsightData(content="x"))
+                for name in ("a", "b")
+            ],
+        ),
+        actor=ACTOR,
+    )
+    for insight in created:
+        assert insight.import_id == imports[0].id
+        assert insight.analyzer_version_id is None
+        assert insight.invocation_id is None
+        assert insight.task_id is None
+        assert insight.analyzer_params is None
+        assert insight.params_hash is None
+    retained = await service.update_insight(
+        created[0].id, InsightUpdate(title="renamed"), actor=ACTOR
+    )
+    assert retained.import_id == imports[0].id
+    reassigned = await service.update_insight(
+        created[0].id, InsightUpdate(import_id=imports[1].id), actor=ACTOR
+    )
+    assert reassigned.import_id == imports[1].id
+    detached = await service.update_insight(
+        created[0].id, InsightUpdate(import_id=None), actor=ACTOR
+    )
+    assert detached.import_id is None
+
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+@pytest.mark.parametrize("wrong_agent", [False, True])
+async def test_invalid_import_association_is_atomic(
+    service: InsightService,
+    agent_id: uuid.UUID,
+    import_repository: FakeImportRepository,
+    operation: str,
+    wrong_agent: bool,
+) -> None:
+    """Reject missing or foreign imports without storing any partial changes."""
+    import_id = uuid.uuid4()
+    if wrong_agent:
+        import_id = (
+            await create_import(import_repository, ACTOR.account.id, uuid.uuid4())
+        ).id
+    original = await service.create_insights(
+        InsightCreate(
+            agent_id=agent_id,
+            insights=[
+                InsightInput(
+                    name="n", title="original", data=TextInsightData(content="x")
+                )
+            ],
+        ),
+        actor=ACTOR,
+    )
+    expected_error = ValidationError if wrong_agent else ImportNotFound
+    with pytest.raises(expected_error):
+        if operation == "create":
+            await service.create_insights(
+                InsightCreate(
+                    agent_id=agent_id,
+                    import_id=import_id,
+                    insights=[
+                        InsightInput(
+                            name="new", title="new", data=TextInsightData(content="x")
+                        )
+                    ],
+                ),
+                actor=ACTOR,
+            )
+        else:
+            await service.update_insight(
+                original[0].id,
+                InsightUpdate(title="changed", import_id=import_id),
+                actor=ACTOR,
+            )
+    stored = await service.get_insight(original[0].id, actor=ACTOR)
+    assert stored.title == "original"
+    assert stored.import_id is None
+    all_insights, _ = await service.list_insights(InsightFilter(), actor=ACTOR)
+    assert len(all_insights) == 1
+
+
+@pytest.mark.parametrize(
+    "provenance", ["analyzer_version_id", "task_id", "invocation_id"]
+)
+@pytest.mark.parametrize("detach", [False, True])
+async def test_generated_insight_association_cannot_change(
+    service: InsightService,
+    insight_repository: FakeInsightRepository,
+    agent_id: uuid.UUID,
+    provenance: str,
+    detach: bool,
+) -> None:
+    """Retain generated provenance even after nullable analyzer and task cleanup."""
+    insight = Insight(
+        owner_id=ACTOR.account.id,
+        agent_id=agent_id,
+        name="n",
+        title="original",
+        data=TextInsightData(content="x"),
+        analyzer_version_id=uuid.uuid4()
+        if provenance == "analyzer_version_id"
+        else None,
+        task_id=uuid.uuid4() if provenance == "task_id" else None,
+        invocation_id=uuid.uuid4() if provenance == "invocation_id" else None,
+    )
+    await insight_repository.create_many([insight])
+    with pytest.raises(ValidationError, match="analyzer-generated"):
+        await service.update_insight(
+            insight.id,
+            InsightUpdate(title="changed", import_id=None if detach else uuid.uuid4()),
+            actor=ACTOR,
+        )
+    stored = await service.get_insight(insight.id, actor=ACTOR)
+    assert stored.title == "original"
+    renamed = await service.update_insight(
+        insight.id, InsightUpdate(title="renamed"), actor=ACTOR
+    )
+    assert renamed.title == "renamed"
