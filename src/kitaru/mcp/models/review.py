@@ -127,6 +127,9 @@ class InsightsCreate(MCPModel):
     insights: list[InsightInput] = Field(
         min_length=1, max_length=MAX_INSIGHT_BATCH_SIZE
     )
+    import_id: uuid.UUID | None = Field(
+        default=None, description="Import to associate with every insight in the batch."
+    )
     idempotency_key: str | None = Field(
         default=None,
         description=IDEMPOTENCY_KEY_DESCRIPTION,
@@ -134,13 +137,21 @@ class InsightsCreate(MCPModel):
 
 
 class InsightUpdate(MCPModel):
-    """Sparsely update one insight's title or description."""
+    """Sparsely update one insight's title, description, or import association."""
 
     operation: Literal["update_insight"]
     insight_id: uuid.UUID
     title: str | None = None
     description: str | None = None
     clear_description: bool = False
+    import_id: uuid.UUID | None = Field(
+        default=None,
+        description="Import to associate; omit to keep the current import.",
+    )
+    clear_import: bool = Field(
+        default=False,
+        description="Clear the import association; conflicts with import_id.",
+    )
 
     @model_validator(mode="after")
     def _validate_update(self) -> "InsightUpdate":
@@ -154,8 +165,16 @@ class InsightUpdate(MCPModel):
             raise ValueError("description cannot be null without clear_description")
         if self.description is not None and self.clear_description:
             raise ValueError("description and clear_description conflict")
-        if not ({"title", "description"} & self.model_fields_set) and not (
-            self.clear_description
+        if (
+            "import_id" in self.model_fields_set
+            and self.import_id is None
+            and not self.clear_import
+        ):
+            raise ValueError("import_id cannot be null without clear_import")
+        if self.import_id is not None and self.clear_import:
+            raise ValueError("import_id and clear_import conflict")
+        if not ({"title", "description", "import_id"} & self.model_fields_set) and not (
+            self.clear_description or self.clear_import
         ):
             raise ValueError("insight update must change at least one field")
         return self

@@ -72,6 +72,7 @@ class StubInsightClient:
         )
         self.agent_lookups = 0
         self.create_calls: list[tuple[uuid.UUID, list[InsightInput]]] = []
+        self.create_import_ids: list[uuid.UUID | None] = []
         self.create_idempotency_keys: list[str | None] = []
         self.list_calls: list[InsightListParams] = []
         self.get_calls: list[uuid.UUID] = []
@@ -103,7 +104,10 @@ class StubInsightClient:
             agent_id: uuid.UUID,
             insight_inputs: list[InsightInput],
             idempotency_key: str | None = None,
+            *,
+            import_id: uuid.UUID | None = None,
         ) -> list[StubModel]:
+            self.owner.create_import_ids.append(import_id)
             self.owner.create_calls.append((agent_id, insight_inputs))
             self.owner.create_idempotency_keys.append(idempotency_key)
             return [self.owner.insight]
@@ -297,11 +301,13 @@ async def test_get_and_list_pass_through_analyzer_provenance() -> None:
     """Get and list surface the analyzer version and params stamped by a task."""
     client = StubInsightClient()
     analyzer_version_id = str(uuid.uuid4())
+    import_id = str(uuid.uuid4())
     client.insight = StubModel(
         client.insight.id,
         {
             **client.insight.values,
             "analyzer_version_id": analyzer_version_id,
+            "import_id": import_id,
             "analyzer_params": {"window_days": 7},
         },
     )
@@ -309,6 +315,7 @@ async def test_get_and_list_pass_through_analyzer_provenance() -> None:
     fetched = await insights.get_insight(client, client.insight.id)
     assert fetched.item["analyzer_version_id"] == analyzer_version_id
     assert fetched.item["analyzer_params"] == {"window_days": 7}
+    assert fetched.item["import_id"] == import_id
 
     listed = await insights.list_insights(
         client,
@@ -322,6 +329,7 @@ async def test_get_and_list_pass_through_analyzer_provenance() -> None:
     )
     assert listed.items is not None
     assert listed.items[0]["analyzer_version_id"] == analyzer_version_id
+    assert listed.items[0]["import_id"] == import_id
 
 
 async def test_sparse_update_rejects_conflicts_and_empty_changes() -> None:
@@ -399,3 +407,95 @@ def test_public_argv_and_schema_cover_insight_lifecycle(
     }
     assert specs["insight.delete"]["side_effects"]["deletes_remote_state"]
     assert specs["insight.create"]["side_effects"]["creates_remote_state"]
+
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_public_argv_import_attachment(
+    operation: str, argv_client: StubInsightClient, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Public import flags parse UUIDs and preserve structured results."""
+    import_id = uuid.uuid4()
+    if operation == "create":
+        arguments = [
+            "--agent",
+            "assistant",
+            "--insight",
+            json.dumps(
+                {
+                    "name": "finding",
+                    "title": "Finding",
+                    "data": {"type": "text", "content": "Evidence"},
+                }
+            ),
+        ]
+    else:
+        arguments = [str(argv_client.insight.id)]
+    assert (
+        app_module.main(["insight", operation, *arguments, "--import", str(import_id)])
+        == 0
+    )
+    response = json.loads(capsys.readouterr().out)
+    assert response["ok"] is True
+    assert response["command"] == f"insight.{operation}"
+    if operation == "create":
+        assert argv_client.create_import_ids == [import_id]
+    else:
+        assert argv_client.update_calls[0][1].model_dump(
+            mode="json", exclude_unset=True
+        ) == {"import_id": str(import_id)}
+
+
+def test_public_argv_clear_import(
+    argv_client: StubInsightClient, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Detaching alone sends explicit null and succeeds."""
+    assert (
+        app_module.main(
+            ["insight", "update", str(argv_client.insight.id), "--clear-import"]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+    assert argv_client.update_calls[0][1].model_dump(
+        mode="json", exclude_unset=True
+    ) == {"import_id": None}
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--import", str(uuid.uuid4()), "--clear-import"],
+        [],
+        ["--import", "not-a-uuid"],
+    ],
+)
+def test_public_argv_rejects_import_conflict_or_no_change(
+    arguments: list[str],
+    argv_client: StubInsightClient,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Invalid import flags and empty updates fail before a resource write."""
+    assert (
+        app_module.main(["insight", "update", str(argv_client.insight.id), *arguments])
+        != 0
+    )
+    assert json.loads(capsys.readouterr().err)["ok"] is False
+    assert argv_client.update_calls == []
+
+
+def test_import_options_in_offline_schema_and_help(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Offline discovery advertises the import association options."""
+    specs = {item["command"]: item for item in describe_schema(("insight",))}
+    for operation in ("create", "update"):
+        parameters = {
+            item["name"] for item in specs[f"insight.{operation}"]["parameters"]
+        }
+        assert "--import" in parameters
+        assert app_module.main(["insight", operation, "--help"]) == 0
+        help_text = capsys.readouterr().out
+        assert "--import" in help_text
+        if operation == "update":
+            assert "--clear-import" in parameters
+            assert "--clear-import" in help_text

@@ -2241,6 +2241,13 @@ async def connection_delete(
                 True,
                 "Insight JSON object; repeat for each created insight.",
             ),
+            ParameterSpec(
+                "--import",
+                "UUID",
+                "option",
+                False,
+                "Associate every insight with this import.",
+            ),
             _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
@@ -2254,6 +2261,7 @@ async def insight_create(
     agent: str,
     insight: list[str],
     idempotency_key: str | None = None,
+    import_id: Annotated[uuid.UUID | None, Parameter(name="--import")] = None,
 ) -> CommandResult:
     """Create a batch of insights for one agent."""
     async with _open_asset_client() as client:
@@ -2262,6 +2270,7 @@ async def insight_create(
             agent=agent,
             insight=insight,
             idempotency_key=idempotency_key,
+            import_id=import_id,
         )
 
 
@@ -2354,6 +2363,20 @@ async def insight_get(insight: uuid.UUID, /) -> CommandResult:
                 False,
                 "Clear the description.",
             ),
+            ParameterSpec(
+                "--import",
+                "UUID",
+                "option",
+                False,
+                "Attach or reassign to this import; omit to preserve the association.",
+            ),
+            ParameterSpec(
+                "--clear-import",
+                "boolean",
+                "option",
+                False,
+                "Detach from the import; cannot be combined with --import.",
+            ),
         ),
         read_only=False,
         side_effects=("mutates_remote_state",),
@@ -2368,6 +2391,8 @@ async def insight_update(
     title: str | None = None,
     description: str | None = None,
     clear_description: bool = False,
+    import_id: Annotated[uuid.UUID | None, Parameter(name="--import")] = None,
+    clear_import: bool = False,
 ) -> CommandResult:
     """Update selected fields on one insight."""
     async with _open_asset_client() as client:
@@ -2377,6 +2402,8 @@ async def insight_update(
             title=title,
             description=description,
             clear_description=clear_description,
+            import_id=import_id,
+            clear_import=clear_import,
         )
 
 

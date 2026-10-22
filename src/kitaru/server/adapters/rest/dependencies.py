@@ -963,6 +963,7 @@ def get_insight_service(
     return InsightService(
         repository=SQLInsightRepository(session),
         agent_repository=SQLAgentRepository(session),
+        import_repository=SQLImportRepository(session),
         analytics=analytics,
     )
 

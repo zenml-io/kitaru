@@ -42,6 +42,7 @@ def insight_batch_create_to_command(
     """
     return InsightCreate(
         agent_id=body.agent_id,
+        import_id=body.import_id,
         insights=[
             InsightInput(
                 name=item.name,

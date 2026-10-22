@@ -51,11 +51,13 @@ class InsightCreate(FrozenModel):
     """Insight create command."""
 
     agent_id: uuid.UUID
+    import_id: uuid.UUID | None = None
     insights: list[InsightInput]
 
 
 class InsightUpdate(FrozenModel):
     """Insight update command."""
 
+    import_id: uuid.UUID | None = None
     title: str | None = None
     description: str | None = None

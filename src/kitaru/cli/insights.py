@@ -46,6 +46,7 @@ async def create_insights(
     agent: str,
     insight: list[str],
     idempotency_key: str | None = None,
+    import_id: uuid.UUID | None = None,
 ) -> CommandResult:
     """Create a batch of insights for one agent in one shot."""
     if not insight:
@@ -53,7 +54,7 @@ async def create_insights(
     parsed = [_parse_insight_input(value) for value in insight]
     resolved_agent = await resolve_asset(client.agents, agent, "Agent")
     created = await client.insights.create(
-        resolved_agent.id, parsed, idempotency_key=idempotency_key
+        resolved_agent.id, parsed, idempotency_key=idempotency_key, import_id=import_id
     )
     return CommandResult(
         items=[item.model_dump(mode="json") for item in created],
@@ -112,12 +113,19 @@ async def update_insight(
     title: str | None,
     description: str | None,
     clear_description: bool,
+    import_id: uuid.UUID | None = None,
+    clear_import: bool = False,
 ) -> CommandResult:
     """Update only explicitly selected insight fields."""
     if description is not None and clear_description:
         raise CLIError(
             "invalid_arguments",
             "--description and --clear-description cannot be used together.",
+        )
+    if import_id is not None and clear_import:
+        raise CLIError(
+            "invalid_arguments",
+            "--import and --clear-import cannot be used together.",
         )
     fields: dict[str, Any] = {}
     if title is not None:
@@ -126,6 +134,10 @@ async def update_insight(
         fields["description"] = description
     elif clear_description:
         fields["description"] = None
+    if import_id is not None:
+        fields["import_id"] = import_id
+    elif clear_import:
+        fields["import_id"] = None
     if not fields:
         raise CLIError("invalid_arguments", "Select at least one insight update.")
     insight = await client.insights.update(insight_id, InsightUpdateRequest(**fields))

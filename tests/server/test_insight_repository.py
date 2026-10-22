@@ -18,6 +18,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any, NamedTuple
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from conftest import (
@@ -53,7 +54,7 @@ from kitaru.server.application.models.insight import InsightFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.blob import Blob, BlobStorageBackend
-from kitaru.server.domain.imports import Import
+from kitaru.server.domain.imports import Import, ImportNotFound
 from kitaru.server.domain.insight import Insight, InsightNotFound
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import (
@@ -569,3 +570,49 @@ async def test_delete_not_found(setup: Setup) -> None:
     missing_id = uuid.uuid4()
     with pytest.raises(InsightNotFound, match=f"Insight {missing_id} was not found"):
         await setup.insights.delete(missing_id)
+
+
+async def test_update_manual_import_association(setup: Setup) -> None:
+    """Persist attachment, reassignment, and detachment without adding provenance."""
+    version_id = await setup.make_analyzer_version_id()
+    import_ids = [uuid.uuid4(), uuid.uuid4()]
+    for import_id in import_ids:
+        await setup.make_task_id(version_id, import_id)
+    insight = await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
+    for import_id in [*import_ids, None]:
+        insight.update_import_id(import_id)
+        updated = await setup.insights.update(insight)
+        loaded = await setup.insights.get(insight.id)
+        assert updated.import_id == loaded.import_id == import_id
+        assert loaded.analyzer_version_id is None
+        assert loaded.task_id is None
+        assert loaded.invocation_id is None
+        assert loaded.analyzer_params is None
+        assert loaded.params_hash is None
+
+
+async def test_update_deleted_import_rolls_back_all_changes() -> None:
+    """Translate an import deleted after validation and keep the transaction usable."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        setup = await _seed_postgres(session)
+        import_ = await SQLImportRepository(session).create(
+            Import(owner_id=setup.owner_id, agent_id=setup.agent_id, fetch_query={})
+        )
+        insight = await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
+        await session.commit()
+        await SQLImportRepository(session).get(import_.id)
+        async with engine.begin() as connection:
+            await connection.execute(
+                text('DELETE FROM "import" WHERE id = :id'), {"id": import_.id}
+            )
+        insight.update_title("must roll back")
+        insight.update_import_id(import_.id)
+        with pytest.raises(ImportNotFound):
+            await setup.insights.update(insight)
+        loaded = await setup.insights.get(insight.id)
+        assert loaded.title == "insight"
+        assert loaded.import_id is None
+        created = await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
+        assert created.id != insight.id

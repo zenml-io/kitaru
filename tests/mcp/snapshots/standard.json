@@ -6777,7 +6777,7 @@
                 }
               ],
               "default": null,
-              "description": "Import whose sessions produced the insight.",
+              "description": "Import associated with the insight.",
               "title": "Import Id"
             },
             "metadata": {
@@ -11661,11 +11661,17 @@
         },
         "InsightUpdate": {
           "additionalProperties": false,
-          "description": "Sparsely update one insight's title or description.",
+          "description": "Sparsely update one insight's title, description, or import association.",
           "properties": {
             "clear_description": {
               "default": false,
               "title": "Clear Description",
+              "type": "boolean"
+            },
+            "clear_import": {
+              "default": false,
+              "description": "Clear the import association; conflicts with import_id.",
+              "title": "Clear Import",
               "type": "boolean"
             },
             "description": {
@@ -11679,6 +11685,20 @@
               ],
               "default": null,
               "title": "Description"
+            },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import to associate; omit to keep the current import.",
+              "title": "Import Id"
             },
             "insight_id": {
               "format": "uuid",
@@ -11731,6 +11751,20 @@
               "default": null,
               "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
               "title": "Idempotency Key"
+            },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Import to associate with every insight in the batch.",
+              "title": "Import Id"
             },
             "insights": {
               "items": {
@@ -12715,7 +12749,7 @@
                 }
               ],
               "default": null,
-              "description": "Import whose sessions produced the insight.",
+              "description": "Import associated with the insight.",
               "title": "Import Id"
             },
             "metadata": {
