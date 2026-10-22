@@ -177,6 +177,7 @@ def build_report(
         )
     )
     coverage = _coverage(collection, sampled)
+    weight = population_weight(sampled, collection.group_seen)
     mix = (
         None
         if params.dry_run
@@ -185,7 +186,8 @@ def build_report(
             sampled,
             volume,
             params.min_mix_calls,
-            _split_routes(by_candidate, sampled),
+            _split_routes(by_candidate, sampled, weight),
+            weight,
         )
     )
     return {
@@ -485,6 +487,7 @@ def _candidate_report(
         return report
 
     results = [r for r in attempts if r.attempt == 0]
+    weight = population_weight(sampled, weights)
     sent = [r for r in results if r.reply is not None]
     answered = [r for r in sent if r.agreement is not None]
     every_sent = [r for r in attempts if r.reply is not None]
@@ -534,8 +537,8 @@ def _candidate_report(
             reply.failure: reply.failure_detail for reply in reversed(failed)
         },
         "failure_rate": _rate(sum(failures.values()), len(every_sent)),
-        "by_tool": _by_group(headline, _group),
-        "by_route": _by_group(headline, _route_key(sampled)),
+        "by_tool": _by_group(_get_step_results(attempts), _group, weight),
+        "by_route": _by_group(_get_step_results(attempts), _route_key(sampled), weight),
         "latency_seconds": {
             "p50": _round(statistics.median(latencies)) if latencies else None,
             "p95": _round(_percentile(latencies, 0.95)) if latencies else None,
@@ -552,23 +555,64 @@ def _candidate_report(
     return report
 
 
+def population_weight(
+    sampled: list[RecordedCall], weights: Counter[tuple[str, str | None]]
+) -> Callable[[RecordedCall], Decimal]:
+    """Weight each sampled call by how many recorded calls it stands for.
+
+    Sampling takes an even number of calls from each node name and model,
+    so a call from a group seen 9,900 times stands for far more traffic than
+    one from a group seen 100 times. A group without a recorded count stands
+    for just its sampled calls.
+    """
+    sampled_counts = Counter((c.node_name, c.model) for c in sampled)
+
+    def weight(call: RecordedCall) -> Decimal:
+        group = (call.node_name, call.model)
+        seen, count = weights.get(group), sampled_counts.get(group)
+        return Decimal(seen) / count if seen and count else Decimal(1)
+
+    return weight
+
+
+def _get_step_results(attempts: list[CallResult]) -> list[CallResult]:
+    """First attempts on calls with known tool schemas, answered or not."""
+    return [
+        r
+        for r in attempts
+        if r.attempt == 0 and r.call.request.schema_source != "inferred"
+    ]
+
+
 def _by_group(
-    results: list[CallResult], key: Callable[[RecordedCall], str]
+    results: list[CallResult],
+    key: Callable[[RecordedCall], str],
+    weight: Callable[[RecordedCall], Decimal] | None = None,
 ) -> dict[str, Any]:
-    """Agreement and per-argument agreement grouped by `key`.
+    """Agreement, reliability and per-argument agreement grouped by `key`.
+
+    `calls` counts answered calls, which the rates are computed on;
+    `attempted` counts every call, of which `failed` got a provider failure
+    and `not_run` was never sent because a budget ran out. `failure_rate` is
+    failures among the calls that were sent.
 
     `match_rate` asks whether the candidate took the same kind of action: the
     same tools, or a text answer where the recording answered in text. Exact
     wording almost never matches, so it would make every text step look
     unmovable, or, against a reference that does not match itself, movable to
-    anything.
+    anything. It is not semantic agreement: any two text answers match.
+
+    `cost_per_call_usd` weights each call by `weight`, the recorded traffic
+    it stands for, so a group's cost is not skewed by balanced sampling.
     """
     groups: dict[str, dict[str, Any]] = {}
     for result in results:
-        assert result.reply is not None
         group = groups.setdefault(
             key(result.call),
             {
+                "attempted": 0,
+                "failed": 0,
+                "not_run": 0,
                 "calls": 0,
                 "agreeing": 0,
                 "same_tool": 0,
@@ -577,6 +621,13 @@ def _by_group(
                 "fields": defaultdict(lambda: [0, 0]),
             },
         )
+        group["attempted"] += 1
+        if result.reply is None:
+            group["not_run"] += 1
+            continue
+        if result.agreement is None:
+            group["failed"] += result.reply.failure is not None
+            continue
         group["calls"] += 1
         group["agreeing"] += result.agreement in AGREEING
         group["same_tool"] += result.agreement in _SAME_TOOL
@@ -584,7 +635,9 @@ def _by_group(
             _SAME_TOOL if result.call.request.recorded.tool_calls else _TEXT_REPLY
         )
         if result.cost is not None:
-            group["costs"].append(result.cost)
+            group["costs"].append(
+                (result.cost, weight(result.call) if weight else Decimal(1))
+            )
         for tool, fields in field_matches(
             result.call.request.recorded, result.reply
         ).items():
@@ -594,7 +647,11 @@ def _by_group(
                 counts[1] += 1
     return {
         name: {
+            "attempted": group["attempted"],
             "calls": group["calls"],
+            "failed": group["failed"],
+            "not_run": group["not_run"],
+            "failure_rate": _rate(group["failed"], group["calls"] + group["failed"]),
             "agreement_rate": _rate(group["agreeing"], group["calls"]),
             "tool_choice_rate": (
                 None
@@ -602,7 +659,7 @@ def _by_group(
                 else _rate(group["same_tool"], group["calls"])
             ),
             "match_rate": _rate(group["matching"], group["calls"]),
-            "cost_per_call_usd": _mean_usd(group["costs"]),
+            "cost_per_call_usd": _usd(_weighted_mean(group["costs"])),
             "fields": {
                 field: _rate(matched, total)
                 for field, (matched, total) in sorted(group["fields"].items())
@@ -610,6 +667,14 @@ def _by_group(
         }
         for name, group in sorted(groups.items())
     }
+
+
+def _weighted_mean(values: list[tuple[Decimal, Decimal]]) -> Decimal | None:
+    """Mean of `(value, weight)` pairs, or None without any weight."""
+    total = sum((w for _, w in values), Decimal(0))
+    if not total:
+        return None
+    return sum((v * w for v, w in values), Decimal(0)) / total
 
 
 def _group(call: RecordedCall) -> str:
@@ -1340,7 +1405,9 @@ def _is_learning_session(call: RecordedCall) -> bool:
 
 
 def _split_routes(
-    by_candidate: dict[str, list[CallResult]], sampled: list[RecordedCall]
+    by_candidate: dict[str, list[CallResult]],
+    sampled: list[RecordedCall],
+    weight: Callable[[RecordedCall], Decimal],
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     """Per-step results of each candidate on the learning and held-out sessions.
 
@@ -1352,11 +1419,22 @@ def _split_routes(
     held_out: dict[str, dict[str, Any]] = {}
     for name, results in by_candidate.items():
         halves: tuple[list[CallResult], list[CallResult]] = ([], [])
-        for r in _get_headline(results):
+        for r in _get_step_results(results):
             halves[0 if _is_learning_session(r.call) else 1].append(r)
-        learning[name] = _by_group(halves[0], key)
-        held_out[name] = _by_group(halves[1], key)
+        learning[name] = _by_group(halves[0], key, weight)
+        held_out[name] = _by_group(halves[1], key, weight)
     return learning, held_out
+
+
+def _is_unreliable(values: dict[str, Any] | None) -> bool:
+    """Tell whether a candidate failed too often on one step.
+
+    Agreement among the replies that came back says nothing about how often
+    the provider failed to reply, so a step is judged on its own failures,
+    not on the candidate's overall rate, which other steps can dilute.
+    """
+    rate = None if values is None else values["failure_rate"]
+    return rate is not None and rate > _MAX_FAILURE_RATE
 
 
 def _best_mix(
@@ -1365,6 +1443,7 @@ def _best_mix(
     volume: Volume,
     min_calls: int,
     split: tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]],
+    weight: Callable[[RecordedCall], Decimal],
 ) -> dict[str, Any] | None:
     """Pick, per step, the cheapest candidate that behaves well enough.
 
@@ -1372,26 +1451,34 @@ def _best_mix(
     router can see. Picking the best of many candidates on many steps finds
     some by luck, so each step is chosen on the learning half of the sessions
     and checked on the held-out half. A step moves to a candidate only when
-    the candidate answered at least `min_calls` of the step's calls and its
-    rate on the learning half is within 10 points of the reference's rate
-    there (or of the best rate when there is no reference). A pick whose
-    held-out rate, on enough held-out calls, falls more than 10 points below
-    the reference's held-out rate (or the learning bar) is dropped
-    (`held_out: failed`); with too few held-out calls it stays but is marked
-    `too_few`. Otherwise the step stays on today's model, as does a step where
-    the reference itself takes the recorded action less than half the time.
-    "Rate" is whether the candidate takes the same kind of action (the same
-    tools, or a text answer), not exact wording. Today's cost is the
-    reference's replay cost when there is a reference, since recorded calls
-    often hit a warm prompt cache that replayed single calls do not.
+    the candidate answered at least `min_calls` of the step's calls, failed on
+    no more than a fifth of the step's calls it was sent, and its rate on the
+    learning half is within 10 points of the reference's rate there (or of the
+    best rate when there is no reference). A pick whose held-out rate, on
+    enough held-out calls, falls more than 10 points below the reference's
+    held-out rate (or the learning bar), or that fails too often on the
+    held-out calls, is dropped (`held_out: failed`); with too few held-out
+    calls it stays but is marked `too_few`. Otherwise the step stays on
+    today's model, as does a step where the reference itself takes the
+    recorded action less than half the time. "Rate" is whether the candidate
+    takes the same kind of action (the same tools, or a text answer), not
+    exact wording or meaning. Today's cost is the reference's replay cost
+    where the reference answered the step, since recorded calls often hit a
+    warm prompt cache that replayed single calls do not, and the recorded
+    cost elsewhere; each step says which (`today_source`). Shares and costs
+    weight each sampled call by the recorded traffic it stands for, so a
+    mix that picks one candidate everywhere costs what that candidate costs.
     Excluded, failing and unpriced candidates are never picked.
     """
     key = _route_key(sampled)
-    shares = Counter(key(call) for call in sampled)
-    recorded_costs: dict[str, list[Decimal]] = defaultdict(list)
+    population: dict[str, Decimal] = defaultdict(Decimal)
+    counts = Counter(key(call) for call in sampled)
+    recorded_costs: dict[str, list[tuple[Decimal, Decimal]]] = defaultdict(list)
     for call in sampled:
+        population[key(call)] += weight(call)
         if call.cost is not None:
-            recorded_costs[key(call)].append(call.cost)
+            recorded_costs[key(call)].append((call.cost, weight(call)))
+    total_population = sum(population.values(), Decimal(0))
     # The reference is today's model run again, so it sets the bar but is not
     # somewhere to move calls to.
     usable = [
@@ -1402,7 +1489,6 @@ def _best_mix(
         and (c["failure_rate"] is None or c["failure_rate"] <= _MAX_FAILURE_RATE)
     ]
     reference = next((c for c in candidates if c["reference"]), None)
-    today_source = "reference replay" if reference else "recording"
     groups: list[dict[str, Any]] = []
     # (share, cost per call with the mix, cost per call today) per step
     prices: list[tuple[Decimal, Decimal | None, Decimal | None]] = []
@@ -1411,7 +1497,7 @@ def _best_mix(
         "learning": len({c.session_id for c in sampled if _is_learning_session(c)}),
         "held_out": len({c.session_id for c in sampled if not _is_learning_session(c)}),
     }
-    for group, count in sorted(shares.items()):
+    for group, count in sorted(counts.items()):
         ref_all = reference["by_route"].get(group) if reference else None
         # A step seen in only one half of the sessions cannot be split; it is
         # judged on all its calls and its pick marked as not checked.
@@ -1421,24 +1507,29 @@ def _best_mix(
             else None
         )
         ref_held = held_out.get(reference["name"], {}).get(group) if reference else None
-        today = (
-            Decimal(ref_all["cost_per_call_usd"])
-            if ref_all and ref_all["cost_per_call_usd"] is not None
-            else _mean_decimal(recorded_costs[group])
-        )
+        if ref_all and ref_all["cost_per_call_usd"] is not None:
+            today: Decimal | None = Decimal(ref_all["cost_per_call_usd"])
+            today_source: str | None = "reference replay"
+        else:
+            today = _weighted_mean(recorded_costs[group])
+            today_source = None if today is None else "recording"
         rates: dict[str, float] = {}
         costs: dict[str, Decimal] = {}
         unsplit: set[str] = set()
+        unreliable: list[str] = []
         too_few = False
         for c in usable:
             values = learning.get(c["name"], {}).get(group)
             overall = c["by_route"].get(group)
+            if _is_unreliable(overall):
+                unreliable.append(c["name"])
+                continue
             if not overall or overall["cost_per_call_usd"] is None:
                 continue
             if overall["calls"] < min_calls:
                 too_few = True
                 continue
-            if not values:
+            if not values or not values["calls"]:
                 unsplit.add(c["name"])
                 values = overall
             rates[c["name"]] = values["match_rate"]
@@ -1468,6 +1559,8 @@ def _best_mix(
             held_rate = held["match_rate"] if held else None
             if choice in unsplit:
                 held_status = "no_split"
+            elif _is_unreliable(held):
+                choice, held_status = None, "failed"
             elif held_rate is None or held_calls < max(1, min_calls // 4):
                 held_status = "too_few"
             elif held_rate < held_bar - _COMPARABLE_POINTS:
@@ -1475,45 +1568,56 @@ def _best_mix(
             else:
                 held_status = "held"
         cost = costs[choice] if choice else today
-        share = round(count / len(sampled), 4)
+        share = population[group] / total_population if total_population else None
         groups.append(
             {
                 "group": group,
-                "share": share,
+                "share": None if share is None else round(float(share), 4),
                 "calls": count,
                 "candidate": choice,
                 "rate": None if choice is None else rates[choice],
                 "cost_per_call_usd": _usd(cost),
                 "too_few_calls": choice is None and too_few and not rates,
                 "noisy_reference": noisy,
+                "unreliable": sorted(unreliable),
                 "held_out": held_status,
                 "held_out_rate": held_rate,
                 "held_out_calls": held_calls,
+                "today_source": today_source,
             }
         )
-        prices.append((Decimal(str(share)), cost, today))
+        prices.append((share or Decimal(0), cost, today))
     # A pick that failed on held-out sessions is a result worth showing.
     if not any(item["candidate"] or item["held_out"] == "failed" for item in groups):
         return None
-    if any(cost is None or today is None for _, cost, today in prices):
-        return {
-            "groups": groups,
-            "min_calls": min_calls,
-            "today_source": today_source,
-            "sessions": sessions,
-            "cost": None,
-            "recorded_cost": None,
-        }
-    mixed = sum((share * (cost or 0) for share, cost, _ in prices), Decimal(0))
-    recorded = sum((share * (today or 0) for share, _, today in prices), Decimal(0))
-    return {
+    summary = {
         "groups": groups,
         "min_calls": min_calls,
-        "today_source": today_source,
+        "today_source": _describe_sources(groups),
         "sessions": sessions,
+        "cost": None,
+        "recorded_cost": None,
+    }
+    if any(cost is None or today is None for _, cost, today in prices):
+        return summary
+    mixed = sum((share * (cost or 0) for share, cost, _ in prices), Decimal(0))
+    recorded = sum((share * (today or 0) for share, _, today in prices), Decimal(0))
+    return summary | {
         "cost": _projection(mixed, volume),
         "recorded_cost": _projection(recorded, volume),
     }
+
+
+def _describe_sources(groups: list[dict[str, Any]]) -> str:
+    """Say where today's cost comes from, naming a mix of sources."""
+    sources = Counter(item["today_source"] for item in groups if item["today_source"])
+    if len(sources) <= 1:
+        return next(iter(sources), "recording")
+    replayed = sources["reference replay"]
+    return (
+        f"reference replay on {replayed} of {sources.total()} steps and the "
+        "recording on the rest, which is not like for like"
+    )
 
 
 def _mix_row(mix: dict[str, Any] | None) -> list[dict[str, str]]:
@@ -1546,10 +1650,6 @@ def _group_rate(candidate: dict[str, Any] | None, group: str) -> float | None:
         return None
     rate = values["tool_choice_rate"]
     return values["agreement_rate"] if rate is None else rate
-
-
-def _mean_decimal(costs: list[Decimal]) -> Decimal | None:
-    return sum(costs, Decimal(0)) / len(costs) if costs else None
 
 
 def _judge_label(params: ModelSwapParams) -> str | None:
