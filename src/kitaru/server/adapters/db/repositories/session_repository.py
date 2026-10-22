@@ -323,7 +323,10 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         return [row.to_domain(exclude=exclude) for row in rows], next_cursor
 
     async def get_many(
-        self, session_ids: Sequence[uuid.UUID], include_payloads: bool
+        self,
+        session_ids: Sequence[uuid.UUID],
+        include_payloads: bool,
+        exclusive: bool = False,
     ) -> dict[uuid.UUID, Session]:
         """Bulk-load sessions by id, keyed by id, missing ids omitted.
 
@@ -331,12 +334,16 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             session_ids: Ids of the sessions to load.
             include_payloads: Whether to read the inputs and outputs
                 columns.
+            exclusive: Whether to lock the rows in ascending id order for
+                the duration of the transaction.
 
         Returns:
             Stored sessions keyed by id.
         """
         deferred = () if include_payloads else PAYLOAD_COLUMNS
-        rows = await self._load_by_ids(list(session_ids), deferred_columns=deferred)
+        rows = await self._load_by_ids(
+            list(session_ids), exclusive=exclusive, deferred_columns=deferred
+        )
         exclude = {column.key for column in deferred}
         return {
             session_id: row.to_domain(exclude=exclude)

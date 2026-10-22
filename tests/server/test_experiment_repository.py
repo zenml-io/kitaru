@@ -167,6 +167,36 @@ async def test_create_experiment_duplicate_name(setup: Setup) -> None:
         await repository.create(_experiment(owner_id, agent_id, config.id, name="exp"))
 
 
+async def test_create_with_replay_config_duplicate_keeps_original_pair(
+    setup: Setup,
+) -> None:
+    """Roll back both candidate rows and keep the surrounding transaction usable."""
+    repository, owner_id, agent_id = setup
+    original_config = _config(owner_id)
+    original, stored_config = await repository.create_with_replay_config(
+        _experiment(owner_id, agent_id, original_config.id), original_config
+    )
+    candidate_config = _config(owner_id)
+    candidate = _experiment(owner_id, agent_id, candidate_config.id)
+
+    with pytest.raises(DuplicateExperimentName):
+        await repository.create_with_replay_config(candidate, candidate_config)
+
+    with pytest.raises(ReplayConfigNotFound):
+        await repository.get_replay_config(candidate_config.id)
+    with pytest.raises(ExperimentNotFound):
+        await repository.get(candidate.id)
+    assert await repository.get(original.id) == original
+    assert await repository.get_replay_config(stored_config.id) == stored_config
+    config = _config(owner_id)
+    created, stored = await repository.create_with_replay_config(
+        _experiment(owner_id, agent_id, config.id, name="after-conflict"), config
+    )
+    assert created.replay_config_id == stored.id
+    assert created.created is not None
+    assert stored.created is not None
+
+
 async def test_get_experiment_not_found(setup: Setup) -> None:
     """Raise for an unknown experiment id."""
     repository, _, _ = setup

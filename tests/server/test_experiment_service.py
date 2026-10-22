@@ -188,6 +188,7 @@ async def test_create_experiment_with_override_and_tool_policy(
 
 async def test_create_experiment_duplicate_name(
     service: ExperimentService,
+    repository: FakeExperimentRepository,
     plugin_repository: FakePluginRepository,
     agent_id: uuid.UUID,
 ) -> None:
@@ -198,9 +199,14 @@ async def test_create_experiment_duplicate_name(
         agent_id=agent_id,
         evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
-    await service.create_experiment(command, actor=ACTOR)
+    experiment, config = await service.create_experiment(command, actor=ACTOR)
     with pytest.raises(DuplicateExperimentName):
         await service.create_experiment(command, actor=ACTOR)
+    assert list(repository._configs) == [config.id]
+    assert await service.get_experiment(experiment.id, actor=ACTOR) == (
+        experiment,
+        config,
+    )
 
 
 async def test_create_experiment_unknown_evaluator(

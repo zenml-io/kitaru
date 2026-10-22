@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests that the SDK exposes idempotency_key on exactly the marked routes."""
+"""Tests that the SDK exposes idempotency keys for its marked routes."""
 
 import inspect
 import uuid
@@ -82,6 +82,8 @@ MAPPING = {
     ("POST", "/api/v1/users"): ("users", "create"),
 }
 
+UI_ONLY_IDEMPOTENT_ROUTES = {("POST", "/api/v1/ui/sample-data")}
+
 
 def _resource_methods(client: KitaruAPIClient) -> dict[tuple[str, str], MethodType]:
     """Return every public method on every resource bound to a client.
@@ -121,8 +123,10 @@ def _parameter_names(method: MethodType) -> set[str]:
 
 
 def test_mapping_matches_the_marked_routes() -> None:
-    """Assert the mapping covers exactly the routes the app marks idempotent."""
-    assert set(MAPPING.keys()) == marked_idempotent_routes(create_app(local_settings()))
+    """Cover marked routes through either the SDK or a UI-specific operation."""
+    assert set(MAPPING) | UI_ONLY_IDEMPOTENT_ROUTES == marked_idempotent_routes(
+        create_app(local_settings())
+    )
 
 
 def test_mapped_methods_accept_idempotency_key() -> None:

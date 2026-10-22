@@ -37,11 +37,12 @@ class AgentRepository(Protocol):
         """
         ...
 
-    async def get(self, agent_id: uuid.UUID) -> Agent:
+    async def get(self, agent_id: uuid.UUID, exclusive: bool = False) -> Agent:
         """Load an agent by id.
 
         Args:
             agent_id: Id of the agent.
+            exclusive: Whether to lock the row for the transaction.
 
         Raises:
             AgentNotFound: No agent has this id.

@@ -2244,11 +2244,12 @@ class FakeAgentRepository:
         self._agents[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, agent_id: uuid.UUID) -> Agent:
+    async def get(self, agent_id: uuid.UUID, exclusive: bool = False) -> Agent:
         """Load an agent by id.
 
         Args:
             agent_id: Id of the agent.
+            exclusive: Whether to lock the row, a no-op in memory.
 
         Raises:
             AgentNotFound: No agent has this id.
@@ -3095,7 +3096,10 @@ class FakeSessionRepository:
         return self._evaluations.has_evaluation(session.id) == expected
 
     async def get_many(
-        self, session_ids: Sequence[uuid.UUID], include_payloads: bool
+        self,
+        session_ids: Sequence[uuid.UUID],
+        include_payloads: bool,
+        exclusive: bool = False,
     ) -> dict[uuid.UUID, Session]:
         """Bulk-load sessions by id, keyed by id, missing ids omitted.
 
@@ -3103,13 +3107,15 @@ class FakeSessionRepository:
             session_ids: Ids of the sessions to load.
             include_payloads: Whether to read the inputs and outputs
                 columns.
+            exclusive: Whether to return rows in ascending id order. Row
+                locking has no in-memory counterpart.
 
         Returns:
             Stored sessions keyed by id.
         """
         return {
             session_id: self._copy(self._sessions[session_id], include_payloads)
-            for session_id in session_ids
+            for session_id in (sorted(session_ids) if exclusive else session_ids)
             if session_id in self._sessions
         }
 
@@ -4964,6 +4970,26 @@ class FakeExperimentRepository:
                 and other.name == experiment.name
             ):
                 raise DuplicateExperimentName(experiment.name)
+
+    async def create_with_replay_config(
+        self, experiment: Experiment, config: ReplayConfig
+    ) -> tuple[Experiment, ReplayConfig]:
+        """Persist an experiment and its replay config atomically.
+
+        Args:
+            experiment: Experiment to store, referencing the config id.
+            config: Replay config to store.
+
+        Raises:
+            DuplicateExperimentName: The experiment name is already registered.
+
+        Returns:
+            Stored experiment and replay config with timestamps set.
+        """
+        self._check_duplicate_name(experiment)
+        stored_config = await self.create_replay_config(config)
+        stored_experiment = await self.create(experiment)
+        return stored_experiment, stored_config
 
     async def create(self, experiment: Experiment) -> Experiment:
         """Persist a new experiment.

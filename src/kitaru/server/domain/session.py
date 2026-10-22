@@ -23,6 +23,7 @@ from pydantic import Field
 
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
 from kitaru.base import FrozenModel
+from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
@@ -88,6 +89,10 @@ class DuplicateSessionExternalId(ConflictError):
             f"Session with imported_from '{imported_from}' and external_id "
             f"'{external_id}' is already registered"
         )
+
+
+class SessionSampleDataMismatch(ConflictError):
+    """Raised when a session does not match the canonical sample data."""
 
 
 class SessionInUse(ConflictError):
@@ -445,6 +450,40 @@ class Session(DomainModel):
             metadata: New metadata.
         """
         self.metadata = metadata
+
+    def link_sample_agent_version(
+        self, version: AgentVersion, imported_from: str | None, external_id: str
+    ) -> bool:
+        """Fill a missing recorded version on a matching sample session.
+
+        Args:
+            version: Recorded sample version.
+            imported_from: Canonical source system.
+            external_id: Canonical external id.
+
+        Raises:
+            SessionSampleDataMismatch: The session is not the expected sample.
+
+        Returns:
+            Whether the missing version was filled.
+        """
+        if (
+            self.agent_id != version.agent_id
+            or self.owner_id != version.owner_id
+            or self.origin != SessionOrigin.IMPORTED
+            or self.metadata.get("kitaru_sample_data") is not True
+            or self.imported_from != imported_from
+            or self.external_id != external_id
+            or self.task_id is not None
+            or self.import_id is not None
+        ):
+            raise SessionSampleDataMismatch(
+                f"Session {self.id} does not match the sample data"
+            )
+        if self.agent_version_id is not None:
+            return False
+        self.agent_version_id = version.id
+        return True
 
     def link_task(self, task_id: uuid.UUID) -> None:
         """Set the task this session was produced by.

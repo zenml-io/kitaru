@@ -21,6 +21,8 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from conftest import (
     FakeCohortRepository,
@@ -432,6 +434,91 @@ async def test_get_exclusive(setup: Setup) -> None:
     )
     loaded = await repository.get(created.id, exclusive=True, include_payloads=True)
     assert loaded == created
+
+
+@pytest.mark.parametrize("include_payloads", [False, True])
+async def test_get_many_exclusive(setup: Setup, include_payloads: bool) -> None:
+    """Bulk locking returns unique existing sessions in ascending id order."""
+    repository, owner_id, agent_id, _, _ = setup
+    sessions = [
+        await repository.create(
+            Session(
+                owner_id=owner_id,
+                agent_id=agent_id,
+                number=number,
+                origin=SessionOrigin.RECORDED,
+                inputs=Payload.from_json({"number": number}),
+            )
+        )
+        for number in (1, 2)
+    ]
+    descending_ids = sorted((session.id for session in sessions), reverse=True)
+    loaded = await repository.get_many(
+        [*descending_ids, descending_ids[0], uuid.uuid4()],
+        include_payloads=include_payloads,
+        exclusive=True,
+    )
+    assert list(loaded) == sorted(descending_ids)
+    for session in sessions:
+        assert loaded[session.id].number == session.number
+        expected_inputs = (
+            Payload.from_json({"number": session.number}) if include_payloads else None
+        )
+        assert loaded[session.id].inputs == expected_inputs
+    assert (
+        await repository.get_many([], include_payloads=include_payloads, exclusive=True)
+        == {}
+    )
+
+
+@pytest.mark.parametrize("exclusive", [False, True])
+async def test_get_many_postgres_row_locks(exclusive: bool) -> None:
+    """Bulk loads lock every row in id order only when requested."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(session).create(
+            Agent(owner_id=owner.id, name="assistant")
+        )
+        repository = SQLSessionRepository(session, engine)
+        sessions = [
+            await repository.create(
+                Session(
+                    owner_id=owner.id,
+                    agent_id=agent.id,
+                    number=number,
+                    origin=SessionOrigin.RECORDED,
+                )
+            )
+            for number in (1, 2)
+        ]
+        await session.commit()
+        descending_ids = sorted((stored.id for stored in sessions), reverse=True)
+        if exclusive:
+            loaded = await repository.get_many(
+                descending_ids, include_payloads=False, exclusive=True
+            )
+            assert list(loaded) == sorted(descending_ids)
+        else:
+            loaded = await repository.get_many(descending_ids, include_payloads=False)
+        assert set(loaded) == set(descending_ids)
+
+        session_factory = async_sessionmaker(engine)
+        for session_id in descending_ids:
+            async with session_factory() as contender:
+                statement = (
+                    select(SessionORM.id)
+                    .where(SessionORM.id == session_id)
+                    .with_for_update(nowait=True)
+                )
+                if exclusive:
+                    with pytest.raises(DBAPIError, match="could not obtain lock"):
+                        await contender.execute(statement)
+                else:
+                    assert (
+                        await contender.execute(statement)
+                    ).scalar_one() == session_id
 
 
 async def test_query_filters_by_origin_and_status(setup: Setup) -> None:

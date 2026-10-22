@@ -61,6 +61,27 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
 
     orm_class = ExperimentORM
 
+    async def create_with_replay_config(
+        self, experiment: Experiment, config: ReplayConfig
+    ) -> tuple[Experiment, ReplayConfig]:
+        """Persist an experiment and its replay config atomically.
+
+        Args:
+            experiment: Experiment to store, referencing the config id.
+            config: Replay config to store.
+
+        Raises:
+            DuplicateExperimentName: The experiment name is already registered.
+            AgentNotFound: No agent has the experiment's agent id.
+
+        Returns:
+            Stored experiment and replay config with timestamps set.
+        """
+        async with self._session.begin_nested():
+            stored_config = await self.create_replay_config(config)
+            stored_experiment = await self.create(experiment)
+        return stored_experiment, stored_config
+
     def _not_found(self, entity_id: uuid.UUID) -> NotFoundError:
         """Build the not-found error for an id.
 

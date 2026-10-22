@@ -18,7 +18,6 @@ from collections import Counter, defaultdict
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from kitaru.analytics.source import analytics_event_context
 from kitaru.api_models.v1.base import Page
@@ -36,12 +35,13 @@ from kitaru.api_models.v1.ui import (
     SessionWithEvaluationsResponse,
 )
 from kitaru.server.adapters.rest.dependencies import (
+    SampleDataAgentPreparer,
     authorize,
     get_evaluation_service,
     get_experiment_run_service,
     get_replay_service,
+    get_sample_data_agent_preparer,
     get_sample_data_seeder,
-    get_session,
     get_session_service,
 )
 from kitaru.server.adapters.rest.mapping.evaluations import evaluation_to_response
@@ -51,7 +51,7 @@ from kitaru.server.adapters.rest.mapping.sessions import (
     session_to_response,
 )
 from kitaru.server.adapters.rest.responses import error_responses
-from kitaru.server.adapters.rest.route import KitaruAPIRoute, read_only
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent, read_only
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationWithEvaluator,
 )
@@ -401,33 +401,41 @@ async def list_experiment_run_evaluation_aggregates(
     status_code=status.HTTP_201_CREATED,
     responses=error_responses(409),
 )
+@idempotent
 async def create_sample_data(
     seeder: Annotated[SampleDataSeeder, Depends(get_sample_data_seeder)],
-    session: Annotated[AsyncSession, Depends(get_session)],
+    prepare_agent: Annotated[
+        SampleDataAgentPreparer, Depends(get_sample_data_agent_preparer)
+    ],
     actor: Annotated[AuthContext, Depends(authorize)],
     body: SampleDataCreateRequest | None = None,
 ) -> SampleDataResponse:
     """Seed the sample agent and everything recorded under it.
 
     Clients observe HTTP 201 on success and 409 when the agent name is
-    already registered.
+    already registered unless resume_existing requests repair of sample data.
+    Conflicting resources that do not match the sample data also return 409.
 
     Args:
         seeder: Sample data seeder.
-        session: Request-scoped database session.
+        prepare_agent: Sample-agent preparation with its own transaction.
         actor: Caller context.
         body: Sample data create request, None uses the sample data's agent name.
 
     Returns:
-        Agent the sample data was seeded under.
+        Sample agent and the session and investigation opened by its tour.
     """
     with analytics_event_context(sample_data=True):
-        agent = await seeder.create_sample_agent(
-            body.agent_name if body is not None else None, actor
+        agent, version = await prepare_agent(
+            body.agent_name if body is not None else None,
+            body.resume_existing if body is not None else False,
+            actor,
         )
-        # Commit the agent ahead of the seed because session numbers are
-        # allocated on the agent row from a connection of their own, which
-        # cannot see an uncommitted agent.
-        await session.commit()
-        await seeder.seed(agent, actor)
-    return SampleDataResponse(agent_id=agent.id)
+        agent, failing, investigation = await seeder.seed(agent, version, actor)
+    return SampleDataResponse(
+        agent_id=agent.id,
+        agent_name=agent.name,
+        failing_session_id=failing.id,
+        failing_session_number=failing.number,
+        investigation_id=investigation.id,
+    )
