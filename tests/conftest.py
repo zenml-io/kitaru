@@ -4971,6 +4971,26 @@ class FakeExperimentRepository:
             ):
                 raise DuplicateExperimentName(experiment.name)
 
+    async def create_with_replay_config(
+        self, experiment: Experiment, config: ReplayConfig
+    ) -> tuple[Experiment, ReplayConfig]:
+        """Persist an experiment and its replay config atomically.
+
+        Args:
+            experiment: Experiment to store, referencing the config id.
+            config: Replay config to store.
+
+        Raises:
+            DuplicateExperimentName: The experiment name is already registered.
+
+        Returns:
+            Stored experiment and replay config with timestamps set.
+        """
+        self._check_duplicate_name(experiment)
+        stored_config = await self.create_replay_config(config)
+        stored_experiment = await self.create(experiment)
+        return stored_experiment, stored_config
+
     async def create(self, experiment: Experiment) -> Experiment:
         """Persist a new experiment.
 

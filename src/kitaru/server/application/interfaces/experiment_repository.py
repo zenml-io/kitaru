@@ -25,6 +25,24 @@ from kitaru.server.domain.replay_config import ReplayConfig
 class ExperimentRepository(Protocol):
     """Experiment and replay config persistence operations."""
 
+    async def create_with_replay_config(
+        self, experiment: Experiment, config: ReplayConfig
+    ) -> tuple[Experiment, ReplayConfig]:
+        """Persist an experiment and its replay config atomically.
+
+        Args:
+            experiment: Experiment to store, referencing the config id.
+            config: Replay config to store.
+
+        Raises:
+            DuplicateExperimentName: The experiment name is already registered.
+            AgentNotFound: No agent has the experiment's agent id.
+
+        Returns:
+            Stored experiment and replay config with timestamps set.
+        """
+        ...
+
     async def create(self, experiment: Experiment) -> Experiment:
         """Persist a new experiment.
 

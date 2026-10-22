@@ -31,8 +31,10 @@ from kitaru.server.adapters.db.repositories.session_repository import (
 )
 from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.experiment import ExperimentCreate
 from kitaru.server.application.models.session import SessionCreate
 from kitaru.server.application.services.agent_version_service import AgentVersionService
+from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.sample_data_seeding import (
     SampleDataSeeder,
     load_sample_data,
@@ -41,7 +43,9 @@ from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersion
+from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.investigation import Investigation
+from kitaru.server.domain.replay_config import ReplayConfig
 from kitaru.server.domain.session import Session
 
 
@@ -82,6 +86,75 @@ def _agent_filter(agent_id: str) -> dict[str, str]:
         "filter": json.dumps({"field": "agent_id", "op": "eq", "value": agent_id}),
         "size": "100",
     }
+
+
+@pytest.mark.parametrize("matching_description", [True, False])
+async def test_sample_data_adopts_experiment_created_during_seed(
+    client: httpx.AsyncClient,
+    seeded: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    matching_description: bool,
+) -> None:
+    """Recover a competing ordinary create without persisting an unused config."""
+    data = load_sample_data()
+    experiments = (
+        await client.get(
+            "/api/v1/experiments", params=_agent_filter(seeded["agent_id"])
+        )
+    ).json()["items"]
+    deleted = await client.delete(f"/api/v1/experiments/{experiments[0]['id']}")
+    assert deleted.status_code == 204
+    create_experiment = ExperimentService.create_experiment
+    competing: dict[str, object] = {}
+
+    async def create_competitor_first(
+        self: ExperimentService, command: ExperimentCreate, actor: AuthContext
+    ) -> tuple[Experiment, ReplayConfig]:
+        if not competing:
+            competing["started"] = True
+            response = await client.post(
+                "/api/v1/experiments",
+                json={
+                    "name": command.name,
+                    "description": (
+                        command.description
+                        if matching_description
+                        else "User experiment with different content"
+                    ),
+                    "agent_id": str(command.agent_id),
+                    "evaluators": [
+                        evaluator.model_dump(mode="json")
+                        for evaluator in command.evaluators
+                    ],
+                },
+            )
+            assert response.status_code == 201
+            competing.update(response.json())
+        return await create_experiment(self, command, actor)
+
+    monkeypatch.setattr(ExperimentService, "create_experiment", create_competitor_first)
+    response = await client.post(
+        "/api/v1/ui/sample-data", json={"resume_existing": True}
+    )
+    assert response.status_code == (201 if matching_description else 409)
+    assert competing.get("id") is not None
+    experiments = (
+        await client.get(
+            "/api/v1/experiments", params=_agent_filter(seeded["agent_id"])
+        )
+    ).json()["items"]
+    assert [item["id"] for item in experiments] == [competing["id"]]
+    assert experiments[0]["description"] == competing["description"]
+    assert experiments[0]["name"] == data.experiment.name
+    transport = client._transport
+    assert isinstance(transport, httpx.ASGITransport)
+    assert isinstance(transport.app, FastAPI)
+    database: DatabaseService = transport.app.state.database
+    async with database.engine.connect() as connection:
+        configs = await connection.scalar(
+            select(func.count()).select_from(ReplayConfigORM)
+        )
+    assert configs == 1
 
 
 async def test_seed_sample_data(

@@ -84,6 +84,7 @@ from kitaru.server.domain.agent import Agent, DuplicateAgentName
 from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.base import ConflictError
 from kitaru.server.domain.cohort import DuplicateCohortName
+from kitaru.server.domain.experiment import DuplicateExperimentName
 from kitaru.server.domain.investigation import Investigation
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
@@ -542,38 +543,38 @@ class SampleDataSeeder:
             await self._evaluators.create_version(
                 evaluator.id, source, data.evaluator.display_version, actor
             )
-        # Creating an experiment also creates its replay config, so adopt
-        # before that composite write to avoid leaving an unused config.
-        experiments, _ = await self._experiments.list_experiments(
-            ExperimentFilter(
-                expression=AndExpression(
-                    operands=(
-                        FilterCondition(
-                            field="name", op=FilterOp.EQ, value=data.experiment.name
-                        ),
-                        FilterCondition(
-                            field="agent_id", op=FilterOp.EQ, value=agent.id
-                        ),
-                    )
+        try:
+            await self._experiments.create_experiment(
+                ExperimentCreate(
+                    name=data.experiment.name,
+                    description=data.experiment.description,
+                    agent_id=agent.id,
+                    tool_policy=data.experiment.tool_policy,
+                    evaluators=data.experiment.evaluators,
                 ),
-                size=1,
-            ),
-            actor,
-        )
-        if experiments:
+                actor,
+            )
+        except DuplicateExperimentName:
+            experiments, _ = await self._experiments.list_experiments(
+                ExperimentFilter(
+                    expression=AndExpression(
+                        operands=(
+                            FilterCondition(
+                                field="name", op=FilterOp.EQ, value=data.experiment.name
+                            ),
+                            FilterCondition(
+                                field="agent_id", op=FilterOp.EQ, value=agent.id
+                            ),
+                        )
+                    ),
+                    size=1,
+                ),
+                actor,
+            )
+            if not experiments:
+                raise
             if experiments[0][0].description != data.experiment.description:
-                raise ConflictError("Sample experiment has different content")
-            return
-        await self._experiments.create_experiment(
-            ExperimentCreate(
-                name=data.experiment.name,
-                description=data.experiment.description,
-                agent_id=agent.id,
-                tool_policy=data.experiment.tool_policy,
-                evaluators=data.experiment.evaluators,
-            ),
-            actor,
-        )
+                raise ConflictError("Sample experiment has different content") from None
 
     async def _seed_investigation(
         self,

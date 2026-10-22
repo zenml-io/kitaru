@@ -213,11 +213,11 @@ class ExperimentService:
             command.agent_id,
             actor,
         )
-        config = await self._create_replay_config(
-            actor.account.id,
-            command.override,
-            command.tool_policy or default_tool_policy(),
-            evaluators,
+        config = ReplayConfig(
+            owner_id=actor.account.id,
+            override=command.override,
+            tool_policy=command.tool_policy or default_tool_policy(),
+            evaluators=evaluators,
         )
         experiment = Experiment(
             owner_id=actor.account.id,
@@ -226,7 +226,9 @@ class ExperimentService:
             agent_id=command.agent_id,
             replay_config_id=config.id,
         )
-        experiment = await self._repository.create(experiment)
+        experiment, config = await self._repository.create_with_replay_config(
+            experiment, config
+        )
         if self._analytics is not None:
             self._analytics.track(
                 actor.account.id,
