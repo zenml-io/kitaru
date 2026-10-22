@@ -825,6 +825,12 @@ export function validateMemorySnapshot(
       "Malformed or unsupported observational-memory record.",
     );
     recordIds.add(record.id);
+    requireStoredShape(
+      record.supersededBy === undefined ||
+        record.supersededBy === null ||
+        typeof record.supersededBy === "string",
+      "Malformed observational-memory generation successor.",
+    );
     for (const key of [
       "generationCount",
       "totalTokensObserved",

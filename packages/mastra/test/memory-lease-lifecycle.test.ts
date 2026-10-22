@@ -18,6 +18,7 @@ import {
   createProcessLocalMemoryAccess,
   type MastraExclusiveMemoryAccess,
 } from "../src/memory.js";
+import { getMastraVersion } from "../src/stream-recording.js";
 import { createFileMemoryAccess } from "./helpers/file-memory-access.js";
 import {
   createMemoryRuntime,
@@ -676,7 +677,9 @@ it.each(LEASES)(
     );
     const [first] = api.sessionIds;
     expect(memoryMethods(api, String(first))).toContain(
-      "updateBufferedObservations",
+      Number(getMastraVersion().split(".")[1]) >= 77
+        ? "appendBufferedObservations"
+        : "updateBufferedObservations",
     );
     const inputs = finalInputs(api, String(first));
     expect(JSON.stringify(inputs)).toContain('"phase":"observer"');
@@ -934,6 +937,56 @@ it("lets the source Memory's settled() join a turn's observational-memory work",
   expect(observed).toBe(false);
   await memory.settled();
   expect(observed).toBe(true);
+});
+
+it("closes an ineligible turn while the source Memory still joins its own background observation", async () => {
+  const earlierReflection = gate();
+  const observation = gate();
+  let observing = false;
+  const thread = "ineligible-source-settled-thread";
+  const { api, memory, turn } = await setup(createProcessLocalMemoryAccess(), {
+    thread,
+    backgroundObservation: true,
+    joinSourceMemory: true,
+    finalizationWaitMs: 3000,
+    observerWait: async () => {
+      observing = true;
+      await observation.opened;
+    },
+  });
+  const engine = await memory.omEngine;
+  if (!engine) throw new Error("Missing observational-memory engine");
+  const operations = (
+    engine.buffering.constructor as unknown as {
+      asyncBufferingOps: Map<string, Promise<void>>;
+    }
+  ).asyncBufferingOps;
+  const key = engine.buffering.getReflectionBufferKey(
+    engine.buffering.getLockKey(thread, RESOURCE),
+  );
+  operations.set(key, earlierReflection.opened);
+  void earlierReflection.opened.then(() => operations.delete(key));
+  try {
+    expect(await turn(LONG_MESSAGE)).toBe("done");
+    await vi.waitFor(() => expect(observing).toBe(true));
+    await vi.waitFor(() =>
+      expect(outcomes(api)).toEqual(["completed/ineligible/om_work_unjoined"]),
+    );
+    let settled = false;
+    const completion = memory.settled().then(() => {
+      settled = true;
+    });
+    earlierReflection.open();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    observation.open();
+    await completion;
+    expect(settled).toBe(true);
+  } finally {
+    earlierReflection.open();
+    observation.open();
+    await memory.settled();
+  }
 });
 
 it("bounds the source Memory's settled() by the finalization deadline when OM work hangs", async () => {

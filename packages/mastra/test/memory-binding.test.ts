@@ -527,6 +527,7 @@ it("records OM flags, buffers, config, activation and working memory with stable
 
 it("records first-turn OM initialization by model and built-in extractor identity", async () => {
   const { runtime, binding, recordMutation } = await fixture();
+  await runtime.domain.clearObservationalMemory(THREAD, RESOURCE);
   await binding.captureInitial(runtime.memory);
   const observer = runtime.observer.model;
   const reflector = runtime.reflector.model;

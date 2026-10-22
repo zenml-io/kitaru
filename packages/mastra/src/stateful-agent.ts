@@ -1053,15 +1053,23 @@ export function createMemoryReplayAgent(
             );
         },
       });
+      const unjoinedEarlierWork =
+        binding.incompleteReason === "om_work_unjoined";
       let tracked = false;
       const trackSourceWork = () => {
         if (tracked) return;
         tracked = true;
         void binding.beginFinalization();
         if (!sourceEngine) return;
-        void sourceEngine
-          .trackBackgroundWork(binding.settle(memory, finalizationWaitMs))
-          .catch(() => undefined);
+        const trackBackgroundWork: (
+          work: Promise<boolean>,
+          scope: { threadId: string; resourceId: string },
+        ) => Promise<boolean> =
+          sourceEngine.trackBackgroundWork.bind(sourceEngine);
+        void trackBackgroundWork(
+          binding.settle(memory, finalizationWaitMs),
+          selector,
+        ).catch(() => undefined);
       };
       let finished: Promise<boolean> | undefined;
       runtime = {
@@ -1072,6 +1080,9 @@ export function createMemoryReplayAgent(
         finish() {
           finished ??= (async () => {
             trackSourceWork();
+            // Keep the source's bounded background join, but close this
+            // ineligible recording without waiting for another turn's work.
+            if (unjoinedEarlierWork) return false;
             const settled = await binding.settle(memory, finalizationWaitMs);
             if (!settled)
               binding.markIncomplete(
