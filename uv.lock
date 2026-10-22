@@ -1807,7 +1807,7 @@ requires-dist = [
     { name = "cyclopts", marker = "extra == 'cli'", specifier = ">=4.25.1" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.139" },
     { name = "httpx", specifier = ">=0.27,<1" },
-    { name = "langfuse", marker = "extra == 'examples'", specifier = ">=4.14,<5" },
+    { name = "langfuse", marker = "extra == 'examples'", specifier = ">=5,<6" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0,<3" },
     { name = "modal", marker = "extra == 'modal'", specifier = ">=1.5,<2" },
     { name = "obstore", marker = "extra == 's3'", specifier = ">=0.11.1" },
@@ -1858,7 +1858,7 @@ fuzz = [{ name = "schemathesis", specifier = ">=4.25,<5" }]
 
 [[package]]
 name = "langfuse"
-version = "4.15.6"
+version = "5.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backoff" },
@@ -1871,9 +1871,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4a/19/59253a357d77147e8cd3ad97817519e158af5d3336654656c92c2fc922f1/langfuse-4.15.6.tar.gz", hash = "sha256:af80ed1199e57c2641c9f228066bf9dc324657c06ce6e68660118fa46b237e35", size = 392968, upload-time = "2026-09-24T13:32:47.032Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/02/1da2d1753ded73faecf445e3944ecd13703e71ce7af6a136acc8ddfc7d17/langfuse-5.0.2.tar.gz", hash = "sha256:8ca53a2c49d99ad5dc3c1d356e3802f00765c0bf155da5d078978cb467a5a474", size = 365828, upload-time = "2026-10-16T10:01:37.759Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1a/c5/927a01c47c0adf53832c6e5e35951e3d4998072ef955f3bb8e87e6d10517/langfuse-4.15.6-py3-none-any.whl", hash = "sha256:2364d5f17342301a8651ef166abb5bb260aaadd94d1ac72aa30c298b3a395d85", size = 706806, upload-time = "2026-09-24T13:32:48.577Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/93/18acd320f902453a8c8d82d9a583b473c7c1f762ce0b8f1a9c0ecc2c0498/langfuse-5.0.2-py3-none-any.whl", hash = "sha256:fee8184e88a7310fdae521d6abf1e4ba5f4d3d8ce67055fa641d2aab94e50380", size = 636051, upload-time = "2026-10-16T10:01:39.329Z" },
 ]
 
 [[package]]

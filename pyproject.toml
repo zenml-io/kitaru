@@ -56,7 +56,7 @@ cli = [
     "rich>=13.0",
 ]
 examples = [
-    "langfuse>=4.14,<5",
+    "langfuse>=5,<6",
 ]
 server = [
     "fastapi>=0.139",
