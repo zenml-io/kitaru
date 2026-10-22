@@ -11,32 +11,41 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for the UI experiment run evaluation aggregate route."""
+"""Parity tests for public and UI experiment run evaluation aggregates."""
 
 import uuid
 from collections.abc import AsyncGenerator
 
 import httpx
 import pytest
+from fastapi import FastAPI, Request
 
 from conftest import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    FakePasswordHasher,
     ReplayServices,
     build_replay_services,
     create_experiment_run,
     create_job,
     create_replay,
+    local_settings,
+    stub_auth_session,
 )
 from kitaru.api_models.v1.evaluation import EvaluationDataType
+from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
-    get_evaluation_service,
-    get_experiment_run_service,
-    get_replay_service,
+    get_auth_service,
+    get_auth_session,
+    get_experiment_run_evaluation_service,
 )
+from kitaru.server.adapters.rest.request_state import request_uses_read_engine
 from kitaru.server.api.app import create_app
-from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.services.evaluation_service import EvaluationService
+from kitaru.server.application.services.experiment_run_evaluation_service import (
+    ExperimentRunEvaluationService,
+)
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.domain.plugin import PackagePluginSource, Plugin, PluginKind
@@ -52,26 +61,44 @@ def services() -> ReplayServices:
 
 
 @pytest.fixture
-async def client(services: ReplayServices) -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Provide an HTTP client for the app with fake-backed UI aggregate services."""
-    app = create_app(
-        APISettings(
-            DB_HOST="localhost",
-            SECRET_ENCRYPTION_KEY="test-encryption-key",
-            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
-        )
+def evaluation_service(services: ReplayServices) -> ExperimentRunEvaluationService:
+    """Provide a fake-backed experiment run evaluation service."""
+    return ExperimentRunEvaluationService(
+        repository=services.experiment_runs,
+        replay_repository=services.replays,
+        evaluation_repository=services.evaluations,
     )
-    evaluation_service = EvaluationService(
-        repository=services.evaluations, session_repository=services.sessions
+
+
+@pytest.fixture
+def app(evaluation_service: ExperimentRunEvaluationService) -> FastAPI:
+    """Provide the app with fake-backed aggregation and authentication services."""
+    settings = local_settings()
+    app = create_app(settings)
+    auth_service = AuthService(
+        settings=settings,
+        account_repository=FakeAccountRepository(),
+        api_key_repository=FakeApiKeyRepository(),
+        password_hasher=FakePasswordHasher(),
     )
-    app.dependency_overrides[get_experiment_run_service] = lambda: (
-        services.experiment_run_service
+    app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_auth_session] = stub_auth_session
+    app.dependency_overrides[get_experiment_run_evaluation_service] = lambda: (
+        evaluation_service
     )
-    app.dependency_overrides[get_replay_service] = lambda: services.replay_service
-    app.dependency_overrides[get_evaluation_service] = lambda: evaluation_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    return app
+
+
+@pytest.fixture(params=["/api/v1/ui", "/api/v1"], ids=["ui", "public"])
+async def client(
+    app: FastAPI, request: pytest.FixtureRequest
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Exercise the same aggregate contract through both API routes."""
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url=f"http://test{request.param}/"
+    ) as client:
         yield client
 
 
@@ -261,9 +288,7 @@ async def test_aggregates_float_evaluations(
         score=0.1,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     assert response.json() == [
@@ -370,9 +395,7 @@ async def test_aggregates_score_bounds_when_uniform(
         target_score=0.9,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     result = response.json()[0]["result"]
@@ -426,9 +449,7 @@ async def test_aggregates_score_bounds_null_when_mixed(
         target_score=0.9,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     result = response.json()[0]["result"]
@@ -475,9 +496,7 @@ async def test_aggregates_score_bounds_null_when_one_row_lacks_it(
         score=1.0,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     result = response.json()[0]["result"]
@@ -518,9 +537,7 @@ async def test_aggregates_bool_and_pass_rate(
             passed=passed,
         )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -575,9 +592,7 @@ async def test_aggregates_categorical_value_counts(
             value=value,
         )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -637,9 +652,7 @@ async def test_aggregates_dedupes_shared_baseline_session(
         score=0.42,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -692,17 +705,20 @@ async def test_aggregates_caps_replays_to_most_recent(
             score=index / 100,
         )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
     assert len(body) == 1
     aggregate = body[0]
     assert aggregate["result"]["count"] == 55
+    assert aggregate["result"]["mean"] == pytest.approx(0.27)
+    assert aggregate["result"]["min"] == 0.0
+    assert aggregate["result"]["max"] == 0.54
     assert len(aggregate["replays"]) == 50
-    assert aggregate["replays"][0]["replay_id"] == str(replay_ids[5])
+    assert [entry["replay_id"] for entry in aggregate["replays"]] == [
+        str(replay_id) for replay_id in replay_ids[5:]
+    ]
 
 
 async def test_aggregates_include_baseline_only_names(
@@ -725,9 +741,7 @@ async def test_aggregates_include_baseline_only_names(
         score=0.3,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -820,9 +834,7 @@ async def test_aggregates_link_scoped_math(
         999.0,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -925,9 +937,7 @@ async def test_aggregates_groups_by_evaluator_version(
         score=0.4,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -967,9 +977,7 @@ async def test_aggregates_manual_rows_invisible(
         services, baseline, "human_quality", EvaluationDataType.FLOAT, score=0.9
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -1007,9 +1015,7 @@ async def test_aggregates_dangling_evaluator_version(
 
     await services.plugins.delete(plugin.id)
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -1048,9 +1054,7 @@ async def test_aggregates_adoption_pinning_ignores_newer_evaluation(
         services, baseline, "accuracy", EvaluationDataType.FLOAT, version_id, 0.9
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -1072,9 +1076,7 @@ async def test_aggregates_standalone_unlinked_rows_invisible(
         services, baseline, "orphan", EvaluationDataType.FLOAT, version_id, 0.5
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     assert response.json() == []
@@ -1086,9 +1088,7 @@ async def test_aggregates_empty_run(
     """Return an empty list for a run with no replays."""
     run_id = await _create_run(services)
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     assert response.json() == []
@@ -1096,7 +1096,132 @@ async def test_aggregates_empty_run(
 
 async def test_aggregates_run_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown experiment run id."""
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{uuid.uuid4()}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{uuid.uuid4()}/evaluation-aggregates")
     assert response.status_code == 404
+
+
+async def test_aggregates_missing_result_session(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """Preserve baseline evidence before a replay produces its result session."""
+    run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
+    baseline = uuid.uuid4()
+    job = await create_job(services.jobs, ACCOUNT.id)
+    config = await services.experiments.create_replay_config(
+        ReplayConfig(
+            owner_id=ACCOUNT.id, tool_policy=default_tool_policy(), evaluators=[]
+        )
+    )
+    replay = await create_replay(
+        services.replays,
+        ACCOUNT.id,
+        job_id=job.id,
+        replay_config_id=config.id,
+        baseline_session_id=baseline,
+        experiment_run_id=run_id,
+    )
+    await _store_linked_evaluation(
+        services,
+        replay.id,
+        baseline,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=0.7,
+    )
+
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
+
+    assert response.status_code == 200
+    aggregate = response.json()[0]
+    assert aggregate["baseline"]["count"] == 1
+    assert aggregate["baseline"]["mean"] == 0.7
+    assert aggregate["result"]["count"] == 0
+    assert aggregate["replays"][0]["baseline"]["score"] == 0.7
+    assert aggregate["replays"][0]["result"] is None
+
+
+async def test_aggregates_groups_by_name_and_data_type(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """Sort groups by name and type while retaining string values without a mean."""
+    run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
+    baseline, result = uuid.uuid4(), uuid.uuid4()
+    replay_id = await _add_replay_with_result_session(
+        services, run_id, baseline, result
+    )
+    for session_id, name, data_type, score, value in [
+        (baseline, "quality", EvaluationDataType.STR, None, "needs review"),
+        (result, "quality", EvaluationDataType.FLOAT, 0.8, None),
+        (result, "accuracy", EvaluationDataType.BOOL, True, None),
+    ]:
+        await _store_linked_evaluation(
+            services,
+            replay_id,
+            session_id,
+            name,
+            data_type,
+            version_id,
+            score=score,
+            value=value,
+        )
+
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
+
+    assert response.status_code == 200
+    aggregates = response.json()
+    assert [(item["name"], item["data_type"]) for item in aggregates] == [
+        ("accuracy", "bool"),
+        ("quality", "float"),
+        ("quality", "str"),
+    ]
+    string_group = aggregates[2]
+    assert string_group["baseline"]["count"] == 1
+    assert string_group["baseline"]["mean"] is None
+    assert string_group["baseline"]["value_counts"] is None
+    assert string_group["result"]["count"] == 0
+    assert string_group["replays"][0]["baseline"]["value"] == "needs review"
+
+
+async def test_aggregates_require_authentication(
+    app: FastAPI, client: httpx.AsyncClient
+) -> None:
+    """Reject unauthenticated reads before looking up an experiment run."""
+    del app.dependency_overrides[authorize]
+
+    response = await client.get(f"experiment-runs/{uuid.uuid4()}/evaluation-aggregates")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing bearer credential."}
+
+
+@pytest.mark.parametrize("strong_consistency", [False, True])
+async def test_aggregates_route_read_consistency(
+    app: FastAPI,
+    client: httpx.AsyncClient,
+    services: ReplayServices,
+    evaluation_service: ExperimentRunEvaluationService,
+    strong_consistency: bool,
+) -> None:
+    """Route ordinary reads to the replica and honor the primary read preference."""
+    run_id = await _create_run(services)
+    read_engine_requests: list[bool] = []
+
+    def provide_service(request: Request) -> ExperimentRunEvaluationService:
+        read_engine_requests.append(request_uses_read_engine(request))
+        return evaluation_service
+
+    app.dependency_overrides[get_experiment_run_evaluation_service] = provide_service
+    headers = {"Prefer": "consistency=strong"} if strong_consistency else {}
+
+    response = await client.get(
+        f"experiment-runs/{run_id}/evaluation-aggregates", headers=headers
+    )
+
+    assert response.status_code == 200
+    assert read_engine_requests == [not strong_consistency]
+    assert response.headers.get("Preference-Applied") == (
+        "consistency=strong" if strong_consistency else None
+    )

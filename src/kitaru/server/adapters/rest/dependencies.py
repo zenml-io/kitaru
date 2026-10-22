@@ -147,6 +147,9 @@ from kitaru.server.application.services.connection_service import (
 )
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.application.services.evaluation_service import EvaluationService
+from kitaru.server.application.services.experiment_run_evaluation_service import (
+    ExperimentRunEvaluationService,
+)
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
@@ -882,6 +885,24 @@ def get_experiment_run_service(
         job_repository=SQLJobRepository(session),
         transitions=_build_task_transitions(session, engine, analytics),
         analytics=analytics,
+    )
+
+
+def get_experiment_run_evaluation_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ExperimentRunEvaluationService:
+    """Return an experiment run evaluation service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Experiment run evaluation service bound to the SQL repositories.
+    """
+    return ExperimentRunEvaluationService(
+        repository=SQLExperimentRunRepository(session),
+        replay_repository=SQLReplayRepository(session),
+        evaluation_repository=SQLEvaluationRepository(session),
     )
 
 

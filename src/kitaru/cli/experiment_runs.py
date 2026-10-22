@@ -248,10 +248,18 @@ async def list_runs(
     return page_result(await client.experiment_runs.list(params), size=size)
 
 
-async def get_run(client: Any, run_id: uuid.UUID) -> CommandResult:
+async def get_run(
+    client: Any, run_id: uuid.UUID, *, aggregate: bool = False
+) -> CommandResult:
     """Get one experiment run without mapping its terminal status to an error."""
     run = await client.experiment_runs.get(run_id)
-    return CommandResult(item=run.model_dump(mode="json"))
+    item = run.model_dump(mode="json")
+    if aggregate:
+        evaluations = await client.experiment_runs.get_evaluation_aggregates(run_id)
+        item["evaluation_aggregates"] = [
+            evaluation.model_dump(mode="json") for evaluation in evaluations
+        ]
+    return CommandResult(item=item)
 
 
 async def list_run_jobs(

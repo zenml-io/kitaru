@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.experiment_run import (
+    EvaluationAggregateResponse,
     ExperimentRunJobsListParams,
     ExperimentRunListParams,
     ExperimentRunResponse,
@@ -27,18 +28,23 @@ from kitaru.api_models.v1.experiment_run import (
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    get_experiment_run_evaluation_service,
     get_experiment_run_service,
 )
 from kitaru.server.adapters.rest.mapping.experiment_runs import (
+    evaluation_aggregate_to_response,
     experiment_run_jobs_list_params_to_filter,
     experiment_run_list_params_to_filter,
     experiment_run_to_response,
 )
 from kitaru.server.adapters.rest.mapping.jobs import job_to_response
 from kitaru.server.adapters.rest.responses import error_responses
-from kitaru.server.adapters.rest.route import KitaruAPIRoute
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, read_only
 from kitaru.server.api.run_cancellation import RunCanceler, get_run_canceler
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.experiment_run_evaluation_service import (
+    ExperimentRunEvaluationService,
+)
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
@@ -93,6 +99,39 @@ async def get_experiment_run(
     """
     run, counts = await service.get_run(experiment_run_id, actor=actor)
     return experiment_run_to_response(run, counts)
+
+
+@router.get(
+    "/{experiment_run_id}/evaluation-aggregates", responses=error_responses(404)
+)
+@read_only
+async def list_experiment_run_evaluation_aggregates(
+    experiment_run_id: uuid.UUID,
+    service: Annotated[
+        ExperimentRunEvaluationService, Depends(get_experiment_run_evaluation_service)
+    ],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> list[EvaluationAggregateResponse]:
+    """Aggregate the evaluations linked to an experiment run's replays.
+
+    Groups contain whole-run baseline and result statistics, plus evaluation
+    values for the 50 most recent replays, oldest first. Only evaluations
+    pinned to the run's replays contribute. Clients observe HTTP 200 on
+    success and 404 when no experiment run has this id.
+
+    Args:
+        experiment_run_id: Id of the experiment run.
+        service: Experiment run evaluation service.
+        actor: Caller context.
+
+    Returns:
+        One aggregate per evaluation name, evaluator version, and data type,
+        sorted by name, data type, and evaluator version id.
+    """
+    aggregates = await service.list_evaluation_aggregates(
+        experiment_run_id, actor=actor
+    )
+    return [evaluation_aggregate_to_response(aggregate) for aggregate in aggregates]
 
 
 @router.delete(

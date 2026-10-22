@@ -68,6 +68,7 @@ def test_route_manifest_is_registered() -> None:
         "/api/v1/experiment-runs",
         "/api/v1/experiment-runs/{experiment_run_id}",
         "/api/v1/experiment-runs/{experiment_run_id}/cancel",
+        "/api/v1/experiment-runs/{experiment_run_id}/evaluation-aggregates",
         "/api/v1/experiment-runs/{experiment_run_id}/jobs",
         "/api/v1/experiments",
         "/api/v1/experiments/{experiment_id}",

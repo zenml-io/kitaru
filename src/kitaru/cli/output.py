@@ -647,7 +647,7 @@ def _human_field_value(
     if item is _MISSING:
         return "-"
     if field.formatter is not None:
-        return field.formatter(item)
+        return _escape_terminal_controls(field.formatter(item))
     if detail:
         return _detail_value(item)
     return _display_value(item)
