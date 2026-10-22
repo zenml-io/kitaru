@@ -24,11 +24,14 @@ from typing import Any
 import httpx
 import pytest
 
+from kitaru.api_models.v1.insight import TextInsightData
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
+from kitaru_model_swap import SUMMARY_INSIGHT_NAME
 from kitaru_model_swap.analyzer import run_model_swap
 from kitaru_model_swap.calls import Collection
 from kitaru_model_swap.endpoint import replace_system_prompt, send
 from kitaru_model_swap.params import Candidate, ModelSwapParams
+from kitaru_model_swap.report import REPORT_SECTION_KEY
 
 from .helpers import MockOpenAIServer, StubClient, completion
 from .test_analyzer import CHEAP, REFERENCE, escalator, mirror, report, run
@@ -369,3 +372,17 @@ async def test_one_session_cannot_be_split_and_the_mix_says_so(
     # Every pick stays, flagged as unchecked rather than silently confirmed.
     assert moved
     assert {item["held_out"] for item in moved} <= {"too_few", "no_split"}
+
+
+async def test_the_report_says_the_screen_rules_out_and_replays_decide(
+    stub_client: StubClient, server: MockOpenAIServer
+) -> None:
+    insights = await run(
+        stub_client, server, candidates=[REFERENCE, CHEAP], max_calls=3
+    )
+    section = insights[SUMMARY_INSIGHT_NAME].metadata[REPORT_SECTION_KEY]
+    summary = insights[SUMMARY_INSIGHT_NAME].data
+
+    assert isinstance(section, dict) and isinstance(summary, TextInsightData)
+    assert "rules candidates out but does not pick a winner" in str(section["html"])
+    assert "Stage 1 of 2" in summary.content

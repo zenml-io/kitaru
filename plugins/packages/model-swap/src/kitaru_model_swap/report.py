@@ -1085,6 +1085,12 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"{estimate['spend_usd'] or 'unknown price'} |"
             )
     elif report["candidates"]:
+        lines.append(
+            "Stage 1 of 2: this screen compares single recorded calls, so it rules "
+            "candidates out but does not pick a winner. Replay the candidates worth "
+            "a full replay end to end, graded on outcomes, to decide."
+        )
+        lines.append("")
         lines.extend(
             f"- **{choice['goal']}:** {choice['candidate']}. {choice['why']}"
             for choice in report["best_for"]

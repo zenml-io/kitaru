@@ -88,6 +88,10 @@ def _best_for(choices: list[dict[str, str]]) -> str:
         return ""
     return (
         "<h2>Best for</h2>"
+        + '<p class="muted">Stage 1 of 2: this screen compares single recorded '
+        "calls, so it rules candidates out but does not pick a winner. Replay the "
+        "candidates worth a full replay end to end, graded on outcomes, to "
+        "decide.</p>"
         + _table(
             ["Goal", "Candidate", "Why"],
             [[c["goal"], c["candidate"], c["why"]] for c in choices],
