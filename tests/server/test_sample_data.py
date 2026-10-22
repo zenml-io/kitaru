@@ -127,3 +127,16 @@ def test_evaluator_source_defines_the_entrypoint() -> None:
     data = load_sample_data()
 
     assert f"def {EVALUATOR_ENTRYPOINT}(" in data.evaluator.source
+
+
+def test_tour_opens_the_failed_session() -> None:
+    """Keep the tour target aligned with the recorded failing verdict."""
+    data = load_sample_data()
+    failing = [
+        item.session.external_id
+        for item in data.sessions
+        if any(result.passed is False for result in item.evaluations)
+    ]
+    assert failing == [data.failing_session_external_id]
+    assert data.agent_version.display_version == "baseline-v1"
+    assert "get_return_policy" in data.agent_version.capabilities.tools

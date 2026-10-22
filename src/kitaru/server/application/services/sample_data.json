@@ -16715,5 +16715,20 @@
       }
     ]
   },
-  "session_tag": "returns-baseline"
+  "session_tag": "returns-baseline",
+  "agent_version": {
+    "display_version": "baseline-v1",
+    "description": "The agent version these sessions were recorded against, as tagged in the source traces.",
+    "capabilities": {
+      "tools": [
+        "check_shipping",
+        "create_replacement",
+        "escalate_to_human",
+        "get_return_policy",
+        "issue_refund",
+        "lookup_order"
+      ]
+    }
+  },
+  "failing_session_external_id": "kitaru-template:returns-ticket-007"
 }

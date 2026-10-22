@@ -14,7 +14,7 @@
 """FastAPI dependency providers."""
 
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Annotated, NamedTuple
 
 from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
@@ -161,6 +161,7 @@ from kitaru.server.application.services.permission_service import PermissionServ
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.sample_data_seeding import (
+    SampleDataAgentSeeder,
     SampleDataSeeder,
 )
 from kitaru.server.application.services.secret_service import SecretService
@@ -179,6 +180,8 @@ from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
+from kitaru.server.domain.agent import Agent
+from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.plugin import PluginKind
 
@@ -1071,8 +1074,46 @@ def get_tag_service(
     return TagService(repository=SQLTagRepository(session))
 
 
+SampleDataAgentPreparer = Callable[
+    [str | None, bool, AuthContext], Awaitable[tuple[Agent, AgentVersion]]
+]
+
+
+def get_sample_data_agent_preparer(
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
+    client: Annotated[AnalyticsClient, Depends(get_analytics_client)],
+) -> SampleDataAgentPreparer:
+    """Provide sample-agent preparation on its own transaction.
+
+    Args:
+        engine: Application database engine.
+        client: Application analytics client.
+
+    Returns:
+        Agent preparation that commits before session numbers are allocated.
+    """
+
+    async def prepare(
+        name: str | None, resume_existing: bool, actor: AuthContext
+    ) -> tuple[Agent, AgentVersion]:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            analytics = ServerAnalytics(client=client, session=session)
+            repository = SQLAgentRepository(session)
+            seeder = SampleDataAgentSeeder(
+                AgentService(repository, analytics),
+                AgentVersionService(SQLAgentVersionRepository(session), analytics),
+                repository,
+            )
+            result = await seeder.create_sample_agent(name, resume_existing, actor)
+            await session.commit()
+            return result
+
+    return prepare
+
+
 def get_sample_data_seeder(
-    agent_service: Annotated[AgentService, Depends(get_agent_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     session_service: Annotated[SessionService, Depends(get_session_service)],
     session_node_service: Annotated[
         SessionNodeService, Depends(get_session_node_service)
@@ -1094,7 +1135,8 @@ def get_sample_data_seeder(
     """Return a sample data seeder for the current request.
 
     Args:
-        agent_service: Agent service.
+        session: Request-scoped database session.
+        engine: Application database engine.
         session_service: Session service.
         session_node_service: Session node service.
         evaluation_service: Evaluation service.
@@ -1111,8 +1153,8 @@ def get_sample_data_seeder(
         Sample data seeder bound to the request's services.
     """
     return SampleDataSeeder(
-        agent_service=agent_service,
         session_service=session_service,
+        session_repository=SQLSessionRepository(session, engine),
         session_node_service=session_node_service,
         evaluation_service=evaluation_service,
         tag_service=tag_service,

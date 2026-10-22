@@ -1,0 +1,1 @@
+- Fixed sample data loading to resume interrupted requests safely and return the guided tour's session and investigation links, with sample activity marked separately in analytics.

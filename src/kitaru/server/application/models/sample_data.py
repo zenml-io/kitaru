@@ -23,6 +23,7 @@ from kitaru.server.application.models.agent import AgentCreate
 from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.models.session import SessionCreate
 from kitaru.server.application.models.session_node import SessionNodeUpsert
+from kitaru.server.domain.agent_version import AgentCapabilities, RunSpec
 from kitaru.server.domain.replay_config import ToolPolicy
 
 
@@ -91,10 +92,31 @@ class SampleExperiment(FrozenModel):
     evaluators: list[EvaluatorConfigInput]
 
 
+class SampleAgentVersion(FrozenModel):
+    """Recorded sample agent version."""
+
+    display_version: str
+    description: str | None = None
+    run_spec: RunSpec | None = None
+    capabilities: AgentCapabilities
+
+
+class SampleDataResult(FrozenModel):
+    """Identifiers needed to open the sample-data tour."""
+
+    agent_id: uuid.UUID
+    agent_name: str
+    failing_session_id: uuid.UUID
+    failing_session_number: int
+    investigation_id: uuid.UUID
+
+
 class SampleData(FrozenModel):
     """Sample data."""
 
     agent: AgentCreate
+    agent_version: SampleAgentVersion
+    failing_session_external_id: str
     sessions: list[SampleSession]
     session_tag: str
     cohort: SampleCohort
@@ -107,4 +129,5 @@ class SeededSession(FrozenModel):
     """Seeded session."""
 
     id: uuid.UUID
+    number: int
     node_ids: dict[str, uuid.UUID]

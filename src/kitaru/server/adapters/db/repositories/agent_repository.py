@@ -83,7 +83,9 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
                 *(defer(column) for column in deferred_columns)
             )
         if exclusive:
-            statement = statement.with_for_update()
+            # Admit session FK references so an active seed cannot block
+            # bootstrap while its separate number allocator waits for us.
+            statement = statement.with_for_update(key_share=True)
         row = await self._session.scalar(statement)
         if row is None:
             raise self._not_found(entity_id)
@@ -107,11 +109,12 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
         )
         return row.to_domain()
 
-    async def get(self, agent_id: uuid.UUID) -> Agent:
+    async def get(self, agent_id: uuid.UUID, exclusive: bool = False) -> Agent:
         """Load an agent by id.
 
         Args:
             agent_id: Id of the agent.
+            exclusive: Whether to lock the row for the transaction.
 
         Raises:
             AgentNotFound: No agent has this id.
@@ -119,7 +122,7 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
         Returns:
             Stored agent.
         """
-        row = await self._get_row(agent_id)
+        row = await self._get_row(agent_id, exclusive=exclusive)
         return row.to_domain()
 
     async def query(self, agent_filter: AgentFilter) -> tuple[list[Agent], str | None]:

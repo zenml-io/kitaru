@@ -2244,11 +2244,12 @@ class FakeAgentRepository:
         self._agents[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, agent_id: uuid.UUID) -> Agent:
+    async def get(self, agent_id: uuid.UUID, exclusive: bool = False) -> Agent:
         """Load an agent by id.
 
         Args:
             agent_id: Id of the agent.
+            exclusive: Whether to lock the row, a no-op in memory.
 
         Raises:
             AgentNotFound: No agent has this id.

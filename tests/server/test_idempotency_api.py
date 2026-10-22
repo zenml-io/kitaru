@@ -71,6 +71,7 @@ EXPECTED_IDEMPOTENT_ROUTES = {
     ("POST", "/api/v1/annotations"),
     ("POST", "/api/v1/insights"),
     ("POST", "/api/v1/investigations"),
+    ("POST", "/api/v1/ui/sample-data"),
     ("POST", "/api/v1/api-keys"),
     ("POST", "/api/v1/api-keys/{api_key_id}/rotate"),
     ("POST", "/api/v1/evaluators"),

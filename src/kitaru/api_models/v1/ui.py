@@ -142,8 +142,23 @@ class SampleDataCreateRequest(RequestModel):
         default=None, description="Agent name, None uses the sample data's agent name."
     )
 
+    resume_existing: bool = Field(
+        default=False,
+        description="Repair a previous sample-data load under this agent name.",
+    )
+
 
 class SampleDataResponse(ResponseModel):
     """Sample data response."""
 
     agent_id: uuid.UUID = Field(description="Agent the sample data was seeded under.")
+    agent_name: str = Field(description="Name of the sample agent.")
+    failing_session_id: uuid.UUID = Field(
+        description="Session opened by the sample-data tour."
+    )
+    failing_session_number: int = Field(
+        description="Agent-relative number of the failing session."
+    )
+    investigation_id: uuid.UUID = Field(
+        description="Investigation opened by the sample-data tour."
+    )
