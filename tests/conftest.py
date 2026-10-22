@@ -3096,7 +3096,10 @@ class FakeSessionRepository:
         return self._evaluations.has_evaluation(session.id) == expected
 
     async def get_many(
-        self, session_ids: Sequence[uuid.UUID], include_payloads: bool
+        self,
+        session_ids: Sequence[uuid.UUID],
+        include_payloads: bool,
+        exclusive: bool = False,
     ) -> dict[uuid.UUID, Session]:
         """Bulk-load sessions by id, keyed by id, missing ids omitted.
 
@@ -3104,13 +3107,15 @@ class FakeSessionRepository:
             session_ids: Ids of the sessions to load.
             include_payloads: Whether to read the inputs and outputs
                 columns.
+            exclusive: Whether to return rows in ascending id order. Row
+                locking has no in-memory counterpart.
 
         Returns:
             Stored sessions keyed by id.
         """
         return {
             session_id: self._copy(self._sessions[session_id], include_payloads)
-            for session_id in session_ids
+            for session_id in (sorted(session_ids) if exclusive else session_ids)
             if session_id in self._sessions
         }
 

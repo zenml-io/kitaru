@@ -25,6 +25,7 @@ from kitaru.server.application.models.session import SessionCreate
 from kitaru.server.application.models.session_node import SessionNodeUpsert
 from kitaru.server.domain.agent_version import AgentCapabilities, RunSpec
 from kitaru.server.domain.replay_config import ToolPolicy
+from kitaru.server.domain.session import Session
 
 
 class SampleSession(FrozenModel):
@@ -101,16 +102,6 @@ class SampleAgentVersion(FrozenModel):
     capabilities: AgentCapabilities
 
 
-class SampleDataResult(FrozenModel):
-    """Identifiers needed to open the sample-data tour."""
-
-    agent_id: uuid.UUID
-    agent_name: str
-    failing_session_id: uuid.UUID
-    failing_session_number: int
-    investigation_id: uuid.UUID
-
-
 class SampleData(FrozenModel):
     """Sample data."""
 
@@ -128,6 +119,5 @@ class SampleData(FrozenModel):
 class SeededSession(FrozenModel):
     """Seeded session."""
 
-    id: uuid.UUID
-    number: int
+    session: Session
     node_ids: dict[str, uuid.UUID]

@@ -114,7 +114,10 @@ class SessionRepository(Protocol):
         ...
 
     async def get_many(
-        self, session_ids: Sequence[uuid.UUID], include_payloads: bool
+        self,
+        session_ids: Sequence[uuid.UUID],
+        include_payloads: bool,
+        exclusive: bool = False,
     ) -> dict[uuid.UUID, Session]:
         """Bulk-load sessions by id, keyed by id, missing ids omitted.
 
@@ -122,6 +125,8 @@ class SessionRepository(Protocol):
             session_ids: Ids of the sessions to load.
             include_payloads: Whether to read the inputs and outputs
                 columns.
+            exclusive: Whether to lock the rows in ascending id order for
+                the duration of the transaction.
 
         Returns:
             Stored sessions keyed by id.

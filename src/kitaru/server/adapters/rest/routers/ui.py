@@ -431,11 +431,11 @@ async def create_sample_data(
             body.resume_existing if body is not None else False,
             actor,
         )
-        result = await seeder.seed(agent, version, actor)
+        agent, failing, investigation = await seeder.seed(agent, version, actor)
     return SampleDataResponse(
-        agent_id=result.agent_id,
-        agent_name=result.agent_name,
-        failing_session_id=result.failing_session_id,
-        failing_session_number=result.failing_session_number,
-        investigation_id=result.investigation_id,
+        agent_id=agent.id,
+        agent_name=agent.name,
+        failing_session_id=failing.id,
+        failing_session_number=failing.number,
+        investigation_id=investigation.id,
     )

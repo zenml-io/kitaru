@@ -15,7 +15,8 @@
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator
+import uuid
+from collections.abc import AsyncGenerator, Sequence
 
 import httpx
 import pytest
@@ -25,6 +26,9 @@ from sqlalchemy import func, select
 from conftest import db_settings, lifespan_client
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.adapters.db.orm.experiment import ReplayConfigORM
+from kitaru.server.adapters.db.repositories.session_repository import (
+    SQLSessionRepository,
+)
 from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.session import SessionCreate
@@ -35,7 +39,9 @@ from kitaru.server.application.services.sample_data_seeding import (
 )
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.database.service import DatabaseService
+from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersion
+from kitaru.server.domain.investigation import Investigation
 from kitaru.server.domain.session import Session
 
 
@@ -98,6 +104,117 @@ async def test_seed_sample_data(
         if evaluation["passed"] is False
     ]
     assert failing == [("kitaru-template:returns-ticket-007", "policy_grounded_refund")]
+
+
+async def test_seed_returns_domain_objects_and_keeps_the_tour_response(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Return domain entities and map the unchanged tour response at REST."""
+    results: list[tuple[Agent, Session, Investigation]] = []
+    seed = SampleDataSeeder.seed
+
+    async def capture_seed(
+        self: SampleDataSeeder,
+        agent: Agent,
+        version: AgentVersion,
+        actor: AuthContext,
+    ) -> tuple[Agent, Session, Investigation]:
+        result = await seed(self, agent, version, actor)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(SampleDataSeeder, "seed", capture_seed)
+    response = await client.post("/api/v1/ui/sample-data")
+    assert response.status_code == 201
+    assert len(results) == 1
+    assert isinstance(results[0], tuple)
+    agent, session, investigation = results[0]
+    assert isinstance(agent, Agent)
+    assert isinstance(session, Session)
+    assert isinstance(investigation, Investigation)
+    assert session.external_id == load_sample_data().failing_session_external_id
+    assert response.json() == {
+        "agent_id": str(agent.id),
+        "agent_name": agent.name,
+        "failing_session_id": str(session.id),
+        "failing_session_number": session.number,
+        "investigation_id": str(investigation.id),
+    }
+
+
+@pytest.mark.parametrize("existing_count", [3, 10])
+async def test_recovery_locks_every_session_before_repair_or_ingestion(
+    client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    existing_count: int,
+) -> None:
+    """Lock the full set once when legacy IDs disagree with fixture order."""
+    data = load_sample_data()
+    agent = (
+        await client.post("/api/v1/agents", json=data.agent.model_dump(mode="json"))
+    ).json()
+    legacy: dict[str, str] = {}
+    for item in reversed(data.sessions[:existing_count]):
+        response = await client.post(
+            "/api/v1/sessions",
+            json=item.session.model_dump(mode="json") | {"agent_id": agent["id"]},
+        )
+        assert response.status_code == 201
+        legacy[response.json()["external_id"]] = response.json()["id"]
+    fixture_order = [
+        legacy[item.session.external_id]
+        for item in data.sessions[:existing_count]
+        if item.session.external_id is not None
+    ]
+    assert fixture_order != sorted(fixture_order)
+    batches: list[set[uuid.UUID]] = []
+    get_many = SQLSessionRepository.get_many
+    get = SQLSessionRepository.get
+
+    async def capture_batch(
+        self: SQLSessionRepository,
+        session_ids: Sequence[uuid.UUID],
+        include_payloads: bool,
+        exclusive: bool = False,
+    ) -> dict[uuid.UUID, Session]:
+        if exclusive:
+            assert not batches
+            assert len(session_ids) == len(data.sessions)
+            assert list(session_ids) == sorted(session_ids)
+        result = await get_many(self, session_ids, include_payloads, exclusive)
+        if exclusive:
+            batches.append(set(result))
+        return result
+
+    async def require_complete_batch(
+        self: SQLSessionRepository,
+        session_id: uuid.UUID,
+        include_payloads: bool,
+        exclusive: bool = False,
+    ) -> Session:
+        if exclusive:
+            assert len(batches) == 1, "Lock the complete set before per-session writes"
+            assert session_id in batches[0]
+        return await get(self, session_id, include_payloads, exclusive)
+
+    monkeypatch.setattr(SQLSessionRepository, "get_many", capture_batch)
+    monkeypatch.setattr(SQLSessionRepository, "get", require_complete_batch)
+    response = await client.post(
+        "/api/v1/ui/sample-data", json={"resume_existing": True}
+    )
+    assert response.status_code == 201
+    assert len(batches) == 1
+    assert {uuid.UUID(value) for value in legacy.values()} <= batches[0]
+    sessions = (
+        await client.get("/api/v1/sessions", params=_agent_filter(agent["id"]))
+    ).json()["items"]
+    assert len(sessions) == len(data.sessions)
+    assert {
+        row["external_id"]: row["id"]
+        for row in sessions
+        if row["external_id"] in legacy
+    } == legacy
+    assert all(row["agent_version_id"] is not None for row in sessions)
 
 
 async def test_seed_sample_data_stores_session_nodes(

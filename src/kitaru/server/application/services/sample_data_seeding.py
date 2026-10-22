@@ -58,7 +58,6 @@ from kitaru.server.application.models.plugin import (
 )
 from kitaru.server.application.models.sample_data import (
     SampleData,
-    SampleDataResult,
     SampleInvestigationSession,
     SeededSession,
 )
@@ -91,7 +90,11 @@ from kitaru.server.domain.plugin import (
     PluginKind,
     ScriptPluginSource,
 )
-from kitaru.server.domain.session import DuplicateSessionExternalId
+from kitaru.server.domain.session import (
+    DuplicateSessionExternalId,
+    Session,
+    SessionNotFound,
+)
 from kitaru.server.domain.tag import DuplicateTagLink, DuplicateTagName, Tag
 from kitaru.server.filtering import AndExpression, FilterCondition
 from kitaru.server.utils import paginate_all
@@ -153,7 +156,7 @@ def _investigation_session(
         Investigation session input.
     """
     return InvestigationSessionInput(
-        session_id=seeded.id,
+        session_id=seeded.session.id,
         questions=[
             InvestigationSessionQuestion(
                 key=question.key,
@@ -222,7 +225,7 @@ class SampleDataSeeder:
 
     async def seed(
         self, agent: Agent, version: AgentVersion, actor: AuthContext
-    ) -> SampleDataResult:
+    ) -> tuple[Agent, Session, Investigation]:
         """Seed everything recorded under the sample agent.
 
         The sample sessions are stored with their nodes and evaluations,
@@ -239,7 +242,7 @@ class SampleDataSeeder:
         data = load_sample_data()
         seeded = await self._seed_sessions(data, agent, version, actor)
         await self._tag_sessions(
-            data.session_tag, [item.id for item in seeded.values()], actor
+            data.session_tag, [item.session.id for item in seeded.values()], actor
         )
         await self._seed_cohort(data, agent, seeded, actor)
         await self._seed_experiment(data, agent, actor)
@@ -247,13 +250,7 @@ class SampleDataSeeder:
         if self._analytics is not None:
             self._analytics.track(actor.account.id, AnalyticsEvent.SAMPLE_DATA_LOADED)
         failing = seeded[data.failing_session_external_id]
-        return SampleDataResult(
-            agent_id=agent.id,
-            agent_name=agent.name,
-            failing_session_id=failing.id,
-            failing_session_number=failing.number,
-            investigation_id=investigation.id,
-        )
+        return agent, failing.session, investigation
 
     async def _seed_sessions(
         self, data: SampleData, agent: Agent, version: AgentVersion, actor: AuthContext
@@ -269,7 +266,7 @@ class SampleDataSeeder:
         Returns:
             Stored session per external id.
         """
-        seeded: dict[str, SeededSession] = {}
+        resolved: dict[str, Session] = {}
         for item in data.sessions:
             try:
                 session = await self._sessions.create_session(
@@ -309,15 +306,30 @@ class SampleDataSeeder:
                     or sessions[0].imported_from != item.session.imported_from
                 ):
                     raise
-                session = await self._session_repository.get(
-                    sessions[0].id, include_payloads=False, exclusive=True
-                )
-                external_id = item.session.external_id
-                assert external_id is not None
-                if session.link_sample_agent_version(
-                    version, item.session.imported_from, external_id
-                ):
-                    session = await self._session_repository.update(session)
+                session = sessions[0]
+            external_id = item.session.external_id
+            assert external_id is not None
+            resolved[external_id] = session
+
+        # Ingestion and evaluation services re-lock sessions, so acquire the
+        # complete set in one ordered batch before any per-session work.
+        locked = await self._session_repository.get_many(
+            sorted(session.id for session in resolved.values()),
+            include_payloads=False,
+            exclusive=True,
+        )
+        seeded: dict[str, SeededSession] = {}
+        for item in data.sessions:
+            external_id = item.session.external_id
+            assert external_id is not None
+            session_id = resolved[external_id].id
+            session = locked.get(session_id)
+            if session is None:
+                raise SessionNotFound(session_id)
+            if session.link_sample_agent_version(
+                version, item.session.imported_from, external_id
+            ):
+                session = await self._session_repository.update(session)
             nodes = await self._nodes.ingest_nodes(session.id, item.nodes, actor)
             existing = await paginate_all(
                 lambda cursor, session_id=session.id: (
@@ -350,11 +362,8 @@ class SampleDataSeeder:
                 ],
                 actor,
             )
-            external_id = item.session.external_id
-            assert external_id is not None
             seeded[external_id] = SeededSession(
-                id=session.id,
-                number=session.number,
+                session=session,
                 node_ids={node.external_id: node.id for node in nodes},
             )
         return seeded
@@ -467,7 +476,7 @@ class SampleDataSeeder:
             cohort.id,
             CohortVersionCreate(
                 add_session_ids=[
-                    seeded[external_id].id
+                    seeded[external_id].session.id
                     for external_id in data.cohort.member_external_ids
                 ],
                 display_version=data.cohort.display_version,
