@@ -7,7 +7,7 @@ import argparse
 import asyncio
 import logging
 import sys
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import asynccontextmanager
 
 from mcp.server import MCPServer
@@ -38,7 +38,7 @@ def create_server(
     @asynccontextmanager
     async def lifespan(
         _server: MCPServer[MCPServerState],
-    ) -> AsyncIterator[MCPServerState]:
+    ) -> AsyncGenerator[MCPServerState, None]:
         if connection is None:
             raise RuntimeError(
                 "A resolved connection is required to run the MCP server."

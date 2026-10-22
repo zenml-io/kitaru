@@ -8,7 +8,7 @@ import socket
 import subprocess
 import sys
 import uuid
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -169,7 +169,7 @@ def _available_port() -> int:
 
 
 @asynccontextmanager
-async def _network_server() -> AsyncIterator[str]:
+async def _network_server() -> AsyncGenerator[str, None]:
     await _require_postgres()
     settings = db_settings()
     await DatabaseService.create_db(settings)

@@ -27,7 +27,7 @@ from kitaru.api_models.v1.investigation import (
     InvestigationResponse,
     InvestigationSessionResponse,
 )
-from kitaru.api_models.v1.job import JobResponse
+from kitaru.api_models.v1.job import JobKind, JobResponse
 from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayResponse
 from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
 from kitaru.api_models.v1.session_node import SessionNodeResponse
@@ -139,7 +139,9 @@ class _MCPJob(JobResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    kind: Literal["session_run", "import", "evaluation", "replay"]
+    kind: Literal[  # ty: ignore[invalid-mutable-override]
+        JobKind.SESSION_RUN, JobKind.IMPORT, JobKind.EVALUATION, JobKind.REPLAY
+    ]
 
 
 ActivityItem = (

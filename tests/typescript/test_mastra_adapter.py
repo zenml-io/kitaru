@@ -8,7 +8,7 @@ import socket
 import subprocess
 import sys
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -43,7 +43,7 @@ def _available_port() -> int:
 
 
 @asynccontextmanager
-async def _network_server() -> AsyncIterator[str]:
+async def _network_server() -> AsyncGenerator[str, None]:
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     settings = db_settings()

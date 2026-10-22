@@ -24,7 +24,7 @@ import secrets
 import shutil
 import socket
 import webbrowser
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -974,7 +974,7 @@ def _read_state(path: Path) -> LocalRuntimeState | None:
 
 
 @contextmanager
-def _operation_lock(paths: LocalRuntimePaths) -> Iterator[None]:
+def _operation_lock(paths: LocalRuntimePaths) -> Generator[None, None, None]:
     paths.directory.mkdir(parents=True, exist_ok=True, mode=DIRECTORY_MODE)
     os.chmod(paths.directory, DIRECTORY_MODE)
     descriptor: int | None = None

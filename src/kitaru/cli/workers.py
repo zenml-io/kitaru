@@ -19,7 +19,7 @@ import logging
 import os
 import signal
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -209,7 +209,7 @@ def _parse_metadata(values: list[str]) -> dict[str, str]:
 @contextmanager
 def worker_contract_environment(
     target: ResolvedTarget,
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """Set the unchanged worker environment contract and restore it afterward."""
     original = {
         name: os.environ.get(name, _ENV_MISSING) for name in _WORKER_CONTRACT_ENV
@@ -311,7 +311,7 @@ class ForegroundWorkerProcess:
                 reset_output_context(token)
 
     @contextmanager
-    def _installed_signal_handlers(self) -> Iterator[None]:
+    def _installed_signal_handlers(self) -> Generator[None, None, None]:
         """Install available process signals and restore the prior handlers."""
         from kitaru.worker.platforms import current_platform
 
