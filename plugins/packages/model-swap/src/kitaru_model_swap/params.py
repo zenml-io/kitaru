@@ -30,6 +30,26 @@ from pydantic import (
 ToolCallFormat = Literal["native", "hermes", "json_content"]
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Fields the analyzer derives from the recording or from the candidate's own
+# settings. Overriding them in `extra_body` would change the task, the token
+# limit the spend cap reserves for, or how many answers are billed.
+_RESERVED_BODY_FIELDS = frozenset(
+    {
+        "model",
+        "messages",
+        "input",
+        "instructions",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "response_format",
+        "max_tokens",
+        "max_completion_tokens",
+        "max_output_tokens",
+        "n",
+        "stream",
+    }
+)
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
@@ -87,7 +107,12 @@ class ProviderSettings(_Params):
     temperature: float | None = Field(default=None, ge=0)
     extra_body: dict[str, Any] = Field(
         default_factory=dict,
-        description="Extra request fields merged into every request body.",
+        description=(
+            "Extra request fields merged into every request body. Fields the "
+            "analyzer sets itself (the model, messages, tools, recorded request "
+            "controls such as `tool_choice`, token limits, `n` and `stream`) "
+            "are rejected; use `max_tokens` for the output limit."
+        ),
     )
     timeout_seconds: float = Field(default=120, gt=0)
     max_retries: int = Field(
@@ -99,18 +124,29 @@ class ProviderSettings(_Params):
 
     @model_validator(mode="after")
     def _check_api(self) -> Self:
-        """Tool calls come back in native form from the Responses API.
+        """Check the request shape and the fields `extra_body` may add.
 
         Returns:
             The validated settings.
 
         Raises:
-            ValueError: A text tool-call format is set with the Responses API.
+            ValueError: A text tool-call format is set with the Responses API,
+                or `extra_body` overrides a field the analyzer sets.
         """
         if self.api == "responses" and self.tool_call_format != "native":
             raise ValueError(
                 "the Responses API returns tool calls natively; leave "
                 "tool_call_format at `native`"
+            )
+        reserved = sorted(_RESERVED_BODY_FIELDS & self.extra_body.keys())
+        text = self.extra_body.get("text")
+        if text is not None and (not isinstance(text, dict) or "format" in text):
+            reserved.append("text.format")
+        if reserved:
+            raise ValueError(
+                "extra_body must not set fields the analyzer sets itself: "
+                + ", ".join(reserved)
+                + "; use max_tokens for the output limit"
             )
         return self
 

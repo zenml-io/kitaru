@@ -357,7 +357,7 @@ def test_responses_body_converts_a_chat_request() -> None:
         },
         {"type": "function_call_output", "call_id": "c1", "output": "shipped"},
     ]
-    assert body["tools"] == [{"type": "function", **TOOL["function"]}]
+    assert body["tools"] == [{"type": "function", "strict": False, **TOOL["function"]}]
     assert body["reasoning"] == {"effort": "low"}
     assert body["max_output_tokens"] == 256
     assert body["store"] is False

@@ -43,6 +43,7 @@ from kitaru_model_swap.runner import Runner
 # Sessions are fetched a few at a time so a large import neither waits on
 # one request after another nor holds every session in memory at once.
 _FETCH_CONCURRENCY = 8
+_DASHBOARD_LOOKUP_SECONDS = 10.0
 
 
 async def analyze_model_swap(
@@ -106,7 +107,7 @@ async def run_model_swap(
                     collection.add_session(session, params)
         except TimeoutError:
             collection.sessions_not_fetched = len(session_ids) - collection.sessions
-        dashboard_url = await _get_dashboard_url(client)
+        dashboard_url = await _get_dashboard_url(client, deadline)
     sampled = sample_calls(collection.calls, params.max_calls)
     _check_cap_fits(params, prices, sampled)
     plans = [(call, plan_decisions(call.request)) for call in sampled]
@@ -115,6 +116,7 @@ async def run_model_swap(
     judge_check = None
     spent = Decimal(0)
     stopped_early = None
+    unmetered_attempts = 0
     if not params.dry_run and sampled:
         runner = Runner(params, prices, judge_price=judge_price, transport=transport)
         # Decision requests are small and fast, so they go first and are not
@@ -130,6 +132,7 @@ async def run_model_swap(
         stopped_early = runner.stopped_early
         judge_check = await runner.recheck_judge(results)
         spent = runner.budget.spent
+        unmetered_attempts = runner.unmetered_attempts
     if collection.sessions_not_fetched:
         stopped_early = stopped_early or "time_budget"
     report = build_report(
@@ -143,6 +146,7 @@ async def run_model_swap(
         plans=plans,
         decision_results=decision_results,
         judge_check=judge_check,
+        unmetered_attempts=unmetered_attempts,
     )
     return build_insights(report, dashboard_url=dashboard_url)
 
@@ -195,13 +199,20 @@ def _check_cap_fits(
             )
 
 
-async def _get_dashboard_url(client: KitaruAPIClient) -> str | None:
-    """Resolve the dashboard base URL for session links, when there is one."""
+async def _get_dashboard_url(client: KitaruAPIClient, deadline: float) -> str | None:
+    """Resolve the dashboard base URL for session links, when there is one.
+
+    The lookup gets what is left of the time budget, at most
+    `_DASHBOARD_LOOKUP_SECONDS`; without an answer in time the report has
+    no links.
+    """
+    remaining = min(deadline - time.monotonic(), _DASHBOARD_LOOKUP_SECONDS)
     try:
-        info = await client.info.get()
-    # Links only decorate the report, so a failing or malformed info
-    # response must not fail an analysis whose replays already ran.
-    except (KitaruClientError, httpx.HTTPError, ValueError):
+        async with asyncio.timeout(max(remaining, 0)):
+            info = await client.info.get()
+    # Links only decorate the report, so a failing, malformed or slow info
+    # response must not fail an analysis or hold up its replays.
+    except (KitaruClientError, httpx.HTTPError, ValueError, TimeoutError):
         return None
     url = get_dashboard_base_url(info, client.base_url)
     return url if url and urlsplit(url).scheme in {"http", "https"} else None

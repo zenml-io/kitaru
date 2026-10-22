@@ -1767,7 +1767,15 @@ def test_falls_back_to_genai_tool_definitions() -> None:
     assert _generation_node(session).metadata[
         langfuse_module.TOOL_DEFINITIONS_METADATA_KEY
     ] == [
-        {"type": "function", "function": {"name": "get_weather", "parameters": schema}}
+        {"type": "function", "function": {"name": "get_weather", "parameters": schema}},
+        # A function without parameters takes no arguments.
+        {
+            "type": "function",
+            "function": {
+                "name": "no_schema",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
     ]
 
 

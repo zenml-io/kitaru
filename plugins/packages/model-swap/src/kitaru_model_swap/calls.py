@@ -168,16 +168,27 @@ def reservation_usage(
     reasons and the recorded model did not, so the reservation assumes
     several times the recorded output, never more than the limit.
     """
-    if strict and max_tokens is not None:
-        output_tokens = max_tokens
-    else:
-        recorded = call.usage.output_tokens or _DEFAULT_OUTPUT_TOKENS
-        output_tokens = max(recorded * _RESERVE_OUTPUT_FACTOR, _MIN_RESERVED_OUTPUT)
-        if max_tokens is not None:
-            output_tokens = min(output_tokens, max_tokens)
     return Usage(
-        input_tokens=_input_tokens(call, system_prompt), output_tokens=output_tokens
+        input_tokens=_input_tokens(call, system_prompt),
+        output_tokens=reserved_output_tokens(
+            call.usage.output_tokens, max_tokens, strict=strict
+        ),
     )
+
+
+def reserved_output_tokens(
+    typical: int | None, max_tokens: int | None, *, strict: bool
+) -> int:
+    """Output tokens to reserve for a request whose typical output is known.
+
+    With `strict` and an output limit, the reservation is the full limit;
+    otherwise several times the typical output, never more than the limit.
+    """
+    if strict and max_tokens is not None:
+        return max_tokens
+    typical = typical or _DEFAULT_OUTPUT_TOKENS
+    output_tokens = max(typical * _RESERVE_OUTPUT_FACTOR, _MIN_RESERVED_OUTPUT)
+    return output_tokens if max_tokens is None else min(output_tokens, max_tokens)
 
 
 def sample_calls(calls: list[RecordedCall], max_calls: int) -> list[RecordedCall]:

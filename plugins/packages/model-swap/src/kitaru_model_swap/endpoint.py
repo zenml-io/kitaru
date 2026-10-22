@@ -18,7 +18,8 @@ import json
 import os
 import re
 import time
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 import httpx
@@ -39,6 +40,8 @@ FailureCategory = Literal[
 _MAX_DETAIL = 200
 _RETRYABLE_STATUS = frozenset({408, 409, 429, 500, 502, 503, 504})
 _HERMES_BLOCK = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+# Errors raised before the request reached the provider, so nothing was billed.
+_NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 
 class MissingCredentialError(RuntimeError):
@@ -47,12 +50,17 @@ class MissingCredentialError(RuntimeError):
 
 @dataclass(frozen=True)
 class Usage:
-    """Token counts reported by the endpoint."""
+    """Token counts reported by the endpoint.
+
+    `reported` is False when the endpoint gave no usage, so the counts are
+    unknown rather than measured zeros. It does not take part in equality.
+    """
 
     input_tokens: int = 0
     cached_input_tokens: int = 0
     output_tokens: int = 0
     reasoning_tokens: int = 0
+    reported: bool = field(default=True, compare=False)
 
 
 @dataclass(frozen=True)
@@ -66,6 +74,10 @@ class CandidateReply:
     attempts: int
     failure: FailureCategory | None = None
     failure_detail: str | None = None
+    unmetered_attempts: int = 0
+    """Attempts the provider may have billed without reporting usage: a
+    timeout or broken connection after the request was sent, or a reply
+    without usage."""
 
 
 def get_api_key(candidate: Candidate) -> str | None:
@@ -90,12 +102,18 @@ def build_body(
     candidate: Candidate,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
+    controls: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the chat-completions request body for a candidate."""
+    """Build the chat-completions request body for a candidate.
+
+    `controls` are the recorded call's `tool_choice`, `parallel_tool_calls`
+    and `response_format`, already in chat-completions form.
+    """
     settings = candidate.provider_settings
     body: dict[str, Any] = {"model": candidate.model, "messages": messages}
     if tools:
         body["tools"] = tools
+    body.update(controls or {})
     if settings.reasoning_effort is not None:
         body["reasoning_effort"] = settings.reasoning_effort
     if settings.max_tokens is not None:
@@ -110,6 +128,7 @@ def build_responses_body(
     candidate: Candidate,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
+    controls: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build an OpenAI Responses API request from a chat-completions request.
 
@@ -153,9 +172,25 @@ def build_responses_body(
     if instructions:
         body["instructions"] = "\n\n".join(instructions)
     if tools:
+        # The Responses API makes functions strict unless told otherwise,
+        # while chat completions does not, so the recorded flag is explicit.
         body["tools"] = [
-            {"type": "function", **_as_dict(tool.get("function"))} for tool in tools
+            {"type": "function", "strict": False, **_as_dict(tool.get("function"))}
+            for tool in tools
         ]
+    controls = controls or {}
+    if "tool_choice" in controls:
+        choice = controls["tool_choice"]
+        body["tool_choice"] = (
+            {"type": "function", "name": choice["function"]["name"]}
+            if isinstance(choice, dict)
+            else choice
+        )
+    if "parallel_tool_calls" in controls:
+        body["parallel_tool_calls"] = controls["parallel_tool_calls"]
+    text = dict(settings.extra_body.get("text") or {})
+    if "response_format" in controls:
+        text["format"] = _responses_format(controls["response_format"])
     if settings.reasoning_effort is not None:
         body["reasoning"] = {"effort": settings.reasoning_effort}
     if settings.max_tokens is not None:
@@ -163,7 +198,16 @@ def build_responses_body(
     if settings.temperature is not None:
         body["temperature"] = settings.temperature
     body.update(settings.extra_body)
+    if text:
+        body["text"] = text
     return body
+
+
+def _responses_format(response_format: Mapping[str, Any]) -> dict[str, Any]:
+    """Convert a chat-completions `response_format` to a Responses `text.format`."""
+    if response_format["type"] != "json_schema":
+        return {"type": response_format["type"]}
+    return {"type": "json_schema", **response_format["json_schema"]}
 
 
 def _text(content: Any) -> str:
@@ -198,8 +242,14 @@ async def send(
     api_key: str | None,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
+    controls: Mapping[str, Any] | None = None,
+    may_retry: Callable[[], Awaitable[bool]] | None = None,
 ) -> CandidateReply:
-    """Send one request, retrying transient failures, and classify the reply."""
+    """Send one request, retrying transient failures, and classify the reply.
+
+    `may_retry` is asked before each retry, so a retry can be refused when
+    the spend cap has no room for another attempt.
+    """
     settings = candidate.provider_settings
     responses = settings.api == "responses"
     url = candidate.base_url.rstrip("/") + (
@@ -207,10 +257,11 @@ async def send(
     )
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     body = (build_responses_body if responses else build_body)(
-        candidate, messages, tools
+        candidate, messages, tools, controls
     )
     started = time.monotonic()
     attempts = 0
+    unmetered = 0
     failure: FailureCategory = "http_error"
     detail = ""
     while attempts <= settings.max_retries:
@@ -219,32 +270,39 @@ async def send(
             response = await client.post(
                 url, json=body, headers=headers, timeout=settings.timeout_seconds
             )
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as error:
             failure, detail = "timeout", f"no reply in {settings.timeout_seconds}s"
+            unmetered += not isinstance(error, _NOT_SENT)
         except httpx.HTTPError as error:
             failure, detail = "http_error", type(error).__name__
+            unmetered += not isinstance(error, _NOT_SENT)
         else:
-            if response.status_code == 200 and responses:
-                return _classify_responses(
-                    response,
-                    latency=time.monotonic() - started,
-                    attempts=attempts,
-                )
             if response.status_code == 200:
-                return _classify(
+                classify = _classify_responses if responses else _classify
+                reply = classify(
                     response,
                     settings.tool_call_format,
                     latency=time.monotonic() - started,
                     attempts=attempts,
+                )
+                return replace(
+                    reply,
+                    unmetered_attempts=unmetered + (not reply.usage.reported),
                 )
             failure = "rate_limited" if response.status_code == 429 else "http_error"
             detail = f"HTTP {response.status_code}" + _error_message(response)
             if response.status_code not in _RETRYABLE_STATUS:
                 break
         if attempts <= settings.max_retries:
+            if may_retry is not None and not await may_retry():
+                detail += "; not retried, the spend cap has no room"
+                break
             await asyncio.sleep(min(2.0**attempts, 10.0))
-    return _failure(
-        failure, detail, latency=time.monotonic() - started, attempts=attempts
+    return replace(
+        _failure(
+            failure, detail, latency=time.monotonic() - started, attempts=attempts
+        ),
+        unmetered_attempts=unmetered,
     )
 
 
@@ -319,7 +377,11 @@ def _classify(
 
 
 def _classify_responses(
-    response: httpx.Response, *, latency: float, attempts: int
+    response: httpx.Response,
+    _tool_call_format: ToolCallFormat,
+    *,
+    latency: float,
+    attempts: int,
 ) -> CandidateReply:
     """Turn a successful Responses API reply into a reply or a failure."""
     try:
@@ -389,11 +451,11 @@ def _failure(
     attempts: int,
     usage: Usage | None = None,
 ) -> CandidateReply:
-    """Build the reply for a failed request."""
+    """Build the reply for a failed request; without usage, usage is unknown."""
     return CandidateReply(
         tool_calls=(),
         text=None,
-        usage=usage or Usage(),
+        usage=usage or Usage(reported=False),
         latency_seconds=latency,
         attempts=attempts,
         failure=category,
@@ -465,7 +527,7 @@ def read_usage(usage: Any) -> Usage:
     Responses API reports `input_tokens` and `output_tokens`.
     """
     if not isinstance(usage, dict):
-        return Usage()
+        return Usage(reported=False)
     if "input_tokens" in usage or "output_tokens" in usage:
         input_details = _as_dict(usage.get("input_tokens_details"))
         output_details = _as_dict(usage.get("output_tokens_details"))

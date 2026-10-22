@@ -252,7 +252,10 @@ def test_tool_definitions_metadata_takes_precedence() -> None:
         node(
             inputs={
                 "messages": [{"role": "user", "content": "hi"}],
-                "tools": [{"type": "function", "name": "other", "parameters": {}}],
+                "tools": [
+                    {"type": "function", "name": "search", "parameters": {}},
+                    {"type": "function", "name": "other", "parameters": {}},
+                ],
             },
             outputs={"role": "assistant", "content": "hello"},
             metadata={"kitaru.tool_definitions": [definition]},
@@ -260,7 +263,12 @@ def test_tool_definitions_metadata_takes_precedence() -> None:
     )
 
     assert isinstance(request, ReplayRequest)
-    assert request.tools == [definition]
+    # The metadata defines `search`; `other` was offered in the request too,
+    # so it is still offered rather than silently dropped.
+    assert request.tools == [
+        definition,
+        {"type": "function", "function": {"name": "other", "parameters": {}}},
+    ]
 
 
 def test_mlflow_fixture_rebuilds_openai_chat_calls() -> None:

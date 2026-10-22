@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep each recorded call's `tool_choice`, `parallel_tool_calls`, `response_format` and strict function schemas in rebuilt chat-completions and Responses API requests, or skip the call with a counted reason (`unsupported_request_control`, `unsupported_tool`) when a control or offered tool cannot be sent faithfully. Offer functions without parameters with an empty schema, and keep recorded plain text that is valid JSON as text.
+- Hold the spend cap for the request actually sent: reject `extra_body` fields the analyzer sets itself (model, messages, tools, request controls, token limits, `n`, `stream`), reserve the judge's own output limit, reserve room for each retry, and charge replies without usage, timeouts and broken connections their full reservation. Unknown usage is no longer a measured zero cost.
 - Shorten oversized tool-call ids consistently in rebuilt requests without changing the recording, and clarify that instructions may be present in user messages when no system or developer message was recorded. Document explicit Responses API selection for GPT-5.6 candidates using tools with reasoning.
 - Present the report as stage 1 of 2: a screen that rules candidates out, with full replays graded on outcomes deciding.
 - Keep comparisons honest: `system_prompt` per candidate (optionally only on `system_prompt_nodes`) to try a rewritten prompt, a `truncated` failure for replies cut off by the token limit, a blind judge (answers A and B in varying order) rechecked with the order swapped (`judge_check`) and flagged when unstable or when it runs a candidate's model, a note when there is no reference to set a noise floor, and a best mix chosen on half of the sessions and kept only where it holds on the other half.

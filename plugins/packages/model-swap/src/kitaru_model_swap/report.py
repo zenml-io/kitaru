@@ -126,8 +126,14 @@ def build_report(
     plans: list[tuple[RecordedCall, DecisionPlan]] | None = None,
     decision_results: list[DecisionResult] | None = None,
     judge_check: dict[str, int] | None = None,
+    unmetered_attempts: int = 0,
 ) -> dict[str, Any]:
-    """Build the JSON report for a completed run or a dry run."""
+    """Build the JSON report for a completed run or a dry run.
+
+    `unmetered_attempts` counts attempts charged their reservation against
+    the spend cap because the provider may have billed them without
+    reporting usage.
+    """
     plans = plans or []
     volume = get_volume(collection, params)
     by_candidate: dict[str, list[CallResult]] = defaultdict(list)
@@ -229,6 +235,17 @@ def build_report(
                 "a full replay of the agent measures that."
             ]
             if params.candidates and not params.dry_run
+            else []
+        )
+        + (
+            [
+                f"{unmetered_attempts} requests may have been billed without "
+                "reporting usage (a timeout or broken connection after the "
+                "request was sent, or a reply without usage). Each was charged "
+                "its full reservation against the spend cap, so the spend shown "
+                "is an upper bound, and their cost is left out of per-call costs."
+            ]
+            if unmetered_attempts
             else []
         ),
     }

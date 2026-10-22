@@ -26,8 +26,8 @@ Anything else is skipped with a reason instead of guessed.
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from kitaru.api_models.v1.session_node import NodeStatus, SessionNodeResponse
@@ -42,10 +42,17 @@ SkipReason = Literal[
     "unrecognized_recorded_output",
     "missing_tool_schema",
     "missing_tool_call_id",
+    "unsupported_tool",
+    "unsupported_request_control",
 ]
 SchemaSource = Literal["recorded", "supplied", "inferred", "none"]
 
 _CHAT_ROLES = frozenset({"system", "developer", "user", "assistant", "tool"})
+_TOOL_CHOICE_MODES = frozenset({"auto", "none", "required"})
+_RESPONSE_FORMATS = frozenset({"text", "json_object", "json_schema"})
+# Legacy function calling has no faithful rebuild in either request shape.
+_LEGACY_CONTROLS = ("functions", "function_call")
+_EMPTY_PARAMETERS: dict[str, Any] = {"type": "object", "properties": {}}
 
 
 class UnsupportedShapeError(ValueError):
@@ -83,6 +90,9 @@ class ReplayRequest:
     source_format: str
     recorded: RecordedOutcome
     dropped_reasoning_parts: int = 0
+    controls: Mapping[str, Any] = field(default_factory=dict)
+    """Recorded `tool_choice`, `parallel_tool_calls` and `response_format`,
+    in chat-completions form, which constrain what the model could answer."""
 
 
 @dataclass(frozen=True)
@@ -139,11 +149,15 @@ def build_replay_request(
 
     definitions: dict[str, dict[str, Any]] = {}
     schema_source: SchemaSource = "none"
-    if use_recorded_tools:
-        for definition in _recorded_tool_definitions(node, recorded_tools):
-            definitions.setdefault(definition["function"]["name"], definition)
-        if definitions:
-            schema_source = "recorded"
+    try:
+        if use_recorded_tools:
+            for definition in _recorded_tool_definitions(node, recorded_tools):
+                definitions.setdefault(definition["function"]["name"], definition)
+            if definitions:
+                schema_source = "recorded"
+        raw_controls = _recorded_controls(node.inputs, node.model_params)
+    except UnsupportedShapeError as error:
+        return Skipped(error.reason, str(error))
     used = _tool_names_used(messages, recorded)
     if used or definitions:
         # A model that may call tools must see every tool the agent offered,
@@ -168,6 +182,10 @@ def build_replay_request(
                 name, _infer_schema(name, messages, recorded), None
             )
         schema_source = "inferred"
+    try:
+        controls = _normalize_controls(raw_controls, definitions.keys())
+    except UnsupportedShapeError as error:
+        return Skipped(error.reason, str(error))
     return ReplayRequest(
         messages=messages,
         tools=list(definitions.values()),
@@ -175,6 +193,113 @@ def build_replay_request(
         source_format=source_format,
         recorded=recorded,
         dropped_reasoning_parts=dropped,
+        controls=controls,
+    )
+
+
+def _recorded_controls(inputs: Any, model_params: Any) -> dict[str, Any]:
+    """Collect request controls recorded beside the messages or as parameters.
+
+    Raises:
+        UnsupportedShapeError: The call used legacy function calling.
+    """
+    if isinstance(inputs, str):
+        try:
+            inputs = json.loads(inputs)
+        except json.JSONDecodeError:
+            inputs = None
+    scopes = [s for s in (inputs, model_params) if isinstance(s, dict)]
+    for scope in scopes:
+        for key in _LEGACY_CONTROLS:
+            if scope.get(key) is not None:
+                raise UnsupportedShapeError(
+                    "unsupported_request_control", f"legacy `{key}` is not supported"
+                )
+    controls: dict[str, Any] = {}
+    for key in ("tool_choice", "parallel_tool_calls", "response_format"):
+        for scope in scopes:
+            if scope.get(key) is not None:
+                controls[key] = scope[key]
+                break
+    return controls
+
+
+def _normalize_controls(
+    controls: Mapping[str, Any], offered: Iterable[str]
+) -> dict[str, Any]:
+    """Return the recorded controls in chat-completions form.
+
+    A control changes which answers the model may give, so one that cannot be
+    sent faithfully skips the call rather than being dropped.
+
+    Raises:
+        UnsupportedShapeError: A control has a form neither request shape
+            can carry, or names a tool that is not offered.
+    """
+    normalized: dict[str, Any] = {}
+    offered = set(offered)
+    if "tool_choice" in controls:
+        choice = _tool_choice(controls["tool_choice"], offered)
+        if not offered and choice == "required":
+            raise UnsupportedShapeError(
+                "unsupported_request_control", "tool_choice requires a tool"
+            )
+        # Endpoints reject `tool_choice` without tools; with none offered,
+        # `auto` and `none` both mean a text answer.
+        if offered:
+            normalized["tool_choice"] = choice
+    if "parallel_tool_calls" in controls:
+        value = controls["parallel_tool_calls"]
+        if not isinstance(value, bool):
+            raise UnsupportedShapeError(
+                "unsupported_request_control", "parallel_tool_calls is not a boolean"
+            )
+        normalized["parallel_tool_calls"] = value
+    if "response_format" in controls:
+        normalized["response_format"] = _response_format(controls["response_format"])
+    return normalized
+
+
+def _tool_choice(value: Any, offered: set[str]) -> str | dict[str, Any]:
+    """Normalize a recorded `tool_choice` to the chat-completions form.
+
+    Raises:
+        UnsupportedShapeError: The form is unknown or the named tool is not
+            offered.
+    """
+    if isinstance(value, str) and value in _TOOL_CHOICE_MODES:
+        return value
+    name = None
+    if isinstance(value, dict) and value.get("type") == "function":
+        function = value.get("function")
+        # The Responses API names the function beside `type`.
+        name = function.get("name") if isinstance(function, dict) else value.get("name")
+    if isinstance(name, str) and name in offered:
+        return {"type": "function", "function": {"name": name}}
+    raise UnsupportedShapeError(
+        "unsupported_request_control",
+        "tool_choice names a tool that is not offered"
+        if isinstance(name, str)
+        else "tool_choice has an unsupported form",
+    )
+
+
+def _response_format(value: Any) -> dict[str, Any]:
+    """Check a recorded chat-completions `response_format`.
+
+    Raises:
+        UnsupportedShapeError: The format is not one both request shapes carry.
+    """
+    if isinstance(value, dict) and value.get("type") in _RESPONSE_FORMATS:
+        schema = value.get("json_schema")
+        if value["type"] != "json_schema" or (
+            isinstance(schema, dict)
+            and isinstance(schema.get("name"), str)
+            and isinstance(schema.get("schema"), dict)
+        ):
+            return dict(value)
+    raise UnsupportedShapeError(
+        "unsupported_request_control", "response_format has an unsupported form"
     )
 
 
@@ -397,12 +522,30 @@ def _openai_tool_call(call_id: Any, name: Any, arguments: Any) -> dict[str, Any]
 
 
 def parse_recorded_output(outputs: Any) -> RecordedOutcome:
-    """Read the recorded answer from any supported output shape."""
+    """Read the recorded answer from any supported output shape.
+
+    A string is decoded only when it holds a recognized response envelope;
+    any other string, including plain text that happens to be valid JSON
+    such as `42` or a structured answer, is the answer's text.
+    """
     if isinstance(outputs, str):
         try:
-            outputs = json.loads(outputs)
+            decoded = json.loads(outputs)
         except json.JSONDecodeError:
             return RecordedOutcome(tool_calls=(), text=outputs)
+        try:
+            return _parse_envelope(decoded)
+        except (UnsupportedShapeError, TypeError, AttributeError, KeyError):
+            return RecordedOutcome(tool_calls=(), text=outputs)
+    return _parse_envelope(outputs)
+
+
+def _parse_envelope(outputs: Any) -> RecordedOutcome:
+    """Read the recorded answer from a decoded response or message list.
+
+    Raises:
+        UnsupportedShapeError: The value is not a recognized answer shape.
+    """
     if isinstance(outputs, dict) and isinstance(outputs.get("choices"), list):
         if not outputs["choices"]:
             raise UnsupportedShapeError(
@@ -455,7 +598,11 @@ def _outcome_from_openai(message: Mapping[str, Any]) -> RecordedOutcome:
 
 
 def normalize_tool_definition(value: Any) -> dict[str, Any] | None:
-    """Return a tool definition in nested OpenAI form, or None."""
+    """Return a tool definition in nested OpenAI form, or None.
+
+    A function declared with `type: function` but no parameters takes no
+    arguments, so it gets an empty object schema.
+    """
     if not isinstance(value, dict):
         return None
     function = value.get("function") if "function" in value else value
@@ -466,39 +613,86 @@ def normalize_tool_definition(value: Any) -> dict[str, Any] | None:
         "parameters",
         function.get("parameters_json_schema", function.get("input_schema")),
     )
-    if not isinstance(name, str) or not isinstance(parameters, dict):
+    if parameters is None and value.get("type") == "function":
+        parameters = _EMPTY_PARAMETERS
+    if not isinstance(name, str) or not name or not isinstance(parameters, dict):
         return None
-    return _definition(name, parameters, function.get("description"))
+    strict = function.get("strict")
+    return _definition(
+        name,
+        parameters,
+        function.get("description"),
+        strict=strict if isinstance(strict, bool) else None,
+    )
 
 
 def _recorded_tool_definitions(
     node: SessionNodeResponse, recorded_tools: Any
 ) -> list[dict[str, Any]]:
-    """Collect tool definitions from the node, most specific source first."""
+    """Collect tool definitions from the node, most specific source first.
+
+    The first source that holds definitions sets them. Tools recorded in the
+    request itself are checked too, since the request is what the model was
+    offered: one missing from the chosen source is added, and its `strict`
+    flag is kept.
+
+    Raises:
+        UnsupportedShapeError: An offered tool is not a function definition
+            this analyzer can send, so replaying without it would narrow the
+            model's choices.
+    """
     sources: list[Any] = [
         node.metadata.get(TOOL_DEFINITIONS_METADATA_KEY),
         recorded_tools,
         (node.model_params or {}).get("tools"),
     ]
-    definitions: list[dict[str, Any]] = []
+    definitions: dict[str, dict[str, Any]] = {}
     for source in sources:
-        if isinstance(source, Sequence) and not isinstance(source, str):
-            for item in source:
-                definition = normalize_tool_definition(item)
-                if definition is not None:
-                    definitions.append(definition)
+        for definition in _read_definitions(source):
+            definitions.setdefault(definition["function"]["name"], definition)
         if definitions:
-            return definitions
-    return []
+            break
+    for definition in _read_definitions(recorded_tools):
+        function = definition["function"]
+        known = definitions.setdefault(function["name"], definition)["function"]
+        if "strict" in function and "strict" not in known:
+            known["strict"] = function["strict"]
+    return list(definitions.values())
+
+
+def _read_definitions(source: Any) -> list[dict[str, Any]]:
+    """Normalize every tool in one recorded list.
+
+    Raises:
+        UnsupportedShapeError: An item is not a function definition.
+    """
+    if not isinstance(source, Sequence) or isinstance(source, str):
+        return []
+    definitions = []
+    for item in source:
+        definition = normalize_tool_definition(item)
+        if definition is None:
+            kind = item.get("type") if isinstance(item, dict) else type(item).__name__
+            raise UnsupportedShapeError(
+                "unsupported_tool", f"an offered tool is not supported: {kind}"
+            )
+        definitions.append(definition)
+    return definitions
 
 
 def _definition(
-    name: str, parameters: Mapping[str, Any], description: str | None
+    name: str,
+    parameters: Mapping[str, Any],
+    description: str | None,
+    *,
+    strict: bool | None = None,
 ) -> dict[str, Any]:
     """Build one nested OpenAI tool definition."""
     function: dict[str, Any] = {"name": name, "parameters": dict(parameters)}
     if description:
         function["description"] = description
+    if strict is not None:
+        function["strict"] = strict
     return {"type": "function", "function": function}
 
 

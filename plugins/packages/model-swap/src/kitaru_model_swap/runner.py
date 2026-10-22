@@ -25,7 +25,11 @@ from typing import Any, Literal, Protocol, TypeVar
 import httpx
 
 from kitaru.task.importer import gather_bounded
-from kitaru_model_swap.calls import RecordedCall, reservation_usage
+from kitaru_model_swap.calls import (
+    RecordedCall,
+    reservation_usage,
+    reserved_output_tokens,
+)
 from kitaru_model_swap.compare import Agreement, compare
 from kitaru_model_swap.decision_plan import DecisionPlan, build_state
 from kitaru_model_swap.decisions import (
@@ -135,6 +139,18 @@ class Budget:
             self._reserved += amount
             return True
 
+    async def try_reserve(self, amount: Decimal) -> bool:
+        """Reserve more for a request already in flight, without waiting.
+
+        A request that waited here while holding its own reservation could
+        wait on others doing the same, so it gets the room now or not at all.
+        """
+        async with self._settled:
+            if not self._fits(amount):
+                return False
+            self._reserved += amount
+            return True
+
     async def settle(self, reserved: Decimal, actual: Decimal) -> None:
         """Replace a reservation with the actual cost."""
         async with self._settled:
@@ -190,6 +206,8 @@ class Runner:
             self._judge_key = None
         self.budget = Budget(params.max_spend_usd)
         self.stopped_early: NotRunReason | None = None
+        self.unmetered_attempts = 0
+        """Attempts charged their reservation because usage was unknown."""
         self._deadline = 0.0
 
     async def run(
@@ -299,7 +317,7 @@ class Runner:
         asked = await self._within_budget(
             self._prices.get(candidate.name),
             Usage(input_tokens=estimated),
-            lambda: ask(
+            lambda _: ask(
                 client,
                 candidate,
                 api_key=self._decision_keys[candidate.name],
@@ -343,12 +361,14 @@ class Runner:
                 strict=self.budget.cap is not None,
                 system_prompt=prompt,
             ),
-            lambda: send(
+            lambda extend: send(
                 client,
                 candidate,
                 api_key=self._keys[candidate.name],
                 messages=messages,
                 tools=call.request.tools,
+                controls=call.request.controls,
+                may_retry=extend,
             ),
         )
         if isinstance(sent, str):
@@ -412,7 +432,7 @@ class Runner:
             decided = await self._within_budget(
                 self._judge_price,
                 Usage(input_tokens=estimated),
-                lambda: decide(
+                lambda _: decide(
                     client,
                     judge,
                     api_key=decision_key,
@@ -434,9 +454,15 @@ class Runner:
             self._judge_price,
             Usage(
                 input_tokens=(len(_JUDGE_PROMPT) + len(prompt)) // 4,
-                output_tokens=_JUDGE_OUTPUT_TOKENS,
+                # The judge is sent its own output limit, so that limit, not
+                # the length of a typical verdict, bounds what it can cost.
+                output_tokens=reserved_output_tokens(
+                    _JUDGE_OUTPUT_TOKENS,
+                    judge.provider_settings.max_tokens,
+                    strict=self.budget.cap is not None,
+                ),
             ),
-            lambda: send(
+            lambda extend: send(
                 client,
                 judge,
                 api_key=key,
@@ -445,6 +471,7 @@ class Runner:
                     {"role": "user", "content": prompt},
                 ],
                 tools=[],
+                may_retry=extend,
             ),
         )
         if isinstance(sent, str):
@@ -464,13 +491,19 @@ class Runner:
         self,
         price: ResolvedPrice | None,
         estimate: Usage,
-        request: Callable[[], Awaitable[_R]],
+        request: Callable[[Callable[[], Awaitable[bool]]], Awaitable[_R]],
     ) -> tuple[_R, Decimal | None] | NotRunReason:
         """Reserve the estimated cost, make the request, and settle the cost.
 
+        `request` receives a function that reserves room for one more
+        attempt and says whether it fit, so retries stay within the cap.
+
         Returns why the request was not made, or was cut off, when a budget
-        runs out. A request cut off by the time budget is charged its
-        reservation, because the provider has usually billed it already.
+        runs out, or the result and its measured cost (None when the reply
+        reported no usage). Work the provider may have billed without
+        reporting usage, such as a request cut off by the time budget, a
+        timed-out attempt, or a reply without usage, is charged its whole
+        reservation, so unknown usage never counts as free.
         """
         if time.monotonic() >= self._deadline:
             self.stopped_early = self.stopped_early or "time_budget"
@@ -491,19 +524,35 @@ class Runner:
         if not fits:
             self.stopped_early = self.stopped_early or "max_spend"
             return "max_spend"
+        held = reserved
+
+        async def extend() -> bool:
+            nonlocal held
+            if not await self.budget.try_reserve(reserved):
+                return False
+            held += reserved
+            return True
+
         try:
             async with asyncio.timeout(self._deadline - time.monotonic()):
-                result = await request()
+                result = await request(extend)
         except TimeoutError:
-            await self.budget.settle(reserved, reserved)
+            await self.budget.settle(held, held)
             self.stopped_early = self.stopped_early or "time_budget"
             return "time_budget"
         except Exception:
             # Release the reservation so calls waiting on the budget go on.
-            await self.budget.settle(reserved, Decimal(0))
+            await self.budget.settle(held, Decimal(0))
             raise
-        cost = _price_or_none(price, result.usage)
-        await self.budget.settle(reserved, cost or Decimal(0))
+        cost = _price_or_none(price, result.usage) if result.usage.reported else None
+        unmetered = (
+            result.unmetered_attempts if isinstance(result, CandidateReply) else 0
+        )
+        self.unmetered_attempts += unmetered
+        # A reply without usage is among the unmetered attempts, so it is
+        # charged once, as its reservation.
+        charged = (cost or Decimal(0)) + reserved * unmetered
+        await self.budget.settle(held, charged)
         return result, cost
 
 

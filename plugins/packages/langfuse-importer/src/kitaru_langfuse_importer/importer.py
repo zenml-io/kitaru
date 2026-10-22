@@ -765,6 +765,9 @@ def _tool_definition(value: Any) -> dict[str, Any] | None:
     parameters = _decode_json(
         _first(function, "parameters", "parameters_json_schema", "input_schema")
     )
+    # OpenAI lets a function that takes no arguments omit its parameters.
+    if parameters is None and value.get("type") == "function":
+        parameters = {"type": "object", "properties": {}}
     # Keep only definitions that carry a real schema; a bare name cannot be
     # replayed against another model.
     if not isinstance(name, str) or not name or not isinstance(parameters, dict):
@@ -774,6 +777,10 @@ def _tool_definition(value: Any) -> dict[str, Any] | None:
     if isinstance(description, str) and description:
         normalized["description"] = description
     normalized["parameters"] = parameters
+    # Strict schemas constrain the arguments the model may send, so a replay
+    # without the flag would pose a looser task.
+    if isinstance(function.get("strict"), bool):
+        normalized["strict"] = function["strict"]
     return {"type": "function", "function": normalized}
 
 
