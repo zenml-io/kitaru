@@ -62,9 +62,9 @@ Three profiles are registered in each root's `conftest.py` and selected with `HY
 
 Known bugs are pinned with `@pytest.mark.xfail(strict=True, raises=..., reason="<issue>")` example tests, where `raises=` names the specific failure (a `pytest.RaisesExc` matcher when the exception type alone cannot tell it apart) so that a different failure still fails the run, and the generators exclude the matching input class with a comment naming the same issue. Fixing the bug makes the xfail fail; remove the marker and the generator exclusion in the same PR. Failing examples are saved under `.hypothesis/examples` and replayed first on the next run.
 
-Mark generated-input MCP tests with `mcp_fuzz`. PR CI runs those properties on Python 3.14 only; fixed MCP regression tests continue on every supported Python version. The nightly MCP fuzz job remains on Python 3.12.
+Mark generated-input MCP tests with `mcp_fuzz`. PR CI runs those properties on Python 3.14 only; fixed MCP regression tests continue on every supported Python version. Nightly MCP boundary and redaction jobs run separately on Python 3.12, retaining 2,000 examples per property. `just fuzz-mcp` runs their combined selection locally; `just fuzz-mcp-boundary` and `just fuzz-mcp-redaction` reproduce each job. The recipes print test names, durations, and a stack dump after five minutes in one test. Nightly processes stop before the job deadline so logs and saved examples can be uploaded; a separate reporting job includes failed and cancelled matrix jobs. Cancelling the entire workflow or losing a runner can still prevent diagnostics and reporting.
 
-The CI profile omits Hypothesis's explanation phase only for the known-failing invalid-input MCP property. It still generates and shrinks examples; local and nightly profiles retain explanation.
+The CI and nightly profiles omit Hypothesis's explanation phase only for the known-failing invalid-input MCP property. They still generate and shrink examples; the local development profile retains explanation.
 
 ## API fuzzing
 
