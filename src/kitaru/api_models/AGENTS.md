@@ -10,21 +10,8 @@
   (base.py), which carries `cursor`, `size`, and `sort`. List params models
   declare only wire-exposed fields, never internal filter dimensions such as
   `owner_id`.
-- Every field declares `Field(description=...)`. The descriptions feed the
-  OpenAPI schema, so they are part of the API contract. Use the shortest noun
-  phrase that disambiguates and never restate what the type, enum, validator,
-  default, or field name already conveys.
-- Discriminated request unions mark the `type` discriminator as set in
-  `model_post_init` so `exclude_unset` dumps keep it. The `type: Literal`
-  discriminator is the one field exempt from the description rule.
-- A deprecated wire field carries `Field(deprecated=...)` and an entry in the
-  repository-root `DEPRECATIONS.md`.
-- This package imports neither server nor client code.
+- Field descriptions feed the OpenAPI schema, so they are part of the API contract. Use the shortest noun phrase that disambiguates and never restate what the type, enum, validator, default, or field name already conveys.
+- Discriminated request unions mark the `type` discriminator as set in `model_post_init` so `exclude_unset` dumps keep it.
+- A deprecated wire field carries `Field(deprecated=...)`.
 
-## Datetimes
-
-Every request field or query parameter that accepts a datetime declares
-`pydantic.AwareDatetime`, never plain `datetime`. Naive client input must fail
-validation with HTTP 422 instead of being interpreted in an implicit timezone.
-Plain `datetime` stays fine on response models, where the server controls the
-value.
+Import-linter keeps this package free of server and client imports. `tests/api_models/test_model_conventions.py` fails for a field without a description (single-value discriminator tags excepted), a naive `datetime` on a request model, and a deprecated field missing from `DEPRECATIONS.md`.
