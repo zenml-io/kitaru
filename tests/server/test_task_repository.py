@@ -24,14 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from worker_coverage_cases import COVERAGE_CASES, CoverageCase, CoverageIds
 
-from conftest import (
-    UNSCOPED_WORKER_SCOPE,
-    FakeJobRepository,
-    FakeTaskRepository,
-    create_job,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind
 from kitaru.api_models.v1.task import TaskKind, TaskStatus
@@ -82,6 +75,12 @@ from kitaru.server.domain.task import (
 )
 from kitaru.server.domain.worker import Worker
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    UNSCOPED_WORKER_SCOPE,
+    FakeJobRepository,
+    FakeTaskRepository,
+    create_job,
+)
 
 
 class Setup(NamedTuple):

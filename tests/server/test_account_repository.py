@@ -18,7 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import FakeAccountRepository, pg_session, postgres_available
+from conftest import pg_session, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -34,6 +34,7 @@ from kitaru.server.domain.account import (
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import FakeAccountRepository
 
 
 @pytest.fixture(params=["fake", "postgres"])

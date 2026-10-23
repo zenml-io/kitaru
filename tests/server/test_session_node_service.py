@@ -20,19 +20,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeBlobDataStore,
-    FakeBlobRepository,
-    FakeImportRepository,
-    FakeReplayRepository,
-    FakeSessionNodeRepository,
-    FakeSessionRepository,
-    FakeTaskRepository,
-    build_payload_store,
-    create_session,
-)
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.cache_keys import compute_tool_cache_key
@@ -56,6 +43,19 @@ from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session import SessionAccessDenied
 from kitaru.server.domain.task import AgentTask
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeBlobDataStore,
+    FakeBlobRepository,
+    FakeImportRepository,
+    FakeReplayRepository,
+    FakeSessionNodeRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+    build_payload_store,
+    create_session,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

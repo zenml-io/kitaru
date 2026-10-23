@@ -18,22 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeConnectionRepository,
-    FakeEvaluationRepository,
-    FakeImportRepository,
-    FakeJobRepository,
-    FakePluginRepository,
-    FakeReplayRepository,
-    FakeSessionRepository,
-    FakeTaskRepository,
-    asgi_api_client,
-    build_payload_store,
-    create_plugin,
-    override_idempotency,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.evaluation import (
     EvaluationBatchCreateRequest,
     EvaluationListParams,
@@ -67,6 +52,21 @@ from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeConnectionRepository,
+    FakeEvaluationRepository,
+    FakeImportRepository,
+    FakeJobRepository,
+    FakePluginRepository,
+    FakeReplayRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+    build_payload_store,
+    create_plugin,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

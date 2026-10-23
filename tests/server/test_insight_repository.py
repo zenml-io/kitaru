@@ -20,13 +20,7 @@ from typing import Any, NamedTuple
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from conftest import (
-    FakeInsightRepository,
-    FakePluginRepository,
-    FakeTaskRepository,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.insight import (
     CategoricalInsightData,
@@ -64,6 +58,11 @@ from kitaru.server.domain.plugin import (
 )
 from kitaru.server.domain.task import AnalysisTask, TaskNotFound
 from kitaru.server.filtering import FilterCondition, NotExpression
+from kitaru_test_support import (
+    FakeInsightRepository,
+    FakePluginRepository,
+    FakeTaskRepository,
+)
 
 
 class Setup(NamedTuple):
