@@ -1414,6 +1414,7 @@ dev = [
     { name = "hypothesis", specifier = ">=6.165" },
     { name = "hypothesis-jsonschema", specifier = ">=0.23" },
     { name = "import-linter", specifier = ">=2.0" },
+    { name = "markdown-it-py", specifier = ">=4.2" },
     { name = "moto", extras = ["s3"], specifier = ">=5.2.3" },
     { name = "pip-audit", specifier = ">=2.10,<3" },
     { name = "pytest", specifier = ">=8.4" },
