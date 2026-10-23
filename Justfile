@@ -25,6 +25,8 @@ check:
     @just python-standards-check
     @printf '\n─── Release Units ──────────────────────────────\n'
     @just release-units-check
+    @printf '\n─── Markdown ───────────────────────────────────\n'
+    @just markdown-check
     @printf '\n─── MCP Schema ─────────────────────────────────\n'
     @just mcp-schema-check
     @printf '\n─── Example Coverage ───────────────────────────\n'
@@ -74,6 +76,10 @@ python-standards-check:
 # Validate the release-unit inventory against package manifests and default plugins, as CI does
 release-units-check:
     uv run --no-project --with packaging==26.2 python scripts/release_units.py validate
+
+# Check Markdown wrapping and GitBook page rules (KMD codes)
+markdown-check:
+    uv run python scripts/check_markdown.py
 
 # Check plugin formatting, lint, and types in the frozen plugin workspace
 plugin-check:
@@ -136,6 +142,7 @@ fix:
     uv run ruff format .
     uv run ruff check . --fix
     find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml -print0 | xargs -0 uv run yamlfix
+    uv run python scripts/check_markdown.py --fix
 
 # Run tests (e.g., `just test`, `just test -x`, `just test tests/test_foo.py`)
 test *ARGS:

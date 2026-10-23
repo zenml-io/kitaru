@@ -1,8 +1,6 @@
 # Repository Guidelines
 
-Kitaru is a mixed Python + docs repo. It produces the Python package (SDK and
-server) and the SDK reference docs app. The public marketing site and
-`kitaru.ai` runtime live in the sibling `zenml-io-v2` repository, not here.
+Kitaru is a mixed Python + docs repo. It produces the Python package (SDK and server) and the SDK reference docs app. The public marketing site and `kitaru.ai` runtime live in the sibling `zenml-io-v2` repository, not here.
 
 ## Project Map
 
@@ -19,10 +17,7 @@ server) and the SDK reference docs app. The public marketing site and
 - `docker/`: Dockerfiles
 - `design/`: gitignored design notes; never commit anything from this directory
 
-For adapter, importer, specialized UI API, docs, CI, and release work, load the
-matching Kitaru repo skill under `.agents/skills/`. Keep each logical repo skill
-available under the same name in `.claude/skills/`; share host-neutral guidance
-and diverge only for a documented host-specific reason.
+For adapter, importer, specialized UI API, docs, CI, and release work, load the matching Kitaru repo skill under `.agents/skills/`. Keep each logical repo skill available under the same name in `.claude/skills/`; share host-neutral guidance and diverge only for a documented host-specific reason.
 
 Before editing a subtree, read the `AGENTS.md` files along its path that have not already been loaded. If a directory has no `AGENTS.md` but has a `CLAUDE.md`, read that guidance too.
 
@@ -36,8 +31,7 @@ For substantial work with independent questions or modules, use subagents when p
 
 ## Core Commands
 
-Use `uv` for Python dependency management and `just` for the normal command
-stack.
+Use `uv` for Python dependency management and `just` for the normal command stack.
 
 - `uv sync`: install and sync dependencies
 - `uv sync --extra server`: include server components
@@ -64,49 +58,33 @@ Replace `yourtask` with a unique task identifier. The pipeline reports failure i
 - Follow US English spelling in code and docs (`initialize`, `serialize`, `color`); `just typos` enforces it.
 - Ruff enforces production signatures, modern annotations, Google docstring structure, and eager annotations. ty checks types and suppressions. Run `just check`.
 - Models and routes inspect annotations at runtime; keep referenced names resolvable.
-- Name a function or method for the action it performs, not the value it
-  returns. Write `_get_bearer_credential`, `_get_account_name`,
-  `_get_name_taken_message`, not `_bearer_credential`, `_account_name`,
-  `_name_taken`. A bare noun reads as an attribute at the call site.
-- Describe the symbol in a docstring, never its callers. Write "Set the account
-  name and contact email", not "Set the identity fields mirrored from an
-  external account". A caller named in a docstring is wrong as soon as a second
-  caller appears.
+- Name a function or method for the action it performs, not the value it returns. Write `_get_bearer_credential`, `_get_account_name`, `_get_name_taken_message`, not `_bearer_credential`, `_account_name`, `_name_taken`. A bare noun reads as an attribute at the call site.
+- Describe the symbol in a docstring, never its callers. Write "Set the account name and contact email", not "Set the identity fields mirrored from an external account". A caller named in a docstring is wrong as soon as a second caller appears.
 - Keep comments focused on why the code exists or why a trade-off was chosen.
 - Treat leading underscore names as private to their module or class. Ruff (`SLF001`) rejects access to another class's private members in production code.
 - Prefer Protocols/ABCs or `isinstance` over `getattr`/`hasattr` for capability checks; `just python-standards-check` rejects `hasattr`.
-- Put helpers on the class when tied to its behavior; use standalone utilities
-  only for generic cross-module functions.
+- Put helpers on the class when tied to its behavior; use standalone utilities only for generic cross-module functions.
 - Prefer Pydantic models for data structures.
 
 ## Testing
 
-Use `pytest` for unit and integration tests. Name files `test_*.py` and test
-functions `test_*`. Mirror source paths where practical. Every bug fix should
-include a regression test that fails before the fix and passes after it.
+Use `pytest` for unit and integration tests. Name files `test_*.py` and test functions `test_*`. Mirror source paths where practical. Every bug fix should include a regression test that fails before the fix and passes after it.
 
 When you work under `tests/`, also read `tests/AGENTS.md`.
 
-Tests cover ordinary changes. When a change can only be proven against a live
-stack, such as import, replay, experiment, job, or worker behavior, `devtools/`
-runs one locally: `uv run python devtools/seed.py --db-name kitaru_<yourtask>
---keep` seeds a server end to end. Read `devtools/AGENTS.md` first, and clean up
-the stacks and databases you create.
+Tests cover ordinary changes. When a change can only be proven against a live stack, such as import, replay, experiment, job, or worker behavior, `devtools/` runs one locally: `uv run python devtools/seed.py --db-name kitaru_<yourtask> --keep` seeds a server end to end. Read `devtools/AGENTS.md` first, and clean up the stacks and databases you create.
 
 ## Docs
 
-- Never hard-wrap prose in Markdown files. Keep each paragraph and each list item on one logical line; use line breaks only for Markdown structure such as headings, blank lines, list items, tables, and fenced code blocks.
+- Never hard-wrap prose in Markdown files. `just markdown-check` reports wrapped lines and `just fix` joins them.
 
 Kitaru docs live on three different surfaces:
 
-- Hand-written docs are GitBook Markdown in `docs/book/`, published to
-  `docs.zenml.io/kitaru`.
-- Generated SDK reference docs live under `docs/content/docs/` and are
-  served at `sdkdocs.kitaru.ai`.
+- Hand-written docs are GitBook Markdown in `docs/book/`, published to `docs.zenml.io/kitaru`.
+- Generated SDK reference docs live under `docs/content/docs/` and are served at `sdkdocs.kitaru.ai`.
 - `kitaru.ai/docs/*` is handled by the redirect worker under `docs/worker/`.
 
-Do not add hand-written pages to the FumaDocs app under `docs/content/docs/`;
-they belong in `docs/book/`. Do not hand-edit generated reference output.
+Do not add hand-written pages to the FumaDocs app under `docs/content/docs/`; they belong in `docs/book/`. Do not hand-edit generated reference output.
 
 Only document shipped features.
 
@@ -118,26 +96,19 @@ The quickstart example lives in `examples/python/pydantic_ai_ticket_resolver/`. 
 - `main` tracks the latest released version only; do not push directly.
 - Use short, imperative commit subjects such as `Add ...` or `Update ...`.
 - Keep commit titles concise, around 50 characters when practical.
-- Never include a `[Codex] ` prefix in PR titles.
 - Link related issues when applicable.
-- Every PR description should include a `Reviewer Notes` H2 or H3 section with
-  a concrete reproduction path for reviewers.
+- Every PR description should include a `Reviewer Notes` H2 or H3 section with a concrete reproduction path for reviewers. The `PR description` workflow rejects a missing section and Conventional Commits or `[Codex]` title prefixes.
 - Track deprecated surfaces in `DEPRECATIONS.md` at the repository root.
 - Never merge a PR that has not received an approving human review — this includes dependabot bumps and trivial changes, and it must not be bypassed with `gh pr merge --admin` or similar. Documented review of every change is part of our change-management controls (relevant to compliance frameworks such as SOC 2). Prepare the PR, request review, and wait.
 
 ## CI/CD
 
-Python CI runs on push/PR to `develop`; docs CI runs for docs/reference-related
-changes.
+Python CI runs on push/PR to `develop`; docs CI runs for docs/reference-related changes.
 
-When changing Kitaru UI bundling, frontend smoke testing, Docker dashboard
-packaging, or release UI selection, read `FRONTEND-TESTING.md` first.
+When changing Kitaru UI bundling, frontend smoke testing, Docker dashboard packaging, or release UI selection, read `FRONTEND-TESTING.md` first.
 
 ## Security and Generated Files
 
-Do not commit local secrets, `.env` files, or anything in `design/`. Use `uv`,
-not raw `pip`, for dependency management to keep environments reproducible.
+Do not commit local secrets, `.env` files, or anything in `design/`. Use `uv`, not raw `pip`, for dependency management to keep environments reproducible.
 
-Do not commit RepoPrompt/orchestration scratch documents such as plans, reviews,
-handoffs, prompt exports, or ad-hoc coordination docs unless the user explicitly
-asks for that artifact to be part of repository history.
+Do not commit RepoPrompt/orchestration scratch documents such as plans, reviews, handoffs, prompt exports, or ad-hoc coordination docs unless the user explicitly asks for that artifact to be part of repository history.

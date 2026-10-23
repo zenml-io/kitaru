@@ -51,6 +51,7 @@ jobs:
       - run: just format-check
       - run: just import-check
       - run: just python-standards-check
+      - run: just markdown-check
       - run: just mcp-schema-check
       - run: just mcp-docs-index-check
       - run: just openapi-check

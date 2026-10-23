@@ -143,6 +143,7 @@ dev = [
     "flask>=3.1",
     "flask-cors>=6.0",
     "pytest-xdist>=3.8",
+    "markdown-it-py>=4.2",
 ]
 fuzz = [
     "schemathesis>=4.25,<5",

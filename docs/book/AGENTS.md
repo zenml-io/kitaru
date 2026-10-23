@@ -21,7 +21,7 @@ Do **not** put hand-written docs in `docs/content/docs/` — that is the referen
 ## Links
 
 - **Within this space:** relative `.md` paths — `../concepts/checkpoints.md`. Section index → `../concepts/README.md`.
-- **Never add an anchor to a cross-file link** (`other-page.md#section`). GitBook's Git Sync rewrites those with one `../` too many, producing broken URLs on the published site (verified Aug 2026). Link the page without the anchor; same-file anchors (`#section`) are fine.
+- Link other pages without an anchor; same-file anchors (`#section`) are fine. GitBook's Git Sync rewrites cross-file anchors into broken URLs.
 - **SDK / CLI reference:** `https://sdkdocs.kitaru.ai` — the separate reference site, not part of this GitBook space.
 - **Other ZenML docs:** absolute `https://docs.zenml.io/...`.
 - **Changelog:** `https://docs.zenml.io/changelog` (owned by the changelog repo).
@@ -46,3 +46,5 @@ The visual source of truth is the React components in `docs/components/diagrams.
 - Keep **Kitaru v2 product terminology**: agent, agent version, session, session node, replay, evaluator, evaluation, cohort, cohort version, experiment, experiment run, worker, importer. The eval objects are **evaluators/evaluations — never "scorers"/"scores" as nouns**. Traces are **recorded** or **imported** — never "captured". Do not describe the retired v1 runtime vocabulary (flow, checkpoint, stack, deployment, wait/HITL) as current — durable execution belongs to ZenML, not Kitaru.
 - Langfuse, LangSmith, and Braintrust are complements, never competitors, in docs copy ("Langfuse stays your system of record").
 - US English. Only document shipped features. Keep plans for unshipped behavior in unpublished planning material until the behavior ships.
+
+`just markdown-check` fails for a page without a `description:`, a page missing from `toc.md`, a cross-file anchor link, and hard-wrapped prose.
