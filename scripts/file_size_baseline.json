@@ -31,7 +31,6 @@
   "plugins/tests/analyzers/post_import_insights/test_profiling.py": 2146,
   "plugins/tests/importers/fuzz_strategies.py": 1008,
   "plugins/tests/importers/test_langfuse.py": 1473,
-  "src/kitaru/cli/app.py": 5476,
   "src/kitaru/cli/local_runtime.py": 1057,
   "src/kitaru/cli/registration.py": 1032,
   "src/kitaru/server/adapters/rest/dependencies.py": 1546,
