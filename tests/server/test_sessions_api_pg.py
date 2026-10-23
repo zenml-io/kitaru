@@ -16,6 +16,7 @@
 import json
 import uuid
 from collections.abc import AsyncGenerator
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -308,6 +309,52 @@ async def test_ingest_and_list_nodes_persist_across_requests(
     assert response.status_code == 200
     items = response.json()["items"]
     assert items[0]["inputs"] == {"q": "hi"}
+
+
+async def test_cost_completeness_persists_across_node_upserts(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Recover the full stored cost only when every LLM call is priced."""
+    response = await client.post("/api/v1/sessions", json=_session_body(agent_id))
+    assert response.status_code == 201
+    session_url = f"/api/v1/sessions/{response.json()['id']}"
+    steps = [
+        ("known", "1.25", Decimal("1.25"), 1),
+        ("unknown", None, None, 2),
+        ("another-known", "2.50", None, 3),
+        ("unknown", "0.75", Decimal("4.50"), 3),
+        ("unknown", "0.75", Decimal("4.50"), 3),
+        ("known", None, None, 3),
+        ("known", None, None, 3),
+    ]
+    for external_id, cost, expected_cost, expected_calls in steps:
+        response = await client.post(
+            f"{session_url}/nodes",
+            json={
+                "nodes": [
+                    {
+                        "external_id": external_id,
+                        "node_type": "llm_call",
+                        "name": "call",
+                        "status": "completed",
+                        "cost": cost,
+                        "tokens": {"input_tokens": 10, "output_tokens": 5},
+                        "inputs": None,
+                        "outputs": None,
+                        "attributes": None,
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 200
+        response = await client.get(session_url)
+        assert response.status_code == 200
+        session = response.json()
+        actual_cost = Decimal(session["cost"]) if session["cost"] is not None else None
+        assert actual_cost == expected_cost
+        assert session["llm_call_count"] == expected_calls
+        assert session["tokens"]["input_tokens"] == 10 * expected_calls
+        assert session["tokens"]["output_tokens"] == 5 * expected_calls
 
 
 async def test_ingest_into_terminal_recorded_session_rejected(

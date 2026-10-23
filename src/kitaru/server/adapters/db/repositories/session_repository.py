@@ -16,6 +16,7 @@
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import ColumnElement, CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -422,9 +423,9 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         )
 
     async def apply_rollups(
-        self, session_id: uuid.UUID, deltas: SessionRollups
+        self, session_id: uuid.UUID, deltas: SessionRollups, cost: Decimal | None
     ) -> None:
-        """Apply rollup deltas to a session's cost, tokens, and call counts.
+        """Set session cost and apply token and call-count deltas.
 
         This is a Core-level bulk statement rather than an ORM attribute
         mutation, so the ``updated`` timestamp needs to be stamped here
@@ -433,6 +434,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Args:
             session_id: Id of the session.
             deltas: Rollup deltas to add.
+            cost: Total cost, or ``None`` when pricing is incomplete.
 
         Raises:
             SessionNotFound: No session has this id.
@@ -441,7 +443,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             update(SessionORM)
             .where(SessionORM.id == session_id)
             .values(
-                cost=func.coalesce(SessionORM.cost, 0) + deltas.cost,
+                cost=cost,
                 input_tokens=func.coalesce(SessionORM.input_tokens, 0)
                 + deltas.input_tokens,
                 output_tokens=func.coalesce(SessionORM.output_tokens, 0)
