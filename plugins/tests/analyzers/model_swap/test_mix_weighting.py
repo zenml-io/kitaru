@@ -73,6 +73,7 @@ def report(
     calls: list[RecordedCall],
     results: list[CallResult],
     weights: Counter[tuple[str, str | None]] | None = None,
+    candidates: list[Candidate] | None = None,
     **params: Any,
 ) -> dict[str, Any]:
     weights = weights or Counter((c.node_name, c.model) for c in calls)
@@ -86,7 +87,8 @@ def report(
     )
     return build_report(
         ModelSwapParams(
-            candidates=[candidate("reference", reference=True), candidate("cheap")],
+            candidates=candidates
+            or [candidate("reference", reference=True), candidate("cheap")],
             sessions_per_month=1000,
             **params,
         ),

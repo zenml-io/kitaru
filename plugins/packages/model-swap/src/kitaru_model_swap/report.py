@@ -831,9 +831,12 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
 
     Quality here is closeness to the current model's recorded answers; the
     user's verdicts on the disagreements decide which answers are right. The
-    current model run again sets the bar: a candidate counts as comparable
-    within a few points of how often today's model matches itself, measured
-    on the calls both answered. Only candidates that answered most of their
+    current model run again (the reference) sets the bar: a candidate counts
+    as comparable when its rate is within 10 points of the reference's own
+    rate, both measured on the calls the two answered. Without a reference,
+    the bar is the closest candidate's rate. The reference is the baseline and
+    never a pick; a goal no other candidate qualifies for gets a row with no
+    candidate that says why. Only candidates that answered most of their
     calls are ranked; the rest are named as needing more measurement.
     """
     usable = [
@@ -864,11 +867,31 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
     closest = max(others, key=rate)
     bar = rate(reference) if reference is not None else rate(closest)
 
-    def is_comparable(candidate: dict[str, Any]) -> bool:
+    def banded(candidate: dict[str, Any]) -> tuple[float, float]:
+        """The candidate's rate and the bar it is held to, on the same calls."""
         paired = candidate.get("paired")
         if reference is None or not paired or paired["rate"] is None:
-            return rate(candidate) >= bar - _COMPARABLE_POINTS
-        return paired["rate"] >= paired["reference_rate"] - _COMPARABLE_POINTS
+            return rate(candidate), bar
+        return paired["rate"], paired["reference_rate"]
+
+    def is_comparable(candidate: dict[str, Any]) -> bool:
+        own, against = banded(candidate)
+        return own >= against - _COMPARABLE_POINTS
+
+    # The row text names the same bar is_comparable uses, so the stated rule
+    # and the applied rule cannot drift apart.
+    def versus(candidate: dict[str, Any]) -> str:
+        own, against = banded(candidate)
+        if reference is None:
+            return f"{_pct(own)} vs the closest candidate's {_pct(against)}"
+        return (
+            f"{_pct(own)} vs today's model's own {_pct(against)} on the calls "
+            "both answered"
+        )
+
+    band = f"within {_COMPARABLE_POINTS * 100:.0f} points of " + (
+        "today's model" if reference is not None else "the closest candidate"
+    )
 
     # When today's model does not take the same action as its own recording,
     # agreement cannot tell an equivalent candidate from a different one; and
@@ -876,6 +899,24 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
     unbarred = reference is not None and not reference["measured"]
     noisy = reference is not None and (unbarred or bar < _NOISY_REFERENCE)
     comparable = [] if noisy else [c for c in others if is_comparable(c)]
+    if unbarred:
+        no_band = (
+            "Your current model run again answered too few of its calls to set a "
+            "bar, so step agreement cannot show which candidate is equivalent."
+        )
+    elif noisy:
+        no_band = (
+            f"Your current model matches its own recording only {_pct(bar)} of "
+            "the time, so step agreement cannot show which candidate is "
+            "equivalent."
+        )
+    elif not comparable:
+        no_band = (
+            f"No candidate is {band} (closest: {closest['name']} "
+            f"at {versus(closest)}), so step agreement cannot name an equivalent."
+        )
+    else:
+        no_band = ""
     choices = [
         {
             "goal": "Closest to today",
@@ -890,49 +931,8 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
         },
         *choices,
     ]
-    priced = [
-        c
-        for c in comparable
-        if c["cost"]["per_call_usd"] is not None and c["cost_complete"]
-    ]
-    if priced:
-        cheapest = min(priced, key=lambda c: Decimal(c["cost"]["per_call_usd"]))
-        today = (reference or {}).get("cost", {}).get("per_call_usd")
-        if (
-            reference is not None
-            and today is not None
-            and Decimal(today) <= Decimal(cheapest["cost"]["per_call_usd"])
-        ):
-            choices.append(
-                {
-                    "goal": "Cheapest",
-                    "candidate": reference["name"],
-                    "why": f"${today} per call: no comparable candidate costs less "
-                    "than your current model.",
-                }
-            )
-        else:
-            choices.append(
-                {
-                    "goal": "Cheapest",
-                    "candidate": cheapest["name"],
-                    "why": f"${cheapest['cost']['per_call_usd']} per call, within "
-                    f"{_COMPARABLE_POINTS * 100:.0f} points of how often your "
-                    f"current model matches itself{_answered(cheapest)}.",
-                }
-            )
-    timed = [c for c in comparable if c["latency_seconds"]["p50"] is not None]
-    if timed:
-        fastest = min(timed, key=lambda c: c["latency_seconds"]["p50"])
-        choices.append(
-            {
-                "goal": "Fastest",
-                "candidate": fastest["name"],
-                "why": f"{fastest['latency_seconds']['p50']:.2f}s median latency, "
-                f"within {_COMPARABLE_POINTS * 100:.0f} points of how often your "
-                f"current model matches itself{_answered(fastest)}.",
-            }
-        )
+    choices.append(_cheapest_row(comparable, reference, others, versus, band, no_band))
+    choices.append(_fastest_row(comparable, reference, versus, band, no_band))
     open_models = [c for c in others if c["open_weights"]]
     if open_models:
         best_open = max(open_models, key=rate)
@@ -945,6 +945,21 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
                 "and you can run it anywhere.",
             }
         )
+    else:
+        screened = any(
+            c["open_weights"] and not c["reference"] and not c["excluded"]
+            for c in candidates
+        )
+        why = (
+            "Open-weight candidates were screened, but none can be ranked: each "
+            f"failed on more than {_MAX_FAILURE_RATE:.0%} of its calls or answered "
+            "too few of them."
+            if screened
+            else "No open-weight candidate was screened."
+        )
+        if reference is not None and reference["open_weights"]:
+            why += " Today's model has open weights, but it is the baseline."
+        choices.append({"goal": "Best open model", "candidate": "", "why": why})
     # Step agreement ranks a cheap model low when it reaches the same outcome by
     # a different route, so only clear failures are dropped and the cheapest
     # candidate is always kept.
@@ -963,26 +978,7 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
     if cheapest_overall is not None and cheapest_overall not in finalists:
         finalists.append(cheapest_overall)
     dropped = [c["name"] for c in others if c not in finalists]
-    if unbarred:
-        reason = (
-            "Your current model run again answered too few of its calls to "
-            "set a bar, so step agreement cannot show which candidate is "
-            "equivalent."
-        )
-    elif noisy:
-        reason = (
-            f"Your current model matches its own recording only {_pct(bar)} of "
-            "the time, so step agreement cannot show which candidate is "
-            "equivalent."
-        )
-    elif not comparable:
-        reason = (
-            f"No candidate comes within {_COMPARABLE_POINTS * 100:.0f} points of "
-            f"how often your current model matches itself ({_pct(bar)}), so step "
-            "agreement cannot name an equivalent."
-        )
-    else:
-        reason = "Step agreement ranks candidates but does not show outcomes."
+    reason = no_band or "Step agreement ranks candidates but does not show outcomes."
     left_out = (
         f" Left out as clear failures, matching today's model less than half as "
         f"often as the closest candidate: {', '.join(dropped)}."
@@ -1000,6 +996,111 @@ def _best_for(candidates: list[dict[str, Any]]) -> list[dict[str, str]]:
         }
     )
     return choices
+
+
+def _cheapest_row(
+    comparable: list[dict[str, Any]],
+    reference: dict[str, Any] | None,
+    others: list[dict[str, Any]],
+    versus: Callable[[dict[str, Any]], str],
+    band: str,
+    no_band: str,
+) -> dict[str, str]:
+    """Name the cheapest comparable candidate that costs less than today's model.
+
+    A candidate that costs as much as today's model or more is no reason to
+    switch, so the row then names no candidate and says what was cheaper.
+    """
+    goal = "Cheapest"
+    decide = " Decide with full replays."
+    if no_band:
+        return {"goal": goal, "candidate": "", "why": no_band + decide}
+
+    priced = [(price, c) for c in comparable if (price := _get_price(c)) is not None]
+    if not priced:
+        return {
+            "goal": goal,
+            "candidate": "",
+            "why": f"No candidate {band} has a complete price for every call it "
+            "answered, so none can be ranked on cost." + decide,
+        }
+    price, cheapest = min(priced, key=lambda pair: pair[0])
+    today_usd = None if reference is None else reference["cost"]["per_call_usd"]
+    today = None if today_usd is None else Decimal(today_usd)
+    if today is None or price < today:
+        against = "" if today_usd is None else f" against ${today_usd} today"
+        return {
+            "goal": goal,
+            "candidate": cheapest["name"],
+            "why": f"${cheapest['cost']['per_call_usd']} per call{against}"
+            f"{_answered(cheapest)}, {band}: {versus(cheapest)}.",
+        }
+    cheaper = [
+        (price, c)
+        for c in others
+        if (price := _get_price(c)) is not None and price < today
+    ]
+    outside = ""
+    if cheaper:
+        _, cheapest_outside = min(cheaper, key=lambda pair: pair[0])
+        outside = (
+            " Cheaper candidates fall outside that band (cheapest: "
+            f"{cheapest_outside['name']} at "
+            f"${cheapest_outside['cost']['per_call_usd']} per call, "
+            f"{versus(cheapest_outside)})."
+        )
+    return {
+        "goal": goal,
+        "candidate": "",
+        "why": f"No candidate {band} costs less than it "
+        f"(${today_usd} per call).{outside}" + decide,
+    }
+
+
+def _get_price(candidate: dict[str, Any]) -> Decimal | None:
+    """Return a candidate's cost per call when every answered call was priced."""
+    if candidate["cost"]["per_call_usd"] is None or not candidate["cost_complete"]:
+        return None
+    return Decimal(candidate["cost"]["per_call_usd"])
+
+
+def _fastest_row(
+    comparable: list[dict[str, Any]],
+    reference: dict[str, Any] | None,
+    versus: Callable[[dict[str, Any]], str],
+    band: str,
+    no_band: str,
+) -> dict[str, str]:
+    """Name the fastest comparable candidate that is faster than today's model."""
+    goal = "Fastest"
+    decide = " Decide with full replays."
+    if no_band:
+        return {"goal": goal, "candidate": "", "why": no_band + decide}
+    timed = [c for c in comparable if c["latency_seconds"]["p50"] is not None]
+    if not timed:
+        return {
+            "goal": goal,
+            "candidate": "",
+            "why": f"No candidate {band} has a measured latency." + decide,
+        }
+    fastest = min(timed, key=lambda c: c["latency_seconds"]["p50"])
+    today = None if reference is None else reference["latency_seconds"]["p50"]
+    p50 = fastest["latency_seconds"]["p50"]
+    if today is not None and p50 >= today:
+        return {
+            "goal": goal,
+            "candidate": "",
+            "why": f"No candidate {band} is faster than today's model "
+            f"({today:.2f}s median latency; the fastest of them, "
+            f"{fastest['name']}, takes {p50:.2f}s)." + decide,
+        }
+    against = "" if today is None else f" against {today:.2f}s today"
+    return {
+        "goal": goal,
+        "candidate": fastest["name"],
+        "why": f"{p50:.2f}s median latency{against}{_answered(fastest)}, "
+        f"{band}: {versus(fastest)}.",
+    }
 
 
 def _answered(candidate: dict[str, Any]) -> str:
@@ -1281,7 +1382,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         )
         lines.append("")
         lines.extend(
-            f"- **{choice['goal']}:** {choice['candidate']}. {choice['why']}"
+            f"- **{choice['goal']}:** {choice['candidate'] or 'No pick'}. "
+            f"{choice['why']}"
             for choice in report["best_for"]
         )
         lines += [
