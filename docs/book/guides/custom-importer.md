@@ -51,7 +51,9 @@ def parse(
 
 Yield lazily; the import consumes one item at a time, so payload size is bounded by disk, not memory. Yield an `ImportFailure` for a bad record and the import counts it and moves on. Only a crash of the parser itself fails the task, with partial stats preserved. The full field reference for `ParsedSession` and `ParsedNode` is the [portable session contract](importing-sessions.md). `parse` may be a regular or an async generator.
 
-Set a stable `external_id` from your source system: together with the importer's provider name it is the dedup key, so re-importing an overlapping export skips what is already stored instead of duplicating it.
+Set a stable `external_id` from your source system and register a nonempty provider name. In Kitaru 0.24.0 and later, the provider and `external_id` identify an imported session per destination logical agent. Re-importing the same identity under that agent skips the existing session, even if you select another agent version; importing it under a different agent creates a separate session. A session skipped because it was stored by an earlier import is not refreshed with new content.
+
+Kitaru 0.23.0 used a global `(imported_from, external_id)` key across agents. Check the destination server's version before relying on either scope. See [Kitaru JSONL](importing-sessions.md) for the full identity and deduplication rules.
 
 ## Fetch traces from your own API instead of a file
 
