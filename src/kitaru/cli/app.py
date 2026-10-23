@@ -338,8 +338,8 @@ async def _launch(
     output: Annotated[
         OutputMode,
         Parameter(
-            name=("--output", "-o"),
-            help="Serialization mode; JSONL is streaming-only.",
+            name="--output",
+            help="Serialization mode; JSONL is streaming-only. Alias: -o.",
         ),
     ] = "auto",
     machine: Annotated[
@@ -5181,7 +5181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         try:
             result = app.meta(
-                tokens,
+                _normalize_output_alias(tokens),
                 exit_on_error=False,
                 print_error=False,
                 result_action="return_value",
@@ -5474,3 +5474,17 @@ def _guess_command(tokens: Sequence[str]) -> str:
         break
     candidate = tuple(names)
     return ".".join(names) if candidate and get_spec(candidate) is not None else "cli"
+
+
+def _normalize_output_alias(tokens: Sequence[str]) -> list[str]:
+    """Rewrite the `-o` short alias to `--output` before the end-of-options marker."""
+    normalized: list[str] = []
+    for index, token in enumerate(tokens):
+        if token == "--":
+            return [*normalized, *tokens[index:]]
+        if token == "-o":
+            token = "--output"
+        elif token.startswith("-o") and not token.startswith("--"):
+            token = "--output=" + token[2:].removeprefix("=")
+        normalized.append(token)
+    return normalized
