@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import os
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -132,7 +132,7 @@ def _assert_recorded_shape(nodes: list[SessionNodeResponse]) -> None:
 
 
 @contextmanager
-def _worker_environment(api_url: str, api_key: str) -> Iterator[None]:
+def _worker_environment(api_url: str, api_key: str) -> Generator[None, None, None]:
     names = ("KITARU_API_URL", "KITARU_API_KEY")
     original = {name: os.environ.get(name) for name in names}
     os.environ["KITARU_API_URL"] = api_url

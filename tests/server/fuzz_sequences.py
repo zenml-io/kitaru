@@ -15,7 +15,7 @@
 
 import re
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator, Iterable, Iterator
+from collections.abc import AsyncGenerator, Generator, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from enum import StrEnum
 from types import TracebackType
@@ -307,7 +307,7 @@ class SequenceRuntime:
 @asynccontextmanager
 async def report_cleanup_failures(
     manager: AbstractAsyncContextManager[httpx.AsyncClient],
-) -> AsyncIterator[httpx.AsyncClient]:
+) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Preserve a sequence failure when its context cleanup also fails."""
     client = await manager.__aenter__()
     sequence_error: BaseException | None = None
@@ -375,7 +375,7 @@ async def isolate_sequence(
 
 
 @contextmanager
-def annotate_sequence_failure(receipt: SequenceReceipt) -> Iterator[None]:
+def annotate_sequence_failure(receipt: SequenceReceipt) -> Generator[None, None, None]:
     """Attach a sanitized receipt to an assertion without replacing it."""
     try:
         yield

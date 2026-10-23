@@ -125,7 +125,8 @@ class SessionNodeCreateRequest(RequestModel):
 class SessionNodeListParams(FilterableListParams):
     """Session node list params."""
 
-    sort: Literal["position:asc"] = Field(
+    # Node lists support one fixed order, so the inherited free-form sort narrows.
+    sort: Literal["position:asc"] = Field(  # ty: ignore[invalid-mutable-override]
         default="position:asc",
         description="Nodes are ordered by start time, then insertion.",
     )

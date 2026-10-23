@@ -10,7 +10,7 @@ import json
 import re
 import shlex
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -123,7 +123,7 @@ async def open_client(
     server_url: str,
     credential_store: CredentialStore,
     timeout: float,
-) -> AsyncIterator[KitaruAPIClient]:
+) -> AsyncGenerator[KitaruAPIClient, None]:
     """Open one SDK client using the established credential precedence."""
     credential = resolve_credential(server_url, credential_store)
     client = build_api_client(server_url, credential, credential_store, timeout)

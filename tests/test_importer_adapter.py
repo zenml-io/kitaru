@@ -15,7 +15,7 @@
 
 import asyncio
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -138,7 +138,7 @@ class _FakeAdapter(ImporterBackedAdapter):
         self.fetch_error: Exception | None = None
 
     @contextmanager
-    def open_trace(self) -> Iterator[str]:
+    def open_trace(self) -> Generator[str, None, None]:
         self.events.append("trace-enter")
         try:
             yield "trace-1"

@@ -13,7 +13,7 @@
 #  permissions and limitations under the License.
 """Analytics source and event context tracking."""
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
@@ -48,7 +48,7 @@ current_event_context: ContextVar[EventContext] = ContextVar(
 
 
 @contextmanager
-def analytics_event_context(**properties: Any) -> Iterator[None]:
+def analytics_event_context(**properties: Any) -> Generator[None, None, None]:
     """Merge properties into every analytics event tracked inside the block."""
     current = current_event_context.get()
     token = current_event_context.set(
