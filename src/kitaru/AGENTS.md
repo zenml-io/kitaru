@@ -15,11 +15,7 @@ The package also has four first-class delivery surfaces outside that five-part c
 - `task/`: Importer and evaluator task subprocess entrypoints.
 - `worker/`: Worker lifecycle, task dispatch, and task handlers.
 
-Module naming: modules that define per-entity types are singular
-(`domain/order.py`, `orm/order.py`, `application/models/order.py`,
-`api_models/v1/order.py`). Routers and client resources are named after the
-URL segment they serve (`/api/v1/orders` → `orders.py`), and mapping modules
-follow their router.
+Module naming: modules that define per-entity types are singular (`domain/order.py`, `orm/order.py`, `application/models/order.py`, `api_models/v1/order.py`). Routers and client resources are named after the URL segment they serve (`/api/v1/orders` → `orders.py`), and mapping modules follow their router.
 
 ## New persistent public API resource checklist
 
@@ -29,18 +25,12 @@ Adding a new persistent public API resource named `Order` touches these places. 
 2. `server/application/interfaces/order_repository.py`: repository Protocol.
 3. `server/application/models/order.py`: filter model.
 4. `server/application/services/order_service.py`: use cases.
-5. `server/adapters/db/orm/order.py`: `OrderORM` class, exported from
-   `server/adapters/db/orm/__init__.py`.
+5. `server/adapters/db/orm/order.py`: `OrderORM` class, exported from `server/adapters/db/orm/__init__.py`.
 6. New Alembic revision under `server/database/migrations/versions/`.
 7. `server/adapters/db/repositories/order_repository.py`: SQL repository.
 8. `server/adapters/rest/mapping/orders.py`: DTO and filter conversions.
-9. `server/adapters/rest/routers/orders.py`: routes, registered in
-   `server/api/app.py`, service dependency added to
-   `server/adapters/rest/dependencies.py`.
+9. `server/adapters/rest/routers/orders.py`: routes, registered in `server/api/app.py`, service dependency added to `server/adapters/rest/dependencies.py`.
 10. `api_models/v1/order.py`: request, list params, and response DTOs.
-11. `client/resources/orders.py`: SDK resource, registered in
-    `client/api_client.py`.
-12. Regenerate `openapi/openapi.json` via `scripts/generate_openapi.py`, then
-    the generated TypeScript types via `pnpm run generate`.
-13. Tests for all surfaces listed in `tests/AGENTS.md`, plus a fake repository
-    in `tests/conftest.py`.
+11. `client/resources/orders.py`: SDK resource, registered in `client/api_client.py`.
+12. Regenerate `openapi/openapi.json` via `scripts/generate_openapi.py`, then the generated TypeScript types via `pnpm run generate`.
+13. Tests for all surfaces listed in `tests/AGENTS.md`, plus a fake repository in `tests/conftest.py`.

@@ -20,8 +20,4 @@ This shape is the data-privacy story: traces are stored on your server, parsed a
 3. Start [workers](workers.md) in each environment agents run in.
 4. Store provider credentials the server should manage as [secrets](secrets.md), and set client defaults via [configuration](configuration.md).
 
-Steps 2 to 4 are covered in **Running in production**, alongside worker
-sizing, authentication, secrets and configuration. Come back to them once
-a server is up. For a first look, `kitaru login --local` in
-[Installation](../getting-started/installation.md) is faster than any of
-this.
+Steps 2 to 4 are covered in **Running in production**, alongside worker sizing, authentication, secrets and configuration. Come back to them once a server is up. For a first look, `kitaru login --local` in [Installation](../getting-started/installation.md) is faster than any of this.
