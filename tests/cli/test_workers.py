@@ -37,7 +37,7 @@ from kitaru.api_models.v1.worker import (
     WorkerRuntime,
 )
 from kitaru.cli import app as app_module
-from kitaru.cli import workers
+from kitaru.cli import command_registry, worker_commands, workers
 from kitaru.cli.config import ResolvedTarget
 from kitaru.cli.output import (
     CLIError,
@@ -513,7 +513,9 @@ def test_closed_output_cannot_prevent_signal_drain(
 
 def test_worker_start_schema_describes_safe_graceful_signals() -> None:
     """Offline discovery promises only the safe first-signal drain."""
-    description = app_module._FUNCTION_SPECS[app_module.worker_start].description
+    description = command_registry.FUNCTION_SPECS[
+        worker_commands.worker_start
+    ].description
     assert "first SIGINT or SIGTERM requests a safe drain" in description
     assert "exits immediately" not in description
 
@@ -581,7 +583,9 @@ async def test_worker_list_rejects_unsupported_sort_before_network_call() -> Non
 
 def test_worker_list_defaults_to_newest_first() -> None:
     """The CLI requests workers from newest to oldest by default."""
-    default_sort = inspect.signature(app_module.worker_list).parameters["sort"].default
+    default_sort = (
+        inspect.signature(worker_commands.worker_list).parameters["sort"].default
+    )
     assert WorkerListParams(sort=default_sort).sort == "created:desc"
 
 
